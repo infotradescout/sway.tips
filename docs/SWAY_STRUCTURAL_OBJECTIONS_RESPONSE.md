@@ -179,7 +179,36 @@ updated_at
 Intent fingerprint:
 
 ```text
-SHA256(idempotency_key + patron_device_id_hash + gig_id + action_type + target_entity_id + amount_cents + currency + payload_hash)
+SHA256(canonical_json(input))
+```
+
+Canonical JSON input:
+
+```json
+{
+  "v": 1,
+  "idempotency_key": "opaque-client-key",
+  "patron_device_id_hash": "hashed-device-id",
+  "gig_id": "gig-id",
+  "action_type": "request",
+  "target_entity_id": "target-id-or-empty-string",
+  "amount_cents": 500,
+  "currency": "USD",
+  "payload_hash": "payload-hash"
+}
+```
+
+Canonical rules:
+
+```text
+fixed field order
+explicit version field
+UTF-8 encoding
+amount_cents encoded as an integer
+currency normalized to uppercase
+missing optional fields encoded by schema rule as empty string or null
+no raw personal data inside the fingerprint input
+no Array.join, raw + concatenation, or delimiter-only concatenation
 ```
 
 Rules:
@@ -221,6 +250,14 @@ public patron route does not receive performer/admin/dev controls as its primary
 ```
 
 This is not the only security layer. Server-side authorization still decides access.
+
+Current status:
+
+```text
+entry files are explicit Slice 0A stubs
+real separate production shells are pending Slice 2 server route decoupling
+route decoupling is not complete until entries import distinct role-specific shell code and the server serves distinct bundles
+```
 
 ### Idempotency TTL
 

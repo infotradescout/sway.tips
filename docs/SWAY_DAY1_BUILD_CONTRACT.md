@@ -537,7 +537,7 @@ WebSocket is enhancement only. The source of truth must remain:
 - Server must select separate shells and bundles for patron, talent, overlay, admin, and dev-sandbox entry points.
 - React routing is not a security boundary.
 - Idempotency records must live for 48 hours initially, with 24 hours as the minimum acceptable TTL.
-- Idempotency fingerprint must be `SHA256(idempotency_key + patron_device_id_hash + gig_id + action_type + target_entity_id + amount_cents + currency + payload_hash)`.
+- Idempotency fingerprint must be `SHA256(canonical_json(input))` with fixed field order, explicit version field, integer `amount_cents`, uppercase `currency`, and no raw delimiter-only concatenation.
 - Same idempotency key and same fingerprint returns the original result.
 - Same idempotency key and different fingerprint is rejected as misuse.
 - New idempotency key and different fingerprint is a distinct intent.

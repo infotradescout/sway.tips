@@ -87,6 +87,22 @@ function hashPayload(payload: unknown): string {
     .digest('hex');
 }
 
+function canonicalJson(input: Record<string, string | number>): string {
+  const orderedInput = {
+    v: Number(input.v),
+    idempotency_key: String(input.idempotency_key),
+    patron_device_id_hash: String(input.patron_device_id_hash),
+    gig_id: String(input.gig_id),
+    action_type: String(input.action_type),
+    target_entity_id: String(input.target_entity_id),
+    amount_cents: Math.trunc(Number(input.amount_cents)),
+    currency: String(input.currency).toUpperCase(),
+    payload_hash: String(input.payload_hash)
+  };
+
+  return JSON.stringify(orderedInput);
+}
+
 function createIdempotencyFingerprint(input: {
   idempotency_key: string;
   patron_device_id_hash: string;
@@ -97,17 +113,20 @@ function createIdempotencyFingerprint(input: {
   currency: string;
   payload_hash: string;
 }): string {
+  const canonicalInput = canonicalJson({
+    v: 1,
+    idempotency_key: input.idempotency_key,
+    patron_device_id_hash: input.patron_device_id_hash,
+    gig_id: input.gig_id,
+    action_type: input.action_type,
+    target_entity_id: input.target_entity_id,
+    amount_cents: Math.trunc(Number(input.amount_cents)),
+    currency: input.currency.toUpperCase(),
+    payload_hash: input.payload_hash
+  });
+
   return createHash('sha256')
-    .update([
-      input.idempotency_key,
-      input.patron_device_id_hash,
-      input.gig_id,
-      input.action_type,
-      input.target_entity_id,
-      input.amount_cents,
-      input.currency,
-      input.payload_hash
-    ].join('|'))
+    .update(canonicalInput, 'utf8')
     .digest('hex');
 }
 
@@ -245,6 +264,10 @@ function recalculateTotals() {
 }
 
 // API Routes
+app.get("/api/health/network-probe", (_req, res) => {
+  res.status(204).end();
+});
+
 app.get("/api/state", (req, res) => {
   res.json(state);
 });
@@ -414,7 +437,7 @@ app.post("/api/request/create", (req, res) => {
     action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     target_entity_id: title || 'request',
     amount_cents,
-    currency,
+    currency: String(currency).toUpperCase(),
     payload_hash
   });
 
@@ -465,7 +488,7 @@ app.post("/api/request/create", (req, res) => {
     gigId: gig_id,
     payloadHash: payload_hash,
     amountCents: amount_cents,
-    currency,
+    currency: String(currency).toUpperCase(),
     boosts: []
   };
 

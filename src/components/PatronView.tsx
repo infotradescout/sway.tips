@@ -26,6 +26,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
 
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired and you were not charged.';
+const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request. You were not charged.';
+
 interface PatronViewProps {
   session: GigSession;
   requests: RequestItem[];
@@ -91,12 +95,15 @@ export default function PatronView({
     trackArt?: string;
     clientRequestId: string;
     idempotencyKey: string;
+    expires_at: string;
   } | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [degraded, setDegraded] = useState(!navigator.onLine);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
+  const [pendingActionMessage, setPendingActionMessage] = useState('');
+  const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
 
   useEffect(() => {
     const updateConnectionState = () => setDegraded(!navigator.onLine);
@@ -108,11 +115,52 @@ export default function PatronView({
     };
   }, []);
 
+  useEffect(() => {
+    const storedPendingAction = localStorage.getItem('sway.pendingAction');
+    if (!storedPendingAction) return;
+
+    try {
+      const parsed = JSON.parse(storedPendingAction);
+      if (parsed.expires_at && Date.now() > new Date(parsed.expires_at).getTime()) {
+        localStorage.removeItem('sway.pendingAction');
+        setPendingAction(null);
+        setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+      }
+    } catch {
+      localStorage.removeItem('sway.pendingAction');
+      setPendingAction(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 3000);
+
+    fetch('/api/health/network-probe', {
+      method: 'GET',
+      redirect: 'manual',
+      cache: 'no-store',
+      signal: controller.signal
+    })
+      .then((response) => {
+        const contentType = response.headers.get('content-type') || '';
+        setNetworkPreflightStatus(response.status === 204 && !contentType.includes('text/html') ? 'ready' : 'blocked');
+      })
+      .catch(() => setNetworkPreflightStatus('blocked'))
+      .finally(() => window.clearTimeout(timeout));
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, []);
+
   const createClientActionIds = () => {
     const id = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return {
       clientRequestId: id,
-      idempotencyKey: `sway:${id}`
+      idempotencyKey: `sway:${id}`,
+      expires_at: new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString()
     };
   };
 
@@ -193,6 +241,13 @@ export default function PatronView({
   const initiateCheckout = (type: 'request' | 'boost') => {
     if (session.status === 'closed') return;
 
+    if (networkPreflightStatus !== 'ready') {
+      setDegraded(true);
+      setPendingActionMessage(CAPTIVE_PORTAL_BLOCK_COPY);
+      alert(CAPTIVE_PORTAL_BLOCK_COPY);
+      return;
+    }
+
     if (type === 'request' && activeTab === 'request' && !session.requestsOpen) {
       alert("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
       return;
@@ -268,6 +323,16 @@ export default function PatronView({
   // Process optimistic success payment
   const completePayment = async () => {
     if (!checkoutPayload) return;
+
+    if (Date.now() > new Date(checkoutPayload.expires_at).getTime()) {
+      setCheckoutPayload(null);
+      setPendingAction(null);
+      setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+      localStorage.removeItem('sway.pendingAction');
+      alert(PENDING_ACTION_EXPIRED_COPY);
+      return;
+    }
+
     setIsPaying(true);
     const serializedPendingAction = JSON.stringify(checkoutPayload);
     setPendingAction(serializedPendingAction);
@@ -455,7 +520,7 @@ export default function PatronView({
       {/* 3. Core Action Panels */}
       {(degraded || pendingAction) && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-200">
-          Connection degraded. Sway saved your pending action locally and will reconcile with the server before showing confirmation.
+          {pendingActionMessage || 'Connection degraded. Sway saved your pending action locally and will reconcile with the server before showing confirmation.'}
         </div>
       )}
       <div id="patron_action_panel">
