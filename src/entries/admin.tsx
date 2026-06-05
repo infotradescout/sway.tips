@@ -1,2 +1,4 @@
-// Slice 0A stub: real admin shell lands in server route decoupling.
-export const swayEntryStatus = 'stub:admin-shell-pending';
+import AdminApp from '../shells/AdminApp';
+import { mountSwayShell } from './mount';
+
+mountSwayShell(<AdminApp />);

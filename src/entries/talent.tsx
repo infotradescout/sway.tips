@@ -1,2 +1,4 @@
-// Slice 0A stub: real talent shell lands in server route decoupling.
-export const swayEntryStatus = 'stub:talent-shell-pending';
+import TalentApp from '../shells/TalentApp';
+import { mountSwayShell } from './mount';
+
+mountSwayShell(<TalentApp />);

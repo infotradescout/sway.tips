@@ -97,8 +97,8 @@ for (const [file, source] of Object.entries(docs)) {
 }
 
 const structuralDoc = docs['docs/SWAY_STRUCTURAL_OBJECTIONS_RESPONSE.md'];
-if (!structuralDoc.includes('route decoupling is not complete until entries import distinct role-specific shell code and the server serves distinct bundles')) {
-  failures.push('Structural doc must not claim route decoupling complete while entry files are Slice 0A stubs.');
+if (!structuralDoc.includes('route decoupling is complete for shell selection when entries import distinct role-specific shell code and the server serves distinct shell HTML')) {
+  failures.push('Structural doc must describe Slice 2 route decoupling completion criteria.');
 }
 
 const wildcardRequiredScripts = [
@@ -123,8 +123,8 @@ const entryPaths = [
 
 for (const entryPath of entryPaths) {
   const source = readFileSync(join(root, entryPath), 'utf8');
-  if (!source.includes('Slice 0A stub') || !source.includes('stub:')) {
-    failures.push(`${entryPath} must remain an explicit Slice 0A stub until route decoupling implementation begins.`);
+  if (/import\s+['"]\.\.\/main['"]/.test(source) || source.includes('stub:')) {
+    failures.push(`${entryPath} must be a real Slice 2 entrypoint, not a Slice 0A stub or ../main alias.`);
   }
 }
 

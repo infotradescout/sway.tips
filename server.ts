@@ -8,6 +8,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { createHash } from "crypto";
+import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession } from "./src/types";
 
 dotenv.config();
@@ -19,13 +20,23 @@ const IDEMPOTENCY_TTL_HOURS = 48;
 
 app.use(express.json());
 
-function resolveShellForRoute(urlPath: string): 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox' {
+type SwayShell = 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
+
+function resolveShellForRoute(urlPath: string): SwayShell {
   if (urlPath.startsWith('/talent')) return 'talent';
   if (urlPath.startsWith('/overlay')) return 'overlay';
   if (urlPath.startsWith('/admin')) return 'admin';
-  if (urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
+  if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
   if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
   return 'patron';
+}
+
+function shellHtmlRelativePath(shell: SwayShell): string {
+  return `shells/${shell}.html`;
+}
+
+function isShellAllowed(shell: SwayShell): boolean {
+  return !(isProduction && shell === 'dev-sandbox');
 }
 
 app.use((req, _res, next) => {
@@ -651,14 +662,36 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
+    app.get('*', async (req, res, next) => {
+      try {
+        const shell = resolveShellForRoute(req.path);
+        const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
+        const template = readFileSync(templatePath, 'utf8');
+        const html = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (error) {
+        next(error);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.get('/shells/dev-sandbox.html', (_req, res) => {
+      res.status(404).send('Not found');
+    });
+    app.get(/^\/assets\/dev-sandbox-.*\.js$/, (_req, res) => {
+      res.status(404).send('Not found');
+    });
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const shell = resolveShellForRoute(req.path);
+      if (!isShellAllowed(shell)) {
+        res.status(404).send('Not found');
+        return;
+      }
+      res.sendFile(path.join(distPath, shellHtmlRelativePath(shell)));
     });
   }
 

@@ -256,9 +256,9 @@ This is not the only security layer. Server-side authorization still decides acc
 Current status:
 
 ```text
-entry files are explicit Slice 0A stubs
-real separate production shells are pending Slice 2 server route decoupling
-route decoupling is not complete until entries import distinct role-specific shell code and the server serves distinct bundles
+entry files are real Slice 2 role-specific entrypoints
+route decoupling is complete for shell selection when entries import distinct role-specific shell code and the server serves distinct shell HTML
+middleware authorization remains pending Slice 3 and must query persisted schema
 ```
 
 ### Idempotency TTL

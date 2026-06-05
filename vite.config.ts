@@ -5,6 +5,18 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    build: {
+      rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, 'index.html'),
+          patron: path.resolve(__dirname, 'shells/patron.html'),
+          talent: path.resolve(__dirname, 'shells/talent.html'),
+          overlay: path.resolve(__dirname, 'shells/overlay.html'),
+          admin: path.resolve(__dirname, 'shells/admin.html'),
+          'dev-sandbox': path.resolve(__dirname, 'shells/dev-sandbox.html'),
+        },
+      },
+    },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
