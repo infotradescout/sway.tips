@@ -10,6 +10,7 @@ import { createServer as createViteServer } from "vite";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession } from "./src/types";
+import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 
 dotenv.config();
 
@@ -17,6 +18,10 @@ const app = express();
 const PORT = 3000;
 const isProduction = process.env.NODE_ENV === "production";
 const IDEMPOTENCY_TTL_HOURS = 48;
+const accessControl = createAccessControl({
+  databaseUrl: process.env.DATABASE_URL,
+  isProduction
+});
 
 app.use(express.json());
 
@@ -42,6 +47,14 @@ function isShellAllowed(shell: SwayShell): boolean {
 app.use((req, _res, next) => {
   req.headers['x-sway-shell'] = resolveShellForRoute(req.path);
   next();
+});
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/assets') || req.path.startsWith('/shells')) {
+    next();
+    return;
+  }
+  routeFamilyGuard(accessControl)(req, res, next);
 });
 
 const systemRequestPresets = [
