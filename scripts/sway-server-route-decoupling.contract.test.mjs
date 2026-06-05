@@ -21,9 +21,9 @@ if (/window\.location\.pathname/.test(app) && !server.includes('resolveShellForR
 }
 
 if (failures.length) {
-  console.error('Server route decoupling contract failed:');
+  console.error('Server route decoupling stub contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
 
-console.log('Server route decoupling contract passed.');
+console.log('Server route decoupling stub contract passed; full route decoupling remains pending until distinct bundles are served.');

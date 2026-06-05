@@ -242,13 +242,23 @@ The council loop is now closed for the first planning phase.
 
 Validated conclusions:
 
+- Sway is the active commissioned product.
+- The first value loop is live-gig monetization through QR-driven paid tips/requests/boosts.
+- The current repo is still a prototype.
+- The ABC123 roadmap is correct only after the schema-first correction and the split between repo truth normalization and hard contract gates.
+- The first implementation priority is not UI polish.
+- The accepted build order is:
+
 ```text
-Sway is the active commissioned product.
-The first value loop is live-gig monetization through QR-driven paid tips/requests/boosts.
-The current repo is still a prototype.
-The ABC123 roadmap is correct only after the schema-first correction.
-The first implementation priority is not UI polish.
-The first implementation priority is repo normalization, real contract gates, schema init, and route decoupling.
+0A. Repo truth normalization
+0B. Hard contract gates
+1. Database schema init
+2. Server route decoupling and separate entrypoints
+3. Middleware guards backed by persisted schema
+4. Degraded network and idempotent action handling
+5. Payment lifecycle and processor webhooks
+6. Moderation/reporting/blocking
+7. App Store/TestFlight package
 ```
 
 ## Immediate Next Council Assignment
@@ -258,19 +268,16 @@ Codex should not start payment or marketplace work.
 Next Codex assignment:
 
 ```text
-Slice 0A — Repo Truth Normalization
+Slice 0B — Hard Contract Gates
 
-1. Rename package from react-example to sway-tips.
-2. Replace AI Studio README with Sway README.
-3. Add docs index.
-4. Add audit:contracts and test:contracts scripts.
-5. Convert the uploaded prototype contract scanner into two modes:
-   - audit:contracts soft diagnostic
-   - test:contracts hard failing gate
-6. Expand demo-data scan to include server.ts and production src files.
-7. Update Day-1 build contract to match schema-first order.
-8. Merge canonical idempotency serialization rule into structural objections response.
-9. Ensure npm run lint and npm run build pass.
+1. Verify every script in test:contracts exits nonzero on failure.
+2. Verify audit:contracts is the only soft diagnostic path.
+3. Flag mock-only contract tests as diagnostics instead of implementation proof.
+4. Map every current contract to a repo file, doc rule, or explicit Slice 0A stub.
+5. Align docs on the accepted build order.
+6. Keep route decoupling marked pending while entrypoints are Slice 0A stubs.
+7. Ensure wild-card risks are represented in hard tests.
+8. Ensure npm run test:contracts, audit:contracts, lint, and build pass.
 
 Do not implement middleware before schema.
 Do not implement payment before durable idempotency and audit tables.

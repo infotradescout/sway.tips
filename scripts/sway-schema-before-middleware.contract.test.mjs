@@ -8,10 +8,11 @@ const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const failures = [];
 
 for (const term of [
-  'Guardrail contract tests',
+  '0A. Repo truth normalization',
+  '0B. Hard contract gates',
   'Database schema init',
-  'Route split and server-side decoupling',
-  'Server-side middleware guards',
+  'Server route decoupling and separate entrypoints',
+  'Middleware guards backed by persisted schema',
   'Move schema initialization before role middleware',
   'PostgreSQL + Drizzle ORM + explicit SQL-friendly schema files'
 ]) {

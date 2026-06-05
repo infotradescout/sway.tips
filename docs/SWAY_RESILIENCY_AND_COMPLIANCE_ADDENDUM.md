@@ -312,11 +312,11 @@ gig_sessions.last_activity_at
 
 Heartbeat is not used to decide payment truth. It only informs session freshness and closeout automation.
 
-## 6. Sprint Placement
+## 6. Build-Order Placement
 
 These changes must be inserted into the build sequence:
 
-### Slice 1 Additions
+### Slice 0B Hard-Gate Additions
 
 ```text
 client-side pending action contract
@@ -325,7 +325,7 @@ WebSocket fallback/polling doctrine
 network degraded UI states
 ```
 
-### Slice 2 Additions
+### Slice 1 Database Schema Init Additions
 
 ```text
 gig_sessions auto_closeout_at
@@ -333,9 +333,20 @@ last_activity_at
 server-side hard closeout worker contract
 performer onboarding/KYC status fields
 central $100 verification threshold config
+idempotency_keys table
+client_pending_actions table
 ```
 
-### Slice 3 Additions
+### Slice 4 Degraded Network And Idempotent Action Handling Additions
+
+```text
+client pending action queue implementation
+safe retry rules
+HTTP polling fallback
+server reconciliation path
+```
+
+### Slice 5 Payment Lifecycle And Processor Webhooks Additions
 
 ```text
 processor-backed idempotency

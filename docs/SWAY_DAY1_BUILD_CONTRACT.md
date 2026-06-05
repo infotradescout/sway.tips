@@ -273,9 +273,21 @@ changed routes are documented
 no unrelated brand assets are introduced
 ```
 
-## Build Sequence
+## Corrected Sway Build Order
 
-### Slice 0 — Repository normalization
+```text
+0A. Repo truth normalization
+0B. Hard contract gates
+1. Database schema init
+2. Server route decoupling and separate entrypoints
+3. Middleware guards backed by persisted schema
+4. Degraded network and idempotent action handling
+5. Payment lifecycle and processor webhooks
+6. Moderation/reporting/blocking
+7. App Store/TestFlight package
+```
+
+### Slice 0A — Repo truth normalization
 
 Deliver:
 
@@ -296,27 +308,29 @@ build scripts work
 no generic AI Studio handoff remains as primary documentation
 ```
 
-### Slice 1 — Route separation
+### Slice 0B — Hard contract gates
 
 Deliver:
 
 ```text
-remove sandbox switcher from production path
-create explicit patron route
-create explicit talent route
-create overlay route
-preserve dev sandbox only under dev-only guard
+test:contracts exits nonzero on failure
+audit:contracts remains the only soft diagnostic path
+mock-only contract tests are flagged as diagnostics
+wild-card risks are represented in hard tests
+docs agree on build order
+route decoupling remains explicitly pending while entries are stubs
 ```
 
 Exit gate:
 
 ```text
-patron cannot see talent controls
-talent cannot use public patron role switcher
-production route map is documented
+contract tests fail the gate when broken
+audit mode can report without blocking
+no stale unsafe idempotency formula remains
+no schema, middleware, payment provider, or UI polish is introduced
 ```
 
-### Slice 2 — Persistent gig model
+### Slice 1 — Database schema init
 
 Deliver:
 
@@ -335,7 +349,73 @@ request survives reload and server restart
 session survives reload and server restart
 ```
 
-### Slice 3 — Real payment lifecycle
+### Slice 2 — Server route decoupling and separate entrypoints
+
+Deliver:
+
+```text
+remove sandbox switcher from production path
+create explicit patron route shell
+create explicit talent route shell
+create overlay route shell
+create admin route shell
+preserve dev sandbox only under dev-only guard
+serve distinct role-specific bundles from the server
+```
+
+Exit gate:
+
+```text
+patron does not receive the talent/admin/dev shell as its primary production bundle
+talent does not use public patron role switcher
+production route map is documented
+entry files are no longer Slice 0A stubs
+```
+
+### Slice 3 — Middleware guards backed by persisted schema
+
+Deliver:
+
+```text
+auth actor resolution
+performer membership lookup
+gig ownership/access lookup
+gig active/closed checks
+admin guard
+public gig guard
+```
+
+Exit gate:
+
+```text
+middleware queries persisted schema
+no mock role checks
+no client-only role assumptions
+```
+
+### Slice 4 — Degraded network and idempotent action handling
+
+Deliver:
+
+```text
+client pending action queue
+idempotency key creation
+server intent fingerprint validation
+HTTP polling fallback
+connection state machine
+safe retry rules
+```
+
+Exit gate:
+
+```text
+retry does not duplicate charge/request
+payment success requires backend confirmation
+offline pending survives refresh
+WebSocket failure falls back to polling
+```
+
+### Slice 5 — Payment lifecycle and processor webhooks
 
 Deliver:
 
@@ -356,7 +436,7 @@ one denied request creates the correct void/refund state
 one fulfilled request creates the correct capture/ledger state
 ```
 
-### Slice 4 — Moderation and reporting
+### Slice 6 — Moderation/reporting/blocking
 
 Deliver:
 
@@ -376,7 +456,7 @@ unsafe content is not publicly shown without a reviewable decision path
 AI outage behavior is deterministic
 ```
 
-### Slice 5 — App wrapper and TestFlight
+### Slice 7 — App Store/TestFlight package
 
 Deliver:
 
@@ -532,7 +612,7 @@ WebSocket is enhancement only. The source of truth must remain:
 
 ## Addendum: Structural Objections
 
-- Corrected build order is guardrail contract tests, normalize repo identity, database schema init, route split and server-side decoupling, then server-side middleware guards.
+- Corrected build order is 0A. Repo truth normalization, 0B. Hard contract gates, 1. Database schema init, 2. Server route decoupling and separate entrypoints, then 3. Middleware guards backed by persisted schema.
 - Use PostgreSQL + Drizzle ORM + explicit SQL-friendly schema files.
 - Server must select separate shells and bundles for patron, talent, overlay, admin, and dev-sandbox entry points.
 - React routing is not a security boundary.

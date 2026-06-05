@@ -34,12 +34,14 @@ Move schema initialization before role middleware.
 Corrected sequence:
 
 ```text
-1. Guardrail contract tests
-2. Normalize repo identity
-3. Database schema init
-4. Route split and server-side decoupling
-5. Server-side middleware guards
+0A. Repo truth normalization
+0B. Hard contract gates
+1. Database schema init
+2. Server route decoupling and separate entrypoints
+3. Middleware guards backed by persisted schema
 ```
+
+Hard contract gates are the guardrail contract tests. Route split and server-side decoupling remains after schema initialization and before middleware.
 
 ## Accepted Objection 2: Client Routing Is Not Security
 
@@ -273,16 +275,48 @@ Stripe documents that idempotency keys can be pruned after they are at least 24 
 
 ## Corrected Build Order
 
-### Slice 0 — Guardrails And Repo Identity
+```text
+0A. Repo truth normalization
+0B. Hard contract gates
+1. Database schema init
+2. Server route decoupling and separate entrypoints
+3. Middleware guards backed by persisted schema
+4. Degraded network and idempotent action handling
+5. Payment lifecycle and processor webhooks
+6. Moderation/reporting/blocking
+7. App Store/TestFlight package
+```
+
+### Slice 0A — Repo Truth Normalization
 
 Deliver:
 
 ```text
-contract tests created
 package renamed
 README normalized
 AI Studio default handoff removed
 docs index added
+```
+
+### Slice 0B — Hard Contract Gates
+
+Deliver:
+
+```text
+test:contracts hard-fails on contract breakage
+audit:contracts remains the only soft diagnostic path
+contract scripts map to repo files, doc rules, or explicit Slice 0A stubs
+wild-card risks are represented by hard tests
+docs agree on build order
+```
+
+Exit gate:
+
+```text
+failing contracts exit nonzero
+route decoupling is not claimed complete while entries are stubs
+no stale unsafe idempotency formula remains
+no schema, middleware, payment provider, or UI polish is introduced
 ```
 
 ### Slice 1 — Database Schema Init
@@ -307,7 +341,7 @@ migration runs locally
 contract tests detect required tables/fields/enums
 ```
 
-### Slice 2 — Server-Side Route Decoupling
+### Slice 2 — Server Route Decoupling And Separate Entrypoints
 
 Deliver:
 
@@ -327,7 +361,7 @@ Exit gate:
 /admin/* does not share public shell
 ```
 
-### Slice 3 — Middleware Guards Query Real State
+### Slice 3 — Middleware Guards Backed By Persisted Schema
 
 Deliver:
 
