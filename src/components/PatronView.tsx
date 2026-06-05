@@ -394,6 +394,14 @@ export default function PatronView({
   // Straight classic tipping logic bypass
   const handleStraightTipSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (networkPreflightStatus !== 'ready') {
+      setDegraded(true);
+      setPendingActionMessage(CAPTIVE_PORTAL_BLOCK_COPY);
+      alert(CAPTIVE_PORTAL_BLOCK_COPY);
+      return;
+    }
+
     if (!senderName) {
       alert("Please enter a Patron Name!");
       return;
