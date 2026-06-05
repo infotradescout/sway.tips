@@ -95,6 +95,18 @@ export default function PatronView({
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+  const [degraded, setDegraded] = useState(!navigator.onLine);
+  const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
+
+  useEffect(() => {
+    const updateConnectionState = () => setDegraded(!navigator.onLine);
+    window.addEventListener('online', updateConnectionState);
+    window.addEventListener('offline', updateConnectionState);
+    return () => {
+      window.removeEventListener('online', updateConnectionState);
+      window.removeEventListener('offline', updateConnectionState);
+    };
+  }, []);
 
   const createClientActionIds = () => {
     const id = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -257,6 +269,9 @@ export default function PatronView({
   const completePayment = async () => {
     if (!checkoutPayload) return;
     setIsPaying(true);
+    const serializedPendingAction = JSON.stringify(checkoutPayload);
+    setPendingAction(serializedPendingAction);
+    localStorage.setItem('sway.pendingAction', serializedPendingAction);
 
     try {
       if (checkoutPayload.type === 'request') {
@@ -288,6 +303,8 @@ export default function PatronView({
 
       // Show high impact check animation
       setBackendConfirmed(true);
+      setPendingAction(null);
+      localStorage.removeItem('sway.pendingAction');
       setTimeout(() => {
         // Reset inputs
         setBackendConfirmed(false);
@@ -303,6 +320,7 @@ export default function PatronView({
 
     } catch (e) {
       console.error(e);
+      setDegraded(true);
     } finally {
       setIsPaying(false);
     }
@@ -435,6 +453,11 @@ export default function PatronView({
       )}
 
       {/* 3. Core Action Panels */}
+      {(degraded || pendingAction) && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-200">
+          Connection degraded. Sway saved your pending action locally and will reconcile with the server before showing confirmation.
+        </div>
+      )}
       <div id="patron_action_panel">
         
         {/* TAB A: Dynamic Search & Selection (Music / Custom Menu) */}

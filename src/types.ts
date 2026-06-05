@@ -26,6 +26,8 @@ export interface BoostContribution {
   timestamp: string;
   clientRequestId?: string;
   idempotencyKey?: string;
+  idempotencyFingerprint?: string;
+  idempotencyExpiresAt?: string;
 }
 
 export interface RequestItem {
@@ -46,6 +48,13 @@ export interface RequestItem {
   createdAt: string;
   clientRequestId?: string;
   idempotencyKey?: string;
+  idempotencyFingerprint?: string;
+  idempotencyExpiresAt?: string;
+  patronDeviceIdHash?: string;
+  gigId?: string;
+  payloadHash?: string;
+  amountCents?: number;
+  currency?: string;
   boosts: BoostContribution[];
 }
 

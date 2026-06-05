@@ -7,6 +7,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
+import { createHash } from "crypto";
 import { BackendState, RequestItem, GigSession } from "./src/types";
 
 dotenv.config();
@@ -14,8 +15,23 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 const isProduction = process.env.NODE_ENV === "production";
+const IDEMPOTENCY_TTL_HOURS = 48;
 
 app.use(express.json());
+
+function resolveShellForRoute(urlPath: string): 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox' {
+  if (urlPath.startsWith('/talent')) return 'talent';
+  if (urlPath.startsWith('/overlay')) return 'overlay';
+  if (urlPath.startsWith('/admin')) return 'admin';
+  if (urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
+  if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
+  return 'patron';
+}
+
+app.use((req, _res, next) => {
+  req.headers['x-sway-shell'] = resolveShellForRoute(req.path);
+  next();
+});
 
 const systemRequestPresets = [
   { id: "p-sys-15", label: "Speed Round", duration: 15, isSystem: true },
@@ -63,6 +79,36 @@ function requirePersistentBusinessStore(res: express.Response): boolean {
     error: "Persistent business store is not configured. Production routes cannot use in-memory gig, request, or ledger state."
   });
   return false;
+}
+
+function hashPayload(payload: unknown): string {
+  return createHash('sha256')
+    .update(JSON.stringify(payload ?? {}))
+    .digest('hex');
+}
+
+function createIdempotencyFingerprint(input: {
+  idempotency_key: string;
+  patron_device_id_hash: string;
+  gig_id: string;
+  action_type: string;
+  target_entity_id: string;
+  amount_cents: number;
+  currency: string;
+  payload_hash: string;
+}): string {
+  return createHash('sha256')
+    .update([
+      input.idempotency_key,
+      input.patron_device_id_hash,
+      input.gig_id,
+      input.action_type,
+      input.target_entity_id,
+      input.amount_cents,
+      input.currency,
+      input.payload_hash
+    ].join('|'))
+    .digest('hex');
 }
 
 function syncActivePerformer() {
@@ -339,14 +385,44 @@ app.post("/api/session/window/preset/delete", (req, res) => {
 // Create request + check profanity
 app.post("/api/request/create", (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const { type, targetType, title, subtitle, senderName, message, amount, albumArt, client_request_id, idempotency_key } = req.body;
+  const {
+    type,
+    targetType,
+    title,
+    subtitle,
+    senderName,
+    message,
+    amount,
+    albumArt,
+    client_request_id,
+    idempotency_key,
+    patron_device_id_hash = "anonymous-device",
+    gig_id = "local",
+    currency = "USD"
+  } = req.body;
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
 
+  const amount_cents = Math.round(Math.max(Number(amount) || 0, state.session.minimumTip) * 100);
+  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
+  const idempotencyFingerprint = createIdempotencyFingerprint({
+    idempotency_key,
+    patron_device_id_hash,
+    gig_id,
+    action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
+    target_entity_id: title || 'request',
+    amount_cents,
+    currency,
+    payload_hash
+  });
+
   const existingRequest = state.requests.find(r => r.idempotencyKey === idempotency_key);
   if (existingRequest) {
+    if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
+      return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+    }
     return res.json({ success: true, request: existingRequest, state, reconciled: true });
   }
 
@@ -383,6 +459,13 @@ app.post("/api/request/create", (req, res) => {
     createdAt: new Date().toISOString(),
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
+    idempotencyFingerprint,
+    idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString(),
+    patronDeviceIdHash: patron_device_id_hash,
+    gigId: gig_id,
+    payloadHash: payload_hash,
+    amountCents: amount_cents,
+    currency,
     boosts: []
   };
 
@@ -400,7 +483,16 @@ app.post("/api/request/create", (req, res) => {
 // Boost an existing request
 app.post("/api/request/boost", (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const { requestId, patronName, boostAmount, client_request_id, idempotency_key } = req.body;
+  const {
+    requestId,
+    patronName,
+    boostAmount,
+    client_request_id,
+    idempotency_key,
+    patron_device_id_hash = "anonymous-device",
+    gig_id = "local",
+    currency = "USD"
+  } = req.body;
   const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
 
   if (!client_request_id || !idempotency_key) {
@@ -412,8 +504,24 @@ app.post("/api/request/boost", (req, res) => {
     return res.status(404).json({ error: "Request not found" });
   }
 
+  const amount_cents = Math.round(amt * 100);
+  const payload_hash = hashPayload({ requestId, patronName, boostAmount });
+  const idempotencyFingerprint = createIdempotencyFingerprint({
+    idempotency_key,
+    patron_device_id_hash,
+    gig_id,
+    action_type: 'boost',
+    target_entity_id: requestId,
+    amount_cents,
+    currency,
+    payload_hash
+  });
+
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
   if (existingBoost) {
+    if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
+      return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+    }
     return res.json({ success: true, request, boost: existingBoost, state, reconciled: true });
   }
 
@@ -427,7 +535,9 @@ app.post("/api/request/boost", (req, res) => {
     amount: amt,
     timestamp: new Date().toISOString(),
     clientRequestId: client_request_id,
-    idempotencyKey: idempotency_key
+    idempotencyKey: idempotency_key,
+    idempotencyFingerprint,
+    idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
 
   request.boosts.push(newBoost);

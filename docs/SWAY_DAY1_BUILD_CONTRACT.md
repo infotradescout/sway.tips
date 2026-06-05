@@ -529,3 +529,18 @@ WebSocket is enhancement only. The source of truth must remain:
 - stored-value wallet behavior without legal/payment processor support
 - losing pending client actions on refresh
 - leaving authorized payments unresolved after stale gig expiration
+
+## Addendum: Structural Objections
+
+- Corrected build order is guardrail contract tests, normalize repo identity, database schema init, route split and server-side decoupling, then server-side middleware guards.
+- Use PostgreSQL + Drizzle ORM + explicit SQL-friendly schema files.
+- Server must select separate shells and bundles for patron, talent, overlay, admin, and dev-sandbox entry points.
+- React routing is not a security boundary.
+- Idempotency records must live for 48 hours initially, with 24 hours as the minimum acceptable TTL.
+- Idempotency fingerprint must be `SHA256(idempotency_key + patron_device_id_hash + gig_id + action_type + target_entity_id + amount_cents + currency + payload_hash)`.
+- Same idempotency key and same fingerprint returns the original result.
+- Same idempotency key and different fingerprint is rejected as misuse.
+- New idempotency key and different fingerprint is a distinct intent.
+- No production role middleware may be accepted until it queries real persisted schema.
+- No production payment route may be accepted until idempotency records and audit events are durable.
+- No production patron route may depend on client-only role isolation.
