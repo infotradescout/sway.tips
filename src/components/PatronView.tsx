@@ -78,7 +78,7 @@ export default function PatronView({
   const [boostPatronName, setBoostPatronName] = useState('');
   const [boostAmount, setBoostAmount] = useState<number>(5);
 
-  // Interactive Payment Escrow Overlay
+  // Temporary checkout overlay until the real payment processor flow is implemented.
   const [checkoutPayload, setCheckoutPayload] = useState<{
     open: boolean;
     type: 'request' | 'boost';
@@ -171,7 +171,7 @@ export default function PatronView({
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
 
-  // Open simulated checkout
+  // Open test checkout
   const initiateCheckout = (type: 'request' | 'boost') => {
     if (session.status === 'closed') return;
 
@@ -354,7 +354,7 @@ export default function PatronView({
             </div>
           )}
           <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
-            Sway {session.talentName} on stage via the live live ladder! Double checkout hold security—authorized cards only capture once your action is successfully fulfilled!
+            Sway {session.talentName || 'this performer'} on stage through the live ladder. Payment processing is not yet enabled in this build.
           </p>
         </div>
       </div>
@@ -708,17 +708,17 @@ export default function PatronView({
                   />
                 </div>
 
-                {/* Submit hold */}
+                {/* Submit request */}
                 <div className="pt-2 font-sans">
                   <button
                     type="button"
                     onClick={() => initiateCheckout('request')}
                     className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient rounded-xl text-xs font-bold text-white transition-all transform active:scale-95 glow-fuchsia cursor-pointer"
                   >
-                    <CreditCard className="w-4 h-4" /> Place Auction Hold ({getFormat(tipAmount)})
+                    <CreditCard className="w-4 h-4" /> Continue To Test Checkout ({getFormat(tipAmount)})
                   </button>
                   <p className="text-[9px] text-slate-500 text-center mt-2.5 leading-relaxed font-sans">
-                    💳 Escrow protected. Cards authorized immediately but funds are not captured until performer is successful at the venue.
+                    Test checkout only. Real payment authorization and capture will be enabled in the payments sprint.
                   </p>
                 </div>
 
@@ -812,7 +812,7 @@ export default function PatronView({
                 <div className="text-center p-8 bg-slate-900/10 border border-dashed border-white/10 rounded-2xl select-none">
                   <Smartphone className="w-6 h-6 text-slate-600 mx-auto animate-bounce" />
                   <div className="text-xs font-semibold text-slate-400 mt-1">Ladder is currently vacant</div>
-                  <p className="text-[10px] text-slate-500">Wait for performer approvals or place your own hold above!</p>
+                  <p className="text-[10px] text-slate-500">Wait for performer approvals or submit your own request above.</p>
                 </div>
               ) : (
                 approvedLadder.map((req, idx) => {
@@ -1118,7 +1118,7 @@ export default function PatronView({
                             }}
                             className="w-full py-2 bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white font-black text-xs rounded-lg shadow-md cursor-pointer font-sans text-center"
                           >
-                            Place Checkout Hold (${tipAmount}.00)
+                            Continue To Test Checkout (${tipAmount}.00)
                           </button>
                         </div>
                       )}
@@ -1146,13 +1146,13 @@ export default function PatronView({
                   <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center rounded-full mx-auto animate-bounce">
                     <Check className="w-8 h-8 text-cyan-400" />
                   </div>
-                  <h3 className="font-sans text-lg font-bold text-white">Payment Authorized!</h3>
+                  <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    ${checkoutPayload.amount}.00 Escrow Hold successful. Performer notified in real-time. If they veto or cannot fulfill during the gig, this hold voids automatically.
+                    ${checkoutPayload.amount}.00 test checkout recorded. The performer has been notified in real time.
                   </p>
                 </div>
               ) : (
-                /* The Checkout payment sheets fields */
+                /* Temporary checkout fields */
                 <div className="p-6 space-y-6">
                   
                   {/* Title and meta */}
@@ -1183,7 +1183,7 @@ export default function PatronView({
                     </div>
 
                     <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                      <span className="text-slate-400">Escrow Authorized:</span>
+                      <span className="text-slate-400">Test Checkout Total:</span>
                       <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                     </div>
                   </div>
@@ -1220,24 +1220,24 @@ export default function PatronView({
                   {/* Payment option tools */}
                   <div className="space-y-2">
                     
-                    {/* Simulated Apple Pay */}
+                    {/* Temporary test payment action */}
                     <button
                       type="button"
                       onClick={completePayment}
                       disabled={isPaying}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-black hover:bg-slate-900 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500" /> {isPaying ? "Simulating Hold..." : "📳 Pay with Apple Pay"}
+                      <Lock className="w-3.5 h-3.5 text-fuchsia-500" /> {isPaying ? "Recording..." : "Record test checkout"}
                     </button>
 
-                    {/* Simulated Google Pay */}
+                    {/* Temporary alternate test action */}
                     <button
                       type="button"
                       onClick={completePayment}
                       disabled={isPaying}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-slate-100 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500 font-bold" /> {isPaying ? "Simulating Hold..." : "📱 Pay with Google Pay"}
+                      <Lock className="w-3.5 h-3.5 text-fuchsia-500 font-bold" /> {isPaying ? "Recording..." : "Record alternate test checkout"}
                     </button>
 
                     <button
@@ -1312,7 +1312,7 @@ export default function PatronView({
               {/* Subtext info */}
               <p className={`text-[10px] leading-relaxed max-w-xs mx-auto mb-4 font-sans ${showDirQrCodeModal.isFeatured ? 'text-amber-250 text-amber-200' : 'text-slate-400'}`}>
                 {showDirQrCodeModal.isFeatured
-                  ? 'Highly Promoted Spot. Support this artist immediately with safe on-hold escrow checks. Fast processing priority guaranteed.'
+                  ? 'Featured placement for this performer. Real payment processing is not enabled in this build.'
                   : 'Standard direct tipping desk for supporting local performers at the venue stage.'}
               </p>
 

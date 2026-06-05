@@ -36,7 +36,7 @@ export interface RequestItem {
   senderName: string;
   message?: string;
   amount: number;         // Total pool (original + boosts)
-  holdAmount: number;     // The amount that is authorized/held for this specific sponsor/patrons
+  holdAmount: number;     // Temporary amount field until real payment lifecycle lands
   platformFee: number;    // Accumulated platform fees ($1 per transaction/boost)
   sponsorCount: number;   // Number of different patrons funding this
   status: 'hold' | 'approved' | 'denied' | 'fulfilled';

@@ -71,7 +71,7 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
           </h1>
           
           <p className="text-gray-300 text-sm leading-relaxed">
-            You ended your gig and auto-released all remaining escrow hold. No complaints, no chargeback fees—just straightforward cash captured. Here is how your audience paid up tonight.
+            You ended your gig and cleared the remaining request queue. Real payment capture, refund, and payout reporting will be added in the payments sprint.
           </p>
 
           {/* Gamified Stat Grid */}

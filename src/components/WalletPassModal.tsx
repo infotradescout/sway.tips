@@ -38,7 +38,7 @@ export default function WalletPassModal({ isOpen, onClose, session }: WalletPass
   if (!isOpen) return null;
 
   const mockAppUrl = window.location.origin;
-  const overlayUrl = `${mockAppUrl}/?overlay=true&role=${session.talentRole}`;
+  const overlayUrl = `${mockAppUrl}/overlay/local`;
 
   const handleCopy = (text: string, key: 'overlay' | 'flyer') => {
     navigator.clipboard.writeText(text);
@@ -439,7 +439,7 @@ export default function WalletPassModal({ isOpen, onClose, session }: WalletPass
                         <p className={`text-[10px] mt-2 max-w-[200px] mx-auto ${
                           flyerTheme === 'clean' ? 'text-gray-500' : 'text-gray-400'
                         }`}>
-                          Skip the line! Cast a tip, place a request, or boost the ladder with Apple/Google Pay.
+                          Cast a tip, place a request, or boost the ladder from the gig QR route.
                         </p>
                       </div>
 

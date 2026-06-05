@@ -1,76 +1,110 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  Smartphone, 
-  Tv, 
-  Info, 
-  RotateCcw, 
-  Flame, 
-  ArrowRight,
-  TrendingUp,
-  Music,
-  Check
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CalendarDays, Flame, Lock, Smartphone, Tv, Users } from 'lucide-react';
+import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
 import PatronView from './components/PatronView';
 import VictoryScreen from './components/VictoryScreen';
 import WalletPassModal from './components/WalletPassModal';
 
-export default function App() {
-  // Test/User Mode: 'talent' (Performer console) or 'patron' (Audience checkout)
-  const [userMode, setUserMode] = useState<'talent' | 'patron'>('patron');
-  
-  // App state holds (synced from Express Server backend in real-time)
-  const [bState, setBState] = useState<BackendState>({
-    session: {
-      status: 'active',
-      talentName: 'DJ Shadow',
-      talentRole: 'DJ',
-      feeType: 'patron',
-      minimumTip: 5,
-      endGigTimerStartedAt: null,
-      totals: { totalTips: 85, accumulatedFees: 12, totalCount: 4, topRequest: 'Mr. Brightside' }
-    },
-    requests: []
-  });
+const emptySession: GigSession = {
+  status: 'inactive',
+  talentName: '',
+  talentRole: 'DJ',
+  feeType: 'patron',
+  minimumTip: 5,
+  endGigTimerStartedAt: null,
+  isFeatured: false,
+  featuredExpiresAt: null,
+  featuredCost: 0,
+  featuredDurationHours: 0,
+  requestsOpen: true,
+  requestWindowMode: 'manual',
+  requestWindowExpiresAt: null,
+  requestWindowDuration: null,
+  requestWindowLabel: null,
+  requestPresets: [],
+  totals: {
+    totalTips: 0,
+    accumulatedFees: 0,
+    totalCount: 0,
+    topRequest: 'None yet'
+  }
+};
 
+type AppRoute =
+  | { name: 'talent-login' }
+  | { name: 'talent-gigs'; gigId?: string }
+  | { name: 'patron-gig'; gigId: string }
+  | { name: 'performer'; performerHandle: string }
+  | { name: 'overlay'; gigId: string }
+  | { name: 'home' }
+  | { name: 'not-found' };
+
+function resolveRoute(pathname: string): AppRoute {
+  const parts = pathname.split('/').filter(Boolean);
+
+  if (parts.length === 0) return { name: 'home' };
+  if (parts[0] === 'talent' && parts[1] === 'login' && parts.length === 2) return { name: 'talent-login' };
+  if (parts[0] === 'talent' && parts[1] === 'gigs') return { name: 'talent-gigs', gigId: parts[2] };
+  if (parts[0] === 'g' && parts[1]) return { name: 'patron-gig', gigId: parts[1] };
+  if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
+  if (parts[0] === 'overlay' && parts[1]) return { name: 'overlay', gigId: parts[1] };
+
+  return { name: 'not-found' };
+}
+
+function ShellMessage({
+  icon,
+  title,
+  body,
+  actions
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
+          {icon}
+        </div>
+        <h1 className="font-display text-xl font-black uppercase tracking-wide text-white">{title}</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-400">{body}</p>
+        {actions && <div className="mt-5 flex flex-col gap-2">{actions}</div>}
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const route = useMemo(() => resolveRoute(window.location.pathname), []);
+  const [bState, setBState] = useState<BackendState>({
+    session: emptySession,
+    requests: [],
+    performers: []
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [showTools, setShowTools] = useState(false);
-  const [isOverlay, setIsOverlay] = useState(false);
 
-  // Sync state helper from server
   const fetchState = async () => {
     try {
       const response = await fetch('/api/state');
       const data = await response.json();
       setBState(data);
     } catch (e) {
-      console.warn("Unable to sync server state:", e);
+      console.warn('Unable to sync server state:', e);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Check URL attributes on mounting
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('overlay') === 'true') {
-      setIsOverlay(true);
-    }
-    
     fetchState();
 
-    // 4-Second Real-Time Synchronization Polling Loop!
     const interval = setInterval(fetchState, 4000);
-
-    // Fast force refresh on demand
     const handleForceSync = () => fetchState();
     window.addEventListener('re-fetch-state', handleForceSync);
 
@@ -80,7 +114,6 @@ export default function App() {
     };
   }, []);
 
-  // API Callbacks for State modification
   const handleStartSession = async (setupData: {
     talentName: string;
     talentRole: 'DJ' | 'Bartender' | 'Performer';
@@ -180,7 +213,7 @@ export default function App() {
 
   const resetInactiveSession = () => {
     handleStartSession({
-      talentName: 'DJ Shadow',
+      talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',
       minimumTip: 5
@@ -189,28 +222,38 @@ export default function App() {
 
   const { session, requests } = bState;
 
-  // Streamer Overlay Mode Render Page (Transparent Widget Feed)
-  if (isOverlay) {
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-slate-400 font-mono">Synchronizing Sway live ledger...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (route.name === 'overlay') {
     const liveLadder = requests
-      .filter(r => r.status === 'approved')
+      .filter((r: RequestItem) => r.status === 'approved')
       .sort((a, b) => b.amount - a.amount);
 
     return (
       <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
         <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 mb-3">
           <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">
-            SWAY ACTION CARDS
+            SWAY LIVE LADDER
           </span>
-          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">📶 LIVE GIG FEED</span>
+          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
         </div>
 
         <div className="space-y-2.5">
           {liveLadder.slice(0, 5).map((req, idx) => (
-            <div 
-              key={req.id} 
+            <div
+              key={req.id}
               className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-transform ${
-                idx === 0 
-                  ? 'bg-slate-950/90 border-fuchsia-500/50 glow-fuchsia text-white' 
+                idx === 0
+                  ? 'bg-slate-950/90 border-fuchsia-500/50 glow-fuchsia text-white'
                   : 'bg-slate-900/80 border-white/5'
               }`}
             >
@@ -233,125 +276,128 @@ export default function App() {
     );
   }
 
-  // Loading Screen
-  if (isLoading) {
+  if (route.name === 'home') {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400 font-mono">Synchronizing Sway live ledger...</p>
-        </div>
-      </div>
+      <ShellMessage
+        icon={<Flame className="h-5 w-5" />}
+        title="Sway"
+        body="Sway lets live performers, DJs, bartenders, and event acts accept paid tips, requests, and audience boosts through a QR-powered live ladder."
+        actions={
+          <>
+            <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/login">
+              Talent login
+            </a>
+            <a className="rounded-xl border border-white/10 bg-slate-950 px-4 py-2 text-center text-sm font-bold text-slate-200 hover:text-white" href="/g/local">
+              Open patron gig route
+            </a>
+          </>
+        }
+      />
     );
   }
 
-  // Victor Recaps Shift Complete Screen
-  if (session.status === 'closed') {
+  if (route.name === 'talent-login') {
     return (
-      <VictoryScreen 
-        session={session} 
-        onRestart={resetInactiveSession} 
+      <ShellMessage
+        icon={<Lock className="h-5 w-5" />}
+        title="Talent Login"
+        body="Account authentication is the next production milestone. This route is separated now so talent-only screens are no longer reachable through the patron surface."
+        actions={
+          <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/gigs">
+            Continue to gigs
+          </a>
+        }
       />
+    );
+  }
+
+  if (route.name === 'not-found') {
+    return (
+      <ShellMessage
+        icon={<CalendarDays className="h-5 w-5" />}
+        title="Route Not Found"
+        body="Use /talent/login, /talent/gigs, /talent/gigs/:gigId, /g/:gigId, /p/:performerHandle, or /overlay/:gigId."
+      />
+    );
+  }
+
+  if (route.name === 'talent-gigs') {
+    if (session.status === 'closed') {
+      return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
+    }
+
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+        <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
+                <Users className="h-4 w-4" />
+              </div>
+              <div>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">
+                  Sway Talent
+                </span>
+                <p className="text-[9px] text-slate-400">Gig setup, queue triage, fulfillment, and closeout</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <main className="flex-1">
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+            <TalentDashboard
+              session={session}
+              requests={requests}
+              onStartSession={handleStartSession}
+              onEndSession={handleEndSession}
+              onCloseout={handleCloseout}
+              onTriage={handleTriageRequest}
+              onFulfill={handleFulfillRequest}
+              onOpenTools={() => setShowTools(true)}
+            />
+          </motion.div>
+        </main>
+
+        <WalletPassModal isOpen={showTools} onClose={() => setShowTools(false)} session={session} />
+      </div>
     );
   }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      
-      {/* 1. SANDBOX TESTING PROFILE SWITCHER TOOLBAR */}
-      <div className="bg-slate-900 border-b border-white/10 py-3.5 px-4 select-none relative z-40">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
+        <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-1 rounded bg-fuchsia-500/10 text-fuchsia-400">
-              <Flame className="w-4.5 h-4.5 animate-pulse" />
+            <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
+              {route.name === 'performer' ? <Smartphone className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
             </div>
             <div>
-              <span className="text-xs font-black font-display tracking-widest text-white uppercase">
-                Sway Sandbox
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">
+                Sway Patron
               </span>
-              <p className="text-[9px] text-slate-400">Simulate both sides of the Sway Request &amp; Tip Auction dynamically</p>
+              <p className="text-[9px] text-slate-400">
+                {route.name === 'performer' ? `Performer link: ${route.performerHandle}` : `Gig route: ${route.gigId}`}
+              </p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 font-mono uppercase mr-2 hidden md:inline">TEST ENVIRONMENT PROFILE:</span>
-            
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setUserMode('patron')}
-                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  userMode === 'patron' 
-                    ? 'bg-fuchsia-600 text-white shadow' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5" /> Patron scan view
-              </button>
-              
-              <button
-                onClick={() => setUserMode('talent')}
-                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  userMode === 'talent' 
-                    ? 'bg-fuchsia-600 text-white shadow' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" /> Talent booth screen
-              </button>
-            </div>
-          </div>
+          <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${route.name === 'patron-gig' ? route.gigId : 'local'}`} title="Open overlay">
+            <Tv className="h-4 w-4" />
+          </a>
         </div>
       </div>
 
-      {/* 2. Main Page Render Canvas */}
       <main className="flex-1">
-        <AnimatePresence mode="wait">
-          {userMode === 'talent' ? (
-            <motion.div
-              key="talent"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.3 }}
-            >
-              <TalentDashboard 
-                session={session}
-                requests={requests}
-                onStartSession={handleStartSession}
-                onEndSession={handleEndSession}
-                onCloseout={handleCloseout}
-                onTriage={handleTriageRequest}
-                onFulfill={handleFulfillRequest}
-                onOpenTools={() => setShowTools(true)}
-              />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="patron"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.3 }}
-            >
-              <PatronView 
-                session={session}
-                requests={requests}
-                performers={bState.performers || []}
-                onCreateRequest={handleCreateRequest}
-                onBoostRequest={handleBoostRequest}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+          <PatronView
+            session={session}
+            requests={requests}
+            performers={bState.performers || []}
+            onCreateRequest={handleCreateRequest}
+            onBoostRequest={handleBoostRequest}
+          />
+        </motion.div>
       </main>
-
-      {/* Hardware & Promos Modal Overlay Drawer */}
-      <WalletPassModal 
-        isOpen={showTools} 
-        onClose={() => setShowTools(false)} 
-        session={session} 
-      />
-
     </div>
   );
 }

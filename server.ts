@@ -17,13 +17,18 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// In-memory Database State
-let state: BackendState = {
-  session: {
-    status: 'active',
-    talentName: "DJ Shadow",
+const systemRequestPresets = [
+  { id: "p-sys-15", label: "Speed Round", duration: 15, isSystem: true },
+  { id: "p-sys-30", label: "Mid-Gig Rush", duration: 30, isSystem: true },
+  { id: "p-sys-45", label: "Main Stage Vibe", duration: 45, isSystem: true }
+];
+
+function createInactiveSession(): GigSession {
+  return {
+    status: 'inactive',
+    talentName: "",
     talentRole: 'DJ',
-    feeType: 'patron', // patron pays $1 platform fee
+    feeType: 'patron',
     minimumTip: 5,
     endGigTimerStartedAt: null,
     isFeatured: false,
@@ -35,146 +40,45 @@ let state: BackendState = {
     requestWindowExpiresAt: null,
     requestWindowDuration: null,
     requestWindowLabel: null,
-    requestPresets: [
-      { id: "p-sys-15", label: "🔥 Speed Round", duration: 15, isSystem: true },
-      { id: "p-sys-30", label: "🌟 Mid-Gig Rush", duration: 30, isSystem: true },
-      { id: "p-sys-45", label: "🥁 Main Stage Vibe", duration: 45, isSystem: true }
-    ],
+    requestPresets: [...systemRequestPresets],
     totals: {
-      totalTips: 85,
-      accumulatedFees: 12,
-      totalCount: 4,
-      topRequest: "Mr. Brightside"
+      totalTips: 0,
+      accumulatedFees: 0,
+      totalCount: 0,
+      topRequest: "None yet"
     }
-  },
-  requests: [
-    {
-      id: "demo-1",
-      type: "request",
-      targetType: "music",
-      title: "Mr. Brightside",
-      subtitle: "The Killers",
-      albumArt: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop",
-      senderName: "Bachelorette Sarah",
-      message: "OMG play this for my girls, we are screaming!!!",
-      amount: 45,
-      holdAmount: 20,
-      platformFee: 3,
-      sponsorCount: 3,
-      status: "approved",
-      shadowBanned: false,
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-      boosts: [
-        { id: "b1", patronName: "Sarah's Maid of Honor", amount: 15, timestamp: new Date(Date.now() - 1800000).toISOString() },
-        { id: "b2", patronName: "Anonymous Giver", amount: 10, timestamp: new Date(Date.now() - 900000).toISOString() }
-      ]
-    },
-    {
-      id: "demo-2",
-      type: "request",
-      targetType: "music",
-      title: "Bohemian Rhapsody",
-      subtitle: "Queen",
-      albumArt: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150&h=150&fit=crop",
-      senderName: "Karaoke Guy Mike",
-      message: "Please let me sing along on the mic!! Bold move, I know.",
-      amount: 25,
-      holdAmount: 25,
-      platformFee: 1,
-      sponsorCount: 1,
-      status: "hold", // Starts in private triage queue
-      shadowBanned: false,
-      createdAt: new Date(Date.now() - 1200000).toISOString(),
-      boosts: []
-    },
-    {
-      id: "demo-3",
-      type: "request",
-      targetType: "music",
-      title: "Dancing Queen",
-      subtitle: "ABBA",
-      albumArt: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&h=150&fit=crop",
-      senderName: "Dancing Queen Emma",
-      message: "Tipping $15 to get this on next! Absolute tune",
-      amount: 15,
-      holdAmount: 15,
-      platformFee: 1,
-      sponsorCount: 1,
-      status: "approved",
-      shadowBanned: false,
-      createdAt: new Date(Date.now() - 600000).toISOString(),
-      boosts: []
-    },
-    {
-      id: "demo-4",
-      type: "tip",
-      targetType: "straight_tip",
-      title: "Straight Tip",
-      subtitle: "Supported the artist directly!",
-      senderName: "Gentleman Carl",
-      message: "Outstanding mixing tonight, seriously good selections.",
-      amount: 20,
-      holdAmount: 20,
-      platformFee: 1,
-      sponsorCount: 1,
-      status: "fulfilled", // Direct tips are instantly fulfilled/captured
-      shadowBanned: false,
-      createdAt: new Date(Date.now() - 2400000).toISOString(),
-      boosts: []
-    }
-  ],
-  performers: [
-    {
-      id: "p-1",
-      name: "DJ Shadow",
-      role: 'DJ',
-      venueName: "The Underground Club",
-      isFeatured: false,
-      featuredExpiresAt: null,
-      minimumTip: 5,
-      avatarUrl: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=100&h=100&fit=crop"
-    },
-    {
-      id: "p-2",
-      name: "The Velvet Voice",
-      role: 'Performer',
-      venueName: "Jazz & Blues Bistro",
-      isFeatured: true,
-      featuredExpiresAt: new Date(Date.now() + 7200000).toISOString(), // 2 hours
-      minimumTip: 10,
-      avatarUrl: "https://images.unsplash.com/photo-1511192336575-5a79af67a629?w=100&h=100&fit=crop"
-    },
-    {
-      id: "p-3",
-      name: "Neon Mixer",
-      role: 'Bartender',
-      venueName: "Atomic Lounge Bar",
-      isFeatured: true,
-      featuredExpiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour
-      minimumTip: 5,
-      avatarUrl: "https://images.unsplash.com/photo-1574096079513-d8259312b785?w=100&h=100&fit=crop"
-    },
-    {
-      id: "p-4",
-      name: "Beatbox Champ Mike",
-      role: 'Performer',
-      venueName: "Subway Street Corner",
-      isFeatured: false,
-      featuredExpiresAt: null,
-      minimumTip: 3,
-      avatarUrl: "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=100&h=100&fit=crop"
-    }
-  ]
+  };
+}
+
+// In-memory state remains temporary until the persistent database sprint.
+let state: BackendState = {
+  session: createInactiveSession(),
+  requests: [],
+  performers: []
 };
 
 function syncActivePerformer() {
-  const activeP = state.performers.find(p => p.id === 'p-1');
-  if (activeP) {
-    activeP.name = state.session.talentName;
-    activeP.role = state.session.talentRole;
-    activeP.isFeatured = state.session.isFeatured;
-    activeP.featuredExpiresAt = state.session.featuredExpiresAt;
-    activeP.minimumTip = state.session.minimumTip;
+  if (state.session.status === 'inactive' || !state.session.talentName) {
+    state.performers = [];
+    return;
+  }
+
+  const activePerformer = {
+    id: "p-active",
+    name: state.session.talentName,
+    role: state.session.talentRole,
+    venueName: "Current gig",
+    isFeatured: state.session.isFeatured,
+    featuredExpiresAt: state.session.featuredExpiresAt,
+    minimumTip: state.session.minimumTip,
+    avatarUrl: ""
+  };
+
+  const existingIndex = state.performers.findIndex(p => p.id === activePerformer.id);
+  if (existingIndex >= 0) {
+    state.performers[existingIndex] = activePerformer;
+  } else {
+    state.performers = [activePerformer];
   }
 }
 
@@ -264,7 +168,7 @@ setInterval(() => {
     
     // 5 minutes is 300,000 ms. For easier testing, let's keep the real 5 minutes but allow talent to dismiss.
     if (elapsedTime >= 300000) {
-      console.log("Post-Gig timer expired! Auto-nuking active holds.");
+      console.log("Post-gig timer expired. Releasing pending requests.");
       executeAutoNuke();
     }
   }
@@ -297,7 +201,7 @@ setInterval(() => {
 function executeAutoNuke() {
   state.requests = state.requests.map(req => {
     if (req.status === 'hold') {
-      return { ...req, status: 'denied' }; // Released
+      return { ...req, status: 'denied' };
     }
     return req;
   });
@@ -361,11 +265,7 @@ app.post("/api/session/start", (req, res) => {
     requestWindowExpiresAt: null,
     requestWindowDuration: null,
     requestWindowLabel: null,
-    requestPresets: [
-      { id: "p-sys-15", label: "🔥 Speed Round", duration: 15, isSystem: true },
-      { id: "p-sys-30", label: "🌟 Mid-Gig Rush", duration: 30, isSystem: true },
-      { id: "p-sys-45", label: "🥁 Main Stage Vibe", duration: 45, isSystem: true }
-    ],
+    requestPresets: [...systemRequestPresets],
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -517,7 +417,7 @@ app.post("/api/request/create", async (req, res) => {
     success: true, 
     request: newItem,
     state,
-    shadowBannedFeedback: shadowBanned ? "Check processed successfully. Authorized hold placed." : null 
+    shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
   });
 });
 
@@ -566,7 +466,7 @@ app.post("/api/request/triage", (req, res) => {
   if (action === 'approve') {
     request.status = 'approved';
   } else {
-    request.status = 'denied'; // Vecto, hold instantly voided
+    request.status = 'denied';
   }
 
   recalculateTotals();

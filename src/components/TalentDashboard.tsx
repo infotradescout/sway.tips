@@ -55,7 +55,7 @@ export default function TalentDashboard({
   onOpenTools
 }: TalentDashboardProps) {
   // Session Configuration Setup States (for Starting New Session)
-  const [setupName, setSetupName] = useState('DJ Shadow');
+  const [setupName, setSetupName] = useState('');
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
   const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
   const [setupMinTip, setSetupMinTip] = useState(5);
@@ -332,7 +332,7 @@ export default function TalentDashboard({
                   type="text" 
                   value={setupName}
                   onChange={(e) => setSetupName(e.target.value)}
-                  placeholder="e.g. DJ Shadow, Bartender Dave"
+                  placeholder="e.g. DJ Luna, Bartender Dave"
                   required
                   className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
                 />
@@ -356,7 +356,7 @@ export default function TalentDashboard({
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">EAT PLATFORM TRANSACTION FEE ($1.00)</label>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">STRIPE INTEGRATED</span>
+                <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PAYMENTS PENDING</span>
               </div>
               
               <div className="grid sm:grid-cols-2 gap-4">
@@ -436,7 +436,7 @@ export default function TalentDashboard({
                 <div className="space-y-1 select-none">
                   <h4 className="text-sm font-bold text-amber-200">5-Minute Final Check is ticking</h4>
                   <p className="text-xs text-amber-300 leading-relaxed">
-                    Review your pending queue below. Tap approval on anything you actually fulfilled but forgot to log. Once the time is up, Sway instantly voids all remaining escrow authorizations!
+                    Review your pending queue below. Tap approval on anything you actually fulfilled but forgot to log. Real payment void/refund handling will be added in the payments sprint.
                   </p>
                 </div>
               </div>
@@ -450,11 +450,11 @@ export default function TalentDashboard({
                     Private Triage Desk
                   </h3>
                   <span className="text-xs bg-slate-900 border border-white/5 text-slate-400 font-mono px-2 py-0.5 rounded-full select-none">
-                    {triageQueue.length} Holds Pending
+                    {triageQueue.length} Pending
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest flex items-center gap-1">
-                  🔒 ESCROW SECURITY SHIELD
+                  REVIEW BEFORE PUBLIC LADDER
                 </span>
               </div>
 
@@ -467,8 +467,8 @@ export default function TalentDashboard({
                       className="text-center p-8 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl space-y-2 select-none"
                     >
                       <Check className="w-6 h-6 text-slate-600 mx-auto" />
-                      <div className="text-xs font-semibold text-slate-400">All holds cleared!</div>
-                      <p className="text-[10px] text-slate-500">Pending crowd tip holds appear here for review first.</p>
+                      <div className="text-xs font-semibold text-slate-400">Queue cleared!</div>
+                      <p className="text-[10px] text-slate-500">Pending crowd requests appear here for review first.</p>
                     </motion.div>
                   ) : (
                     triageQueue.map((req) => (
@@ -519,9 +519,9 @@ export default function TalentDashboard({
                           <button
                             onClick={() => onTriage(req.id, 'approve')}
                             className="bg-cyan-600 hover:bg-cyan-500 text-slate-955 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10"
-                            title="Accept Escrow Hold"
+                            title="Approve request"
                           >
-                            <Check className="w-4 h-4" /> Accept Hold
+                            <Check className="w-4 h-4" /> Approve
                           </button>
                         </div>
                       </motion.div>
@@ -618,7 +618,7 @@ export default function TalentDashboard({
                             </div>
                           </div>
 
-                          {/* Fulfillment actions (Officially capture holds!) */}
+                          {/* Fulfillment actions */}
                           <div>
                             <button
                               type="button"

@@ -1,6 +1,6 @@
 {
   "name": "Sway",
-  "description": "Frictionless mobile tip jar with Sway me request times and live custom-funded Request Auction Ladder.",
+  "description": "QR-powered live tips, requests, and audience boosts for performers and venues.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
