@@ -339,7 +339,16 @@ app.post("/api/session/window/preset/delete", (req, res) => {
 // Create request + check profanity
 app.post("/api/request/create", (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const { type, targetType, title, subtitle, senderName, message, amount, albumArt } = req.body;
+  const { type, targetType, title, subtitle, senderName, message, amount, albumArt, client_request_id, idempotency_key } = req.body;
+
+  if (!client_request_id || !idempotency_key) {
+    return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+
+  const existingRequest = state.requests.find(r => r.idempotencyKey === idempotency_key);
+  if (existingRequest) {
+    return res.json({ success: true, request: existingRequest, state, reconciled: true });
+  }
 
   const tipAmount = Math.max(Number(amount) || 0, state.session.minimumTip);
   const holdAmount = tipAmount;
@@ -357,7 +366,7 @@ app.post("/api/request/create", (req, res) => {
   const shadowBanned = !modResult.isAllowed;
 
   const newItem: RequestItem = {
-    id: "req-" + Math.random().toString(36).substring(2, 11),
+    id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
     type: isStraightTip ? 'tip' : 'request',
     targetType: targetType || 'music',
     title: isStraightTip ? 'Straight Tip' : (title || 'Request'),
@@ -372,6 +381,8 @@ app.post("/api/request/create", (req, res) => {
     status: isStraightTip ? 'fulfilled' : 'hold', // straight tips are accepted instantly
     shadowBanned: shadowBanned,
     createdAt: new Date().toISOString(),
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key,
     boosts: []
   };
 
@@ -389,12 +400,21 @@ app.post("/api/request/create", (req, res) => {
 // Boost an existing request
 app.post("/api/request/boost", (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const { requestId, patronName, boostAmount } = req.body;
+  const { requestId, patronName, boostAmount, client_request_id, idempotency_key } = req.body;
   const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
+
+  if (!client_request_id || !idempotency_key) {
+    return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
 
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
     return res.status(404).json({ error: "Request not found" });
+  }
+
+  const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
+  if (existingBoost) {
+    return res.json({ success: true, request, boost: existingBoost, state, reconciled: true });
   }
 
   // Shadow moderate backer's name
@@ -402,10 +422,12 @@ app.post("/api/request/boost", (req, res) => {
   const isBackerShadowed = !modResult.isAllowed;
 
   const newBoost = {
-    id: "boost-" + Math.random().toString(36).substring(2, 11),
+    id: `boost-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
     patronName: patronName || "Co-Sponsor",
     amount: amt,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key
   };
 
   request.boosts.push(newBoost);

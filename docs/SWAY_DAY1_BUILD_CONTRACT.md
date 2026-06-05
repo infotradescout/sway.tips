@@ -465,3 +465,67 @@ no App Store review package
 ```
 
 The correction is to build the product spine before expanding scope.
+
+## Addendum: Auto-Closeout
+
+Manual-only closeout is prohibited. Gig sessions must support server-side stale-gig expiration with:
+
+- `auto_closeout_at`
+- `last_activity_at`
+- `auto_closeout_reason`
+- `closeout_policy`
+- hard closeout worker
+- void/refund unresolved holds
+- audit events for every transition
+
+Default policy:
+
+`auto_closeout_at = max(started_at + 4 hours, scheduled_end_at + 30 minutes when scheduled_end_at exists)`
+
+## Addendum: Deferred KYC
+
+Deferred KYC is a product rule, not a fake wallet or payout promise.
+
+Initial threshold:
+
+`verification_required_at_amount = 10000` cents lifetime gross volume
+
+Rules:
+
+- Performer can reach `gig_ready` before payout verification.
+- Payout route is blocked until `payouts_enabled` is true.
+- UI copy cannot promise unverified payouts.
+- Stripe Connect verification requirements vary by country, capability, business type, risk, and other factors.
+- Incremental onboarding may collect more information as the account earns more revenue.
+
+## Addendum: Offline Client Resilience
+
+Basement club and bad-network flows must preserve patron intent without creating duplicate money events.
+
+Requirements:
+
+- `client_request_id`
+- `idempotency_key`
+- local pending action record
+- offline/degraded indicator
+- exponential retry
+- server reconciliation
+- no duplicate charges
+- no payment success before backend confirmation
+
+WebSocket is enhancement only. The source of truth must remain:
+
+- database state
+- payment processor events/webhooks
+- request lifecycle audit log
+
+## Additional Prohibited Patterns
+
+- manual-only closeout
+- payment success before backend confirmation
+- WebSocket-only transaction state
+- retry without idempotency
+- payout promise before KYC completion
+- stored-value wallet behavior without legal/payment processor support
+- losing pending client actions on refresh
+- leaving authorized payments unresolved after stale gig expiration

@@ -170,12 +170,24 @@ export default function App() {
     }
   };
 
-  const handleBoostRequest = async (requestId: string, patronName: string, amount: number) => {
+  const handleBoostRequest = async (
+    requestId: string,
+    patronName: string,
+    amount: number,
+    clientRequestId?: string,
+    idempotencyKey?: string
+  ) => {
     try {
       const response = await fetch('/api/request/boost', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, patronName, boostAmount: amount })
+        body: JSON.stringify({
+          requestId,
+          patronName,
+          boostAmount: amount,
+          client_request_id: clientRequestId,
+          idempotency_key: idempotencyKey
+        })
       });
       const data = await response.json();
       setBState(data.state);

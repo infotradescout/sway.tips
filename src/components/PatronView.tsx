@@ -39,8 +39,10 @@ interface PatronViewProps {
     message?: string;
     amount: number;
     albumArt?: string;
+    client_request_id?: string;
+    idempotency_key?: string;
   }) => Promise<any>;
-  onBoostRequest: (requestId: string, patronName: string, amount: number) => Promise<any>;
+  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string) => Promise<any>;
 }
 
 export default function PatronView({
@@ -87,10 +89,20 @@ export default function PatronView({
     total: number;
     targetId?: string; // used for boost routing
     trackArt?: string;
+    clientRequestId: string;
+    idempotencyKey: string;
   } | null>(null);
 
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+
+  const createClientActionIds = () => {
+    const id = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return {
+      clientRequestId: id,
+      idempotencyKey: `sway:${id}`
+    };
+  };
 
   // Pre-built customizable menus for bartenders / street performers
   const customItems: CustomMenuItem[] = session.talentRole === 'Bartender' ? [
@@ -236,7 +248,8 @@ export default function PatronView({
       fee: platformFee,
       total,
       targetId: boostingItem?.id,
-      trackArt
+      trackArt,
+      ...createClientActionIds()
     });
   };
 
@@ -256,7 +269,9 @@ export default function PatronView({
           senderName: senderName,
           message: commentMessage,
           amount: checkoutPayload.amount,
-          albumArt: checkoutPayload.trackArt
+          albumArt: checkoutPayload.trackArt,
+          client_request_id: checkoutPayload.clientRequestId,
+          idempotency_key: checkoutPayload.idempotencyKey
         });
       } else {
         // Boost routing!
@@ -264,16 +279,18 @@ export default function PatronView({
           await onBoostRequest(
             checkoutPayload.targetId,
             boostPatronName,
-            checkoutPayload.amount
+            checkoutPayload.amount,
+            checkoutPayload.clientRequestId,
+            checkoutPayload.idempotencyKey
           );
         }
       }
 
       // Show high impact check animation
-      setPaymentSuccess(true);
+      setBackendConfirmed(true);
       setTimeout(() => {
         // Reset inputs
-        setPaymentSuccess(false);
+        setBackendConfirmed(false);
         setCheckoutPayload(null);
         setBoostingItem(null);
         setSelectedTrack(null);
@@ -311,7 +328,8 @@ export default function PatronView({
       artist: 'Straight tip supporting the performer directly!',
       amount: tipAmount,
       fee: platformFee,
-      total: tipAmount + platformFee
+      total: tipAmount + platformFee,
+      ...createClientActionIds()
     });
   };
 
@@ -1070,7 +1088,8 @@ export default function PatronView({
                                 artist: `Straight tip supporting ${p.name} at ${p.venueName}`,
                                 amount: tipAmount,
                                 fee: platformFee,
-                                total: tipAmount + platformFee
+                                total: tipAmount + platformFee,
+                                ...createClientActionIds()
                               });
                             }}
                             className="w-full py-2 bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white font-black text-xs rounded-lg shadow-md cursor-pointer font-sans text-center"
@@ -1098,7 +1117,7 @@ export default function PatronView({
             >
               
               {/* Payment Processing and Success Cards */}
-              {paymentSuccess ? (
+              {backendConfirmed ? (
                 <div className="p-8 space-y-4">
                   <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center rounded-full mx-auto animate-bounce">
                     <Check className="w-8 h-8 text-cyan-400" />

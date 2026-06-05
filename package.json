@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:contracts": "node scripts/contract-check.mjs"
+    "test:contracts": "node scripts/contract-check.mjs && node scripts/sway-auto-closeout.contract.test.mjs && node scripts/sway-deferred-kyc.contract.test.mjs && node scripts/sway-offline-client-resilience.contract.test.mjs && node scripts/sway-idempotent-submit.contract.test.mjs && node scripts/sway-role-route-separation.contract.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

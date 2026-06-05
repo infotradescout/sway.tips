@@ -24,6 +24,8 @@ export interface BoostContribution {
   patronName: string;
   amount: number;
   timestamp: string;
+  clientRequestId?: string;
+  idempotencyKey?: string;
 }
 
 export interface RequestItem {
@@ -42,6 +44,8 @@ export interface RequestItem {
   status: 'hold' | 'approved' | 'denied' | 'fulfilled';
   shadowBanned: boolean;  // Profanity filter flag
   createdAt: string;
+  clientRequestId?: string;
+  idempotencyKey?: string;
   boosts: BoostContribution[];
 }
 
