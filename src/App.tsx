@@ -32,6 +32,7 @@ const emptySession: GigSession = {
 };
 
 const routeSpine = ['/talent/login', '/talent/gigs', '/g/', '/p/', '/overlay/', '/admin'];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type AppRoute =
   | { name: 'talent-login' }
@@ -84,6 +85,7 @@ function ShellMessage({
 
 export default function App() {
   const route = useMemo(() => resolveRoute(window.location.pathname), []);
+  const routeGigId = route.name === 'patron-gig' && UUID_PATTERN.test(route.gigId) ? route.gigId : undefined;
   const [bState, setBState] = useState<BackendState>({
     session: emptySession,
     requests: [],
@@ -163,6 +165,12 @@ export default function App() {
         body: JSON.stringify(requestData)
       });
       const data = await response.json();
+      if (!response.ok) {
+        throw Object.assign(new Error(data?.error || 'Backend request failed.'), {
+          status: response.status,
+          body: data
+        });
+      }
       setBState(data.state);
       return data;
     } catch (e) {
@@ -175,7 +183,9 @@ export default function App() {
     patronName: string,
     amount: number,
     clientRequestId?: string,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    expiresAt?: string,
+    gigId?: string
   ) => {
     try {
       const response = await fetch('/api/request/boost', {
@@ -186,15 +196,45 @@ export default function App() {
           patronName,
           boostAmount: amount,
           client_request_id: clientRequestId,
-          idempotency_key: idempotencyKey
+          idempotency_key: idempotencyKey,
+          expires_at: expiresAt,
+          gig_id: gigId
         })
       });
       const data = await response.json();
+      if (!response.ok) {
+        throw Object.assign(new Error(data?.error || 'Backend request failed.'), {
+          status: response.status,
+          body: data
+        });
+      }
       setBState(data.state);
       return data;
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string) => {
+    const response = await fetch('/api/pending-action/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_request_id: clientRequestId,
+        idempotency_key: idempotencyKey
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Backend request failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    if (data.status === 'reconciled' && data.responseBody?.state) {
+      setBState(data.responseBody.state);
+    }
+    return data;
   };
 
   const handleTriageRequest = async (requestId: string, action: 'approve' | 'deny') => {
@@ -414,8 +454,10 @@ export default function App() {
             session={session}
             requests={requests}
             performers={bState.performers || []}
+            gigId={routeGigId}
             onCreateRequest={handleCreateRequest}
             onBoostRequest={handleBoostRequest}
+            onReconcilePendingAction={handleReconcilePendingAction}
           />
         </motion.div>
       </main>

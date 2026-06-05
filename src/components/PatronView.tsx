@@ -35,6 +35,7 @@ interface PatronViewProps {
   session: GigSession;
   requests: RequestItem[];
   performers: PerformerProfile[];
+  gigId?: string;
   onCreateRequest: (data: {
     type: 'request' | 'tip';
     targetType: 'music' | 'custom' | 'straight_tip';
@@ -47,16 +48,20 @@ interface PatronViewProps {
     client_request_id?: string;
     idempotency_key?: string;
     expires_at?: string;
+    gig_id?: string;
   }) => Promise<any>;
-  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string) => Promise<any>;
+  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string) => Promise<any>;
+  onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string) => Promise<any>;
 }
 
 export default function PatronView({
   session,
   requests,
   performers,
+  gigId,
   onCreateRequest,
-  onBoostRequest
+  onBoostRequest,
+  onReconcilePendingAction
 }: PatronViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
@@ -98,6 +103,7 @@ export default function PatronView({
     clientRequestId: string;
     idempotencyKey: string;
     expires_at: string;
+    gigId: string;
   } | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
@@ -120,6 +126,7 @@ export default function PatronView({
   useEffect(() => {
     const storedPendingAction = localStorage.getItem('sway.pendingAction');
     if (!storedPendingAction) return;
+    let cancelled = false;
 
     try {
       const parsed = JSON.parse(storedPendingAction);
@@ -127,11 +134,53 @@ export default function PatronView({
         localStorage.removeItem('sway.pendingAction');
         setPendingAction(null);
         setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+        return;
       }
+
+      if (!parsed.clientRequestId || !parsed.idempotencyKey) {
+        localStorage.removeItem('sway.pendingAction');
+        setPendingAction(null);
+        return;
+      }
+
+      setDegraded(true);
+      setPendingAction(storedPendingAction);
+      setPendingActionMessage('Reconnecting to confirm your pending action.');
+
+      onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey)
+        .then((result) => {
+          if (cancelled) return;
+          if (result?.status === 'reconciled') {
+            localStorage.removeItem('sway.pendingAction');
+            setPendingAction(null);
+            setPendingActionMessage('');
+            window.dispatchEvent(new Event('re-fetch-state'));
+            return;
+          }
+          if (result?.status === 'pending') {
+            setDegraded(true);
+            setPendingActionMessage('Connection degraded. Your pending action is still awaiting backend confirmation.');
+          }
+        })
+        .catch((error: any) => {
+          if (cancelled) return;
+          setDegraded(true);
+          if (error?.status === 410) {
+            localStorage.removeItem('sway.pendingAction');
+            setPendingAction(null);
+            setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+            return;
+          }
+          setPendingActionMessage('Connection degraded. Sway will retry reconciliation when the network is available.');
+        });
     } catch {
       localStorage.removeItem('sway.pendingAction');
       setPendingAction(null);
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -279,6 +328,14 @@ export default function PatronView({
       return;
     }
 
+    if (!gigId) {
+      const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+      setDegraded(true);
+      setPendingActionMessage(routeCopy);
+      alert(routeCopy);
+      return;
+    }
+
     if (type === 'request' && activeTab === 'request' && !session.requestsOpen) {
       alert("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
       return;
@@ -347,6 +404,7 @@ export default function PatronView({
       total,
       targetId: boostingItem?.id,
       trackArt,
+      gigId,
       ...createClientActionIds()
     });
   };
@@ -383,7 +441,8 @@ export default function PatronView({
           albumArt: checkoutPayload.trackArt,
           client_request_id: checkoutPayload.clientRequestId,
           idempotency_key: checkoutPayload.idempotencyKey,
-          expires_at: checkoutPayload.expires_at
+          expires_at: checkoutPayload.expires_at,
+          gig_id: checkoutPayload.gigId
         }), checkoutPayload.expires_at);
       } else {
         // Boost routing!
@@ -394,7 +453,8 @@ export default function PatronView({
             checkoutPayload.amount,
             checkoutPayload.clientRequestId,
             checkoutPayload.idempotencyKey,
-            checkoutPayload.expires_at
+            checkoutPayload.expires_at,
+            checkoutPayload.gigId
           ), checkoutPayload.expires_at);
         }
       }
@@ -441,6 +501,14 @@ export default function PatronView({
       return;
     }
 
+    if (!gigId) {
+      const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+      setDegraded(true);
+      setPendingActionMessage(routeCopy);
+      alert(routeCopy);
+      return;
+    }
+
     if (!senderName) {
       alert("Please enter a Patron Name!");
       return;
@@ -459,6 +527,7 @@ export default function PatronView({
       amount: tipAmount,
       fee: platformFee,
       total: tipAmount + platformFee,
+      gigId,
       ...createClientActionIds()
     });
   };
@@ -1214,6 +1283,13 @@ export default function PatronView({
                                 alert(`Minimum tip is $${p.minimumTip}`);
                                 return;
                               }
+                              if (!gigId) {
+                                const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+                                setDegraded(true);
+                                setPendingActionMessage(routeCopy);
+                                alert(routeCopy);
+                                return;
+                              }
                               // Open checkout
                               const platformFee = session.feeType === 'patron' ? 1.0 : 0;
                               setCheckoutPayload({
@@ -1224,6 +1300,7 @@ export default function PatronView({
                                 amount: tipAmount,
                                 fee: platformFee,
                                 total: tipAmount + platformFee,
+                                gigId,
                                 ...createClientActionIds()
                               });
                             }}

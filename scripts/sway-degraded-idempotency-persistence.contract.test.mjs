@@ -59,6 +59,9 @@ for (const term of [
 for (const term of [
   'createIdempotencyStore(process.env.DATABASE_URL)',
   '/api/pending-action/reconcile',
+  'parseDurableGigId(gig_id)',
+  'A valid route gig_id is required for durable request submission.',
+  'A valid route gig_id is required for durable boost submission.',
   'idempotencyStore.reservePendingAction',
   'idempotencyStore.completePendingAction',
   "durableReplay.kind === 'expired'",
@@ -68,6 +71,10 @@ for (const term of [
   'Pending action expired before boost creation.'
 ]) {
   if (!server.includes(term)) failures.push(`Server missing degraded/idempotency behavior: ${term}`);
+}
+
+if (/gig_id\s*=\s*["']local["']/.test(server)) {
+  failures.push('Server durable request/boost paths must not default gig_id to "local".');
 }
 
 const requestReserveIndex = server.indexOf('idempotencyStore.reservePendingAction(durableInput)');
@@ -88,6 +95,10 @@ for (const term of [
   'waitForRetryBackoff',
   'checkoutPayload.expires_at',
   'expires_at: checkoutPayload.expires_at',
+  'gig_id: checkoutPayload.gigId',
+  'onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey)',
+  "result?.status === 'reconciled'",
+  "result?.status === 'pending'",
   'setBackendConfirmed(true)',
   'localStorage.setItem',
   'localStorage.removeItem'
@@ -112,6 +123,21 @@ if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(com
 
 if (!patronApp.includes('expires_at: expiresAt')) {
   failures.push('Patron shell must forward expires_at for boost submissions.');
+}
+
+for (const term of [
+  'const routeGigId =',
+  'UUID_PATTERN.test(route.gigId)',
+  'gig_id: gigId',
+  '/api/pending-action/reconcile',
+  "data.status === 'reconciled'",
+  'setBState(data.responseBody.state)'
+]) {
+  if (!patronApp.includes(term)) failures.push(`Patron shell missing route gig/reconciliation behavior: ${term}`);
+}
+
+if (!patron.includes('This QR route is missing a valid gig ID.')) {
+  failures.push('Patron client must block checkout when a valid route gig ID is unavailable.');
 }
 
 for (const pattern of [

@@ -10,12 +10,15 @@ type PatronRoute =
 function resolvePatronRoute(pathname: string): PatronRoute {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
-  return { name: 'patron-gig', gigId: parts[1] || 'local' };
+  return { name: 'patron-gig', gigId: parts[1] || '' };
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function PatronApp() {
   const route = resolvePatronRoute(window.location.pathname);
   const { bState, isLoading, setBState } = useSwayState();
+  const routeGigId = route.name === 'patron-gig' && UUID_PATTERN.test(route.gigId) ? route.gigId : undefined;
 
   const handleCreateRequest = async (requestData: Record<string, unknown>) => {
     try {
@@ -24,6 +27,7 @@ export default function PatronApp() {
       return data;
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -33,7 +37,8 @@ export default function PatronApp() {
     amount: number,
     clientRequestId?: string,
     idempotencyKey?: string,
-    expiresAt?: string
+    expiresAt?: string,
+    gigId?: string
   ) => {
     try {
       const data = await postJson('/api/request/boost', {
@@ -42,19 +47,34 @@ export default function PatronApp() {
         boostAmount: amount,
         client_request_id: clientRequestId,
         idempotency_key: idempotencyKey,
-        expires_at: expiresAt
+        expires_at: expiresAt,
+        gig_id: gigId
       });
       setBState(data.state);
       return data;
     } catch (e) {
       console.error(e);
+      throw e;
     }
+  };
+
+  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string) => {
+    const data = await postJson('/api/pending-action/reconcile', {
+      client_request_id: clientRequestId,
+      idempotency_key: idempotencyKey
+    });
+
+    if (data.status === 'reconciled' && data.responseBody?.state) {
+      setBState(data.responseBody.state);
+    }
+
+    return data;
   };
 
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
-  const overlayGigId = route.name === 'patron-gig' ? route.gigId : 'local';
+  const overlayGigId = routeGigId || '';
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -83,8 +103,10 @@ export default function PatronApp() {
             session={session}
             requests={requests}
             performers={bState.performers || []}
+            gigId={routeGigId}
             onCreateRequest={handleCreateRequest}
             onBoostRequest={handleBoostRequest}
+            onReconcilePendingAction={handleReconcilePendingAction}
           />
         </motion.div>
       </main>

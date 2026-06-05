@@ -113,6 +113,14 @@ function hashPayload(payload: unknown): string {
     .digest('hex');
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseDurableGigId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return UUID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
 function canonicalJson(input: Record<string, string | number>): string {
   const orderedInput = {
     v: Number(input.v),
@@ -467,7 +475,7 @@ app.post("/api/request/create", async (req, res) => {
     client_request_id,
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
-    gig_id = "local",
+    gig_id,
     currency = "USD",
     expires_at
   } = req.body;
@@ -476,12 +484,17 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
 
+  const durableGigId = parseDurableGigId(gig_id);
+  if (!durableGigId) {
+    return res.status(422).json({ error: "A valid route gig_id is required for durable request submission." });
+  }
+
   const amount_cents = Math.round(Math.max(Number(amount) || 0, state.session.minimumTip) * 100);
   const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash,
-    gig_id,
+    gig_id: durableGigId,
     action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     target_entity_id: title || 'request',
     amount_cents,
@@ -493,7 +506,7 @@ app.post("/api/request/create", async (req, res) => {
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
     patronDeviceIdHash: patron_device_id_hash,
-    gigId: gig_id,
+    gigId: durableGigId,
     actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     amountCents: amount_cents,
     currency: String(currency).toUpperCase(),
@@ -566,7 +579,7 @@ app.post("/api/request/create", async (req, res) => {
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString(),
     patronDeviceIdHash: patron_device_id_hash,
-    gigId: gig_id,
+    gigId: durableGigId,
     payloadHash: payload_hash,
     amountCents: amount_cents,
     currency: String(currency).toUpperCase(),
@@ -601,7 +614,7 @@ app.post("/api/request/boost", async (req, res) => {
     client_request_id,
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
-    gig_id = "local",
+    gig_id,
     currency = "USD",
     expires_at
   } = req.body;
@@ -609,6 +622,11 @@ app.post("/api/request/boost", async (req, res) => {
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+
+  const durableGigId = parseDurableGigId(gig_id);
+  if (!durableGigId) {
+    return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
   }
 
   const request = state.requests.find(r => r.id === requestId);
@@ -621,7 +639,7 @@ app.post("/api/request/boost", async (req, res) => {
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash,
-    gig_id,
+    gig_id: durableGigId,
     action_type: 'boost',
     target_entity_id: requestId,
     amount_cents,
@@ -633,7 +651,7 @@ app.post("/api/request/boost", async (req, res) => {
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
     patronDeviceIdHash: patron_device_id_hash,
-    gigId: gig_id,
+    gigId: durableGigId,
     actionType: 'boost',
     amountCents: amount_cents,
     currency: String(currency).toUpperCase(),
