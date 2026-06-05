@@ -19,11 +19,8 @@ import {
   Settings, 
   Flame, 
   Radio, 
-  ChevronRight,
-  Gift,
   Search,
   Badge,
-  Smartphone,
   Plus,
   Sliders,
   ToggleLeft,
@@ -41,7 +38,6 @@ interface TalentDashboardProps {
   onCloseout: () => void;
   onTriage: (requestId: string, action: 'approve' | 'deny') => void;
   onFulfill: (requestId: string) => void;
-  onOpenTools: () => void;
 }
 
 export default function TalentDashboard({
@@ -51,8 +47,7 @@ export default function TalentDashboard({
   onEndSession,
   onCloseout,
   onTriage,
-  onFulfill,
-  onOpenTools
+  onFulfill
 }: TalentDashboardProps) {
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
@@ -280,12 +275,6 @@ export default function TalentDashboard({
         {/* Header CTA Tools */}
         {session.status !== 'inactive' && (
           <div className="flex items-center gap-3 font-sans">
-            <button 
-              onClick={onOpenTools}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-white/10 rounded-xl text-xs font-bold transition-all shadow cursor-pointer font-sans"
-            >
-              <Gift className="w-4 h-4" /> Share link / NFC Cards
-            </button>
             {session.status === 'active' ? (
               <button 
                 onClick={onEndSession}
@@ -966,38 +955,6 @@ export default function TalentDashboard({
               <div className="pt-3 border-t border-white/5 space-y-2">
                 <div className="text-[10px] text-slate-550 text-slate-500 font-mono tracking-wide uppercase">Top Requested Target:</div>
                 <div className="text-sm font-bold text-white line-clamp-1">{session.totals.topRequest}</div>
-              </div>
-            </div>
-
-            {/* Quick action simulation and options triggers */}
-            <div className="p-5 bg-slate-900 border border-white/10 rounded-2xl space-y-3.5 shadow-lg">
-              <h4 className="text-xs font-mono text-indigo-400 uppercase tracking-wider font-bold">
-                Setup Shortcuts
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Want to configure physical welcome kit stickers or trigger the OBS display templates? Download widgets or configure passes.
-              </p>
-              
-              <div className="space-y-2">
-                <button 
-                  onClick={onOpenTools}
-                  className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-white/5 hover:border-white/10 hover:bg-slate-900/60 transition-all text-xs text-slate-300 font-bold cursor-pointer"
-                >
-                  <span className="flex items-center gap-2">
-                    <Smartphone className="w-4.5 h-4.5 text-fuchsia-400" /> Apple/Google passes
-                  </span>
-                  <ChevronRight className="w-4 h-4 text-slate-500" />
-                </button>
-
-                <button 
-                  onClick={onOpenTools}
-                  className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-white/5 hover:border-white/10 hover:bg-slate-900/60 transition-all text-xs text-slate-300 font-bold cursor-pointer"
-                >
-                  <span className="flex items-center gap-2">
-                    <Radio className="w-4.5 h-4.5 text-indigo-400" /> OBS Stream overlays
-                  </span>
-                  <ChevronRight className="w-4 h-4 text-slate-500" />
-                </button>
               </div>
             </div>
 

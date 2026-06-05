@@ -7,13 +7,13 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import { BackendState, RequestItem, GigSession } from "./src/types";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const isProduction = process.env.NODE_ENV === "production";
 
 app.use(express.json());
 
@@ -50,12 +50,20 @@ function createInactiveSession(): GigSession {
   };
 }
 
-// In-memory state remains temporary until the persistent database sprint.
+// Development-only state. Production must use a persistent business store.
 let state: BackendState = {
   session: createInactiveSession(),
   requests: [],
   performers: []
 };
+
+function requirePersistentBusinessStore(res: express.Response): boolean {
+  if (!isProduction) return true;
+  res.status(503).json({
+    error: "Persistent business store is not configured. Production routes cannot use in-memory gig, request, or ledger state."
+  });
+  return false;
+}
 
 function syncActivePerformer() {
   if (state.session.status === 'inactive' || !state.session.talentName) {
@@ -82,32 +90,15 @@ function syncActivePerformer() {
   }
 }
 
-// Lazy Gemini Initialization
-let aiClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI | null {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (key && key !== "" && key !== "MY_GEMINI_API_KEY") {
-      aiClient = new GoogleGenAI({
-        apiKey: key,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          }
-        }
-      });
-      console.log("Gemini client successfully initialized.");
-    }
-  }
-  return aiClient;
-}
-
-// Global profanity checker using Gemini with structural local fallback
-async function checkContentAppropriate(sender: string, text: string): Promise<{ isAllowed: boolean; reason?: string }> {
-  const localProfanityWords = ["fudge", "spam", "troll", "abuse", "vulgarword", "asshole", "bitch", "bastard"];
+// Deterministic moderation must stay active even when external AI services are absent.
+function checkContentAppropriate(sender: string, text: string): { isAllowed: boolean; reason?: string } {
+  const localProfanityWords = ["fudge", "spam", "abuse", "vulgarword", "asshole", "bitch", "bastard"];
+  const blockedPatterns = [
+    /\b(?:kill|hurt|attack)\s+(?:you|him|her|them|everyone)\b/i,
+    /\b(?:https?:\/\/|www\.)\S+/i
+  ];
   const contentString = `${sender} ${text}`.toLowerCase();
-  
-  // Quick regex check
+
   for (const word of localProfanityWords) {
     if (contentString.includes(word)) {
       console.log(`Local moderation check caught profanity in message: "${contentString}"`);
@@ -115,49 +106,14 @@ async function checkContentAppropriate(sender: string, text: string): Promise<{ 
     }
   }
 
-  const ai = getGeminiClient();
-  if (!ai) {
-    return { isAllowed: true }; // No AI configured, fallback default approves
-  }
-
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `Perform moderation on a crowd requested song tip or patron message.
-Context: Mobile live party request app. Patron submits a sender name and a message.
-Name: "${sender}"
-Message: "${text}"
-
-We must filter out hate speech, racial slurs, heavy harassment, spam, and severe explicit language. Friendly banter, slang, and standard adult expressions are perfectly acceptable in a club/bar atmosphere. Under NO circumstances allow aggressive slurs, explicit sexual solicitations, or threats of violence.
-
-Respond in exact strict JSON format:
-{
-  "isInappropriate": boolean,
-  "reason": string
-}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            isInappropriate: { type: Type.BOOLEAN },
-            reason: { type: Type.STRING }
-          },
-          required: ["isInappropriate", "reason"]
-        }
-      }
-    });
-
-    const body = JSON.parse(response.text?.trim() || "{}");
-    if (body.isInappropriate) {
-      console.log(`Gemini moderation vetoed message. Reason: ${body.reason}`);
-      return { isAllowed: false, reason: body.reason };
+  for (const pattern of blockedPatterns) {
+    if (pattern.test(`${sender} ${text}`)) {
+      console.log(`Local moderation check caught blocked pattern in message: "${contentString}"`);
+      return { isAllowed: false, reason: "Message requires review before public display." };
     }
-    return { isAllowed: true };
-  } catch (err) {
-    console.warn("Gemini moderation call fell back gracefully:", err);
-    return { isAllowed: true };
   }
+
+  return { isAllowed: true };
 }
 
 // 5-Minute Timer Closeout Routine Worker
@@ -248,6 +204,7 @@ app.get("/api/state", (req, res) => {
 });
 
 app.post("/api/session/start", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { talentName, talentRole, feeType, minimumTip } = req.body;
   state.session = {
     status: 'active',
@@ -279,6 +236,7 @@ app.post("/api/session/start", (req, res) => {
 });
 
 app.post("/api/session/feature", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { hours, cost, activate } = req.body;
   
   if (activate) {
@@ -298,6 +256,7 @@ app.post("/api/session/feature", (req, res) => {
 });
 
 app.post("/api/session/end", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   if (state.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
   }
@@ -307,6 +266,7 @@ app.post("/api/session/end", (req, res) => {
 });
 
 app.post("/api/session/closeout", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   executeAutoNuke();
   res.json({ success: true, state });
 });
@@ -315,6 +275,7 @@ app.post("/api/session/closeout", (req, res) => {
 
 // Toggle overall requests status (Manual Mode)
 app.post("/api/session/window/toggle", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { open } = req.body;
   
   state.session.requestsOpen = !!open;
@@ -328,6 +289,7 @@ app.post("/api/session/window/toggle", (req, res) => {
 
 // Activate standard/custom preset time window
 app.post("/api/session/window/preset/activate", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { durationMinutes, label } = req.body;
   
   const duration = Number(durationMinutes);
@@ -346,6 +308,7 @@ app.post("/api/session/window/preset/activate", (req, res) => {
 
 // Create/Build beautiful custom preset
 app.post("/api/session/window/preset/create", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { label, durationMinutes } = req.body;
   
   const duration = Number(durationMinutes);
@@ -366,6 +329,7 @@ app.post("/api/session/window/preset/create", (req, res) => {
 
 // Delete custom preset
 app.post("/api/session/window/preset/delete", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { presetId } = req.body;
   
   state.session.requestPresets = state.session.requestPresets.filter(p => p.id !== presetId);
@@ -373,7 +337,8 @@ app.post("/api/session/window/preset/delete", (req, res) => {
 });
 
 // Create request + check profanity
-app.post("/api/request/create", async (req, res) => {
+app.post("/api/request/create", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { type, targetType, title, subtitle, senderName, message, amount, albumArt } = req.body;
 
   const tipAmount = Math.max(Number(amount) || 0, state.session.minimumTip);
@@ -388,7 +353,7 @@ app.post("/api/request/create", async (req, res) => {
   }
 
   // AI shadow ban filter check
-  const modResult = await checkContentAppropriate(senderName || "Patron", message || "");
+  const modResult = checkContentAppropriate(senderName || "Patron", message || "");
   const shadowBanned = !modResult.isAllowed;
 
   const newItem: RequestItem = {
@@ -422,7 +387,8 @@ app.post("/api/request/create", async (req, res) => {
 });
 
 // Boost an existing request
-app.post("/api/request/boost", async (req, res) => {
+app.post("/api/request/boost", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { requestId, patronName, boostAmount } = req.body;
   const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
 
@@ -432,7 +398,7 @@ app.post("/api/request/boost", async (req, res) => {
   }
 
   // Shadow moderate backer's name
-  const modResult = await checkContentAppropriate(patronName || "Patron", "");
+  const modResult = checkContentAppropriate(patronName || "Patron", "");
   const isBackerShadowed = !modResult.isAllowed;
 
   const newBoost = {
@@ -457,6 +423,7 @@ app.post("/api/request/boost", async (req, res) => {
 
 // Triage Queue Action (Accept / Deny)
 app.post("/api/request/triage", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { requestId, action } = req.body; // action: 'approve' | 'deny'
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
@@ -475,22 +442,29 @@ app.post("/api/request/triage", (req, res) => {
 
 // Fulfillment Queue Action (Fulfill)
 app.post("/api/request/fulfill", (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
   const { requestId } = req.body;
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
     return res.status(404).json({ error: "Request not found (could be deleted)" });
   }
 
-  request.status = 'fulfilled'; // Handled, cash captured!
+  request.status = 'fulfilled';
   recalculateTotals();
 
   res.json({ success: true, request, state });
 });
 
-// Standard & Gemini search integration
-app.post("/api/music/search", async (req, res) => {
-  const { query, isVoiceOrMood } = req.body;
-  
+// Development catalog only. Production must use a licensed/verifiable catalog integration.
+app.post("/api/music/search", (req, res) => {
+  if (isProduction) {
+    return res.status(503).json({
+      error: "Music catalog integration is not configured for production.",
+      results: []
+    });
+  }
+
+  const { query } = req.body;
   const songs = [
     { id: "s1", title: "Mr. Brightside", artist: "The Killers", albumArt: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop", genre: "Rock" },
     { id: "s2", title: "Dancing Queen", artist: "ABBA", albumArt: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150&h=150&fit=crop", genre: "Pop" },
@@ -507,65 +481,6 @@ app.post("/api/music/search", async (req, res) => {
     return res.json({ results: songs.slice(0, 5) });
   }
 
-  // Check if AI is configured and client explicitly requested mood-based or AI suggestion
-  const ai = getGeminiClient();
-  if (isVoiceOrMood && ai) {
-    try {
-      const prompt = `A user at a bar or club requests a song recommendation matching their query or vibe description.
-User Vibe: "${query}"
-We want to return a realistic matching song from Spotify with a cool artist, title, genre and brief descriptive reasoning.
-Return exactly 3 song recommendation options in STRICT JSON list format:
-[
-  {
-    "title": "Song Title",
-    "artist": "Artist name",
-    "genre": "Genre name",
-    "reason": "Cute brief sentence explanation of why this fits their vibe"
-  }
-]`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                artist: { type: Type.STRING },
-                genre: { type: Type.STRING },
-                reason: { type: Type.STRING }
-              },
-              required: ["title", "artist", "genre", "reason"]
-            }
-          }
-        }
-      });
-
-      const parsed: any[] = JSON.parse(response.text?.trim() || "[]");
-      const results = parsed.map((item, idx) => ({
-        id: "ai-" + idx + "-" + Math.random().toString(36).substring(2, 6),
-        title: item.title,
-        artist: item.artist,
-        albumArt: [
-          "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop",
-          "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150&h=150&fit=crop",
-          "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&h=150&fit=crop"
-        ][idx % 3],
-        description: item.reason,
-        genre: item.genre
-      }));
-
-      return res.json({ results, generatedByAI: true });
-    } catch (e) {
-      console.warn("AI music selection query failed, falling back to basic matching:", e);
-    }
-  }
-
-  // Local matching fallback
   const normalizedQuery = query.toLowerCase();
   const matched = songs.filter(s => 
     s.title.toLowerCase().includes(normalizedQuery) || 

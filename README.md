@@ -12,6 +12,7 @@ This repo is moving from prototype behavior toward a production-ready web app an
 - `/g/:gigId`
 - `/p/:performerHandle`
 - `/overlay/:gigId`
+- `/admin`
 
 ## Local Development
 
@@ -28,4 +29,4 @@ Useful checks:
 
 ## Production Gaps
 
-Do not submit this app for public App Store review until the launch gate is complete. The backend still uses temporary in-memory state, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.
+Do not submit this app for public App Store review until the launch gate is complete. Production business writes are blocked until a persistent store is configured, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.

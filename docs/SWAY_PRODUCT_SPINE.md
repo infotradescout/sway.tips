@@ -27,6 +27,7 @@ Sway lets live performers, DJs, bartenders, and event acts accept paid tips, req
 - `/g/:gigId`
 - `/p/:performerHandle`
 - `/overlay/:gigId`
+- `/admin`
 
 ## Current Product State
 

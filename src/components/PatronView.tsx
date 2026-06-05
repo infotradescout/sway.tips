@@ -52,7 +52,6 @@ export default function PatronView({
 }: PatronViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
-  const [searchMethod, setSearchMethod] = useState<'standard' | 'gemini'>('standard');
 
   // Search Venue Directory States
   const [directorySearch, setDirectorySearch] = useState('');
@@ -63,7 +62,6 @@ export default function PatronView({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [aiGeneratedResults, setAiGeneratedResults] = useState(false);
   
   // Selected search target
   const [selectedTrack, setSelectedTrack] = useState<any | null>(null);
@@ -108,7 +106,7 @@ export default function PatronView({
   // Load Initial Standard Suggestions
   useEffect(() => {
     handleSearch('');
-  }, [searchMethod]);
+  }, []);
 
   // Live request window countdown for patron
   const [patronsWindowTimeLeft, setPatronsWindowTimeLeft] = useState<string>('');
@@ -145,14 +143,10 @@ export default function PatronView({
       const response = await fetch('/api/music/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: val,
-          isVoiceOrMood: searchMethod === 'gemini'
-        })
+        body: JSON.stringify({ query: val })
       });
       const data = await response.json();
       setSearchResults(data.results || []);
-      setAiGeneratedResults(!!data.generatedByAI);
     } catch (e) {
       console.warn("Search endpoint errored out:", e);
     } finally {
@@ -477,39 +471,13 @@ export default function PatronView({
             ) : (
               <>
             
-            {/* If DJ Role: Search with Standard & Gemini Mood Option */}
+            {/* If DJ Role: Search verified catalog */}
             {session.talentRole === 'DJ' && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    PATH A: Spotify Search Modality
+                    PATH A: Music Catalog Search
                   </span>
-                  
-                  {/* Standard vs Gemini toggle */}
-                  <div className="flex bg-slate-950 p-1 rounded-lg border border-white/5">
-                    <button
-                      type="button"
-                      onClick={() => setSearchMethod('standard')}
-                      className={`text-[9px] font-mono px-2 py-1 rounded font-bold uppercase transition-all cursor-pointer ${
-                        searchMethod === 'standard' 
-                          ? 'bg-slate-800 text-white' 
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      Spotify Text
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSearchMethod('gemini')}
-                      className={`text-[9px] font-mono px-2 py-1 rounded font-bold uppercase transition-all flex items-center gap-1 cursor-pointer ${
-                        searchMethod === 'gemini' 
-                          ? 'bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white shadow shadow-fuchsia-500/20' 
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      <Sparkles className="w-3 h-3 text-cyan-300 animate-pulse" /> Gemini Vibe
-                    </button>
-                  </div>
                 </div>
                  {/* Form input fields */}
                 <form onSubmit={triggerSearchSubmit} className="flex gap-2">
@@ -519,11 +487,7 @@ export default function PatronView({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={
-                        searchMethod === 'standard' 
-                          ? "Search track, artist, or genre..." 
-                          : "Describe your vibe (e.g. 90s classic house, cyber trance mood)..."
-                      }
+                      placeholder="Search track, artist, or genre..."
                       className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
                     />
                   </div>
@@ -566,13 +530,6 @@ export default function PatronView({
                 )}
                 {!selectedTrack && (
                   <div className="space-y-2 max-h-56 overflow-y-auto">
-                    {/* Gemini tag indicator */}
-                    {aiGeneratedResults && (
-                      <div className="text-[10px] bg-gradient-to-r from-fuchsia-500/10 to-blue-500/10 border border-fuchsia-500/20 rounded-lg p-2 text-fuchsia-300 font-mono flex items-center gap-1.5 select-none animate-pulse">
-                        <Sparkles className="w-3.5 h-3.5 text-cyan-300" /> Bespoke matching recommendations created by Gemini AI
-                      </div>
-                    )}
-                    
                     {searchResults.map((song) => (
                       <button
                         key={song.id}
@@ -1129,7 +1086,7 @@ export default function PatronView({
             </div>
           </div>
         )}        </div>
-       {/* 4. APPLE / GOOGLE PAY SIMULATOR ESCROW MODAL OVERLAY */}
+       {/* 4. TEMPORARY CHECKOUT MODAL OVERLAY */}
       <AnimatePresence>
         {checkoutPayload && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">

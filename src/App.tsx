@@ -5,7 +5,6 @@ import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
 import PatronView from './components/PatronView';
 import VictoryScreen from './components/VictoryScreen';
-import WalletPassModal from './components/WalletPassModal';
 
 const emptySession: GigSession = {
   status: 'inactive',
@@ -32,12 +31,15 @@ const emptySession: GigSession = {
   }
 };
 
+const routeSpine = ['/talent/login', '/talent/gigs', '/g/', '/p/', '/overlay/', '/admin'];
+
 type AppRoute =
   | { name: 'talent-login' }
   | { name: 'talent-gigs'; gigId?: string }
   | { name: 'patron-gig'; gigId: string }
   | { name: 'performer'; performerHandle: string }
   | { name: 'overlay'; gigId: string }
+  | { name: 'admin' }
   | { name: 'home' }
   | { name: 'not-found' };
 
@@ -50,6 +52,7 @@ function resolveRoute(pathname: string): AppRoute {
   if (parts[0] === 'g' && parts[1]) return { name: 'patron-gig', gigId: parts[1] };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
   if (parts[0] === 'overlay' && parts[1]) return { name: 'overlay', gigId: parts[1] };
+  if (parts[0] === 'admin') return { name: 'admin' };
 
   return { name: 'not-found' };
 }
@@ -87,7 +90,6 @@ export default function App() {
     performers: []
   });
   const [isLoading, setIsLoading] = useState(true);
-  const [showTools, setShowTools] = useState(false);
 
   const fetchState = async () => {
     try {
@@ -316,7 +318,17 @@ export default function App() {
       <ShellMessage
         icon={<CalendarDays className="h-5 w-5" />}
         title="Route Not Found"
-        body="Use /talent/login, /talent/gigs, /talent/gigs/:gigId, /g/:gigId, /p/:performerHandle, or /overlay/:gigId."
+        body={`Use ${routeSpine.join(', ')} or their documented parameterized variants.`}
+      />
+    );
+  }
+
+  if (route.name === 'admin') {
+    return (
+      <ShellMessage
+        icon={<Lock className="h-5 w-5" />}
+        title="Admin"
+        body="Admin tools are intentionally separated from patron and talent routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
       />
     );
   }
@@ -354,12 +366,9 @@ export default function App() {
               onCloseout={handleCloseout}
               onTriage={handleTriageRequest}
               onFulfill={handleFulfillRequest}
-              onOpenTools={() => setShowTools(true)}
             />
           </motion.div>
         </main>
-
-        <WalletPassModal isOpen={showTools} onClose={() => setShowTools(false)} session={session} />
       </div>
     );
   }
