@@ -32,7 +32,8 @@ export default function PatronApp() {
     patronName: string,
     amount: number,
     clientRequestId?: string,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    expiresAt?: string
   ) => {
     try {
       const data = await postJson('/api/request/boost', {
@@ -40,7 +41,8 @@ export default function PatronApp() {
         patronName,
         boostAmount: amount,
         client_request_id: clientRequestId,
-        idempotency_key: idempotencyKey
+        idempotency_key: idempotencyKey,
+        expires_at: expiresAt
       });
       setBState(data.state);
       return data;

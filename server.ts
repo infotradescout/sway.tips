@@ -11,6 +11,7 @@ import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession } from "./src/types";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
+import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ const accessControl = createAccessControl({
   databaseUrl: process.env.DATABASE_URL,
   isProduction
 });
+const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 
 app.use(express.json());
 
@@ -296,6 +298,27 @@ app.get("/api/state", (req, res) => {
   res.json(state);
 });
 
+app.post("/api/pending-action/reconcile", async (req, res) => {
+  const { client_request_id, idempotency_key } = req.body;
+  if (!client_request_id || !idempotency_key) {
+    return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+
+  const result = await idempotencyStore.reconcilePendingAction({
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key
+  });
+
+  if (result.status === 'unavailable') {
+    return res.status(503).json({ error: "Durable pending action reconciliation is not configured." });
+  }
+  if (result.status === 'expired') {
+    return res.status(410).json({ error: "Pending action expired before backend confirmation." });
+  }
+
+  return res.json(result);
+});
+
 app.post("/api/session/start", (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
   const { talentName, talentRole, feeType, minimumTip } = req.body;
@@ -430,7 +453,7 @@ app.post("/api/session/window/preset/delete", (req, res) => {
 });
 
 // Create request + check profanity
-app.post("/api/request/create", (req, res) => {
+app.post("/api/request/create", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
   const {
     type,
@@ -445,7 +468,8 @@ app.post("/api/request/create", (req, res) => {
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
     gig_id = "local",
-    currency = "USD"
+    currency = "USD",
+    expires_at
   } = req.body;
 
   if (!client_request_id || !idempotency_key) {
@@ -465,12 +489,45 @@ app.post("/api/request/create", (req, res) => {
     payload_hash
   });
 
+  const durableInput: DurableActionInput = {
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key,
+    patronDeviceIdHash: patron_device_id_hash,
+    gigId: gig_id,
+    actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
+    amountCents: amount_cents,
+    currency: String(currency).toUpperCase(),
+    targetEntityType: targetType || 'music',
+    targetEntityId: title || 'request',
+    payloadHash: payload_hash,
+    intentFingerprint: idempotencyFingerprint,
+    expiresAt: expires_at
+  };
+
+  const durableReplay = await idempotencyStore.reservePendingAction(durableInput);
+  if (durableReplay.kind === 'expired') {
+    return res.status(410).json({ error: "Pending action expired before request creation." });
+  }
+  if (durableReplay.kind === 'misuse') {
+    return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+  }
+  if (durableReplay.kind === 'replay') {
+    return res.status(durableReplay.status).json(durableReplay.body);
+  }
+
   const existingRequest = state.requests.find(r => r.idempotencyKey === idempotency_key);
   if (existingRequest) {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    return res.json({ success: true, request: existingRequest, state, reconciled: true });
+    const responseBody = { success: true, request: existingRequest, state, reconciled: true };
+    await idempotencyStore.completePendingAction({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      status: 200,
+      body: responseBody
+    });
+    return res.json(responseBody);
   }
 
   const tipAmount = Math.max(Number(amount) || 0, state.session.minimumTip);
@@ -519,16 +576,23 @@ app.post("/api/request/create", (req, res) => {
   state.requests.push(newItem);
   recalculateTotals();
 
-  res.json({ 
+  const responseBody = {
     success: true, 
     request: newItem,
     state,
     shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
+  };
+  await idempotencyStore.completePendingAction({
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key,
+    status: 200,
+    body: responseBody
   });
+  res.json(responseBody);
 });
 
 // Boost an existing request
-app.post("/api/request/boost", (req, res) => {
+app.post("/api/request/boost", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
   const {
     requestId,
@@ -538,7 +602,8 @@ app.post("/api/request/boost", (req, res) => {
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
     gig_id = "local",
-    currency = "USD"
+    currency = "USD",
+    expires_at
   } = req.body;
   const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
 
@@ -564,12 +629,45 @@ app.post("/api/request/boost", (req, res) => {
     payload_hash
   });
 
+  const durableInput: DurableActionInput = {
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key,
+    patronDeviceIdHash: patron_device_id_hash,
+    gigId: gig_id,
+    actionType: 'boost',
+    amountCents: amount_cents,
+    currency: String(currency).toUpperCase(),
+    targetEntityType: 'request',
+    targetEntityId: requestId,
+    payloadHash: payload_hash,
+    intentFingerprint: idempotencyFingerprint,
+    expiresAt: expires_at
+  };
+
+  const durableReplay = await idempotencyStore.reservePendingAction(durableInput);
+  if (durableReplay.kind === 'expired') {
+    return res.status(410).json({ error: "Pending action expired before boost creation." });
+  }
+  if (durableReplay.kind === 'misuse') {
+    return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+  }
+  if (durableReplay.kind === 'replay') {
+    return res.status(durableReplay.status).json(durableReplay.body);
+  }
+
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
   if (existingBoost) {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    return res.json({ success: true, request, boost: existingBoost, state, reconciled: true });
+    const responseBody = { success: true, request, boost: existingBoost, state, reconciled: true };
+    await idempotencyStore.completePendingAction({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      status: 200,
+      body: responseBody
+    });
+    return res.json(responseBody);
   }
 
   // Shadow moderate backer's name
@@ -597,7 +695,14 @@ app.post("/api/request/boost", (req, res) => {
   }
 
   recalculateTotals();
-  res.json({ success: true, request, state });
+  const responseBody = { success: true, request, state };
+  await idempotencyStore.completePendingAction({
+    clientRequestId: client_request_id,
+    idempotencyKey: idempotency_key,
+    status: 200,
+    body: responseBody
+  });
+  res.json(responseBody);
 });
 
 // Triage Queue Action (Accept / Deny)

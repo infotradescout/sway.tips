@@ -1,0 +1,1 @@
+ALTER TABLE "idempotency_keys" ADD COLUMN "first_response_body" jsonb;

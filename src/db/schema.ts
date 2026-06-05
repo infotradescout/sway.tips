@@ -291,6 +291,7 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
   payloadHash: text('payload_hash').notNull(),
   intentFingerprint: text('intent_fingerprint').notNull(),
   firstResponseStatus: integer('first_response_status'),
+  firstResponseBody: jsonb('first_response_body'),
   firstResponseBodyHash: text('first_response_body_hash'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   ...timestamps

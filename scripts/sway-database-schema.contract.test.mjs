@@ -155,6 +155,7 @@ const requiredTableColumns = {
     'payload_hash',
     'intent_fingerprint',
     'first_response_status',
+    'first_response_body',
     'first_response_body_hash',
     'expires_at'
   ],
@@ -205,7 +206,8 @@ for (const [table, columns] of Object.entries(requiredTableColumns)) {
   const tableEnd = tableStart === -1 ? -1 : migrations.indexOf(');', tableStart);
   const tableSql = tableStart === -1 || tableEnd === -1 ? '' : migrations.slice(tableStart, tableEnd);
   for (const column of columns) {
-    if (!tableSql.includes(`"${column}"`)) {
+    const alterColumnSql = `ALTER TABLE "${table}" ADD COLUMN "${column}"`;
+    if (!tableSql.includes(`"${column}"`) && !migrations.includes(alterColumnSql)) {
       failures.push(`Table ${table} missing required column: ${column}`);
     }
   }

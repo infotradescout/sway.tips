@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+const MAX_PENDING_ACTION_RETRIES = 3;
 const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired and you were not charged.';
 const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request. You were not charged.';
 
@@ -45,8 +46,9 @@ interface PatronViewProps {
     albumArt?: string;
     client_request_id?: string;
     idempotency_key?: string;
+    expires_at?: string;
   }) => Promise<any>;
-  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string) => Promise<any>;
+  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string) => Promise<any>;
 }
 
 export default function PatronView({
@@ -162,6 +164,35 @@ export default function PatronView({
       idempotencyKey: `sway:${id}`,
       expires_at: new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString()
     };
+  };
+
+  const waitForRetryBackoff = (attempt: number) =>
+    new Promise((resolve) => window.setTimeout(resolve, Math.min(2 ** attempt * 500, 3000)));
+
+  const submitWithBoundedRetry = async (submitAction: () => Promise<any>, expiresAt: string) => {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < MAX_PENDING_ACTION_RETRIES; attempt += 1) {
+      if (Date.now() > new Date(expiresAt).getTime()) {
+        throw Object.assign(new Error(PENDING_ACTION_EXPIRED_COPY), { status: 410 });
+      }
+
+      try {
+        const response = await submitAction();
+        if (response?.success || response?.reconciled) return response;
+        throw new Error('Backend did not confirm the action.');
+      } catch (error: any) {
+        lastError = error;
+        if (error?.status === 409 || error?.status === 410 || error?.status === 400) throw error;
+        setDegraded(true);
+        setPendingActionMessage('Connection degraded. Retrying safely with the same idempotency key.');
+        if (attempt < MAX_PENDING_ACTION_RETRIES - 1) {
+          await waitForRetryBackoff(attempt);
+        }
+      }
+    }
+
+    throw lastError;
   };
 
   // Pre-built customizable menus for bartenders / street performers
@@ -341,7 +372,7 @@ export default function PatronView({
     try {
       if (checkoutPayload.type === 'request') {
         const isCustom = session.talentRole !== 'DJ';
-        await onCreateRequest({
+        await submitWithBoundedRetry(() => onCreateRequest({
           type: 'request',
           targetType: isCustom ? 'custom' : 'music',
           title: checkoutPayload.title,
@@ -351,18 +382,20 @@ export default function PatronView({
           amount: checkoutPayload.amount,
           albumArt: checkoutPayload.trackArt,
           client_request_id: checkoutPayload.clientRequestId,
-          idempotency_key: checkoutPayload.idempotencyKey
-        });
+          idempotency_key: checkoutPayload.idempotencyKey,
+          expires_at: checkoutPayload.expires_at
+        }), checkoutPayload.expires_at);
       } else {
         // Boost routing!
         if (checkoutPayload.targetId) {
-          await onBoostRequest(
+          await submitWithBoundedRetry(() => onBoostRequest(
             checkoutPayload.targetId,
             boostPatronName,
             checkoutPayload.amount,
             checkoutPayload.clientRequestId,
-            checkoutPayload.idempotencyKey
-          );
+            checkoutPayload.idempotencyKey,
+            checkoutPayload.expires_at
+          ), checkoutPayload.expires_at);
         }
       }
 
@@ -386,6 +419,12 @@ export default function PatronView({
     } catch (e) {
       console.error(e);
       setDegraded(true);
+      if ((e as any)?.status === 410) {
+        setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+        setPendingAction(null);
+        setCheckoutPayload(null);
+        localStorage.removeItem('sway.pendingAction');
+      }
     } finally {
       setIsPaying(false);
     }

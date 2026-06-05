@@ -1,0 +1,137 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = process.cwd();
+const failures = [];
+
+const storeFile = 'src/server/idempotency-store.ts';
+if (!existsSync(join(root, storeFile))) failures.push(`Missing idempotency persistence helper: ${storeFile}`);
+
+const store = existsSync(join(root, storeFile)) ? readFileSync(join(root, storeFile), 'utf8') : '';
+const server = readFileSync(join(root, 'server.ts'), 'utf8');
+const patron = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
+const patronApp = readFileSync(join(root, 'src/shells/PatronApp.tsx'), 'utf8');
+const schema = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
+
+function extractFunctionBody(source, functionName) {
+  const start = source.indexOf(`const ${functionName} =`);
+  if (start === -1) return '';
+  const firstBrace = source.indexOf('{', start);
+  if (firstBrace === -1) return '';
+  let depth = 0;
+  for (let i = firstBrace; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    if (source[i] === '}') depth -= 1;
+    if (depth === 0) return source.slice(firstBrace, i + 1);
+  }
+  return '';
+}
+
+for (const term of [
+  'idempotencyKeys',
+  'clientPendingActions',
+  'reservePendingAction',
+  'completePendingAction',
+  'reconcilePendingAction',
+  'PENDING_ACTION_TTL_MS = 5 * 60 * 1000',
+  'IDEMPOTENCY_TTL_HOURS = 48',
+  'firstResponseBody',
+  'firstResponseBodyHash'
+]) {
+  if (!store.includes(term) && !schema.includes(term)) failures.push(`Persistence helper/schema missing term: ${term}`);
+}
+
+for (const term of [
+  'db.insert(clientPendingActions)',
+  'db.insert(idempotencyKeys)',
+  'db.update(idempotencyKeys)',
+  'db.update(clientPendingActions)',
+  'eq(idempotencyKeys.idempotencyKey, input.idempotencyKey)',
+  "record.intentFingerprint !== input.intentFingerprint",
+  "return { kind: 'misuse' }",
+  "return { kind: 'expired' }",
+  "return { kind: 'replay'",
+  "status: 'reconciled'"
+]) {
+  if (!store.includes(term)) failures.push(`Idempotency persistence helper missing behavior: ${term}`);
+}
+
+for (const term of [
+  'createIdempotencyStore(process.env.DATABASE_URL)',
+  '/api/pending-action/reconcile',
+  'idempotencyStore.reservePendingAction',
+  'idempotencyStore.completePendingAction',
+  "durableReplay.kind === 'expired'",
+  "durableReplay.kind === 'misuse'",
+  "durableReplay.kind === 'replay'",
+  'Pending action expired before request creation.',
+  'Pending action expired before boost creation.'
+]) {
+  if (!server.includes(term)) failures.push(`Server missing degraded/idempotency behavior: ${term}`);
+}
+
+const requestReserveIndex = server.indexOf('idempotencyStore.reservePendingAction(durableInput)');
+const requestCreationIndex = server.indexOf('const newItem: RequestItem');
+if (requestReserveIndex === -1 || requestCreationIndex === -1 || requestReserveIndex > requestCreationIndex) {
+  failures.push('Request route must reserve/check durable idempotency before request creation.');
+}
+
+const boostReserveIndex = server.lastIndexOf('idempotencyStore.reservePendingAction(durableInput)');
+const boostCreationIndex = server.indexOf('const newBoost =');
+if (boostReserveIndex === -1 || boostCreationIndex === -1 || boostReserveIndex > boostCreationIndex) {
+  failures.push('Boost route must reserve/check durable idempotency before boost creation.');
+}
+
+for (const term of [
+  'MAX_PENDING_ACTION_RETRIES = 3',
+  'submitWithBoundedRetry',
+  'waitForRetryBackoff',
+  'checkoutPayload.expires_at',
+  'expires_at: checkoutPayload.expires_at',
+  'setBackendConfirmed(true)',
+  'localStorage.setItem',
+  'localStorage.removeItem'
+]) {
+  if (!patron.includes(term)) failures.push(`Patron client missing bounded retry/pending behavior: ${term}`);
+}
+
+const completePaymentBody = extractFunctionBody(patron, 'completePayment');
+if (!completePaymentBody) failures.push('Patron client missing completePayment function.');
+
+if (completePaymentBody.indexOf('localStorage.setItem') > completePaymentBody.indexOf('submitWithBoundedRetry')) {
+  failures.push('Patron client must persist pending action before network submit.');
+}
+
+if (completePaymentBody.indexOf('setBackendConfirmed(true)') < completePaymentBody.indexOf('submitWithBoundedRetry')) {
+  failures.push('Patron client must not show success before backend confirmation.');
+}
+
+if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(completePaymentBody)) {
+  failures.push('Patron client must clear pending action only after backend confirmation.');
+}
+
+if (!patronApp.includes('expires_at: expiresAt')) {
+  failures.push('Patron shell must forward expires_at for boost submissions.');
+}
+
+for (const pattern of [
+  /WebSocket-only transaction state/i,
+  /new WebSocket/i,
+  /payment success before backend confirmation/i,
+  /retry without idempotency/i,
+  /stripe/i,
+  /PaymentIntent/i,
+  /webhook/i
+]) {
+  if (pattern.test(store) || pattern.test(server) || pattern.test(patron)) {
+    failures.push(`Slice 4 contains forbidden provider/WebSocket-only pattern: ${pattern}`);
+  }
+}
+
+if (failures.length) {
+  console.error('Degraded idempotency persistence contract failed:');
+  failures.forEach((failure) => console.error(`- ${failure}`));
+  process.exit(1);
+}
+
+console.log('Degraded idempotency persistence contract passed.');

@@ -106,5 +106,12 @@ export async function postJson(url: string, body?: unknown) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
-  return response.json();
+  const data = await response.json();
+  if (!response.ok) {
+    throw Object.assign(new Error(data?.error || 'Backend request failed.'), {
+      status: response.status,
+      body: data
+    });
+  }
+  return data;
 }
