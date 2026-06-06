@@ -41,6 +41,7 @@ async function loadFactories() {
   const accessOut = join(tempDir, 'access-control.slice8.bundle.cjs');
   const storeOut = join(tempDir, 'business-store.slice8.bundle.cjs');
   const auditOut = join(tempDir, 'audit-log.slice8.bundle.cjs');
+  const clientOut = join(tempDir, 'db-client.slice8.bundle.cjs');
 
   await build({
     entryPoints: ['src/server/access-control.ts'],
@@ -69,15 +70,26 @@ async function loadFactories() {
     sourcemap: false
   });
 
+  await build({
+    entryPoints: ['src/db/client.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile: clientOut,
+    sourcemap: false
+  });
+
   const require = createRequire(import.meta.url);
   const accessModule = require(accessOut);
   const storeModule = require(storeOut);
   const auditModule = require(auditOut);
+  const clientModule = require(clientOut);
 
   return {
     createAccessControl: accessModule.createAccessControl,
     createBusinessStore: storeModule.createBusinessStore,
-    writeAuditEvent: auditModule.writeAuditEvent
+    writeAuditEvent: auditModule.writeAuditEvent,
+    createSwayDb: clientModule.createSwayDb
   };
 }
 
@@ -150,7 +162,7 @@ async function main() {
     await adminClient.end();
   }
 
-  const { createAccessControl, createBusinessStore, writeAuditEvent } = await loadFactories();
+  const { createAccessControl, createBusinessStore, writeAuditEvent, createSwayDb } = await loadFactories();
 
   const store = createBusinessStore(databaseUrl, createInactiveSession);
   const gigId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -241,8 +253,7 @@ async function main() {
   const verifyClient = new Client({ connectionString: databaseUrl });
   await verifyClient.connect();
   try {
-    const drizzleModule = await import('../src/db/client.ts');
-    const db = drizzleModule.createSwayDb(databaseUrl);
+    const db = createSwayDb(databaseUrl);
 
     const previousStatus = 'approved';
     const nextStatus = 'fulfilled';
