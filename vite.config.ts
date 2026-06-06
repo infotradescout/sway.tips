@@ -9,6 +9,7 @@ export default defineConfig(() => {
       rollupOptions: {
         input: {
           index: path.resolve(__dirname, 'index.html'),
+          public: path.resolve(__dirname, 'shells/public.html'),
           patron: path.resolve(__dirname, 'shells/patron.html'),
           talent: path.resolve(__dirname, 'shells/talent.html'),
           overlay: path.resolve(__dirname, 'shells/overlay.html'),

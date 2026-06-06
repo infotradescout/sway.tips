@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sway | Early Access</title>
+    <meta
+      name="description"
+      content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Early access and demos are open while safety gates are finalized."
+    />
+    <style>
+      :root {
+        --bg-deep: #0d1b2a;
+        --bg-mid: #1b263b;
+        --bg-soft: #e0e1dd;
+        --ink: #0b132b;
+        --ink-soft: #3a506b;
+        --card: rgba(255, 255, 255, 0.9);
+        --line: rgba(27, 38, 59, 0.16);
+        --cta: #ff6b35;
+        --cta-ink: #ffffff;
+        --highlight: #2ec4b6;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 15% 20%, rgba(46, 196, 182, 0.25), transparent 35%),
+          radial-gradient(circle at 85% 0%, rgba(255, 107, 53, 0.28), transparent 30%),
+          linear-gradient(135deg, var(--bg-deep) 0%, var(--bg-mid) 52%, #415a77 100%);
+        min-height: 100vh;
+      }
+
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .hero {
+        margin-top: 20px;
+        border-radius: 24px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(224, 225, 221, 0.94));
+        border: 1px solid var(--line);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+        padding: 28px;
+      }
+
+      .badge {
+        display: inline-block;
+        border-radius: 999px;
+        background: rgba(46, 196, 182, 0.18);
+        color: #0f766e;
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 8px 12px;
+      }
+
+      h1 {
+        margin: 14px 0 10px;
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+      }
+
+      .lead {
+        margin: 0;
+        font-size: clamp(18px, 2.5vw, 22px);
+        line-height: 1.35;
+        color: var(--ink-soft);
+      }
+
+      .status {
+        margin-top: 18px;
+        border-left: 4px solid var(--highlight);
+        border-radius: 12px;
+        background: rgba(11, 19, 43, 0.06);
+        padding: 14px 16px;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      .grid {
+        margin-top: 22px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      .card {
+        border-radius: 16px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      .card p,
+      .card li {
+        margin: 0;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .cta {
+        margin-top: 22px;
+        border-radius: 16px;
+        background: rgba(11, 19, 43, 0.08);
+        border: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .cta p {
+        margin: 0 0 12px;
+        color: var(--ink-soft);
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .button {
+        text-decoration: none;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 44px;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 700;
+        font-size: 15px;
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+
+      .button.primary {
+        background: var(--cta);
+        color: var(--cta-ink);
+      }
+
+      .button.secondary {
+        background: rgba(27, 38, 59, 0.12);
+        color: var(--ink);
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
+      }
+
+      .fine-print {
+        margin-top: 14px;
+        font-size: 13px;
+        color: rgba(11, 19, 43, 0.75);
+      }
+
+      @media (min-width: 820px) {
+        .wrap {
+          padding: 28px;
+        }
+
+        .hero {
+          padding: 38px;
+        }
+
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
+        }
+
+        .actions {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="hero">
+        <span class="badge">Pre-Production MVP Surface</span>
+        <h1>Let the crowd shape the show.</h1>
+        <p class="lead">
+          Sway gives performers, DJs, bartenders, and live venues a QR-powered way to collect requests, boosts,
+          shoutouts, and tips.
+        </p>
+
+        <p class="status">
+          Sway is currently in pre-production. We are opening controlled early access while backend persistence,
+          identity, moderation, and payment safety gates are finalized.
+        </p>
+
+        <div class="grid">
+          <article class="card">
+            <h2>What it does</h2>
+            <p>QR-based song requests, boosts, shoutouts, tips, and live queue control in high-energy venue environments.</p>
+          </article>
+
+          <article class="card">
+            <h2>Who it is for</h2>
+            <ul>
+              <li>DJs: song requests and crowd boosts</li>
+              <li>Performers: paid crowd interactions</li>
+              <li>Bartenders: premium action menus</li>
+              <li>Venues: controlled audience engagement</li>
+            </ul>
+          </article>
+
+          <article class="card" style="grid-column: 1 / -1;">
+            <h2>Safety and trust</h2>
+            <p>
+              Built with moderation, blocking, durable request state, and role-based authorization before live payments.
+            </p>
+          </article>
+        </div>
+
+        <section class="cta" aria-label="Early access actions">
+          <p>Choose one of the actions below to connect with the early access team.</p>
+          <div class="actions">
+            <a class="button primary" href="mailto:hello@sway.tips?subject=Sway%20Early%20Access">Join early access</a>
+            <a class="button primary" href="mailto:hello@sway.tips?subject=Sway%20Demo%20Request">Book a demo</a>
+            <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Performer%20Interest">For performers</a>
+            <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Venue%20Interest">For venues</a>
+          </div>
+          <p class="fine-print">
+            Demo and early-access intake currently runs through email only. Real-money payments are not live yet.
+          </p>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

@@ -35,9 +35,10 @@ const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_
 
 app.use(express.json());
 
-type SwayShell = 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
+type SwayShell = 'public' | 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
 
 function resolveShellForRoute(urlPath: string): SwayShell {
+  if (urlPath === '/' || urlPath === '/home') return 'public';
   if (urlPath.startsWith('/talent')) return 'talent';
   if (urlPath.startsWith('/overlay')) return 'overlay';
   if (urlPath.startsWith('/admin')) return 'admin';
