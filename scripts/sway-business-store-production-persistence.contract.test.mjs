@@ -35,7 +35,7 @@ for (const route of persistenceProtectedRoutes) {
   }
 
   const routeBlock = server.slice(routeIndex, routeIndex + 7000);
-  if (!routeBlock.includes('requirePersistentBusinessStore(res)')) {
+  if (!routeBlock.includes('requirePersistentBusinessStore(res)') && !routeBlock.includes('resolveProtectedMutationActor(req, res')) {
     failures.push(`Route ${route} must keep production persistence gate.`);
   }
 
@@ -43,7 +43,12 @@ for (const route of persistenceProtectedRoutes) {
     failures.push(`Route ${route} must refresh state through business-store boundary.`);
   }
 
-  if (!routeBlock.includes('await persistBusinessState()') && !route.includes('/api/moderation/report') && !route.includes('/api/moderation/block')) {
+  if (
+    !routeBlock.includes('await persistBusinessState()') &&
+    !routeBlock.includes('await persistStateWithAudit(') &&
+    !route.includes('/api/moderation/report') &&
+    !route.includes('/api/moderation/block')
+  ) {
     failures.push(`Route ${route} must persist durable business-state changes.`);
   }
 }

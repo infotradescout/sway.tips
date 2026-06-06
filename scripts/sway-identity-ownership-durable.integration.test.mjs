@@ -40,6 +40,7 @@ async function loadFactories() {
   mkdirSync(tempDir, { recursive: true });
   const accessOut = join(tempDir, 'access-control.slice8.bundle.cjs');
   const storeOut = join(tempDir, 'business-store.slice8.bundle.cjs');
+  const auditOut = join(tempDir, 'audit-log.slice8.bundle.cjs');
 
   await build({
     entryPoints: ['src/server/access-control.ts'],
@@ -59,24 +60,36 @@ async function loadFactories() {
     sourcemap: false
   });
 
+  await build({
+    entryPoints: ['src/server/audit-log.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile: auditOut,
+    sourcemap: false
+  });
+
   const require = createRequire(import.meta.url);
   const accessModule = require(accessOut);
   const storeModule = require(storeOut);
+  const auditModule = require(auditOut);
 
   return {
     createAccessControl: accessModule.createAccessControl,
-    createBusinessStore: storeModule.createBusinessStore
+    createBusinessStore: storeModule.createBusinessStore,
+    writeAuditEvent: auditModule.writeAuditEvent
   };
 }
 
 function makeReq(actorId) {
-  return {
-    headers: {
-      'x-sway-actor-id': actorId,
-      'x-sway-session-id': 'sess-test',
-      'x-sway-device-id-hash': 'device-test'
-    }
+  const headers = {
+    'x-sway-session-id': 'sess-test',
+    'x-sway-device-id-hash': 'device-test'
   };
+  if (actorId) {
+    headers['x-sway-actor-id'] = actorId;
+  }
+  return { headers };
 }
 
 function createInactiveSession() {
@@ -128,13 +141,19 @@ async function main() {
         ('33333333-3333-4333-8333-333333333333', 'patron@sway.local', 'Patron', 'patron'),
         ('44444444-4444-4444-8444-444444444444', 'support@sway.local', 'Support', 'support')
     `);
+
+    await adminClient.query(
+      `INSERT INTO performers (id, owner_user_id, handle, display_name, bio)
+       VALUES ('55555555-5555-4555-8555-555555555555', '11111111-1111-4111-8111-111111111111', 'performer-a', 'Performer A', NULL)`
+    );
   } finally {
     await adminClient.end();
   }
 
-  const { createAccessControl, createBusinessStore } = await loadFactories();
+  const { createAccessControl, createBusinessStore, writeAuditEvent } = await loadFactories();
 
   const store = createBusinessStore(databaseUrl, createInactiveSession);
+  const gigId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
   const initialState = {
     session: {
@@ -169,7 +188,7 @@ async function main() {
         idempotencyFingerprint: 'fp-identity-1',
         idempotencyExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
         patronDeviceIdHash: 'device-identity-1',
-        gigId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        gigId,
         payloadHash: 'payload',
         amountCents: 1000,
         currency: 'USD',
@@ -187,10 +206,18 @@ async function main() {
     performers: []
   };
 
-  const gigId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   await store.persistState({ state: initialState, activeGigId: gigId });
 
   const accessA = createAccessControl({ databaseUrl, isProduction: true });
+
+  const missingActorResult = await accessA.requireTalentAccess(makeReq(null));
+  assert.equal(missingActorResult.allowed, false, 'Missing actor must be rejected for protected talent routes.');
+
+  const patronTalentResult = await accessA.requireTalentAccess(makeReq('33333333-3333-4333-8333-333333333333'));
+  assert.equal(patronTalentResult.allowed, false, 'Patron actors must be rejected for protected talent routes.');
+
+  const ownerBootstrapResult = await accessA.requireTalentAccess(makeReq('11111111-1111-4111-8111-111111111111'));
+  assert.equal(ownerBootstrapResult.allowed, true, 'Performer owner must be allowed to bootstrap session start without membership/grant rows.');
 
   const performerAResult = await accessA.requireGigMutationAccess(makeReq('11111111-1111-4111-8111-111111111111'), gigId);
   assert.equal(performerAResult.allowed, true, 'Performer A should be authorized for own gig mutations.');
@@ -214,6 +241,43 @@ async function main() {
   const verifyClient = new Client({ connectionString: databaseUrl });
   await verifyClient.connect();
   try {
+    const drizzleModule = await import('../src/db/client.ts');
+    const db = drizzleModule.createSwayDb(databaseUrl);
+
+    const previousStatus = 'approved';
+    const nextStatus = 'fulfilled';
+    await db.transaction(async (tx) => {
+      await store.persistState({
+        state: {
+          ...initialState,
+          session: {
+            ...initialState.session,
+            lastMutationActorUserId: '11111111-1111-4111-8111-111111111111'
+          },
+          requests: initialState.requests.map((request) => ({
+            ...request,
+            status: request.id === 'req-identity-1' ? 'fulfilled' : request.status,
+            lastMutationActorUserId: '11111111-1111-4111-8111-111111111111'
+          }))
+        },
+        activeGigId: gigId
+      }, { executor: tx });
+
+      await writeAuditEvent(tx, {
+        actorId: '11111111-1111-4111-8111-111111111111',
+        actorType: 'performer',
+        entityType: 'request',
+        entityId: 'req-identity-1',
+        eventType: 'request.fulfill',
+        previousStatus,
+        nextStatus,
+        metadata: {
+          requestId: 'req-identity-1',
+          gigId
+        }
+      });
+    });
+
     const gigRow = await verifyClient.query(
       'SELECT owner_actor_user_id, last_mutation_actor_user_id FROM gig_sessions WHERE id = $1',
       [gigId]
@@ -236,6 +300,18 @@ async function main() {
     assert.equal(boostRows.rows.length, 1, 'Expected persisted boost row.');
     assert.equal(boostRows.rows[0].patron_user_id, '33333333-3333-4333-8333-333333333333');
     assert.equal(boostRows.rows[0].actor_user_id, '33333333-3333-4333-8333-333333333333');
+
+    const auditRows = await verifyClient.query(
+      'SELECT actor_id, actor_type, entity_type, event_type, previous_status, next_status FROM audit_events WHERE event_type = $1 ORDER BY created_at DESC LIMIT 1',
+      ['request.fulfill']
+    );
+    assert.equal(auditRows.rows.length, 1, 'Expected durable audit_events row for protected mutation.');
+    assert.equal(auditRows.rows[0].actor_id, '11111111-1111-4111-8111-111111111111');
+    assert.equal(auditRows.rows[0].actor_type, 'performer');
+    assert.equal(auditRows.rows[0].entity_type, 'request');
+    assert.equal(auditRows.rows[0].event_type, 'request.fulfill');
+    assert.equal(auditRows.rows[0].previous_status, 'approved');
+    assert.equal(auditRows.rows[0].next_status, 'fulfilled');
   } finally {
     await verifyClient.end();
   }
@@ -245,6 +321,7 @@ async function main() {
 
 main().catch((error) => {
   console.error('Identity ownership durable authorization integration test failed:');
+  console.error(error);
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

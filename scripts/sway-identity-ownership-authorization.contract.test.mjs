@@ -19,6 +19,7 @@ for (const term of [
   'resolveServerActor',
   'requireAdminOrSupportAccess',
   'requireGigMutationAccess',
+  'requireTalentAccess',
   'ownerActorUserId',
   'lastMutationActorUserId',
   'actorUserId',
@@ -32,9 +33,13 @@ for (const term of [
 for (const term of [
   'accessControl.requireGigMutationAccess',
   'resolveProtectedMutationActor',
+  'persistStateWithAudit',
+  'writeAuditEvent',
+  'businessDb.transaction',
   '/api/session/start',
   '/api/request/triage',
   '/api/request/fulfill',
+  '/api/moderation/block',
   '/api/moderation/hide',
   '/api/moderation/remove'
 ]) {
@@ -56,6 +61,23 @@ for (const term of [
 
 if (!/role === 'admin' \|\| role === 'support'/.test(accessSource)) {
   failures.push('Access control must preserve admin/support override for protected gig mutations.');
+}
+
+if (!/eq\(performers\.ownerUserId, actorId\)/.test(accessSource)) {
+  failures.push('Talent access must authorize performer owners by ownerUserId for bootstrap session start.');
+}
+
+for (const eventType of [
+  'session.start',
+  'request.triage.',
+  'request.fulfill',
+  'moderation.block',
+  'moderation.hide',
+  'moderation.remove'
+]) {
+  if (!serverSource.includes(eventType)) {
+    failures.push(`Server audit wiring missing event_type: ${eventType}`);
+  }
 }
 
 if (/x-sway-test-role/i.test(serverSource) || /x-sway-test-role/i.test(accessSource)) {

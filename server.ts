@@ -10,10 +10,13 @@ import { createServer as createViteServer } from "vite";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession } from "./src/types";
+import { createSwayDb } from "./src/db/client";
+import { activeBlocks, moderationEvents } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
+import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 
 dotenv.config();
 
@@ -28,6 +31,7 @@ const accessControl = createAccessControl({
 const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
+const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
 
 app.use(express.json());
 
@@ -213,7 +217,12 @@ function resolveActorUserId(req: express.Request): string | null {
   return accessControl.resolveServerActor(req).actorId;
 }
 
-async function resolveProtectedMutationActor(req: express.Request, res: express.Response, gigId?: string | null): Promise<string | null> {
+type ProtectedMutationActor = {
+  actorId: string;
+  actorType: string;
+};
+
+async function resolveProtectedMutationActor(req: express.Request, res: express.Response, gigId?: string | null): Promise<ProtectedMutationActor | null> {
   if (!requirePersistentBusinessStore(res)) {
     return null;
   }
@@ -225,12 +234,28 @@ async function resolveProtectedMutationActor(req: express.Request, res: express.
       return null;
     }
 
-    return result.actor.actorId;
+    if (!result.actor.actorId) {
+      res.status(401).json({ error: 'Sway actor resolution required.' });
+      return null;
+    }
+
+    return {
+      actorId: result.actor.actorId,
+      actorType: result.role ?? 'unknown'
+    };
   }
 
   const talentResult = await accessControl.requireTalentAccess(req);
   if (talentResult.allowed) {
-    return talentResult.actor.actorId;
+    if (!talentResult.actor.actorId) {
+      res.status(401).json({ error: 'Sway actor resolution required.' });
+      return null;
+    }
+
+    return {
+      actorId: talentResult.actor.actorId,
+      actorType: talentResult.role ?? 'performer'
+    };
   }
 
   const privilegedResult = await accessControl.requireAdminOrSupportAccess(req);
@@ -239,7 +264,44 @@ async function resolveProtectedMutationActor(req: express.Request, res: express.
     return null;
   }
 
-  return privilegedResult.actor.actorId;
+  if (!privilegedResult.actor.actorId) {
+    res.status(401).json({ error: 'Sway actor resolution required.' });
+    return null;
+  }
+
+  return {
+    actorId: privilegedResult.actor.actorId,
+    actorType: privilegedResult.role ?? 'unknown'
+  };
+}
+
+async function persistStateWithAudit(input: {
+  actor: ProtectedMutationActor;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  previousStatus?: string | null;
+  nextStatus?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  if (!businessDb) {
+    await persistBusinessState();
+    return;
+  }
+
+  await businessDb.transaction(async (tx) => {
+    await businessStore.persistState({ state, activeGigId }, { executor: tx as any });
+    await writeAuditEvent(tx, {
+      actorId: input.actor.actorId,
+      actorType: input.actor.actorType,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      eventType: input.eventType,
+      previousStatus: input.previousStatus,
+      nextStatus: input.nextStatus,
+      metadata: input.metadata
+    });
+  });
 }
 
 // 5-Minute Timer Closeout Routine Worker
@@ -366,8 +428,8 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
 });
 
 app.post("/api/session/start", async (req, res) => {
-  const actorUserId = await resolveProtectedMutationActor(req, res);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res);
+  if (!actor) return;
   await refreshBusinessState();
   const { talentName, talentRole, feeType, minimumTip, gig_id } = req.body;
 
@@ -376,8 +438,8 @@ app.post("/api/session/start", async (req, res) => {
 
   state.session = {
     status: 'active',
-    ownerActorUserId: actorUserId,
-    lastMutationActorUserId: actorUserId,
+    ownerActorUserId: actor.actorId,
+    lastMutationActorUserId: actor.actorId,
     talentName: talentName || "DJ Pro",
     talentRole: talentRole || 'DJ',
     feeType: feeType || 'patron',
@@ -402,15 +464,29 @@ app.post("/api/session/start", async (req, res) => {
   };
   state.requests = []; // Clear current requests for a fresh session!
   syncActivePerformer(state);
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId,
+    eventType: 'session.start',
+    previousStatus: null,
+    nextStatus: state.session.status,
+    metadata: {
+      talentName: state.session.talentName,
+      talentRole: state.session.talentRole,
+      feeType: state.session.feeType,
+      minimumTip: state.session.minimumTip
+    }
+  });
   res.json({ success: true, state });
 });
 
 app.post("/api/session/feature", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   const { hours, cost, activate } = req.body;
+  const wasFeatured = state.session.isFeatured;
   
   if (activate) {
     state.session.isFeatured = true;
@@ -423,34 +499,68 @@ app.post("/api/session/feature", async (req, res) => {
     state.session.featuredCost = 0;
     state.session.featuredDurationHours = 0;
   }
-  state.session.lastMutationActorUserId = actorUserId;
+  state.session.lastMutationActorUserId = actor.actorId;
   
   syncActivePerformer(state);
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: activate ? 'session.feature.enable' : 'session.feature.disable',
+    previousStatus: wasFeatured ? 'featured' : 'not_featured',
+    nextStatus: state.session.isFeatured ? 'featured' : 'not_featured',
+    metadata: {
+      featuredDurationHours: state.session.featuredDurationHours,
+      featuredCost: state.session.featuredCost,
+      featuredExpiresAt: state.session.featuredExpiresAt
+    }
+  });
   res.json({ success: true, state });
 });
 
 app.post("/api/session/end", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   if (state.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
   }
+  const previousStatus = state.session.status;
   state.session.status = 'ending';
   state.session.endGigTimerStartedAt = new Date().toISOString();
-  state.session.lastMutationActorUserId = actorUserId;
-  await persistBusinessState();
+  state.session.lastMutationActorUserId = actor.actorId;
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.end',
+    previousStatus,
+    nextStatus: state.session.status,
+    metadata: {
+      endGigTimerStartedAt: state.session.endGigTimerStartedAt
+    }
+  });
   res.json({ success: true, state });
 });
 
 app.post("/api/session/closeout", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
+  const previousStatus = state.session.status;
   executeAutoNuke(state);
-  state.session.lastMutationActorUserId = actorUserId;
-  await persistBusinessState();
+  state.session.lastMutationActorUserId = actor.actorId;
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.closeout',
+    previousStatus,
+    nextStatus: state.session.status,
+    metadata: {
+      autoNukeApplied: true
+    }
+  });
   res.json({ success: true, state });
 });
 
@@ -459,26 +569,37 @@ app.post("/api/session/closeout", async (req, res) => {
 // Toggle overall requests status (Manual Mode)
 app.post("/api/session/window/toggle", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   const { open } = req.body;
+  const previousStatus = state.session.requestsOpen ? 'open' : 'closed';
   
   state.session.requestsOpen = !!open;
   state.session.requestWindowMode = 'manual';
   state.session.requestWindowExpiresAt = null;
   state.session.requestWindowDuration = null;
   state.session.requestWindowLabel = null;
-  state.session.lastMutationActorUserId = actorUserId;
+  state.session.lastMutationActorUserId = actor.actorId;
   
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.window.toggle',
+    previousStatus,
+    nextStatus: state.session.requestsOpen ? 'open' : 'closed',
+    metadata: {
+      requestWindowMode: state.session.requestWindowMode
+    }
+  });
   res.json({ success: true, state });
 });
 
 // Activate standard/custom preset time window
 app.post("/api/session/window/preset/activate", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   const { durationMinutes, label } = req.body;
   
   const duration = Number(durationMinutes);
@@ -491,17 +612,29 @@ app.post("/api/session/window/preset/activate", async (req, res) => {
   state.session.requestWindowExpiresAt = new Date(Date.now() + duration * 60 * 1000).toISOString();
   state.session.requestWindowDuration = duration;
   state.session.requestWindowLabel = label || "Active Window";
-  state.session.lastMutationActorUserId = actorUserId;
+  state.session.lastMutationActorUserId = actor.actorId;
   
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.window.preset.activate',
+    previousStatus: 'manual',
+    nextStatus: 'preset',
+    metadata: {
+      requestWindowDuration: state.session.requestWindowDuration,
+      requestWindowLabel: state.session.requestWindowLabel,
+      requestWindowExpiresAt: state.session.requestWindowExpiresAt
+    }
+  });
   res.json({ success: true, state });
 });
 
 // Create/Build beautiful custom preset
 app.post("/api/session/window/preset/create", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   const { label, durationMinutes } = req.body;
   
   const duration = Number(durationMinutes);
@@ -517,21 +650,43 @@ app.post("/api/session/window/preset/create", async (req, res) => {
   };
   
   state.session.requestPresets.push(newPreset);
-  state.session.lastMutationActorUserId = actorUserId;
-  await persistBusinessState();
+  state.session.lastMutationActorUserId = actor.actorId;
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.window.preset.create',
+    previousStatus: null,
+    nextStatus: null,
+    metadata: {
+      presetId: newPreset.id,
+      label: newPreset.label,
+      duration: newPreset.duration
+    }
+  });
   res.json({ success: true, state });
 });
 
 // Delete custom preset
 app.post("/api/session/window/preset/delete", async (req, res) => {
   await refreshBusinessState();
-  const actorUserId = await resolveProtectedMutationActor(req, res, activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
   const { presetId } = req.body;
   
   state.session.requestPresets = state.session.requestPresets.filter(p => p.id !== presetId);
-  state.session.lastMutationActorUserId = actorUserId;
-  await persistBusinessState();
+  state.session.lastMutationActorUserId = actor.actorId;
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.window.preset.delete',
+    previousStatus: null,
+    nextStatus: null,
+    metadata: {
+      presetId
+    }
+  });
   res.json({ success: true, state });
 });
 
@@ -865,19 +1020,31 @@ app.post("/api/request/triage", async (req, res) => {
     return res.status(404).json({ error: "Request not found" });
   }
 
-  const actorUserId = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  if (!actor) return;
+  const previousStatus = request.status;
 
   if (action === 'approve') {
     request.status = 'approved';
   } else {
     request.status = 'denied';
   }
-  request.lastMutationActorUserId = actorUserId;
-  state.session.lastMutationActorUserId = actorUserId;
+  request.lastMutationActorUserId = actor.actorId;
+  state.session.lastMutationActorUserId = actor.actorId;
 
   recalculateTotals(state);
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      gigId: request.gigId ?? activeGigId
+    }
+  });
   res.json({ success: true, request, state });
 });
 
@@ -891,14 +1058,26 @@ app.post("/api/request/fulfill", async (req, res) => {
     return res.status(404).json({ error: "Request not found (could be deleted)" });
   }
 
-  const actorUserId = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  if (!actor) return;
+  const previousStatus = request.status;
 
   request.status = 'fulfilled';
-  request.lastMutationActorUserId = actorUserId;
-  state.session.lastMutationActorUserId = actorUserId;
+  request.lastMutationActorUserId = actor.actorId;
+  state.session.lastMutationActorUserId = actor.actorId;
   recalculateTotals(state);
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'request.fulfill',
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      gigId: request.gigId ?? activeGigId
+    }
+  });
 
   res.json({ success: true, request, state });
 });
@@ -930,6 +1109,10 @@ app.post("/api/moderation/block", async (req, res) => {
     return res.status(privilegedActor.status).json({ error: privilegedActor.reason });
   }
 
+  if (!privilegedActor.actor.actorId) {
+    return res.status(401).json({ error: 'Sway actor resolution required.' });
+  }
+
   const { scope, value, reason, actor_user_id } = req.body;
   const allowedScopes: BlockScope[] = ['patron_user_id', 'patron_device_id_hash', 'sender_name'];
 
@@ -939,12 +1122,69 @@ app.post("/api/moderation/block", async (req, res) => {
     });
   }
 
-  await moderationService.addBlockRule({
-    scope,
-    value: String(value),
-    reason: String(reason),
-    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : privilegedActor.actor.actorId
-  });
+  const normalizedValue = String(value).trim().toLowerCase();
+  const actorId = typeof actor_user_id === 'string' ? actor_user_id : privilegedActor.actor.actorId;
+
+  if (!businessDb) {
+    await moderationService.addBlockRule({
+      scope,
+      value: String(value),
+      reason: String(reason),
+      actorUserId: actorId
+    });
+  } else {
+    await businessDb.transaction(async (tx) => {
+      await tx
+        .insert(activeBlocks)
+        .values({
+          scope,
+          normalizedValue,
+          reason: String(reason),
+          actorUserId: actorId,
+          status: 'active',
+          revokedAt: null,
+          metadata: { source: 'moderation.block' }
+        })
+        .onConflictDoUpdate({
+          target: [activeBlocks.scope, activeBlocks.normalizedValue, activeBlocks.status],
+          set: {
+            reason: String(reason),
+            actorUserId: actorId,
+            revokedAt: null,
+            metadata: { source: 'moderation.block' },
+            updatedAt: new Date()
+          }
+        });
+
+      await tx.insert(moderationEvents).values({
+        actorUserId: actorId,
+        entityType: 'block_rule',
+        entityId: toAuditEntityUuid(`${scope}:${normalizedValue}`),
+        status: 'blocked',
+        reason: String(reason),
+        metadata: {
+          scope,
+          value: normalizedValue,
+          source: 'moderation.block'
+        }
+      });
+
+      await writeAuditEvent(tx, {
+        actorId,
+        actorType: privilegedActor.role ?? 'unknown',
+        entityType: 'moderation_block',
+        entityId: `${scope}:${normalizedValue}`,
+        eventType: 'moderation.block',
+        previousStatus: null,
+        nextStatus: 'blocked',
+        metadata: {
+          scope,
+          value: normalizedValue,
+          reason: String(reason)
+        }
+      });
+    });
+  }
 
   return res.json({ success: true, moderation_action: 'block_added' });
 });
@@ -963,18 +1203,30 @@ app.post("/api/moderation/hide", async (req, res) => {
     return res.status(404).json({ error: "Request not found" });
   }
 
-  const actorUserId = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  if (!actor) return;
 
+  const previousStatus = request.hidden ? 'hidden' : 'visible';
   request.hidden = true;
-  request.lastMutationActorUserId = actorUserId;
-  state.session.lastMutationActorUserId = actorUserId;
-  await persistBusinessState();
+  request.lastMutationActorUserId = actor.actorId;
+  state.session.lastMutationActorUserId = actor.actorId;
+  await persistStateWithAudit({
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'moderation.hide',
+    previousStatus,
+    nextStatus: request.hidden ? 'hidden' : 'visible',
+    metadata: {
+      requestId: request.id,
+      reason: String(reason)
+    }
+  });
 
   await moderationService.hideRequest({
     requestId: String(requestId),
     reason: String(reason),
-    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actorUserId
+    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
   });
 
   return res.json({ success: true, moderation_action: 'hidden', request, state });
@@ -994,20 +1246,33 @@ app.post("/api/moderation/remove", async (req, res) => {
     return res.status(404).json({ error: "Request not found" });
   }
 
-  const actorUserId = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
-  if (!actorUserId) return;
+  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  if (!actor) return;
 
+  const previousStatus = request.status;
   request.removed = true;
   request.status = 'denied';
-  request.lastMutationActorUserId = actorUserId;
-  state.session.lastMutationActorUserId = actorUserId;
+  request.lastMutationActorUserId = actor.actorId;
+  state.session.lastMutationActorUserId = actor.actorId;
   recalculateTotals(state);
-  await persistBusinessState();
+  await persistStateWithAudit({
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'moderation.remove',
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      removed: true,
+      reason: String(reason)
+    }
+  });
 
   await moderationService.removeRequest({
     requestId: String(requestId),
     reason: String(reason),
-    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actorUserId
+    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
   });
 
   return res.json({ success: true, moderation_action: 'removed', request, state });

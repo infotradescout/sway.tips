@@ -75,6 +75,14 @@ async function getActorRole(db: SwayDb, actorId: string): Promise<ActorRole> {
 }
 
 async function hasTalentRole(db: SwayDb, actorId: string) {
+  const ownerRows = await db
+    .select({ id: performers.id })
+    .from(performers)
+    .where(eq(performers.ownerUserId, actorId))
+    .limit(1);
+
+  if (ownerRows.length > 0) return true;
+
   const membershipRows = await db
     .select({ id: performerMemberships.id })
     .from(performerMemberships)
