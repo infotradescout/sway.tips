@@ -62,3 +62,6 @@ jobs:
 
       - name: Run Business Store Process-Kill Integration Test
         run: npm run test:integration:business-store-process-kill
+
+      - name: Run Identity Ownership Durable Integration Test
+        run: npm run test:integration:identity-ownership-durable

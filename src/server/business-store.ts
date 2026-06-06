@@ -15,7 +15,6 @@ type PersistInput = {
 };
 
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
-const RUNTIME_PERFORMER_ID = '00000000-0000-4000-8000-000000000222';
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
   hold: 'held_for_review',
@@ -144,7 +143,7 @@ function deriveSessionStatus(status: GigSession['status']): 'draft' | 'active' |
 export function createBusinessStore(databaseUrl: string | undefined, createInactiveSession: () => GigSession) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
 
-  async function ensureRuntimeOwnershipRows() {
+  async function ensureRuntimeUserRow() {
     if (!db) return;
 
     await db.insert(users).values({
@@ -154,13 +153,33 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       role: 'performer'
     }).onConflictDoNothing();
 
-    await db.insert(performers).values({
-      id: RUNTIME_PERFORMER_ID,
-      ownerUserId: RUNTIME_USER_ID,
-      handle: 'runtime-owner',
-      displayName: 'Runtime Owner',
+  }
+
+  async function ensurePerformerForActor(actorUserId: string | null | undefined) {
+    if (!db) return null;
+
+    const ownerUserId = actorUserId ?? RUNTIME_USER_ID;
+    await ensureRuntimeUserRow();
+
+    const [existingPerformer] = await db
+      .select({ id: performers.id })
+      .from(performers)
+      .where(eq(performers.ownerUserId, ownerUserId))
+      .limit(1);
+
+    if (existingPerformer) {
+      return existingPerformer.id;
+    }
+
+    const idSuffix = ownerUserId.slice(0, 8).replace(/[^a-z0-9]/gi, '').toLowerCase() || 'runtime';
+    const [inserted] = await db.insert(performers).values({
+      ownerUserId,
+      handle: `runtime-${idSuffix}`,
+      displayName: `Runtime ${idSuffix}`,
       bio: null
-    }).onConflictDoNothing();
+    }).returning({ id: performers.id });
+
+    return inserted.id;
   }
 
   async function hydrateState(fallbackState: BackendState): Promise<DurableSnapshot> {
@@ -247,14 +266,18 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
   async function persistState(input: PersistInput) {
     if (!db || !input.activeGigId) return;
 
-    await ensureRuntimeOwnershipRows();
+    await ensureRuntimeUserRow();
 
     const now = new Date();
     const session = input.state.session;
+    const runtimePerformerId = await ensurePerformerForActor(null);
+    const performerId = (await ensurePerformerForActor(session.ownerActorUserId ?? null)) ?? runtimePerformerId;
 
     await db.insert(gigSessions).values({
       id: input.activeGigId,
-      performerId: RUNTIME_PERFORMER_ID,
+      performerId,
+      ownerActorUserId: session.ownerActorUserId ?? null,
+      lastMutationActorUserId: session.lastMutationActorUserId ?? null,
       status: deriveSessionStatus(session.status),
       title: 'runtime_active_session',
       venueName: 'runtime',
@@ -271,7 +294,9 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     }).onConflictDoUpdate({
       target: gigSessions.id,
       set: {
-        performerId: RUNTIME_PERFORMER_ID,
+        performerId,
+        ownerActorUserId: session.ownerActorUserId ?? null,
+        lastMutationActorUserId: session.lastMutationActorUserId ?? null,
         status: deriveSessionStatus(session.status),
         title: 'runtime_active_session',
         venueName: 'runtime',
@@ -293,7 +318,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     for (const request of input.state.requests) {
       const [insertedRequest] = await db.insert(requests).values({
         gigId: input.activeGigId,
-        patronUserId: null,
+        patronUserId: request.actorUserId ?? null,
+        lastMutationActorUserId: request.lastMutationActorUserId ?? request.actorUserId ?? null,
         clientRequestId: request.clientRequestId ?? `legacy-${request.id}`,
         status: deriveRequestStatus(request),
         requestType: deriveRequestType(request),
@@ -315,7 +341,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         await db.insert(requestBoosts).values({
           requestId: persistedRequestId,
           gigId: input.activeGigId,
-          patronUserId: null,
+          patronUserId: boost.actorUserId ?? request.actorUserId ?? null,
+          actorUserId: boost.actorUserId ?? request.actorUserId ?? null,
           status: deriveRequestStatus(request),
           amountCents: Math.round(Number(boost.amount ?? 0) * 100),
           currency: request.currency ?? 'USD',

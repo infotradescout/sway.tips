@@ -122,6 +122,8 @@ for (const [enumName, values] of Object.entries(requiredEnums)) {
 
 const requiredTableColumns = {
   gig_sessions: [
+    'owner_actor_user_id',
+    'last_mutation_actor_user_id',
     'status',
     'runtime_session_state',
     'started_at',
@@ -190,9 +192,11 @@ const requiredTableColumns = {
     'updated_at'
   ],
   requests: [
+    'last_mutation_actor_user_id',
     'runtime_request_state'
   ],
   request_boosts: [
+    'actor_user_id',
     'runtime_boost_state'
   ],
   audit_events: [
@@ -240,6 +244,9 @@ for (const term of [
   "runtimeSessionState: jsonb('runtime_session_state')",
   "runtimeRequestState: jsonb('runtime_request_state')",
   "runtimeBoostState: jsonb('runtime_boost_state')",
+  "ownerActorUserId: uuid('owner_actor_user_id')",
+  "lastMutationActorUserId: uuid('last_mutation_actor_user_id')",
+  "actorUserId: uuid('actor_user_id')",
   "export const activeBlocks",
   'export const idempotencyKeys',
   'export const clientPendingActions'

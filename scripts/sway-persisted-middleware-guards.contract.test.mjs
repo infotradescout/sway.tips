@@ -16,6 +16,7 @@ for (const term of [
   'resolveActor',
   'requireTalentAccess',
   'requireAdminAccess',
+  'requireAdminOrSupportAccess',
   'allowPublicPatronAccess',
   'allowPublicOverlayAccess',
   'requireDevSandboxAccess'
@@ -38,7 +39,7 @@ for (const term of [
   "shell === 'talent'",
   'accessControl.requireTalentAccess',
   "shell === 'admin'",
-  'accessControl.requireAdminAccess',
+  'accessControl.requireAdminOrSupportAccess',
   "shell === 'overlay'",
   'accessControl.allowPublicOverlayAccess',
   "shell === 'dev-sandbox'",
@@ -74,7 +75,6 @@ const forbiddenAccessPatterns = [
   /state\./,
   /BackendState/,
   /requests\./,
-  /performers\./,
   /role\s*===\s*req\.headers/i,
   /x-sway-role/i,
   /isAdmin\s*=\s*true/i,
@@ -86,11 +86,11 @@ for (const pattern of forbiddenAccessPatterns) {
   if (pattern.test(access)) failures.push(`Access guard contains forbidden mock/client-only pattern: ${pattern}`);
 }
 
-if (!/if \(await hasTalentRole\(db, actor\.actorId\)\) return \{ allowed: true, actor \}/.test(access)) {
+if (!/if \(await hasTalentRole\(db, actor\.actorId\)\)[\s\S]{0,180}allowed:\s*true/.test(access)) {
   failures.push('Talent guard must allow only after persisted membership/access lookup.');
 }
 
-if (!/if \(await hasAdminRole\(db, actor\.actorId\)\) return \{ allowed: true, actor \}/.test(access)) {
+if (!/if \(await hasAdminRole\(db, actor\.actorId\)\)[\s\S]{0,180}allowed:\s*true/.test(access)) {
   failures.push('Admin guard must allow only after persisted admin lookup.');
 }
 

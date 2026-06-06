@@ -24,6 +24,7 @@ export interface BoostContribution {
   patronName: string;
   amount: number;
   timestamp: string;
+  actorUserId?: string | null;
   clientRequestId?: string;
   idempotencyKey?: string;
   idempotencyFingerprint?: string;
@@ -47,6 +48,8 @@ export interface RequestItem {
   shadowBanned: boolean;  // Profanity filter flag
   hidden?: boolean;
   removed?: boolean;
+  actorUserId?: string | null;
+  lastMutationActorUserId?: string | null;
   createdAt: string;
   clientRequestId?: string;
   idempotencyKey?: string;
@@ -69,6 +72,8 @@ export interface RequestPreset {
 
 export interface GigSession {
   status: 'inactive' | 'active' | 'ending' | 'closed';
+  ownerActorUserId?: string | null;
+  lastMutationActorUserId?: string | null;
   talentName: string;
   talentRole: 'DJ' | 'Bartender' | 'Performer';
   feeType: 'talent' | 'patron'; // Who pays the $1 platform fee
