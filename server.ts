@@ -12,6 +12,7 @@ import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession } from "./src/types";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
+import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ const accessControl = createAccessControl({
   isProduction
 });
 const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
+const moderationService = createModerationService(process.env.DATABASE_URL);
 
 app.use(express.json());
 
@@ -189,30 +191,12 @@ function syncActivePerformer() {
   }
 }
 
-// Deterministic moderation must stay active even when external AI services are absent.
-function checkContentAppropriate(sender: string, text: string): { isAllowed: boolean; reason?: string } {
-  const localProfanityWords = ["fudge", "spam", "abuse", "vulgarword", "asshole", "bitch", "bastard"];
-  const blockedPatterns = [
-    /\b(?:kill|hurt|attack)\s+(?:you|him|her|them|everyone)\b/i,
-    /\b(?:https?:\/\/|www\.)\S+/i
-  ];
-  const contentString = `${sender} ${text}`.toLowerCase();
-
-  for (const word of localProfanityWords) {
-    if (contentString.includes(word)) {
-      console.log(`Local moderation check caught profanity in message: "${contentString}"`);
-      return { isAllowed: false, reason: "Inappropriate language filtered." };
-    }
+function resolveActorUserId(req: express.Request): string | null {
+  const value = req.headers['x-sway-resolved-actor-id'];
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value;
   }
-
-  for (const pattern of blockedPatterns) {
-    if (pattern.test(`${sender} ${text}`)) {
-      console.log(`Local moderation check caught blocked pattern in message: "${contentString}"`);
-      return { isAllowed: false, reason: "Message requires review before public display." };
-    }
-  }
-
-  return { isAllowed: true };
+  return null;
 }
 
 // 5-Minute Timer Closeout Routine Worker
@@ -475,6 +459,7 @@ app.post("/api/request/create", async (req, res) => {
     client_request_id,
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
+    patron_user_id,
     gig_id,
     currency = "USD",
     expires_at
@@ -554,9 +539,27 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(400).json({ error: "Request submissions are currently closed by the host." });
   }
 
-  // AI shadow ban filter check
-  const modResult = checkContentAppropriate(senderName || "Patron", message || "");
-  const shadowBanned = !modResult.isAllowed;
+  const moderationOutcome = await moderationService.evaluateSubmission({
+    senderName: senderName || "Patron",
+    text: message || "",
+    patronUserId: typeof patron_user_id === 'string' ? patron_user_id : null,
+    patronDeviceIdHash: typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null
+  });
+
+  if (moderationOutcome.decision === 'block_submission') {
+    await moderationService.recordPatronReport({
+      requestId: client_request_id,
+      reason: moderationOutcome.reason,
+      actorUserId: resolveActorUserId(req),
+      patronDeviceIdHash: patron_device_id_hash
+    });
+    return res.status(403).json({
+      error: moderationOutcome.reason,
+      outage_behavior: 'block_submission'
+    });
+  }
+
+  const shadowBanned = moderationOutcome.decision === 'hold_for_review';
 
   const newItem: RequestItem = {
     id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
@@ -571,7 +574,7 @@ app.post("/api/request/create", async (req, res) => {
     holdAmount: holdAmount,
     platformFee: platformFee,
     sponsorCount: 1,
-    status: isStraightTip ? 'fulfilled' : 'hold', // straight tips are accepted instantly
+    status: shadowBanned ? 'hold' : (isStraightTip ? 'fulfilled' : 'hold'),
     shadowBanned: shadowBanned,
     createdAt: new Date().toISOString(),
     clientRequestId: client_request_id,
@@ -593,6 +596,10 @@ app.post("/api/request/create", async (req, res) => {
     success: true, 
     request: newItem,
     state,
+    moderation: {
+      outage_behavior: moderationOutcome.decision,
+      ai_assistive_only: true
+    },
     shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
   };
   await idempotencyStore.completePendingAction({
@@ -688,9 +695,26 @@ app.post("/api/request/boost", async (req, res) => {
     return res.json(responseBody);
   }
 
-  // Shadow moderate backer's name
-  const modResult = checkContentAppropriate(patronName || "Patron", "");
-  const isBackerShadowed = !modResult.isAllowed;
+  const moderationOutcome = await moderationService.evaluateSubmission({
+    senderName: patronName || "Patron",
+    text: '',
+    patronDeviceIdHash: typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null
+  });
+
+  if (moderationOutcome.decision === 'block_submission') {
+    await moderationService.recordPatronReport({
+      requestId,
+      reason: moderationOutcome.reason,
+      actorUserId: resolveActorUserId(req),
+      patronDeviceIdHash: patron_device_id_hash
+    });
+    return res.status(403).json({
+      error: moderationOutcome.reason,
+      outage_behavior: 'block_submission'
+    });
+  }
+
+  const isBackerShadowed = moderationOutcome.decision === 'hold_for_review';
 
   const newBoost = {
     id: `boost-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
@@ -755,6 +779,118 @@ app.post("/api/request/fulfill", (req, res) => {
   recalculateTotals();
 
   res.json({ success: true, request, state });
+});
+
+app.post("/api/moderation/report", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+
+  const { requestId, reason, details, patron_device_id_hash, patron_user_id } = req.body;
+  if (!requestId || !reason) {
+    return res.status(400).json({ error: "requestId and reason are required." });
+  }
+
+  await moderationService.recordPatronReport({
+    requestId: String(requestId),
+    reason: String(reason),
+    details: typeof details === 'string' ? details : undefined,
+    actorUserId: typeof patron_user_id === 'string' ? patron_user_id : resolveActorUserId(req),
+    patronDeviceIdHash: typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null
+  });
+
+  return res.json({ success: true, moderation_action: 'report_submitted' });
+});
+
+app.post("/api/moderation/block", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+
+  const { scope, value, reason, actor_user_id } = req.body;
+  const allowedScopes: BlockScope[] = ['patron_user_id', 'patron_device_id_hash', 'sender_name'];
+
+  if (!allowedScopes.includes(scope) || !value || !reason) {
+    return res.status(400).json({
+      error: "scope, value, and reason are required. scope must be patron_user_id, patron_device_id_hash, or sender_name."
+    });
+  }
+
+  await moderationService.addBlockRule({
+    scope,
+    value: String(value),
+    reason: String(reason),
+    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : resolveActorUserId(req)
+  });
+
+  return res.json({ success: true, moderation_action: 'block_added' });
+});
+
+app.post("/api/moderation/hide", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+
+  const { requestId, reason, actor_user_id } = req.body;
+  if (!requestId || !reason) {
+    return res.status(400).json({ error: "requestId and reason are required." });
+  }
+
+  const request = state.requests.find((item) => item.id === requestId);
+  if (!request) {
+    return res.status(404).json({ error: "Request not found" });
+  }
+
+  request.hidden = true;
+
+  await moderationService.hideRequest({
+    requestId: String(requestId),
+    reason: String(reason),
+    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : resolveActorUserId(req)
+  });
+
+  return res.json({ success: true, moderation_action: 'hidden', request, state });
+});
+
+app.post("/api/moderation/remove", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+
+  const { requestId, reason, actor_user_id } = req.body;
+  if (!requestId || !reason) {
+    return res.status(400).json({ error: "requestId and reason are required." });
+  }
+
+  const request = state.requests.find((item) => item.id === requestId);
+  if (!request) {
+    return res.status(404).json({ error: "Request not found" });
+  }
+
+  request.removed = true;
+  request.status = 'denied';
+  recalculateTotals();
+
+  await moderationService.removeRequest({
+    requestId: String(requestId),
+    reason: String(reason),
+    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : resolveActorUserId(req)
+  });
+
+  return res.json({ success: true, moderation_action: 'removed', request, state });
+});
+
+app.get('/api/moderation/placeholders', (_req, res) => {
+  return res.json({
+    success: true,
+    app_store_ugc_controls: moderationService.getAppStoreUgcControlPlaceholders()
+  });
+});
+
+app.get('/api/support/contact', (_req, res) => {
+  return res.json({
+    success: true,
+    placeholder: 'Support/contact flow placeholder. In-app support routing lands before App Store/TestFlight package.'
+  });
+});
+
+app.post('/api/privacy/data-deletion-placeholder', (_req, res) => {
+  return res.json({
+    success: true,
+    placeholder: 'Data deletion request placeholder captured. Verified deletion workflow will be added before launch gates.'
+  });
 });
 
 // Development catalog only. Production must use a licensed/verifiable catalog integration.

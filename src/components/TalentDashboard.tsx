@@ -38,6 +38,8 @@ interface TalentDashboardProps {
   onCloseout: () => void;
   onTriage: (requestId: string, action: 'approve' | 'deny') => void;
   onFulfill: (requestId: string) => void;
+  onHide: (requestId: string) => void;
+  onRemove: (requestId: string) => void;
 }
 
 export default function TalentDashboard({
@@ -47,7 +49,9 @@ export default function TalentDashboard({
   onEndSession,
   onCloseout,
   onTriage,
-  onFulfill
+  onFulfill,
+  onHide,
+  onRemove
 }: TalentDashboardProps) {
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
@@ -217,11 +221,11 @@ export default function TalentDashboard({
   }, [session.status, session.endGigTimerStartedAt, onCloseout]);
 
   // Derived filter collections
-  const triageQueue = requests.filter(r => r.status === 'hold' && !r.shadowBanned);
+  const triageQueue = requests.filter(r => r.status === 'hold' && !r.shadowBanned && !r.hidden && !r.removed);
   const liveLadderQueue = requests
-    .filter(r => r.status === 'approved')
+    .filter(r => r.status === 'approved' && !r.hidden && !r.removed)
     .sort((a, b) => b.amount - a.amount); // SORTED BY LOWER TO HIGHEST OR HIGH TO LOW (AUCTION VALUE)
-  const fulfilledHistory = requests.filter(r => r.status === 'fulfilled' || r.type === 'tip');
+  const fulfilledHistory = requests.filter(r => (r.status === 'fulfilled' || r.type === 'tip') && !r.hidden && !r.removed);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -498,6 +502,14 @@ export default function TalentDashboard({
                         {/* Triage Accept (Move to Ladder) or Reject (Instant Void Hold) */}
                         <div className="flex items-center gap-2 font-sans">
                           <button
+                            onClick={() => onHide(req.id)}
+                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
+                            title="Hide from performer/admin view"
+                          >
+                            <AlertTriangle className="w-4 h-4" /> Hide
+                          </button>
+
+                          <button
                             onClick={() => onTriage(req.id, 'deny')}
                             className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-fuchsia-400 hover:bg-fuchsia-500/10 hover:border-fuchsia-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
                             title="Reject &amp; Void Hold"
@@ -511,6 +523,14 @@ export default function TalentDashboard({
                             title="Approve request"
                           >
                             <Check className="w-4 h-4" /> Approve
+                          </button>
+
+                          <button
+                            onClick={() => onRemove(req.id)}
+                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
+                            title="Remove from queue"
+                          >
+                            <Trash2 className="w-4 h-4" /> Remove
                           </button>
                         </div>
                       </motion.div>

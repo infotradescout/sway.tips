@@ -52,6 +52,10 @@ interface PatronViewProps {
   }) => Promise<any>;
   onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string) => Promise<any>;
   onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string) => Promise<any>;
+  onReportContent: (requestId: string, reason: string, details?: string) => Promise<any>;
+  onBlockFoundation: (scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name', value: string, reason: string) => Promise<any>;
+  onSupportContact: () => Promise<any>;
+  onDataDeletionPlaceholder: () => Promise<any>;
 }
 
 export default function PatronView({
@@ -61,7 +65,11 @@ export default function PatronView({
   gigId,
   onCreateRequest,
   onBoostRequest,
-  onReconcilePendingAction
+  onReconcilePendingAction,
+  onReportContent,
+  onBlockFoundation,
+  onSupportContact,
+  onDataDeletionPlaceholder
 }: PatronViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
@@ -537,8 +545,21 @@ export default function PatronView({
   };
 
   const approvedLadder = requests
-    .filter(r => r.status === 'approved' || r.status === 'fulfilled')
+    .filter(r => (r.status === 'approved' || r.status === 'fulfilled') && !r.hidden && !r.removed)
     .sort((a, b) => b.amount - a.amount);
+
+  const newestModeratableRequest = requests.find((item) => !item.removed);
+
+  const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
+    try {
+      await action();
+      alert(successCopy);
+      window.dispatchEvent(new Event('re-fetch-state'));
+    } catch (error) {
+      console.error(error);
+      alert('Safety action failed. Try again in a few moments.');
+    }
+  };
 
   return (
     <div id="patron_crowd_screen" className="max-w-xl mx-auto py-4 px-4 pb-20 space-y-6">
@@ -582,6 +603,59 @@ export default function PatronView({
           </div>
         </div>
       )}
+
+      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
+        <div>
+          <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Safety Controls</h3>
+          <p className="text-[11px] text-slate-400 mt-1">App Store UGC placeholders: report, block, remove/hide, support/contact, and data deletion intake.</p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (!newestModeratableRequest) {
+                alert('No request is available to report yet.');
+                return;
+              }
+              runSafetyAction(
+                () => onReportContent(newestModeratableRequest.id, 'Patron report placeholder', 'User-reported content check requested.'),
+                'Report submitted for moderator review.'
+              );
+            }}
+            className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
+          >
+            Report
+          </button>
+
+          <button
+            type="button"
+            onClick={() => runSafetyAction(
+              () => onBlockFoundation('patron_device_id_hash', 'anonymous-device', 'Patron device block placeholder requested.'),
+              'Device block placeholder recorded.'
+            )}
+            className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
+          >
+            Block
+          </button>
+
+          <button
+            type="button"
+            onClick={() => runSafetyAction(onSupportContact, 'Support/contact placeholder opened.')}
+            className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
+          >
+            Support / Contact
+          </button>
+
+          <button
+            type="button"
+            onClick={() => runSafetyAction(onDataDeletionPlaceholder, 'Data deletion placeholder submitted.')}
+            className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
+          >
+            Data Deletion Placeholder
+          </button>
+        </div>
+      </div>
 
       {/* 2. Primary Tabs Selector */}
       {session.status === 'active' && (

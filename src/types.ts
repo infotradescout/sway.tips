@@ -45,6 +45,8 @@ export interface RequestItem {
   sponsorCount: number;   // Number of different patrons funding this
   status: 'hold' | 'approved' | 'denied' | 'fulfilled';
   shadowBanned: boolean;  // Profanity filter flag
+  hidden?: boolean;
+  removed?: boolean;
   createdAt: string;
   clientRequestId?: string;
   idempotencyKey?: string;

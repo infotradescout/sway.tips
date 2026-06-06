@@ -71,6 +71,34 @@ export default function PatronApp() {
     return data;
   };
 
+  const handleReportContent = async (requestId: string, reason: string, details?: string) => {
+    return postJson('/api/moderation/report', { requestId, reason, details });
+  };
+
+  const handleBlockFoundation = async (
+    scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name',
+    value: string,
+    reason: string
+  ) => {
+    return postJson('/api/moderation/block', { scope, value, reason });
+  };
+
+  const handleSupportContact = async () => {
+    const response = await fetch('/api/support/contact');
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Support placeholder failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
+  const handleDataDeletionPlaceholder = async () => {
+    return postJson('/api/privacy/data-deletion-placeholder', { source: 'patron_shell_placeholder' });
+  };
+
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
@@ -107,6 +135,10 @@ export default function PatronApp() {
             onCreateRequest={handleCreateRequest}
             onBoostRequest={handleBoostRequest}
             onReconcilePendingAction={handleReconcilePendingAction}
+            onReportContent={handleReportContent}
+            onBlockFoundation={handleBlockFoundation}
+            onSupportContact={handleSupportContact}
+            onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
           />
         </motion.div>
       </main>

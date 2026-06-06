@@ -265,6 +265,104 @@ export default function App() {
     }
   };
 
+  const handleReportContent = async (requestId: string, reason: string, details?: string) => {
+    const response = await fetch('/api/moderation/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, reason, details })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Moderation report failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
+  const handleBlockFoundation = async (
+    scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name',
+    value: string,
+    reason: string
+  ) => {
+    const response = await fetch('/api/moderation/block', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, value, reason })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Moderation block failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
+  const handleHideRequest = async (requestId: string) => {
+    const response = await fetch('/api/moderation/hide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, reason: 'Performer/admin hide action placeholder.' })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Moderation hide failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    setBState(data.state);
+    return data;
+  };
+
+  const handleRemoveRequest = async (requestId: string) => {
+    const response = await fetch('/api/moderation/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, reason: 'Performer/admin remove action placeholder.' })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Moderation remove failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    setBState(data.state);
+    return data;
+  };
+
+  const handleSupportContact = async () => {
+    const response = await fetch('/api/support/contact');
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Support placeholder failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
+  const handleDataDeletionPlaceholder = async () => {
+    const response = await fetch('/api/privacy/data-deletion-placeholder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'patron_ui_placeholder' })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Data deletion placeholder failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
   const resetInactiveSession = () => {
     handleStartSession({
       talentName: 'Sway Performer',
@@ -418,6 +516,8 @@ export default function App() {
               onCloseout={handleCloseout}
               onTriage={handleTriageRequest}
               onFulfill={handleFulfillRequest}
+              onHide={handleHideRequest}
+              onRemove={handleRemoveRequest}
             />
           </motion.div>
         </main>
@@ -458,6 +558,10 @@ export default function App() {
             onCreateRequest={handleCreateRequest}
             onBoostRequest={handleBoostRequest}
             onReconcilePendingAction={handleReconcilePendingAction}
+            onReportContent={handleReportContent}
+            onBlockFoundation={handleBlockFoundation}
+            onSupportContact={handleSupportContact}
+            onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
           />
         </motion.div>
       </main>

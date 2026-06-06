@@ -61,6 +61,30 @@ export default function TalentApp() {
     }
   };
 
+  const handleHideRequest = async (requestId: string) => {
+    try {
+      const data = await postJson('/api/moderation/hide', {
+        requestId,
+        reason: 'Performer/admin hide action placeholder.'
+      });
+      setBState(data.state);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRemoveRequest = async (requestId: string) => {
+    try {
+      const data = await postJson('/api/moderation/remove', {
+        requestId,
+        reason: 'Performer/admin remove action placeholder.'
+      });
+      setBState(data.state);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const resetInactiveSession = () => {
     handleStartSession({
       talentName: 'Sway Performer',
@@ -119,6 +143,8 @@ export default function TalentApp() {
             onCloseout={handleCloseout}
             onTriage={handleTriageRequest}
             onFulfill={handleFulfillRequest}
+            onHide={handleHideRequest}
+            onRemove={handleRemoveRequest}
           />
         </motion.div>
       </main>
