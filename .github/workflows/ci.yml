@@ -1,0 +1,61 @@
+name: CI Validation Gate 1
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sway
+          POSTGRES_PASSWORD: sway
+          POSTGRES_DB: sway_tips
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sway -d sway_tips"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://sway:sway@localhost:5432/sway_tips
+      APP_URL: http://localhost:3000
+      PERSISTENCE_DRIVER: postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Contract Tests
+        run: npm run test:contracts
+
+      - name: Run Contract Audit
+        run: npm run audit:contracts
+
+      - name: Run Lint
+        run: npm run lint
+
+      - name: Run Build
+        run: npm run build
+
+      - name: Run Drizzle Check
+        run: npm run db:check
+
+      - name: Run Active Blocks Postgres Integration Test
+        run: npm run test:integration:moderation-active-blocks
