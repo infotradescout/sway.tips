@@ -141,6 +141,7 @@ export const gigSessions = pgTable('gig_sessions', {
   status: gigSessionStatusEnum('status').notNull().default('draft'),
   title: text('title'),
   venueName: text('venue_name'),
+  runtimeSessionState: jsonb('runtime_session_state'),
   startedAt: timestamp('started_at', { withTimezone: true }),
   scheduledEndAt: timestamp('scheduled_end_at', { withTimezone: true }),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
@@ -176,6 +177,7 @@ export const requests = pgTable('requests', {
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   message: text('message'),
+  runtimeRequestState: jsonb('runtime_request_state'),
   ...timestamps
 }, (table) => ({
   gigStatusIdx: index('requests_gig_status_idx').on(table.gigId, table.status),
@@ -190,6 +192,7 @@ export const requestBoosts = pgTable('request_boosts', {
   status: requestStatusEnum('status').notNull().default('submitted'),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
+  runtimeBoostState: jsonb('runtime_boost_state'),
   ...timestamps
 }, (table) => ({
   requestIdx: index('request_boosts_request_id_idx').on(table.requestId),

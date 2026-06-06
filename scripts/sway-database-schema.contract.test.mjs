@@ -123,6 +123,7 @@ for (const [enumName, values] of Object.entries(requiredEnums)) {
 const requiredTableColumns = {
   gig_sessions: [
     'status',
+    'runtime_session_state',
     'started_at',
     'scheduled_end_at',
     'last_activity_at',
@@ -188,6 +189,12 @@ const requiredTableColumns = {
     'created_at',
     'updated_at'
   ],
+  requests: [
+    'runtime_request_state'
+  ],
+  request_boosts: [
+    'runtime_boost_state'
+  ],
   audit_events: [
     'event_id',
     'actor_type',
@@ -230,6 +237,9 @@ for (const term of [
   "verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000)",
   "autoCloseoutAt: timestamp('auto_closeout_at'",
   "expiresAt: timestamp('expires_at'",
+  "runtimeSessionState: jsonb('runtime_session_state')",
+  "runtimeRequestState: jsonb('runtime_request_state')",
+  "runtimeBoostState: jsonb('runtime_boost_state')",
   "export const activeBlocks",
   'export const idempotencyKeys',
   'export const clientPendingActions'

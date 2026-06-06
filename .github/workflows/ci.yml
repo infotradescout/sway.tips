@@ -59,3 +59,6 @@ jobs:
 
       - name: Run Active Blocks Postgres Integration Test
         run: npm run test:integration:moderation-active-blocks
+
+      - name: Run Business Store Process-Kill Integration Test
+        run: npm run test:integration:business-store-process-kill

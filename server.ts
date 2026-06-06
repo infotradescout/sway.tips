@@ -13,6 +13,7 @@ import { BackendState, RequestItem, GigSession } from "./src/types";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
+import { createBusinessStore } from "./src/server/business-store";
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ const accessControl = createAccessControl({
 });
 const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
+const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 
 app.use(express.json());
 
@@ -100,9 +102,23 @@ let state: BackendState = {
   requests: [],
   performers: []
 };
+let activeGigId: string | null = null;
+
+async function refreshBusinessState() {
+  const snapshot = await businessStore.hydrateState(state);
+  state = snapshot.state;
+  activeGigId = snapshot.activeGigId;
+  syncActivePerformer(state);
+  return snapshot;
+}
+
+async function persistBusinessState() {
+  syncActivePerformer(state);
+  await businessStore.persistState({ state, activeGigId });
+}
 
 function requirePersistentBusinessStore(res: express.Response): boolean {
-  if (!isProduction) return true;
+  if (!isProduction || businessStore.hasDurableStore) return true;
   res.status(503).json({
     error: "Persistent business store is not configured. Production routes cannot use in-memory gig, request, or ledger state."
   });
@@ -166,28 +182,28 @@ function createIdempotencyFingerprint(input: {
     .digest('hex');
 }
 
-function syncActivePerformer() {
-  if (state.session.status === 'inactive' || !state.session.talentName) {
-    state.performers = [];
+function syncActivePerformer(inputState: BackendState) {
+  if (inputState.session.status === 'inactive' || !inputState.session.talentName) {
+    inputState.performers = [];
     return;
   }
 
   const activePerformer = {
     id: "p-active",
-    name: state.session.talentName,
-    role: state.session.talentRole,
+    name: inputState.session.talentName,
+    role: inputState.session.talentRole,
     venueName: "Current gig",
-    isFeatured: state.session.isFeatured,
-    featuredExpiresAt: state.session.featuredExpiresAt,
-    minimumTip: state.session.minimumTip,
+    isFeatured: inputState.session.isFeatured,
+    featuredExpiresAt: inputState.session.featuredExpiresAt,
+    minimumTip: inputState.session.minimumTip,
     avatarUrl: ""
   };
 
-  const existingIndex = state.performers.findIndex(p => p.id === activePerformer.id);
+  const existingIndex = inputState.performers.findIndex(p => p.id === activePerformer.id);
   if (existingIndex >= 0) {
-    state.performers[existingIndex] = activePerformer;
+    inputState.performers[existingIndex] = activePerformer;
   } else {
-    state.performers = [activePerformer];
+    inputState.performers = [activePerformer];
   }
 }
 
@@ -200,7 +216,11 @@ function resolveActorUserId(req: express.Request): string | null {
 }
 
 // 5-Minute Timer Closeout Routine Worker
-setInterval(() => {
+setInterval(async () => {
+  await refreshBusinessState();
+
+  let changed = false;
+
   if (state.session.status === 'ending' && state.session.endGigTimerStartedAt) {
     const startTimeStamp = new Date(state.session.endGigTimerStartedAt).getTime();
     const elapsedTime = Date.now() - startTimeStamp;
@@ -208,7 +228,8 @@ setInterval(() => {
     // 5 minutes is 300,000 ms. For easier testing, let's keep the real 5 minutes but allow talent to dismiss.
     if (elapsedTime >= 300000) {
       console.log("Post-gig timer expired. Releasing pending requests.");
-      executeAutoNuke();
+      executeAutoNuke(state);
+      changed = true;
     }
   }
 
@@ -220,6 +241,7 @@ setInterval(() => {
       state.session.featuredExpiresAt = null;
       state.session.featuredCost = 0;
       state.session.featuredDurationHours = 0;
+      changed = true;
     }
   }
 
@@ -231,31 +253,35 @@ setInterval(() => {
       state.session.requestWindowExpiresAt = null;
       state.session.requestWindowDuration = null;
       state.session.requestWindowLabel = null;
+      changed = true;
     }
   }
 
-  syncActivePerformer();
+  syncActivePerformer(state);
+  if (changed) {
+    await persistBusinessState();
+  }
 }, 10000); // Check every 10 seconds for tighter precision
 
-function executeAutoNuke() {
-  state.requests = state.requests.map(req => {
+function executeAutoNuke(inputState: BackendState) {
+  inputState.requests = inputState.requests.map(req => {
     if (req.status === 'hold') {
       return { ...req, status: 'denied' };
     }
     return req;
   });
-  state.session.status = 'closed';
-  state.session.endGigTimerStartedAt = null;
+  inputState.session.status = 'closed';
+  inputState.session.endGigTimerStartedAt = null;
 
   // Compute final totals
-  recalculateTotals();
+  recalculateTotals(inputState);
 }
 
-function recalculateTotals() {
-  const fulfilledItems = state.requests.filter(r => r.status === 'fulfilled');
+function recalculateTotals(inputState: BackendState) {
+  const fulfilledItems = inputState.requests.filter(r => r.status === 'fulfilled');
   const totalTips = fulfilledItems.reduce((acc, curr) => acc + curr.amount, 0);
   const totalCount = fulfilledItems.length;
-  const accumulatedFees = (state.requests.filter(r => r.status !== 'denied').reduce((acc, curr) => acc + curr.sponsorCount, 0)) * 1.0;
+  const accumulatedFees = (inputState.requests.filter(r => r.status !== 'denied').reduce((acc, curr) => acc + curr.sponsorCount, 0)) * 1.0;
 
   // Find top requested item
   const counts: Record<string, number> = {};
@@ -273,7 +299,7 @@ function recalculateTotals() {
     }
   }
 
-  state.session.totals = {
+  inputState.session.totals = {
     totalTips,
     accumulatedFees,
     totalCount,
@@ -286,7 +312,8 @@ app.get("/api/health/network-probe", (_req, res) => {
   res.status(204).end();
 });
 
-app.get("/api/state", (req, res) => {
+app.get("/api/state", async (req, res) => {
+  await refreshBusinessState();
   res.json(state);
 });
 
@@ -311,9 +338,14 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
   return res.json(result);
 });
 
-app.post("/api/session/start", (req, res) => {
+app.post("/api/session/start", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const { talentName, talentRole, feeType, minimumTip } = req.body;
+  await refreshBusinessState();
+  const { talentName, talentRole, feeType, minimumTip, gig_id } = req.body;
+
+  const requestedGigId = parseDurableGigId(gig_id);
+  activeGigId = requestedGigId ?? activeGigId ?? businessStore.createGigId();
+
   state.session = {
     status: 'active',
     talentName: talentName || "DJ Pro",
@@ -339,12 +371,14 @@ app.post("/api/session/start", (req, res) => {
     }
   };
   state.requests = []; // Clear current requests for a fresh session!
-  syncActivePerformer();
+  syncActivePerformer(state);
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
-app.post("/api/session/feature", (req, res) => {
+app.post("/api/session/feature", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { hours, cost, activate } = req.body;
   
   if (activate) {
@@ -359,31 +393,37 @@ app.post("/api/session/feature", (req, res) => {
     state.session.featuredDurationHours = 0;
   }
   
-  syncActivePerformer();
+  syncActivePerformer(state);
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
-app.post("/api/session/end", (req, res) => {
+app.post("/api/session/end", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   if (state.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
   }
   state.session.status = 'ending';
   state.session.endGigTimerStartedAt = new Date().toISOString();
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
-app.post("/api/session/closeout", (req, res) => {
+app.post("/api/session/closeout", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  executeAutoNuke();
+  await refreshBusinessState();
+  executeAutoNuke(state);
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
 // REQUEST WINDOW MANAGERS & PRESETS ENDPOINTS
 
 // Toggle overall requests status (Manual Mode)
-app.post("/api/session/window/toggle", (req, res) => {
+app.post("/api/session/window/toggle", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { open } = req.body;
   
   state.session.requestsOpen = !!open;
@@ -392,12 +432,14 @@ app.post("/api/session/window/toggle", (req, res) => {
   state.session.requestWindowDuration = null;
   state.session.requestWindowLabel = null;
   
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
 // Activate standard/custom preset time window
-app.post("/api/session/window/preset/activate", (req, res) => {
+app.post("/api/session/window/preset/activate", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { durationMinutes, label } = req.body;
   
   const duration = Number(durationMinutes);
@@ -411,12 +453,14 @@ app.post("/api/session/window/preset/activate", (req, res) => {
   state.session.requestWindowDuration = duration;
   state.session.requestWindowLabel = label || "Active Window";
   
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
 // Create/Build beautiful custom preset
-app.post("/api/session/window/preset/create", (req, res) => {
+app.post("/api/session/window/preset/create", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { label, durationMinutes } = req.body;
   
   const duration = Number(durationMinutes);
@@ -432,21 +476,25 @@ app.post("/api/session/window/preset/create", (req, res) => {
   };
   
   state.session.requestPresets.push(newPreset);
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
 // Delete custom preset
-app.post("/api/session/window/preset/delete", (req, res) => {
+app.post("/api/session/window/preset/delete", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { presetId } = req.body;
   
   state.session.requestPresets = state.session.requestPresets.filter(p => p.id !== presetId);
+  await persistBusinessState();
   res.json({ success: true, state });
 });
 
 // Create request + check profanity
 app.post("/api/request/create", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const {
     type,
     targetType,
@@ -472,6 +520,10 @@ app.post("/api/request/create", async (req, res) => {
   const durableGigId = parseDurableGigId(gig_id);
   if (!durableGigId) {
     return res.status(422).json({ error: "A valid route gig_id is required for durable request submission." });
+  }
+
+  if (!activeGigId || activeGigId !== durableGigId) {
+    activeGigId = durableGigId;
   }
 
   const amount_cents = Math.round(Math.max(Number(amount) || 0, state.session.minimumTip) * 100);
@@ -590,7 +642,8 @@ app.post("/api/request/create", async (req, res) => {
   };
 
   state.requests.push(newItem);
-  recalculateTotals();
+  recalculateTotals(state);
+  await persistBusinessState();
 
   const responseBody = {
     success: true, 
@@ -614,6 +667,7 @@ app.post("/api/request/create", async (req, res) => {
 // Boost an existing request
 app.post("/api/request/boost", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const {
     requestId,
     patronName,
@@ -634,6 +688,10 @@ app.post("/api/request/boost", async (req, res) => {
   const durableGigId = parseDurableGigId(gig_id);
   if (!durableGigId) {
     return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
+  }
+
+  if (!activeGigId || activeGigId !== durableGigId) {
+    activeGigId = durableGigId;
   }
 
   const request = state.requests.find(r => r.id === requestId);
@@ -736,7 +794,8 @@ app.post("/api/request/boost", async (req, res) => {
     request.shadowBanned = true; // Cascade shadow ban if the booster is vulgar
   }
 
-  recalculateTotals();
+  recalculateTotals(state);
+  await persistBusinessState();
   const responseBody = { success: true, request, state };
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
@@ -748,8 +807,9 @@ app.post("/api/request/boost", async (req, res) => {
 });
 
 // Triage Queue Action (Accept / Deny)
-app.post("/api/request/triage", (req, res) => {
+app.post("/api/request/triage", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { requestId, action } = req.body; // action: 'approve' | 'deny'
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
@@ -762,13 +822,15 @@ app.post("/api/request/triage", (req, res) => {
     request.status = 'denied';
   }
 
-  recalculateTotals();
+  recalculateTotals(state);
+  await persistBusinessState();
   res.json({ success: true, request, state });
 });
 
 // Fulfillment Queue Action (Fulfill)
-app.post("/api/request/fulfill", (req, res) => {
+app.post("/api/request/fulfill", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
   const { requestId } = req.body;
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
@@ -776,7 +838,8 @@ app.post("/api/request/fulfill", (req, res) => {
   }
 
   request.status = 'fulfilled';
-  recalculateTotals();
+  recalculateTotals(state);
+  await persistBusinessState();
 
   res.json({ success: true, request, state });
 });
@@ -824,6 +887,7 @@ app.post("/api/moderation/block", async (req, res) => {
 
 app.post("/api/moderation/hide", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
 
   const { requestId, reason, actor_user_id } = req.body;
   if (!requestId || !reason) {
@@ -836,6 +900,7 @@ app.post("/api/moderation/hide", async (req, res) => {
   }
 
   request.hidden = true;
+  await persistBusinessState();
 
   await moderationService.hideRequest({
     requestId: String(requestId),
@@ -848,6 +913,7 @@ app.post("/api/moderation/hide", async (req, res) => {
 
 app.post("/api/moderation/remove", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
+  await refreshBusinessState();
 
   const { requestId, reason, actor_user_id } = req.body;
   if (!requestId || !reason) {
@@ -861,7 +927,8 @@ app.post("/api/moderation/remove", async (req, res) => {
 
   request.removed = true;
   request.status = 'denied';
-  recalculateTotals();
+  recalculateTotals(state);
+  await persistBusinessState();
 
   await moderationService.removeRequest({
     requestId: String(requestId),
@@ -931,6 +998,8 @@ app.post("/api/music/search", (req, res) => {
 
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
+  await refreshBusinessState();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
