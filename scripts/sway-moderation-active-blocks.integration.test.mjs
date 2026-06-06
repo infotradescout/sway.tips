@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { Client } from 'pg';
-import { createModerationService } from '../src/server/moderation-service.ts';
+import { build } from 'esbuild';
 
 function getDatabaseUrl() {
   const value = process.env.DATABASE_URL;
@@ -43,8 +44,28 @@ async function applyMigrations(client) {
   }
 }
 
+async function loadModerationServiceFactory() {
+  const tempDir = join(process.cwd(), '.tmp');
+  const outfile = join(tempDir, 'moderation-service.integration.bundle.cjs');
+  const require = createRequire(import.meta.url);
+  mkdirSync(tempDir, { recursive: true });
+
+  await build({
+    entryPoints: ['src/server/moderation-service.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile,
+    sourcemap: false
+  });
+
+  const loaded = require(outfile);
+  return loaded.createModerationService;
+}
+
 async function main() {
   const databaseUrl = getDatabaseUrl();
+  const createModerationService = await loadModerationServiceFactory();
   const adminClient = new Client({ connectionString: databaseUrl });
 
   await adminClient.connect();
