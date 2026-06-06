@@ -15,6 +15,10 @@ const requiredServiceTerms = [
   'hideRequest',
   'removeRequest',
   'writeModerationEvent',
+  'activeBlocks',
+  'findMatchingBlock',
+  "eq(activeBlocks.status, 'active')",
+  'onConflictDoUpdate',
   'moderationEvents',
   "allow_with_local_filter",
   "hold_for_review",
@@ -26,6 +30,10 @@ for (const term of requiredServiceTerms) {
   if (!moderationService.toLowerCase().includes(term.toLowerCase())) {
     failures.push(`Moderation service missing required term: ${term}`);
   }
+}
+
+if (/new\s+Map\s*<.*BlockRule.*>\s*\(/i.test(moderationService) || /blockRules\.set\(/i.test(moderationService)) {
+  failures.push('Moderation service still uses an in-memory blockRules map as enforcement source of truth.');
 }
 
 const requiredServerTerms = [

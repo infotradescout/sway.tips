@@ -260,6 +260,21 @@ export const moderationEvents = pgTable('moderation_events', {
   entityIdx: index('moderation_events_entity_idx').on(table.entityType, table.entityId)
 }));
 
+export const activeBlocks = pgTable('active_blocks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  scope: text('scope').notNull(),
+  normalizedValue: text('normalized_value').notNull(),
+  reason: text('reason').notNull(),
+  actorUserId: uuid('actor_user_id').references(() => users.id),
+  status: text('status').notNull().default('active'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  scopeValueStatusIdx: uniqueIndex('active_blocks_scope_value_status_idx').on(table.scope, table.normalizedValue, table.status),
+  activeLookupIdx: index('active_blocks_scope_value_idx').on(table.scope, table.normalizedValue)
+}));
+
 export const auditEvents = pgTable('audit_events', {
   eventId: uuid('event_id').primaryKey().defaultRandom(),
   actorType: text('actor_type').notNull(),

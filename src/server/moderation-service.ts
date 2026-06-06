@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
+import { and, eq } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
-import { moderationEvents } from '../db/schema';
+import { activeBlocks, moderationEvents } from '../db/schema';
 
 export type ModerationOutageBehavior =
   | 'allow_with_local_filter'
@@ -17,6 +18,34 @@ type BlockRule = {
   scope: BlockScope;
   value: string;
   reason: string;
+};
+
+type BlockLookupResult = {
+  match: BlockRule | null;
+  outage: boolean;
+};
+
+type ModerationServiceOverrides = {
+  hasDurableStore?: boolean;
+  findMatchingBlock?: (input: {
+    patronUserId?: string | null;
+    patronDeviceIdHash?: string | null;
+    senderName?: string | null;
+  }) => Promise<BlockLookupResult>;
+  upsertActiveBlock?: (input: {
+    scope: BlockScope;
+    normalizedValue: string;
+    reason: string;
+    actorUserId?: string | null;
+  }) => Promise<void>;
+  writeModerationEvent?: (input: {
+    actorUserId?: string | null;
+    entityType: string;
+    entityId: string;
+    status: 'allowed' | 'held_for_review' | 'blocked';
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<{ status: 'written' | 'unavailable' }>;
 };
 
 const localReviewTerms = ['spam', 'abuse', 'vulgarword', 'asshole', 'bitch', 'bastard'];
@@ -48,9 +77,8 @@ function pickStricterSignal(a: LocalSignal, b: AiAssistiveSignal): LocalSignal {
   return a;
 }
 
-export function createModerationService(databaseUrl?: string) {
+export function createModerationService(databaseUrl?: string, overrides?: ModerationServiceOverrides) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
-  const blockRules = new Map<string, BlockRule>();
 
   function evaluateLocalSignal(input: { senderName: string; text: string }): { signal: LocalSignal; reason?: string } {
     const haystack = `${input.senderName} ${input.text}`.toLowerCase();
@@ -82,25 +110,51 @@ export function createModerationService(databaseUrl?: string) {
     return { signal: 'allow' };
   }
 
-  function findMatchingBlock(input: {
+  async function findMatchingBlock(input: {
     patronUserId?: string | null;
     patronDeviceIdHash?: string | null;
     senderName?: string | null;
-  }): BlockRule | null {
+  }): Promise<BlockLookupResult> {
+    if (!db) {
+      return { match: null, outage: false };
+    }
+
     const candidates: Array<[BlockScope, string | null | undefined]> = [
       ['patron_user_id', input.patronUserId],
       ['patron_device_id_hash', input.patronDeviceIdHash],
       ['sender_name', input.senderName]
     ];
 
-    for (const [scope, rawValue] of candidates) {
-      if (!rawValue) continue;
-      const key = `${scope}:${normalizeKey(rawValue)}`;
-      const existing = blockRules.get(key);
-      if (existing) return existing;
+    try {
+      for (const [scope, rawValue] of candidates) {
+        if (!rawValue) continue;
+        const normalizedValue = normalizeKey(rawValue);
+        const [existing] = await db
+          .select({ scope: activeBlocks.scope, normalizedValue: activeBlocks.normalizedValue, reason: activeBlocks.reason })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.scope, scope),
+            eq(activeBlocks.normalizedValue, normalizedValue),
+            eq(activeBlocks.status, 'active')
+          ))
+          .limit(1);
+
+        if (existing) {
+          return {
+            match: {
+              scope,
+              value: existing.normalizedValue,
+              reason: existing.reason
+            },
+            outage: false
+          };
+        }
+      }
+    } catch {
+      return { match: null, outage: true };
     }
 
-    return null;
+    return { match: null, outage: false };
   }
 
   async function writeModerationEvent(input: {
@@ -111,6 +165,10 @@ export function createModerationService(databaseUrl?: string) {
     reason?: string;
     metadata?: Record<string, unknown>;
   }) {
+    if (overrides?.writeModerationEvent) {
+      return overrides.writeModerationEvent(input);
+    }
+
     if (!db) {
       return { status: 'unavailable' as const };
     }
@@ -134,16 +192,29 @@ export function createModerationService(databaseUrl?: string) {
     patronDeviceIdHash?: string | null;
     aiAssistiveModeration?: () => Promise<AiAssistiveSignal>;
   }) {
-    const blockMatch = findMatchingBlock({
+    const blockLookup = await (overrides?.findMatchingBlock?.({
       patronUserId: input.patronUserId,
       patronDeviceIdHash: input.patronDeviceIdHash,
       senderName: input.senderName
-    });
+    }) ?? findMatchingBlock({
+      patronUserId: input.patronUserId,
+      patronDeviceIdHash: input.patronDeviceIdHash,
+      senderName: input.senderName
+    }));
 
-    if (blockMatch) {
+    if (blockLookup.outage) {
+      return {
+        decision: 'hold_for_review' as ModerationOutageBehavior,
+        reason: 'Moderation block store is unavailable; submission held for review.',
+        aiAssistiveUsed: false,
+        aiAvailable: false
+      };
+    }
+
+    if (blockLookup.match) {
       return {
         decision: 'block_submission' as ModerationOutageBehavior,
-        reason: `Blocked by ${blockMatch.scope} rule: ${blockMatch.reason}`,
+        reason: `Blocked by ${blockLookup.match.scope} rule: ${blockLookup.match.reason}`,
         aiAssistiveUsed: false,
         aiAvailable: false
       };
@@ -198,18 +269,48 @@ export function createModerationService(databaseUrl?: string) {
     reason: string;
     actorUserId?: string | null;
   }) {
-    const key = `${input.scope}:${normalizeKey(input.value)}`;
+    const normalizedValue = normalizeKey(input.value);
     const rule: BlockRule = {
       scope: input.scope,
-      value: normalizeKey(input.value),
+      value: normalizedValue,
       reason: input.reason
     };
-    blockRules.set(key, rule);
+
+    if (overrides?.upsertActiveBlock) {
+      await overrides.upsertActiveBlock({
+        scope: input.scope,
+        normalizedValue,
+        reason: input.reason,
+        actorUserId: input.actorUserId ?? null
+      });
+    } else if (db) {
+      await db
+        .insert(activeBlocks)
+        .values({
+          scope: input.scope,
+          normalizedValue,
+          reason: input.reason,
+          actorUserId: input.actorUserId ?? null,
+          status: 'active',
+          revokedAt: null,
+          metadata: { source: 'moderation.block' }
+        })
+        .onConflictDoUpdate({
+          target: [activeBlocks.scope, activeBlocks.normalizedValue, activeBlocks.status],
+          set: {
+            reason: input.reason,
+            actorUserId: input.actorUserId ?? null,
+            revokedAt: null,
+            metadata: { source: 'moderation.block' },
+            updatedAt: new Date()
+          }
+        });
+    }
 
     await writeModerationEvent({
       actorUserId: input.actorUserId ?? null,
       entityType: 'block_rule',
-      entityId: key,
+      entityId: `${input.scope}:${normalizedValue}`,
       status: 'blocked',
       reason: input.reason,
       metadata: {
@@ -284,7 +385,7 @@ export function createModerationService(databaseUrl?: string) {
   }
 
   return {
-    hasDurableStore: Boolean(db),
+    hasDurableStore: overrides?.hasDurableStore ?? Boolean(db),
     evaluateSubmission,
     addBlockRule,
     recordPatronReport,

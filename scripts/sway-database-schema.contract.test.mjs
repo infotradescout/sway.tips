@@ -60,6 +60,7 @@ const requiredTables = [
   'payment_events',
   'payouts',
   'moderation_events',
+  'active_blocks',
   'audit_events',
   'idempotency_keys',
   'client_pending_actions'
@@ -198,6 +199,18 @@ const requiredTableColumns = {
     'next_status',
     'metadata',
     'created_at'
+  ],
+  active_blocks: [
+    'id',
+    'scope',
+    'normalized_value',
+    'reason',
+    'actor_user_id',
+    'status',
+    'created_at',
+    'updated_at',
+    'revoked_at',
+    'metadata'
   ]
 };
 
@@ -217,6 +230,7 @@ for (const term of [
   "verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000)",
   "autoCloseoutAt: timestamp('auto_closeout_at'",
   "expiresAt: timestamp('expires_at'",
+  "export const activeBlocks",
   'export const idempotencyKeys',
   'export const clientPendingActions'
 ]) {
