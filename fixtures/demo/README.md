@@ -1,5 +1,7 @@
 # Sway Demo Fixtures
 
+See `../../docs/DEMO_PREVIEW_RUNBOOK.md` for the stakeholder demo checklist, kill switch, validation commands, and the required "do not claim" boundaries.
+
 This folder contains demo-only records for previewing Sway UI surfaces.
 
 These records are not production data. They must stay visibly marked with:

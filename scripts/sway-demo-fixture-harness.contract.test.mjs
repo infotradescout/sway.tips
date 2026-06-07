@@ -36,6 +36,7 @@ const overlayShell = read('src/shells/OverlayApp.tsx');
 const adminShell = read('src/shells/AdminApp.tsx');
 const splitView = read('src/components/SplitViewShell.tsx');
 const demoReadme = read('fixtures/demo/README.md');
+const demoRunbook = read('docs/DEMO_PREVIEW_RUNBOOK.md');
 
 for (const term of [
   "import.meta.env.VITE_SWAY_DEMO_MODE === 'true'",
@@ -156,6 +157,20 @@ for (const term of [
   'Deleting this fixture folder must not remove or break Split View'
 ]) {
   requireIncludes(demoReadme, term, `Demo README missing Split View removal rule: ${term}`);
+}
+
+for (const term of [
+  'Kill Switch',
+  'remove or unset `VITE_SWAY_DEMO_MODE`',
+  'default production build must not publish `sway-demo-fixtures.json`',
+  'Demo mode must not create backend API, mutation, payment, moderation, persistence, or admin authority',
+  'Do not claim live payment execution',
+  'Do not claim live admin authority',
+  'Do not claim live moderation enforcement',
+  'Do not claim App Store or TestFlight readiness',
+  'artifacts/demo-preview-smoke/<timestamp>/'
+]) {
+  requireIncludes(demoRunbook, term, `Demo preview runbook missing stakeholder safety boundary: ${term}`);
 }
 
 if (!existsSync(fixturePath)) {
