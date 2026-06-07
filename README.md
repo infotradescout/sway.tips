@@ -44,6 +44,8 @@ Do not submit this app for public App Store review until the launch gate is comp
 
 ### Deploy Verification Checklist
 
+Current live DNS status: blocked. `sway.tips` still serves GoDaddy until DNS/hosting moves to the deployed Sway app.
+
 - `https://sway.tips/` serves public landing shell.
 - `https://www.sway.tips/` serves public landing shell.
 - `https://app.sway.tips/` serves app shell entry (patron shell).
