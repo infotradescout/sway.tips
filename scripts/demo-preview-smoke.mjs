@@ -23,7 +23,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-off-public.png',
-        expectedText: ['Pre-Production MVP Surface', 'Real-money payments are not live yet.'],
+        expectedText: ['Sway', 'Talent login', 'Open patron gig route'],
         absentText: ['Demo preview data']
       },
       {
@@ -77,7 +77,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-on-public.png',
-        expectedText: ['Pre-Production MVP Surface', 'Demo preview data'],
+        expectedText: ['Sway', 'Talent login', 'Open patron gig route', 'Demo preview data'],
         absentText: []
       },
       {
