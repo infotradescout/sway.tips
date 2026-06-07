@@ -101,8 +101,8 @@ const scenarios = [
         path: '/talent/gigs',
         host: 'app.sway.tips',
         screenshot: 'demo-on-talent.png',
-        expectedText: ['Performer Console', 'Demo preview data', 'Preview data only; no live tips are being collected.', 'Midnight City'],
-        absentText: ['No active session yet']
+        expectedText: ['Performer Console', 'Demo preview data', 'Preview data only; no live tips are being collected.', 'Midnight City', 'Preview only', 'Preview total shown'],
+        absentText: ['No active session yet', 'Fulfill & Capture', 'Current captured total:', 'Veto / Cancel Promotion']
       },
       {
         surface: 'admin preview Split View',

@@ -284,14 +284,15 @@ export default function TalentDashboard({
         </div>
 
         {/* Header CTA Tools */}
-        {session.status !== 'inactive' && (
-          <div className="flex items-center gap-3 font-sans">
-            {session.status === 'active' ? (
-              <button 
-                onClick={onEndSession}
+          {session.status !== 'inactive' && (
+            <div className="flex items-center gap-3 font-sans">
+              {session.status === 'active' ? (
+                <button
+                onClick={previewMode ? undefined : onEndSession}
+                disabled={previewMode}
                 className="flex items-center gap-1.5 px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-600 shadow rounded-xl text-xs font-bold transition-all cursor-pointer glow-fuchsia font-sans"
               >
-                <X className="w-4 h-4" /> End Gig Live
+                <X className="w-4 h-4" /> {previewMode ? 'Preview only' : 'End Gig Live'}
               </button>
             ) : (
               <div className="flex items-center gap-3">
@@ -299,10 +300,11 @@ export default function TalentDashboard({
                   <Clock className="w-3.5 h-3.5 animate-spin" /> Sweep: {timeLeft}
                 </div>
                 <button 
-                  onClick={onCloseout}
+                  onClick={previewMode ? undefined : onCloseout}
+                  disabled={previewMode}
                   className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold border border-fuchsia-600 rounded-xl text-xs transition-transform transform active:scale-95 cursor-pointer glow-fuchsia"
                 >
-                  Close Out &amp; Capture
+                  {previewMode ? 'Preview only' : 'Close Out & Capture'}
                 </button>
               </div>
             )}
@@ -638,10 +640,11 @@ export default function TalentDashboard({
                           <div>
                             <button
                               type="button"
-                              onClick={() => onFulfill(req.id)}
+                              onClick={previewMode ? undefined : () => onFulfill(req.id)}
+                              disabled={previewMode}
                               className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia"
                             >
-                              <Award className="w-4 h-4" /> Fulfill &amp; Capture
+                              <Award className="w-4 h-4" /> {previewMode ? 'Preview only' : 'Fulfill & Capture'}
                             </button>
                           </div>
                         </motion.div>
@@ -866,10 +869,11 @@ export default function TalentDashboard({
 
                   <button
                     type="button"
-                    onClick={() => handleToggleFeature(0, 0, false)}
+                    onClick={previewMode ? undefined : () => handleToggleFeature(0, 0, false)}
+                    disabled={previewMode}
                     className="w-full text-center py-2 bg-slate-950 border border-white/5 text-xs font-bold text-slate-400 hover:text-red-400 hover:bg-red-950/10 hover:border-red-500/35 rounded-xl transition-all cursor-pointer"
                   >
-                    Veto / Cancel Promotion
+                    {previewMode ? 'Preview only: promotion locked' : 'Veto / Cancel Promotion'}
                   </button>
                 </div>
               ) : (
@@ -936,18 +940,20 @@ export default function TalentDashboard({
                   {session.totals.totalTips >= 50 ? (
                     <button
                       type="button"
-                      onClick={() => handleToggleFeature(2, 0, true)}
+                      onClick={previewMode ? undefined : () => handleToggleFeature(2, 0, true)}
+                      disabled={previewMode}
                       className="w-full py-2.5 flex items-center justify-center gap-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-cyan-500/10 cursor-pointer text-center font-sans"
                     >
-                      🌟 Redeem Shift Achievement! (2-Hr Promo)
+                      {previewMode ? 'Preview only: no promo action' : '🌟 Redeem Shift Achievement! (2-Hr Promo)'}
                     </button>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => handleToggleFeature(selectedHours, selectedHours * 5, true)}
+                      onClick={previewMode ? undefined : () => handleToggleFeature(selectedHours, selectedHours * 5, true)}
+                      disabled={previewMode}
                       className="w-full py-2.5 flex items-center justify-center gap-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-amber-500/10 cursor-pointer text-center font-sans"
                     >
-                      🌟 Unlock Placement (${selectedHours * 5}.00)
+                      {previewMode ? 'Preview only: no placement purchase' : `🌟 Unlock Placement ($${selectedHours * 5}.00)`}
                     </button>
                   )}
                 </div>
@@ -962,7 +968,7 @@ export default function TalentDashboard({
 
               <div className="space-y-3 select-none font-sans">
                 <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>Current captured total:</span>
+                  <span>{previewMode ? 'Preview total shown:' : 'Current captured total:'}</span>
                   <span className="font-mono text-sm font-bold text-white">{formatValue(session.totals.totalTips)}</span>
                 </div>
                 

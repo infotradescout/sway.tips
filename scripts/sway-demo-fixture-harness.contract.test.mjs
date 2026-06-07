@@ -23,6 +23,7 @@ function walkFiles(dir) {
 
 const demoMode = read('src/demo-mode.tsx');
 const shared = read('src/shells/shared.tsx');
+const server = read('server.ts');
 const accessControl = read('src/server/access-control.ts');
 const viteConfig = read('vite.config.ts');
 const packageJson = read('package.json');
@@ -65,6 +66,15 @@ for (const term of [
   requireIncludes(accessControl, term, `Demo preview shell guard missing safe shell-only allowance: ${term}`);
 }
 
+for (const term of [
+  "req.path.startsWith('/api')",
+  "req.path.startsWith('/assets')",
+  "req.path.startsWith('/shells')",
+  'routeFamilyGuard(accessControl)'
+]) {
+  requireIncludes(server, term, `Server must keep demo shell preview allowance outside API/static routes: ${term}`);
+}
+
 requireIncludes(viteConfig, "process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.resolve(__dirname, 'fixtures/demo') : false", 'Vite must only publish demo fixtures when VITE_SWAY_DEMO_MODE is explicitly true.');
 requireIncludes(packageJson, 'sway-demo-fixture-harness.contract.test.mjs', 'test:contracts must include the demo fixture harness contract.');
 
@@ -100,6 +110,15 @@ for (const term of [
   'Preview data only; no live tips are being collected.'
 ]) {
   requireIncludes(talentDashboard, term, `Talent preview must prevent live-activity interpretation risk: ${term}`);
+}
+
+for (const term of [
+  'Preview only',
+  'Preview total shown:',
+  'Preview only: promotion locked',
+  'Preview only: no placement purchase'
+]) {
+  requireIncludes(talentDashboard, term, `Talent preview must not imply capture or promotion authority: ${term}`);
 }
 
 for (const term of [
