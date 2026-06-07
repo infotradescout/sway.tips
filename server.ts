@@ -1355,7 +1355,10 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: ['sway.tips', 'www.sway.tips', 'app.sway.tips']
+      },
       appType: "custom",
     });
     app.use(vite.middlewares);

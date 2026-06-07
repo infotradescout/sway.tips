@@ -28,6 +28,7 @@ export default defineConfig(() => {
       },
     },
     server: {
+      allowedHosts: ['sway.tips', 'www.sway.tips', 'app.sway.tips'],
       // HMR can be disabled in hosted edit environments with DISABLE_HMR.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.

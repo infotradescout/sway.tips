@@ -244,6 +244,18 @@ export function createAccessControl({
 export function routeFamilyGuard(accessControl: AccessControl) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const shell = req.headers['x-sway-shell'];
+    const demoPreviewShellAllowed =
+      process.env.VITE_SWAY_DEMO_MODE === 'true' &&
+      req.method === 'GET' &&
+      (shell === 'talent' || shell === 'admin');
+
+    if (demoPreviewShellAllowed) {
+      req.headers['x-sway-resolved-actor-id'] = '';
+      req.headers['x-sway-resolved-device-id-hash'] = '';
+      next();
+      return;
+    }
+
     const guard =
       shell === 'talent'
         ? accessControl.requireTalentAccess

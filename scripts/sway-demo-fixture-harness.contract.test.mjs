@@ -23,6 +23,7 @@ function walkFiles(dir) {
 
 const demoMode = read('src/demo-mode.tsx');
 const shared = read('src/shells/shared.tsx');
+const accessControl = read('src/server/access-control.ts');
 const viteConfig = read('vite.config.ts');
 const packageJson = read('package.json');
 const publicShell = read('shells/public.html');
@@ -53,6 +54,15 @@ for (const term of [
   'setInterval(fetchState, 4000)'
 ]) {
   requireIncludes(shared, term, `Shared state loader missing demo/real split: ${term}`);
+}
+
+for (const term of [
+  "process.env.VITE_SWAY_DEMO_MODE === 'true'",
+  "req.method === 'GET'",
+  "shell === 'talent' || shell === 'admin'",
+  'demoPreviewShellAllowed'
+]) {
+  requireIncludes(accessControl, term, `Demo preview shell guard missing safe shell-only allowance: ${term}`);
 }
 
 requireIncludes(viteConfig, "process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.resolve(__dirname, 'fixtures/demo') : false", 'Vite must only publish demo fixtures when VITE_SWAY_DEMO_MODE is explicitly true.');
