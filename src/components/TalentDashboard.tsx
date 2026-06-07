@@ -40,6 +40,7 @@ interface TalentDashboardProps {
   onFulfill: (requestId: string) => void;
   onHide: (requestId: string) => void;
   onRemove: (requestId: string) => void;
+  previewMode?: boolean;
 }
 
 export default function TalentDashboard({
@@ -51,7 +52,8 @@ export default function TalentDashboard({
   onTriage,
   onFulfill,
   onHide,
-  onRemove
+  onRemove,
+  previewMode = false
 }: TalentDashboardProps) {
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
@@ -273,6 +275,11 @@ export default function TalentDashboard({
               {session.status === 'ending' && '⏳ Post-Gig 5-Minute Sweep timer ticking'}
               {session.status === 'inactive' && 'Select your performance rules to generate QR Code'}
             </p>
+            {previewMode && (
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
+                Preview data only; no live tips are being collected.
+              </p>
+            )}
           </div>
         </div>
 

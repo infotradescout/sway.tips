@@ -56,6 +56,7 @@ interface PatronViewProps {
   onBlockFoundation: (scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name', value: string, reason: string) => Promise<any>;
   onSupportContact: () => Promise<any>;
   onDataDeletionPlaceholder: () => Promise<any>;
+  previewMode?: boolean;
 }
 
 export default function PatronView({
@@ -69,7 +70,8 @@ export default function PatronView({
   onReportContent,
   onBlockFoundation,
   onSupportContact,
-  onDataDeletionPlaceholder
+  onDataDeletionPlaceholder,
+  previewMode = false
 }: PatronViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
@@ -586,7 +588,9 @@ export default function PatronView({
             </div>
           )}
           <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
-            Sway {session.talentName || 'this performer'} on stage through the live ladder. Payment processing is not yet enabled in this build.
+            {previewMode
+              ? 'Preview data only. No checkout/payment/moderation action will be sent.'
+              : `Sway ${session.talentName || 'this performer'} on stage through the live ladder. Payment processing is not yet enabled in this build.`}
           </p>
         </div>
       </div>
@@ -1421,8 +1425,13 @@ export default function PatronView({
                   <div className="space-y-1">
                     <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">CHECKOUT INVOICE</span>
                     <h3 className="font-sans text-base font-bold text-white">
-                      {checkoutPayload.type === 'request' ? 'Live Desk Board Request' : `Boost Standing Index`}
+                      {previewMode ? 'Preview Checkout Only' : checkoutPayload.type === 'request' ? 'Live Desk Board Request' : `Boost Standing Index`}
                     </h3>
+                    {previewMode && (
+                      <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
+                        Demo data. No payment or request will be recorded.
+                      </p>
+                    )}
                   </div>
 
                   {/* Pricing detail sheets */}
@@ -1445,7 +1454,7 @@ export default function PatronView({
                     </div>
 
                     <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                      <span className="text-slate-400">Test Checkout Total:</span>
+                      <span className="text-slate-400">{previewMode ? 'Preview Checkout Total:' : 'Test Checkout Total:'}</span>
                       <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                     </div>
                   </div>
@@ -1486,20 +1495,20 @@ export default function PatronView({
                     <button
                       type="button"
                       onClick={completePayment}
-                      disabled={isPaying}
+                      disabled={isPaying || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-black hover:bg-slate-900 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500" /> {isPaying ? "Recording..." : "Record test checkout"}
+                      <Lock className="w-3.5 h-3.5 text-fuchsia-500" /> {previewMode ? 'Preview only: checkout disabled' : isPaying ? "Recording..." : "Record test checkout"}
                     </button>
 
                     {/* Temporary alternate test action */}
                     <button
                       type="button"
                       onClick={completePayment}
-                      disabled={isPaying}
+                      disabled={isPaying || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-slate-100 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500 font-bold" /> {isPaying ? "Recording..." : "Record alternate test checkout"}
+                      <Lock className="w-3.5 h-3.5 text-fuchsia-500 font-bold" /> {previewMode ? 'Preview only: no alternate checkout' : isPaying ? "Recording..." : "Record alternate test checkout"}
                     </button>
 
                     <button

@@ -26,6 +26,8 @@ const shared = read('src/shells/shared.tsx');
 const viteConfig = read('vite.config.ts');
 const packageJson = read('package.json');
 const publicShell = read('shells/public.html');
+const patronView = read('src/components/PatronView.tsx');
+const talentDashboard = read('src/components/TalentDashboard.tsx');
 const patronShell = read('src/shells/PatronApp.tsx');
 const talentShell = read('src/shells/TalentApp.tsx');
 const overlayShell = read('src/shells/OverlayApp.tsx');
@@ -72,6 +74,22 @@ for (const [name, source] of [
 ]) {
   requireIncludes(source, 'rejectDemoMutation', `${name} must keep demo previews read-only.`);
   requireIncludes(source, 'No backend mutation was sent.', `${name} must make demo mutation suppression explicit.`);
+}
+
+for (const term of [
+  'previewMode',
+  'Preview data only. No checkout/payment/moderation action will be sent.',
+  'Demo data. No payment or request will be recorded.',
+  'Preview only: checkout disabled'
+]) {
+  requireIncludes(patronView, term, `Patron preview must prevent payment interpretation risk: ${term}`);
+}
+
+for (const term of [
+  'previewMode',
+  'Preview data only; no live tips are being collected.'
+]) {
+  requireIncludes(talentDashboard, term, `Talent preview must prevent live-activity interpretation risk: ${term}`);
 }
 
 for (const term of [

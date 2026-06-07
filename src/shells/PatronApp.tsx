@@ -172,6 +172,7 @@ export default function PatronApp() {
                 onBlockFoundation={handleBlockFoundation}
                 onSupportContact={handleSupportContact}
                 onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
+                previewMode={demoMode}
               />
             }
             secondary={

@@ -177,6 +177,7 @@ export default function TalentApp() {
                 onFulfill={handleFulfillRequest}
                 onHide={handleHideRequest}
                 onRemove={handleRemoveRequest}
+                previewMode={demoMode}
               />
             }
             secondary={
