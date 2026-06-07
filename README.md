@@ -44,7 +44,15 @@ Do not submit this app for public App Store review until the launch gate is comp
 
 ### Deploy Verification Checklist
 
-Current live DNS status: blocked. `sway.tips` still serves GoDaddy until DNS/hosting moves to the deployed Sway app.
+Current live DNS status: pending cutover. Add `sway.tips`, `www.sway.tips`, and `app.sway.tips` to the Render service at `https://sway-tips.onrender.com`, then update GoDaddy DNS:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| A | `@` | `216.24.57.1` |
+| CNAME | `www` | `sway-tips.onrender.com` |
+| CNAME | `app` | `sway-tips.onrender.com` |
+
+Remove conflicting `AAAA`, parked-domain, forwarding, or duplicate apex records before Render verification.
 
 - `https://sway.tips/` serves public landing shell.
 - `https://www.sway.tips/` serves public landing shell.
