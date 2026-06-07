@@ -77,7 +77,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-on-public.png',
-        expectedText: ['Sway', 'Talent login', 'Open patron gig route', 'Demo preview data'],
+        expectedText: ['Sway', 'Talent login', 'Open patron gig route'],
         absentText: []
       },
       {

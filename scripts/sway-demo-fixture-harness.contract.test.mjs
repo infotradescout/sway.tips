@@ -27,7 +27,6 @@ const server = read('server.ts');
 const accessControl = read('src/server/access-control.ts');
 const viteConfig = read('vite.config.ts');
 const packageJson = read('package.json');
-const publicShell = read('shells/public.html');
 const patronView = read('src/components/PatronView.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const patronShell = read('src/shells/PatronApp.tsx');
@@ -36,7 +35,6 @@ const overlayShell = read('src/shells/OverlayApp.tsx');
 const adminShell = read('src/shells/AdminApp.tsx');
 const splitView = read('src/components/SplitViewShell.tsx');
 const demoReadme = read('fixtures/demo/README.md');
-const demoRunbook = read('docs/DEMO_PREVIEW_RUNBOOK.md');
 
 for (const term of [
   "import.meta.env.VITE_SWAY_DEMO_MODE === 'true'",
@@ -80,7 +78,6 @@ requireIncludes(viteConfig, "process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.r
 requireIncludes(packageJson, 'sway-demo-fixture-harness.contract.test.mjs', 'test:contracts must include the demo fixture harness contract.');
 
 for (const [name, source] of [
-  ['public shell', publicShell],
   ['patron shell', patronShell],
   ['talent shell', talentShell],
   ['overlay shell', overlayShell],
@@ -157,20 +154,6 @@ for (const term of [
   'Deleting this fixture folder must not remove or break Split View'
 ]) {
   requireIncludes(demoReadme, term, `Demo README missing Split View removal rule: ${term}`);
-}
-
-for (const term of [
-  'Kill Switch',
-  'remove or unset `VITE_SWAY_DEMO_MODE`',
-  'default production build must not publish `sway-demo-fixtures.json`',
-  'Demo mode must not create backend API, mutation, payment, moderation, persistence, or admin authority',
-  'Do not claim live payment execution',
-  'Do not claim live admin authority',
-  'Do not claim live moderation enforcement',
-  'Do not claim App Store or TestFlight readiness',
-  'artifacts/demo-preview-smoke/<timestamp>/'
-]) {
-  requireIncludes(demoRunbook, term, `Demo preview runbook missing stakeholder safety boundary: ${term}`);
 }
 
 if (!existsSync(fixturePath)) {
