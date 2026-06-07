@@ -1,7 +1,9 @@
 import { Lock, Users } from 'lucide-react';
 import { motion } from 'motion/react';
+import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
 import VictoryScreen from '../components/VictoryScreen';
+import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import { LoadingState, ShellMessage, postJson, useSwayState } from './shared';
 
 function isTalentLogin(pathname: string) {
@@ -10,6 +12,11 @@ function isTalentLogin(pathname: string) {
 
 export default function TalentApp() {
   const { bState, isLoading, setBState } = useSwayState();
+  const demoMode = isDemoModeEnabled();
+
+  const rejectDemoMutation = async () => {
+    throw new Error('Demo preview data is read-only. No backend mutation was sent.');
+  };
 
   const handleStartSession = async (setupData: {
     talentName: string;
@@ -17,6 +24,7 @@ export default function TalentApp() {
     feeType: 'talent' | 'patron';
     minimumTip: number;
   }) => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/session/start', setupData);
       setBState(data.state);
@@ -26,6 +34,7 @@ export default function TalentApp() {
   };
 
   const handleEndSession = async () => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/session/end');
       setBState(data.state);
@@ -35,6 +44,7 @@ export default function TalentApp() {
   };
 
   const handleCloseout = async () => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/session/closeout');
       setBState(data.state);
@@ -44,6 +54,7 @@ export default function TalentApp() {
   };
 
   const handleTriageRequest = async (requestId: string, action: 'approve' | 'deny') => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/request/triage', { requestId, action });
       setBState(data.state);
@@ -53,6 +64,7 @@ export default function TalentApp() {
   };
 
   const handleFulfillRequest = async (requestId: string) => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/request/fulfill', { requestId });
       setBState(data.state);
@@ -62,6 +74,7 @@ export default function TalentApp() {
   };
 
   const handleHideRequest = async (requestId: string) => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/moderation/hide', {
         requestId,
@@ -74,6 +87,7 @@ export default function TalentApp() {
   };
 
   const handleRemoveRequest = async (requestId: string) => {
+    if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/moderation/remove', {
         requestId,
@@ -112,6 +126,8 @@ export default function TalentApp() {
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
+  const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
+  const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
 
   if (session.status === 'closed') {
     return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
@@ -119,6 +135,7 @@ export default function TalentApp() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+      <DemoModeBanner />
       <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -130,21 +147,62 @@ export default function TalentApp() {
               <p className="text-[9px] text-slate-400">Gig setup, queue triage, fulfillment, and closeout</p>
             </div>
           </div>
+          <DemoModeBanner compact />
         </div>
       </div>
 
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          <TalentDashboard
-            session={session}
-            requests={requests}
-            onStartSession={handleStartSession}
-            onEndSession={handleEndSession}
-            onCloseout={handleCloseout}
-            onTriage={handleTriageRequest}
-            onFulfill={handleFulfillRequest}
-            onHide={handleHideRequest}
-            onRemove={handleRemoveRequest}
+          <SplitViewShell
+            title="Performer Console"
+            eyebrow="Split View"
+            primaryLabel="Queue operations"
+            secondaryLabel="Session inspector"
+            badge={<DemoModeBanner compact />}
+            isEmpty={session.status === 'inactive' && requests.length === 0}
+            emptyState={
+              <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
+                <p className="text-sm font-bold text-white">No active session yet</p>
+                <p className="mt-2 text-xs text-slate-400">Start a real session or enable demo mode; Split View stays mounted either way.</p>
+              </div>
+            }
+            primary={
+              <TalentDashboard
+                session={session}
+                requests={requests}
+                onStartSession={handleStartSession}
+                onEndSession={handleEndSession}
+                onCloseout={handleCloseout}
+                onTriage={handleTriageRequest}
+                onFulfill={handleFulfillRequest}
+                onHide={handleHideRequest}
+                onRemove={handleRemoveRequest}
+              />
+            }
+            secondary={
+              <div className="space-y-4 text-sm">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
+                  <p className="mt-1 font-bold text-white">{session.talentName || 'Unassigned performer'}</p>
+                  <p className="text-xs text-slate-400">{session.status} / {session.talentRole}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg bg-slate-950 p-3">
+                    <p className="text-slate-500">Pending</p>
+                    <p className="mt-1 font-mono text-lg font-black text-amber-300">{pendingCount}</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-950 p-3">
+                    <p className="text-slate-500">Approved</p>
+                    <p className="mt-1 font-mono text-lg font-black text-cyan-300">{approvedCount}</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Window</p>
+                  <p className="mt-2 font-bold text-white">{session.requestsOpen ? 'Open' : 'Closed'}</p>
+                  <p className="text-xs text-slate-400">{session.requestWindowLabel || 'Manual request window'}</p>
+                </div>
+              </div>
+            }
           />
         </motion.div>
       </main>

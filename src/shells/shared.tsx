@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isDemoModeEnabled, loadDemoBackendState } from '../demo-mode';
 import { BackendState, GigSession } from '../types';
 
 export const emptySession: GigSession = {
@@ -73,6 +74,18 @@ export function useSwayState() {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchState = async () => {
+    if (isDemoModeEnabled()) {
+      try {
+        const demoState = await loadDemoBackendState();
+        if (demoState) setBState(demoState);
+      } catch (e) {
+        console.warn('Unable to load demo fixture state:', e);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     try {
       const response = await fetch('/api/state');
       const data = await response.json();
@@ -86,6 +99,8 @@ export function useSwayState() {
 
   useEffect(() => {
     fetchState();
+
+    if (isDemoModeEnabled()) return;
 
     const interval = setInterval(fetchState, 4000);
     const handleForceSync = () => fetchState();

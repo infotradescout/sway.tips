@@ -5,6 +5,12 @@ const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const failures = [];
 
+function requireTerm(term, label = term) {
+  if (!server.includes(term)) {
+    failures.push(`Host-aware routing missing term: ${label}`);
+  }
+}
+
 for (const term of [
   'normalizeHost',
   "host === 'app.sway.tips'",
@@ -14,9 +20,7 @@ for (const term of [
   "if (isAppSubdomain) return 'patron';",
   "if (isPublicHost) return 'public';"
 ]) {
-  if (!server.includes(term)) {
-    failures.push(`Host-aware routing missing term: ${term}`);
-  }
+  requireTerm(term);
 }
 
 const rootBranchStart = server.indexOf("urlPath === '/' || urlPath === '/home'");
@@ -24,6 +28,28 @@ const appBranch = server.indexOf("if (isAppSubdomain) return 'patron';", Math.ma
 const publicBranch = server.indexOf("if (isPublicHost) return 'public';", Math.max(rootBranchStart, 0));
 if (rootBranchStart === -1 || appBranch === -1 || publicBranch === -1 || appBranch > publicBranch) {
   failures.push('Root/home host branch must resolve app.sway.tips to patron and apex hosts to public.');
+}
+
+const publicHostBranchPattern = /const isPublicHost = host === '' \|\| host === 'sway\.tips' \|\| host === 'www\.sway\.tips' \|\| host === 'localhost' \|\| host === '127\.0\.0\.1';/;
+if (!publicHostBranchPattern.test(server)) {
+  failures.push('Public host branch must explicitly include sway.tips and www.sway.tips.');
+}
+
+const rootHomeBranchPattern = /if \(urlPath === '\/' \|\| urlPath === '\/home'\) \{\s*if \(isAppSubdomain\) return 'patron';\s*if \(isPublicHost\) return 'public';\s*return 'patron';\s*\}/;
+if (!rootHomeBranchPattern.test(server)) {
+  failures.push('Root/home branch must keep app.sway.tips on patron shell, public hosts on public shell, and unknown hosts on patron.');
+}
+
+for (const requiredCase of [
+  { host: 'sway.tips', paths: ['/', '/home'], shell: 'public' },
+  { host: 'www.sway.tips', paths: ['/', '/home'], shell: 'public' },
+  { host: 'app.sway.tips', paths: ['/', '/home'], shell: 'patron' }
+]) {
+  requireTerm(`host === '${requiredCase.host}'`, `${requiredCase.host} host detection`);
+  for (const routePath of requiredCase.paths) {
+    requireTerm(`urlPath === '${routePath}'`, `${requiredCase.host} ${routePath} route branch`);
+  }
+  requireTerm(`return '${requiredCase.shell}'`, `${requiredCase.host} root/home ${requiredCase.shell} shell`);
 }
 
 for (const routeToShell of [
@@ -38,6 +64,20 @@ for (const routeToShell of [
   if (routeIndex === -1 || shellIndex === -1 || shellIndex - routeIndex > 240) {
     failures.push(`Expected ${routeToShell.route} to map to ${routeToShell.shell}.`);
   }
+}
+
+for (const term of [
+  "if (urlPath.startsWith('/talent')) return 'talent';",
+  "if (urlPath.startsWith('/overlay')) return 'overlay';",
+  "if (urlPath.startsWith('/admin')) return 'admin';",
+  "if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';",
+  "if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';",
+  "return !(isProduction && shell === 'dev-sandbox');",
+  "app.get('/shells/dev-sandbox.html'",
+  "app.get(/^\\/assets\\/dev-sandbox-.*\\.js$/",
+  "res.status(404).send('Not found')"
+]) {
+  requireTerm(term);
 }
 
 if (failures.length) {

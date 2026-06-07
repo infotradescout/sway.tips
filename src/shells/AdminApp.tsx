@@ -1,7 +1,50 @@
 import { Lock } from 'lucide-react';
+import SplitViewShell from '../components/SplitViewShell';
+import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import { ShellMessage } from './shared';
 
 export default function AdminApp() {
+  if (isDemoModeEnabled()) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <DemoModeBanner />
+        <SplitViewShell
+          title="Admin Preview"
+          eyebrow="Split View"
+          primaryLabel="Operator queues"
+          secondaryLabel="Authority boundary"
+          badge={<DemoModeBanner compact />}
+          isEmpty={false}
+          emptyState={
+            <div className="rounded-xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
+              Admin preview has no records yet.
+            </div>
+          }
+          primary={
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">Demo preview data</p>
+              {['Moderation queue', 'Payment lifecycle preview', 'Identity review'].map((label) => (
+                <div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
+                  <p className="text-sm font-bold text-white">{label}</p>
+                  <p className="mt-1 text-xs text-slate-400">Preview data only. No admin mutation route is enabled here.</p>
+                </div>
+              ))}
+            </div>
+          }
+          secondary={
+            <div className="space-y-3 text-sm">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
+                <Lock className="h-5 w-5" />
+              </div>
+              <p className="font-bold text-white">Admin authority remains locked</p>
+              <p className="text-xs leading-5 text-slate-400">This Split View is reusable layout architecture. Demo fixtures can be removed without removing the admin shell boundary.</p>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <ShellMessage
       icon={<Lock className="h-5 w-5" />}

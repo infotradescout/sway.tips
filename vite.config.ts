@@ -4,6 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const demoPublicDir: string | false = process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.resolve(__dirname, 'fixtures/demo') : false;
+
   return {
     build: {
       rollupOptions: {
@@ -18,6 +20,7 @@ export default defineConfig(() => {
         },
       },
     },
+    publicDir: demoPublicDir,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

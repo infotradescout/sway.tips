@@ -1,4 +1,5 @@
 import { RequestItem } from '../types';
+import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import { LoadingState, useSwayState } from './shared';
 
 export default function OverlayApp() {
@@ -14,7 +15,13 @@ export default function OverlayApp() {
     <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
       <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 mb-3">
         <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">SWAY LIVE LADDER</span>
-        <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
+        {isDemoModeEnabled() ? (
+          <div aria-label="Demo preview data">
+            <DemoModeBanner compact />
+          </div>
+        ) : (
+          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
+        )}
       </div>
 
       <div className="space-y-2.5">

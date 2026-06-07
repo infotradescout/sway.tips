@@ -1,0 +1,211 @@
+{
+  "fixtureKind": "demo",
+  "fixtureSource": "demo-fixture-harness",
+  "surfaces": {
+    "public-landing": {
+      "id": "demo_public_landing_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "label": "Preview data",
+      "summary": "Demo-only early access story for preview conversations."
+    },
+    "patron-dashboard": {
+      "id": "demo_patron_dashboard_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "label": "Preview data"
+    },
+    "performer-dashboard": {
+      "id": "demo_performer_dashboard_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "label": "Preview data"
+    },
+    "overlay": {
+      "id": "demo_overlay_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "label": "Preview data"
+    },
+    "admin-console": {
+      "id": "demo_admin_console_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "label": "Preview data",
+      "queueDepth": 3,
+      "reviewNote": "Demo moderation and operator queues are illustrative only."
+    },
+    "moderation-queue": [
+      {
+        "id": "demo_moderation_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "reason": "Held for review",
+        "status": "preview_only"
+      }
+    ],
+    "payments-preview": [
+      {
+        "id": "demo_payment_preview_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "status": "preview_only",
+        "amount": 24,
+        "copy": "No real payment created."
+      }
+    ],
+    "events-feed": [
+      {
+        "id": "demo_event_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "kind": "request_approved",
+        "label": "Preview queue movement"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "demo_profile_aria",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "name": "Aria Neon",
+        "role": "DJ",
+        "venueName": "Demo Room",
+        "isFeatured": true,
+        "featuredExpiresAt": null,
+        "minimumTip": 5,
+        "avatarUrl": "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=240&q=80"
+      },
+      {
+        "id": "demo_profile_mika",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "name": "Mika Stage",
+        "role": "Performer",
+        "venueName": "Demo Lounge",
+        "isFeatured": false,
+        "featuredExpiresAt": null,
+        "minimumTip": 8,
+        "avatarUrl": "https://images.unsplash.com/photo-1499364615650-ec38552f4f34?auto=format&fit=crop&w=240&q=80"
+      }
+    ],
+    "requests": [
+      {
+        "id": "demo_request_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "type": "request",
+        "targetType": "music",
+        "title": "Midnight City",
+        "subtitle": "M83",
+        "albumArt": "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=240&q=80",
+        "senderName": "Demo Patron",
+        "message": "Preview request for layout testing.",
+        "amount": 42,
+        "holdAmount": 42,
+        "platformFee": 2,
+        "sponsorCount": 2,
+        "status": "approved",
+        "shadowBanned": false,
+        "createdAt": "2026-06-06T18:00:00.000Z",
+        "boosts": [
+          {
+            "id": "demo_boost_001",
+            "demo": true,
+            "fixtureSource": "demo-fixture-harness",
+            "patronName": "Demo Booster",
+            "amount": 12,
+            "timestamp": "2026-06-06T18:02:00.000Z"
+          }
+        ]
+      },
+      {
+        "id": "demo_request_002",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "type": "request",
+        "targetType": "custom",
+        "title": "Birthday shoutout",
+        "subtitle": "Preview custom moment",
+        "senderName": "Demo Table",
+        "message": "Demo-only custom request.",
+        "amount": 18,
+        "holdAmount": 18,
+        "platformFee": 1,
+        "sponsorCount": 1,
+        "status": "hold",
+        "shadowBanned": false,
+        "createdAt": "2026-06-06T18:04:00.000Z",
+        "boosts": []
+      },
+      {
+        "id": "demo_tip_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "type": "tip",
+        "targetType": "straight_tip",
+        "title": "Classic Tip",
+        "subtitle": "",
+        "senderName": "Demo Supporter",
+        "message": "Preview tip record. No money moved.",
+        "amount": 10,
+        "holdAmount": 10,
+        "platformFee": 1,
+        "sponsorCount": 1,
+        "status": "fulfilled",
+        "shadowBanned": false,
+        "createdAt": "2026-06-06T18:06:00.000Z",
+        "boosts": []
+      }
+    ],
+    "tips": [
+      {
+        "id": "demo_tip_summary_001",
+        "demo": true,
+        "fixtureSource": "demo-fixture-harness",
+        "amount": 10,
+        "status": "preview_only"
+      }
+    ]
+  },
+  "state": {
+    "session": {
+      "id": "demo_session_001",
+      "demo": true,
+      "fixtureSource": "demo-fixture-harness",
+      "status": "active",
+      "ownerActorUserId": "demo_actor_performer",
+      "lastMutationActorUserId": "demo_actor_performer",
+      "talentName": "Aria Neon",
+      "talentRole": "DJ",
+      "feeType": "patron",
+      "minimumTip": 5,
+      "endGigTimerStartedAt": null,
+      "isFeatured": true,
+      "featuredExpiresAt": null,
+      "featuredCost": 0,
+      "featuredDurationHours": 0,
+      "requestsOpen": true,
+      "requestWindowMode": "preset",
+      "requestWindowExpiresAt": "2026-06-06T20:00:00.000Z",
+      "requestWindowDuration": 45,
+      "requestWindowLabel": "Demo Rush",
+      "requestPresets": [
+        {
+          "id": "demo_preset_001",
+          "demo": true,
+          "fixtureSource": "demo-fixture-harness",
+          "label": "Demo Rush",
+          "duration": 45,
+          "isSystem": true
+        }
+      ],
+      "totals": {
+        "totalTips": 70,
+        "accumulatedFees": 4,
+        "totalCount": 3,
+        "topRequest": "Midnight City"
+      }
+    }
+  }
+}

@@ -250,5 +250,24 @@
         </section>
       </section>
     </main>
+    <script type="module">
+      if (import.meta.env.VITE_SWAY_DEMO_MODE === 'true') {
+        const badge = document.createElement('div');
+        badge.textContent = 'Demo preview data';
+        badge.style.position = 'fixed';
+        badge.style.top = '12px';
+        badge.style.right = '12px';
+        badge.style.zIndex = '10';
+        badge.style.border = '1px solid rgba(255, 255, 255, 0.45)';
+        badge.style.borderRadius = '999px';
+        badge.style.background = 'rgba(11, 19, 43, 0.82)';
+        badge.style.color = '#ffffff';
+        badge.style.font = '700 11px "Space Grotesk", sans-serif';
+        badge.style.letterSpacing = '0.08em';
+        badge.style.textTransform = 'uppercase';
+        badge.style.padding = '8px 10px';
+        document.body.appendChild(badge);
+      }
+    </script>
   </body>
 </html>
