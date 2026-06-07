@@ -37,8 +37,21 @@ app.use(express.json());
 
 type SwayShell = 'public' | 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
 
-function resolveShellForRoute(urlPath: string): SwayShell {
-  if (urlPath === '/' || urlPath === '/home') return 'public';
+function normalizeHost(rawHost: string | undefined): string {
+  if (!rawHost) return '';
+  return rawHost.split(':')[0].trim().toLowerCase();
+}
+
+function resolveShellForRoute(urlPath: string, rawHost?: string): SwayShell {
+  const host = normalizeHost(rawHost);
+  const isAppSubdomain = host === 'app.sway.tips';
+  const isPublicHost = host === '' || host === 'sway.tips' || host === 'www.sway.tips' || host === 'localhost' || host === '127.0.0.1';
+
+  if (urlPath === '/' || urlPath === '/home') {
+    if (isAppSubdomain) return 'patron';
+    if (isPublicHost) return 'public';
+    return 'patron';
+  }
   if (urlPath.startsWith('/talent')) return 'talent';
   if (urlPath.startsWith('/overlay')) return 'overlay';
   if (urlPath.startsWith('/admin')) return 'admin';
@@ -56,7 +69,7 @@ function isShellAllowed(shell: SwayShell): boolean {
 }
 
 app.use((req, _res, next) => {
-  req.headers['x-sway-shell'] = resolveShellForRoute(req.path);
+  req.headers['x-sway-shell'] = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
   next();
 });
 
@@ -1348,7 +1361,7 @@ async function startServer() {
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
       try {
-        const shell = resolveShellForRoute(req.path);
+        const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
         const template = readFileSync(templatePath, 'utf8');
         const html = await vite.transformIndexHtml(req.originalUrl, template);
@@ -1367,7 +1380,7 @@ async function startServer() {
     });
     app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
-      const shell = resolveShellForRoute(req.path);
+      const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
       if (!isShellAllowed(shell)) {
         res.status(404).send('Not found');
         return;

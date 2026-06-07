@@ -30,3 +30,22 @@ Useful checks:
 ## Production Gaps
 
 Do not submit this app for public App Store review until the launch gate is complete. Production business writes are blocked until a persistent store is configured, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.
+
+## Domain Routing Strategy
+
+- `sway.tips` and `www.sway.tips`: public MVP landing shell at `/` and `/home`.
+- `app.sway.tips`: application shell entry at `/` and `/home`.
+- App route families remain:
+	- `/g/*` patron shell
+	- `/p/*` patron shell
+	- `/talent/*` talent shell
+	- `/overlay/*` overlay shell
+	- `/admin/*` admin shell (still auth/role gated)
+
+### Deploy Verification Checklist
+
+- `https://sway.tips/` serves public landing shell.
+- `https://www.sway.tips/` serves public landing shell.
+- `https://app.sway.tips/` serves app shell entry (patron shell).
+- `https://app.sway.tips/g/test` resolves to patron shell.
+- `https://app.sway.tips/talent/test` resolves to talent shell.
