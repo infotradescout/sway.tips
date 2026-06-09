@@ -24,6 +24,9 @@ const app = express();
 const PORT = 3000;
 const isProduction = process.env.NODE_ENV === "production";
 const IDEMPOTENCY_TTL_HOURS = 48;
+const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
+const MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION = 4;
+const MAX_BOOSTS_PER_DEVICE_PER_SESSION = 12;
 const accessControl = createAccessControl({
   databaseUrl: process.env.DATABASE_URL,
   isProduction
@@ -804,6 +807,27 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(400).json({ error: "Request submissions are currently closed by the host." });
   }
 
+  if (!isStraightTip) {
+    const sameDeviceSessionRequests = state.requests.filter((item) =>
+      item.gigId === durableGigId
+      && item.patronDeviceIdHash === patron_device_id_hash
+      && item.type === 'request'
+    );
+
+    if (sameDeviceSessionRequests.length >= MAX_REQUESTS_PER_DEVICE_PER_SESSION) {
+      return res.status(429).json({
+        error: "You've reached the request limit for this session. Try again shortly as the queue moves."
+      });
+    }
+
+    const noteRequests = sameDeviceSessionRequests.filter((item) => typeof item.message === 'string' && item.message.trim().length > 0);
+    if ((message || '').trim().length > 0 && noteRequests.length >= MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION) {
+      return res.status(429).json({
+        error: "You've reached the custom-note limit for this session. Try a preset request next."
+      });
+    }
+  }
+
   const moderationOutcome = await moderationService.evaluateSubmission({
     senderName: senderName || "Patron",
     text: message || "",
@@ -913,6 +937,25 @@ app.post("/api/request/boost", async (req, res) => {
   const request = state.requests.find(r => r.id === requestId);
   if (!request) {
     return res.status(404).json({ error: "Request not found" });
+  }
+
+  if (request.hidden || request.removed || request.status === 'denied' || request.status === 'fulfilled' || request.status === 'hold') {
+    return res.status(409).json({
+      error: "This request cannot be boosted right now. Please choose an approved queue item."
+    });
+  }
+
+  const sameActorBoostCount = resolvedActor.actorId
+    ? state.requests.reduce((count, current) => {
+        if (current.gigId !== durableGigId) return count;
+        return count + current.boosts.filter((boost) => boost.actorUserId === resolvedActor.actorId).length;
+      }, 0)
+    : 0;
+
+  if (sameActorBoostCount >= MAX_BOOSTS_PER_DEVICE_PER_SESSION) {
+    return res.status(429).json({
+      error: "You've reached the boost limit for this session. Try again later."
+    });
   }
 
   const amount_cents = Math.round(amt * 100);

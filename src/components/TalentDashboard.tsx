@@ -671,7 +671,7 @@ export default function TalentDashboard({
                   <h4 className="font-display text-xs font-mono font-bold tracking-wider text-cyan-400 uppercase flex items-center gap-1.5 leading-none">
                     <Clock className="w-4 h-4 text-cyan-400" /> REQUEST TIME WINDOW
                   </h4>
-                  <p className="text-[10px] text-slate-500 font-sans mt-0.5">Control crowd window submissions</p>
+                    <p className="text-[10px] text-slate-500 font-sans mt-0.5">Pause all requests instantly, then resume when ready.</p>
                 </div>
                 
                 <div className="flex items-center gap-1.5 animate-pulse-subtle">
@@ -711,7 +711,7 @@ export default function TalentDashboard({
                       : 'bg-slate-950 border border-white/5 text-emerald-400 hover:bg-emerald-950/15'
                   }`}
                 >
-                  <ToggleRight className="w-4 h-4 shrink-0" /> Open Unrestricted
+                    <ToggleRight className="w-4 h-4 shrink-0" /> Resume Requests
                 </button>
                 <button
                   type="button"
@@ -722,7 +722,7 @@ export default function TalentDashboard({
                       : 'bg-slate-950 border border-white/5 text-rose-400 hover:bg-rose-950/15'
                   }`}
                 >
-                  <ToggleLeft className="w-4 h-4 shrink-0" /> Lock Submissions
+                    <ToggleLeft className="w-4 h-4 shrink-0" /> Pause All Requests
                 </button>
               </div>
 

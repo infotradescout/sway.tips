@@ -197,6 +197,21 @@ export default function PatronView({
             ? 'Approved'
             : 'Received';
 
+  const moderationStatusLabel: 'pending_review' | 'approved' | 'declined' | 'hidden' | 'blocked' | 'played/completed' =
+    latestRequest?.hidden || latestRequest?.removed
+      ? 'hidden'
+      : latestRequest?.shadowBanned
+        ? 'pending_review'
+        : latestRequest?.status === 'approved'
+          ? 'approved'
+          : latestRequest?.status === 'denied'
+            ? 'declined'
+            : latestRequest?.status === 'fulfilled'
+              ? 'played/completed'
+              : latestRequest?.status === 'hold'
+                ? 'pending_review'
+                : 'pending_review';
+
   useEffect(() => {
     const updateConnectionState = () => setDegraded(!navigator.onLine);
     window.addEventListener('online', updateConnectionState);
@@ -316,7 +331,7 @@ export default function PatronView({
         throw new Error('Backend did not confirm the action.');
       } catch (error: any) {
         lastError = error;
-        if (error?.status === 409 || error?.status === 410 || error?.status === 400) throw error;
+        if (error?.status === 409 || error?.status === 410 || error?.status === 400 || error?.status === 403 || error?.status === 429) throw error;
         setDegraded(true);
         setPendingActionMessage('Connection degraded. Retrying safely with the same idempotency key.');
         if (attempt < MAX_PENDING_ACTION_RETRIES - 1) {
@@ -608,8 +623,26 @@ export default function PatronView({
     } catch (e) {
       console.error(e);
       setDegraded(true);
-      if ((e as any)?.status === 410) {
+      const status = (e as any)?.status;
+      const backendMessage = (e as any)?.body?.error;
+
+      if (status === 410) {
         setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+        setPendingAction(null);
+        setCheckoutPayload(null);
+        localStorage.removeItem('sway.pendingAction');
+      } else if (status === 403) {
+        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask venue staff for help.');
+        setPendingAction(null);
+        setCheckoutPayload(null);
+        localStorage.removeItem('sway.pendingAction');
+      } else if (status === 429) {
+        setPendingActionMessage(backendMessage || "You've reached the request limit for this session. Try again later as the queue moves.");
+        setPendingAction(null);
+        setCheckoutPayload(null);
+        localStorage.removeItem('sway.pendingAction');
+      } else if (status === 409 || status === 400) {
+        setPendingActionMessage(backendMessage || 'This action is not available right now.');
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
@@ -851,6 +884,23 @@ export default function PatronView({
               {status}
             </div>
           ))}
+        </div>
+
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Moderation state</h4>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-300">{moderationStatusLabel}</span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px]">
+            {['pending_review', 'approved', 'declined', 'hidden', 'blocked', 'played/completed'].map((state) => (
+              <div
+                key={state}
+                className={`rounded-lg border px-2 py-2 text-center font-bold ${moderationStatusLabel === state ? 'border-cyan-400 bg-cyan-500/15 text-cyan-100' : 'border-white/10 bg-slate-950 text-slate-500'}`}
+              >
+                {state}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
