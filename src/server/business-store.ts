@@ -68,7 +68,7 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     requestWindowDuration: input.requestWindowDuration ?? fallback.requestWindowDuration,
     requestWindowLabel: input.requestWindowLabel ?? fallback.requestWindowLabel,
     requestPresets: Array.isArray(input.requestPresets) ? input.requestPresets : fallback.requestPresets,
-    operatingMode: input.operatingMode === 'open_call' || input.operatingMode === 'connected'
+    operatingMode: input.operatingMode === 'open_call'
       ? input.operatingMode
       : (fallback.operatingMode ?? 'manual'),
     totals: input.totals ?? fallback.totals

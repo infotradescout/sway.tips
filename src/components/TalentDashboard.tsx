@@ -482,12 +482,12 @@ export default function TalentDashboard({
               </button>
             </div>
 
-            {/* 3-MODE. OPERATING POSTURE (Connected is not yet integrated — honest gap) */}
+            {/* 3-MODE. OPERATING POSTURE */}
             <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Operating Mode</p>
                 <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Sway tracks automatically when a source is connected. Until then, drive the room manually or run an open call.
+                  Drive the room manually or open the floor for open-call requests.
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -513,12 +513,6 @@ export default function TalentDashboard({
                 >
                   Open Call
                 </button>
-                <span
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-950/60 border border-dashed border-white/10 text-slate-600 cursor-not-allowed"
-                  title="Connected mode requires a source integration that is not configured yet."
-                >
-                  Connected · soon
-                </span>
               </div>
             </div>
             
