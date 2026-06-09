@@ -1,0 +1,135 @@
+name: Production Deploy Drift Guard
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-drift-guard-main
+  cancel-in-progress: true
+
+jobs:
+  verify-production-build-marker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify production build marker catches up
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const urls = [
+            'https://sway.tips/api/build-marker',
+            'https://www.sway.tips/api/build-marker',
+            'https://app.sway.tips/api/build-marker'
+          ];
+
+          const expectedSha = process.env.EXPECTED_SHA;
+          const timeoutMs = 15 * 60 * 1000;
+          const intervalMs = 30 * 1000;
+          const started = Date.now();
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          function formatObservation(observation) {
+            const lines = [];
+            lines.push(`URL: ${observation.url}`);
+            lines.push(`HTTP: ${observation.status}`);
+            lines.push(`Content-Type: ${observation.contentType || 'missing'}`);
+            if (observation.error) {
+              lines.push(`Error: ${observation.error}`);
+            }
+            if (observation.bodySnippet) {
+              lines.push(`Body snippet: ${observation.bodySnippet}`);
+            }
+            if (observation.commit) {
+              lines.push(`Commit: ${observation.commit}`);
+            }
+            return lines.join('\n');
+          }
+
+          async function checkOnce() {
+            const observations = [];
+            let allOk = true;
+
+            for (const url of urls) {
+              const observation = {
+                url,
+                status: 'n/a',
+                contentType: '',
+                commit: '',
+                error: '',
+                bodySnippet: ''
+              };
+
+              try {
+                const response = await fetch(url, { redirect: 'follow' });
+                observation.status = response.status;
+                observation.contentType = response.headers.get('content-type') || '';
+
+                const body = await response.text();
+                observation.bodySnippet = body.slice(0, 180).replace(/\s+/g, ' ').trim();
+
+                let parsed;
+                try {
+                  parsed = JSON.parse(body);
+                } catch {
+                  parsed = null;
+                }
+
+                if (!parsed || typeof parsed !== 'object') {
+                  observation.error = 'Response is not JSON.';
+                  allOk = false;
+                } else if (parsed.service !== 'sway.tips') {
+                  observation.error = `Unexpected service marker: ${String(parsed.service)}`;
+                  allOk = false;
+                } else if (typeof parsed.commit !== 'string' || parsed.commit.length < 7) {
+                  observation.error = 'Commit marker is missing or invalid.';
+                  allOk = false;
+                } else {
+                  observation.commit = parsed.commit;
+                  if (parsed.commit !== expectedSha) {
+                    observation.error = `Commit mismatch. Expected ${expectedSha}, got ${parsed.commit}`;
+                    allOk = false;
+                  }
+                }
+              } catch (error) {
+                observation.error = error instanceof Error ? error.message : String(error);
+                allOk = false;
+              }
+
+              observations.push(observation);
+            }
+
+            return { allOk, observations };
+          }
+
+          let attempt = 0;
+          while (Date.now() - started < timeoutMs) {
+            attempt += 1;
+            const { allOk, observations } = await checkOnce();
+
+            console.log(`Attempt ${attempt}:`);
+            for (const o of observations) {
+              console.log(formatObservation(o));
+              console.log('----');
+            }
+
+            if (allOk) {
+              console.log('Production build marker matches pushed commit on all domains.');
+              process.exit(0);
+            }
+
+            await sleep(intervalMs);
+          }
+
+          console.error('Timed out waiting for production build marker to match pushed commit.');
+          process.exit(1);
+          NODE
