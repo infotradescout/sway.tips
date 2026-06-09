@@ -422,11 +422,11 @@ export default function PatronView({
         ? {
             id: `any-${query.replace(/\s+/g, '-')}`,
             title: val.trim(),
-            artist: 'Any source accepted',
+            artist: 'Request by name',
             albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
             basePrice: session.minimumTip,
-            description: 'Open request across linked music apps',
-            source: 'Any Library'
+            description: 'Send this as an open request',
+            source: 'Open request'
           }
         : null;
 
@@ -435,6 +435,19 @@ export default function PatronView({
       return;
     }
 
+    const trimmed = val.trim();
+    const openSongOption: SearchTrack | null = (session.talentRole === 'DJ' && trimmed)
+      ? {
+          id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
+          title: trimmed,
+          artist: 'Request by name',
+          albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+          basePrice: session.minimumTip,
+          targetType: 'music',
+          source: 'Open request'
+        }
+      : null;
+
     try {
       const response = await fetch('/api/music/search', {
         method: 'POST',
@@ -442,9 +455,11 @@ export default function PatronView({
         body: JSON.stringify({ query: val })
       });
       const data = await response.json();
-      setSearchResults(data.results || []);
+      const results: SearchTrack[] = Array.isArray(data.results) ? data.results : [];
+      setSearchResults(openSongOption ? [openSongOption, ...results] : results);
     } catch (e) {
       console.warn("Search endpoint errored out:", e);
+      setSearchResults(openSongOption ? [openSongOption] : []);
     } finally {
       setIsSearching(false);
     }
@@ -1058,7 +1073,7 @@ export default function PatronView({
 
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    Music library (optional)
+                    Request any song
                   </span>
                 </div>
                  {/* Form input fields */}
@@ -1069,7 +1084,7 @@ export default function PatronView({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search tracks across linked libraries..."
+                      placeholder="Type a song or artist..."
                       className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
                     />
                   </div>
