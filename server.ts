@@ -435,6 +435,25 @@ app.get("/api/health/network-probe", (_req, res) => {
   res.status(204).end();
 });
 
+app.get("/api/build-marker", (_req, res) => {
+  const commit = process.env.RENDER_GIT_COMMIT
+    ?? process.env.SOURCE_VERSION
+    ?? process.env.GITHUB_SHA
+    ?? process.env.VERCEL_GIT_COMMIT_SHA
+    ?? 'unknown';
+  const branch = process.env.RENDER_GIT_BRANCH
+    ?? process.env.GITHUB_REF_NAME
+    ?? process.env.VERCEL_GIT_COMMIT_REF
+    ?? 'unknown';
+
+  res.json({
+    service: 'sway.tips',
+    commit,
+    branch,
+    nodeEnv: process.env.NODE_ENV ?? 'unknown'
+  });
+});
+
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
