@@ -802,8 +802,8 @@ app.post("/api/request/create", async (req, res) => {
 
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
 
-  // If request mode (not a straight tip) and requests are closed, block!
-  if (!isStraightTip && !state.session.requestsOpen) {
+  // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
+  if (!isStraightTip && (!state.session.requestsOpen || state.session.status !== 'active')) {
     return res.status(400).json({ error: "Request submissions are currently closed by the host." });
   }
 
