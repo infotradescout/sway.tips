@@ -35,6 +35,9 @@ export default function OverlayApp() {
       )}
 
       <div className="space-y-2.5">
+        {liveLadder.length > 0 && (
+          <div className="text-[9px] font-mono tracking-widest text-fuchsia-400/80 uppercase">Up Next</div>
+        )}
         {liveLadder.slice(0, 5).map((req, idx) => (
           <div
             key={req.id}

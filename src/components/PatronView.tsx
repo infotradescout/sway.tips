@@ -186,16 +186,16 @@ export default function PatronView({
     .filter((item) => !item.hidden && !item.removed)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
-  const activePatronStatus: 'Pending network' | 'Received' | 'Approved' | 'Session paused' | 'Session ended' =
+  const activePatronStatus: 'Syncing' | 'Pending' | 'Approved' | 'Paused' | 'Ended' =
     session.status === 'closed'
-      ? 'Session ended'
+      ? 'Ended'
       : (!session.requestsOpen || session.status === 'ending')
-        ? 'Session paused'
+        ? 'Paused'
         : (degraded || !!pendingAction)
-          ? 'Pending network'
+          ? 'Syncing'
           : latestRequest?.status === 'approved' || latestRequest?.status === 'fulfilled'
             ? 'Approved'
-            : 'Received';
+            : 'Pending';
 
   const moderationStatusLabel: 'pending_review' | 'approved' | 'declined' | 'hidden' | 'blocked' | 'played/completed' =
     latestRequest?.hidden || latestRequest?.removed
@@ -345,7 +345,7 @@ export default function PatronView({
 
   // Pre-built customizable menus for bartenders / street performers
   const customItems: CustomMenuItem[] = session.talentRole === 'Bartender' ? [
-    { id: "c1", title: "Skip the Line Cocktail", description: "Veto checkout crowds. Bartender mixes your drink immediately.", basePrice: 10, iconName: "🍹" },
+    { id: "c1", title: "Skip the Line Cocktail", description: "Skip the crowd. Bartender mixes your drink immediately.", basePrice: 10, iconName: "🍹" },
     { id: "c2", title: "Special Shot Round", description: "Bartender generates a custom premium fire shot selection.", basePrice: 15, iconName: "🔥" },
     { id: "c3", title: "Buy the Bartender a Pint", description: "Show some absolute love to the crew behind the bar.", basePrice: 8, iconName: "🍺" }
   ] : [
@@ -538,7 +538,7 @@ export default function PatronView({
       // Boost check
       if (!boostingItem) return;
       if (!boostPatronName) {
-        alert("Please enter your sponsor name for the boost leaderboard!");
+        alert("Please enter your sponsor name for the boost!");
         return;
       }
       if (boostAmount < 1) {
@@ -783,7 +783,7 @@ export default function PatronView({
           <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-bold tracking-widest uppercase text-slate-400">
-                {nowPlaying ? 'Current Moment' : 'Live Now'}
+                {nowPlaying ? 'Now Playing' : 'Live Now'}
               </span>
               <span
                 className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950 border border-white/10 text-cyan-300"
@@ -926,7 +926,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Activity className="w-4 h-4" /> Leaderboard
+            <Activity className="w-4 h-4" /> Live Queue
           </button>
 
           <button
@@ -955,7 +955,7 @@ export default function PatronView({
           <span className="text-[10px] font-mono text-fuchsia-300 uppercase tracking-widest">Current: {activePatronStatus}</span>
         </div>
         <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
-          {['Pending network', 'Received', 'Approved', 'Session paused', 'Session ended'].map((status) => (
+          {['Syncing', 'Pending', 'Approved', 'Paused', 'Ended'].map((status) => (
             <div
               key={status}
               className={`rounded-lg border px-2 py-2 text-center font-bold ${activePatronStatus === status ? 'border-fuchsia-400 bg-fuchsia-500/15 text-fuchsia-200' : 'border-white/10 bg-slate-950 text-slate-400'}`}
@@ -1011,7 +1011,7 @@ export default function PatronView({
                   <span className="text-fuchsia-400 font-bold block select-none">💡 WHAT YOU CAN STILL DO:</span>
                   <div className="text-slate-400 space-y-1 font-sans text-xs">
                     <p>• Send a <strong className="text-emerald-400">Direct Cash Tip</strong> to show love</p>
-                    <p>• <strong className="text-cyan-400">Boost existing requests</strong> on the leaderboard to push them up</p>
+                    <p>• <strong className="text-cyan-400">Boost existing requests</strong> in the live queue to push them up</p>
                     <p>• Discover other live performers near you</p>
                   </div>
                 </div>
@@ -1030,7 +1030,7 @@ export default function PatronView({
                     onClick={() => setActiveTab('ladder')}
                     className="flex-1 py-2.5 bg-slate-950 border border-white/5 text-slate-300 hover:text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
                   >
-                    📊 View Leaderboard
+                    📊 View Live Queue
                   </button>
                 </div>
               </motion.div>
@@ -1388,7 +1388,7 @@ export default function PatronView({
           <div className="space-y-4 font-sans">
             <div className="flex justify-between items-center select-none animate-fade-in">
               <h3 className="font-display text-sm font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <TrendingUp className="w-4 h-4 text-fuchsia-500 animate-pulse" /> Live Action Ladder
+                <TrendingUp className="w-4 h-4 text-fuchsia-500 animate-pulse" /> Live Queue
               </h3>
               <span className="text-[9px] text-cyan-400 font-mono uppercase bg-cyan-950/40 px-2.5 py-1 rounded-full border border-cyan-500/20 shadow-sm animate-pulse flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping"></span> Live Feed
@@ -1399,7 +1399,7 @@ export default function PatronView({
               {approvedLadder.length === 0 ? (
                 <div className="text-center p-8 bg-slate-900/10 border border-dashed border-white/10 rounded-2xl select-none">
                   <Smartphone className="w-6 h-6 text-slate-600 mx-auto animate-bounce" />
-                  <div className="text-xs font-semibold text-slate-400 mt-1">Ladder is currently vacant</div>
+                  <div className="text-xs font-semibold text-slate-400 mt-1">No approved requests yet</div>
                   <p className="text-[10px] text-slate-500">Wait for performer approvals or submit your own request above.</p>
                 </div>
               ) : (
@@ -1418,7 +1418,7 @@ export default function PatronView({
                     >
                       <div className={`flex items-center justify-between gap-4 p-3.5 rounded-xl ${isTopOne ? 'bg-slate-900/70 border border-white/5' : ''}`}>
                         <div className="flex items-center gap-3 min-w-0">
-                          {/* Spot standing index rank */}
+                          {/* Ranking position */}
                           <div className="flex flex-col items-center justify-center font-display font-black text-center pr-1 shrink-0 select-none">
                             <span className={`text-base ${isTopOne ? 'text-fuchsia-400 font-black italic' : 'text-slate-500 font-bold'}`}>
                               {idx < 9 ? `0${idx + 1}` : idx + 1}
@@ -1756,7 +1756,7 @@ export default function PatronView({
                   <div className="space-y-1">
                     <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
                     <h3 className="font-sans text-base font-bold text-white">
-                      {previewMode ? 'Preview Checkout Only' : checkoutPayload.type === 'request' ? 'Live Desk Board Request' : `Boost Standing Index`}
+                      {previewMode ? 'Preview Only' : checkoutPayload.type === 'request' ? 'Confirm Request' : `Confirm Boost`}
                     </h3>
                     {previewMode && (
                       <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">

@@ -275,7 +275,7 @@ export default function TalentDashboard({
           <div className="font-sans">
             <div className="flex items-center gap-2">
               <h2 className="font-display text-lg font-bold text-white tracking-wide uppercase">
-                {session.status === 'inactive' ? 'Configure Shift Setup' : session.talentName}
+                {session.status === 'inactive' ? 'Set Up Session' : session.talentName}
               </h2>
               {session.status !== 'inactive' && (
                 <span className="text-[10px] font-mono font-black uppercase tracking-wider bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 px-2 py-0.5 rounded-full select-none">
@@ -305,7 +305,7 @@ export default function TalentDashboard({
                 disabled={previewMode}
                 className="flex items-center gap-1.5 px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-600 shadow rounded-xl text-xs font-bold transition-all cursor-pointer glow-fuchsia font-sans"
               >
-                <X className="w-4 h-4" /> {previewMode ? 'Preview only' : 'End Gig Live'}
+                <X className="w-4 h-4" /> {previewMode ? 'Preview only' : 'End Session'}
               </button>
             ) : (
               <div className="flex items-center gap-3">
@@ -333,8 +333,8 @@ export default function TalentDashboard({
           className="bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-2xl mx-auto space-y-6 glow-fuchsia"
         >
           <div className="text-center space-y-2">
-            <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Setup Your Live Desk</h3>
-            <p className="text-sm text-slate-400 font-sans">Configure parameters before letting patrons check out on their smartphones.</p>
+            <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Set Up Your Session</h3>
+            <p className="text-sm text-slate-400 font-sans">Set your performance rules before patrons start sending requests and tips.</p>
           </div>
 
           <form onSubmit={handleStart} className="space-y-6">
@@ -342,7 +342,7 @@ export default function TalentDashboard({
             {/* Performer Vitals */}
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFOMER / DESK NAME</label>
+                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMER NAME</label>
                 <input 
                   type="text" 
                   value={setupName}
@@ -371,7 +371,7 @@ export default function TalentDashboard({
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">EAT PLATFORM TRANSACTION FEE ($1.00)</label>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PAYMENTS PENDING</span>
+                <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PLATFORM FEE</span>
               </div>
               
               <div className="grid sm:grid-cols-2 gap-4">
@@ -386,7 +386,7 @@ export default function TalentDashboard({
                 >
                   <span className="text-xs font-bold text-white mb-1">Pass as Convenience Fee</span>
                   <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                    Audience pays $1.00 platform processing fee during checkout. Performer collects 100% of tip.
+                    Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.
                   </p>
                 </button>
 
@@ -401,7 +401,7 @@ export default function TalentDashboard({
                 >
                   <span className="text-xs font-bold text-white mb-1">Absorb Processing Cost</span>
                   <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                    Performer absorbs the flat $1.00 cut to keep audience checkout fees clean. Boost volume.
+                    Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.
                   </p>
                 </button>
               </div>
@@ -410,7 +410,7 @@ export default function TalentDashboard({
             {/* Minimum Entrance Bar Check */}
             <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
               <div className="flex justify-between items-center text-sm font-mono text-slate-400">
-                <span>Minimum Tip Entrance Entry</span>
+                <span>Minimum Tip</span>
                 <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
               </div>
               <input 
@@ -431,7 +431,7 @@ export default function TalentDashboard({
               type="submit"
               className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white font-bold rounded-xl text-sm transition-all shadow-lg glow-fuchsia transform active:scale-95 cursor-pointer"
             >
-              <Play className="w-4 h-4" /> Initialize Live Gig Space
+              <Play className="w-4 h-4" /> Start Live Session
             </button>
           </form>
         </motion.div>
@@ -534,7 +534,7 @@ export default function TalentDashboard({
               <div className="flex justify-between items-center select-none font-sans">
                 <div className="flex items-center gap-2">
                   <h3 className="font-display text-base font-bold text-white tracking-wide uppercase">
-                    Private Triage Desk
+                    Pending Triage
                   </h3>
                   <span className="text-xs bg-slate-900 border border-white/5 text-slate-400 font-mono px-2 py-0.5 rounded-full select-none">
                     {triageQueue.length} Pending
@@ -639,14 +639,14 @@ export default function TalentDashboard({
               <div className="flex justify-between items-center select-none font-sans">
                 <div className="flex items-center gap-2">
                   <h3 className="font-display text-base font-bold text-white tracking-wide uppercase">
-                    Live Audience Request Ladder
+                    Approved Queue
                   </h3>
                   <span className="text-[10px] bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 font-mono px-2.5 py-0.5 rounded-full select-none font-black tracking-wider uppercase animate-pulse">
-                    AUCTION ACTIVE
+                    LIVE
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest flex items-center gap-1">
-                  📶 PUBLIC VENUE LEADERBOARD
+                  📶 SHOWN ON OVERLAY
                 </span>
               </div>
 
@@ -659,8 +659,8 @@ export default function TalentDashboard({
                       className="text-center p-8 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none"
                     >
                       <Sparkles className="w-6 h-6 text-slate-600 mx-auto" />
-                      <div className="text-xs font-semibold text-slate-400">Ladder is currently vacant</div>
-                      <p className="text-[10px] text-slate-500 font-medium font-sans mt-0.5">Approved submissions will appear here sorted by total bids!</p>
+                      <div className="text-xs font-semibold text-slate-400">No approved requests yet</div>
+                      <p className="text-[10px] text-slate-500 font-medium font-sans mt-0.5">Approved requests appear here, ranked by total boosts.</p>
                     </motion.div>
                   ) : (
                     liveLadderQueue.map((req, index) => {
@@ -679,7 +679,7 @@ export default function TalentDashboard({
                           }`}
                         >
                           <div className="flex items-center gap-4 min-w-0">
-                            {/* Standings index rank */}
+                            {/* Ranking position */}
                             <div className="flex flex-col items-center justify-center font-display font-black text-center pr-1 shrink-0">
                               <span className={`text-base ${index === 0 ? 'text-fuchsia-400 font-black italic' : 'text-slate-500 font-bold'}`}>
                                 #{index + 1}

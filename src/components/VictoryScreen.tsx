@@ -83,7 +83,7 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
                 <Coins className="w-5 h-5" id="victory_icon_tips" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Total Captured</div>
+                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Total Tips</div>
                 <div className="text-xl font-bold font-display text-white mt-0.5">{formattedTips}</div>
               </div>
             </div>
@@ -105,7 +105,7 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
                 <Users className="w-5 h-5" id="victory_icon_backers" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Bbackers</div>
+                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Backers</div>
                 <div className="text-xl font-bold font-display text-white mt-5">6 Sponsors</div>
               </div>
             </div>
@@ -132,7 +132,7 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
               {session.totals.topRequest}
             </div>
             <p className="text-[11px] text-gray-400 leading-relaxed">
-              This choice brought in the most crowd-funded boosts and dominated your Request Ladder.
+              This choice brought in the most crowd-funded boosts and topped your Approved Queue.
             </p>
           </div>
 
@@ -177,12 +177,12 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
                   <div className="w-20 h-20 rounded-full bg-gradient-to-br from-rose-500/10 to-indigo-500/10 border border-white/10 flex items-center justify-center mb-2 animate-pulse">
                     <AwardIcon className="w-10 h-10 text-rose-400" />
                   </div>
-                  <div className="text-[11px] text-gray-400 font-mono uppercase tracking-widest leading-none">TOTAL TIPS SAVED</div>
+                  <div className="text-[11px] text-gray-400 font-mono uppercase tracking-widest leading-none">TOTAL TIPS</div>
                   <div className="text-5xl font-black font-display text-white tracking-tight mt-1">
                     {formattedTips}
                   </div>
                   <div className="text-xs text-rose-400 font-mono font-medium tracking-wide mt-2">
-                    🔥 GIG CLEARED SUCCESFULLY!
+                    🔥 GIG CLEARED SUCCESSFULLY!
                   </div>
                 </div>
 
