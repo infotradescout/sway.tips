@@ -317,7 +317,7 @@ export default function TalentDashboard({
                   disabled={previewMode}
                   className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold border border-fuchsia-600 rounded-xl text-xs transition-transform transform active:scale-95 cursor-pointer glow-fuchsia"
                 >
-                  {previewMode ? 'Preview only' : 'Close Out & Capture'}
+                  {previewMode ? 'Preview only' : 'Close Out Session'}
                 </button>
               </div>
             )}
@@ -523,7 +523,7 @@ export default function TalentDashboard({
                 <div className="space-y-1 select-none">
                   <h4 className="text-sm font-bold text-amber-200">5-Minute Final Check is ticking</h4>
                   <p className="text-xs text-amber-300 leading-relaxed">
-                    Review your pending queue below. Tap approval on anything you actually fulfilled but forgot to log. Real payment void/refund handling will be added in the payments sprint.
+                    Review your pending queue below. Tap approval on anything you actually fulfilled but forgot to log. No card is charged — approvals record the request for the performer's queue.
                   </p>
                 </div>
               </div>
@@ -729,7 +729,7 @@ export default function TalentDashboard({
                               disabled={previewMode}
                               className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia"
                             >
-                              <Award className="w-4 h-4" /> {previewMode ? 'Preview only' : 'Fulfill & Capture'}
+                              <Award className="w-4 h-4" /> {previewMode ? 'Preview only' : 'Mark Fulfilled'}
                             </button>
                           </div>
                         </motion.div>
@@ -1053,7 +1053,7 @@ export default function TalentDashboard({
 
               <div className="space-y-3 select-none font-sans">
                 <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>{previewMode ? 'Preview total shown:' : 'Current captured total:'}</span>
+                  <span>{previewMode ? 'Preview total shown:' : 'Fulfilled requests total:'}</span>
                   <span className="font-mono text-sm font-bold text-white">{formatValue(session.totals.totalTips)}</span>
                 </div>
                 

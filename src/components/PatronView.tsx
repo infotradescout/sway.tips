@@ -476,7 +476,7 @@ export default function PatronView({
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
 
-  // Open test checkout
+  // Open checkout
   const initiateCheckout = (type: 'request' | 'boost') => {
     if (session.status === 'closed') return;
 
@@ -757,7 +757,7 @@ export default function PatronView({
           <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
             {previewMode
               ? 'Preview data only. No checkout/payment/moderation action will be sent.'
-              : `Sway ${session.talentName || 'this performer'} on stage through the live ladder. Payment processing is not yet enabled in this build.`}
+              : `Sway ${session.talentName || 'this performer'} on stage through the live ladder. Requests go to the performer for approval — no card is charged.`}
           </p>
         </div>
       </div>
@@ -1303,10 +1303,10 @@ export default function PatronView({
                     onClick={() => initiateCheckout('request')}
                     className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient rounded-xl text-xs font-bold text-white transition-all transform active:scale-95 glow-fuchsia cursor-pointer"
                   >
-                    <CreditCard className="w-4 h-4" /> Continue To Test Checkout ({getFormat(tipAmount)})
+                    <CreditCard className="w-4 h-4" /> Send Request • {getFormat(tipAmount)}
                   </button>
                   <p className="text-[9px] text-slate-500 text-center mt-2.5 leading-relaxed font-sans">
-                    Test checkout only. Real payment authorization and capture will be enabled in the payments sprint.
+                    Your request goes to {session.talentName || 'the performer'} for approval. No card is charged.
                   </p>
                 </div>
 
@@ -1328,7 +1328,7 @@ export default function PatronView({
             <div className="text-center pb-2 select-none">
               <Coins className="w-10 h-10 text-fuchsia-500 mx-auto animate-bounce mb-2" />
               <h3 className="font-display text-sm font-bold text-white uppercase tracking-wider">Classic Straight Tip</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">No requests, no action ladder—just straightforward appreciation for {session.talentName}. Approved and captured instantly.</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">No requests, no action ladder—just straightforward appreciation for {session.talentName}. Goes to the performer for approval; no card is charged.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -1715,7 +1715,7 @@ export default function PatronView({
                             }}
                             className="w-full py-2 bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white font-black text-xs rounded-lg shadow-md cursor-pointer font-sans text-center"
                           >
-                            Continue To Test Checkout (${tipAmount}.00)
+                            Send Tip • ${tipAmount}.00
                           </button>
                         </div>
                       )}
@@ -1745,7 +1745,7 @@ export default function PatronView({
                   </div>
                   <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    ${checkoutPayload.amount}.00 test checkout recorded. The performer has been notified in real time.
+                    Your ${checkoutPayload.amount}.00 request was recorded and sent to the performer for approval. No card was charged.
                   </p>
                 </div>
               ) : (
@@ -1754,7 +1754,7 @@ export default function PatronView({
                   
                   {/* Title and meta */}
                   <div className="space-y-1">
-                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">CHECKOUT INVOICE</span>
+                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
                     <h3 className="font-sans text-base font-bold text-white">
                       {previewMode ? 'Preview Checkout Only' : checkoutPayload.type === 'request' ? 'Live Desk Board Request' : `Boost Standing Index`}
                     </h3>
@@ -1785,7 +1785,7 @@ export default function PatronView({
                     </div>
 
                     <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                      <span className="text-slate-400">{previewMode ? 'Preview Checkout Total:' : 'Test Checkout Total:'}</span>
+                      <span className="text-slate-400">{previewMode ? 'Preview Request Total:' : 'Request Total:'}</span>
                       <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                     </div>
                   </div>
@@ -1819,27 +1819,16 @@ export default function PatronView({
                     </div>
                   )}
 
-                  {/* Payment option tools */}
+                  {/* Submit action */}
                   <div className="space-y-2">
-                    
-                    {/* Temporary test payment action */}
-                    <button
-                      type="button"
-                      onClick={completePayment}
-                      disabled={isPaying || previewMode}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-black hover:bg-slate-900 border border-white/10 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
-                    >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500" /> {previewMode ? 'Preview only: checkout disabled' : isPaying ? "Recording..." : "Record test checkout"}
-                    </button>
 
-                    {/* Temporary alternate test action */}
                     <button
                       type="button"
                       onClick={completePayment}
                       disabled={isPaying || previewMode}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-slate-100 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                      className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-fuchsia-500 font-bold" /> {previewMode ? 'Preview only: no alternate checkout' : isPaying ? "Recording..." : "Record alternate test checkout"}
+                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Preview only: checkout disabled' : isPaying ? "Sending..." : "Send request for approval"}
                     </button>
 
                     <button
@@ -1848,7 +1837,7 @@ export default function PatronView({
                       disabled={isPaying}
                       className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                     >
-                      Cancel checkout
+                      Cancel
                     </button>
                   </div>
 
@@ -1914,7 +1903,7 @@ export default function PatronView({
               {/* Subtext info */}
               <p className={`text-[10px] leading-relaxed max-w-xs mx-auto mb-4 font-sans ${showDirQrCodeModal.isFeatured ? 'text-amber-250 text-amber-200' : 'text-slate-400'}`}>
                 {showDirQrCodeModal.isFeatured
-                  ? 'Featured placement for this performer. Real payment processing is not enabled in this build.'
+                  ? 'Featured placement for this performer. Scan to open their live request page.'
                   : 'Standard direct tipping desk for supporting local performers at the venue stage.'}
               </p>
 
