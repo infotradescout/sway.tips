@@ -939,9 +939,20 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(404).json({ error: "Request not found" });
   }
 
-  if (request.hidden || request.removed || request.status === 'denied' || request.status === 'fulfilled' || request.status === 'hold') {
+  // Gate #9.2: Paid boosts must never bypass private triage or moderation.
+  // A boost is an ordering action that may only touch content that has already
+  // cleared the Private Triage Desk. Allowlist approved, non-shadowbanned,
+  // visible requests only; everything else (hold/denied/fulfilled/hidden/removed)
+  // is rejected so money can never grant display or approval authority.
+  const isBoostEligible =
+    request.status === 'approved'
+    && !request.shadowBanned
+    && !request.hidden
+    && !request.removed;
+
+  if (!isBoostEligible) {
     return res.status(409).json({
-      error: "This request cannot be boosted right now. Please choose an approved queue item."
+      error: "This request cannot be boosted right now. Boosts are only allowed on approved queue items."
     });
   }
 

@@ -430,6 +430,44 @@ export default function TalentDashboard({
           
           {/* Main Triage and Live Auction Columns */}
           <div className="lg:col-span-2 space-y-8">
+
+            {/* 3-KILL. ALWAYS-VISIBLE OPERATOR KILL SWITCH */}
+            <div
+              className={`rounded-2xl p-4 border flex items-center justify-between gap-4 shadow-lg select-none ${
+                session.requestsOpen
+                  ? 'bg-emerald-950/30 border-emerald-500/30'
+                  : 'bg-rose-950/40 border-rose-500/40'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`w-3 h-3 rounded-full shrink-0 ${session.requestsOpen ? 'bg-emerald-400 shadow-md shadow-emerald-500/50 animate-pulse' : 'bg-rose-400'}`} />
+                <div className="min-w-0">
+                  <p className={`text-sm font-black uppercase tracking-wide font-display ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    {session.requestsOpen ? 'Requests Live' : 'All Requests Paused'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-sans leading-snug">
+                    {session.requestsOpen
+                      ? 'Patrons can submit. Tap pause to immediately halt all inbound requests.'
+                      : 'New patron submissions are halted. Tap resume to reopen the queue.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleToggleRequests(!session.requestsOpen)}
+                className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+                  session.requestsOpen
+                    ? 'bg-rose-500 text-slate-950 hover:bg-rose-400 shadow-lg shadow-rose-500/20'
+                    : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20'
+                }`}
+              >
+                {session.requestsOpen ? (
+                  <><ToggleLeft className="w-4 h-4 shrink-0" /> Pause All Requests</>
+                ) : (
+                  <><ToggleRight className="w-4 h-4 shrink-0" /> Resume Requests</>
+                )}
+              </button>
+            </div>
             
             {/* 3a. POST-GIG FINAL SWEEP INDICATOR */}
             {session.status === 'ending' && (
