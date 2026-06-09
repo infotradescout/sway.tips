@@ -67,6 +67,7 @@ type SearchTrack = {
   basePrice?: number;
   description?: string;
   source?: string;
+  targetType?: 'music' | 'custom';
 };
 
 const previewCatalog: SearchTrack[] = [
@@ -118,8 +119,21 @@ export default function PatronView({
   onDataDeletionPlaceholder,
   previewMode = false
 }: PatronViewProps) {
+  const requestPresets: Array<{ id: string; label: string; subtitle: string; amount: number; targetType: 'music' | 'custom' }> = session.talentRole === 'DJ'
+    ? [
+        { id: 'preset-shoutout', label: '$5 Shoutout', subtitle: 'Quick crowd shoutout', amount: 5, targetType: 'custom' },
+        { id: 'preset-bump', label: '$10 Bump the Queue', subtitle: 'Push your moment higher', amount: 10, targetType: 'custom' },
+        { id: 'preset-vip-song', label: '$20 VIP Song Request', subtitle: 'Priority song request', amount: 20, targetType: 'music' }
+      ]
+    : [
+        { id: 'preset-shoutout', label: '$5 Shoutout', subtitle: 'Quick audience shoutout', amount: 5, targetType: 'custom' },
+        { id: 'preset-bump', label: '$10 Bump the Queue', subtitle: 'Prioritize your request', amount: 10, targetType: 'custom' },
+        { id: 'preset-vip', label: '$20 VIP Request', subtitle: 'Premium priority action', amount: 20, targetType: 'custom' }
+      ];
+
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
   // Search Venue Directory States
   const [directorySearch, setDirectorySearch] = useState('');
@@ -167,6 +181,21 @@ export default function PatronView({
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
+
+  const latestRequest = [...requests]
+    .filter((item) => !item.hidden && !item.removed)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  const activePatronStatus: 'Pending network' | 'Received' | 'Approved' | 'Session paused' | 'Session ended' =
+    session.status === 'closed'
+      ? 'Session ended'
+      : (!session.requestsOpen || session.status === 'ending')
+        ? 'Session paused'
+        : (degraded || !!pendingAction)
+          ? 'Pending network'
+          : latestRequest?.status === 'approved' || latestRequest?.status === 'fulfilled'
+            ? 'Approved'
+            : 'Received';
 
   useEffect(() => {
     const updateConnectionState = () => setDegraded(!navigator.onLine);
@@ -314,6 +343,24 @@ export default function PatronView({
   useEffect(() => {
     handleSearch('');
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'request') return;
+    if (selectedTrack || requestPresets.length === 0) return;
+
+    const firstPreset = requestPresets[0];
+    setSelectedPresetId(firstPreset.id);
+    setSelectedTrack({
+      id: firstPreset.id,
+      title: firstPreset.label.replace(/^\$\d+\s*/, ''),
+      artist: firstPreset.subtitle,
+      albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+      basePrice: firstPreset.amount,
+      targetType: firstPreset.targetType,
+      source: 'Sway Preset'
+    });
+    setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
+  }, [activeTab, selectedTrack, requestPresets, session.minimumTip]);
 
   // Live request window countdown for patron
   const [patronsWindowTimeLeft, setPatronsWindowTimeLeft] = useState<string>('');
@@ -514,7 +561,7 @@ export default function PatronView({
         const isCustom = session.talentRole !== 'DJ';
         await submitWithBoundedRetry(() => onCreateRequest({
           type: 'request',
-          targetType: isCustom ? 'custom' : 'music',
+          targetType: selectedTrack?.targetType || (isCustom ? 'custom' : 'music'),
           title: checkoutPayload.title,
           subtitle: checkoutPayload.artist || '',
           senderName: senderName,
@@ -789,6 +836,24 @@ export default function PatronView({
           {pendingActionMessage || 'Connection degraded. Sway saved your pending action locally and will reconcile with the server before showing confirmation.'}
         </div>
       )}
+
+      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Request status</h3>
+          <span className="text-[10px] font-mono text-fuchsia-300 uppercase tracking-widest">Current: {activePatronStatus}</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
+          {['Pending network', 'Received', 'Approved', 'Session paused', 'Session ended'].map((status) => (
+            <div
+              key={status}
+              className={`rounded-lg border px-2 py-2 text-center font-bold ${activePatronStatus === status ? 'border-fuchsia-400 bg-fuchsia-500/15 text-fuchsia-200' : 'border-white/10 bg-slate-950 text-slate-400'}`}
+            >
+              {status}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div id="patron_action_panel">
         
         {/* TAB A: Dynamic Search & Selection (Music / Custom Menu) */}
@@ -846,9 +911,40 @@ export default function PatronView({
             {/* If DJ Role: Search verified catalog */}
             {session.talentRole === 'DJ' && (
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
+                    Quick presets
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {requestPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPresetId(preset.id);
+                          setSelectedTrack({
+                            id: preset.id,
+                            title: preset.label.replace(/^\$\d+\s*/, ''),
+                            artist: preset.subtitle,
+                            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+                            basePrice: preset.amount,
+                            targetType: preset.targetType,
+                            source: 'Sway Preset'
+                          });
+                          setTipAmount(Math.max(session.minimumTip, preset.amount));
+                        }}
+                        className={`rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${selectedPresetId === preset.id ? 'border-fuchsia-400 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950 hover:border-fuchsia-500/40'}`}
+                      >
+                        <div className="text-xs font-bold text-white">{preset.label}</div>
+                        <div className="mt-1 text-[10px] text-slate-400">{preset.subtitle}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    Music Library Search
+                    Music library (optional)
                   </span>
                 </div>
                  {/* Form input fields */}
@@ -889,6 +985,7 @@ export default function PatronView({
                       <div>
                         <div className="text-sm font-bold text-white">{selectedTrack.title}</div>
                         <p className="text-xs text-slate-400 font-sans">{selectedTrack.artist}</p>
+                        {selectedTrack.source && <p className="text-[10px] text-fuchsia-300 mt-1 uppercase tracking-wider">{selectedTrack.source}</p>}
                       </div>
                     </div>
                     <button 
@@ -935,6 +1032,36 @@ export default function PatronView({
             {session.talentRole !== 'DJ' && (
               /* If Bartender / Magician custom menu selection: Path B */
               <div className="space-y-4 font-sans">
+                <div className="space-y-2">
+                  <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
+                    Quick presets
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {requestPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPresetId(preset.id);
+                          setSelectedTrack({
+                            id: preset.id,
+                            title: preset.label.replace(/^\$\d+\s*/, ''),
+                            artist: preset.subtitle,
+                            basePrice: preset.amount,
+                            targetType: preset.targetType,
+                            source: 'Sway Preset'
+                          });
+                          setTipAmount(Math.max(session.minimumTip, preset.amount));
+                        }}
+                        className={`rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${selectedPresetId === preset.id ? 'border-fuchsia-400 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950 hover:border-fuchsia-500/40'}`}
+                      >
+                        <div className="text-xs font-bold text-white">{preset.label}</div>
+                        <div className="mt-1 text-[10px] text-slate-400">{preset.subtitle}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
                   PATH B: Interactive Custom Action List
                 </div>
