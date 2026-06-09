@@ -806,7 +806,8 @@ app.post("/api/request/create", async (req, res) => {
     patron_device_id_hash = "anonymous-device",
     gig_id,
     currency = "USD",
-    expires_at
+    expires_at,
+    payment_method
   } = req.body;
 
   if (!client_request_id || !idempotency_key) {
@@ -960,8 +961,9 @@ app.post("/api/request/create", async (req, res) => {
     boosts: []
   };
 
-  // Provider-backed authorization/hold. Fail safe: if the provider rejects the
-  // authorization, no request is created and no successful financial state exists.
+  // Provider-backed authorization/hold. A paid request/tip must NOT enter app
+  // state or Private Triage until the provider confirms a real hold
+  // (PaymentIntent requires_capture). Fail safe / fail closed otherwise.
   if (paymentService.isEnabled()) {
     const platformFeeCents = state.session.feeType === 'patron' ? 100 : 0;
     const authorization = await paymentService.authorizeAction({
@@ -972,7 +974,9 @@ app.post("/api/request/create", async (req, res) => {
       currency: String(currency).toUpperCase(),
       idempotencyKey: idempotency_key,
       runtimeRequestId: newItem.id,
-      clientRequestId: client_request_id
+      clientRequestId: client_request_id,
+      paymentMethod: payment_method,
+      confirm: typeof payment_method === 'string' && payment_method.length > 0
     });
     if (authorization.status === 'failed') {
       return res.status(402).json({
@@ -980,19 +984,40 @@ app.post("/api/request/create", async (req, res) => {
         payment_status: 'failed'
       });
     }
+    if (authorization.status === 'requires_confirmation') {
+      // No hold yet: do NOT create the request. Return the client_secret so the
+      // patron can confirm their card; the request is created only after the
+      // PaymentIntent reaches requires_capture.
+      return res.status(402).json({
+        error: "Payment confirmation is required before your request is submitted.",
+        payment_status: 'requires_confirmation',
+        payment_intent_id: authorization.processorPaymentIntentId,
+        client_secret: authorization.clientSecret
+      });
+    }
+    // status === 'authorized': a real hold exists. Only now may the request enter
+    // app state / Private Triage.
     if (authorization.status === 'authorized') {
       newItem.paymentId = authorization.paymentId;
       newItem.paymentIntentId = authorization.processorPaymentIntentId;
-      newItem.paymentStatus = authorization.capturable ? 'authorized' : 'payment_pending';
+      newItem.paymentStatus = 'authorized';
       // A straight tip is not gated by Private Triage, so capture its authorized
-      // hold immediately when the funds are capturable.
-      if (isStraightTip && authorization.capturable) {
+      // hold immediately.
+      if (isStraightTip) {
         const capture = await paymentService.captureAuthorization(authorization.paymentId);
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
         }
       }
     }
+  } else if (isProduction) {
+    // Fail closed: a visible money action must never silently create no-money
+    // request state in production. If the payment provider is not configured,
+    // the action is rejected rather than processed for free.
+    return res.status(503).json({
+      error: "Payments are temporarily unavailable. Your request was not submitted and you were not charged.",
+      payment_status: 'provider_unavailable'
+    });
   }
 
   state.requests.push(newItem);
@@ -1032,10 +1057,10 @@ app.post("/api/request/boost", async (req, res) => {
     patron_device_id_hash = "anonymous-device",
     gig_id,
     currency = "USD",
-    expires_at
+    expires_at,
+    payment_method
   } = req.body;
   const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
-
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
@@ -1184,7 +1209,9 @@ app.post("/api/request/boost", async (req, res) => {
       currency: String(currency).toUpperCase(),
       idempotencyKey: idempotency_key,
       runtimeRequestId: request.id,
-      clientRequestId: client_request_id
+      clientRequestId: client_request_id,
+      paymentMethod: payment_method,
+      confirm: typeof payment_method === 'string' && payment_method.length > 0
     });
     if (authorization.status === 'failed') {
       return res.status(402).json({
@@ -1192,17 +1219,34 @@ app.post("/api/request/boost", async (req, res) => {
         payment_status: 'failed'
       });
     }
+    if (authorization.status === 'requires_confirmation') {
+      // No hold yet: do NOT create the boost. Return the client_secret so the
+      // patron can confirm; the boost is created only after requires_capture.
+      return res.status(402).json({
+        error: "Payment confirmation is required before your boost is applied.",
+        payment_status: 'requires_confirmation',
+        payment_intent_id: authorization.processorPaymentIntentId,
+        client_secret: authorization.clientSecret
+      });
+    }
+    // status === 'authorized': a real hold exists. The target request already
+    // cleared Private Triage, so the approved boost is captured immediately.
     if (authorization.status === 'authorized') {
       newBoost.paymentId = authorization.paymentId;
       newBoost.paymentIntentId = authorization.processorPaymentIntentId;
-      newBoost.paymentStatus = authorization.capturable ? 'authorized' : 'payment_pending';
-      if (authorization.capturable) {
-        const capture = await paymentService.captureAuthorization(authorization.paymentId);
-        if (capture.status === 'captured') {
-          newBoost.paymentStatus = 'captured';
-        }
+      newBoost.paymentStatus = 'authorized';
+      const capture = await paymentService.captureAuthorization(authorization.paymentId);
+      if (capture.status === 'captured') {
+        newBoost.paymentStatus = 'captured';
       }
     }
+  } else if (isProduction) {
+    // Fail closed: a visible money action must never silently create no-money
+    // boost state in production when the payment provider is unavailable.
+    return res.status(503).json({
+      error: "Payments are temporarily unavailable. Your boost was not applied and you were not charged.",
+      payment_status: 'provider_unavailable'
+    });
   }
 
   request.boosts.push(newBoost);

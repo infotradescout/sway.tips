@@ -20,7 +20,14 @@ export type AuthorizeActionInput = {
 
 export type AuthorizeActionResult =
   | { status: 'disabled' }
-  | { status: 'authorized'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null; capturable: boolean }
+  // 'authorized' is returned ONLY when the provider confirms the funds are held
+  // (PaymentIntent requires_capture). A request may enter app state / triage only
+  // on this result.
+  | { status: 'authorized'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null }
+  // 'requires_confirmation' means a PaymentIntent exists but is not yet a hold.
+  // The caller MUST NOT create app state; the patron must confirm the payment
+  // (via clientSecret) before the action can proceed.
+  | { status: 'requires_confirmation'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null; providerStatus: string }
   | { status: 'failed'; reason: string };
 
 export type SettleResult =
@@ -123,30 +130,38 @@ export function createPaymentService(config: {
       });
 
       // Funds are only "authorized" (capturable) once the PaymentIntent reaches
-      // requires_capture. Otherwise it stays payment_pending until the patron
-      // confirms their card and the provider webhook reports it capturable.
+      // requires_capture. Until then the action must NOT enter app state: we
+      // return requires_confirmation so the caller can have the patron confirm
+      // their card (clientSecret) before any request/boost/tip is created.
       const capturable = authorization.status === 'requires_capture';
-      if (capturable) {
-        await lifecycle.transitionPaymentState({
+      if (!capturable) {
+        return {
+          status: 'requires_confirmation',
           paymentId,
-          processor: provider.processor,
-          nextStatus: 'authorized',
-          eventType: 'payment_intent.amount_capturable_updated',
-          processorEventId: authorization.processorPaymentIntentId,
-          actorType: 'system',
-          metadata: {
-            processorPaymentIntentId: authorization.processorPaymentIntentId,
-            providerStatus: authorization.status
-          }
-        });
+          processorPaymentIntentId: authorization.processorPaymentIntentId,
+          clientSecret: authorization.clientSecret,
+          providerStatus: authorization.status
+        };
       }
+
+      await lifecycle.transitionPaymentState({
+        paymentId,
+        processor: provider.processor,
+        nextStatus: 'authorized',
+        eventType: 'payment_intent.amount_capturable_updated',
+        processorEventId: authorization.processorPaymentIntentId,
+        actorType: 'system',
+        metadata: {
+          processorPaymentIntentId: authorization.processorPaymentIntentId,
+          providerStatus: authorization.status
+        }
+      });
 
       return {
         status: 'authorized',
         paymentId,
         processorPaymentIntentId: authorization.processorPaymentIntentId,
-        clientSecret: authorization.clientSecret,
-        capturable
+        clientSecret: authorization.clientSecret
       };
     } catch (error) {
       // Fail safe: mark the payment failed so no successful financial state exists.

@@ -40,7 +40,11 @@ const requiredServiceTerms = [
   'insert(payments)',
   'isEnabled',
   "status: 'failed'",
-  'payment.authorization.failed'
+  'payment.authorization.failed',
+  // Authorization must be gated on a real hold (requires_capture); otherwise the
+  // caller is told confirmation is required and no app state is created.
+  "status: 'requires_confirmation'",
+  "authorization.status === 'requires_capture'"
 ];
 
 for (const term of requiredServiceTerms) {

@@ -128,8 +128,7 @@ async function main() {
       paymentMethod: 'pm_card_visa',
       confirm: true
     });
-    assert.equal(auth.status, 'authorized', 'authorization must succeed');
-    assert.equal(auth.capturable, true, 'confirmed test card must be capturable');
+    assert.equal(auth.status, 'authorized', 'confirmed test card must reach a capturable hold (requires_capture)');
 
     const authedRow = await adminClient.query('SELECT payment_status FROM payments WHERE id = $1', [auth.paymentId]);
     assert.equal(authedRow.rows[0].payment_status, 'authorized', 'payment row must be authorized');
@@ -174,7 +173,24 @@ async function main() {
     const totalsAfterVoid = await service.aggregateCapturedTotals(GIG_ID);
     assert.equal(totalsAfterVoid.capturedSubtotalCents, 1500, 'voided hold must not be counted');
 
-    // 5. Provider failure fails safe (invalid amount => no successful state).
+    // 5. Unconfirmed authorization (no payment_method) must NOT be capturable:
+    //    it must return requires_confirmation, never 'authorized'.
+    const unconfirmed = await service.authorizeAction({
+      gigId: GIG_ID,
+      actionType: 'request',
+      amountSubtotalCents: 700,
+      platformFeeCents: 100,
+      currency: 'USD',
+      idempotencyKey: `it-unconfirmed-${Date.now()}`
+    });
+    assert.equal(unconfirmed.status, 'requires_confirmation', 'unconfirmed intent must not be authorized');
+    assert.ok(unconfirmed.clientSecret, 'requires_confirmation must expose a client secret for confirmation');
+    const unconfirmedRow = await adminClient.query('SELECT payment_status FROM payments WHERE id = $1', [unconfirmed.paymentId]);
+    assert.equal(unconfirmedRow.rows[0].payment_status, 'payment_pending', 'unconfirmed payment must stay payment_pending');
+    const totalsAfterUnconfirmed = await service.aggregateCapturedTotals(GIG_ID);
+    assert.equal(totalsAfterUnconfirmed.capturedSubtotalCents, 1500, 'unconfirmed intent must not be captured');
+
+    // 6. Provider failure fails safe (invalid amount => no successful state).
     const failed = await service.authorizeAction({
       gigId: GIG_ID,
       actionType: 'request',
