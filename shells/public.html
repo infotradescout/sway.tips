@@ -13,7 +13,7 @@
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1672" />
     <meta property="og:image:height" content="941" />
-    <meta property="og:image:alt" content="Sway live tips and requests preview" />
+    <meta property="og:image:alt" content="Sway live tips and requests" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Sway | Live Crowd Requests" />
     <meta name="twitter:description" content="Sway is a live request and tipping app for performers, DJs, bartenders, and venues. Fans scan, request, tip, and follow the queue in real time." />
@@ -26,148 +26,320 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0f1115;
-        --card: #171a20;
-        --line: rgba(255, 255, 255, 0.14);
-        --text: #f5f7ff;
-        --muted: #a2a8b8;
+        --bg: #07080c;
+        --panel: rgba(22, 26, 35, 0.72);
+        --line: rgba(255, 255, 255, 0.10);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --text: #f6f8ff;
+        --muted: #9aa2b6;
         --accent: #35d59a;
+        --accent-2: #7c5cff;
+        --accent-3: #ff4fa3;
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
+
+      html, body { margin: 0; }
 
       body {
-        margin: 0;
         min-height: 100vh;
-        font-family: "Space Grotesk", "Segoe UI", sans-serif;
-        background: radial-gradient(1200px 700px at 10% -10%, #1d2330 0%, var(--bg) 45%);
+        font-family: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background-color: var(--bg);
+        background-image:
+          radial-gradient(900px 520px at 12% -8%, rgba(124, 92, 255, 0.22), transparent 60%),
+          radial-gradient(820px 520px at 92% 0%, rgba(255, 79, 163, 0.16), transparent 58%),
+          radial-gradient(760px 620px at 50% 118%, rgba(53, 213, 154, 0.16), transparent 60%);
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+        background-size: 46px 46px;
+        mask-image: radial-gradient(1100px 700px at 50% 0%, #000 30%, transparent 78%);
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .shell { position: relative; z-index: 1; }
+
+      .topbar {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 22px 0 8px;
+      }
+
+      .wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 22px;
+        letter-spacing: -0.02em;
+        text-decoration: none;
         color: var(--text);
       }
 
-      main {
-        width: min(920px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 40px 0 48px;
+      .wordmark .dot {
+        width: 11px; height: 11px; border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: 0 0 14px rgba(124, 92, 255, 0.7);
       }
 
-      .header {
-        margin-bottom: 24px;
+      .topnav { display: flex; align-items: center; gap: 10px; }
+
+      .ghost {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-height: 38px; padding: 0 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text);
+        font-weight: 700; font-size: 13px;
+        text-decoration: none;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .ghost:hover { background: rgba(255, 255, 255, 0.08); border-color: var(--line-strong); }
+      .topnav .ghost.hide-sm { display: none; }
+
+      main {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 36px 0 56px;
+      }
+
+      .hero { max-width: 760px; }
+
+      .eyebrow {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 6px 12px; margin-bottom: 20px;
+        border-radius: 999px;
+        border: 1px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+      }
+      .eyebrow .pulse {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 rgba(53, 213, 154, 0.55);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(53, 213, 154, 0.5); }
+        70% { box-shadow: 0 0 0 9px rgba(53, 213, 154, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(53, 213, 154, 0); }
       }
 
       h1 {
-        margin: 0 0 8px;
-        font-size: clamp(36px, 9vw, 64px);
-        line-height: 0.96;
+        margin: 0 0 16px;
+        font-size: clamp(40px, 8vw, 72px);
+        line-height: 0.98;
+        letter-spacing: -0.03em;
+      }
+      h1 .grad {
+        background: linear-gradient(110deg, var(--accent) 0%, var(--accent-2) 52%, var(--accent-3) 100%);
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent; color: transparent;
       }
 
       .sub {
-        margin: 0;
+        margin: 0 0 28px;
         color: var(--muted);
-        font-size: clamp(15px, 2.4vw, 19px);
-        max-width: 680px;
+        font-size: clamp(16px, 2.2vw, 20px);
+        line-height: 1.5;
+        max-width: 620px;
       }
 
-      .grid {
+      .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        min-height: 50px; padding: 0 22px;
+        border-radius: 12px;
+        font-weight: 800; font-size: 15px;
+        text-decoration: none;
+        border: 1px solid var(--line-strong);
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.04);
+        transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+      .btn:hover { transform: translateY(-1px); background: rgba(255, 255, 255, 0.08); }
+      .btn.primary {
+        border-color: transparent;
+        color: #06140e;
+        background: linear-gradient(135deg, var(--accent), #5ce0b4);
+        box-shadow: 0 10px 30px -10px rgba(53, 213, 154, 0.6);
+      }
+      .btn.primary:hover { background: linear-gradient(135deg, #46e0a8, #6cead0); }
+
+      .features {
+        margin-top: 56px;
         display: grid;
-        gap: 12px;
+        gap: 16px;
+        grid-template-columns: 1fr;
       }
 
       .card {
-        background: var(--card);
+        background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 16px;
+        border-radius: 18px;
+        padding: 22px;
+        backdrop-filter: blur(8px);
+        transition: border-color 0.15s ease, transform 0.15s ease;
       }
+      .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
 
-      .card h2 {
-        margin: 0 0 6px;
-        font-size: 15px;
+      .card .icon {
+        width: 42px; height: 42px; border-radius: 12px;
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 14px;
+        border: 1px solid var(--line-strong);
       }
+      .card .icon.a { background: rgba(53, 213, 154, 0.12); color: var(--accent); }
+      .card .icon.b { background: rgba(124, 92, 255, 0.14); color: #b3a3ff; }
+      .card .icon.c { background: rgba(255, 79, 163, 0.12); color: #ff8cc4; }
 
-      .card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .actions {
-        margin-top: 18px;
-        display: grid;
-        gap: 10px;
-      }
-
-      .actions a {
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 42px;
-        text-decoration: none;
-        border-radius: 10px;
-        border: 1px solid var(--line);
-        font-weight: 800;
+      .card h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.01em; }
+      .card p { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+      .card .card-link {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-weight: 800; font-size: 13px; text-decoration: none;
         color: var(--text);
-        background: #121620;
       }
+      .card .card-link:hover { color: var(--accent); }
+      .card .card-link .arrow { transition: transform 0.15s ease; }
+      .card .card-link:hover .arrow { transform: translateX(3px); }
 
-      .actions a.primary {
-        border-color: rgba(53, 213, 154, 0.5);
-        background: rgba(53, 213, 154, 0.15);
+      .flow {
+        margin-top: 48px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        backdrop-filter: blur(8px);
       }
-
-      .meta {
-        margin-top: 16px;
-        color: #8f95a5;
-        font-size: 11px;
+      .flow .flow-label {
+        font-size: 11px; font-weight: 800; letter-spacing: 0.16em;
+        text-transform: uppercase; color: var(--muted);
+        margin-bottom: 14px;
       }
+      .flow .steps {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      }
+      .flow .chip {
+        display: inline-flex; align-items: center;
+        padding: 7px 14px; border-radius: 999px;
+        border: 1px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.03);
+        font-weight: 700; font-size: 13px;
+      }
+      .flow .sep { color: var(--muted); font-weight: 700; }
 
-      @media (min-width: 760px) {
-        .grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
+      footer {
+        width: min(1120px, calc(100% - 40px));
+        margin: 40px auto 36px;
+        padding-top: 22px;
+        border-top: 1px solid var(--line);
+        display: flex; flex-wrap: wrap; gap: 14px;
+        align-items: center; justify-content: space-between;
+      }
+      footer .meta { margin: 0; color: #7e8499; font-size: 12px; line-height: 1.5; max-width: 560px; }
+      footer .foot-links { display: flex; gap: 8px; flex-wrap: wrap; }
 
-        .actions {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
+      @media (min-width: 720px) {
+        .topnav .ghost.hide-sm { display: inline-flex; }
+        .features { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       }
     </style>
   </head>
   <body>
-    <main>
-      <section class="header">
-        <h1>Sway</h1>
-        <p class="sub">Fast requests, clear queue movement, and simple session controls for live floors.</p>
-      </section>
+    <div class="shell">
+      <header class="topbar">
+        <a class="wordmark" href="/"><span class="dot"></span>Sway</a>
+        <nav class="topnav" aria-label="sign in">
+          <a class="ghost hide-sm" href="/talent/gigs">Performer sign in</a>
+          <a class="ghost" href="/admin">Venue sign in</a>
+        </nav>
+      </header>
 
-      <section class="grid" aria-label="entry points">
-        <article class="card">
-          <h2>Audience: start request</h2>
-          <p>Open the active session, send a preset request, and follow status without page reloads.</p>
-        </article>
-        <article class="card">
-          <h2>Performer: open console</h2>
-          <p>Review approvals, pause submissions instantly, and move the queue with one dashboard.</p>
-        </article>
-        <article class="card">
-          <h2>Venue: operator tools</h2>
-          <p>Handle session oversight, moderation workflow, and safety response from protected routes.</p>
-        </article>
-        <article class="card">
-          <h2>Open overlay</h2>
-          <p>Show the live ladder on screens so the crowd sees movement in real time.</p>
-        </article>
-      </section>
+      <main>
+        <section class="hero">
+          <span class="eyebrow"><span class="pulse"></span> Live request &amp; tipping for real rooms</span>
+          <h1>Run the room.<br /><span class="grad">Move the queue.</span></h1>
+          <p class="sub">
+            Sway turns any live floor into a connected experience. The crowd requests and tips from their phones,
+            performers approve and reorder in real time, and the overlay shows the room what is playing next.
+          </p>
+          <div class="cta-row">
+            <a class="btn primary" href="/g/00000000-0000-4000-8000-000000000001">Audience: start request</a>
+            <a class="btn" href="/overlay/00000000-0000-4000-8000-000000000001">Open overlay</a>
+          </div>
+        </section>
 
-      <nav class="actions" aria-label="quick links">
-        <a class="primary" href="/g/00000000-0000-4000-8000-000000000001">Audience: start request</a>
-        <a href="/talent/gigs">Performer: open console</a>
-        <a href="/admin">Venue: operator tools</a>
-        <a href="/overlay/00000000-0000-4000-8000-000000000001">Open overlay</a>
-      </nav>
+        <section class="features" aria-label="who it is for">
+          <article class="card">
+            <span class="icon a" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            </span>
+            <h2>For the crowd</h2>
+            <p>Scan, send a request or tip, then boost it up the queue and watch your spot move &mdash; no app install, no page reloads.</p>
+            <a class="card-link" href="/g/00000000-0000-4000-8000-000000000001">Audience: start request <span class="arrow">&rarr;</span></a>
+          </article>
+          <article class="card">
+            <span class="icon b" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </span>
+            <h2>For performers</h2>
+            <p>Approve or decline pending requests, pause submissions instantly, and reorder the approved queue from one console.</p>
+            <a class="card-link" href="/talent/gigs">Performer: open console <span class="arrow">&rarr;</span></a>
+          </article>
+          <article class="card">
+            <span class="icon c" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </span>
+            <h2>For venues</h2>
+            <p>Oversee sessions, run moderation and safety response, and keep every floor accountable from protected operator routes.</p>
+            <a class="card-link" href="/admin">Venue: operator tools <span class="arrow">&rarr;</span></a>
+          </article>
+        </section>
 
-      <p class="meta">Live tips and request moderation run on session state. Preview image metadata is set for social link shares.</p>
-    </main>
+        <section class="flow" aria-label="how a request moves">
+          <div class="flow-label">How a request moves</div>
+          <div class="steps">
+            <span class="chip">Request</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Tip</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Boost</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Pending</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Approved</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Up Next</span>
+            <span class="sep">&rarr;</span>
+            <span class="chip">Playing</span>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p class="meta">Live tips and request moderation run on session state. Rich image metadata is set for social link shares.</p>
+        <div class="foot-links">
+          <a class="ghost" href="/overlay/00000000-0000-4000-8000-000000000001">Open overlay</a>
+        </div>
+      </footer>
+    </div>
   </body>
 </html>
