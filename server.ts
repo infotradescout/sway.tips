@@ -24,7 +24,7 @@ import { createPaymentWebhookService } from "./src/server/payment-webhook";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
 const IDEMPOTENCY_TTL_HOURS = 48;
 const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
@@ -1672,6 +1672,10 @@ app.post("/api/music/search", (req, res) => {
   );
 
   return res.json({ results: matched.length ? matched : songs.slice(0, 3) });
+});
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found.' });
 });
 
 // Vite Middleware & Front-End Serving Config

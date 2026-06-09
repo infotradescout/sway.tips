@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sway-tips-web
+    runtime: node
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/build-marker
+    domains:
+      - sway.tips
+      - www.sway.tips
+      - app.sway.tips
+    envVars:
+      - key: NODE_ENV
+        value: production
