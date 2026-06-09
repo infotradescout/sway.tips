@@ -619,6 +619,7 @@ export default function PatronView({
       }
 
       // Show high impact check animation
+      const completedActionType = checkoutPayload.type;
       setBackendConfirmed(true);
       setPendingAction(null);
       localStorage.removeItem('sway.pendingAction');
@@ -632,7 +633,11 @@ export default function PatronView({
         setSenderName('');
         setBoostPatronName('');
         setTipAmount(session.minimumTip);
-        setActiveTab('ladder'); // Go check their position on the ladder!
+        // A boost lands on an already-approved item, so the queue shows the result.
+        // A new request is pending approval and is not on the queue yet, so keep the
+        // patron on the request surface where the persistent Request status panel
+        // shows it as Pending instead of dumping them on an approved-only queue.
+        setActiveTab(completedActionType === 'boost' ? 'ladder' : 'request');
       }, 2000);
 
     } catch (e) {
