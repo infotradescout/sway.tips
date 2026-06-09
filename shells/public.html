@@ -5,804 +5,261 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Sway" />
-    <meta property="og:title" content="Sway | Live Crowd Requests" />
-    <meta property="og:description" content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Preview the product direction while production safety gates are finalized." />
+    <meta property="og:title" content="Sway | Early Access" />
+    <meta property="og:description" content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Early access and demos are open while safety gates are finalized." />
     <meta property="og:url" content="https://sway.tips/" />
     <meta property="og:image" content="https://sway.tips/419c8589-e2ef-4199-8221-4794e7420df4.png?v=2" />
-    <meta property="og:image:alt" content="Sway live request platform preview" />
+    <meta property="og:image:alt" content="Sway early access demo preview" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Sway | Live Crowd Requests" />
-    <meta name="twitter:description" content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Preview the product direction while production safety gates are finalized." />
+    <meta name="twitter:title" content="Sway | Early Access" />
+    <meta name="twitter:description" content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Early access and demos are open while safety gates are finalized." />
     <meta name="twitter:image" content="https://sway.tips/419c8589-e2ef-4199-8221-4794e7420df4.png?v=2" />
-    <title>Sway | Live Crowd Requests</title>
+    <title>Sway | Early Access</title>
     <meta
       name="description"
-      content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Preview the product direction while production safety gates are finalized."
+      content="Sway is a QR-powered live request and tipping system for performers, DJs, bartenders, and live venues. Early access and demos are open while safety gates are finalized."
     />
     <style>
       :root {
-        color-scheme: dark;
-        --night: #101114;
-        --panel: #181a1f;
-        --panel-strong: #20232a;
-        --paper: #f6f1e8;
-        --muted: #b9b2a7;
-        --line: rgba(246, 241, 232, 0.16);
-        --line-strong: rgba(246, 241, 232, 0.28);
-        --rose: #ff4d8d;
-        --mint: #32d6a0;
-        --gold: #f8c44f;
-        --blue: #55b7ff;
-        --orange: #ff7a45;
+        --bg-deep: #0d1b2a;
+        --bg-mid: #1b263b;
+        --bg-soft: #e0e1dd;
+        --ink: #0b132b;
+        --ink-soft: #3a506b;
+        --card: rgba(255, 255, 255, 0.9);
+        --line: rgba(27, 38, 59, 0.16);
+        --cta: #ff6b35;
+        --cta-ink: #ffffff;
+        --highlight: #2ec4b6;
       }
 
       * {
         box-sizing: border-box;
       }
 
-      html {
-        min-width: 320px;
-        background: var(--night);
-      }
-
       body {
         margin: 0;
-        min-width: 320px;
-        min-height: 100vh;
         font-family: "Space Grotesk", "Segoe UI", sans-serif;
-        background: var(--night);
-        color: var(--paper);
-      }
-
-      a {
-        color: inherit;
-      }
-
-      .page {
-        min-height: 100vh;
+        color: var(--ink);
         background:
-          linear-gradient(rgba(16, 17, 20, 0.72), rgba(16, 17, 20, 0.88)),
-          url("https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1800&q=80") center / cover fixed;
+          radial-gradient(circle at 15% 20%, rgba(46, 196, 182, 0.25), transparent 35%),
+          radial-gradient(circle at 85% 0%, rgba(255, 107, 53, 0.28), transparent 30%),
+          linear-gradient(135deg, var(--bg-deep) 0%, var(--bg-mid) 52%, #415a77 100%);
+        min-height: 100vh;
       }
 
-      .nav {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        width: min(1180px, calc(100% - 32px));
+      .wrap {
+        max-width: 1040px;
         margin: 0 auto;
-        padding: 18px 0;
-      }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .mark {
-        display: grid;
-        place-items: center;
-        width: 34px;
-        height: 34px;
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        border-radius: 10px;
-        background: var(--rose);
-        color: #fff;
-        font-weight: 900;
-      }
-
-      .nav-actions {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .nav-link {
-        display: none;
-        color: var(--muted);
-        font-size: 13px;
-        font-weight: 800;
-        text-decoration: none;
-      }
-
-      .button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 42px;
-        border-radius: 8px;
-        border: 1px solid transparent;
-        padding: 10px 14px;
-        font-size: 14px;
-        font-weight: 900;
-        text-decoration: none;
-        white-space: nowrap;
-      }
-
-      .button.primary {
-        background: var(--paper);
-        color: #111317;
-      }
-
-      .button.secondary {
-        border-color: var(--line-strong);
-        background: rgba(255, 255, 255, 0.08);
-        color: var(--paper);
+        padding: 20px;
       }
 
       .hero {
-        width: min(1180px, calc(100% - 32px));
-        min-height: calc(100vh - 76px);
-        margin: 0 auto;
-        display: grid;
-        align-items: center;
-        gap: 28px;
-        padding: 18px 0 42px;
-      }
-
-      .hero-copy {
-        max-width: 760px;
+        margin-top: 20px;
+        border-radius: 24px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(224, 225, 221, 0.94));
+        border: 1px solid var(--line);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+        padding: 28px;
       }
 
       .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        border: 1px solid rgba(248, 196, 79, 0.36);
+        display: inline-block;
         border-radius: 999px;
-        background: rgba(248, 196, 79, 0.12);
-        color: #ffe2a0;
-        padding: 8px 11px;
-        font-size: 11px;
-        font-weight: 900;
+        background: rgba(46, 196, 182, 0.18);
+        color: #0f766e;
+        font-weight: 700;
+        font-size: 12px;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+        padding: 8px 12px;
       }
 
       h1 {
-        margin: 18px 0 12px;
-        max-width: 720px;
-        font-size: clamp(42px, 9vw, 92px);
-        line-height: 0.94;
-        letter-spacing: 0;
+        margin: 14px 0 10px;
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1.02;
+        letter-spacing: -0.02em;
       }
 
       .lead {
-        max-width: 660px;
         margin: 0;
-        color: #e7dfd3;
-        font-size: clamp(17px, 2.4vw, 23px);
-        line-height: 1.38;
-      }
-
-      .hero-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 22px;
+        font-size: clamp(18px, 2.5vw, 22px);
+        line-height: 1.35;
+        color: var(--ink-soft);
       }
 
       .status {
-        max-width: 710px;
         margin-top: 18px;
-        border-left: 4px solid var(--mint);
-        background: rgba(16, 17, 20, 0.64);
+        border-left: 4px solid var(--highlight);
+        border-radius: 12px;
+        background: rgba(11, 19, 43, 0.06);
         padding: 14px 16px;
-        color: #d7d0c5;
-        font-size: 14px;
+        font-size: 15px;
         line-height: 1.5;
       }
 
-      .preview {
-        display: grid;
-        gap: 14px;
-        align-self: stretch;
-      }
-
-      .preview-shell {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(24, 26, 31, 0.9);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
-        overflow: hidden;
-      }
-
-      .preview-topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        min-height: 48px;
-        border-bottom: 1px solid var(--line);
-        padding: 10px 12px;
-        background: rgba(255, 255, 255, 0.05);
-      }
-
-      .dots {
-        display: flex;
-        gap: 6px;
-      }
-
-      .dot {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: var(--muted);
-      }
-
-      .dot:nth-child(1) {
-        background: var(--rose);
-      }
-
-      .dot:nth-child(2) {
-        background: var(--gold);
-      }
-
-      .dot:nth-child(3) {
-        background: var(--mint);
-      }
-
-      .preview-label {
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .preview-body {
-        display: grid;
-        gap: 12px;
-        padding: 12px;
-      }
-
-      .phone-panel,
-      .operator-panel,
-      .overlay-panel {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: var(--panel);
-        overflow: hidden;
-      }
-
-      .phone-panel {
-        min-height: 430px;
-      }
-
-      .phone-hero {
-        min-height: 150px;
-        padding: 18px;
-        background:
-          linear-gradient(rgba(16, 17, 20, 0.32), rgba(16, 17, 20, 0.82)),
-          url("https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=900&q=80") center / cover;
-      }
-
-      .phone-kicker,
-      .section-kicker {
-        margin: 0;
-        color: var(--gold);
-        font-size: 10px;
-        font-weight: 900;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-
-      .phone-title {
-        margin: 8px 0 0;
-        font-size: 28px;
-        line-height: 1;
-      }
-
-      .phone-subtitle {
-        margin: 8px 0 0;
-        color: #d7d0c5;
-        font-size: 13px;
-      }
-
-      .action-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-        padding: 12px;
-      }
-
-      .action-chip {
-        min-height: 58px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: var(--panel-strong);
-        padding: 9px;
-      }
-
-      .chip-icon {
-        display: block;
-        color: var(--mint);
-        font-size: 18px;
-        line-height: 1;
-      }
-
-      .chip-label {
-        display: block;
-        margin-top: 7px;
-        color: #f4eadf;
-        font-size: 11px;
-        font-weight: 900;
-      }
-
-      .queue {
-        display: grid;
-        gap: 8px;
-        padding: 0 12px 12px;
-      }
-
-      .queue-row {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 10px;
-        min-height: 54px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.045);
-        padding: 9px 10px;
-      }
-
-      .rank {
-        display: grid;
-        place-items: center;
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        background: rgba(85, 183, 255, 0.16);
-        color: #9ad4ff;
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .row-title {
-        min-width: 0;
-        color: #fff7ee;
-        font-size: 13px;
-        font-weight: 900;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .row-meta {
-        margin-top: 3px;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .row-value {
-        color: var(--mint);
-        font-size: 13px;
-        font-weight: 900;
-      }
-
-      .operator-panel {
-        padding: 14px;
-      }
-
-      .operator-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 12px;
-      }
-
-      .operator-title {
-        margin: 4px 0 0;
-        font-size: 22px;
-      }
-
-      .pill {
-        border: 1px solid rgba(50, 214, 160, 0.34);
-        border-radius: 999px;
-        background: rgba(50, 214, 160, 0.1);
-        color: #a8f4d9;
-        padding: 7px 9px;
-        font-size: 10px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-
-      .metric-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-      }
-
-      .metric {
-        min-height: 76px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.045);
-        padding: 10px;
-      }
-
-      .metric span {
-        color: var(--muted);
-        font-size: 10px;
-        font-weight: 800;
-      }
-
-      .metric strong {
-        display: block;
-        margin-top: 8px;
-        color: #fff;
-        font-size: 22px;
-      }
-
-      .operator-actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .operator-action {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: var(--panel-strong);
-        padding: 12px;
-        color: #f6f1e8;
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .overlay-panel {
-        padding: 14px;
-        background: rgba(0, 0, 0, 0.72);
-      }
-
-      .overlay-title {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        border-bottom: 1px solid rgba(255, 77, 141, 0.34);
-        padding-bottom: 10px;
-        color: var(--rose);
-        font-size: 12px;
-        font-weight: 900;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-
-      .preview-note {
-        margin: 10px 0 0;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
-      .below {
-        background: #f6f1e8;
-        color: #17191d;
-      }
-
-      .below-inner {
-        width: min(1180px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 44px 0;
-      }
-
-      .section-title {
-        margin: 0;
-        max-width: 720px;
-        font-size: clamp(28px, 5vw, 48px);
-        line-height: 1;
-      }
-
-      .feature-grid {
+      .grid {
+        margin-top: 22px;
         display: grid;
         grid-template-columns: 1fr;
-        gap: 12px;
-        margin-top: 22px;
+        gap: 14px;
       }
 
-      .feature {
-        border: 1px solid rgba(23, 25, 29, 0.14);
-        border-radius: 8px;
-        background: #fffaf1;
-        padding: 18px;
+      .card {
+        border-radius: 16px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        padding: 16px;
       }
 
-      .feature h2 {
+      .card h2 {
         margin: 0 0 8px;
-        font-size: 19px;
+        font-size: 20px;
       }
 
-      .feature p {
+      .card p,
+      .card li {
         margin: 0;
-        color: #5d544d;
-        font-size: 14px;
-        line-height: 1.5;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .cta {
+        margin-top: 22px;
+        border-radius: 16px;
+        background: rgba(11, 19, 43, 0.08);
+        border: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .cta p {
+        margin: 0 0 12px;
+        color: var(--ink-soft);
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .button {
+        text-decoration: none;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 44px;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 700;
+        font-size: 15px;
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+
+      .button.primary {
+        background: var(--cta);
+        color: var(--cta-ink);
+      }
+
+      .button.secondary {
+        background: rgba(27, 38, 59, 0.12);
+        color: var(--ink);
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
       }
 
       .fine-print {
-        margin: 24px 0 0;
-        color: #6b6258;
+        margin-top: 14px;
         font-size: 13px;
-        line-height: 1.5;
+        color: rgba(11, 19, 43, 0.75);
       }
 
-      @media (min-width: 760px) {
-        .nav {
-          width: min(1180px, calc(100% - 48px));
-        }
-
-        .nav-link {
-          display: inline-flex;
+      @media (min-width: 820px) {
+        .wrap {
+          padding: 28px;
         }
 
         .hero {
-          width: min(1180px, calc(100% - 48px));
-          grid-template-columns: minmax(0, 0.9fr) minmax(430px, 1.1fr);
-          padding-bottom: 56px;
+          padding: 38px;
         }
 
-        .preview-body {
-          grid-template-columns: minmax(230px, 0.9fr) minmax(0, 1.1fr);
-          align-items: stretch;
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
         }
 
-        .phone-panel {
-          grid-row: span 2;
-        }
-
-        .below-inner {
-          width: min(1180px, calc(100% - 48px));
-          padding: 54px 0;
-        }
-
-        .feature-grid {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-
-      @media (max-width: 480px) {
-        .nav {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-
-        .hero {
-          min-height: auto;
-        }
-
-        .button {
-          width: 100%;
-        }
-
-        .hero-actions,
-        .nav-actions {
-          width: 100%;
-        }
-
-        .nav-actions {
-          display: grid;
-          grid-template-columns: 1fr;
-        }
-
-        .action-row,
-        .metric-grid,
-        .operator-actions {
-          grid-template-columns: 1fr;
+        .actions {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div class="page">
-      <header class="nav" aria-label="Sway public navigation">
-        <div class="brand" aria-label="Sway">
-          <span class="mark">S</span>
-          <span>Sway</span>
-        </div>
-        <nav class="nav-actions" aria-label="Early access links">
-          <a class="nav-link" href="#preview">Preview</a>
-          <a class="nav-link" href="#trust">Safety</a>
-          <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Demo%20Request">Book a demo</a>
-        </nav>
-      </header>
-
-      <main class="hero" id="preview">
-        <section class="hero-copy" aria-label="Sway product introduction">
-          <span class="badge">Pre-Production MVP Surface</span>
-          <h1>Sway</h1>
-          <p class="lead">
-            A live crowd request surface for performers, DJs, bartenders, and venues. Fans scan, choose the moment,
-            and watch the room's energy move in real time.
-          </p>
-          <div class="hero-actions">
-            <a class="button primary" href="mailto:hello@sway.tips?subject=Sway%20Early%20Access">Join early access</a>
-            <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Performer%20Interest">For performers</a>
-          </div>
-          <p class="status">
-            This is a product preview layout, not live production data. Sway is currently in pre-production while
-            backend persistence, identity, moderation, and payment safety gates are finalized. Real-money payments are not live yet.
-          </p>
-        </section>
-
-        <section class="preview" aria-label="Sway product preview">
-          <div class="preview-shell">
-            <div class="preview-topbar">
-              <div class="dots" aria-hidden="true">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
-              </div>
-              <span class="preview-label">Preview layout, not live data</span>
-            </div>
-
-            <div class="preview-body">
-              <article class="phone-panel" aria-label="Fan phone preview">
-                <div class="phone-hero">
-                  <p class="phone-kicker">Fan view</p>
-                  <h2 class="phone-title">Choose the next moment</h2>
-                  <p class="phone-subtitle">Requests, boosts, shoutouts, and tips in one scan-first flow.</p>
-                </div>
-                <div class="action-row" aria-label="Fan actions preview">
-                  <div class="action-chip">
-                    <span class="chip-icon">+</span>
-                    <span class="chip-label">Request</span>
-                  </div>
-                  <div class="action-chip">
-                    <span class="chip-icon">^</span>
-                    <span class="chip-label">Boost</span>
-                  </div>
-                  <div class="action-chip">
-                    <span class="chip-icon">*</span>
-                    <span class="chip-label">Tip</span>
-                  </div>
-                </div>
-                <div class="queue" aria-label="Fan queue preview">
-                  <div class="queue-row">
-                    <span class="rank">1</span>
-                    <div>
-                      <div class="row-title">Crowd favorite</div>
-                      <div class="row-meta">Approved queue preview</div>
-                    </div>
-                    <span class="row-value">Boost</span>
-                  </div>
-                  <div class="queue-row">
-                    <span class="rank">2</span>
-                    <div>
-                      <div class="row-title">Shoutout moment</div>
-                      <div class="row-meta">Awaiting performer decision</div>
-                    </div>
-                    <span class="row-value">Hold</span>
-                  </div>
-                  <div class="queue-row">
-                    <span class="rank">3</span>
-                    <div>
-                      <div class="row-title">Straight tip</div>
-                      <div class="row-meta">Payment UI planned</div>
-                    </div>
-                    <span class="row-value">Soon</span>
-                  </div>
-                </div>
-              </article>
-
-              <article class="operator-panel" aria-label="Performer console preview">
-                <div class="operator-header">
-                  <div>
-                    <p class="section-kicker">Performer console</p>
-                    <h2 class="operator-title">Run the room without losing the room.</h2>
-                  </div>
-                  <span class="pill">Shell preview</span>
-                </div>
-                <div class="metric-grid">
-                  <div class="metric">
-                    <span>Queue</span>
-                    <strong>Live</strong>
-                  </div>
-                  <div class="metric">
-                    <span>Controls</span>
-                    <strong>Guarded</strong>
-                  </div>
-                  <div class="metric">
-                    <span>Payouts</span>
-                    <strong>Soon</strong>
-                  </div>
-                </div>
-                <div class="operator-actions">
-                  <div class="operator-action">Approve or deny requests</div>
-                  <div class="operator-action">Open and close request windows</div>
-                  <div class="operator-action">Hide unsafe submissions</div>
-                  <div class="operator-action">Review closeout totals</div>
-                </div>
-                <p class="preview-note">Operator controls shown here describe the intended surface. Live authority requires persisted roles, audit logs, and production gates.</p>
-              </article>
-
-              <article class="overlay-panel" aria-label="Venue overlay preview">
-                <div class="overlay-title">
-                  <span>Sway live ladder</span>
-                  <span>Venue screen</span>
-                </div>
-                <div class="queue" style="padding: 12px 0 0;">
-                  <div class="queue-row">
-                    <span class="rank">1</span>
-                    <div>
-                      <div class="row-title">Top request slot</div>
-                      <div class="row-meta">Display-ready overlay preview</div>
-                    </div>
-                    <span class="row-value">#1</span>
-                  </div>
-                  <div class="queue-row">
-                    <span class="rank">2</span>
-                    <div>
-                      <div class="row-title">Audience boost slot</div>
-                      <div class="row-meta">Made for screens and projectors</div>
-                    </div>
-                    <span class="row-value">#2</span>
-                  </div>
-                </div>
-                <p class="preview-note">The overlay preview shows the target visual system only. It is not a live gig feed.</p>
-              </article>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
-
-    <section class="below" id="trust" aria-label="Sway production boundaries">
-      <div class="below-inner">
-        <p class="section-kicker" style="color: #9d3a67;">Built for real venues</p>
-        <h2 class="section-title">The public preview shows the product direction. The production gates still stay honest.</h2>
-        <div class="feature-grid">
-          <article class="feature">
-            <h2>For fans</h2>
-            <p>Scan a code, choose a request, boost the ladder, or send a direct tip once payment processing is live.</p>
-          </article>
-          <article class="feature">
-            <h2>For performers</h2>
-            <p>See the room's queue, control what reaches the stage, and keep unsafe or off-brand submissions out.</p>
-          </article>
-          <article class="feature">
-            <h2>For venues</h2>
-            <p>Use a screen-ready ladder and separated role surfaces without treating client routing as security.</p>
-          </article>
-        </div>
-        <p class="fine-print">
-          Demo and early-access intake currently runs through email only. This public page does not execute live payments,
-          grant admin authority, enforce live moderation, or present fixture users/events as production truth.
+    <main class="wrap">
+      <section class="hero">
+        <span class="badge">Pre-Production MVP Surface</span>
+        <h1>Let the crowd shape the show.</h1>
+        <p class="lead">
+          Sway gives performers, DJs, bartenders, and live venues a QR-powered way to collect requests, boosts,
+          shoutouts, and tips.
         </p>
-      </div>
-    </section>
 
-    <script type="module">
-      if (import.meta.env.VITE_SWAY_DEMO_MODE === 'true') {
-        const badge = document.createElement('div');
-        badge.textContent = 'Demo preview data';
-        badge.style.position = 'fixed';
-        badge.style.top = '12px';
-        badge.style.right = '12px';
-        badge.style.zIndex = '10';
-        badge.style.border = '1px solid rgba(255, 255, 255, 0.45)';
-        badge.style.borderRadius = '999px';
-        badge.style.background = 'rgba(11, 19, 43, 0.82)';
-        badge.style.color = '#ffffff';
-        badge.style.font = '700 11px "Space Grotesk", sans-serif';
-        badge.style.letterSpacing = '0.08em';
-        badge.style.textTransform = 'uppercase';
-        badge.style.padding = '8px 10px';
-        document.body.appendChild(badge);
-      }
-    </script>
+        <p class="status">
+          Sway is currently in pre-production. We are opening controlled early access while backend persistence,
+          identity, moderation, and payment safety gates are finalized.
+        </p>
+
+        <div class="grid">
+          <article class="card">
+            <h2>What it does</h2>
+            <p>QR-based song requests, boosts, shoutouts, tips, and live queue control in high-energy venue environments.</p>
+          </article>
+
+          <article class="card">
+            <h2>Who it is for</h2>
+            <ul>
+              <li>DJs: song requests and crowd boosts</li>
+              <li>Performers: paid crowd interactions</li>
+              <li>Bartenders: premium action menus</li>
+              <li>Venues: controlled audience engagement</li>
+            </ul>
+          </article>
+
+          <article class="card" style="grid-column: 1 / -1;">
+            <h2>Safety and trust</h2>
+            <p>
+              Built with moderation, blocking, durable request state, and role-based authorization before live payments.
+            </p>
+          </article>
+        </div>
+
+        <section class="cta" aria-label="Early access actions">
+          <p>Choose one of the actions below to connect with the early access team.</p>
+          <div class="actions">
+            <a class="button primary" href="mailto:hello@sway.tips?subject=Sway%20Early%20Access">Join early access</a>
+            <a class="button primary" href="mailto:hello@sway.tips?subject=Sway%20Demo%20Request">Book a demo</a>
+            <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Performer%20Interest">For performers</a>
+            <a class="button secondary" href="mailto:hello@sway.tips?subject=Sway%20Venue%20Interest">For venues</a>
+          </div>
+          <p class="fine-print">
+            Demo and early-access intake currently runs through email only. Real-money payments are not live yet.
+          </p>
+        </section>
+      </section>
+    </main>
   </body>
 </html>
