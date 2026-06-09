@@ -110,6 +110,7 @@ function createInactiveSession(): GigSession {
     requestWindowDuration: null,
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
+    operatingMode: 'manual',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -472,6 +473,7 @@ app.post("/api/session/start", async (req, res) => {
     requestWindowDuration: null,
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
+    operatingMode: 'manual',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -608,6 +610,38 @@ app.post("/api/session/window/toggle", async (req, res) => {
     metadata: {
       requestWindowMode: state.session.requestWindowMode
     }
+  });
+  res.json({ success: true, state });
+});
+
+// Operator selects the room-layer operating posture. 'connected' (external/internal
+// source integration) is not yet supported, so it is rejected honestly here rather
+// than faked. Only the two real runtime postures are accepted.
+app.post("/api/session/mode", async (req, res) => {
+  await refreshBusinessState();
+  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  if (!actor) return;
+  const { mode } = req.body;
+
+  if (mode === 'connected') {
+    return res.status(501).json({ error: "Connected mode requires a source integration that is not configured yet." });
+  }
+  if (mode !== 'manual' && mode !== 'open_call') {
+    return res.status(400).json({ error: "mode must be 'manual' or 'open_call'." });
+  }
+
+  const previousMode = state.session.operatingMode;
+  state.session.operatingMode = mode;
+  state.session.lastMutationActorUserId = actor.actorId;
+
+  await persistStateWithAudit({
+    actor,
+    entityType: 'gig_session',
+    entityId: activeGigId ?? 'runtime-active-session',
+    eventType: 'session.mode',
+    previousStatus: previousMode,
+    nextStatus: mode,
+    metadata: { operatingMode: mode }
   });
   res.json({ success: true, state });
 });

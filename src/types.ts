@@ -89,6 +89,9 @@ export interface GigSession {
   requestWindowDuration: number | null; // duration in minutes
   requestWindowLabel: string | null; // Active preset label
   requestPresets: RequestPreset[]; // Buildable custom/system presets list
+  // Operating posture for the room layer. 'connected' is reserved for future
+  // external/internal source integration and is not yet supported at runtime.
+  operatingMode: 'connected' | 'manual' | 'open_call';
   totals: {
     totalTips: number;
     accumulatedFees: number;

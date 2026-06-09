@@ -155,6 +155,19 @@ export default function TalentDashboard({
     }
   };
 
+  const handleSetMode = async (mode: 'manual' | 'open_call') => {
+    try {
+      await fetch('/api/session/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      });
+      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleActivatePreset = async (durationMinutes: number, label: string) => {
     try {
       await fetch('/api/session/window/preset/activate', {
@@ -467,6 +480,46 @@ export default function TalentDashboard({
                   <><ToggleRight className="w-4 h-4 shrink-0" /> Resume Requests</>
                 )}
               </button>
+            </div>
+
+            {/* 3-MODE. OPERATING POSTURE (Connected is not yet integrated — honest gap) */}
+            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Operating Mode</p>
+                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
+                  Sway tracks automatically when a source is connected. Until then, drive the room manually or run an open call.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSetMode('manual')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.operatingMode !== 'open_call'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
+                  }`}
+                >
+                  Manual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetMode('open_call')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.operatingMode === 'open_call'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
+                  }`}
+                >
+                  Open Call
+                </button>
+                <span
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-950/60 border border-dashed border-white/10 text-slate-600 cursor-not-allowed"
+                  title="Connected mode requires a source integration that is not configured yet."
+                >
+                  Connected · soon
+                </span>
+              </div>
             </div>
             
             {/* 3a. POST-GIG FINAL SWEEP INDICATOR */}

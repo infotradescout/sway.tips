@@ -23,6 +23,7 @@ const emptySession: GigSession = {
   requestWindowDuration: null,
   requestWindowLabel: null,
   requestPresets: [],
+  operatingMode: 'manual',
   totals: {
     totalTips: 0,
     accumulatedFees: 0,
@@ -471,6 +472,9 @@ export default function App() {
     const liveLadder = requests
       .filter((r: RequestItem) => r.status === 'approved')
       .sort((a, b) => b.amount - a.amount);
+    const nowPlaying = requests
+      .filter((r: RequestItem) => r.status === 'fulfilled' && r.type !== 'tip' && !r.hidden && !r.removed)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
 
     return (
       <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
@@ -480,6 +484,13 @@ export default function App() {
           </span>
           <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
         </div>
+
+        {nowPlaying && (
+          <div className="mb-3 p-2.5 rounded-lg bg-slate-950/90 border border-cyan-500/40">
+            <div className="text-[9px] font-mono tracking-widest text-cyan-400 uppercase">Now Playing</div>
+            <div className="text-sm font-black text-white truncate">{nowPlaying.title}</div>
+          </div>
+        )}
 
         <div className="space-y-2.5">
           {liveLadder.slice(0, 5).map((req, idx) => (

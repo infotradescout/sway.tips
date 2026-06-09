@@ -19,6 +19,7 @@ export const emptySession: GigSession = {
   requestWindowDuration: null,
   requestWindowLabel: null,
   requestPresets: [],
+  operatingMode: 'manual',
   totals: {
     totalTips: 0,
     accumulatedFees: 0,

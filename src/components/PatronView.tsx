@@ -747,6 +747,70 @@ export default function PatronView({
         </div>
       </div>
 
+      {/* Room Layer: Now Playing / Up Next + honest operating mode */}
+      {(() => {
+        const visible = requests.filter(r => !r.hidden && !r.removed && !r.shadowBanned);
+        const nowPlaying = visible
+          .filter(r => r.status === 'fulfilled' && r.type !== 'tip')
+          .slice()
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+        const upNext = visible
+          .filter(r => r.status === 'approved')
+          .slice()
+          .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0))
+          .slice(0, 3);
+        const isOpenCall = session.operatingMode === 'open_call';
+        const modeLabel = isOpenCall ? 'Open Call' : 'Manual';
+        const modeHint = isOpenCall
+          ? 'No catalog — send an open request'
+          : 'Host is driving the room live';
+        return (
+          <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold tracking-widest uppercase text-slate-400">
+                {nowPlaying ? 'Current Moment' : 'Live Now'}
+              </span>
+              <span
+                className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950 border border-white/10 text-cyan-300"
+                title={modeHint}
+              >
+                {modeLabel}
+              </span>
+            </div>
+
+            {nowPlaying ? (
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
+                  <Music className="w-5 h-5 text-cyan-300" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white truncate">{nowPlaying.title}</div>
+                  {nowPlaying.subtitle && (
+                    <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">{modeHint}.</p>
+            )}
+
+            {upNext.length > 0 && (
+              <div className="pt-1 border-t border-white/5 space-y-1.5">
+                <div className="text-[10px] font-bold tracking-widest uppercase text-slate-500">Up Next</div>
+                {upNext.map((r, i) => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate text-slate-200">
+                      <span className="text-slate-500 mr-1.5">{i + 1}.</span>{r.title}
+                    </span>
+                    <span className="font-mono text-cyan-300 shrink-0">${r.amount}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Mode Lock Warning (If gig closed/ending) */}
       {session.status !== 'active' && session.status !== 'ending' && (
         <div className="bg-fuchsia-950/25 border border-fuchsia-900/30 rounded-xl p-4 flex gap-3 text-fuchsia-300">
