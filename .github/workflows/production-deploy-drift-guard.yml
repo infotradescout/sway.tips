@@ -34,6 +34,7 @@ jobs:
           const expectedSha = process.env.EXPECTED_SHA;
           const timeoutMs = 15 * 60 * 1000;
           const intervalMs = 30 * 1000;
+          const requestTimeoutMs = 12 * 1000;
           const started = Date.now();
 
           const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -70,7 +71,14 @@ jobs:
               };
 
               try {
-                const response = await fetch(url, { redirect: 'follow' });
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+                let response;
+                try {
+                  response = await fetch(url, { redirect: 'follow', signal: controller.signal });
+                } finally {
+                  clearTimeout(timer);
+                }
                 observation.status = response.status;
                 observation.contentType = response.headers.get('content-type') || '';
 
