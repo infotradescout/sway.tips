@@ -84,7 +84,7 @@ if (requestReserveIndex === -1 || requestCreationIndex === -1 || requestReserveI
 }
 
 const boostReserveIndex = server.lastIndexOf('idempotencyStore.reservePendingAction(durableInput)');
-const boostCreationIndex = server.indexOf('const newBoost =');
+const boostCreationIndex = server.indexOf('const newBoost');
 if (boostReserveIndex === -1 || boostCreationIndex === -1 || boostReserveIndex > boostCreationIndex) {
   failures.push('Boost route must reserve/check durable idempotency before boost creation.');
 }
@@ -140,17 +140,24 @@ if (!patron.includes('This QR route is missing a valid gig ID.')) {
   failures.push('Patron client must block checkout when a valid route gig ID is unavailable.');
 }
 
+// WebSocket-only / premature-success guards apply to every degraded-path surface.
 for (const pattern of [
   /WebSocket-only transaction state/i,
   /new WebSocket/i,
   /payment success before backend confirmation/i,
-  /retry without idempotency/i,
-  /stripe/i,
-  /PaymentIntent/i,
-  /webhook/i
+  /retry without idempotency/i
 ]) {
   if (pattern.test(store) || pattern.test(server) || pattern.test(patron)) {
-    failures.push(`Slice 4 contains forbidden provider/WebSocket-only pattern: ${pattern}`);
+    failures.push(`Slice 4 contains forbidden WebSocket-only/premature-success pattern: ${pattern}`);
+  }
+}
+
+// Provider coupling must stay out of the idempotency store and patron client.
+// Payment provider integration legitimately lands in server.ts at Slice 5, so
+// server.ts is intentionally excluded from the provider-term ban.
+for (const pattern of [/stripe/i, /PaymentIntent/i, /webhook/i]) {
+  if (pattern.test(store) || pattern.test(patron)) {
+    failures.push(`Idempotency store/patron client must stay provider-free: ${pattern}`);
   }
 }
 

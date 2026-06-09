@@ -34,7 +34,10 @@ for (const route of persistenceProtectedRoutes) {
     continue;
   }
 
-  const routeBlock = server.slice(routeIndex, routeIndex + 7000);
+  // Window sized to accommodate routes that legitimately grew with provider-backed
+  // payment authorization/settlement logic while still requiring each protected
+  // route to persist durable state through the business-store boundary.
+  const routeBlock = server.slice(routeIndex, routeIndex + 9000);
   if (!routeBlock.includes('requirePersistentBusinessStore(res)') && !routeBlock.includes('resolveProtectedMutationActor(req, res')) {
     failures.push(`Route ${route} must keep production persistence gate.`);
   }

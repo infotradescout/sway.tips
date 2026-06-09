@@ -29,6 +29,9 @@ export interface BoostContribution {
   idempotencyKey?: string;
   idempotencyFingerprint?: string;
   idempotencyExpiresAt?: string;
+  paymentId?: string | null;
+  paymentIntentId?: string | null;
+  paymentStatus?: string | null;
 }
 
 export interface RequestItem {
@@ -60,6 +63,9 @@ export interface RequestItem {
   payloadHash?: string;
   amountCents?: number;
   currency?: string;
+  paymentId?: string | null;
+  paymentIntentId?: string | null;
+  paymentStatus?: string | null;
   boosts: BoostContribution[];
 }
 

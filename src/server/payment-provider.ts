@@ -1,6 +1,4 @@
-import type { paymentStatusEnum } from '../db/schema';
-
-export type PaymentState = (typeof paymentStatusEnum.enumValues)[number];
+import Stripe from 'stripe';
 
 export type ProviderWebhookEnvelope = {
   providerEventId: string;
@@ -15,46 +13,192 @@ export type ProviderSignatureVerificationInput = {
   signatureHeader: string | null;
 };
 
+export type ProviderAuthorizeInput = {
+  amountTotalCents: number;
+  currency: string;
+  idempotencyKey: string;
+  paymentMethod?: string;
+  confirm?: boolean;
+  metadata?: Record<string, string>;
+};
+
+export type ProviderAuthorizeResult = {
+  processorPaymentIntentId: string;
+  processorChargeId: string | null;
+  status: string;
+  clientSecret: string | null;
+};
+
+export type ProviderCaptureInput = {
+  processorPaymentIntentId: string;
+  idempotencyKey?: string;
+};
+
+export type ProviderActionResult = {
+  processorPaymentIntentId: string;
+  processorChargeId: string | null;
+  status: string;
+};
+
+export type ProviderVoidInput = {
+  processorPaymentIntentId: string;
+  idempotencyKey?: string;
+};
+
+export type ProviderRefundInput = {
+  processorPaymentIntentId: string;
+  idempotencyKey?: string;
+};
+
 export type PaymentProviderAdapter = {
   readonly processor: string;
   verifyWebhookSignature: (input: ProviderSignatureVerificationInput) => Promise<boolean>;
-  parseWebhookEvent: (input: { rawBody: string }) => Promise<ProviderWebhookEnvelope>;
-  authorizePayment: (input: Record<string, unknown>) => Promise<never>;
-  capturePayment: (input: Record<string, unknown>) => Promise<never>;
-  refundPayment: (input: Record<string, unknown>) => Promise<never>;
-  voidPayment: (input: Record<string, unknown>) => Promise<never>;
+  parseWebhookEvent: (input: { rawBody: string; signatureHeader: string | null }) => Promise<ProviderWebhookEnvelope>;
+  authorizePayment: (input: ProviderAuthorizeInput) => Promise<ProviderAuthorizeResult>;
+  capturePayment: (input: ProviderCaptureInput) => Promise<ProviderActionResult>;
+  refundPayment: (input: ProviderRefundInput) => Promise<ProviderActionResult>;
+  voidPayment: (input: ProviderVoidInput) => Promise<ProviderActionResult>;
 };
 
-function unsupportedProviderAction(action: string): never {
-  throw new Error(`Live provider ${action} execution is blocked in Slice 5 boundary mode.`);
+function extractChargeId(intent: Stripe.PaymentIntent): string | null {
+  const latest = intent.latest_charge;
+  if (!latest) return null;
+  return typeof latest === 'string' ? latest : latest.id;
 }
 
-export function createBoundaryOnlyProviderAdapter(processor: string): PaymentProviderAdapter {
+/**
+ * Real Stripe test-mode provider adapter.
+ *
+ * Authorizations use manual-capture PaymentIntents so funds are held (authorized)
+ * and only captured after the performer approves the request in Private Triage.
+ * Denials/hides void (cancel) the authorization or refund a captured charge.
+ */
+export function createStripeProviderAdapter(config: {
+  secretKey: string;
+  webhookSecret: string;
+  processor?: string;
+}): PaymentProviderAdapter {
+  const stripe = new Stripe(config.secretKey);
+  const processor = config.processor ?? 'stripe';
+
   return {
     processor,
 
-    async verifyWebhookSignature() {
-      return false;
+    async verifyWebhookSignature(input) {
+      if (!input.signatureHeader) return false;
+      try {
+        stripe.webhooks.constructEvent(input.rawBody, input.signatureHeader, config.webhookSecret);
+        return true;
+      } catch {
+        return false;
+      }
     },
 
-    async parseWebhookEvent() {
-      throw new Error('Webhook parsing is provider-specific and must be implemented by a verified adapter.');
+    async parseWebhookEvent(input) {
+      if (!input.signatureHeader) {
+        throw new Error('Webhook signature header is required to parse a Stripe event.');
+      }
+      const event = stripe.webhooks.constructEvent(input.rawBody, input.signatureHeader, config.webhookSecret);
+      const object = event.data?.object as Stripe.PaymentIntent | Stripe.Charge | undefined;
+
+      let processorPaymentIntentId: string | null = null;
+      let processorChargeId: string | null = null;
+
+      if (object && 'object' in object) {
+        if (object.object === 'payment_intent') {
+          const intent = object as Stripe.PaymentIntent;
+          processorPaymentIntentId = intent.id;
+          processorChargeId = extractChargeId(intent);
+        } else if (object.object === 'charge') {
+          const charge = object as Stripe.Charge;
+          processorChargeId = charge.id;
+          processorPaymentIntentId = typeof charge.payment_intent === 'string'
+            ? charge.payment_intent
+            : charge.payment_intent?.id ?? null;
+        }
+      }
+
+      return {
+        providerEventId: event.id,
+        providerType: event.type,
+        processorPaymentIntentId,
+        processorChargeId,
+        metadata: { livemode: event.livemode }
+      };
     },
 
-    async authorizePayment() {
-      return unsupportedProviderAction('authorize');
+    async authorizePayment(input) {
+      const intent = await stripe.paymentIntents.create(
+        {
+          amount: input.amountTotalCents,
+          currency: input.currency.toLowerCase(),
+          capture_method: 'manual',
+          ...(input.paymentMethod ? { payment_method: input.paymentMethod } : {}),
+          ...(input.confirm ? { confirm: true } : {}),
+          metadata: input.metadata ?? {}
+        },
+        { idempotencyKey: input.idempotencyKey }
+      );
+
+      return {
+        processorPaymentIntentId: intent.id,
+        processorChargeId: extractChargeId(intent),
+        status: intent.status,
+        clientSecret: intent.client_secret
+      };
     },
 
-    async capturePayment() {
-      return unsupportedProviderAction('capture');
+    async capturePayment(input) {
+      const intent = await stripe.paymentIntents.capture(
+        input.processorPaymentIntentId,
+        input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+      );
+
+      return {
+        processorPaymentIntentId: intent.id,
+        processorChargeId: extractChargeId(intent),
+        status: intent.status
+      };
     },
 
-    async refundPayment() {
-      return unsupportedProviderAction('refund');
+    async voidPayment(input) {
+      const intent = await stripe.paymentIntents.cancel(
+        input.processorPaymentIntentId,
+        input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+      );
+
+      return {
+        processorPaymentIntentId: intent.id,
+        processorChargeId: extractChargeId(intent),
+        status: intent.status
+      };
     },
 
-    async voidPayment() {
-      return unsupportedProviderAction('void');
+    async refundPayment(input) {
+      const refund = await stripe.refunds.create(
+        { payment_intent: input.processorPaymentIntentId },
+        input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+      );
+
+      return {
+        processorPaymentIntentId: input.processorPaymentIntentId,
+        processorChargeId: typeof refund.charge === 'string' ? refund.charge : refund.charge?.id ?? null,
+        status: refund.status ?? 'refunded'
+      };
     }
   };
+}
+
+/**
+ * Reads server-side environment variables and returns a configured Stripe adapter,
+ * or null when execution is not provisioned. A null provider fails safe: no
+ * authorization, capture, or financial state is ever created without real keys.
+ */
+export function createConfiguredPaymentProvider(env: NodeJS.ProcessEnv = process.env): PaymentProviderAdapter | null {
+  const secretKey = env.STRIPE_SECRET_KEY;
+  const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
+  if (!secretKey || !webhookSecret) {
+    return null;
+  }
+  return createStripeProviderAdapter({ secretKey, webhookSecret });
 }

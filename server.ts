@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
-import { BackendState, RequestItem, GigSession } from "./src/types";
+import { BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, moderationEvents } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
@@ -17,6 +17,9 @@ import { createIdempotencyStore, type DurableActionInput } from "./src/server/id
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
+import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
+import { createPaymentService } from "./src/server/payment-service";
+import { createPaymentWebhookService } from "./src/server/payment-webhook";
 
 dotenv.config();
 
@@ -35,8 +38,21 @@ const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
+const paymentProvider = createConfiguredPaymentProvider(process.env);
+const paymentService = createPaymentService({
+  databaseUrl: process.env.DATABASE_URL,
+  provider: paymentProvider
+});
+const paymentWebhookService = paymentProvider
+  ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
+  : null;
 
-app.use(express.json());
+// Capture the raw request body so Stripe webhook signatures can be verified.
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
+  }
+}));
 
 type SwayShell = 'public' | 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
 
@@ -419,6 +435,27 @@ app.get("/api/health/network-probe", (_req, res) => {
   res.status(204).end();
 });
 
+// Stripe webhook ingestion. Signature verification is mandatory and the payment
+// is resolved from the verified PaymentIntent id, never from request input.
+app.post("/api/payment/webhook", async (req, res) => {
+  if (!paymentWebhookService) {
+    return res.status(503).json({ error: "Payment provider is not configured." });
+  }
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
+  if (typeof rawBody !== 'string') {
+    return res.status(400).json({ error: "Raw request body unavailable for signature verification." });
+  }
+  const signatureHeader = req.header('stripe-signature') ?? null;
+  try {
+    const result = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
+    return res.json({ received: true, result });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Webhook processing failed.'
+    });
+  }
+});
+
 app.get("/api/state", async (req, res) => {
   await refreshBusinessState();
   res.json(state);
@@ -569,6 +606,17 @@ app.post("/api/session/closeout", async (req, res) => {
   const previousStatus = state.session.status;
   executeAutoNuke(state);
   state.session.lastMutationActorUserId = actor.actorId;
+
+  // Closeout totals are sourced from captured payment records in the database,
+  // never from runtime arrays. Disabled provider mode reports zero captured funds.
+  let closeoutTotals: Awaited<ReturnType<typeof paymentService.aggregateCapturedTotals>> | null = null;
+  if (paymentService.hasDurableStore && activeGigId) {
+    closeoutTotals = await paymentService.aggregateCapturedTotals(activeGigId);
+    state.session.totals.totalTips = closeoutTotals.capturedSubtotalCents / 100;
+    state.session.totals.accumulatedFees = closeoutTotals.platformFeeCents / 100;
+    state.session.totals.totalCount = closeoutTotals.capturedCount;
+  }
+
   await persistStateWithAudit({
     actor,
     entityType: 'gig_session',
@@ -577,10 +625,12 @@ app.post("/api/session/closeout", async (req, res) => {
     previousStatus,
     nextStatus: state.session.status,
     metadata: {
-      autoNukeApplied: true
+      autoNukeApplied: true,
+      closeoutTotalsSource: closeoutTotals ? closeoutTotals.source : 'provider_disabled',
+      capturedTotalCents: closeoutTotals ? closeoutTotals.capturedTotalCents : 0
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state, closeoutTotals });
 });
 
 // REQUEST WINDOW MANAGERS & PRESETS ENDPOINTS
@@ -910,6 +960,41 @@ app.post("/api/request/create", async (req, res) => {
     boosts: []
   };
 
+  // Provider-backed authorization/hold. Fail safe: if the provider rejects the
+  // authorization, no request is created and no successful financial state exists.
+  if (paymentService.isEnabled()) {
+    const platformFeeCents = state.session.feeType === 'patron' ? 100 : 0;
+    const authorization = await paymentService.authorizeAction({
+      gigId: durableGigId,
+      actionType: isStraightTip ? 'tip' : 'request',
+      amountSubtotalCents: amount_cents,
+      platformFeeCents,
+      currency: String(currency).toUpperCase(),
+      idempotencyKey: idempotency_key,
+      runtimeRequestId: newItem.id,
+      clientRequestId: client_request_id
+    });
+    if (authorization.status === 'failed') {
+      return res.status(402).json({
+        error: "Payment authorization failed. Your card was not charged and no request was created.",
+        payment_status: 'failed'
+      });
+    }
+    if (authorization.status === 'authorized') {
+      newItem.paymentId = authorization.paymentId;
+      newItem.paymentIntentId = authorization.processorPaymentIntentId;
+      newItem.paymentStatus = authorization.capturable ? 'authorized' : 'payment_pending';
+      // A straight tip is not gated by Private Triage, so capture its authorized
+      // hold immediately when the funds are capturable.
+      if (isStraightTip && authorization.capturable) {
+        const capture = await paymentService.captureAuthorization(authorization.paymentId);
+        if (capture.status === 'captured') {
+          newItem.paymentStatus = 'captured';
+        }
+      }
+    }
+  }
+
   state.requests.push(newItem);
   recalculateTotals(state);
   await persistBusinessState();
@@ -1075,7 +1160,7 @@ app.post("/api/request/boost", async (req, res) => {
 
   const isBackerShadowed = moderationOutcome.decision === 'hold_for_review';
 
-  const newBoost = {
+  const newBoost: BoostContribution = {
     id: `boost-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
     patronName: patronName || "Co-Sponsor",
     amount: amt,
@@ -1086,6 +1171,39 @@ app.post("/api/request/boost", async (req, res) => {
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
+
+  // Provider-backed authorization/hold for the boost. The booster only reaches
+  // this point because the target request already cleared Private Triage, so the
+  // boost never grants approval authority. Fail safe on provider rejection.
+  if (paymentService.isEnabled()) {
+    const authorization = await paymentService.authorizeAction({
+      gigId: durableGigId,
+      actionType: 'boost',
+      amountSubtotalCents: amount_cents,
+      platformFeeCents: 100,
+      currency: String(currency).toUpperCase(),
+      idempotencyKey: idempotency_key,
+      runtimeRequestId: request.id,
+      clientRequestId: client_request_id
+    });
+    if (authorization.status === 'failed') {
+      return res.status(402).json({
+        error: "Boost authorization failed. Your card was not charged.",
+        payment_status: 'failed'
+      });
+    }
+    if (authorization.status === 'authorized') {
+      newBoost.paymentId = authorization.paymentId;
+      newBoost.paymentIntentId = authorization.processorPaymentIntentId;
+      newBoost.paymentStatus = authorization.capturable ? 'authorized' : 'payment_pending';
+      if (authorization.capturable) {
+        const capture = await paymentService.captureAuthorization(authorization.paymentId);
+        if (capture.status === 'captured') {
+          newBoost.paymentStatus = 'captured';
+        }
+      }
+    }
+  }
 
   request.boosts.push(newBoost);
   request.amount += amt; // Pool funds!
@@ -1130,6 +1248,26 @@ app.post("/api/request/triage", async (req, res) => {
   request.lastMutationActorUserId = actor.actorId;
   state.session.lastMutationActorUserId = actor.actorId;
 
+  // Settle the provider-backed hold according to the triage decision.
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+
+    if (action === 'approve') {
+      for (const paymentId of paymentIds) {
+        const capture = await paymentService.captureAuthorization(paymentId);
+        if (capture.status === 'captured' && paymentId === request.paymentId) {
+          request.paymentStatus = 'captured';
+        }
+      }
+    } else {
+      await paymentService.voidOrRefundMany(paymentIds);
+      request.paymentStatus = 'voided_or_refunded';
+    }
+  }
+
   recalculateTotals(state);
   await persistStateWithAudit({
     actor,
@@ -1163,6 +1301,22 @@ app.post("/api/request/fulfill", async (req, res) => {
   request.status = 'fulfilled';
   request.lastMutationActorUserId = actor.actorId;
   state.session.lastMutationActorUserId = actor.actorId;
+
+  // Capture any still-authorized holds for the fulfilled request (idempotent:
+  // already-captured holds are a no-op).
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+    for (const paymentId of paymentIds) {
+      const capture = await paymentService.captureAuthorization(paymentId);
+      if (capture.status === 'captured' && paymentId === request.paymentId) {
+        request.paymentStatus = 'captured';
+      }
+    }
+  }
+
   recalculateTotals(state);
   await persistStateWithAudit({
     actor,
@@ -1308,6 +1462,18 @@ app.post("/api/moderation/hide", async (req, res) => {
   request.hidden = true;
   request.lastMutationActorUserId = actor.actorId;
   state.session.lastMutationActorUserId = actor.actorId;
+
+  // A hidden request is never publicly eligible, so release its funds.
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+    if (paymentIds.length) {
+      await paymentService.voidOrRefundMany(paymentIds);
+      request.paymentStatus = 'voided_or_refunded';
+    }
+  }
   await persistStateWithAudit({
     actor,
     entityType: 'request',
@@ -1352,6 +1518,18 @@ app.post("/api/moderation/remove", async (req, res) => {
   request.status = 'denied';
   request.lastMutationActorUserId = actor.actorId;
   state.session.lastMutationActorUserId = actor.actorId;
+
+  // A removed request is never publicly eligible, so release its funds.
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+    if (paymentIds.length) {
+      await paymentService.voidOrRefundMany(paymentIds);
+      request.paymentStatus = 'voided_or_refunded';
+    }
+  }
   recalculateTotals(state);
   await persistStateWithAudit({
     actor,
