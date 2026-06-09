@@ -59,6 +59,51 @@ interface PatronViewProps {
   previewMode?: boolean;
 }
 
+type SearchTrack = {
+  id: string;
+  title: string;
+  artist: string;
+  albumArt?: string;
+  basePrice?: number;
+  description?: string;
+  source?: string;
+};
+
+const previewCatalog: SearchTrack[] = [
+  {
+    id: 'spotify-1',
+    title: 'Levitating',
+    artist: 'Dua Lipa',
+    albumArt: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=240&q=80',
+    basePrice: 8,
+    source: 'Spotify'
+  },
+  {
+    id: 'apple-1',
+    title: 'Blinding Lights',
+    artist: 'The Weeknd',
+    albumArt: 'https://images.unsplash.com/photo-1518976024611-28bf4b48222e?auto=format&fit=crop&w=240&q=80',
+    basePrice: 8,
+    source: 'Apple Music'
+  },
+  {
+    id: 'youtube-1',
+    title: 'Titanium',
+    artist: 'David Guetta ft. Sia',
+    albumArt: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=240&q=80',
+    basePrice: 8,
+    source: 'YouTube Music'
+  },
+  {
+    id: 'tidal-1',
+    title: 'About Damn Time',
+    artist: 'Lizzo',
+    albumArt: 'https://images.unsplash.com/photo-1461783436728-0a9217714694?auto=format&fit=crop&w=240&q=80',
+    basePrice: 8,
+    source: 'TIDAL'
+  }
+];
+
 export default function PatronView({
   session,
   requests,
@@ -83,11 +128,11 @@ export default function PatronView({
   
   // Search parameters
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   
   // Selected search target
-  const [selectedTrack, setSelectedTrack] = useState<any | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<SearchTrack | null>(null);
 
   // Input states
   const [senderName, setSenderName] = useState('');
@@ -301,6 +346,33 @@ export default function PatronView({
   const handleSearch = async (val: string) => {
     setSearchQuery(val);
     setIsSearching(true);
+
+    if (previewMode && session.talentRole === 'DJ') {
+      const query = val.trim().toLowerCase();
+      const filtered = previewCatalog.filter((song) => {
+        if (!query) return true;
+        return song.title.toLowerCase().includes(query)
+          || song.artist.toLowerCase().includes(query)
+          || (song.source || '').toLowerCase().includes(query);
+      });
+
+      const anySongOption: SearchTrack | null = query
+        ? {
+            id: `any-${query.replace(/\s+/g, '-')}`,
+            title: val.trim(),
+            artist: 'Any source accepted',
+            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+            basePrice: session.minimumTip,
+            description: 'Open request across linked music apps',
+            source: 'Any Library'
+          }
+        : null;
+
+      setSearchResults(anySongOption ? [anySongOption, ...filtered] : filtered);
+      setIsSearching(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/music/search', {
         method: 'POST',
@@ -776,7 +848,7 @@ export default function PatronView({
               <div className="space-y-4">
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    PATH A: Music Catalog Search
+                    Music Library Search
                   </span>
                 </div>
                  {/* Form input fields */}
@@ -787,7 +859,7 @@ export default function PatronView({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search track, artist, or genre..."
+                      placeholder="Search tracks across linked libraries..."
                       className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
                     />
                   </div>
@@ -846,6 +918,9 @@ export default function PatronView({
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-white truncate">{song.title}</div>
                           <p className="text-[10px] text-slate-400 truncate mt-0.5">{song.artist}</p>
+                          {song.source && (
+                            <p className="text-[9px] text-fuchsia-300 mt-1 font-bold uppercase tracking-wider">{song.source}</p>
+                          )}
                           {song.description && (
                             <p className="text-[9px] text-cyan-400 italic font-mono mt-1 line-clamp-1">{song.description}</p>
                           )}

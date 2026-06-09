@@ -33,6 +33,19 @@ const emptySession: GigSession = {
 
 const routeSpine = ['/talent/login', '/talent/gigs', '/g/', '/p/', '/overlay/', '/admin'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DATA_MODE_STORAGE_KEY = 'sway.dataMode';
+
+type DataMode = 'demo' | 'live';
+
+type DemoFixturePayload = {
+  state?: {
+    session?: GigSession;
+  };
+  surfaces?: {
+    requests?: RequestItem[];
+    profiles?: BackendState['performers'];
+  };
+};
 
 type AppRoute =
   | { name: 'talent-login' }
@@ -86,6 +99,12 @@ function ShellMessage({
 export default function App() {
   const route = useMemo(() => resolveRoute(window.location.pathname), []);
   const routeGigId = route.name === 'patron-gig' && UUID_PATTERN.test(route.gigId) ? route.gigId : undefined;
+  const operatorControlsEnabled = useMemo(() => new URLSearchParams(window.location.search).get('ops') === '1', []);
+  const [dataMode, setDataMode] = useState<DataMode>(() => {
+    const saved = window.localStorage.getItem(DATA_MODE_STORAGE_KEY);
+    return saved === 'live' ? 'live' : 'demo';
+  });
+  const [homeView, setHomeView] = useState<'guest' | 'dj'>('guest');
   const [bState, setBState] = useState<BackendState>({
     session: emptySession,
     requests: [],
@@ -93,7 +112,37 @@ export default function App() {
   });
   const [isLoading, setIsLoading] = useState(true);
 
+  const isDemoMode = dataMode === 'demo';
+
+  const loadDemoState = async (): Promise<boolean> => {
+    try {
+      const response = await fetch('/sway-demo-fixtures.json', { cache: 'no-store' });
+      if (!response.ok) return false;
+      const payload = await response.json() as DemoFixturePayload;
+
+      if (!payload?.state?.session) return false;
+
+      setBState({
+        session: payload.state.session,
+        requests: payload.surfaces?.requests || [],
+        performers: payload.surfaces?.profiles || []
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const fetchState = async () => {
+    if (isDemoMode) {
+      const loadedDemo = await loadDemoState();
+      if (loadedDemo) {
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
       const response = await fetch('/api/state');
       const data = await response.json();
@@ -106,6 +155,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    window.localStorage.setItem(DATA_MODE_STORAGE_KEY, dataMode);
     fetchState();
 
     const interval = setInterval(fetchState, 4000);
@@ -116,7 +166,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener('re-fetch-state', handleForceSync);
     };
-  }, []);
+  }, [dataMode]);
 
   const handleStartSession = async (setupData: {
     talentName: string;
@@ -124,6 +174,7 @@ export default function App() {
     feeType: 'talent' | 'patron';
     minimumTip: number;
   }) => {
+    if (isDemoMode) return;
     try {
       const response = await fetch('/api/session/start', {
         method: 'POST',
@@ -138,6 +189,7 @@ export default function App() {
   };
 
   const handleEndSession = async () => {
+    if (isDemoMode) return;
     try {
       const response = await fetch('/api/session/end', { method: 'POST' });
       const data = await response.json();
@@ -148,6 +200,7 @@ export default function App() {
   };
 
   const handleCloseout = async () => {
+    if (isDemoMode) return;
     try {
       const response = await fetch('/api/session/closeout', { method: 'POST' });
       const data = await response.json();
@@ -158,6 +211,9 @@ export default function App() {
   };
 
   const handleCreateRequest = async (requestData: any) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     try {
       const response = await fetch('/api/request/create', {
         method: 'POST',
@@ -187,6 +243,9 @@ export default function App() {
     expiresAt?: string,
     gigId?: string
   ) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     try {
       const response = await fetch('/api/request/boost', {
         method: 'POST',
@@ -216,6 +275,9 @@ export default function App() {
   };
 
   const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string) => {
+    if (isDemoMode) {
+      return { status: 'pending' };
+    }
     const response = await fetch('/api/pending-action/reconcile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -238,6 +300,7 @@ export default function App() {
   };
 
   const handleTriageRequest = async (requestId: string, action: 'approve' | 'deny') => {
+    if (isDemoMode) return;
     try {
       const response = await fetch('/api/request/triage', {
         method: 'POST',
@@ -252,6 +315,7 @@ export default function App() {
   };
 
   const handleFulfillRequest = async (requestId: string) => {
+    if (isDemoMode) return;
     try {
       const response = await fetch('/api/request/fulfill', {
         method: 'POST',
@@ -266,6 +330,9 @@ export default function App() {
   };
 
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/moderation/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -286,6 +353,9 @@ export default function App() {
     value: string,
     reason: string
   ) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/moderation/block', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -302,6 +372,9 @@ export default function App() {
   };
 
   const handleHideRequest = async (requestId: string) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/moderation/hide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -319,6 +392,9 @@ export default function App() {
   };
 
   const handleRemoveRequest = async (requestId: string) => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/moderation/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -336,6 +412,9 @@ export default function App() {
   };
 
   const handleSupportContact = async () => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/support/contact');
     const data = await response.json();
     if (!response.ok) {
@@ -348,6 +427,9 @@ export default function App() {
   };
 
   const handleDataDeletionPlaceholder = async () => {
+    if (isDemoMode) {
+      throw new Error('Preview mode is read-only right now.');
+    }
     const response = await fetch('/api/privacy/data-deletion-placeholder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -428,26 +510,6 @@ export default function App() {
     );
   }
 
-  if (route.name === 'home') {
-    return (
-      <ShellMessage
-        icon={<Flame className="h-5 w-5" />}
-        title="Sway"
-        body="Sway lets live performers, DJs, bartenders, and event acts accept paid tips, requests, and audience boosts through a QR-powered live ladder."
-        actions={
-          <>
-            <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/login">
-              Talent login
-            </a>
-            <a className="rounded-xl border border-white/10 bg-slate-950 px-4 py-2 text-center text-sm font-bold text-slate-200 hover:text-white" href="/g/local">
-              Open patron gig route
-            </a>
-          </>
-        }
-      />
-    );
-  }
-
   if (route.name === 'talent-login') {
     return (
       <ShellMessage
@@ -518,9 +580,95 @@ export default function App() {
               onFulfill={handleFulfillRequest}
               onHide={handleHideRequest}
               onRemove={handleRemoveRequest}
+              previewMode={isDemoMode}
             />
           </motion.div>
         </main>
+      </div>
+    );
+  }
+
+  if (route.name === 'home') {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+        <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
+                <Flame className="h-4 w-4" />
+              </div>
+              <div>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Preview</span>
+                <p className="text-[10px] text-slate-400">Choose the perspective: DJ booth or guest phone.</p>
+              </div>
+            </div>
+            <div className="flex rounded-xl border border-white/10 bg-slate-950 p-1">
+              <button
+                type="button"
+                onClick={() => setHomeView('guest')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${homeView === 'guest' ? 'bg-fuchsia-600 text-white' : 'text-slate-300 hover:text-white'}`}
+              >
+                Guest
+              </button>
+              <button
+                type="button"
+                onClick={() => setHomeView('dj')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${homeView === 'dj' ? 'bg-fuchsia-600 text-white' : 'text-slate-300 hover:text-white'}`}
+              >
+                DJ
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <main className="flex-1">
+          {homeView === 'dj' ? (
+            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+              <TalentDashboard
+                session={session}
+                requests={requests}
+                onStartSession={handleStartSession}
+                onEndSession={handleEndSession}
+                onCloseout={handleCloseout}
+                onTriage={handleTriageRequest}
+                onFulfill={handleFulfillRequest}
+                onHide={handleHideRequest}
+                onRemove={handleRemoveRequest}
+                previewMode={isDemoMode}
+              />
+            </motion.div>
+          ) : (
+            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+              <PatronView
+                session={session}
+                requests={requests}
+                performers={bState.performers || []}
+                gigId={routeGigId || 'local-demo'}
+                onCreateRequest={handleCreateRequest}
+                onBoostRequest={handleBoostRequest}
+                onReconcilePendingAction={handleReconcilePendingAction}
+                onReportContent={handleReportContent}
+                onBlockFoundation={handleBlockFoundation}
+                onSupportContact={handleSupportContact}
+                onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
+                previewMode={isDemoMode}
+              />
+            </motion.div>
+          )}
+        </main>
+
+        {operatorControlsEnabled && (
+          <div className="fixed bottom-4 right-4 z-50">
+            <button
+              type="button"
+              onClick={() => setDataMode((mode) => mode === 'demo' ? 'live' : 'demo')}
+              className="rounded-full border border-white/15 bg-slate-900/95 px-4 py-2 text-xs font-bold text-white shadow-xl"
+              title="Switch data source"
+            >
+              {isDemoMode ? 'Demo Data On' : 'Live Data On'}
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -562,6 +710,7 @@ export default function App() {
             onBlockFoundation={handleBlockFoundation}
             onSupportContact={handleSupportContact}
             onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
+            previewMode={isDemoMode}
           />
         </motion.div>
       </main>
