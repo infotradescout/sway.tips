@@ -8,6 +8,7 @@ const operatorShellFile = 'src/shells/OperatorAppShell.tsx';
 const adminOpsShellFile = 'src/shells/AdminOpsShell.tsx';
 const operatorRuntimeFile = 'src/shells/OperatorRuntime.tsx';
 const adminOpsRuntimeFile = 'src/shells/AdminOpsRuntime.tsx';
+const operatorRuntimeCompatFile = 'src/shells/operator/OperatorRuntimeCompat.tsx';
 
 function read(rel) {
   const abs = join(root, rel);
@@ -22,6 +23,7 @@ const operatorShellSource = read(operatorShellFile);
 const adminOpsShellSource = read(adminOpsShellFile);
 const operatorRuntimeSource = read(operatorRuntimeFile);
 const adminOpsRuntimeSource = read(adminOpsRuntimeFile);
+const operatorRuntimeCompatSource = read(operatorRuntimeCompatFile);
 
 if (operatorShellSource) {
   if (!operatorShellSource.includes("import OperatorRuntime from './OperatorRuntime';")) {
@@ -43,12 +45,24 @@ if (adminOpsShellSource) {
 
 if (operatorRuntimeSource) {
   for (const required of [
-    "import AdminApp from './AdminApp';",
-    'export const LEGACY_RUNTIME_DELEGATE = AdminApp;',
+    "import OperatorRuntimeCompat from './operator/OperatorRuntimeCompat';",
+    'export const LEGACY_RUNTIME_DELEGATE = OperatorRuntimeCompat;',
     'const OperatorRuntime = LEGACY_RUNTIME_DELEGATE;'
   ]) {
     if (!operatorRuntimeSource.includes(required)) {
       failures.push(`${operatorRuntimeFile} missing required legacy delegation token: ${required}`);
+    }
+  }
+}
+
+if (operatorRuntimeCompatSource) {
+  for (const required of [
+    "import AdminApp from '../AdminApp';",
+    'export const LEGACY_OPERATOR_RUNTIME_DELEGATE = AdminApp;',
+    'const OperatorRuntimeCompat = LEGACY_OPERATOR_RUNTIME_DELEGATE;'
+  ]) {
+    if (!operatorRuntimeCompatSource.includes(required)) {
+      failures.push(`${operatorRuntimeCompatFile} missing required legacy delegation token: ${required}`);
     }
   }
 }
@@ -93,7 +107,8 @@ for (const sourceSpec of [
   { file: operatorShellFile, source: operatorShellSource },
   { file: adminOpsShellFile, source: adminOpsShellSource },
   { file: operatorRuntimeFile, source: operatorRuntimeSource },
-  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource }
+  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource },
+  { file: operatorRuntimeCompatFile, source: operatorRuntimeCompatSource }
 ]) {
   if (!sourceSpec.source) continue;
   for (const forbidden of [
