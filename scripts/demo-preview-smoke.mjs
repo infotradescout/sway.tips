@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 
 const root = process.cwd();
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const artifactRoot = join(root, 'artifacts', 'demo-preview-smoke', stamp);
+const artifactRoot = join(root, 'artifacts', 'demo-live-room-smoke', stamp);
 mkdirSync(artifactRoot, { recursive: true });
 
 const port = 3000;
@@ -24,23 +24,23 @@ const scenarios = [
         host: 'sway.tips',
         screenshot: 'demo-off-public.png',
         expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools', 'Open overlay'],
-        absentText: ['Demo preview data']
+        absentText: ['Demo data']
       },
       {
         surface: 'app shell home',
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-off-app-home.png',
-        expectedText: ['Patron Preview', 'No live records yet'],
-        absentText: ['Demo preview data', 'Aria Neon']
+        expectedText: ['Patron App', 'No live records yet'],
+        absentText: ['Demo data', 'Aria Neon']
       },
       {
         surface: 'patron Split View',
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-off-patron.png',
-        expectedText: ['Patron Preview', 'No live records yet', 'Selected gig inspector'],
-        absentText: ['Demo preview data', 'Midnight City']
+        expectedText: ['Patron App', 'No live records yet', 'Selected gig inspector'],
+        absentText: ['Demo data', 'Midnight City']
       },
       {
         surface: 'talent protected shell guard',
@@ -48,7 +48,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-talent.png',
         expectedText: ['Sway actor resolution required'],
-        absentText: ['Demo preview data', 'Aria Neon']
+        absentText: ['Demo data', 'Aria Neon']
       },
       {
         surface: 'admin protected shell guard',
@@ -56,15 +56,15 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-admin.png',
         expectedText: ['Sway actor resolution required'],
-        absentText: ['Demo preview data', 'Payment lifecycle preview']
+        absentText: ['Demo data', 'Request lifecycle']
       },
       {
         surface: 'overlay empty state',
         path: overlayPath,
         host: 'app.sway.tips',
         screenshot: 'demo-off-overlay.png',
-        expectedText: ['SWAY LIVE LADDER', 'Waiting for gig requests'],
-        absentText: ['Demo preview data', 'Midnight City']
+        expectedText: ['SWAY LIVE ROOM', 'Waiting for gig requests'],
+        absentText: ['Demo data', 'Midnight City']
       }
     ]
   },
@@ -85,7 +85,7 @@ const scenarios = [
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-on-app-home.png',
-        expectedText: ['Patron Preview', 'Demo preview data', 'Aria Neon', 'Midnight City'],
+        expectedText: ['Patron App', 'Demo data', 'Aria Neon', 'Midnight City'],
         absentText: ['No live records yet']
       },
       {
@@ -93,7 +93,7 @@ const scenarios = [
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-on-patron.png',
-        expectedText: ['Patron Preview', 'Demo preview data', 'Preview data only. No checkout/payment/moderation action will be sent.', 'Midnight City'],
+        expectedText: ['Patron App', 'Demo data', 'Demo data only. No payment or moderation action will be sent.', 'Midnight City'],
         absentText: ['No live records yet']
       },
       {
@@ -101,23 +101,23 @@ const scenarios = [
         path: '/talent/gigs',
         host: 'app.sway.tips',
         screenshot: 'demo-on-talent.png',
-        expectedText: ['Performer Console', 'Demo preview data', 'Preview data only; no live tips are being collected.', 'Midnight City', 'Preview only', 'Preview total shown'],
+        expectedText: ['Performer Console', 'Demo data', 'Demo data only; no live tips are being collected.', 'Midnight City', 'Demo only', 'Demo total shown'],
         absentText: ['No active session yet', 'Fulfill & Capture', 'Current captured total:', 'Veto / Cancel Promotion']
       },
       {
-        surface: 'admin preview Split View',
+        surface: 'operator demo Split View',
         path: '/admin',
         host: 'app.sway.tips',
         screenshot: 'demo-on-admin.png',
-        expectedText: ['Admin Preview', 'Demo preview data', 'Admin authority remains locked', 'Preview data only. No admin mutation route is enabled here.'],
+        expectedText: ['Operator App', 'Demo data', 'Admin authority remains locked', 'Demo data only. No operator mutation route is enabled here.'],
         absentText: ['Operator features remain unavailable']
       },
       {
-        surface: 'overlay demo ladder',
+        surface: 'overlay demo live room',
         path: overlayPath,
         host: 'app.sway.tips',
         screenshot: 'demo-on-overlay.png',
-        expectedText: ['SWAY LIVE LADDER', 'Demo preview data', 'Midnight City'],
+        expectedText: ['SWAY LIVE ROOM', 'Demo data', 'Midnight City'],
         absentText: ['Waiting for gig requests']
       }
     ]
@@ -249,7 +249,7 @@ const reportPath = join(artifactRoot, 'report.json');
 const passed = report.results.every((result) => result.pass);
 writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
-console.log(`Demo preview smoke report: ${reportPath}`);
+console.log(`Demo live room smoke report: ${reportPath}`);
 for (const result of report.results) {
   console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.mode} ${result.surface} -> ${result.screenshot}`);
   for (const failure of result.failures) {
