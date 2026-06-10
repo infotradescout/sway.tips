@@ -9,24 +9,24 @@ export default function AdminApp() {
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <DemoModeBanner />
         <SplitViewShell
-          title="Admin Preview"
-          eyebrow="Split View"
+          title="Operator App"
+          eyebrow="Room State"
           primaryLabel="Operator queues"
           secondaryLabel="Authority boundary"
           badge={<DemoModeBanner compact />}
           isEmpty={false}
           emptyState={
             <div className="rounded-xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
-              Admin preview has no records yet.
+              Operator demo has no records yet.
             </div>
           }
           primary={
             <div className="space-y-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">Demo preview data</p>
-              {['Moderation queue', 'Payment lifecycle preview', 'Identity review'].map((label) => (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">Demo data</p>
+              {['Moderation queue', 'Request lifecycle', 'Identity review'].map((label) => (
                 <div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
                   <p className="text-sm font-bold text-white">{label}</p>
-                  <p className="mt-1 text-xs text-slate-400">Preview data only. No admin mutation route is enabled here.</p>
+                  <p className="mt-1 text-xs text-slate-400">Demo data only. No operator mutation route is enabled here.</p>
                 </div>
               ))}
             </div>
@@ -49,7 +49,7 @@ export default function AdminApp() {
     <ShellMessage
       icon={<Lock className="h-5 w-5" />}
       title="Admin"
-      body="Admin tools are intentionally separated from patron and talent routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
+      body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
     />
   );
 }

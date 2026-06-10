@@ -83,40 +83,40 @@ for (const [name, source] of [
   ['overlay shell', overlayShell],
   ['admin shell', adminShell]
 ]) {
-  requireIncludes(source, 'Demo preview data', `${name} must visibly label demo data.`);
+  requireIncludes(source, 'Demo data', `${name} must visibly label demo data.`);
 }
 
 for (const [name, source] of [
   ['patron shell', patronShell],
   ['talent shell', talentShell]
 ]) {
-  requireIncludes(source, 'rejectDemoMutation', `${name} must keep demo previews read-only.`);
+  requireIncludes(source, 'rejectDemoMutation', `${name} must keep demo data read-only.`);
   requireIncludes(source, 'No backend mutation was sent.', `${name} must make demo mutation suppression explicit.`);
 }
 
 for (const term of [
   'previewMode',
-  'Preview data only. No checkout/payment/moderation action will be sent.',
+  'Demo data only. No payment or moderation action will be sent.',
   'Demo data. No payment or request will be recorded.',
-  'Preview only: checkout disabled'
+  'Demo only: sending disabled'
 ]) {
-  requireIncludes(patronView, term, `Patron preview must prevent payment interpretation risk: ${term}`);
+  requireIncludes(patronView, term, `Patron demo mode must prevent payment interpretation risk: ${term}`);
 }
 
 for (const term of [
   'previewMode',
-  'Preview data only; no live tips are being collected.'
+  'Demo data only; no live tips are being collected.'
 ]) {
-  requireIncludes(talentDashboard, term, `Talent preview must prevent live-activity interpretation risk: ${term}`);
+  requireIncludes(talentDashboard, term, `Talent demo mode must prevent live-activity interpretation risk: ${term}`);
 }
 
 for (const term of [
-  'Preview only',
-  'Preview total shown:',
-  'Preview only: promotion locked',
-  'Preview only: no placement purchase'
+  'Demo only',
+  'Demo total shown:',
+  'Demo only: boost locked',
+  'Demo only: no boost action'
 ]) {
-  requireIncludes(talentDashboard, term, `Talent preview must not imply capture or promotion authority: ${term}`);
+  requireIncludes(talentDashboard, term, `Talent demo mode must not imply capture or promotion authority: ${term}`);
 }
 
 for (const term of [

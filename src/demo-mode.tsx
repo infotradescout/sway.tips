@@ -84,7 +84,7 @@ export function DemoModeBanner({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={compact ? 'rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-200' : 'border-b border-amber-400/30 bg-amber-400/10 px-4 py-2 text-center text-[10px] font-bold uppercase tracking-widest text-amber-200'}>
-      Demo preview data
+      Demo data
     </div>
   );
 }

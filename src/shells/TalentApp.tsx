@@ -15,7 +15,7 @@ export default function TalentApp() {
   const demoMode = isDemoModeEnabled();
 
   const rejectDemoMutation = async () => {
-    throw new Error('Demo preview data is read-only. No backend mutation was sent.');
+    throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
 
   const handleStartSession = async (setupData: {
@@ -144,7 +144,7 @@ export default function TalentApp() {
             </div>
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Talent</span>
-              <p className="text-[9px] text-slate-400">Gig setup, queue triage, fulfillment, and closeout</p>
+              <p className="text-[9px] text-slate-400">Now Playing, Pending Requests, Approved Queue, Controls, and Room State</p>
             </div>
           </div>
           <DemoModeBanner compact />
@@ -155,9 +155,9 @@ export default function TalentApp() {
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
             title="Performer Console"
-            eyebrow="Split View"
-            primaryLabel="Queue operations"
-            secondaryLabel="Session inspector"
+            eyebrow="Operator App"
+            primaryLabel="Now Playing, Pending Requests, Approved Queue, and Controls"
+            secondaryLabel="Room State"
             badge={<DemoModeBanner compact />}
             isEmpty={session.status === 'inactive' && requests.length === 0}
             emptyState={

@@ -279,7 +279,7 @@ export default function TalentDashboard({
               </h2>
               {session.status !== 'inactive' && (
                 <span className="text-[10px] font-mono font-black uppercase tracking-wider bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 px-2 py-0.5 rounded-full select-none">
-                  {session.talentRole} MODULE
+                  {session.talentRole}
                 </span>
               )}
             </div>
@@ -290,7 +290,7 @@ export default function TalentDashboard({
             </p>
             {previewMode && (
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
-                Preview data only; no live tips are being collected.
+                Demo data only; no live tips are being collected.
               </p>
             )}
           </div>
@@ -305,7 +305,7 @@ export default function TalentDashboard({
                 disabled={previewMode}
                 className="flex items-center gap-1.5 px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-600 shadow rounded-xl text-xs font-bold transition-all cursor-pointer glow-fuchsia font-sans"
               >
-                <X className="w-4 h-4" /> {previewMode ? 'Preview only' : 'End Session'}
+                <X className="w-4 h-4" /> {previewMode ? 'Demo only' : 'End Session'}
               </button>
             ) : (
               <div className="flex items-center gap-3">
@@ -317,7 +317,7 @@ export default function TalentDashboard({
                   disabled={previewMode}
                   className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold border border-fuchsia-600 rounded-xl text-xs transition-transform transform active:scale-95 cursor-pointer glow-fuchsia"
                 >
-                  {previewMode ? 'Preview only' : 'Close Out Session'}
+                  {previewMode ? 'Demo only' : 'Close Out Session'}
                 </button>
               </div>
             )}
@@ -354,7 +354,7 @@ export default function TalentDashboard({
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">MODALITY / PERFORMANCE TYPE</label>
+                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMANCE TYPE</label>
                 <select 
                   value={setupRole}
                   onChange={(e) => setSetupRole(e.target.value as any)}
@@ -541,7 +541,7 @@ export default function TalentDashboard({
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest flex items-center gap-1">
-                  REVIEW BEFORE PUBLIC LADDER
+                  REVIEW BEFORE UP NEXT
                 </span>
               </div>
 
@@ -729,7 +729,7 @@ export default function TalentDashboard({
                               disabled={previewMode}
                               className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia"
                             >
-                              <Award className="w-4 h-4" /> {previewMode ? 'Preview only' : 'Mark Fulfilled'}
+                              <Award className="w-4 h-4" /> {previewMode ? 'Demo only' : 'Mark Playing'}
                             </button>
                           </div>
                         </motion.div>
@@ -919,7 +919,7 @@ export default function TalentDashboard({
               
               <div className="flex justify-between items-start select-none">
                 <h4 className="font-display text-xs font-mono font-bold tracking-wider text-amber-400 uppercase flex items-center gap-1.5 leading-none">
-                  <Award className="w-4 h-4 text-amber-400" /> FEATURED STATUS HUB
+                  <Award className="w-4 h-4 text-amber-400" /> BOOST ACTIVITY
                 </h4>
                 {session.isFeatured ? (
                   <span className="text-[8px] font-black tracking-widest bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full animate-bounce font-mono">
@@ -936,9 +936,9 @@ export default function TalentDashboard({
                 // ACTIVE STATE
                 <div className="space-y-3 font-sans">
                   <div className="p-3 bg-amber-950/15 border border-amber-500/35 rounded-xl text-center select-none shadow shadow-amber-500/5">
-                    <p className="text-[10px] text-amber-300 font-mono font-bold uppercase tracking-wider">🌟 PROMOTION TIMER 🌟</p>
+                    <p className="text-[10px] text-amber-300 font-mono font-bold uppercase tracking-wider">BOOST TIMER</p>
                     <p className="text-lg font-black font-mono text-amber-400 mt-1">{featureTimeLeft || 'Computing...'}</p>
-                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your listing is locked at the absolute top of discover directories!</p>
+                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted in venue search.</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-center text-[10px] bg-slate-950 p-2.5 rounded-xl border border-white/5 font-mono select-none">
@@ -958,14 +958,14 @@ export default function TalentDashboard({
                     disabled={previewMode}
                     className="w-full text-center py-2 bg-slate-950 border border-white/5 text-xs font-bold text-slate-400 hover:text-red-400 hover:bg-red-950/10 hover:border-red-500/35 rounded-xl transition-all cursor-pointer"
                   >
-                    {previewMode ? 'Preview only: promotion locked' : 'Veto / Cancel Promotion'}
+                    {previewMode ? 'Demo only: boost locked' : 'Pause Boost'}
                   </button>
                 </div>
               ) : (
                 // CONFIGURATION / EARN STATE
                 <div className="space-y-4 font-sans">
                   <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                    Stand out immediately. Featured statuses prioritize your listing at the top of discover & venue search results, giving you maximum tip-earnings velocity.
+                    Highlight this performer in venue search so patrons can reach the live request page quickly.
                   </p>
 
                   {/* Hours Selector */}
@@ -1003,7 +1003,7 @@ export default function TalentDashboard({
                     <div className="flex justify-between items-center text-[9px] font-mono font-bold uppercase select-none">
                       <span className="text-slate-400">🏆 Earn Shift Achievement</span>
                       <span className="text-cyan-400">
-                        {session.totals.totalTips >= 50 ? 'UNLOCKS FREE PROMO!' : `${Math.floor((session.totals.totalTips / 50) * 100)}%`}
+                        {session.totals.totalTips >= 50 ? 'UNLOCKS BOOST' : `${Math.floor((session.totals.totalTips / 50) * 100)}%`}
                       </span>
                     </div>
                     
@@ -1016,8 +1016,8 @@ export default function TalentDashboard({
                     
                     <p className="text-[9px] text-slate-500 leading-normal font-sans">
                       {session.totals.totalTips >= 50 
-                        ? '🎉 Goal reached! Unlock your shift earnings to claim 2 hours of FREE Featured placement!' 
-                        : 'Collect $50.00 total completed tips in your shifts to auto-unlock a 2-hour Featured spot for FREE.'}
+                        ? 'Goal reached. Unlock your shift earnings to claim 2 hours of boosted visibility.' 
+                        : 'Collect $50.00 total completed tips in your shifts to unlock a 2-hour visibility boost.'}
                     </p>
                   </div>
 
@@ -1029,7 +1029,7 @@ export default function TalentDashboard({
                       disabled={previewMode}
                       className="w-full py-2.5 flex items-center justify-center gap-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-cyan-500/10 cursor-pointer text-center font-sans"
                     >
-                      {previewMode ? 'Preview only: no promo action' : '🌟 Redeem Shift Achievement! (2-Hr Promo)'}
+                      {previewMode ? 'Demo only: no boost action' : 'Redeem Shift Achievement'}
                     </button>
                   ) : (
                     <button
@@ -1038,7 +1038,7 @@ export default function TalentDashboard({
                       disabled={previewMode}
                       className="w-full py-2.5 flex items-center justify-center gap-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-amber-500/10 cursor-pointer text-center font-sans"
                     >
-                      {previewMode ? 'Preview only: no placement purchase' : `🌟 Unlock Placement ($${selectedHours * 5}.00)`}
+                      {previewMode ? 'Demo only: boost locked' : `Boost Visibility ($${selectedHours * 5}.00)`}
                     </button>
                   )}
                 </div>
@@ -1053,7 +1053,7 @@ export default function TalentDashboard({
 
               <div className="space-y-3 select-none font-sans">
                 <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>{previewMode ? 'Preview total shown:' : 'Fulfilled requests total:'}</span>
+                  <span>{previewMode ? 'Demo total shown:' : 'Fulfilled requests total:'}</span>
                   <span className="font-mono text-sm font-bold text-white">{formatValue(session.totals.totalTips)}</span>
                 </div>
                 

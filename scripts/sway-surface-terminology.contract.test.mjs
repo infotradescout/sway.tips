@@ -42,8 +42,8 @@ const PREVIEW = /\bpreview\b/i;
 // Intentional demo-mode read-only disclaimers. These only render when demo mode
 // is enabled and are an intentional safety harness, not live product copy.
 const DEMO_DISCLAIMER_ALLOWLIST = [
-  'No checkout/payment/moderation action will be sent.',
-  'Preview only: checkout disabled',
+  'Demo data only. No payment or moderation action will be sent.',
+  'Demo only: sending disabled',
 ];
 
 function stripCommentsAndDisclaimers(src) {

@@ -132,7 +132,7 @@ export default function PatronView({
       ];
 
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'ladder' | 'discover'>('request');
+  const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'queue' | 'discover'>('request');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
   // Search Venue Directory States
@@ -158,7 +158,7 @@ export default function PatronView({
   const [boostPatronName, setBoostPatronName] = useState('');
   const [boostAmount, setBoostAmount] = useState<number>(5);
 
-  // Temporary checkout overlay until the real payment processor flow is implemented.
+  // Temporary confirmation overlay until the real payment processor flow is implemented.
   const [checkoutPayload, setCheckoutPayload] = useState<{
     open: boolean;
     type: 'request' | 'boost';
@@ -476,7 +476,7 @@ export default function PatronView({
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
 
-  // Open checkout
+  // Open confirmation
   const initiateCheckout = (type: 'request' | 'boost') => {
     if (session.status === 'closed') return;
 
@@ -637,7 +637,7 @@ export default function PatronView({
         // A new request is pending approval and is not on the queue yet, so keep the
         // patron on the request surface where the persistent Request status panel
         // shows it as Pending instead of dumping them on an approved-only queue.
-        setActiveTab(completedActionType === 'boost' ? 'ladder' : 'request');
+        setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
       }, 2000);
 
     } catch (e) {
@@ -718,7 +718,7 @@ export default function PatronView({
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   };
 
-  const approvedLadder = requests
+  const approvedQueue = requests
     .filter(r => (r.status === 'approved' || r.status === 'fulfilled') && !r.hidden && !r.removed)
     .sort((a, b) => b.amount - a.amount);
 
@@ -761,8 +761,8 @@ export default function PatronView({
           )}
           <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
             {previewMode
-              ? 'Preview data only. No checkout/payment/moderation action will be sent.'
-              : `Sway ${session.talentName || 'this performer'} on stage through the live ladder. Requests go to the performer for approval — no card is charged.`}
+              ? 'Demo data only. No payment or moderation action will be sent.'
+              : `Sway ${session.talentName || 'this performer'} on stage through the live queue. Requests go to the performer for approval. No card is charged.`}
           </p>
         </div>
       </div>
@@ -924,9 +924,9 @@ export default function PatronView({
           </button>
 
           <button
-            onClick={() => setActiveTab('ladder')}
+            onClick={() => setActiveTab('queue')}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'ladder'
+              activeTab === 'queue'
                 ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
                 : 'text-slate-400 hover:text-white'
             }`}
@@ -1008,7 +1008,7 @@ export default function PatronView({
                     Queue Temporarily Closed
                   </h3>
                   <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed font-sans">
-                    {session.talentName} has temporarily paused new track requests to catch up with the active ladder.
+                    {session.talentName} has temporarily paused new track requests to catch up with the approved queue.
                   </p>
                 </div>
                 
@@ -1032,10 +1032,10 @@ export default function PatronView({
                     💖 Support Performer Directly
                   </button>
                   <button
-                    onClick={() => setActiveTab('ladder')}
+                    onClick={() => setActiveTab('queue')}
                     className="flex-1 py-2.5 bg-slate-950 border border-white/5 text-slate-300 hover:text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
                   >
-                    📊 View Live Queue
+                    View Live Queue
                   </button>
                 </div>
               </motion.div>
@@ -1229,7 +1229,7 @@ export default function PatronView({
               </div>
             )}
 
-            {/* Common checkout inputs: Sponsor credentials, notes & cash value limits */}
+            {/* Common request inputs: sender credentials, notes, and tip value limits */}
             {selectedTrack && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
@@ -1239,7 +1239,7 @@ export default function PatronView({
                 {/* Visual slider or pricing */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs font-semibold font-sans">
-                    <span className="text-slate-400 font-sans">Bid / Tipping Amount</span>
+                    <span className="text-slate-400 font-sans">Tip Amount</span>
                     <span className="text-fuchsia-400 font-mono font-bold">${tipAmount}.00</span>
                   </div>
                   
@@ -1270,7 +1270,7 @@ export default function PatronView({
                     className="w-full accent-fuchsia-500 mt-2 cursor-pointer"
                   />
                   <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
-                    Tip higher to secure #1 fuchsia spot. High bids command the fastest talent attention!
+                    Tip higher to boost your request toward Up Next.
                   </p>
                 </div>
 
@@ -1333,7 +1333,7 @@ export default function PatronView({
             <div className="text-center pb-2 select-none">
               <Coins className="w-10 h-10 text-fuchsia-500 mx-auto animate-bounce mb-2" />
               <h3 className="font-display text-sm font-bold text-white uppercase tracking-wider">Classic Straight Tip</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">No requests, no action ladder—just straightforward appreciation for {session.talentName}. Goes to the performer for approval; no card is charged.</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">No request queue, just straightforward appreciation for {session.talentName}. Goes to the performer for approval; no card is charged.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -1389,7 +1389,7 @@ export default function PatronView({
         )}
 
         {/* TAB C: The Live Leaderboard / Rank Status List & "Boost" Actions */}
-        {(activeTab === 'ladder' || session.status === 'ending') && (
+        {(activeTab === 'queue' || session.status === 'ending') && (
           <div className="space-y-4 font-sans">
             <div className="flex justify-between items-center select-none animate-fade-in">
               <h3 className="font-display text-sm font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
@@ -1401,20 +1401,20 @@ export default function PatronView({
             </div>
 
             <div className="space-y-3">
-              {approvedLadder.length === 0 ? (
+              {approvedQueue.length === 0 ? (
                 <div className="text-center p-8 bg-slate-900/10 border border-dashed border-white/10 rounded-2xl select-none">
                   <Smartphone className="w-6 h-6 text-slate-600 mx-auto animate-bounce" />
                   <div className="text-xs font-semibold text-slate-400 mt-1">No approved requests yet</div>
                   <p className="text-[10px] text-slate-500">Wait for performer approvals or submit your own request above.</p>
                 </div>
               ) : (
-                approvedLadder.map((req, idx) => {
+                approvedQueue.map((req, idx) => {
                   const isTopOne = idx === 0;
                   const isFulfilled = req.status === 'fulfilled';
                   return (
                     <motion.div
                       key={req.id}
-                      layoutId={`patron-ladder-${req.id}`}
+                      layoutId={`patron-queue-${req.id}`}
                       className={`ladder-row p-1 rounded-2xl flex flex-col transition-all overflow-hidden ${
                         isTopOne 
                           ? 'bg-slate-950 glow-fuchsia border border-fuchsia-500/25' 
@@ -1502,7 +1502,7 @@ export default function PatronView({
                 <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Discover Artists &amp; Venues
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Browse on-duty mixers, acoustic performers, and craft bartenders at this venue. Featured listings rise to the top with priority placements!
+                Browse on-duty mixers, acoustic performers, and craft bartenders at this venue. Active performers are shown with their live request pages.
               </p>
             </div>
 
@@ -1533,7 +1533,7 @@ export default function PatronView({
                     <div className="text-center py-10 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none">
                       <Search className="w-6 h-6 text-slate-500 mx-auto mb-1 animate-bounce" />
                       <div className="text-xs text-slate-400 font-bold">No performers found</div>
-                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active venue desk sessions</p>
+                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active venue sessions</p>
                     </div>
                   );
                 }
@@ -1551,7 +1551,7 @@ export default function PatronView({
                       {/* Distinct Featured holographic stamp overlay */}
                       {p.isFeatured && (
                         <div className="absolute top-0 right-0 bg-amber-500 text-slate-950 text-[7px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-bl-lg select-none animate-pulse font-mono z-10 flex items-center gap-1">
-                          <span>🌟 PRESERVED PLACEMENT</span>
+                          <span>ACTIVE PERFORMER</span>
                         </div>
                       )}
 
@@ -1583,7 +1583,7 @@ export default function PatronView({
                             
                             <div className="flex items-center gap-2 mt-2">
                               <span className="text-[8px] font-mono font-bold text-fuchsia-400 bg-fuchsia-950/20 border border-fuchsia-500/10 px-1.5 py-0.5 rounded">
-                                {p.role} MODALITY
+                                {p.role}
                               </span>
                               <span className="text-[8px] font-mono text-slate-500">
                                 Min Tips: ${p.minimumTip}
@@ -1592,7 +1592,7 @@ export default function PatronView({
                           </div>
                         </div>
 
-                        {/* QR Code section & Quick checkout actions */}
+                        {/* QR Code section & Quick Tip actions */}
                         <div className="flex items-center gap-3 shrink-0">
                           {/* Distinct QR Code with custom indicators if Featured */}
                           <button
@@ -1647,7 +1647,7 @@ export default function PatronView({
 
                           <div className="space-y-1.5 font-sans">
                             <div className="flex justify-between text-[10px] font-sans">
-                              <span className="text-slate-400">Bid / Tip Value</span>
+                              <span className="text-slate-400">Tip Value</span>
                               <span className="text-fuchsia-400 font-mono font-bold">${tipAmount}.00</span>
                             </div>
                             <input
@@ -1704,7 +1704,7 @@ export default function PatronView({
                                 alert(routeCopy);
                                 return;
                               }
-                              // Open checkout
+                              // Open confirmation
                               const platformFee = session.feeType === 'patron' ? 1.0 : 0;
                               setCheckoutPayload({
                                 open: true,
@@ -1731,7 +1731,7 @@ export default function PatronView({
             </div>
           </div>
         )}        </div>
-       {/* 4. TEMPORARY CHECKOUT MODAL OVERLAY */}
+       {/* 4. TEMPORARY CONFIRMATION MODAL OVERLAY */}
       <AnimatePresence>
         {checkoutPayload && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -1742,7 +1742,7 @@ export default function PatronView({
               className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-2xl overflow-hidden shadow-2xl glass-panel text-center font-sans"
             >
               
-              {/* Payment Processing and Success Cards */}
+              {/* Request processing and success cards */}
               {backendConfirmed ? (
                 <div className="p-8 space-y-4">
                   <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center rounded-full mx-auto animate-bounce">
@@ -1754,14 +1754,14 @@ export default function PatronView({
                   </p>
                 </div>
               ) : (
-                /* Temporary checkout fields */
+                /* Temporary confirmation fields */
                 <div className="p-6 space-y-6">
                   
                   {/* Title and meta */}
                   <div className="space-y-1">
                     <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
                     <h3 className="font-sans text-base font-bold text-white">
-                      {previewMode ? 'Preview Only' : checkoutPayload.type === 'request' ? 'Confirm Request' : `Confirm Boost`}
+                      {previewMode ? 'Demo Only' : checkoutPayload.type === 'request' ? 'Confirm Request' : `Confirm Boost`}
                     </h3>
                     {previewMode && (
                       <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
@@ -1773,24 +1773,24 @@ export default function PatronView({
                   {/* Pricing detail sheets */}
                   <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
                     <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-550 text-slate-500">Target Option Item:</span>
+                      <span className="text-slate-550 text-slate-500">Request:</span>
                       <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
                     </div>
 
                     <div className="flex justify-between text-xs">
-                      <span className="text-slate-500 mt-0.5">Hold Bid:</span>
+                      <span className="text-slate-500 mt-0.5">Tip:</span>
                       <span className="text-white">${checkoutPayload.amount}.00</span>
                     </div>
 
                     <div className="flex justify-between text-xs font-sans">
-                      <span className="text-slate-500">Platform Handling Cost:</span>
+                      <span className="text-slate-500">Service Fee:</span>
                       <span className="text-fuchsia-400 font-bold">
                         {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
                       </span>
                     </div>
 
                     <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                      <span className="text-slate-400">{previewMode ? 'Preview Request Total:' : 'Request Total:'}</span>
+                      <span className="text-slate-400">Request Total:</span>
                       <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                     </div>
                   </div>
@@ -1833,7 +1833,7 @@ export default function PatronView({
                       disabled={isPaying || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Preview only: checkout disabled' : isPaying ? "Sending..." : "Send request for approval"}
+                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaying ? "Sending..." : "Send request for approval"}
                     </button>
 
                     <button
@@ -1876,7 +1876,7 @@ export default function PatronView({
               <div className="space-y-1 mb-5">
                 {showDirQrCodeModal.isFeatured ? (
                   <span className="text-[8px] font-black tracking-widest bg-amber-500 text-slate-950 px-2.5 py-1 rounded-full font-mono inline-block animate-bounce shadow">
-                    🌟 PRESTIGE FEATURED STATUS ACTIVE 🌟
+                    ACTIVE PERFORMER
                   </span>
                 ) : (
                   <span className="text-[8px] font-black tracking-widest bg-slate-950 text-slate-400 px-2.5 py-1 rounded-full font-mono inline-block">
@@ -1884,7 +1884,7 @@ export default function PatronView({
                   </span>
                 )}
                 <h3 className="text-base font-black text-white mt-1 uppercase tracking-wide">{showDirQrCodeModal.name}</h3>
-                <p className="text-[10px] text-fuchsia-400 font-semibold">{showDirQrCodeModal.role} MODALITY</p>
+                <p className="text-[10px] text-fuchsia-400 font-semibold">{showDirQrCodeModal.role}</p>
                 <p className="text-[9px] text-slate-400 mt-1">📍 Venue: {showDirQrCodeModal.venueName}</p>
               </div>
 
@@ -1908,8 +1908,8 @@ export default function PatronView({
               {/* Subtext info */}
               <p className={`text-[10px] leading-relaxed max-w-xs mx-auto mb-4 font-sans ${showDirQrCodeModal.isFeatured ? 'text-amber-250 text-amber-200' : 'text-slate-400'}`}>
                 {showDirQrCodeModal.isFeatured
-                  ? 'Featured placement for this performer. Scan to open their live request page.'
-                  : 'Standard direct tipping desk for supporting local performers at the venue stage.'}
+                  ? 'Active performer. Scan to open their live request page.'
+                  : 'Direct Tip and Request page for this performer.'}
               </p>
 
               <button

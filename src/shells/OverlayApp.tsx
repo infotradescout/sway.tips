@@ -7,7 +7,7 @@ export default function OverlayApp() {
 
   if (isLoading) return <LoadingState />;
 
-  const liveLadder = bState.requests
+  const upNextQueue = bState.requests
     .filter((r: RequestItem) => r.status === 'approved')
     .sort((a, b) => b.amount - a.amount);
   const nowPlaying = bState.requests
@@ -17,9 +17,9 @@ export default function OverlayApp() {
   return (
     <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
       <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 mb-3">
-        <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">SWAY LIVE LADDER</span>
+        <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">SWAY LIVE ROOM</span>
         {isDemoModeEnabled() ? (
-          <div aria-label="Demo preview data">
+          <div aria-label="Demo data">
             <DemoModeBanner compact />
           </div>
         ) : (
@@ -35,10 +35,10 @@ export default function OverlayApp() {
       )}
 
       <div className="space-y-2.5">
-        {liveLadder.length > 0 && (
+        {upNextQueue.length > 0 && (
           <div className="text-[9px] font-mono tracking-widest text-fuchsia-400/80 uppercase">Up Next</div>
         )}
-        {liveLadder.slice(0, 5).map((req, idx) => (
+        {upNextQueue.slice(0, 5).map((req, idx) => (
           <div
             key={req.id}
             className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-transform ${
@@ -56,7 +56,7 @@ export default function OverlayApp() {
             <span className="font-mono text-cyan-400 font-bold ml-2">${req.amount}</span>
           </div>
         ))}
-        {liveLadder.length === 0 && (
+        {upNextQueue.length === 0 && (
           <div className="text-center py-4 bg-slate-950/40 rounded border border-white/5 text-[10px] text-slate-500 font-mono">
             Waiting for gig requests...
           </div>

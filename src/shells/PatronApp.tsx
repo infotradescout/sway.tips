@@ -24,7 +24,7 @@ export default function PatronApp() {
   const demoMode = isDemoModeEnabled();
 
   const rejectDemoMutation = async () => {
-    throw new Error('Demo preview data is read-only. No backend mutation was sent.');
+    throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
 
   const handleCreateRequest = async (requestData: Record<string, unknown>) => {
@@ -147,9 +147,9 @@ export default function PatronApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title="Patron Preview"
-            eyebrow="Split View"
-            primaryLabel="Request, tip, ladder, and discover surface"
+            title="Patron App"
+            eyebrow="Live Room"
+            primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
             secondaryLabel="Selected gig inspector"
             badge={<DemoModeBanner compact />}
             isEmpty={requests.length === 0 && (bState.performers || []).length === 0}
@@ -193,9 +193,9 @@ export default function PatronApp() {
                   </div>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Top ladder item</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Top approved request</p>
                   <p className="mt-2 font-bold text-white">{topRequest?.title || 'Nothing approved yet'}</p>
-                  <p className="text-xs text-slate-400">{topRequest ? `$${topRequest.amount} preview value` : 'Empty-state inspector remains visible.'}</p>
+                  <p className="text-xs text-slate-400">{topRequest ? `$${topRequest.amount} request value` : 'Empty-state inspector remains visible.'}</p>
                 </div>
               </div>
             }

@@ -213,7 +213,7 @@ export default function App() {
 
   const handleCreateRequest = async (requestData: any) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     try {
       const response = await fetch('/api/request/create', {
@@ -245,7 +245,7 @@ export default function App() {
     gigId?: string
   ) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     try {
       const response = await fetch('/api/request/boost', {
@@ -332,7 +332,7 @@ export default function App() {
 
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/moderation/report', {
       method: 'POST',
@@ -355,7 +355,7 @@ export default function App() {
     reason: string
   ) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/moderation/block', {
       method: 'POST',
@@ -374,7 +374,7 @@ export default function App() {
 
   const handleHideRequest = async (requestId: string) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/moderation/hide', {
       method: 'POST',
@@ -394,7 +394,7 @@ export default function App() {
 
   const handleRemoveRequest = async (requestId: string) => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/moderation/remove', {
       method: 'POST',
@@ -414,7 +414,7 @@ export default function App() {
 
   const handleSupportContact = async () => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/support/contact');
     const data = await response.json();
@@ -429,7 +429,7 @@ export default function App() {
 
   const handleDataDeletionPlaceholder = async () => {
     if (isDemoMode) {
-      throw new Error('Preview mode is read-only right now.');
+      throw new Error('Demo mode is read-only right now.');
     }
     const response = await fetch('/api/privacy/data-deletion-placeholder', {
       method: 'POST',
@@ -469,7 +469,7 @@ export default function App() {
   }
 
   if (route.name === 'overlay') {
-    const liveLadder = requests
+    const upNextQueue = requests
       .filter((r: RequestItem) => r.status === 'approved')
       .sort((a, b) => b.amount - a.amount);
     const nowPlaying = requests
@@ -480,7 +480,7 @@ export default function App() {
       <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
         <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 mb-3">
           <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">
-            SWAY LIVE LADDER
+            SWAY LIVE ROOM
           </span>
           <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
         </div>
@@ -493,7 +493,7 @@ export default function App() {
         )}
 
         <div className="space-y-2.5">
-          {liveLadder.slice(0, 5).map((req, idx) => (
+          {upNextQueue.slice(0, 5).map((req, idx) => (
             <div
               key={req.id}
               className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-transform ${
@@ -511,7 +511,7 @@ export default function App() {
               <span className="font-mono text-cyan-400 font-bold ml-2">${req.amount}</span>
             </div>
           ))}
-          {liveLadder.length === 0 && (
+          {upNextQueue.length === 0 && (
             <div className="text-center py-4 bg-slate-950/40 rounded border border-white/5 text-[10px] text-slate-500 font-mono">
               Waiting for gig requests...
             </div>
@@ -551,7 +551,7 @@ export default function App() {
       <ShellMessage
         icon={<Lock className="h-5 w-5" />}
         title="Admin"
-        body="Admin tools are intentionally separated from patron and talent routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
+        body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
       />
     );
   }
@@ -573,7 +573,7 @@ export default function App() {
                 <span className="font-display text-xs font-black uppercase tracking-widest text-white">
                   Sway Talent
                 </span>
-                <p className="text-[9px] text-slate-400">Gig setup, queue triage, fulfillment, and closeout</p>
+                <p className="text-[9px] text-slate-400">Now Playing, Pending Requests, Approved Queue, Controls, and Room State</p>
               </div>
             </div>
           </div>
@@ -609,7 +609,7 @@ export default function App() {
                 <Flame className="h-4 w-4" />
               </div>
               <div>
-                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Preview</span>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Live Room</span>
                 <p className="text-[10px] text-slate-400">Choose the perspective: DJ booth or guest phone.</p>
               </div>
             </div>
