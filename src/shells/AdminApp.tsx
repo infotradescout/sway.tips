@@ -1,7 +1,12 @@
 import { Lock } from 'lucide-react';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { ADMIN_OPS_DEMO_ITEM_BODY, ADMIN_OPS_DEMO_SECTION_LABELS, ADMIN_OPS_EMPTY_STATE_COPY } from './admin/AdminOpsRuntimeCompat';
+import {
+  ADMIN_OPS_DEMO_HEADING,
+  ADMIN_OPS_DEMO_ITEM_BODY,
+  ADMIN_OPS_DEMO_SECTION_LABELS,
+  ADMIN_OPS_EMPTY_STATE_COPY
+} from './admin/AdminOpsRuntimeCompat';
 import { ShellMessage } from './shared';
 
 export default function AdminApp() {
@@ -23,7 +28,7 @@ export default function AdminApp() {
           }
           primary={
             <div className="space-y-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">Demo data</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">{ADMIN_OPS_DEMO_HEADING}</p>
               {ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (
                 <div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
                   <p className="text-sm font-bold text-white">{label}</p>

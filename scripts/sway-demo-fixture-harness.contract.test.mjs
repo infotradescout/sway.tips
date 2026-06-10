@@ -33,6 +33,7 @@ const patronShell = read('src/shells/PatronApp.tsx');
 const talentShell = read('src/shells/TalentApp.tsx');
 const overlayShell = read('src/shells/OverlayApp.tsx');
 const adminShell = read('src/shells/AdminApp.tsx');
+const adminCompat = read('src/shells/admin/AdminOpsRuntimeCompat.tsx');
 const splitView = read('src/components/SplitViewShell.tsx');
 const demoReadme = read('fixtures/demo/README.md');
 
@@ -81,7 +82,7 @@ for (const [name, source] of [
   ['patron shell', patronShell],
   ['talent shell', talentShell],
   ['overlay shell', overlayShell],
-  ['admin shell', adminShell]
+  ['admin shell', `${adminShell}\n${adminCompat}`]
 ]) {
   requireIncludes(source, 'Demo data', `${name} must visibly label demo data.`);
 }
