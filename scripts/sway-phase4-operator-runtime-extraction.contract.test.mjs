@@ -16,11 +16,13 @@ function read(rel) {
 const operatorRuntimeFile = 'src/shells/OperatorRuntime.tsx';
 const operatorCompatFile = 'src/shells/operator/OperatorRuntimeCompat.tsx';
 const adminOpsRuntimeFile = 'src/shells/AdminOpsRuntime.tsx';
+const adminOpsCompatFile = 'src/shells/admin/AdminOpsRuntimeCompat.tsx';
 const adminEntryFile = 'src/entries/admin.tsx';
 
 const operatorRuntimeSource = read(operatorRuntimeFile);
 const operatorCompatSource = read(operatorCompatFile);
 const adminOpsRuntimeSource = read(adminOpsRuntimeFile);
+const adminOpsCompatSource = read(adminOpsCompatFile);
 const adminEntrySource = read(adminEntryFile);
 
 if (operatorRuntimeSource) {
@@ -54,12 +56,24 @@ if (operatorCompatSource) {
 
 if (adminOpsRuntimeSource) {
   for (const required of [
-    "import AdminApp from './AdminApp';",
-    'export const LEGACY_RUNTIME_DELEGATE = AdminApp;',
+    "import AdminOpsRuntimeCompat from './admin/AdminOpsRuntimeCompat';",
+    'export const LEGACY_RUNTIME_DELEGATE = AdminOpsRuntimeCompat;',
     'const AdminOpsRuntime = LEGACY_RUNTIME_DELEGATE;'
   ]) {
     if (!adminOpsRuntimeSource.includes(required)) {
-      failures.push(`${adminOpsRuntimeFile} must keep legacy AdminApp delegation token: ${required}`);
+      failures.push(`${adminOpsRuntimeFile} must keep Admin/Ops compatibility boundary token: ${required}`);
+    }
+  }
+}
+
+if (adminOpsCompatSource) {
+  for (const required of [
+    "import AdminApp from '../AdminApp';",
+    'export const LEGACY_ADMIN_OPS_RUNTIME_DELEGATE = AdminApp;',
+    'const AdminOpsRuntimeCompat = LEGACY_ADMIN_OPS_RUNTIME_DELEGATE;'
+  ]) {
+    if (!adminOpsCompatSource.includes(required)) {
+      failures.push(`${adminOpsCompatFile} missing required AdminApp parity token: ${required}`);
     }
   }
 }
@@ -76,7 +90,8 @@ if (adminEntrySource) {
 const scopeFiles = [
   { file: operatorRuntimeFile, source: operatorRuntimeSource },
   { file: operatorCompatFile, source: operatorCompatSource },
-  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource }
+  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource },
+  { file: adminOpsCompatFile, source: adminOpsCompatSource }
 ];
 
 for (const { file, source } of scopeFiles) {
