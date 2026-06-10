@@ -84,11 +84,11 @@ const shellRules = {
     forbidden: ['PatronView', 'TalentDashboard', 'AdminApp', '../App']
   },
   'src/shells/AdminOpsShell.tsx': {
-    required: ["import AdminApp from './AdminApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
+    required: ["import AdminOpsRuntime from './AdminOpsRuntime';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
     forbidden: ['PatronView', 'TalentDashboard', '../App', "import PatronApp from './PatronApp';"]
   },
   'src/shells/OperatorAppShell.tsx': {
-    required: ["import AdminApp from './AdminApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
+    required: ["import OperatorRuntime from './OperatorRuntime';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
     forbidden: ['PatronView', 'TalentDashboard', '../App', "import PatronApp from './PatronApp';"]
   }
 };

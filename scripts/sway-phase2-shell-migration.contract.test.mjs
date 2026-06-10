@@ -36,8 +36,8 @@ const shellDelegationContracts = [
   { file: 'src/shells/PatronAppShell.tsx', legacyImport: "import PatronApp from './PatronApp';" },
   { file: 'src/shells/PerformerAppShell.tsx', legacyImport: "import TalentApp from './TalentApp';" },
   { file: 'src/shells/OverlayShell.tsx', legacyImport: "import OverlayApp from './OverlayApp';" },
-  { file: 'src/shells/AdminOpsShell.tsx', legacyImport: "import AdminApp from './AdminApp';" },
-  { file: 'src/shells/OperatorAppShell.tsx', legacyImport: "import AdminApp from './AdminApp';" }
+  { file: 'src/shells/AdminOpsShell.tsx', legacyImport: "import AdminOpsRuntime from './AdminOpsRuntime';" },
+  { file: 'src/shells/OperatorAppShell.tsx', legacyImport: "import OperatorRuntime from './OperatorRuntime';" }
 ];
 
 for (const { file, legacyImport } of shellDelegationContracts) {
