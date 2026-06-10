@@ -127,6 +127,8 @@ Do not delete old routes in Phase 0. Target routes should be introduced with com
 
 ### Admin/Ops
 
+Parity extraction closeout reference: see `docs/SWAY_ADMIN_OPS_PARITY_EXTRACTION_CLOSEOUT.md`.
+
 - Route(s): current `/admin`; target `/admin` and `/ops`.
 - Current component(s): currently not physically distinct from `src/shells/AdminApp.tsx`.
 - Intended audience: internal administrators and operations.
