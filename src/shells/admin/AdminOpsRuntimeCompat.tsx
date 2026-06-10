@@ -1,7 +1,8 @@
-import AdminApp from '../AdminApp';
+import type { ComponentType } from 'react';
 
-export const LEGACY_ADMIN_OPS_RUNTIME_DELEGATE = AdminApp;
+export const ADMIN_OPS_DEMO_SECTION_LABELS = ['Moderation queue', 'Request lifecycle', 'Identity review'] as const;
 
-const AdminOpsRuntimeCompat = LEGACY_ADMIN_OPS_RUNTIME_DELEGATE;
-
-export default AdminOpsRuntimeCompat;
+export function createAdminOpsRuntimeCompat(LegacyAdminApp: ComponentType) {
+	const AdminOpsRuntimeCompat = LegacyAdminApp;
+	return AdminOpsRuntimeCompat;
+}

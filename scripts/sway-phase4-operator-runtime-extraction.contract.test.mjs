@@ -55,9 +55,12 @@ if (operatorCompatSource) {
 }
 
 if (adminOpsRuntimeSource) {
+  if (!adminOpsRuntimeSource.includes("./admin/AdminOpsRuntimeCompat")) {
+    failures.push(`${adminOpsRuntimeFile} must import AdminOpsRuntimeCompat module path.`);
+  }
   for (const required of [
-    "import AdminOpsRuntimeCompat from './admin/AdminOpsRuntimeCompat';",
-    'export const LEGACY_RUNTIME_DELEGATE = AdminOpsRuntimeCompat;',
+    "import { createAdminOpsRuntimeCompat } from './admin/AdminOpsRuntimeCompat';",
+    'export const LEGACY_RUNTIME_DELEGATE = createAdminOpsRuntimeCompat(AdminApp);',
     'const AdminOpsRuntime = LEGACY_RUNTIME_DELEGATE;'
   ]) {
     if (!adminOpsRuntimeSource.includes(required)) {
@@ -68,9 +71,9 @@ if (adminOpsRuntimeSource) {
 
 if (adminOpsCompatSource) {
   for (const required of [
-    "import AdminApp from '../AdminApp';",
-    'export const LEGACY_ADMIN_OPS_RUNTIME_DELEGATE = AdminApp;',
-    'const AdminOpsRuntimeCompat = LEGACY_ADMIN_OPS_RUNTIME_DELEGATE;'
+    'ADMIN_OPS_DEMO_SECTION_LABELS',
+    'export function createAdminOpsRuntimeCompat',
+    'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {
     if (!adminOpsCompatSource.includes(required)) {
       failures.push(`${adminOpsCompatFile} missing required AdminApp parity token: ${required}`);
