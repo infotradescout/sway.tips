@@ -1,4 +1,4 @@
-import PatronApp from '../shells/PatronApp';
+import PatronAppShell from '../shells/PatronAppShell';
 import { mountSwayShell } from './mount';
 
-mountSwayShell(<PatronApp />);
+mountSwayShell(<PatronAppShell />);

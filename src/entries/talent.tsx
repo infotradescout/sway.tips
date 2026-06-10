@@ -1,4 +1,4 @@
-import TalentApp from '../shells/TalentApp';
+import PerformerAppShell from '../shells/PerformerAppShell';
 import { mountSwayShell } from './mount';
 
-mountSwayShell(<TalentApp />);
+mountSwayShell(<PerformerAppShell />);

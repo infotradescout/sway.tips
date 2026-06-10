@@ -36,10 +36,10 @@ for (const { entry, source } of entrySources) {
 }
 
 const expectedImports = {
-  'src/entries/patron.tsx': '../shells/PatronApp',
-  'src/entries/talent.tsx': '../shells/TalentApp',
-  'src/entries/overlay.tsx': '../shells/OverlayApp',
-  'src/entries/admin.tsx': '../shells/AdminApp',
+  'src/entries/patron.tsx': '../shells/PatronAppShell',
+  'src/entries/talent.tsx': '../shells/PerformerAppShell',
+  'src/entries/overlay.tsx': '../shells/OverlayShell',
+  'src/entries/admin.tsx': '../shells/AdminOpsShell',
   'src/entries/dev-sandbox.tsx': '../App'
 };
 
@@ -63,28 +63,33 @@ for (const { entry, source } of entrySources) {
 }
 
 const shellSources = {
-  'src/shells/PatronApp.tsx': existsSync(join(root, 'src/shells/PatronApp.tsx')) ? readFileSync(join(root, 'src/shells/PatronApp.tsx'), 'utf8') : '',
-  'src/shells/TalentApp.tsx': existsSync(join(root, 'src/shells/TalentApp.tsx')) ? readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8') : '',
-  'src/shells/OverlayApp.tsx': existsSync(join(root, 'src/shells/OverlayApp.tsx')) ? readFileSync(join(root, 'src/shells/OverlayApp.tsx'), 'utf8') : '',
-  'src/shells/AdminApp.tsx': existsSync(join(root, 'src/shells/AdminApp.tsx')) ? readFileSync(join(root, 'src/shells/AdminApp.tsx'), 'utf8') : ''
+  'src/shells/PatronAppShell.tsx': existsSync(join(root, 'src/shells/PatronAppShell.tsx')) ? readFileSync(join(root, 'src/shells/PatronAppShell.tsx'), 'utf8') : '',
+  'src/shells/PerformerAppShell.tsx': existsSync(join(root, 'src/shells/PerformerAppShell.tsx')) ? readFileSync(join(root, 'src/shells/PerformerAppShell.tsx'), 'utf8') : '',
+  'src/shells/OverlayShell.tsx': existsSync(join(root, 'src/shells/OverlayShell.tsx')) ? readFileSync(join(root, 'src/shells/OverlayShell.tsx'), 'utf8') : '',
+  'src/shells/AdminOpsShell.tsx': existsSync(join(root, 'src/shells/AdminOpsShell.tsx')) ? readFileSync(join(root, 'src/shells/AdminOpsShell.tsx'), 'utf8') : '',
+  'src/shells/OperatorAppShell.tsx': existsSync(join(root, 'src/shells/OperatorAppShell.tsx')) ? readFileSync(join(root, 'src/shells/OperatorAppShell.tsx'), 'utf8') : ''
 };
 
 const shellRules = {
-  'src/shells/PatronApp.tsx': {
-    required: ['PatronView'],
+  'src/shells/PatronAppShell.tsx': {
+    required: ["import PatronApp from './PatronApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
     forbidden: ['TalentDashboard', 'AdminApp', 'DevSandbox', '../App']
   },
-  'src/shells/TalentApp.tsx': {
-    required: ['TalentDashboard'],
+  'src/shells/PerformerAppShell.tsx': {
+    required: ["import TalentApp from './TalentApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
     forbidden: ['PatronView', 'DevSandbox', '../App']
   },
-  'src/shells/OverlayApp.tsx': {
-    required: ['LIVE GIG FEED'],
+  'src/shells/OverlayShell.tsx': {
+    required: ["import OverlayApp from './OverlayApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
     forbidden: ['PatronView', 'TalentDashboard', 'AdminApp', '../App']
   },
-  'src/shells/AdminApp.tsx': {
-    required: ['Admin'],
-    forbidden: ['PatronView', 'TalentDashboard', '../App']
+  'src/shells/AdminOpsShell.tsx': {
+    required: ["import AdminApp from './AdminApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
+    forbidden: ['PatronView', 'TalentDashboard', '../App', "import PatronApp from './PatronApp';"]
+  },
+  'src/shells/OperatorAppShell.tsx': {
+    required: ["import AdminApp from './AdminApp';", 'LEGACY_SURFACE_DELEGATE', 'FAIL_CLOSED_SCAFFOLD'],
+    forbidden: ['PatronView', 'TalentDashboard', '../App', "import PatronApp from './PatronApp';"]
   }
 };
 

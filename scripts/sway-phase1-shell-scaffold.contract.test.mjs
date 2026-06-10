@@ -13,6 +13,8 @@ const shellContracts = [
   { file: 'src/shells/AdminOpsShell.tsx', id: 'AdminOpsShell', exportName: 'ADMIN_OPS_SHELL_ID' }
 ];
 
+const scaffoldOnlySurfaces = new Set(['PublicWebShell']);
+
 for (const { file, id } of shellContracts) {
   const abs = join(root, file);
   if (!existsSync(abs)) {
@@ -32,6 +34,14 @@ for (const { file, id } of shellContracts) {
 
   if (!source.toLowerCase().includes('fail-closed')) {
     failures.push(`${file} must document fail-closed default behavior.`);
+  }
+
+  if (!scaffoldOnlySurfaces.has(id) && !source.includes('LEGACY_SURFACE_DELEGATE')) {
+    failures.push(`${file} must expose LEGACY_SURFACE_DELEGATE to support compatibility migration.`);
+  }
+
+  if (!scaffoldOnlySurfaces.has(id) && !source.includes('FAIL_CLOSED_SCAFFOLD')) {
+    failures.push(`${file} must preserve FAIL_CLOSED_SCAFFOLD export for fail-closed fallback.`);
   }
 
   for (const forbidden of [
@@ -100,40 +110,6 @@ if (!existsSync(shellIndexPath)) {
   ]) {
     if (!source.includes(required)) {
       failures.push(`${shellIndexFile} missing stable scaffold export: ${required}`);
-    }
-  }
-}
-
-const legacyEntryExpectations = {
-  'src/entries/patron.tsx': '../shells/PatronApp',
-  'src/entries/talent.tsx': '../shells/TalentApp',
-  'src/entries/overlay.tsx': '../shells/OverlayApp',
-  'src/entries/admin.tsx': '../shells/AdminApp'
-};
-
-for (const [entryFile, expectedImport] of Object.entries(legacyEntryExpectations)) {
-  const abs = join(root, entryFile);
-  if (!existsSync(abs)) {
-    failures.push(`Missing legacy entrypoint while scaffolding: ${entryFile}`);
-    continue;
-  }
-
-  const source = readFileSync(abs, 'utf8');
-  if (!source.includes(expectedImport)) {
-    failures.push(`${entryFile} must keep legacy shell import ${expectedImport} during scaffold-only slice.`);
-  }
-
-  for (const forbidden of [
-    '../shells/PublicWebShell',
-    '../shells/PatronAppShell',
-    '../shells/PerformerAppShell',
-    '../shells/OperatorAppShell',
-    '../shells/OverlayShell',
-    '../shells/AdminOpsShell',
-    "from '../shells'"
-  ]) {
-    if (source.includes(forbidden)) {
-      failures.push(`${entryFile} must not wire Phase 1 scaffold shell import: ${forbidden}`);
     }
   }
 }

@@ -1,4 +1,4 @@
-import AdminApp from '../shells/AdminApp';
+import AdminOpsShell from '../shells/AdminOpsShell';
 import { mountSwayShell } from './mount';
 
-mountSwayShell(<AdminApp />);
+mountSwayShell(<AdminOpsShell />);

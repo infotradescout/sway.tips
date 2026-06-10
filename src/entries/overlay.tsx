@@ -1,4 +1,4 @@
-import OverlayApp from '../shells/OverlayApp';
+import OverlayShell from '../shells/OverlayShell';
 import { mountSwayShell } from './mount';
 
-mountSwayShell(<OverlayApp />);
+mountSwayShell(<OverlayShell />);
