@@ -27,12 +27,13 @@ if (adminOpsCompatSource) {
   for (const required of [
     'ADMIN_OPS_DEMO_SECTION_LABELS',
     'ADMIN_OPS_DEMO_ITEM_BODY',
-    'Demo data only. No operator mutation route is enabled here.',
+    'ADMIN_OPS_EMPTY_STATE_COPY',
+    'Operator demo has no records yet.',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {
     if (!adminOpsCompatSource.includes(required)) {
-      failures.push(`${adminOpsCompatFile} missing required Phase 7 fragment token: ${required}`);
+      failures.push(`${adminOpsCompatFile} missing required Phase 8 extracted fragment token: ${required}`);
     }
   }
 }
@@ -40,13 +41,11 @@ if (adminOpsCompatSource) {
 if (adminAppSource) {
   for (const required of [
     "./admin/AdminOpsRuntimeCompat';",
-    'ADMIN_OPS_DEMO_ITEM_BODY',
-    'ADMIN_OPS_DEMO_SECTION_LABELS',
-    'ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (',
-    '{ADMIN_OPS_DEMO_ITEM_BODY}'
+    'ADMIN_OPS_EMPTY_STATE_COPY',
+    '{ADMIN_OPS_EMPTY_STATE_COPY}'
   ]) {
     if (!adminAppSource.includes(required)) {
-      failures.push(`${adminAppFile} must consume Phase 7 extracted fragment token: ${required}`);
+      failures.push(`${adminAppFile} must consume Phase 8 extracted fragment token: ${required}`);
     }
   }
 }
@@ -106,9 +105,9 @@ if (terminologyContract && !terminologyContract.includes('Request, Tip, Boost, P
 }
 
 if (failures.length) {
-  console.error('Phase 7 admin ops fragment extraction contract failed:');
+  console.error('Phase 8 admin ops fragment extraction contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
 
-console.log('Phase 7 admin ops fragment extraction contract passed.');
+console.log('Phase 8 admin ops fragment extraction contract passed.');

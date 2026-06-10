@@ -1,7 +1,7 @@
 import { Lock } from 'lucide-react';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { ADMIN_OPS_DEMO_ITEM_BODY, ADMIN_OPS_DEMO_SECTION_LABELS } from './admin/AdminOpsRuntimeCompat';
+import { ADMIN_OPS_DEMO_ITEM_BODY, ADMIN_OPS_DEMO_SECTION_LABELS, ADMIN_OPS_EMPTY_STATE_COPY } from './admin/AdminOpsRuntimeCompat';
 import { ShellMessage } from './shared';
 
 export default function AdminApp() {
@@ -18,7 +18,7 @@ export default function AdminApp() {
           isEmpty={false}
           emptyState={
             <div className="rounded-xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
-              Operator demo has no records yet.
+              {ADMIN_OPS_EMPTY_STATE_COPY}
             </div>
           }
           primary={
