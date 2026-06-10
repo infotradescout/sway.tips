@@ -14,44 +14,37 @@ function read(rel) {
 }
 
 const adminAppFile = 'src/shells/AdminApp.tsx';
-const adminOpsRuntimeFile = 'src/shells/AdminOpsRuntime.tsx';
 const adminOpsCompatFile = 'src/shells/admin/AdminOpsRuntimeCompat.tsx';
-const operatorRuntimeFile = 'src/shells/OperatorRuntime.tsx';
+const adminOpsRuntimeFile = 'src/shells/AdminOpsRuntime.tsx';
 const adminEntryFile = 'src/entries/admin.tsx';
 
 const adminAppSource = read(adminAppFile);
-const adminOpsRuntimeSource = read(adminOpsRuntimeFile);
 const adminOpsCompatSource = read(adminOpsCompatFile);
-const operatorRuntimeSource = read(operatorRuntimeFile);
+const adminOpsRuntimeSource = read(adminOpsRuntimeFile);
 const adminEntrySource = read(adminEntryFile);
 
 if (adminOpsCompatSource) {
   for (const required of [
     'ADMIN_OPS_DEMO_SECTION_LABELS',
-    "'Moderation queue'",
-    "'Request lifecycle'",
-    "'Identity review'",
+    'ADMIN_OPS_DEMO_ITEM_BODY',
+    'Demo data only. No operator mutation route is enabled here.',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {
     if (!adminOpsCompatSource.includes(required)) {
-      failures.push(`${adminOpsCompatFile} missing required extracted fragment token: ${required}`);
+      failures.push(`${adminOpsCompatFile} missing required Phase 7 fragment token: ${required}`);
     }
-  }
-
-  if (adminOpsCompatSource.includes("import AdminApp from '../AdminApp';")) {
-    failures.push(`${adminOpsCompatFile} must not import AdminApp directly in Phase 6 extraction mode.`);
   }
 }
 
 if (adminAppSource) {
   for (const required of [
-    "./admin/AdminOpsRuntimeCompat';",
-    'ADMIN_OPS_DEMO_SECTION_LABELS',
-    'ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => ('
+    "import { ADMIN_OPS_DEMO_ITEM_BODY, ADMIN_OPS_DEMO_SECTION_LABELS } from './admin/AdminOpsRuntimeCompat';",
+    'ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (',
+    '{ADMIN_OPS_DEMO_ITEM_BODY}'
   ]) {
     if (!adminAppSource.includes(required)) {
-      failures.push(`${adminAppFile} must render extracted Admin/Ops fragment via compatibility module: ${required}`);
+      failures.push(`${adminAppFile} must consume Phase 7 extracted fragment token: ${required}`);
     }
   }
 }
@@ -63,18 +56,7 @@ if (adminOpsRuntimeSource) {
     'export const LEGACY_RUNTIME_DELEGATE = createAdminOpsRuntimeCompat(AdminApp);'
   ]) {
     if (!adminOpsRuntimeSource.includes(required)) {
-      failures.push(`${adminOpsRuntimeFile} must delegate through createAdminOpsRuntimeCompat parity path: ${required}`);
-    }
-  }
-}
-
-if (operatorRuntimeSource) {
-  for (const required of [
-    "import OperatorRuntimeCompat from './operator/OperatorRuntimeCompat';",
-    'export const LEGACY_RUNTIME_DELEGATE = OperatorRuntimeCompat;'
-  ]) {
-    if (!operatorRuntimeSource.includes(required)) {
-      failures.push(`${operatorRuntimeFile} operator boundary must remain intact: ${required}`);
+      failures.push(`${adminOpsRuntimeFile} must keep parity delegation token: ${required}`);
     }
   }
 }
@@ -89,9 +71,9 @@ if (adminEntrySource) {
 }
 
 for (const sourceSpec of [
-  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource },
+  { file: adminAppFile, source: adminAppSource },
   { file: adminOpsCompatFile, source: adminOpsCompatSource },
-  { file: adminAppFile, source: adminAppSource }
+  { file: adminOpsRuntimeFile, source: adminOpsRuntimeSource }
 ]) {
   if (!sourceSpec.source) continue;
   for (const forbidden of [
@@ -122,9 +104,9 @@ if (terminologyContract && !terminologyContract.includes('Request, Tip, Boost, P
 }
 
 if (failures.length) {
-  console.error('Phase 6 admin ops fragment extraction contract failed:');
+  console.error('Phase 7 admin ops fragment extraction contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
 
-console.log('Phase 6 admin ops fragment extraction contract passed.');
+console.log('Phase 7 admin ops fragment extraction contract passed.');

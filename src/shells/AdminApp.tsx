@@ -1,7 +1,7 @@
 import { Lock } from 'lucide-react';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { ADMIN_OPS_DEMO_SECTION_LABELS } from './admin/AdminOpsRuntimeCompat';
+import { ADMIN_OPS_DEMO_ITEM_BODY, ADMIN_OPS_DEMO_SECTION_LABELS } from './admin/AdminOpsRuntimeCompat';
 import { ShellMessage } from './shared';
 
 export default function AdminApp() {
@@ -27,7 +27,7 @@ export default function AdminApp() {
               {ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (
                 <div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
                   <p className="text-sm font-bold text-white">{label}</p>
-                  <p className="mt-1 text-xs text-slate-400">Demo data only. No operator mutation route is enabled here.</p>
+                  <p className="mt-1 text-xs text-slate-400">{ADMIN_OPS_DEMO_ITEM_BODY}</p>
                 </div>
               ))}
             </div>
