@@ -16,6 +16,15 @@ export function renderAdminOpsDemoEmptyState(emptyStateCopy: ReactNode) {
 	);
 }
 
+export function renderAdminOpsDemoPrimaryPanel(demoHeading: ReactNode, sectionItems: ReactNode) {
+	return (
+		<div className="space-y-3">
+			<p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">{demoHeading}</p>
+			{sectionItems}
+		</div>
+	);
+}
+
 export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 	return (
 		<div className="space-y-3 text-sm">
