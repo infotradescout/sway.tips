@@ -6,7 +6,8 @@ import {
   ADMIN_OPS_DEMO_ITEM_BODY,
   ADMIN_OPS_DEMO_SECTION_LABELS,
   ADMIN_OPS_EMPTY_STATE_COPY,
-  ADMIN_OPS_LOCKED_TITLE
+  ADMIN_OPS_LOCKED_TITLE,
+  renderAdminOpsLockedSecondaryPanel
 } from './admin/AdminOpsRuntimeCompat';
 import { ShellMessage } from './shared';
 
@@ -38,15 +39,7 @@ export default function AdminApp() {
               ))}
             </div>
           }
-          secondary={
-            <div className="space-y-3 text-sm">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
-                <Lock className="h-5 w-5" />
-              </div>
-              <p className="font-bold text-white">{ADMIN_OPS_LOCKED_TITLE}</p>
-              <p className="text-xs leading-5 text-slate-400">This Split View is reusable layout architecture. Demo fixtures can be removed without removing the admin shell boundary.</p>
-            </div>
-          }
+          secondary={renderAdminOpsLockedSecondaryPanel(<>{ADMIN_OPS_LOCKED_TITLE}</>)}
         />
       </div>
     );
