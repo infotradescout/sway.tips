@@ -8,6 +8,14 @@ export const ADMIN_OPS_EMPTY_STATE_COPY = 'Operator demo has no records yet.';
 export const ADMIN_OPS_DEMO_HEADING = 'Demo data';
 export const ADMIN_OPS_LOCKED_TITLE = 'Admin authority remains locked';
 
+export function renderAdminOpsDemoEmptyState(emptyStateCopy: ReactNode) {
+	return (
+		<div className="rounded-xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
+			{emptyStateCopy}
+		</div>
+	);
+}
+
 export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 	return (
 		<div className="space-y-3 text-sm">

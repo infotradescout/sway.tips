@@ -7,6 +7,7 @@ import {
   ADMIN_OPS_DEMO_SECTION_LABELS,
   ADMIN_OPS_EMPTY_STATE_COPY,
   ADMIN_OPS_LOCKED_TITLE,
+  renderAdminOpsDemoEmptyState,
   renderAdminOpsLockedFallbackMessage,
   renderAdminOpsLockedSecondaryPanel
 } from './admin/AdminOpsRuntimeCompat';
@@ -23,11 +24,7 @@ export default function AdminApp() {
           secondaryLabel="Authority boundary"
           badge={<DemoModeBanner compact />}
           isEmpty={false}
-          emptyState={
-            <div className="rounded-xl border border-dashed border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
-              {ADMIN_OPS_EMPTY_STATE_COPY}
-            </div>
-          }
+          emptyState={renderAdminOpsDemoEmptyState(<>{ADMIN_OPS_EMPTY_STATE_COPY}</>)}
           primary={
             <div className="space-y-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200">{ADMIN_OPS_DEMO_HEADING}</p>
