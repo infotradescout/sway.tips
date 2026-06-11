@@ -7,9 +7,9 @@ import {
   ADMIN_OPS_DEMO_SECTION_LABELS,
   ADMIN_OPS_EMPTY_STATE_COPY,
   ADMIN_OPS_LOCKED_TITLE,
+  renderAdminOpsLockedFallbackMessage,
   renderAdminOpsLockedSecondaryPanel
 } from './admin/AdminOpsRuntimeCompat';
-import { ShellMessage } from './shared';
 
 export default function AdminApp() {
   if (isDemoModeEnabled()) {
@@ -45,11 +45,5 @@ export default function AdminApp() {
     );
   }
 
-  return (
-    <ShellMessage
-      icon={<Lock className="h-5 w-5" />}
-      title="Admin"
-      body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
-    />
-  );
+  return renderAdminOpsLockedFallbackMessage();
 }

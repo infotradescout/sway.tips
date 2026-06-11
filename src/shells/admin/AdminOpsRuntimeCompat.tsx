@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import { Lock } from 'lucide-react';
+import { ShellMessage } from '../shared';
 
 export const ADMIN_OPS_DEMO_SECTION_LABELS = ['Moderation queue', 'Request lifecycle', 'Identity review'] as const;
 export const ADMIN_OPS_DEMO_ITEM_BODY = 'Demo data only. No operator mutation route is enabled here.';
@@ -16,6 +17,16 @@ export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 			<p className="font-bold text-white">{lockedTitle}</p>
 			<p className="text-xs leading-5 text-slate-400">This Split View is reusable layout architecture. Demo fixtures can be removed without removing the admin shell boundary.</p>
 		</div>
+	);
+}
+
+export function renderAdminOpsLockedFallbackMessage() {
+	return (
+		<ShellMessage
+			icon={<Lock className="h-5 w-5" />}
+			title="Admin"
+			body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
+		/>
 	);
 }
 
