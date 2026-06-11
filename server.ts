@@ -60,12 +60,17 @@ function resolveGitValue(args: string[]): string | null {
   }
 }
 
+function applyNoStoreHeaders(res: express.Response) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+}
+
 const buildMarker = {
   service: 'sway.tips',
   commit: process.env.RENDER_GIT_COMMIT
-    ?? process.env.SOURCE_VERSION
-    ?? process.env.GITHUB_SHA
-    ?? process.env.VERCEL_GIT_COMMIT_SHA
+    ?? process.env.COMMIT_SHA
     ?? process.env.GIT_COMMIT
     ?? resolveGitValue(['rev-parse', 'HEAD'])
     ?? 'unknown',
@@ -477,6 +482,7 @@ app.get("/api/health/network-probe", (_req, res) => {
 });
 
 app.get("/api/build-marker", (_req, res) => {
+  applyNoStoreHeaders(res);
   res.json(buildMarker);
 });
 
@@ -1723,6 +1729,7 @@ async function startServer() {
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
         const template = readFileSync(templatePath, 'utf8');
         const html = await vite.transformIndexHtml(req.originalUrl, template);
+        applyNoStoreHeaders(res);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
@@ -1743,6 +1750,7 @@ async function startServer() {
         res.status(404).send('Not found');
         return;
       }
+      applyNoStoreHeaders(res);
       res.sendFile(path.join(distPath, shellHtmlRelativePath(shell)));
     });
   }
