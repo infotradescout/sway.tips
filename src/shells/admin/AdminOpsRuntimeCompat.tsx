@@ -34,6 +34,15 @@ export function renderAdminOpsDemoSectionList(sectionLabels: readonly string[], 
 	));
 }
 
+export function renderAdminOpsDemoHeadingComposition(
+	demoHeading: ReactNode,
+	sectionLabels: readonly string[],
+	sectionItemBody: ReactNode
+) {
+	const sectionItems = renderAdminOpsDemoSectionList(sectionLabels, sectionItemBody);
+	return renderAdminOpsDemoPrimaryPanel(demoHeading, sectionItems);
+}
+
 export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 	return (
 		<div className="space-y-3 text-sm">

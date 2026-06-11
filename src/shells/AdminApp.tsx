@@ -8,6 +8,7 @@ import {
   ADMIN_OPS_EMPTY_STATE_COPY,
   ADMIN_OPS_LOCKED_TITLE,
   renderAdminOpsDemoEmptyState,
+  renderAdminOpsDemoHeadingComposition,
   renderAdminOpsDemoPrimaryPanel,
   renderAdminOpsDemoSectionList,
   renderAdminOpsLockedFallbackMessage,
@@ -16,8 +17,10 @@ import {
 
 export default function AdminApp() {
   const demoSectionLabels = ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (label));
+  const demoHeading = <>{ADMIN_OPS_DEMO_HEADING}</>;
   const demoSectionBody = <>{ADMIN_OPS_DEMO_ITEM_BODY}</>;
   const demoSectionItems = renderAdminOpsDemoSectionList(demoSectionLabels, demoSectionBody);
+  const demoPrimaryPanel = renderAdminOpsDemoHeadingComposition(demoHeading, demoSectionLabels, demoSectionBody);
 
   if (isDemoModeEnabled()) {
     return (
@@ -31,7 +34,7 @@ export default function AdminApp() {
           badge={<DemoModeBanner compact />}
           isEmpty={false}
           emptyState={renderAdminOpsDemoEmptyState(<>{ADMIN_OPS_EMPTY_STATE_COPY}</>)}
-          primary={renderAdminOpsDemoPrimaryPanel(<>{ADMIN_OPS_DEMO_HEADING}</>, demoSectionItems)}
+          primary={demoPrimaryPanel}
           secondary={renderAdminOpsLockedSecondaryPanel(<>{ADMIN_OPS_LOCKED_TITLE}</>)}
         />
       </div>
