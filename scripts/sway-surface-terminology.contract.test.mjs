@@ -23,6 +23,7 @@ const BANNED_EVERYWHERE = [
   /standing index/i,
   /captured total/i,
   /total captured/i,
+  /\bmvp\b/i,
   /product direction/i,
   /payment sprint/i,
   /coming soon/i,
@@ -58,6 +59,10 @@ function stripCommentsAndDisclaimers(src) {
   for (const phrase of DEMO_DISCLAIMER_ALLOWLIST) {
     out = out.split(phrase).join('');
   }
+  // Remove internal identifiers so visible-word bans only track user-facing copy.
+  for (const identifier of ['previewMode', 'previewCatalog']) {
+    out = out.split(identifier).join('');
+  }
   return out;
 }
 
@@ -87,7 +92,7 @@ const reactSurfaces = [
 
 for (const rel of reactSurfaces) {
   const scrubbed = stripCommentsAndDisclaimers(readFileSync(join(root, rel), 'utf8'));
-  scan(rel, scrubbed, [...BANNED_EVERYWHERE, CHECKOUT]);
+  scan(rel, scrubbed, [...BANNED_EVERYWHERE, CHECKOUT, PREVIEW]);
 }
 
 if (failures.length) {

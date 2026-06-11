@@ -920,7 +920,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Coins className="w-4 h-4" /> Just the Tip
+            <Coins className="w-4 h-4" /> Tip Only
           </button>
 
           <button
@@ -1750,7 +1750,7 @@ export default function PatronView({
                   </div>
                   <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    Your ${checkoutPayload.amount}.00 request was recorded and sent to the performer for approval. No card was charged.
+                    Your ${checkoutPayload.amount}.00 request is Pending with the performer. No card was charged.
                   </p>
                 </div>
               ) : (
@@ -1833,7 +1833,7 @@ export default function PatronView({
                       disabled={isPaying || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaying ? "Sending..." : "Send request for approval"}
+                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaying ? "Sending..." : "Send Request"}
                     </button>
 
                     <button
