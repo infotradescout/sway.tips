@@ -1,8 +1,8 @@
 # Sway Admin/Ops Parity Extraction Closeout
 
-Status: parity extraction sequence complete through Phase 10.
+Status: parity extraction sequence complete through Phase 11.
 
-This document closes the Admin/Ops parity extraction chain and marks the handoff point from copy/config extraction into first behavior-level extraction planning.
+This document closes the Admin/Ops parity extraction chain and marks the handoff point from copy/config extraction into behavior-level extraction planning.
 
 ## Completed Chain
 
@@ -13,6 +13,17 @@ This document closes the Admin/Ops parity extraction chain and marks the handoff
 - Phase 8: `ADMIN_OPS_EMPTY_STATE_COPY` extracted.
 - Phase 9: `ADMIN_OPS_DEMO_HEADING` extracted.
 - Phase 10: `ADMIN_OPS_LOCKED_TITLE` extracted.
+- Phase 11: Admin/Ops parity extraction closeout documented and committed.
+
+Closeout commit:
+
+- `2e2642cbdeea2b53f352b0c64a019779438d52e9`
+
+## Current Status
+
+- Parity extraction: complete.
+- Admin/Ops compatibility layer: established.
+- Remaining work: behavior extraction (not copy extraction).
 
 ## Current Compat Exports
 
