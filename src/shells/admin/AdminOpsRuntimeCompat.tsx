@@ -25,6 +25,15 @@ export function renderAdminOpsDemoPrimaryPanel(demoHeading: ReactNode, sectionIt
 	);
 }
 
+export function renderAdminOpsDemoSectionList(sectionLabels: readonly string[], sectionItemBody: ReactNode) {
+	return sectionLabels.map((label) => (
+		<div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
+			<p className="text-sm font-bold text-white">{label}</p>
+			<p className="mt-1 text-xs text-slate-400">{sectionItemBody}</p>
+		</div>
+	));
+}
+
 export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 	return (
 		<div className="space-y-3 text-sm">

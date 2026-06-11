@@ -9,17 +9,15 @@ import {
   ADMIN_OPS_LOCKED_TITLE,
   renderAdminOpsDemoEmptyState,
   renderAdminOpsDemoPrimaryPanel,
+  renderAdminOpsDemoSectionList,
   renderAdminOpsLockedFallbackMessage,
   renderAdminOpsLockedSecondaryPanel
 } from './admin/AdminOpsRuntimeCompat';
 
 export default function AdminApp() {
-  const demoSectionItems = ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (
-    <div key={label} className="rounded-xl border border-white/10 bg-slate-900 p-4">
-      <p className="text-sm font-bold text-white">{label}</p>
-      <p className="mt-1 text-xs text-slate-400">{ADMIN_OPS_DEMO_ITEM_BODY}</p>
-    </div>
-  ));
+  const demoSectionLabels = ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (label));
+  const demoSectionBody = <>{ADMIN_OPS_DEMO_ITEM_BODY}</>;
+  const demoSectionItems = renderAdminOpsDemoSectionList(demoSectionLabels, demoSectionBody);
 
   if (isDemoModeEnabled()) {
     return (
