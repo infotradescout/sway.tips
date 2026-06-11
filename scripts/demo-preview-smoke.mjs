@@ -12,6 +12,7 @@ const port = 3000;
 const healthUrl = `http://127.0.0.1:${port}`;
 const demoGigPath = '/g/00000000-0000-4000-8000-000000000001';
 const overlayPath = '/overlay/00000000-0000-4000-8000-000000000001';
+const demoOffForbiddenText = ['Demo data', 'preview-only data', 'demo preview state'];
 
 const scenarios = [
   {
@@ -24,7 +25,7 @@ const scenarios = [
         host: 'sway.tips',
         screenshot: 'demo-off-public.png',
         expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools', 'Open overlay'],
-        absentText: ['Demo data']
+        absentText: demoOffForbiddenText
       },
       {
         surface: 'app shell home',
@@ -32,7 +33,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-app-home.png',
         expectedText: ['Patron App', 'No live records yet'],
-        absentText: ['Demo data', 'Aria Neon']
+        absentText: [...demoOffForbiddenText, 'Aria Neon']
       },
       {
         surface: 'patron Split View',
@@ -40,7 +41,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-patron.png',
         expectedText: ['Patron App', 'No live records yet', 'Selected gig inspector'],
-        absentText: ['Demo data', 'Midnight City']
+        absentText: [...demoOffForbiddenText, 'Midnight City']
       },
       {
         surface: 'talent protected shell guard',
@@ -48,7 +49,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-talent.png',
         expectedText: ['Sway actor resolution required'],
-        absentText: ['Demo data', 'Aria Neon']
+        absentText: [...demoOffForbiddenText, 'Aria Neon']
       },
       {
         surface: 'admin protected shell guard',
@@ -56,7 +57,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-admin.png',
         expectedText: ['Sway actor resolution required'],
-        absentText: ['Demo data', 'Request lifecycle']
+        absentText: [...demoOffForbiddenText, 'Request lifecycle']
       },
       {
         surface: 'overlay empty state',
@@ -64,7 +65,7 @@ const scenarios = [
         host: 'app.sway.tips',
         screenshot: 'demo-off-overlay.png',
         expectedText: ['SWAY LIVE ROOM', 'Waiting for gig requests'],
-        absentText: ['Demo data', 'Midnight City']
+        absentText: [...demoOffForbiddenText, 'Midnight City']
       }
     ]
   },
@@ -157,6 +158,43 @@ async function waitForServer(getOutput) {
   throw new Error(`Server did not become ready. Output:\n${getOutput()}`);
 }
 
+async function verifyBuildMarker(mode) {
+  const response = await fetch(`${healthUrl}/api/build-marker`);
+  const marker = await response.json();
+  const swayBuildHeader = response.headers.get('x-sway-build');
+  const commitHeader = response.headers.get('x-commit-sha');
+  const failures = [];
+
+  if (!response.ok) failures.push(`Build marker returned HTTP ${response.status}`);
+  if (marker.service !== 'sway.tips') failures.push('Build marker service mismatch');
+  if (!marker.commit || marker.commit === 'unknown') failures.push('Build marker commit is missing');
+  if (!marker.branch || marker.branch === 'unknown') failures.push('Build marker branch is missing');
+  if (!marker.buildTimestamp || Number.isNaN(Date.parse(marker.buildTimestamp))) failures.push('Build marker timestamp is missing or invalid');
+  if (!swayBuildHeader || !swayBuildHeader.includes(marker.commit) || !swayBuildHeader.includes(marker.buildTimestamp)) {
+    failures.push('x-sway-build header does not include commit and build timestamp');
+  }
+  if (commitHeader !== marker.commit) failures.push('x-commit-sha header does not match marker commit');
+
+  return {
+    mode,
+    surface: 'build marker',
+    route: '/api/build-marker',
+    host: '127.0.0.1',
+    expected: ['commit', 'branch', 'buildTimestamp', 'x-sway-build', 'x-commit-sha'],
+    absent: [],
+    screenshot: null,
+    observed: [
+      { text: 'commit', found: Boolean(marker.commit && marker.commit !== 'unknown') },
+      { text: 'branch', found: Boolean(marker.branch && marker.branch !== 'unknown') },
+      { text: 'buildTimestamp', found: Boolean(marker.buildTimestamp && !Number.isNaN(Date.parse(marker.buildTimestamp))) },
+      { text: 'x-sway-build', found: Boolean(swayBuildHeader) },
+      { text: 'x-commit-sha', found: Boolean(commitHeader) }
+    ],
+    pass: failures.length === 0,
+    failures
+  };
+}
+
 async function stopServer(child) {
   if (child.exitCode !== null) return;
   child.kill();
@@ -169,6 +207,7 @@ async function runScenario(browser, scenario) {
 
   try {
     await waitForServer(server.getOutput);
+    results.push(await verifyBuildMarker(scenario.mode));
 
     for (const check of scenario.checks) {
       const context = await browser.newContext({

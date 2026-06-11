@@ -156,7 +156,7 @@ export default function PatronApp() {
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
                 <p className="text-sm font-bold text-white">No live records yet</p>
-                <p className="mt-2 text-xs text-slate-400">The same Split View shell stays available for real data, demo data, and empty states.</p>
+                <p className="mt-2 text-xs text-slate-400">The live room shell is ready for the first active session, request, or performer record.</p>
               </div>
             }
             primary={

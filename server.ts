@@ -7,6 +7,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
+import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
@@ -47,12 +48,52 @@ const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
   : null;
 
+function resolveGitValue(args: string[]): string | null {
+  try {
+    return execFileSync('git', args, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const buildMarker = {
+  service: 'sway.tips',
+  commit: process.env.RENDER_GIT_COMMIT
+    ?? process.env.SOURCE_VERSION
+    ?? process.env.GITHUB_SHA
+    ?? process.env.VERCEL_GIT_COMMIT_SHA
+    ?? process.env.GIT_COMMIT
+    ?? resolveGitValue(['rev-parse', 'HEAD'])
+    ?? 'unknown',
+  branch: process.env.RENDER_GIT_BRANCH
+    ?? process.env.GITHUB_REF_NAME
+    ?? process.env.VERCEL_GIT_COMMIT_REF
+    ?? process.env.GIT_BRANCH
+    ?? resolveGitValue(['rev-parse', '--abbrev-ref', 'HEAD'])
+    ?? 'unknown',
+  buildTimestamp: process.env.SWAY_BUILD_TIMESTAMP
+    ?? process.env.RENDER_BUILD_CREATED_AT
+    ?? process.env.BUILD_TIMESTAMP
+    ?? new Date().toISOString(),
+  nodeEnv: process.env.NODE_ENV ?? 'unknown'
+};
+
 // Capture the raw request body so Stripe webhook signatures can be verified.
 app.use(express.json({
   verify: (req, _res, buf) => {
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
   }
 }));
+
+app.use((_req, res, next) => {
+  res.setHeader('x-sway-build', `${buildMarker.commit}:${buildMarker.buildTimestamp}`);
+  res.setHeader('x-commit-sha', buildMarker.commit);
+  next();
+});
 
 type SwayShell = 'public' | 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
 
@@ -436,22 +477,7 @@ app.get("/api/health/network-probe", (_req, res) => {
 });
 
 app.get("/api/build-marker", (_req, res) => {
-  const commit = process.env.RENDER_GIT_COMMIT
-    ?? process.env.SOURCE_VERSION
-    ?? process.env.GITHUB_SHA
-    ?? process.env.VERCEL_GIT_COMMIT_SHA
-    ?? 'unknown';
-  const branch = process.env.RENDER_GIT_BRANCH
-    ?? process.env.GITHUB_REF_NAME
-    ?? process.env.VERCEL_GIT_COMMIT_REF
-    ?? 'unknown';
-
-  res.json({
-    service: 'sway.tips',
-    commit,
-    branch,
-    nodeEnv: process.env.NODE_ENV ?? 'unknown'
-  });
+  res.json(buildMarker);
 });
 
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
