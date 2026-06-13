@@ -158,7 +158,6 @@ export default function TalentApp() {
             eyebrow="Operator App"
             primaryLabel="Now Playing, Pending Requests, Approved Queue, and Controls"
             secondaryLabel="Room State"
-            badge={<DemoModeBanner compact />}
             isEmpty={session.status === 'inactive' && requests.length === 0}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">

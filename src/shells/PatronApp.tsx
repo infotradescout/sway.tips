@@ -151,7 +151,6 @@ export default function PatronApp() {
             eyebrow="Live Room"
             primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
             secondaryLabel="Selected gig inspector"
-            badge={<DemoModeBanner compact />}
             isEmpty={requests.length === 0 && (bState.performers || []).length === 0}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
