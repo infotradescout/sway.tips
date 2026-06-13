@@ -77,7 +77,10 @@ function scan(label, text, patterns) {
   }
 }
 
-// Public Entry: always rendered, no demo gating -> ban the full vocabulary set.
+// Public entries: always rendered, no demo gating -> ban the full vocabulary set.
+const rootHtml = readFileSync(join(root, 'index.html'), 'utf8');
+scan('index.html', rootHtml, [...BANNED_EVERYWHERE, CHECKOUT, PREVIEW]);
+
 const publicHtml = readFileSync(join(root, 'shells/public.html'), 'utf8');
 scan('shells/public.html', publicHtml, [...BANNED_EVERYWHERE, CHECKOUT, PREVIEW]);
 
