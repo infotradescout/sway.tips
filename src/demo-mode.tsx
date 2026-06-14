@@ -23,7 +23,7 @@ type DemoFixturePayload = {
 };
 
 export function isDemoModeEnabled(): boolean {
-  return import.meta.env.VITE_SWAY_DEMO_MODE === 'true';
+  return import.meta.env.VITE_SWAY_DEMO_MODE === 'true' && !import.meta.env.PROD;
 }
 
 function hasDemoRecordMarker(record: unknown): record is DemoFixtureRecord {

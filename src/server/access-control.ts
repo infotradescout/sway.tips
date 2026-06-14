@@ -245,6 +245,7 @@ export function routeFamilyGuard(accessControl: AccessControl) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const shell = req.headers['x-sway-shell'];
     const demoPreviewShellAllowed =
+      process.env.NODE_ENV !== 'production' &&
       process.env.VITE_SWAY_DEMO_MODE === 'true' &&
       req.method === 'GET' &&
       (shell === 'talent' || shell === 'admin');

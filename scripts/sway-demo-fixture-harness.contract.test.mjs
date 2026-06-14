@@ -75,7 +75,8 @@ for (const term of [
   requireIncludes(server, term, `Server must keep demo shell preview allowance outside API/static routes: ${term}`);
 }
 
-requireIncludes(viteConfig, "process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.resolve(__dirname, 'fixtures/demo') : false", 'Vite must only publish demo fixtures when VITE_SWAY_DEMO_MODE is explicitly true.');
+requireIncludes(viteConfig, "process.env.VITE_SWAY_DEMO_MODE === 'true'", 'Vite must only publish demo fixtures when VITE_SWAY_DEMO_MODE is explicitly true.');
+requireIncludes(viteConfig, "process.env.NODE_ENV !== 'production'", 'Vite must not publish demo fixtures in production builds.');
 requireIncludes(packageJson, 'sway-demo-fixture-harness.contract.test.mjs', 'test:contracts must include the demo fixture harness contract.');
 
 for (const [name, source] of [

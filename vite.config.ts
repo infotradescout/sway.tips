@@ -4,7 +4,10 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
-  const demoPublicDir: string | false = process.env.VITE_SWAY_DEMO_MODE === 'true' ? path.resolve(__dirname, 'fixtures/demo') : false;
+  const demoPublicDir: string | false =
+    process.env.VITE_SWAY_DEMO_MODE === 'true' && process.env.NODE_ENV !== 'production'
+      ? path.resolve(__dirname, 'fixtures/demo')
+      : false;
 
   return {
     build: {
