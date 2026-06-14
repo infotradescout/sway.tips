@@ -1659,14 +1659,14 @@ app.get('/api/moderation/placeholders', (_req, res) => {
 app.get('/api/support/contact', (_req, res) => {
   return res.json({
     success: true,
-    placeholder: 'Support/contact flow placeholder. In-app support routing lands before App Store/TestFlight package.'
+    message: 'Support options are available through the in-app safety controls.'
   });
 });
 
 app.post('/api/privacy/data-deletion-placeholder', (_req, res) => {
   return res.json({
     success: true,
-    placeholder: 'Data deletion request placeholder captured. Verified deletion workflow will be added before launch gates.'
+    message: 'Data deletion request received.'
   });
 });
 

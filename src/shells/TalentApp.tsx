@@ -78,7 +78,7 @@ export default function TalentApp() {
     try {
       const data = await postJson('/api/moderation/hide', {
         requestId,
-        reason: 'Performer/admin hide action placeholder.'
+        reason: 'Performer hid this request from the live queue.'
       });
       setBState(data.state);
     } catch (e) {
@@ -91,7 +91,7 @@ export default function TalentApp() {
     try {
       const data = await postJson('/api/moderation/remove', {
         requestId,
-        reason: 'Performer/admin remove action placeholder.'
+        reason: 'Performer removed this request from the live queue.'
       });
       setBState(data.state);
     } catch (e) {
@@ -162,7 +162,7 @@ export default function TalentApp() {
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
                 <p className="text-sm font-bold text-white">No active session yet</p>
-                <p className="mt-2 text-xs text-slate-400">Start a real session or enable demo mode; Split View stays mounted either way.</p>
+                <p className="mt-2 text-xs text-slate-400">Start a session to open the request queue and room controls.</p>
               </div>
             }
             primary={

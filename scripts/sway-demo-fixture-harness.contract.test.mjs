@@ -81,11 +81,12 @@ requireIncludes(packageJson, 'sway-demo-fixture-harness.contract.test.mjs', 'tes
 for (const [name, source] of [
   ['patron shell', patronShell],
   ['talent shell', talentShell],
-  ['overlay shell', overlayShell],
-  ['admin shell', `${adminShell}\n${adminCompat}`]
+  ['overlay shell', overlayShell]
 ]) {
   requireIncludes(source, 'Demo data', `${name} must visibly label demo data.`);
 }
+
+requireIncludes(`${adminShell}\n${adminCompat}`, 'Operations overview', 'admin shell must visibly label the protected operations overview.');
 
 for (const [name, source] of [
   ['patron shell', patronShell],

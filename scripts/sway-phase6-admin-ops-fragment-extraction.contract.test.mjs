@@ -28,9 +28,9 @@ const adminEntrySource = read(adminEntryFile);
 if (adminOpsCompatSource) {
   for (const required of [
     'ADMIN_OPS_DEMO_SECTION_LABELS',
-    "'Moderation queue'",
+    "'Safety queue'",
     "'Request lifecycle'",
-    "'Identity review'",
+    "'Identity checks'",
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {

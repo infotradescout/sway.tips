@@ -379,7 +379,7 @@ export default function App() {
     const response = await fetch('/api/moderation/hide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, reason: 'Performer/admin hide action placeholder.' })
+      body: JSON.stringify({ requestId, reason: 'Performer hid this request from the live queue.' })
     });
     const data = await response.json();
     if (!response.ok) {
@@ -399,7 +399,7 @@ export default function App() {
     const response = await fetch('/api/moderation/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, reason: 'Performer/admin remove action placeholder.' })
+      body: JSON.stringify({ requestId, reason: 'Performer removed this request from the live queue.' })
     });
     const data = await response.json();
     if (!response.ok) {
@@ -419,7 +419,7 @@ export default function App() {
     const response = await fetch('/api/support/contact');
     const data = await response.json();
     if (!response.ok) {
-      throw Object.assign(new Error(data?.error || 'Support placeholder failed.'), {
+      throw Object.assign(new Error(data?.error || 'Support request failed.'), {
         status: response.status,
         body: data
       });
@@ -438,7 +438,7 @@ export default function App() {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw Object.assign(new Error(data?.error || 'Data deletion placeholder failed.'), {
+      throw Object.assign(new Error(data?.error || 'Data deletion request failed.'), {
         status: response.status,
         body: data
       });

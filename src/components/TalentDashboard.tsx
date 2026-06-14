@@ -555,7 +555,7 @@ export default function TalentDashboard({
                     >
                       <Check className="w-6 h-6 text-slate-600 mx-auto" />
                       <div className="text-xs font-semibold text-slate-400">Queue cleared!</div>
-                      <p className="text-[10px] text-slate-500">Pending crowd requests appear here for review first.</p>
+                      <p className="text-[10px] text-slate-500">Pending crowd requests land here before they move into the live queue.</p>
                     </motion.div>
                   ) : (
                     triageQueue.map((req) => (
@@ -598,7 +598,7 @@ export default function TalentDashboard({
                           <button
                             onClick={() => onHide(req.id)}
                             className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
-                            title="Hide from performer/admin view"
+                            title="Hide from the live queue"
                           >
                             <AlertTriangle className="w-4 h-4" /> Hide
                           </button>

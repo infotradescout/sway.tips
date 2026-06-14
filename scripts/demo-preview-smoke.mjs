@@ -110,7 +110,7 @@ const scenarios = [
         path: '/admin',
         host: 'app.sway.tips',
         screenshot: 'demo-on-admin.png',
-        expectedText: ['Operator App', 'Demo data', 'Admin authority remains locked', 'Demo data only. No operator mutation route is enabled here.'],
+        expectedText: ['Operator App', 'Operations overview', 'Operator access is protected', 'Read-only status is shown here until operator access is available.'],
         absentText: ['Operator features remain unavailable']
       },
       {

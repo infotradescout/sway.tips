@@ -14,7 +14,7 @@ const requiredPatronUiTerms = [
   'Report',
   'Block',
   'Support / Contact',
-  'Data Deletion Placeholder',
+  'Data Deletion Request',
   'onReportContent',
   'onBlockFoundation',
   'onSupportContact',

@@ -28,7 +28,7 @@ if (adminOpsCompatSource) {
     'ADMIN_OPS_DEMO_SECTION_LABELS',
     'ADMIN_OPS_DEMO_ITEM_BODY',
     'ADMIN_OPS_EMPTY_STATE_COPY',
-    'Operator demo has no records yet.',
+    'No operator records are available yet.',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {

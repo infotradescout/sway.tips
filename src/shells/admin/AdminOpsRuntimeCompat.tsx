@@ -2,11 +2,11 @@ import type { ComponentType, ReactNode } from 'react';
 import { Lock } from 'lucide-react';
 import { ShellMessage } from '../shared';
 
-export const ADMIN_OPS_DEMO_SECTION_LABELS = ['Moderation queue', 'Request lifecycle', 'Identity review'] as const;
-export const ADMIN_OPS_DEMO_ITEM_BODY = 'Demo data only. No operator mutation route is enabled here.';
-export const ADMIN_OPS_EMPTY_STATE_COPY = 'Operator demo has no records yet.';
-export const ADMIN_OPS_DEMO_HEADING = 'Demo data';
-export const ADMIN_OPS_LOCKED_TITLE = 'Admin authority remains locked';
+export const ADMIN_OPS_DEMO_SECTION_LABELS = ['Safety queue', 'Request lifecycle', 'Identity checks'] as const;
+export const ADMIN_OPS_DEMO_ITEM_BODY = 'Read-only status is shown here until operator access is available.';
+export const ADMIN_OPS_EMPTY_STATE_COPY = 'No operator records are available yet.';
+export const ADMIN_OPS_DEMO_HEADING = 'Operations overview';
+export const ADMIN_OPS_LOCKED_TITLE = 'Operator access is protected';
 
 export function renderAdminOpsDemoEmptyState(emptyStateCopy: ReactNode) {
 	return (
@@ -50,7 +50,7 @@ export function renderAdminOpsLockedSecondaryPanel(lockedTitle: ReactNode) {
 				<Lock className="h-5 w-5" />
 			</div>
 			<p className="font-bold text-white">{lockedTitle}</p>
-			<p className="text-xs leading-5 text-slate-400">This Split View is reusable layout architecture. Demo fixtures can be removed without removing the admin shell boundary.</p>
+			<p className="text-xs leading-5 text-slate-400">Operator tools are separated from patron and performer routes while access controls and audit records are enforced.</p>
 		</div>
 	);
 }

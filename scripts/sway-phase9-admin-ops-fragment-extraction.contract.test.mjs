@@ -29,7 +29,7 @@ if (adminOpsCompatSource) {
     'ADMIN_OPS_DEMO_ITEM_BODY',
     'ADMIN_OPS_EMPTY_STATE_COPY',
     'ADMIN_OPS_DEMO_HEADING',
-    'Demo data',
+    'Operations overview',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {

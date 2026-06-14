@@ -100,7 +100,7 @@ export default function PatronApp() {
     const response = await fetch('/api/support/contact');
     const data = await response.json();
     if (!response.ok) {
-      throw Object.assign(new Error(data?.error || 'Support placeholder failed.'), {
+      throw Object.assign(new Error(data?.error || 'Support request failed.'), {
         status: response.status,
         body: data
       });

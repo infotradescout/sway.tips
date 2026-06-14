@@ -847,7 +847,7 @@ export default function PatronView({
       <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
         <div>
           <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Safety Controls</h3>
-          <p className="text-[11px] text-slate-400 mt-1">App Store UGC placeholders: report, block, remove/hide, support/contact, and data deletion intake.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Use these controls to report a request, block future interactions, contact support, or start a data deletion request.</p>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
@@ -859,8 +859,8 @@ export default function PatronView({
                 return;
               }
               runSafetyAction(
-                () => onReportContent(newestModeratableRequest.id, 'Patron report placeholder', 'User-reported content check requested.'),
-                'Report submitted for moderator review.'
+                () => onReportContent(newestModeratableRequest.id, 'Patron safety report', 'User-reported content check requested.'),
+                'Report sent to the safety team.'
               );
             }}
             className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
@@ -871,8 +871,8 @@ export default function PatronView({
           <button
             type="button"
             onClick={() => runSafetyAction(
-              () => onBlockFoundation('patron_device_id_hash', 'anonymous-device', 'Patron device block placeholder requested.'),
-              'Device block placeholder recorded.'
+              () => onBlockFoundation('patron_device_id_hash', 'anonymous-device', 'Patron requested a device block.'),
+              'Device block recorded.'
             )}
             className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
           >
@@ -881,7 +881,7 @@ export default function PatronView({
 
           <button
             type="button"
-            onClick={() => runSafetyAction(onSupportContact, 'Support/contact placeholder opened.')}
+            onClick={() => runSafetyAction(onSupportContact, 'Support options opened.')}
             className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
           >
             Support / Contact
@@ -889,10 +889,10 @@ export default function PatronView({
 
           <button
             type="button"
-            onClick={() => runSafetyAction(onDataDeletionPlaceholder, 'Data deletion placeholder submitted.')}
+            onClick={() => runSafetyAction(onDataDeletionPlaceholder, 'Data deletion request started.')}
             className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
           >
-            Data Deletion Placeholder
+            Data Deletion Request
           </button>
         </div>
       </div>

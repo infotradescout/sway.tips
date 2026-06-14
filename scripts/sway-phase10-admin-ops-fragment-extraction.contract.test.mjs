@@ -30,7 +30,7 @@ if (adminOpsCompatSource) {
     'ADMIN_OPS_EMPTY_STATE_COPY',
     'ADMIN_OPS_DEMO_HEADING',
     'ADMIN_OPS_LOCKED_TITLE',
-    'Admin authority remains locked',
+    'Operator access is protected',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {

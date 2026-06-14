@@ -27,7 +27,7 @@ if (adminOpsCompatSource) {
   for (const required of [
     'ADMIN_OPS_DEMO_SECTION_LABELS',
     'ADMIN_OPS_DEMO_ITEM_BODY',
-    'Demo data only. No operator mutation route is enabled here.',
+    'Read-only status is shown here until operator access is available.',
     'export function createAdminOpsRuntimeCompat',
     'const AdminOpsRuntimeCompat = LegacyAdminApp;'
   ]) {
