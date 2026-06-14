@@ -133,7 +133,7 @@ export default function PatronApp() {
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
               <p className="text-[9px] text-slate-400">
-                {route.name === 'performer' ? `Performer link: ${route.performerHandle}` : `Gig route: ${route.gigId}`}
+                {route.name === 'performer' ? `Performer: ${route.performerHandle}` : 'Request, Tip, and Boost live'}
               </p>
             </div>
           </div>

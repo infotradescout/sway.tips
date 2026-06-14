@@ -144,7 +144,7 @@ export default function TalentApp() {
             </div>
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Talent</span>
-              <p className="text-[9px] text-slate-400">Now Playing, Pending Requests, Approved Queue, Controls, and Room State</p>
+              <p className="text-[9px] text-slate-400">Manage Pending, Approved, and Playing requests</p>
             </div>
           </div>
           <DemoModeBanner compact />
