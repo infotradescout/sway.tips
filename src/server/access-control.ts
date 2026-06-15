@@ -26,6 +26,109 @@ export type AccessControl = {
   requireDevSandboxAccess: (req: Request) => Promise<GuardResult>;
 };
 
+function isBrowserHtmlRequest(req: Request) {
+  const accept = req.headers.accept;
+  return req.method === 'GET' && typeof accept === 'string' && accept.includes('text/html');
+}
+
+function escapeHtml(input: string) {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderProtectedRouteRecovery(status: number, reason: string) {
+  const safeReason = escapeHtml(reason);
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sway | Session needed</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #070812;
+        color: #f8fafc;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        width: min(100%, 440px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 20px;
+        background: rgba(15, 23, 42, 0.86);
+        padding: 28px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+      }
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        margin-bottom: 18px;
+        border: 1px solid rgba(217, 70, 239, 0.28);
+        background: rgba(217, 70, 239, 0.12);
+        color: #f0abfc;
+        font-weight: 900;
+      }
+      h1 {
+        margin: 0;
+        font-size: 26px;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+      p {
+        margin: 12px 0 0;
+        color: #cbd5e1;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      .reason {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(2, 6, 23, 0.62);
+        color: #94a3b8;
+        font-size: 13px;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        margin-top: 22px;
+        padding: 0 16px;
+        border-radius: 12px;
+        background: #d946ef;
+        color: white;
+        font-weight: 800;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">S</div>
+      <h1>Session needed</h1>
+      <p><strong>Sign in to continue.</strong></p>
+      <p>This Sway area needs an active performer or operator session.</p>
+      <div class="reason">Status ${status}: ${safeReason}</div>
+      <a href="/">Return home</a>
+    </main>
+  </body>
+</html>`;
+}
+
 function resolveActor(req: Request): SwayActor {
   return {
     actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
@@ -270,6 +373,13 @@ export function routeFamilyGuard(accessControl: AccessControl) {
 
     const result = await guard(req);
     if (result.allowed === false) {
+      if (isBrowserHtmlRequest(req)) {
+        res
+          .status(result.status)
+          .set({ 'Content-Type': 'text/html; charset=utf-8' })
+          .send(renderProtectedRouteRecovery(result.status, result.reason));
+        return;
+      }
       res.status(result.status).json({ error: result.reason });
       return;
     }
