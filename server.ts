@@ -486,6 +486,149 @@ app.get("/api/build-marker", (_req, res) => {
   res.json(buildMarker);
 });
 
+const shellTelemetryAllowedEvents = new Set([
+  'telemetry_friction_patron_no_session_recovery_viewed',
+  'telemetry_friction_patron_no_session_return_home_clicked'
+]);
+
+const shellTelemetryAllowedKeys = new Set([
+  'shell',
+  'surface',
+  'event',
+  'route_family',
+  'has_route_context',
+  'has_session_context',
+  'build_commit'
+]);
+
+const shellTelemetrySensitiveKeys = new Set([
+  'card',
+  'cvc',
+  'cvv',
+  'pan',
+  'token',
+  'secret',
+  'cookie',
+  'authorization',
+  'session',
+  'jwt',
+  'email',
+  'phone',
+  'name',
+  'message',
+  'note',
+  'request',
+  'query',
+  'url',
+  'headers',
+  'device',
+  'location',
+  'latitude',
+  'longitude',
+  'amount',
+  'payment',
+  'stripe'
+]);
+
+type ShellTelemetryPayload = {
+  shell: 'patron';
+  surface: 'recovery-view';
+  event: string;
+  route_family: string;
+  has_route_context: boolean;
+  has_session_context: boolean;
+  build_commit: string;
+};
+
+function validateShellTelemetryPayload(body: unknown): { ok: true; payload: ShellTelemetryPayload } | { ok: false; status: number; error: string } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, status: 400, error: 'Shell telemetry payload must be a JSON object.' };
+  }
+
+  const payload = body as Record<string, unknown>;
+  const keys = Object.keys(payload);
+
+  for (const key of keys) {
+    if (shellTelemetrySensitiveKeys.has(key)) {
+      return { ok: false, status: 400, error: `Sensitive telemetry field rejected: ${key}` };
+    }
+    if (!shellTelemetryAllowedKeys.has(key)) {
+      return { ok: false, status: 400, error: `Unexpected telemetry field rejected: ${key}` };
+    }
+  }
+
+  for (const key of shellTelemetryAllowedKeys) {
+    if (!(key in payload)) {
+      return { ok: false, status: 400, error: `Missing telemetry field: ${key}` };
+    }
+  }
+
+  if (payload.shell !== 'patron') {
+    return { ok: false, status: 400, error: 'Shell telemetry requires shell=patron.' };
+  }
+  if (payload.surface !== 'recovery-view') {
+    return { ok: false, status: 400, error: 'Shell telemetry requires surface=recovery-view.' };
+  }
+  if (typeof payload.event !== 'string' || !shellTelemetryAllowedEvents.has(payload.event)) {
+    return { ok: false, status: 400, error: 'Unknown shell telemetry event.' };
+  }
+  if (typeof payload.route_family !== 'string' || payload.route_family.length === 0 || /[?&=#]/.test(payload.route_family)) {
+    return { ok: false, status: 400, error: 'route_family must be a coarse, query-free string.' };
+  }
+  if (typeof payload.has_route_context !== 'boolean' || typeof payload.has_session_context !== 'boolean') {
+    return { ok: false, status: 400, error: 'Shell telemetry context flags must be boolean.' };
+  }
+  if (typeof payload.build_commit !== 'string' || payload.build_commit.length === 0 || payload.build_commit.length > 128) {
+    return { ok: false, status: 400, error: 'build_commit must be a non-empty string.' };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      shell: 'patron',
+      surface: 'recovery-view',
+      event: payload.event,
+      route_family: payload.route_family,
+      has_route_context: payload.has_route_context,
+      has_session_context: payload.has_session_context,
+      build_commit: payload.build_commit
+    }
+  };
+}
+
+app.post("/api/analytics/shell", async (req, res) => {
+  if (!req.is('application/json')) {
+    return res.status(415).json({ error: 'Shell telemetry requires application/json.' });
+  }
+
+  const validation = validateShellTelemetryPayload(req.body);
+  if (validation.ok === false) {
+    return res.status(validation.status).json({ error: validation.error });
+  }
+
+  if (!businessDb) {
+    return res.status(503).json({ error: 'Audit store unavailable for shell telemetry.' });
+  }
+
+  const { payload } = validation;
+
+  try {
+    await businessDb.transaction(async (tx) => {
+      await writeAuditEvent(tx, {
+        actorId: null,
+        actorType: 'system',
+        entityType: 'shell_friction',
+        entityId: `${payload.shell}:${payload.surface}:${payload.event}:${payload.route_family}`,
+        eventType: payload.event,
+        metadata: payload
+      });
+    });
+    return res.status(202).json({ accepted: true });
+  } catch {
+    return res.status(500).json({ error: 'Unable to capture shell telemetry event.' });
+  }
+});
+
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
