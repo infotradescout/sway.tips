@@ -1,9 +1,14 @@
+import { useEffect } from 'react';
 import { Flame, Smartphone, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import PatronView from '../components/PatronView';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import { LoadingState, postJson, useSwayState } from './shared';
+import {
+  sendPatronNoSessionRecoveryViewed,
+  sendPatronNoSessionReturnHomeClicked
+} from './frictionClient';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -17,7 +22,11 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function PatronNoSessionRecovery() {
+function PatronNoSessionRecovery({
+  onReturnHomeClick
+}: {
+  onReturnHomeClick: () => void;
+}) {
   return (
     <div className="mx-auto flex w-full max-w-xl items-center px-4 py-10">
       <div className="w-full rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl">
@@ -35,6 +44,7 @@ function PatronNoSessionRecovery() {
         <a
           className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white hover:bg-fuchsia-500"
           href="https://sway.tips/"
+          onClick={onReturnHomeClick}
         >
           Return to Sway home
         </a>
@@ -151,9 +161,26 @@ export default function PatronApp() {
     requests.length > 0 ||
     performers.length > 0;
   const shouldShowNoSessionRecovery = !hasPatronRouteContext && !hasSessionContext;
+  const frictionPayload = {
+    shell: 'patron' as const,
+    surface: 'recovery-view' as const,
+    route_family: 'patron-root',
+    has_route_context: hasPatronRouteContext,
+    has_session_context: hasSessionContext,
+    build_commit: 'unknown'
+  };
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
+
+  useEffect(() => {
+    if (!shouldShowNoSessionRecovery) return;
+    sendPatronNoSessionRecoveryViewed(frictionPayload);
+  }, [shouldShowNoSessionRecovery]);
+
+  const handleReturnHomeClick = () => {
+    sendPatronNoSessionReturnHomeClicked(frictionPayload);
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -181,7 +208,7 @@ export default function PatronApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           {shouldShowNoSessionRecovery ? (
-            <PatronNoSessionRecovery />
+            <PatronNoSessionRecovery onReturnHomeClick={handleReturnHomeClick} />
           ) : (
             <SplitViewShell
               title="Patron App"
