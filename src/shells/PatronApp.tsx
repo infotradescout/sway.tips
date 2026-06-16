@@ -17,6 +17,32 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function PatronNoSessionRecovery() {
+  return (
+    <div className="mx-auto flex w-full max-w-xl items-center px-4 py-10">
+      <div className="w-full rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
+          <Flame className="h-5 w-5" />
+        </div>
+        <h1 className="font-display text-2xl font-black text-white">Join a Live Room</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">
+          Sway helps you request songs, send tips, and boost queue placement. Scan a live room&apos;s QR code,
+          tap a performer&apos;s link, or return to our homepage to explore.
+        </p>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          Use a Sway room link or performer&apos;s link to join a live session.
+        </p>
+        <a
+          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white hover:bg-fuchsia-500"
+          href="https://sway.tips/"
+        >
+          Return to Sway home
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export default function PatronApp() {
   const route = resolvePatronRoute(window.location.pathname);
   const { bState, isLoading, setBState } = useSwayState();
@@ -116,7 +142,15 @@ export default function PatronApp() {
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
+  const performers = bState.performers || [];
   const overlayGigId = routeGigId || '';
+  const hasPatronRouteContext = route.name === 'performer' || Boolean(routeGigId);
+  const hasSessionContext =
+    session.status !== 'inactive' ||
+    Boolean(session.talentName) ||
+    requests.length > 0 ||
+    performers.length > 0;
+  const shouldShowNoSessionRecovery = !hasPatronRouteContext && !hasSessionContext;
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
@@ -146,59 +180,63 @@ export default function PatronApp() {
 
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          <SplitViewShell
-            title="Patron App"
-            eyebrow="Live Room"
-            primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
-            secondaryLabel="Selected gig inspector"
-            isEmpty={requests.length === 0 && (bState.performers || []).length === 0}
-            emptyState={
-              <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
-                <p className="text-sm font-bold text-white">No live records yet</p>
-                <p className="mt-2 text-xs text-slate-400">The live room shell is ready for the first active session, request, or performer record.</p>
-              </div>
-            }
-            primary={
-              <PatronView
-                session={session}
-                requests={requests}
-                performers={bState.performers || []}
-                gigId={routeGigId}
-                onCreateRequest={handleCreateRequest}
-                onBoostRequest={handleBoostRequest}
-                onReconcilePendingAction={handleReconcilePendingAction}
-                onReportContent={handleReportContent}
-                onBlockFoundation={handleBlockFoundation}
-                onSupportContact={handleSupportContact}
-                onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
-                previewMode={demoMode}
-              />
-            }
-            secondary={
-              <div className="space-y-4 text-sm">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
-                  <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>
-                  <p className="text-xs text-slate-400">{session.talentRole} surface</p>
+          {shouldShowNoSessionRecovery ? (
+            <PatronNoSessionRecovery />
+          ) : (
+            <SplitViewShell
+              title="Patron App"
+              eyebrow="Live Room"
+              primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
+              secondaryLabel="Selected gig inspector"
+              isEmpty={requests.length === 0 && performers.length === 0}
+              emptyState={
+                <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
+                  <p className="text-sm font-bold text-white">No live records yet</p>
+                  <p className="mt-2 text-xs text-slate-400">The live room shell is ready for the first active session, request, or performer record.</p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-slate-500">Requests</p>
-                    <p className="mt-1 font-mono text-lg font-black text-white">{requests.length}</p>
+              }
+              primary={
+                <PatronView
+                  session={session}
+                  requests={requests}
+                  performers={performers}
+                  gigId={routeGigId}
+                  onCreateRequest={handleCreateRequest}
+                  onBoostRequest={handleBoostRequest}
+                  onReconcilePendingAction={handleReconcilePendingAction}
+                  onReportContent={handleReportContent}
+                  onBlockFoundation={handleBlockFoundation}
+                  onSupportContact={handleSupportContact}
+                  onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
+                  previewMode={demoMode}
+                />
+              }
+              secondary={
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
+                    <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>
+                    <p className="text-xs text-slate-400">{session.talentRole} surface</p>
                   </div>
-                  <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-slate-500">Performers</p>
-                    <p className="mt-1 font-mono text-lg font-black text-white">{(bState.performers || []).length}</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-slate-950 p-3">
+                      <p className="text-slate-500">Requests</p>
+                      <p className="mt-1 font-mono text-lg font-black text-white">{requests.length}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-950 p-3">
+                      <p className="text-slate-500">Performers</p>
+                      <p className="mt-1 font-mono text-lg font-black text-white">{performers.length}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Top approved request</p>
+                    <p className="mt-2 font-bold text-white">{topRequest?.title || 'Nothing approved yet'}</p>
+                    <p className="text-xs text-slate-400">{topRequest ? `$${topRequest.amount} request value` : 'Empty-state inspector remains visible.'}</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Top approved request</p>
-                  <p className="mt-2 font-bold text-white">{topRequest?.title || 'Nothing approved yet'}</p>
-                  <p className="text-xs text-slate-400">{topRequest ? `$${topRequest.amount} request value` : 'Empty-state inspector remains visible.'}</p>
-                </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
         </motion.div>
       </main>
     </div>
