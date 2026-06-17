@@ -1,11 +1,23 @@
 import { RequestItem } from '../types';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { LoadingState, useSwayState } from './shared';
+import { EndedLiveRoomRecovery, JoinLiveRoomRecovery, LoadingState, useSwayState } from './shared';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function resolveOverlayGigId(pathname: string) {
+  const parts = pathname.split('/').filter(Boolean);
+  return parts[0] === 'overlay' && UUID_PATTERN.test(parts[1] || '') ? parts[1] : null;
+}
 
 export default function OverlayApp() {
-  const { bState, isLoading } = useSwayState();
+  const routeGigId = resolveOverlayGigId(window.location.pathname);
+  const { bState, isLoading, roomLookup } = useSwayState({
+    statePath: routeGigId ? `/api/state/${routeGigId}` : null
+  });
 
   if (isLoading) return <LoadingState />;
+  if (roomLookup.status === 'ended') return <EndedLiveRoomRecovery />;
+  if (roomLookup.status !== 'active') return <JoinLiveRoomRecovery />;
 
   const upNextQueue = bState.requests
     .filter((r: RequestItem) => r.status === 'approved')

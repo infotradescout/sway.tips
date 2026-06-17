@@ -87,6 +87,9 @@ const buildMarker = {
   nodeEnv: process.env.NODE_ENV ?? 'unknown'
 };
 
+const ROOM_LOOKUP_UNAVAILABLE_COPY = 'Live room unavailable. Scan the performer QR again or request a fresh room link.';
+const ROOM_LOOKUP_ENDED_COPY = 'This live room session has ended. Thank you for supporting the performer!';
+
 // Capture the raw request body so Stripe webhook signatures can be verified.
 app.use(express.json({
   verify: (req, _res, buf) => {
@@ -660,11 +663,58 @@ app.post("/api/payment/webhook", async (req, res) => {
 app.get("/api/state", async (req, res) => {
   await refreshBusinessState();
   const talentAccess = await accessControl.requireTalentAccess(req);
+  applyNoStoreHeaders(res);
   res.json({
     session: state.session,
     requests: state.requests,
     performers: state.performers,
     activeGigId: talentAccess.allowed ? state.activeGigId : null
+  });
+});
+
+app.get("/api/state/:gigId", async (req, res) => {
+  await refreshBusinessState();
+  applyNoStoreHeaders(res);
+
+  const requestedGigId = parseDurableGigId(req.params.gigId);
+  if (!requestedGigId) {
+    return res.status(404).json({
+      error: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      message: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      room_lookup: 'missing'
+    });
+  }
+
+  if (!activeGigId || activeGigId !== requestedGigId) {
+    return res.status(404).json({
+      error: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      message: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      room_lookup: 'missing'
+    });
+  }
+
+  if (state.session.status === 'closed') {
+    return res.status(410).json({
+      error: ROOM_LOOKUP_ENDED_COPY,
+      message: ROOM_LOOKUP_ENDED_COPY,
+      room_lookup: 'ended'
+    });
+  }
+
+  if (state.session.status !== 'active') {
+    return res.status(404).json({
+      error: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      message: ROOM_LOOKUP_UNAVAILABLE_COPY,
+      room_lookup: 'missing'
+    });
+  }
+
+  return res.json({
+    session: state.session,
+    requests: state.requests,
+    performers: state.performers,
+    activeGigId: state.activeGigId,
+    room_lookup: 'active'
   });
 });
 

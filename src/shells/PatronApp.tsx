@@ -4,7 +4,12 @@ import { motion } from 'motion/react';
 import PatronView from '../components/PatronView';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { LoadingState, postJson, useSwayState } from './shared';
+import {
+  EndedLiveRoomRecovery,
+  LoadingState,
+  postJson,
+  useSwayState
+} from './shared';
 import {
   sendPatronNoSessionRecoveryViewed,
   sendPatronNoSessionReturnHomeClicked
@@ -55,8 +60,9 @@ function PatronNoSessionRecovery({
 
 export default function PatronApp() {
   const route = resolvePatronRoute(window.location.pathname);
-  const { bState, isLoading, setBState } = useSwayState();
   const routeGigId = route.name === 'patron-gig' && UUID_PATTERN.test(route.gigId) ? route.gigId : undefined;
+  const statePath = routeGigId ? `/api/state/${routeGigId}` : null;
+  const { bState, isLoading, setBState, roomLookup } = useSwayState({ statePath });
   const demoMode = isDemoModeEnabled();
 
   const rejectDemoMutation = async () => {
@@ -160,11 +166,15 @@ export default function PatronApp() {
     Boolean(session.talentName) ||
     requests.length > 0 ||
     performers.length > 0;
-  const shouldShowNoSessionRecovery = !hasPatronRouteContext && !hasSessionContext;
+  const shouldShowEndedRoomRecovery = roomLookup.status === 'ended';
+  const shouldShowNoSessionRecovery =
+    roomLookup.status === 'missing' ||
+    roomLookup.status === 'error' ||
+    (!hasPatronRouteContext && !hasSessionContext);
   const frictionPayload = {
     shell: 'patron' as const,
     surface: 'recovery-view' as const,
-    route_family: 'patron-root',
+    route_family: routeGigId ? 'patron-gig' : 'patron-root',
     has_route_context: hasPatronRouteContext,
     has_session_context: hasSessionContext,
     build_commit: 'unknown'
@@ -207,7 +217,9 @@ export default function PatronApp() {
 
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          {shouldShowNoSessionRecovery ? (
+          {shouldShowEndedRoomRecovery ? (
+            <EndedLiveRoomRecovery />
+          ) : shouldShowNoSessionRecovery ? (
             <PatronNoSessionRecovery onReturnHomeClick={handleReturnHomeClick} />
           ) : (
             <SplitViewShell
