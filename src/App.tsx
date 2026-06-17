@@ -109,7 +109,8 @@ export default function App() {
   const [bState, setBState] = useState<BackendState>({
     session: emptySession,
     requests: [],
-    performers: []
+    performers: [],
+    activeGigId: null
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -126,7 +127,8 @@ export default function App() {
       setBState({
         session: payload.state.session,
         requests: payload.surfaces?.requests || [],
-        performers: payload.surfaces?.profiles || []
+        performers: payload.surfaces?.profiles || [],
+        activeGigId: null
       });
 
       return true;
@@ -591,6 +593,7 @@ export default function App() {
               onFulfill={handleFulfillRequest}
               onHide={handleHideRequest}
               onRemove={handleRemoveRequest}
+              activeGigId={bState.activeGigId}
               previewMode={isDemoMode}
             />
           </motion.div>
@@ -645,6 +648,7 @@ export default function App() {
                 onFulfill={handleFulfillRequest}
                 onHide={handleHideRequest}
                 onRemove={handleRemoveRequest}
+                activeGigId={bState.activeGigId}
                 previewMode={isDemoMode}
               />
             </motion.div>

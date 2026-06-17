@@ -186,19 +186,26 @@ function createInactiveSession(): GigSession {
 let state: BackendState = {
   session: createInactiveSession(),
   requests: [],
-  performers: []
+  performers: [],
+  activeGigId: null
 };
 let activeGigId: string | null = null;
+
+function syncActiveGigRouteContext(inputState: BackendState) {
+  inputState.activeGigId = inputState.session.status === 'active' ? (activeGigId ?? null) : null;
+}
 
 async function refreshBusinessState() {
   const snapshot = await businessStore.hydrateState(state);
   state = snapshot.state;
   activeGigId = snapshot.activeGigId;
+  syncActiveGigRouteContext(state);
   syncActivePerformer(state);
   return snapshot;
 }
 
 async function persistBusinessState() {
+  syncActiveGigRouteContext(state);
   syncActivePerformer(state);
   await businessStore.persistState({ state, activeGigId });
 }
@@ -652,7 +659,13 @@ app.post("/api/payment/webhook", async (req, res) => {
 
 app.get("/api/state", async (req, res) => {
   await refreshBusinessState();
-  res.json(state);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  res.json({
+    session: state.session,
+    requests: state.requests,
+    performers: state.performers,
+    activeGigId: talentAccess.allowed ? state.activeGigId : null
+  });
 });
 
 app.post("/api/pending-action/reconcile", async (req, res) => {
@@ -684,6 +697,7 @@ app.post("/api/session/start", async (req, res) => {
 
   const requestedGigId = parseDurableGigId(gig_id);
   activeGigId = requestedGigId ?? activeGigId ?? businessStore.createGigId();
+  syncActiveGigRouteContext(state);
 
   state.session = {
     status: 'active',
@@ -1015,6 +1029,7 @@ app.post("/api/request/create", async (req, res) => {
 
   if (!activeGigId || activeGigId !== durableGigId) {
     activeGigId = durableGigId;
+    syncActiveGigRouteContext(state);
   }
 
   const amount_cents = Math.round(Math.max(Number(amount) || 0, state.session.minimumTip) * 100);
@@ -1266,6 +1281,7 @@ app.post("/api/request/boost", async (req, res) => {
 
   if (!activeGigId || activeGigId !== durableGigId) {
     activeGigId = durableGigId;
+    syncActiveGigRouteContext(state);
   }
 
   const request = state.requests.find(r => r.id === requestId);

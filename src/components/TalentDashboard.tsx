@@ -40,6 +40,7 @@ interface TalentDashboardProps {
   onFulfill: (requestId: string) => void;
   onHide: (requestId: string) => void;
   onRemove: (requestId: string) => void;
+  activeGigId: string | null;
   previewMode?: boolean;
 }
 
@@ -53,8 +54,10 @@ export default function TalentDashboard({
   onFulfill,
   onHide,
   onRemove,
+  activeGigId,
   previewMode = false
 }: TalentDashboardProps) {
+  void activeGigId;
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');

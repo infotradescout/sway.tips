@@ -126,6 +126,7 @@ export default function TalentApp() {
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
+  const { activeGigId } = bState;
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
 
@@ -176,6 +177,7 @@ export default function TalentApp() {
                 onFulfill={handleFulfillRequest}
                 onHide={handleHideRequest}
                 onRemove={handleRemoveRequest}
+                activeGigId={activeGigId}
                 previewMode={demoMode}
               />
             }

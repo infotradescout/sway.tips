@@ -75,7 +75,8 @@ export async function loadDemoBackendState(): Promise<BackendState | null> {
   return {
     session: payload.state.session,
     requests: payload.surfaces.requests,
-    performers: payload.surfaces.profiles
+    performers: payload.surfaces.profiles,
+    activeGigId: null
   };
 }
 

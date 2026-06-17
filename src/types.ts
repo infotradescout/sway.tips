@@ -120,4 +120,5 @@ export interface BackendState {
   session: GigSession;
   requests: RequestItem[];
   performers: PerformerProfile[];
+  activeGigId: string | null;
 }
