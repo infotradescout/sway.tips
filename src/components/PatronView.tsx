@@ -28,8 +28,11 @@ import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfi
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
-const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired and you were not charged.';
-const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request. You were not charged.';
+const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired before confirmation was completed.';
+const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request.';
+const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Payment authorization required. Confirm payment to finalize your request.';
+const PAYMENT_CONFIRMATION_WAITING_COPY = 'This request is waiting for payment confirmation. Do not close this page until payment confirmation is complete.';
+const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Your payment method may be authorized now and charged when the action is finalized.';
 
 interface PatronViewProps {
   session: GigSession;
@@ -68,6 +71,12 @@ type SearchTrack = {
   description?: string;
   source?: string;
   targetType?: 'music' | 'custom';
+};
+
+type PaymentConfirmationState = {
+  phase: 'PAYMENT_PENDING_CONFIRMATION';
+  actionType: 'request' | 'boost';
+  message: string;
 };
 
 const previewCatalog: SearchTrack[] = [
@@ -177,10 +186,13 @@ export default function PatronView({
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+  const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
   const [degraded, setDegraded] = useState(!navigator.onLine);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
+  const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
+  const isSubmitLocked = isPaying || isPaymentConfirmationPending;
 
   const latestRequest = [...requests]
     .filter((item) => !item.hidden && !item.removed)
@@ -478,7 +490,7 @@ export default function PatronView({
 
   // Open confirmation
   const initiateCheckout = (type: 'request' | 'boost') => {
-    if (session.status === 'closed') return;
+    if (session.status === 'closed' || isSubmitLocked) return;
 
     if (networkPreflightStatus !== 'ready') {
       setDegraded(true);
@@ -553,6 +565,7 @@ export default function PatronView({
     const platformFee = session.feeType === 'patron' ? 1.0 : 0;
     const total = amt + platformFee;
 
+    setPaymentConfirmationState(null);
     setCheckoutPayload({
       open: true,
       type,
@@ -570,7 +583,7 @@ export default function PatronView({
 
   // Process optimistic success payment
   const completePayment = async () => {
-    if (!checkoutPayload) return;
+    if (!checkoutPayload || isSubmitLocked) return;
 
     if (Date.now() > new Date(checkoutPayload.expires_at).getTime()) {
       setCheckoutPayload(null);
@@ -621,6 +634,7 @@ export default function PatronView({
       // Show high impact check animation
       const completedActionType = checkoutPayload.type;
       setBackendConfirmed(true);
+      setPaymentConfirmationState(null);
       setPendingAction(null);
       localStorage.removeItem('sway.pendingAction');
       setTimeout(() => {
@@ -642,30 +656,50 @@ export default function PatronView({
 
     } catch (e) {
       console.error(e);
-      setDegraded(true);
       const status = (e as any)?.status;
       const backendMessage = (e as any)?.body?.error;
+      const paymentStatus = (e as any)?.body?.payment_status;
 
-      if (status === 410) {
+      if (status === 402 && paymentStatus === 'requires_confirmation') {
+        setDegraded(false);
+        setPaymentConfirmationState({
+          phase: 'PAYMENT_PENDING_CONFIRMATION',
+          actionType: checkoutPayload.type,
+          message: backendMessage || PAYMENT_AUTHORIZATION_REQUIRED_COPY
+        });
+        setPendingAction(null);
+        setPendingActionMessage(PAYMENT_CONFIRMATION_WAITING_COPY);
+        localStorage.removeItem('sway.pendingAction');
+      } else if (status === 410) {
+        setDegraded(true);
+        setPaymentConfirmationState(null);
         setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
       } else if (status === 403) {
+        setDegraded(true);
+        setPaymentConfirmationState(null);
         setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask venue staff for help.');
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
       } else if (status === 429) {
+        setDegraded(true);
+        setPaymentConfirmationState(null);
         setPendingActionMessage(backendMessage || "You've reached the request limit for this session. Try again later as the queue moves.");
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
       } else if (status === 409 || status === 400) {
+        setDegraded(true);
+        setPaymentConfirmationState(null);
         setPendingActionMessage(backendMessage || 'This action is not available right now.');
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
+      } else {
+        setDegraded(true);
       }
     } finally {
       setIsPaying(false);
@@ -675,6 +709,7 @@ export default function PatronView({
   // Straight classic tipping logic bypass
   const handleStraightTipSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitLocked) return;
 
     if (networkPreflightStatus !== 'ready') {
       setDegraded(true);
@@ -701,6 +736,7 @@ export default function PatronView({
     }
 
     const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+    setPaymentConfirmationState(null);
     setCheckoutPayload({
       open: true,
       type: 'request',
@@ -759,13 +795,13 @@ export default function PatronView({
               <span>REQUESTS EXPIRE IN: {patronsWindowTimeLeft}</span>
             </div>
           )}
-          <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
-            {previewMode
-              ? 'Demo data only. No payment or moderation action will be sent.'
-              : `Sway ${session.talentName || 'this performer'} on stage through the live queue. Requests go to the performer for approval. No card is charged.`}
-          </p>
+            <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
+              {previewMode
+                ? 'Demo data only. No payment or moderation action will be sent.'
+                : `Sway ${session.talentName || 'this performer'} on stage through the live queue. Confirm payment to send your action for performer approval.`}
+            </p>
+          </div>
         </div>
-      </div>
 
       {/* Room Layer: Now Playing / Up Next + honest operating mode */}
       {(() => {
@@ -951,6 +987,15 @@ export default function PatronView({
       {(degraded || pendingAction) && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-200">
           {pendingActionMessage || 'Connection degraded. Sway saved your pending action locally and will reconcile with the server before showing confirmation.'}
+        </div>
+      )}
+
+      {isPaymentConfirmationPending && (
+        <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 text-xs text-cyan-100">
+          <p className="font-bold uppercase tracking-wide text-cyan-300">Payment authorization required</p>
+          <p className="mt-2">{paymentConfirmationState?.message || PAYMENT_AUTHORIZATION_REQUIRED_COPY}</p>
+          <p className="mt-2">{PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}</p>
+          <p className="mt-2">{PAYMENT_CONFIRMATION_WAITING_COPY}</p>
         </div>
       )}
 
@@ -1306,12 +1351,13 @@ export default function PatronView({
                   <button
                     type="button"
                     onClick={() => initiateCheckout('request')}
-                    className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient rounded-xl text-xs font-bold text-white transition-all transform active:scale-95 glow-fuchsia cursor-pointer"
+                    disabled={isSubmitLocked}
+                    className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient rounded-xl text-xs font-bold text-white transition-all transform active:scale-95 glow-fuchsia cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <CreditCard className="w-4 h-4" /> Send Request • {getFormat(tipAmount)}
+                    <CreditCard className="w-4 h-4" /> {isSubmitLocked ? 'Payment confirmation pending' : `Send Request • ${getFormat(tipAmount)}`}
                   </button>
                   <p className="text-[9px] text-slate-500 text-center mt-2.5 leading-relaxed font-sans">
-                    Your request goes to {session.talentName || 'the performer'} for approval. No card is charged.
+                    Confirm payment to send this request. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                   </p>
                 </div>
 
@@ -1333,7 +1379,7 @@ export default function PatronView({
             <div className="text-center pb-2 select-none">
               <Coins className="w-10 h-10 text-fuchsia-500 mx-auto animate-bounce mb-2" />
               <h3 className="font-display text-sm font-bold text-white uppercase tracking-wider">Classic Straight Tip</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">No request queue, just straightforward appreciation for {session.talentName}. Goes to the performer for approval; no card is charged.</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Send a direct tip for {session.talentName}. Confirm payment to finalize it, and your payment method may be charged when the action is approved.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -1381,9 +1427,10 @@ export default function PatronView({
 
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient hover:opacity-90 text-white text-xs font-bold rounded-xl transition-all glow-fuchsia cursor-pointer"
+              disabled={isSubmitLocked}
+              className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient hover:opacity-90 text-white text-xs font-bold rounded-xl transition-all glow-fuchsia cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <CreditCard className="w-4 h-4" /> Send Tip ({getFormat(tipAmount)})
+              <CreditCard className="w-4 h-4" /> {isSubmitLocked ? 'Payment confirmation pending' : `Send Tip (${getFormat(tipAmount)})`}
             </button>
           </motion.form>
         )}
@@ -1470,15 +1517,17 @@ export default function PatronView({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  if (isSubmitLocked) return;
                                   setBoostingItem(req);
                                   setBoostAmount(10);
                                   initiateCheckout('boost');
                                 }}
+                                disabled={isSubmitLocked}
                                 className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                                   isTopOne
                                     ? 'bg-fuchsia-600/20 border border-fuchsia-500/40 text-fuchsia-400 hover:bg-fuchsia-600/30 glow-fuchsia shadow-sm'
                                     : 'bg-slate-800 border border-white/10 text-slate-400 hover:text-white hover:border-white/20'
-                                }`}
+                                } disabled:cursor-not-allowed disabled:opacity-60`}
                               >
                                 Boost +$10
                               </button>
@@ -1615,16 +1664,18 @@ export default function PatronView({
                           <button
                             type="button"
                             onClick={() => {
+                              if (isSubmitLocked) return;
                               setSelectedDirectoryPerformer(p);
                               setTipAmount(p.minimumTip);
                               setSenderName('');
                               setCommentMessage('');
                             }}
+                            disabled={isSubmitLocked}
                             className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase text-center transition-all cursor-pointer font-sans ${
                               p.isFeatured
                                 ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/10'
                                 : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/5'
-                            }`}
+                            } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
                             Tip
                           </button>
@@ -1689,6 +1740,7 @@ export default function PatronView({
                           <button
                             type="button"
                             onClick={() => {
+                              if (isSubmitLocked) return;
                               if (!senderName) {
                                 alert("Please enter your name!");
                                 return;
@@ -1706,6 +1758,7 @@ export default function PatronView({
                               }
                               // Open confirmation
                               const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+                              setPaymentConfirmationState(null);
                               setCheckoutPayload({
                                 open: true,
                                 type: 'request',
@@ -1718,9 +1771,10 @@ export default function PatronView({
                                 ...createClientActionIds()
                               });
                             }}
-                            className="w-full py-2 bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white font-black text-xs rounded-lg shadow-md cursor-pointer font-sans text-center"
+                            disabled={isSubmitLocked}
+                            className="w-full py-2 bg-gradient-to-r from-fuchsia-600 to-blue-600 text-white font-black text-xs rounded-lg shadow-md cursor-pointer font-sans text-center disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            Send Tip • ${tipAmount}.00
+                            {isSubmitLocked ? 'Payment confirmation pending' : `Send Tip • $${tipAmount}.00`}
                           </button>
                         </div>
                       )}
@@ -1750,7 +1804,7 @@ export default function PatronView({
                   </div>
                   <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    Your ${checkoutPayload.amount}.00 request is Pending with the performer. No card was charged.
+                    Your ${checkoutPayload.amount}.00 action is Pending with the performer. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                   </p>
                 </div>
               ) : (
@@ -1761,11 +1815,22 @@ export default function PatronView({
                   <div className="space-y-1">
                     <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
                     <h3 className="font-sans text-base font-bold text-white">
-                      {previewMode ? 'Demo Only' : checkoutPayload.type === 'request' ? 'Confirm Request' : `Confirm Boost`}
+                      {previewMode
+                        ? 'Demo Only'
+                        : isPaymentConfirmationPending
+                          ? 'Payment authorization required'
+                          : checkoutPayload.type === 'request'
+                            ? 'Confirm Request'
+                            : 'Confirm Boost'}
                     </h3>
                     {previewMode && (
                       <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
                         Demo data. No payment or request will be recorded.
+                      </p>
+                    )}
+                    {!previewMode && (
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                        {isPaymentConfirmationPending ? PAYMENT_CONFIRMATION_WAITING_COPY : PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                       </p>
                     )}
                   </div>
@@ -1830,15 +1895,15 @@ export default function PatronView({
                     <button
                       type="button"
                       onClick={completePayment}
-                      disabled={isPaying || previewMode}
-                      className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                      disabled={isSubmitLocked || previewMode}
+                      className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaying ? "Sending..." : "Send Request"}
+                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaymentConfirmationPending ? 'Payment authorization required' : isPaying ? "Sending..." : "Confirm Payment"}
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => { setCheckoutPayload(null); setBoostingItem(null); }}
+                      onClick={() => { setCheckoutPayload(null); setBoostingItem(null); setPaymentConfirmationState(null); }}
                       disabled={isPaying}
                       className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                     >
