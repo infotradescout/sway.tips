@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GigSession, RequestItem, RequestPreset } from '../types';
+import PerformerShareKit from './PerformerShareKit';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -747,6 +748,7 @@ export default function TalentDashboard({
 
           {/* Right sidebar panel: Stats and options summary */}
           <div className="space-y-6">
+            <PerformerShareKit activeGigId={activeGigId} />
             
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
             <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${
