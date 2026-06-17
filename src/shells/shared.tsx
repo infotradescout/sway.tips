@@ -31,7 +31,8 @@ export const emptySession: GigSession = {
 const initialState: BackendState = {
   session: emptySession,
   requests: [],
-  performers: []
+  performers: [],
+  activeGigId: null
 };
 
 export function LoadingState() {

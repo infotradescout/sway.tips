@@ -210,7 +210,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           ...fallbackState,
           session: createInactiveSession(),
           requests: [],
-          performers: []
+          performers: [],
+          activeGigId: null
         },
         activeGigId: null
       };
@@ -262,7 +263,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       state: {
         session: restoredSession,
         requests: restoredRequests,
-        performers: fallbackState.performers
+        performers: fallbackState.performers,
+        activeGigId: activeSession.id
       },
       activeGigId: activeSession.id
     };
