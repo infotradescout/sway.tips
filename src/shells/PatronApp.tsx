@@ -155,8 +155,6 @@ export default function PatronApp() {
     return postJson('/api/privacy/data-deletion-placeholder', { source: 'patron_shell_placeholder' });
   };
 
-  if (isLoading) return <LoadingState />;
-
   const { session, requests } = bState;
   const performers = bState.performers || [];
   const overlayGigId = routeGigId || '';
@@ -184,13 +182,15 @@ export default function PatronApp() {
     .sort((a, b) => b.amount - a.amount)[0];
 
   useEffect(() => {
-    if (!shouldShowNoSessionRecovery) return;
+    if (isLoading || !shouldShowNoSessionRecovery) return;
     sendPatronNoSessionRecoveryViewed(frictionPayload);
-  }, [shouldShowNoSessionRecovery]);
+  }, [frictionPayload, isLoading, shouldShowNoSessionRecovery]);
 
   const handleReturnHomeClick = () => {
     sendPatronNoSessionReturnHomeClicked(frictionPayload);
   };
+
+  if (isLoading) return <LoadingState />;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
