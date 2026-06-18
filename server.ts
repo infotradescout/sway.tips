@@ -10,7 +10,7 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
-import { BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
+import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, moderationEvents } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
@@ -325,6 +325,26 @@ async function findRoomStateByRequestId(requestId: string) {
   }
 
   return null;
+}
+
+function buildActiveRoomSummary(roomState: BackendState, gigId: string, startedAt: string | null = null): ActiveRoomSummary {
+  return {
+    gigId,
+    performerName: roomState.session.talentName || 'Unassigned performer',
+    talentRole: roomState.session.talentRole,
+    routePath: `/g/${gigId}`,
+    startedAt,
+    requestCount: roomState.requests.filter((request) => !request.hidden && !request.removed).length
+  };
+}
+
+async function listReadableActiveRooms(): Promise<ActiveRoomSummary[]> {
+  if (!businessStore.hasDurableStore) {
+    await refreshBusinessState();
+    return activeGigId ? [buildActiveRoomSummary(state, activeGigId)] : [];
+  }
+
+  return businessStore.listActiveRoomSummaries();
 }
 
 function requirePersistentBusinessStore(res: express.Response): boolean {
@@ -668,7 +688,12 @@ app.get("/api/build-marker", (_req, res) => {
 
 const shellTelemetryAllowedEvents = new Set([
   'telemetry_friction_patron_no_session_recovery_viewed',
-  'telemetry_friction_patron_no_session_return_home_clicked'
+  'telemetry_friction_patron_no_session_return_home_clicked',
+  'room_entry_viewed',
+  'room_entry_recovery_viewed',
+  'share_link_copied',
+  'request_started',
+  'boost_started'
 ]);
 
 const shellTelemetryAllowedKeys = new Set([
@@ -711,8 +736,8 @@ const shellTelemetrySensitiveKeys = new Set([
 ]);
 
 type ShellTelemetryPayload = {
-  shell: 'patron';
-  surface: 'recovery-view';
+  shell: 'patron' | 'talent';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit';
   event: string;
   route_family: string;
   has_route_context: boolean;
@@ -743,11 +768,11 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
     }
   }
 
-  if (payload.shell !== 'patron') {
-    return { ok: false, status: 400, error: 'Shell telemetry requires shell=patron.' };
+  if (payload.shell !== 'patron' && payload.shell !== 'talent') {
+    return { ok: false, status: 400, error: 'Shell telemetry requires shell=patron or shell=talent.' };
   }
-  if (payload.surface !== 'recovery-view') {
-    return { ok: false, status: 400, error: 'Shell telemetry requires surface=recovery-view.' };
+  if (payload.surface !== 'recovery-view' && payload.surface !== 'room-entry' && payload.surface !== 'share-kit') {
+    return { ok: false, status: 400, error: 'Shell telemetry requires a supported funnel surface.' };
   }
   if (typeof payload.event !== 'string' || !shellTelemetryAllowedEvents.has(payload.event)) {
     return { ok: false, status: 400, error: 'Unknown shell telemetry event.' };
@@ -765,8 +790,8 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
   return {
     ok: true,
     payload: {
-      shell: 'patron',
-      surface: 'recovery-view',
+      shell: payload.shell,
+      surface: payload.surface,
       event: payload.event,
       route_family: payload.route_family,
       has_route_context: payload.has_route_context,
@@ -887,6 +912,26 @@ app.get("/api/state/:gigId", async (req, res) => {
     activeGigId: roomSnapshot.state.activeGigId,
     room_lookup: 'active'
   });
+});
+
+app.get("/api/talent/active-rooms", async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+
+  applyNoStoreHeaders(res);
+  return res.json({ rooms: await listReadableActiveRooms() });
+});
+
+app.get("/api/admin/active-rooms", async (req, res) => {
+  const adminAccess = await accessControl.requireAdminOrSupportAccess(req);
+  if (adminAccess.allowed === false) {
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  }
+
+  applyNoStoreHeaders(res);
+  return res.json({ rooms: await listReadableActiveRooms() });
 });
 
 app.post("/api/pending-action/reconcile", async (req, res) => {

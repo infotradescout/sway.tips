@@ -10,14 +10,19 @@ const ALLOWED_PAYLOAD_KEYS = [
 
 const ALLOWED_EVENTS = [
   'telemetry_friction_patron_no_session_recovery_viewed',
-  'telemetry_friction_patron_no_session_return_home_clicked'
+  'telemetry_friction_patron_no_session_return_home_clicked',
+  'room_entry_viewed',
+  'room_entry_recovery_viewed',
+  'share_link_copied',
+  'request_started',
+  'boost_started'
 ] as const;
 
 type ShellFrictionEvent = (typeof ALLOWED_EVENTS)[number];
 
 type ShellFrictionPayload = {
-  shell: 'patron';
-  surface: 'recovery-view';
+  shell: 'patron' | 'talent';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit';
   route_family: string;
   has_route_context: boolean;
   has_session_context: boolean;
@@ -36,8 +41,8 @@ function hasOnlyAllowedPayloadKeys(payload: Record<string, unknown>) {
 
 function isValidPayload(payload: Record<string, unknown>): payload is ShellFrictionPayload {
   return (
-    payload.shell === 'patron' &&
-    payload.surface === 'recovery-view' &&
+    (payload.shell === 'patron' || payload.shell === 'talent') &&
+    (payload.surface === 'recovery-view' || payload.surface === 'room-entry' || payload.surface === 'share-kit') &&
     typeof payload.route_family === 'string' &&
     typeof payload.has_route_context === 'boolean' &&
     typeof payload.has_session_context === 'boolean' &&
@@ -70,9 +75,29 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
 }
 
 export function sendPatronNoSessionRecoveryViewed(payload: Record<string, unknown>) {
-  sendFrictionEvent('telemetry_friction_patron_no_session_recovery_viewed', payload);
+  sendFrictionEvent('room_entry_recovery_viewed', payload);
 }
 
 export function sendPatronNoSessionReturnHomeClicked(payload: Record<string, unknown>) {
   sendFrictionEvent('telemetry_friction_patron_no_session_return_home_clicked', payload);
+}
+
+export function sendRoomEntryViewed(payload: Record<string, unknown>) {
+  sendFrictionEvent('room_entry_viewed', payload);
+}
+
+export function sendRoomEntryRecoveryViewed(payload: Record<string, unknown>) {
+  sendFrictionEvent('room_entry_recovery_viewed', payload);
+}
+
+export function sendShareLinkCopied(payload: Record<string, unknown>) {
+  sendFrictionEvent('share_link_copied', payload);
+}
+
+export function sendRequestStarted(payload: Record<string, unknown>) {
+  sendFrictionEvent('request_started', payload);
+}
+
+export function sendBoostStarted(payload: Record<string, unknown>) {
+  sendFrictionEvent('boost_started', payload);
 }

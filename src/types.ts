@@ -116,6 +116,15 @@ export interface PerformerProfile {
   avatarUrl: string;
 }
 
+export interface ActiveRoomSummary {
+  gigId: string;
+  performerName: string;
+  talentRole: 'DJ' | 'Bartender' | 'Performer';
+  routePath: string;
+  startedAt: string | null;
+  requestCount: number;
+}
+
 export interface BackendState {
   session: GigSession;
   requests: RequestItem[];

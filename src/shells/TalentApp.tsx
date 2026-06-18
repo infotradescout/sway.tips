@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { Lock, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
+import type { ActiveRoomSummary } from '../types';
 import { LoadingState, ShellMessage, postJson, useSwayState } from './shared';
 
 function isTalentLogin(pathname: string) {
@@ -11,8 +13,50 @@ function isTalentLogin(pathname: string) {
 }
 
 export default function TalentApp() {
-  const { bState, isLoading, setBState } = useSwayState();
   const demoMode = isDemoModeEnabled();
+  const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
+  const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
+  const statePath = selectedGigId ? `/api/state/${selectedGigId}` : '/api/state';
+  const { bState, isLoading, setBState } = useSwayState({ statePath });
+
+  const refreshActiveRooms = async () => {
+    if (demoMode) {
+      const demoRooms = bState.activeGigId && bState.session.status === 'active'
+        ? [{
+            gigId: bState.activeGigId,
+            performerName: bState.session.talentName || 'Sway Performer',
+            talentRole: bState.session.talentRole,
+            routePath: `/g/${bState.activeGigId}`,
+            startedAt: null,
+            requestCount: bState.requests.filter((request) => !request.hidden && !request.removed).length
+          }]
+        : [];
+      setActiveRooms(demoRooms);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/talent/active-rooms');
+      if (!response.ok) return;
+      const data = await response.json();
+      setActiveRooms(Array.isArray(data.rooms) ? data.rooms : []);
+    } catch (error) {
+      console.warn('Unable to load active room summaries:', error);
+    }
+  };
+
+  useEffect(() => {
+    void refreshActiveRooms();
+  }, [demoMode, bState.activeGigId, bState.requests.length, bState.session.status]);
+
+  useEffect(() => {
+    if (selectedGigId && activeRooms.some((room) => room.gigId === selectedGigId)) return;
+    if (bState.activeGigId && activeRooms.some((room) => room.gigId === bState.activeGigId)) {
+      setSelectedGigId(bState.activeGigId);
+      return;
+    }
+    setSelectedGigId(activeRooms[0]?.gigId ?? null);
+  }, [activeRooms, bState.activeGigId, selectedGigId]);
 
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
@@ -28,6 +72,8 @@ export default function TalentApp() {
     try {
       const data = await postJson('/api/session/start', setupData);
       setBState(data.state);
+      setSelectedGigId(data.state?.activeGigId ?? null);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -36,8 +82,9 @@ export default function TalentApp() {
   const handleEndSession = async () => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/session/end');
+      const data = await postJson('/api/session/end', { gig_id: selectedGigId ?? bState.activeGigId });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -46,8 +93,9 @@ export default function TalentApp() {
   const handleCloseout = async () => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/session/closeout');
+      const data = await postJson('/api/session/closeout', { gig_id: selectedGigId ?? bState.activeGigId });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -58,6 +106,7 @@ export default function TalentApp() {
     try {
       const data = await postJson('/api/request/triage', { requestId, action });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -68,6 +117,7 @@ export default function TalentApp() {
     try {
       const data = await postJson('/api/request/fulfill', { requestId });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -81,6 +131,7 @@ export default function TalentApp() {
         reason: 'Performer hid this request from the live queue.'
       });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -94,6 +145,7 @@ export default function TalentApp() {
         reason: 'Performer removed this request from the live queue.'
       });
       setBState(data.state);
+      await refreshActiveRooms();
     } catch (e) {
       console.error(e);
     }
@@ -178,6 +230,9 @@ export default function TalentApp() {
                 onHide={handleHideRequest}
                 onRemove={handleRemoveRequest}
                 activeGigId={activeGigId}
+                activeRooms={activeRooms}
+                selectedGigId={selectedGigId}
+                onSelectGigId={setSelectedGigId}
                 previewMode={demoMode}
               />
             }
