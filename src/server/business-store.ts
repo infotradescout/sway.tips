@@ -37,7 +37,7 @@ type PersistedSessionRow = {
 };
 
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
-const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active'] as const;
+const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active', 'ending'] as const;
 const TRACKED_ROOM_STATUSES = ['active', 'ending'] as const;
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
@@ -184,6 +184,10 @@ function deriveRegistryStatus(status: GigSession['status']): 'active' | 'ending'
   return 'closed';
 }
 
+function hasLiveRoomContext(status: GigSession['status']) {
+  return status === 'active' || status === 'ending';
+}
+
 function derivePerformersFromSession(session: GigSession): PerformerProfile[] {
   if (session.status === 'inactive' || !session.talentName) {
     return [];
@@ -215,7 +219,7 @@ function normalizeState(input: BackendState, gigId: string | null): BackendState
     session: input.session,
     requests: input.requests,
     performers: derivePerformersFromSession(input.session),
-    activeGigId: input.session.status === 'active' ? gigId : null
+    activeGigId: hasLiveRoomContext(input.session.status) ? gigId : null
   };
 }
 
@@ -332,7 +336,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     if (!db) {
       return {
         state: normalizeState(fallbackState, fallbackState.activeGigId ?? null),
-        activeGigId: fallbackState.session.status === 'active' ? (fallbackState.activeGigId ?? null) : null,
+        activeGigId: hasLiveRoomContext(fallbackState.session.status) ? (fallbackState.activeGigId ?? null) : null,
         roomStatus: fallbackState.session.status === 'closed'
           ? 'ended'
           : fallbackState.session.status === 'active'
@@ -363,7 +367,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       if (fallbackState.activeGigId === gigId) {
         return {
           state: normalizeState(fallbackState, gigId),
-          activeGigId: fallbackState.session.status === 'active' ? gigId : null,
+          activeGigId: hasLiveRoomContext(fallbackState.session.status) ? gigId : null,
           roomStatus: fallbackState.session.status === 'closed'
             ? 'ended'
             : fallbackState.session.status === 'active'
