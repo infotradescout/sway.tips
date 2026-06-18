@@ -39,16 +39,25 @@ for (const route of persistenceProtectedRoutes) {
   const nextRouteRelative = server.slice(routeIndex + route.length).search(/app\.(post|get|put|delete)\(/);
   const blockEnd = nextRouteRelative === -1 ? server.length : routeIndex + route.length + nextRouteRelative;
   const routeBlock = server.slice(routeIndex, blockEnd);
-  if (!routeBlock.includes('requirePersistentBusinessStore(res)') && !routeBlock.includes('resolveProtectedMutationActor(req, res')) {
+  if (
+    !routeBlock.includes('requirePersistentBusinessStore(res)') &&
+    !routeBlock.includes('resolveProtectedMutationActor(req, res')
+  ) {
     failures.push(`Route ${route} must keep production persistence gate.`);
   }
 
-  if (!routeBlock.includes('await refreshBusinessState()')) {
+  if (
+    !routeBlock.includes('await refreshBusinessState()') &&
+    !routeBlock.includes('await loadRoomState(') &&
+    !routeBlock.includes('await resolveLegacyWritableRoom(') &&
+    !routeBlock.includes('await findRoomStateByRequestId(')
+  ) {
     failures.push(`Route ${route} must refresh state through business-store boundary.`);
   }
 
   if (
     !routeBlock.includes('await persistBusinessState()') &&
+    !routeBlock.includes('await persistBusinessStateForRoom(') &&
     !routeBlock.includes('await persistStateWithAudit(') &&
     !route.includes('/api/moderation/report') &&
     !route.includes('/api/moderation/block')

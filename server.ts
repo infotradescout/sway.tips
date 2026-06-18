@@ -186,31 +186,145 @@ function createInactiveSession(): GigSession {
 }
 
 // Development-only state. Production must use a persistent business store.
-let state: BackendState = {
-  session: createInactiveSession(),
-  requests: [],
-  performers: [],
-  activeGigId: null
-};
+function createEmptyBackendState(): BackendState {
+  return {
+    session: createInactiveSession(),
+    requests: [],
+    performers: [],
+    activeGigId: null
+  };
+}
+
+let state: BackendState = createEmptyBackendState();
 let activeGigId: string | null = null;
 
-function syncActiveGigRouteContext(inputState: BackendState) {
-  inputState.activeGigId = inputState.session.status === 'active' ? (activeGigId ?? null) : null;
+function syncActiveGigRouteContext(inputState: BackendState, gigId: string | null = activeGigId) {
+  inputState.activeGigId = inputState.session.status === 'active' ? (gigId ?? null) : null;
+}
+
+function prepareRoomState(inputState: BackendState, gigId: string | null) {
+  syncActiveGigRouteContext(inputState, gigId);
+  syncActivePerformer(inputState);
+  return inputState;
 }
 
 async function refreshBusinessState() {
   const snapshot = await businessStore.hydrateState(state);
-  state = snapshot.state;
-  activeGigId = snapshot.activeGigId;
-  syncActiveGigRouteContext(state);
-  syncActivePerformer(state);
+  state = prepareRoomState(snapshot.state, snapshot.activeGigId);
+  activeGigId = state.activeGigId;
   return snapshot;
 }
 
 async function persistBusinessState() {
-  syncActiveGigRouteContext(state);
-  syncActivePerformer(state);
+  prepareRoomState(state, activeGigId);
   await businessStore.persistState({ state, activeGigId });
+}
+
+async function loadRoomState(gigId: string) {
+  if (!businessStore.hasDurableStore) {
+    if (state.activeGigId === gigId) {
+      const fallbackState = prepareRoomState(state, gigId);
+      return {
+        state: fallbackState,
+        activeGigId: fallbackState.activeGigId,
+        roomStatus: fallbackState.session.status === 'closed'
+          ? 'ended' as const
+          : fallbackState.session.status === 'active'
+            ? 'active' as const
+            : 'inactive' as const
+      };
+    }
+
+    return {
+      state: createEmptyBackendState(),
+      activeGigId: null,
+      roomStatus: 'missing' as const
+    };
+  }
+
+  const snapshot = await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState());
+  return {
+    ...snapshot,
+    state: prepareRoomState(snapshot.state, snapshot.activeGigId)
+  };
+}
+
+async function persistBusinessStateForRoom(roomState: BackendState, gigId: string) {
+  const preparedState = prepareRoomState(roomState, gigId);
+
+  if (!businessStore.hasDurableStore) {
+    state = preparedState;
+    activeGigId = preparedState.activeGigId;
+    return;
+  }
+
+  await businessStore.persistState({ state: preparedState, activeGigId: gigId });
+
+  if (activeGigId === gigId) {
+    state = preparedState;
+    activeGigId = preparedState.activeGigId;
+  }
+}
+
+async function resolveLegacyWritableRoom(req: express.Request, res: express.Response) {
+  await refreshBusinessState();
+
+  const requestedGigId = parseDurableGigId(req.body?.gig_id);
+  const targetGigId = requestedGigId ?? activeGigId;
+
+  if (!targetGigId) {
+    res.status(409).json({
+      error: 'A specific live room must be selected before this action can continue.'
+    });
+    return null;
+  }
+
+  const roomSnapshot = await loadRoomState(targetGigId);
+  if (roomSnapshot.roomStatus === 'missing') {
+    res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+    return null;
+  }
+  if (roomSnapshot.roomStatus === 'ended') {
+    res.status(410).json({ error: ROOM_LOOKUP_ENDED_COPY });
+    return null;
+  }
+
+  return {
+    gigId: targetGigId,
+    state: roomSnapshot.state
+  };
+}
+
+async function findRoomStateByRequestId(requestId: string) {
+  if (!businessStore.hasDurableStore) {
+    const request = state.requests.find((item) => item.id === requestId);
+    if (!request) return null;
+    return {
+      gigId: request.gigId ?? activeGigId,
+      state,
+      request
+    };
+  }
+
+  const trackedGigIds = await businessStore.listTrackedGigIds();
+  const seenGigIds = new Set<string>();
+
+  for (const gigId of trackedGigIds) {
+    if (seenGigIds.has(gigId)) continue;
+    seenGigIds.add(gigId);
+
+    const roomSnapshot = await loadRoomState(gigId);
+    const request = roomSnapshot.state.requests.find((item) => item.id === requestId);
+    if (request) {
+      return {
+        gigId,
+        state: roomSnapshot.state,
+        request
+      };
+    }
+  }
+
+  return null;
 }
 
 function requirePersistentBusinessStore(res: express.Response): boolean {
@@ -366,6 +480,8 @@ async function resolveProtectedMutationActor(req: express.Request, res: express.
 }
 
 async function persistStateWithAudit(input: {
+  roomState: BackendState;
+  gigId: string;
   actor: ProtectedMutationActor;
   entityType: string;
   entityId: string;
@@ -374,13 +490,15 @@ async function persistStateWithAudit(input: {
   nextStatus?: string | null;
   metadata?: Record<string, unknown>;
 }) {
+  const preparedState = prepareRoomState(input.roomState, input.gigId);
+
   if (!businessDb) {
-    await persistBusinessState();
+    await persistBusinessStateForRoom(preparedState, input.gigId);
     return;
   }
 
   await businessDb.transaction(async (tx) => {
-    await businessStore.persistState({ state, activeGigId }, { executor: tx as any });
+    await businessStore.persistState({ state: preparedState, activeGigId: input.gigId }, { executor: tx as any });
     await writeAuditEvent(tx, {
       actorId: input.actor.actorId,
       actorType: input.actor.actorType,
@@ -392,54 +510,106 @@ async function persistStateWithAudit(input: {
       metadata: input.metadata
     });
   });
+
+  if (activeGigId === input.gigId) {
+    state = preparedState;
+    activeGigId = preparedState.activeGigId;
+  }
 }
 
 // 5-Minute Timer Closeout Routine Worker
 setInterval(async () => {
+  if (!businessStore.hasDurableStore) {
+    await refreshBusinessState();
+
+    let changed = false;
+
+    if (state.session.status === 'ending' && state.session.endGigTimerStartedAt) {
+      const startTimeStamp = new Date(state.session.endGigTimerStartedAt).getTime();
+      const elapsedTime = Date.now() - startTimeStamp;
+
+      if (elapsedTime >= 300000) {
+        console.log("Post-gig timer expired. Releasing pending requests.");
+        executeAutoNuke(state);
+        changed = true;
+      }
+    }
+
+    if (state.session.isFeatured && state.session.featuredExpiresAt) {
+      if (Date.now() > new Date(state.session.featuredExpiresAt).getTime()) {
+        console.log("Featured Performer status has expired!");
+        state.session.isFeatured = false;
+        state.session.featuredExpiresAt = null;
+        state.session.featuredCost = 0;
+        state.session.featuredDurationHours = 0;
+        changed = true;
+      }
+    }
+
+    if (state.session.requestsOpen && state.session.requestWindowMode === 'preset' && state.session.requestWindowExpiresAt) {
+      if (Date.now() > new Date(state.session.requestWindowExpiresAt).getTime()) {
+        console.log("Request custom window expired! Closing requests automatically.");
+        state.session.requestsOpen = false;
+        state.session.requestWindowExpiresAt = null;
+        state.session.requestWindowDuration = null;
+        state.session.requestWindowLabel = null;
+        changed = true;
+      }
+    }
+
+    syncActivePerformer(state);
+    if (changed) {
+      await persistBusinessState();
+    }
+    return;
+  }
+
+  const trackedGigIds = await businessStore.listTrackedGigIds();
+
+  for (const trackedGigId of trackedGigIds) {
+    const roomSnapshot = await loadRoomState(trackedGigId);
+    const roomState = roomSnapshot.state;
+    let changed = false;
+
+    if (roomState.session.status === 'ending' && roomState.session.endGigTimerStartedAt) {
+      const startTimeStamp = new Date(roomState.session.endGigTimerStartedAt).getTime();
+      const elapsedTime = Date.now() - startTimeStamp;
+
+      if (elapsedTime >= 300000) {
+        console.log("Post-gig timer expired. Releasing pending requests.");
+        executeAutoNuke(roomState);
+        changed = true;
+      }
+    }
+
+    if (roomState.session.isFeatured && roomState.session.featuredExpiresAt) {
+      if (Date.now() > new Date(roomState.session.featuredExpiresAt).getTime()) {
+        console.log("Featured Performer status has expired!");
+        roomState.session.isFeatured = false;
+        roomState.session.featuredExpiresAt = null;
+        roomState.session.featuredCost = 0;
+        roomState.session.featuredDurationHours = 0;
+        changed = true;
+      }
+    }
+
+    if (roomState.session.requestsOpen && roomState.session.requestWindowMode === 'preset' && roomState.session.requestWindowExpiresAt) {
+      if (Date.now() > new Date(roomState.session.requestWindowExpiresAt).getTime()) {
+        console.log("Request custom window expired! Closing requests automatically.");
+        roomState.session.requestsOpen = false;
+        roomState.session.requestWindowExpiresAt = null;
+        roomState.session.requestWindowDuration = null;
+        roomState.session.requestWindowLabel = null;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await persistBusinessStateForRoom(roomState, trackedGigId);
+    }
+  }
+
   await refreshBusinessState();
-
-  let changed = false;
-
-  if (state.session.status === 'ending' && state.session.endGigTimerStartedAt) {
-    const startTimeStamp = new Date(state.session.endGigTimerStartedAt).getTime();
-    const elapsedTime = Date.now() - startTimeStamp;
-    
-    // 5 minutes is 300,000 ms. For easier testing, let's keep the real 5 minutes but allow talent to dismiss.
-    if (elapsedTime >= 300000) {
-      console.log("Post-gig timer expired. Releasing pending requests.");
-      executeAutoNuke(state);
-      changed = true;
-    }
-  }
-
-  // Check if featured status has expired
-  if (state.session.isFeatured && state.session.featuredExpiresAt) {
-    if (Date.now() > new Date(state.session.featuredExpiresAt).getTime()) {
-      console.log("Featured Performer status has expired!");
-      state.session.isFeatured = false;
-      state.session.featuredExpiresAt = null;
-      state.session.featuredCost = 0;
-      state.session.featuredDurationHours = 0;
-      changed = true;
-    }
-  }
-
-  // Check if request open window preset has expired
-  if (state.session.requestsOpen && state.session.requestWindowMode === 'preset' && state.session.requestWindowExpiresAt) {
-    if (Date.now() > new Date(state.session.requestWindowExpiresAt).getTime()) {
-      console.log("Request custom window expired! Closing requests automatically.");
-      state.session.requestsOpen = false;
-      state.session.requestWindowExpiresAt = null;
-      state.session.requestWindowDuration = null;
-      state.session.requestWindowLabel = null;
-      changed = true;
-    }
-  }
-
-  syncActivePerformer(state);
-  if (changed) {
-    await persistBusinessState();
-  }
 }, 10000); // Check every 10 seconds for tighter precision
 
 function executeAutoNuke(inputState: BackendState) {
@@ -673,7 +843,6 @@ app.get("/api/state", async (req, res) => {
 });
 
 app.get("/api/state/:gigId", async (req, res) => {
-  await refreshBusinessState();
   applyNoStoreHeaders(res);
 
   const requestedGigId = parseDurableGigId(req.params.gigId);
@@ -685,7 +854,9 @@ app.get("/api/state/:gigId", async (req, res) => {
     });
   }
 
-  if (!activeGigId || activeGigId !== requestedGigId) {
+  const roomSnapshot = await loadRoomState(requestedGigId);
+
+  if (roomSnapshot.roomStatus === 'missing') {
     return res.status(404).json({
       error: ROOM_LOOKUP_UNAVAILABLE_COPY,
       message: ROOM_LOOKUP_UNAVAILABLE_COPY,
@@ -693,7 +864,7 @@ app.get("/api/state/:gigId", async (req, res) => {
     });
   }
 
-  if (state.session.status === 'closed') {
+  if (roomSnapshot.roomStatus === 'ended') {
     return res.status(410).json({
       error: ROOM_LOOKUP_ENDED_COPY,
       message: ROOM_LOOKUP_ENDED_COPY,
@@ -701,7 +872,7 @@ app.get("/api/state/:gigId", async (req, res) => {
     });
   }
 
-  if (state.session.status !== 'active') {
+  if (roomSnapshot.roomStatus !== 'active') {
     return res.status(404).json({
       error: ROOM_LOOKUP_UNAVAILABLE_COPY,
       message: ROOM_LOOKUP_UNAVAILABLE_COPY,
@@ -710,10 +881,10 @@ app.get("/api/state/:gigId", async (req, res) => {
   }
 
   return res.json({
-    session: state.session,
-    requests: state.requests,
-    performers: state.performers,
-    activeGigId: state.activeGigId,
+    session: roomSnapshot.state.session,
+    requests: roomSnapshot.state.requests,
+    performers: roomSnapshot.state.performers,
+    activeGigId: roomSnapshot.state.activeGigId,
     room_lookup: 'active'
   });
 });
@@ -746,10 +917,10 @@ app.post("/api/session/start", async (req, res) => {
   const { talentName, talentRole, feeType, minimumTip, gig_id } = req.body;
 
   const requestedGigId = parseDurableGigId(gig_id);
-  activeGigId = requestedGigId ?? activeGigId ?? businessStore.createGigId();
-  syncActiveGigRouteContext(state);
+  const roomGigId = requestedGigId ?? businessStore.createGigId();
+  const roomState = createEmptyBackendState();
 
-  state.session = {
+  roomState.session = {
     status: 'active',
     ownerActorUserId: actor.actorId,
     lastMutationActorUserId: actor.actorId,
@@ -776,221 +947,249 @@ app.post("/api/session/start", async (req, res) => {
       topRequest: "None yet"
     }
   };
-  state.requests = []; // Clear current requests for a fresh session!
-  syncActivePerformer(state);
+  roomState.requests = [];
+  activeGigId = roomGigId;
+  state = prepareRoomState(roomState, roomGigId);
   await persistStateWithAudit({
+    roomState,
+    gigId: roomGigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId,
+    entityId: roomGigId,
     eventType: 'session.start',
     previousStatus: null,
-    nextStatus: state.session.status,
+    nextStatus: roomState.session.status,
     metadata: {
-      talentName: state.session.talentName,
-      talentRole: state.session.talentRole,
-      feeType: state.session.feeType,
-      minimumTip: state.session.minimumTip
+      talentName: roomState.session.talentName,
+      talentRole: roomState.session.talentRole,
+      feeType: roomState.session.feeType,
+      minimumTip: roomState.session.minimumTip
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomGigId) });
 });
 
 app.post("/api/session/feature", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { hours, cost, activate } = req.body;
-  const wasFeatured = state.session.isFeatured;
+  const roomState = roomContext.state;
+  const wasFeatured = roomState.session.isFeatured;
   
   if (activate) {
-    state.session.isFeatured = true;
-    state.session.featuredExpiresAt = new Date(Date.now() + Number(hours) * 3600000).toISOString();
-    state.session.featuredCost = Number(cost) || 0;
-    state.session.featuredDurationHours = Number(hours) || 1;
+    roomState.session.isFeatured = true;
+    roomState.session.featuredExpiresAt = new Date(Date.now() + Number(hours) * 3600000).toISOString();
+    roomState.session.featuredCost = Number(cost) || 0;
+    roomState.session.featuredDurationHours = Number(hours) || 1;
   } else {
-    state.session.isFeatured = false;
-    state.session.featuredExpiresAt = null;
-    state.session.featuredCost = 0;
-    state.session.featuredDurationHours = 0;
+    roomState.session.isFeatured = false;
+    roomState.session.featuredExpiresAt = null;
+    roomState.session.featuredCost = 0;
+    roomState.session.featuredDurationHours = 0;
   }
-  state.session.lastMutationActorUserId = actor.actorId;
-  
-  syncActivePerformer(state);
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: activate ? 'session.feature.enable' : 'session.feature.disable',
     previousStatus: wasFeatured ? 'featured' : 'not_featured',
-    nextStatus: state.session.isFeatured ? 'featured' : 'not_featured',
+    nextStatus: roomState.session.isFeatured ? 'featured' : 'not_featured',
     metadata: {
-      featuredDurationHours: state.session.featuredDurationHours,
-      featuredCost: state.session.featuredCost,
-      featuredExpiresAt: state.session.featuredExpiresAt
+      featuredDurationHours: roomState.session.featuredDurationHours,
+      featuredCost: roomState.session.featuredCost,
+      featuredExpiresAt: roomState.session.featuredExpiresAt
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 app.post("/api/session/end", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
-  if (state.session.status !== 'active') {
+  const roomState = roomContext.state;
+  if (roomState.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
   }
-  const previousStatus = state.session.status;
-  state.session.status = 'ending';
-  state.session.endGigTimerStartedAt = new Date().toISOString();
-  state.session.lastMutationActorUserId = actor.actorId;
+  const previousStatus = roomState.session.status;
+  roomState.session.status = 'ending';
+  roomState.session.endGigTimerStartedAt = new Date().toISOString();
+  roomState.session.lastMutationActorUserId = actor.actorId;
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.end',
     previousStatus,
-    nextStatus: state.session.status,
+    nextStatus: roomState.session.status,
     metadata: {
-      endGigTimerStartedAt: state.session.endGigTimerStartedAt
+      endGigTimerStartedAt: roomState.session.endGigTimerStartedAt
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 app.post("/api/session/closeout", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
-  const previousStatus = state.session.status;
-  executeAutoNuke(state);
-  state.session.lastMutationActorUserId = actor.actorId;
+  const roomState = roomContext.state;
+  const previousStatus = roomState.session.status;
+  executeAutoNuke(roomState);
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   // Closeout totals are sourced from captured payment records in the database,
   // never from runtime arrays. Disabled provider mode reports zero captured funds.
   let closeoutTotals: Awaited<ReturnType<typeof paymentService.aggregateCapturedTotals>> | null = null;
-  if (paymentService.hasDurableStore && activeGigId) {
-    closeoutTotals = await paymentService.aggregateCapturedTotals(activeGigId);
-    state.session.totals.totalTips = closeoutTotals.capturedSubtotalCents / 100;
-    state.session.totals.accumulatedFees = closeoutTotals.platformFeeCents / 100;
-    state.session.totals.totalCount = closeoutTotals.capturedCount;
+  if (paymentService.hasDurableStore) {
+    closeoutTotals = await paymentService.aggregateCapturedTotals(roomContext.gigId);
+    roomState.session.totals.totalTips = closeoutTotals.capturedSubtotalCents / 100;
+    roomState.session.totals.accumulatedFees = closeoutTotals.platformFeeCents / 100;
+    roomState.session.totals.totalCount = closeoutTotals.capturedCount;
   }
 
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.closeout',
     previousStatus,
-    nextStatus: state.session.status,
+    nextStatus: roomState.session.status,
     metadata: {
       autoNukeApplied: true,
       closeoutTotalsSource: closeoutTotals ? closeoutTotals.source : 'provider_disabled',
       capturedTotalCents: closeoutTotals ? closeoutTotals.capturedTotalCents : 0
     }
   });
-  res.json({ success: true, state, closeoutTotals });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId), closeoutTotals });
 });
 
 // REQUEST WINDOW MANAGERS & PRESETS ENDPOINTS
 
 // Toggle overall requests status (Manual Mode)
 app.post("/api/session/window/toggle", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { open } = req.body;
-  const previousStatus = state.session.requestsOpen ? 'open' : 'closed';
+  const roomState = roomContext.state;
+  const previousStatus = roomState.session.requestsOpen ? 'open' : 'closed';
   
-  state.session.requestsOpen = !!open;
-  state.session.requestWindowMode = 'manual';
-  state.session.requestWindowExpiresAt = null;
-  state.session.requestWindowDuration = null;
-  state.session.requestWindowLabel = null;
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.requestsOpen = !!open;
+  roomState.session.requestWindowMode = 'manual';
+  roomState.session.requestWindowExpiresAt = null;
+  roomState.session.requestWindowDuration = null;
+  roomState.session.requestWindowLabel = null;
+  roomState.session.lastMutationActorUserId = actor.actorId;
   
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.window.toggle',
     previousStatus,
-    nextStatus: state.session.requestsOpen ? 'open' : 'closed',
+    nextStatus: roomState.session.requestsOpen ? 'open' : 'closed',
     metadata: {
-      requestWindowMode: state.session.requestWindowMode
+      requestWindowMode: roomState.session.requestWindowMode
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Operator selects the room-layer operating posture. Only the two usable runtime
 // postures are accepted; any other value is rejected as defensive validation.
 app.post("/api/session/mode", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { mode } = req.body;
+  const roomState = roomContext.state;
 
   if (mode !== 'manual' && mode !== 'open_call') {
     return res.status(400).json({ error: "mode must be 'manual' or 'open_call'." });
   }
 
-  const previousMode = state.session.operatingMode;
-  state.session.operatingMode = mode;
-  state.session.lastMutationActorUserId = actor.actorId;
+  const previousMode = roomState.session.operatingMode;
+  roomState.session.operatingMode = mode;
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.mode',
     previousStatus: previousMode,
     nextStatus: mode,
     metadata: { operatingMode: mode }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Activate standard/custom preset time window
 app.post("/api/session/window/preset/activate", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { durationMinutes, label } = req.body;
+  const roomState = roomContext.state;
   
   const duration = Number(durationMinutes);
   if (isNaN(duration) || duration <= 0) {
     return res.status(400).json({ error: "Invalid duration, must be minutes greater than zero." });
   }
   
-  state.session.requestsOpen = true;
-  state.session.requestWindowMode = 'preset';
-  state.session.requestWindowExpiresAt = new Date(Date.now() + duration * 60 * 1000).toISOString();
-  state.session.requestWindowDuration = duration;
-  state.session.requestWindowLabel = label || "Active Window";
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.requestsOpen = true;
+  roomState.session.requestWindowMode = 'preset';
+  roomState.session.requestWindowExpiresAt = new Date(Date.now() + duration * 60 * 1000).toISOString();
+  roomState.session.requestWindowDuration = duration;
+  roomState.session.requestWindowLabel = label || "Active Window";
+  roomState.session.lastMutationActorUserId = actor.actorId;
   
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.window.preset.activate',
     previousStatus: 'manual',
     nextStatus: 'preset',
     metadata: {
-      requestWindowDuration: state.session.requestWindowDuration,
-      requestWindowLabel: state.session.requestWindowLabel,
-      requestWindowExpiresAt: state.session.requestWindowExpiresAt
+      requestWindowDuration: roomState.session.requestWindowDuration,
+      requestWindowLabel: roomState.session.requestWindowLabel,
+      requestWindowExpiresAt: roomState.session.requestWindowExpiresAt
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Create/Build beautiful custom preset
 app.post("/api/session/window/preset/create", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { label, durationMinutes } = req.body;
+  const roomState = roomContext.state;
   
   const duration = Number(durationMinutes);
   if (!label || isNaN(duration) || duration <= 0) {
@@ -1004,12 +1203,14 @@ app.post("/api/session/window/preset/create", async (req, res) => {
     isSystem: false
   };
   
-  state.session.requestPresets.push(newPreset);
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.requestPresets.push(newPreset);
+  roomState.session.lastMutationActorUserId = actor.actorId;
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.window.preset.create',
     previousStatus: null,
     nextStatus: null,
@@ -1019,22 +1220,26 @@ app.post("/api/session/window/preset/create", async (req, res) => {
       duration: newPreset.duration
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Delete custom preset
 app.post("/api/session/window/preset/delete", async (req, res) => {
-  await refreshBusinessState();
-  const actor = await resolveProtectedMutationActor(req, res, activeGigId);
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { presetId } = req.body;
+  const roomState = roomContext.state;
   
-  state.session.requestPresets = state.session.requestPresets.filter(p => p.id !== presetId);
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.requestPresets = roomState.session.requestPresets.filter(p => p.id !== presetId);
+  roomState.session.lastMutationActorUserId = actor.actorId;
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'gig_session',
-    entityId: activeGigId ?? 'runtime-active-session',
+    entityId: roomContext.gigId,
     eventType: 'session.window.preset.delete',
     previousStatus: null,
     nextStatus: null,
@@ -1042,13 +1247,12 @@ app.post("/api/session/window/preset/delete", async (req, res) => {
       presetId
     }
   });
-  res.json({ success: true, state });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Create request + check profanity
 app.post("/api/request/create", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
   const resolvedActor = accessControl.resolveServerActor(req);
   const {
     type,
@@ -1077,12 +1281,13 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(422).json({ error: "A valid route gig_id is required for durable request submission." });
   }
 
-  if (!activeGigId || activeGigId !== durableGigId) {
-    activeGigId = durableGigId;
-    syncActiveGigRouteContext(state);
+  const roomSnapshot = await loadRoomState(durableGigId);
+  if (roomSnapshot.roomStatus !== 'active') {
+    return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
+  const roomState = roomSnapshot.state;
 
-  const amount_cents = Math.round(Math.max(Number(amount) || 0, state.session.minimumTip) * 100);
+  const amount_cents = Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100);
   const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
@@ -1121,12 +1326,12 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(durableReplay.status).json(durableReplay.body);
   }
 
-  const existingRequest = state.requests.find(r => r.idempotencyKey === idempotency_key);
+  const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
   if (existingRequest) {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request: existingRequest, state, reconciled: true };
+    const responseBody = { success: true, request: existingRequest, state: roomState, reconciled: true };
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -1136,19 +1341,19 @@ app.post("/api/request/create", async (req, res) => {
     return res.json(responseBody);
   }
 
-  const tipAmount = Math.max(Number(amount) || 0, state.session.minimumTip);
+  const tipAmount = Math.max(Number(amount) || 0, roomState.session.minimumTip);
   const holdAmount = tipAmount;
   const platformFee = 1.0; 
 
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
 
   // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
-  if (!isStraightTip && (!state.session.requestsOpen || state.session.status !== 'active')) {
+  if (!isStraightTip && (!roomState.session.requestsOpen || roomState.session.status !== 'active')) {
     return res.status(400).json({ error: "Request submissions are currently closed by the host." });
   }
 
   if (!isStraightTip) {
-    const sameDeviceSessionRequests = state.requests.filter((item) =>
+    const sameDeviceSessionRequests = roomState.requests.filter((item) =>
       item.gigId === durableGigId
       && item.patronDeviceIdHash === patron_device_id_hash
       && item.type === 'request'
@@ -1224,7 +1429,7 @@ app.post("/api/request/create", async (req, res) => {
   // state or Private Triage until the provider confirms a real hold
   // (PaymentIntent requires_capture). Fail safe / fail closed otherwise.
   if (paymentService.isEnabled()) {
-    const platformFeeCents = state.session.feeType === 'patron' ? 100 : 0;
+    const platformFeeCents = roomState.session.feeType === 'patron' ? 100 : 0;
     const authorization = await paymentService.authorizeAction({
       gigId: durableGigId,
       actionType: isStraightTip ? 'tip' : 'request',
@@ -1279,14 +1484,14 @@ app.post("/api/request/create", async (req, res) => {
     });
   }
 
-  state.requests.push(newItem);
-  recalculateTotals(state);
-  await persistBusinessState();
+  roomState.requests.push(newItem);
+  recalculateTotals(roomState);
+  await persistBusinessStateForRoom(roomState, durableGigId);
 
   const responseBody = {
     success: true, 
     request: newItem,
-    state,
+    state: roomState,
     moderation: {
       outage_behavior: moderationOutcome.decision,
       ai_assistive_only: true
@@ -1305,7 +1510,6 @@ app.post("/api/request/create", async (req, res) => {
 // Boost an existing request
 app.post("/api/request/boost", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
   const resolvedActor = accessControl.resolveServerActor(req);
   const {
     requestId,
@@ -1329,12 +1533,13 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
   }
 
-  if (!activeGigId || activeGigId !== durableGigId) {
-    activeGigId = durableGigId;
-    syncActiveGigRouteContext(state);
+  const roomSnapshot = await loadRoomState(durableGigId);
+  if (roomSnapshot.roomStatus !== 'active') {
+    return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
+  const roomState = roomSnapshot.state;
 
-  const request = state.requests.find(r => r.id === requestId);
+  const request = roomState.requests.find(r => r.id === requestId);
   if (!request) {
     return res.status(404).json({ error: "Request not found" });
   }
@@ -1357,7 +1562,7 @@ app.post("/api/request/boost", async (req, res) => {
   }
 
   const sameActorBoostCount = resolvedActor.actorId
-    ? state.requests.reduce((count, current) => {
+    ? roomState.requests.reduce((count, current) => {
         if (current.gigId !== durableGigId) return count;
         return count + current.boosts.filter((boost) => boost.actorUserId === resolvedActor.actorId).length;
       }, 0)
@@ -1413,7 +1618,7 @@ app.post("/api/request/boost", async (req, res) => {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request, boost: existingBoost, state, reconciled: true };
+    const responseBody = { success: true, request, boost: existingBoost, state: roomState, reconciled: true };
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -1518,9 +1723,9 @@ app.post("/api/request/boost", async (req, res) => {
     request.shadowBanned = true; // Cascade shadow ban if the booster is vulgar
   }
 
-  recalculateTotals(state);
-  await persistBusinessState();
-  const responseBody = { success: true, request, state };
+  recalculateTotals(roomState);
+  await persistBusinessStateForRoom(roomState, durableGigId);
+  const responseBody = { success: true, request, state: roomState };
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
@@ -1533,14 +1738,15 @@ app.post("/api/request/boost", async (req, res) => {
 // Triage Queue Action (Accept / Deny)
 app.post("/api/request/triage", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
   const { requestId, action } = req.body; // action: 'approve' | 'deny'
-  const request = state.requests.find(r => r.id === requestId);
-  if (!request) {
+  const roomContext = await findRoomStateByRequestId(requestId);
+  if (!roomContext || !roomContext.gigId) {
     return res.status(404).json({ error: "Request not found" });
   }
+  const roomState = roomContext.state;
+  const request = roomContext.request;
 
-  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const previousStatus = request.status;
 
@@ -1550,7 +1756,7 @@ app.post("/api/request/triage", async (req, res) => {
     request.status = 'denied';
   }
   request.lastMutationActorUserId = actor.actorId;
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   // Settle the provider-backed hold according to the triage decision.
   if (paymentService.isEnabled()) {
@@ -1572,8 +1778,10 @@ app.post("/api/request/triage", async (req, res) => {
     }
   }
 
-  recalculateTotals(state);
+  recalculateTotals(roomState);
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'request',
     entityId: request.id,
@@ -1582,29 +1790,30 @@ app.post("/api/request/triage", async (req, res) => {
     nextStatus: request.status,
     metadata: {
       requestId: request.id,
-      gigId: request.gigId ?? activeGigId
+      gigId: roomContext.gigId
     }
   });
-  res.json({ success: true, request, state });
+  res.json({ success: true, request, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 // Fulfillment Queue Action (Fulfill)
 app.post("/api/request/fulfill", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
   const { requestId } = req.body;
-  const request = state.requests.find(r => r.id === requestId);
-  if (!request) {
+  const roomContext = await findRoomStateByRequestId(requestId);
+  if (!roomContext || !roomContext.gigId) {
     return res.status(404).json({ error: "Request not found (could be deleted)" });
   }
+  const roomState = roomContext.state;
+  const request = roomContext.request;
 
-  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const previousStatus = request.status;
 
   request.status = 'fulfilled';
   request.lastMutationActorUserId = actor.actorId;
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   // Capture any still-authorized holds for the fulfilled request (idempotent:
   // already-captured holds are a no-op).
@@ -1621,8 +1830,10 @@ app.post("/api/request/fulfill", async (req, res) => {
     }
   }
 
-  recalculateTotals(state);
+  recalculateTotals(roomState);
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'request',
     entityId: request.id,
@@ -1631,11 +1842,11 @@ app.post("/api/request/fulfill", async (req, res) => {
     nextStatus: request.status,
     metadata: {
       requestId: request.id,
-      gigId: request.gigId ?? activeGigId
+      gigId: roomContext.gigId
     }
   });
 
-  res.json({ success: true, request, state });
+  res.json({ success: true, request, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 app.post("/api/moderation/report", async (req, res) => {
@@ -1747,25 +1958,26 @@ app.post("/api/moderation/block", async (req, res) => {
 
 app.post("/api/moderation/hide", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
 
   const { requestId, reason, actor_user_id } = req.body;
   if (!requestId || !reason) {
     return res.status(400).json({ error: "requestId and reason are required." });
   }
 
-  const request = state.requests.find((item) => item.id === requestId);
-  if (!request) {
+  const roomContext = await findRoomStateByRequestId(String(requestId));
+  if (!roomContext || !roomContext.gigId) {
     return res.status(404).json({ error: "Request not found" });
   }
+  const roomState = roomContext.state;
+  const request = roomContext.request;
 
-  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
   const previousStatus = request.hidden ? 'hidden' : 'visible';
   request.hidden = true;
   request.lastMutationActorUserId = actor.actorId;
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   // A hidden request is never publicly eligible, so release its funds.
   if (paymentService.isEnabled()) {
@@ -1779,6 +1991,8 @@ app.post("/api/moderation/hide", async (req, res) => {
     }
   }
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'request',
     entityId: request.id,
@@ -1797,31 +2011,32 @@ app.post("/api/moderation/hide", async (req, res) => {
     actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
   });
 
-  return res.json({ success: true, moderation_action: 'hidden', request, state });
+  return res.json({ success: true, moderation_action: 'hidden', request, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 app.post("/api/moderation/remove", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  await refreshBusinessState();
 
   const { requestId, reason, actor_user_id } = req.body;
   if (!requestId || !reason) {
     return res.status(400).json({ error: "requestId and reason are required." });
   }
 
-  const request = state.requests.find((item) => item.id === requestId);
-  if (!request) {
+  const roomContext = await findRoomStateByRequestId(String(requestId));
+  if (!roomContext || !roomContext.gigId) {
     return res.status(404).json({ error: "Request not found" });
   }
+  const roomState = roomContext.state;
+  const request = roomContext.request;
 
-  const actor = await resolveProtectedMutationActor(req, res, request.gigId ?? activeGigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
   const previousStatus = request.status;
   request.removed = true;
   request.status = 'denied';
   request.lastMutationActorUserId = actor.actorId;
-  state.session.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
 
   // A removed request is never publicly eligible, so release its funds.
   if (paymentService.isEnabled()) {
@@ -1834,8 +2049,10 @@ app.post("/api/moderation/remove", async (req, res) => {
       request.paymentStatus = 'voided_or_refunded';
     }
   }
-  recalculateTotals(state);
+  recalculateTotals(roomState);
   await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
     actor,
     entityType: 'request',
     entityId: request.id,
@@ -1855,7 +2072,7 @@ app.post("/api/moderation/remove", async (req, res) => {
     actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
   });
 
-  return res.json({ success: true, moderation_action: 'removed', request, state });
+  return res.json({ success: true, moderation_action: 'removed', request, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
 app.get('/api/moderation/placeholders', (_req, res) => {

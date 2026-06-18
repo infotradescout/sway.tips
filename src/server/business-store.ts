@@ -1,12 +1,23 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import type { BackendState, RequestItem, BoostContribution, GigSession } from '../types';
+import type { BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
-import { gigSessions, requestBoosts, requests, users, performers, requestStatusEnum } from '../db/schema';
+import {
+  activeRoomRegistry,
+  gigSessions,
+  requestBoosts,
+  requests,
+  users,
+  performers,
+  requestStatusEnum
+} from '../db/schema';
+
+export type BusinessStoreRoomStatus = 'missing' | 'active' | 'inactive' | 'ended' | 'legacy_safe_empty';
 
 type DurableSnapshot = {
   state: BackendState;
   activeGigId: string | null;
+  roomStatus: BusinessStoreRoomStatus;
 };
 
 type PersistInput = {
@@ -18,7 +29,16 @@ type PersistOptions = {
   executor?: SwayDb;
 };
 
+type PersistedSessionRow = {
+  id: string;
+  runtimeSessionState: unknown;
+  status: string;
+  updatedAt: Date;
+};
+
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
+const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active'] as const;
+const TRACKED_ROOM_STATUSES = ['active', 'ending'] as const;
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
   hold: 'held_for_review',
@@ -53,6 +73,8 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
   const input = raw as Partial<GigSession>;
   return {
     status: input.status ?? fallback.status,
+    ownerActorUserId: input.ownerActorUserId ?? fallback.ownerActorUserId ?? null,
+    lastMutationActorUserId: input.lastMutationActorUserId ?? fallback.lastMutationActorUserId ?? null,
     talentName: input.talentName ?? fallback.talentName,
     talentRole: input.talentRole ?? fallback.talentRole,
     feeType: input.feeType ?? fallback.feeType,
@@ -84,10 +106,14 @@ function coerceBoost(raw: unknown): BoostContribution | null {
     patronName: input.patronName ?? 'Co-Sponsor',
     amount: Number(input.amount ?? 0),
     timestamp: input.timestamp ?? new Date().toISOString(),
+    actorUserId: input.actorUserId ?? null,
     clientRequestId: input.clientRequestId,
     idempotencyKey: input.idempotencyKey,
     idempotencyFingerprint: input.idempotencyFingerprint,
-    idempotencyExpiresAt: input.idempotencyExpiresAt
+    idempotencyExpiresAt: input.idempotencyExpiresAt,
+    paymentId: input.paymentId ?? null,
+    paymentIntentId: input.paymentIntentId ?? null,
+    paymentStatus: input.paymentStatus ?? null
   };
 }
 
@@ -117,6 +143,8 @@ function coerceRequest(raw: unknown): RequestItem | null {
     shadowBanned: Boolean(input.shadowBanned),
     hidden: Boolean(input.hidden),
     removed: Boolean(input.removed),
+    actorUserId: input.actorUserId ?? null,
+    lastMutationActorUserId: input.lastMutationActorUserId ?? null,
     createdAt: input.createdAt ?? new Date().toISOString(),
     clientRequestId: input.clientRequestId,
     idempotencyKey: input.idempotencyKey,
@@ -127,6 +155,9 @@ function coerceRequest(raw: unknown): RequestItem | null {
     payloadHash: input.payloadHash,
     amountCents: input.amountCents,
     currency: input.currency,
+    paymentId: input.paymentId ?? null,
+    paymentIntentId: input.paymentIntentId ?? null,
+    paymentStatus: input.paymentStatus ?? null,
     boosts
   };
 }
@@ -147,22 +178,60 @@ function deriveSessionStatus(status: GigSession['status']): 'draft' | 'active' |
   return 'draft';
 }
 
+function deriveRegistryStatus(status: GigSession['status']): 'active' | 'ending' | 'closed' {
+  if (status === 'active') return 'active';
+  if (status === 'ending') return 'ending';
+  return 'closed';
+}
+
+function derivePerformersFromSession(session: GigSession): PerformerProfile[] {
+  if (session.status === 'inactive' || !session.talentName) {
+    return [];
+  }
+
+  return [{
+    id: 'p-active',
+    name: session.talentName,
+    role: session.talentRole,
+    venueName: 'Current gig',
+    isFeatured: session.isFeatured,
+    featuredExpiresAt: session.featuredExpiresAt,
+    minimumTip: session.minimumTip,
+    avatarUrl: ''
+  }];
+}
+
+function createEmptyState(createInactiveSession: () => GigSession): BackendState {
+  return {
+    session: createInactiveSession(),
+    requests: [],
+    performers: [],
+    activeGigId: null
+  };
+}
+
+function normalizeState(input: BackendState, gigId: string | null): BackendState {
+  return {
+    session: input.session,
+    requests: input.requests,
+    performers: derivePerformersFromSession(input.session),
+    activeGigId: input.session.status === 'active' ? gigId : null
+  };
+}
+
 export function createBusinessStore(databaseUrl: string | undefined, createInactiveSession: () => GigSession) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
 
   async function ensureRuntimeUserRow(executor: SwayDb) {
-
     await executor.insert(users).values({
       id: RUNTIME_USER_ID,
       email: null,
       displayName: 'Runtime Owner',
       role: 'performer'
     }).onConflictDoNothing();
-
   }
 
   async function ensurePerformerForActor(executor: SwayDb, actorUserId: string | null | undefined) {
-
     const ownerUserId = actorUserId ?? RUNTIME_USER_ID;
     await ensureRuntimeUserRow(executor);
 
@@ -187,33 +256,12 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     return inserted.id;
   }
 
-  async function hydrateState(fallbackState: BackendState): Promise<DurableSnapshot> {
+  async function restoreSnapshotForGig(sessionRow: PersistedSessionRow): Promise<DurableSnapshot> {
     if (!db) {
-      return { state: fallbackState, activeGigId: null };
-    }
-
-    const [activeSession] = await db
-      .select({
-        id: gigSessions.id,
-        runtimeSessionState: gigSessions.runtimeSessionState,
-        status: gigSessions.status,
-        updatedAt: gigSessions.updatedAt
-      })
-      .from(gigSessions)
-      .where(eq(gigSessions.title, 'runtime_active_session'))
-      .orderBy(desc(gigSessions.updatedAt))
-      .limit(1);
-
-    if (!activeSession) {
       return {
-        state: {
-          ...fallbackState,
-          session: createInactiveSession(),
-          requests: [],
-          performers: [],
-          activeGigId: null
-        },
-        activeGigId: null
+        state: createEmptyState(createInactiveSession),
+        activeGigId: null,
+        roomStatus: 'missing'
       };
     }
 
@@ -225,7 +273,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         createdAt: requests.createdAt
       })
       .from(requests)
-      .where(eq(requests.gigId, activeSession.id))
+      .where(eq(requests.gigId, sessionRow.id))
       .orderBy(asc(requests.createdAt));
 
     const boostRows = await db
@@ -235,7 +283,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         createdAt: requestBoosts.createdAt
       })
       .from(requestBoosts)
-      .where(eq(requestBoosts.gigId, activeSession.id))
+      .where(eq(requestBoosts.gigId, sessionRow.id))
       .orderBy(asc(requestBoosts.createdAt));
 
     const boostsByRequestId = new Map<string, BoostContribution[]>();
@@ -253,21 +301,116 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         if (!request) return null;
         request.status = REVERSE_STATUS_MAP[row.status] ?? request.status;
         request.boosts = boostsByRequestId.get(row.id) ?? request.boosts;
+        request.gigId = request.gigId ?? sessionRow.id;
         return request;
       })
       .filter((request): request is RequestItem => Boolean(request));
 
-    const restoredSession = coerceGigSession(activeSession.runtimeSessionState, createInactiveSession());
+    const restoredSession = coerceGigSession(sessionRow.runtimeSessionState, createInactiveSession());
+    const roomStatus: BusinessStoreRoomStatus =
+      restoredSession.status === 'closed'
+        ? 'ended'
+        : restoredSession.status === 'active'
+          ? 'active'
+          : 'inactive';
+
+    const state = normalizeState({
+      session: restoredSession,
+      requests: restoredRequests,
+      performers: [],
+      activeGigId: null
+    }, sessionRow.id);
 
     return {
-      state: {
-        session: restoredSession,
-        requests: restoredRequests,
-        performers: fallbackState.performers,
-        activeGigId: activeSession.id
-      },
-      activeGigId: activeSession.id
+      state,
+      activeGigId: state.activeGigId,
+      roomStatus
     };
+  }
+
+  async function hydrateState(fallbackState: BackendState): Promise<DurableSnapshot> {
+    if (!db) {
+      return {
+        state: normalizeState(fallbackState, fallbackState.activeGigId ?? null),
+        activeGigId: fallbackState.session.status === 'active' ? (fallbackState.activeGigId ?? null) : null,
+        roomStatus: fallbackState.session.status === 'closed'
+          ? 'ended'
+          : fallbackState.session.status === 'active'
+            ? 'active'
+            : 'inactive'
+      };
+    }
+
+    const activeRoomRows = await db
+      .select({ gigId: activeRoomRegistry.gigId })
+      .from(activeRoomRegistry)
+      .where(inArray(activeRoomRegistry.registryStatus, [...LEGACY_FALLBACK_ACTIVE_STATUSES]))
+      .orderBy(desc(activeRoomRegistry.lastActivityAt), desc(activeRoomRegistry.updatedAt));
+
+    if (activeRoomRows.length !== 1) {
+      return {
+        state: createEmptyState(createInactiveSession),
+        activeGigId: null,
+        roomStatus: 'legacy_safe_empty'
+      };
+    }
+
+    return hydrateStateByGigId(activeRoomRows[0].gigId, fallbackState);
+  }
+
+  async function hydrateStateByGigId(gigId: string, fallbackState: BackendState): Promise<DurableSnapshot> {
+    if (!db) {
+      if (fallbackState.activeGigId === gigId) {
+        return {
+          state: normalizeState(fallbackState, gigId),
+          activeGigId: fallbackState.session.status === 'active' ? gigId : null,
+          roomStatus: fallbackState.session.status === 'closed'
+            ? 'ended'
+            : fallbackState.session.status === 'active'
+              ? 'active'
+              : 'inactive'
+        };
+      }
+
+      return {
+        state: createEmptyState(createInactiveSession),
+        activeGigId: null,
+        roomStatus: 'missing'
+      };
+    }
+
+    const [sessionRow] = await db
+      .select({
+        id: gigSessions.id,
+        runtimeSessionState: gigSessions.runtimeSessionState,
+        status: gigSessions.status,
+        updatedAt: gigSessions.updatedAt
+      })
+      .from(gigSessions)
+      .where(eq(gigSessions.id, gigId))
+      .limit(1);
+
+    if (!sessionRow) {
+      return {
+        state: createEmptyState(createInactiveSession),
+        activeGigId: null,
+        roomStatus: 'missing'
+      };
+    }
+
+    return restoreSnapshotForGig(sessionRow);
+  }
+
+  async function listTrackedGigIds(): Promise<string[]> {
+    if (!db) return [];
+
+    const rows = await db
+      .select({ gigId: activeRoomRegistry.gigId })
+      .from(activeRoomRegistry)
+      .where(inArray(activeRoomRegistry.registryStatus, [...TRACKED_ROOM_STATUSES]))
+      .orderBy(desc(activeRoomRegistry.lastActivityAt), desc(activeRoomRegistry.updatedAt));
+
+    return rows.map((row) => row.gigId);
   }
 
   async function persistState(input: PersistInput, options?: PersistOptions) {
@@ -280,6 +423,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     const session = input.state.session;
     const runtimePerformerId = await ensurePerformerForActor(executor, null);
     const performerId = (await ensurePerformerForActor(executor, session.ownerActorUserId ?? null)) ?? runtimePerformerId;
+    const registryStatus = deriveRegistryStatus(session.status);
+    const routePath = `/g/${input.activeGigId}`;
 
     await executor.insert(gigSessions).values({
       id: input.activeGigId,
@@ -287,7 +432,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       ownerActorUserId: session.ownerActorUserId ?? null,
       lastMutationActorUserId: session.lastMutationActorUserId ?? null,
       status: deriveSessionStatus(session.status),
-      title: 'runtime_active_session',
+      title: `runtime_room:${input.activeGigId}`,
       venueName: 'runtime',
       runtimeSessionState: session,
       startedAt: session.status === 'active' || session.status === 'ending' || session.status === 'closed' ? now : null,
@@ -306,7 +451,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         ownerActorUserId: session.ownerActorUserId ?? null,
         lastMutationActorUserId: session.lastMutationActorUserId ?? null,
         status: deriveSessionStatus(session.status),
-        title: 'runtime_active_session',
+        title: `runtime_room:${input.activeGigId}`,
         venueName: 'runtime',
         runtimeSessionState: session,
         startedAt: session.status === 'active' || session.status === 'ending' || session.status === 'closed' ? now : null,
@@ -314,6 +459,33 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         manualCloseoutStartedAt: session.status === 'ending' ? now : null,
         manualCloseoutCompletedAt: session.status === 'closed' ? now : null,
         autoCloseoutAt: new Date(now.getTime() + 4 * 60 * 60 * 1000),
+        updatedAt: now
+      }
+    });
+
+    await executor.insert(activeRoomRegistry).values({
+      gigId: input.activeGigId,
+      performerId,
+      ownerActorUserId: session.ownerActorUserId ?? null,
+      talentName: session.talentName || '',
+      talentRole: session.talentRole,
+      routePath,
+      registryStatus,
+      startedAt: session.status === 'active' || session.status === 'ending' || session.status === 'closed' ? now : null,
+      endedAt: session.status === 'closed' ? now : null,
+      lastActivityAt: now,
+      updatedAt: now
+    }).onConflictDoUpdate({
+      target: activeRoomRegistry.gigId,
+      set: {
+        performerId,
+        ownerActorUserId: session.ownerActorUserId ?? null,
+        talentName: session.talentName || '',
+        talentRole: session.talentRole,
+        routePath,
+        registryStatus,
+        endedAt: session.status === 'closed' ? now : null,
+        lastActivityAt: now,
         updatedAt: now
       }
     });
@@ -364,6 +536,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
   return {
     hasDurableStore: Boolean(db),
     hydrateState,
+    hydrateStateByGigId,
+    listTrackedGigIds,
     persistState,
     createGigId: () => randomUUID()
   };
