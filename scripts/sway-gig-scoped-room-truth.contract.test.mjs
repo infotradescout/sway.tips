@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+const storeSource = readFileSync(new URL('../src/server/business-store.ts', import.meta.url), 'utf8');
 const patronSource = readFileSync(new URL('../src/shells/PatronApp.tsx', import.meta.url), 'utf8');
 const overlaySource = readFileSync(new URL('../src/shells/OverlayApp.tsx', import.meta.url), 'utf8');
 const sharedSource = readFileSync(new URL('../src/shells/shared.tsx', import.meta.url), 'utf8');
@@ -12,12 +13,21 @@ if (!serverSource.includes('app.get("/api/state/:gigId"')) {
   failures.push('server.ts must expose a gig-scoped state route at /api/state/:gigId.');
 }
 
-if (!serverSource.includes('activeGigId !== requestedGigId')) {
-  failures.push('Gig-scoped state route must block cross-room leakage when the requested gigId does not match the live room.');
+for (const term of [
+  'const roomSnapshot = await loadRoomState(requestedGigId);',
+  "if (roomSnapshot.roomStatus === 'missing')",
+  "if (roomSnapshot.roomStatus === 'ended')",
+  "if (roomSnapshot.roomStatus !== 'active')",
+  "room_lookup: 'ended'",
+  "room_lookup: 'active'"
+]) {
+  if (!serverSource.includes(term)) {
+    failures.push(`Gig-scoped state route missing required room truth behavior: ${term}`);
+  }
 }
 
-if (!serverSource.includes("room_lookup: 'ended'")) {
-  failures.push('Gig-scoped state route must report ended-room lookups explicitly.');
+if (!storeSource.includes('hydrateStateByGigId') || !storeSource.includes('restoreSnapshotForGig')) {
+  failures.push('Business store must hydrate gig-scoped room state without a singleton active-room gate.');
 }
 
 if (!patronSource.includes('const statePath = routeGigId ? `/api/state/${routeGigId}` : null;')) {
@@ -33,7 +43,7 @@ if (!overlaySource.includes("statePath: routeGigId ? `/api/state/${routeGigId}` 
 }
 
 if (!overlaySource.includes("if (roomLookup.status !== 'active') return <JoinLiveRoomRecovery />;")) {
-  failures.push('OverlayApp.tsx must fail closed instead of rendering global room state.');
+  failures.push('OverlayApp.tsx must fail closed instead of rendering another room state.');
 }
 
 if (!sharedSource.includes('statePath?: string | null;')) {

@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto';
 function createInactiveSession() {
   return {
     status: 'inactive',
+    ownerActorUserId: null,
+    lastMutationActorUserId: null,
     talentName: '',
     talentRole: 'DJ',
     feeType: 'patron',
@@ -273,6 +275,22 @@ async function main() {
       boosts: []
     }
   ];
+
+  preCrashState.requests = preCrashState.requests.map((request) => ({
+    actorUserId: null,
+    lastMutationActorUserId: null,
+    paymentId: null,
+    paymentIntentId: null,
+    paymentStatus: null,
+    ...request,
+    boosts: request.boosts.map((boost) => ({
+      actorUserId: null,
+      paymentId: null,
+      paymentIntentId: null,
+      paymentStatus: null,
+      ...boost
+    }))
+  }));
 
   // Simulate session closeout lifecycle after triage/fulfill/hide/remove effects already applied.
   preCrashState.session.status = 'ending';

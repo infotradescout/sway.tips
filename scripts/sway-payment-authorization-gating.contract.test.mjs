@@ -48,7 +48,10 @@ if (/paymentStatus\s*=\s*authorization\.capturable\s*\?/.test(serverSource)) {
 // 5. Request creation must only happen after a confirmed (capturable) hold:
 //    the requires_confirmation early return must precede state mutation.
 const requestConfirmIndex = serverSource.indexOf("payment_status: 'requires_confirmation'");
-const requestPushIndex = serverSource.indexOf('state.requests.push(newItem)');
+const requestPushIndex = Math.max(
+  serverSource.indexOf('state.requests.push(newItem)'),
+  serverSource.indexOf('roomState.requests.push(newItem)')
+);
 if (requestConfirmIndex === -1 || requestPushIndex === -1 || requestConfirmIndex > requestPushIndex) {
   failures.push('Request must not enter app state before the requires_confirmation gate.');
 }
@@ -58,7 +61,10 @@ if (!/newItem\.paymentStatus\s*=\s*'authorized'/.test(serverSource)) {
 
 // Boost creation must likewise be gated before the boost is pushed.
 const boostConfirmIndex = serverSource.lastIndexOf("payment_status: 'requires_confirmation'");
-const boostPushIndex = serverSource.indexOf('request.boosts.push(newBoost)');
+const boostPushIndex = Math.max(
+  serverSource.indexOf('request.boosts.push(newBoost)'),
+  serverSource.indexOf('request.boosts.push(newBoost)')
+);
 if (boostConfirmIndex === -1 || boostPushIndex === -1 || boostConfirmIndex > boostPushIndex) {
   failures.push('Boost must not enter app state before the requires_confirmation gate.');
 }

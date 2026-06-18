@@ -30,23 +30,26 @@ if (!types.includes('activeGigId: string | null;')) {
   failures.push('BackendState must declare activeGigId: string | null.');
 }
 
-if (!server.includes('function syncActiveGigRouteContext(inputState: BackendState)')) {
-  failures.push('server.ts must normalize active gig route context.');
-}
-
 for (const term of [
-  'inputState.activeGigId = inputState.session.status === \'active\' ? (activeGigId ?? null) : null;',
-  'activeGigId: null',
-  'const talentAccess = await accessControl.requireTalentAccess(req);',
+  'function createEmptyBackendState()',
+  'function prepareRoomState(inputState: BackendState, gigId: string | null)',
+  'async function loadRoomState(gigId: string)',
+  'async function resolveLegacyWritableRoom(req: express.Request, res: express.Response)',
+  'async function findRoomStateByRequestId(requestId: string)',
+  'await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState())',
   'activeGigId: talentAccess.allowed ? state.activeGigId : null'
 ]) {
   if (!server.includes(term)) {
-    failures.push(`server.ts missing required activeGigId behavior: ${term}`);
+    failures.push(`server.ts missing required active gig route context behavior: ${term}`);
   }
 }
 
+if (!businessStore.includes('hydrateStateByGigId') || !businessStore.includes('listTrackedGigIds')) {
+  failures.push('Business store must expose gig-scoped hydration helpers for room isolation.');
+}
+
 if (!server.includes('res.json({') || !server.includes('session: state.session') || !server.includes('requests: state.requests') || !server.includes('performers: state.performers')) {
-  failures.push('/api/state must explicitly serialize the allowlisted state payload.');
+  failures.push('/api/state must explicitly serialize the allowlisted legacy state payload.');
 }
 
 const apiStateSection = server.slice(server.indexOf('app.get("/api/state"'), server.indexOf('app.post("/api/pending-action/reconcile"'));
@@ -74,8 +77,8 @@ if (!talentApp.includes('const { activeGigId } = bState;') || !talentApp.include
   failures.push('TalentApp must plumb activeGigId into TalentDashboard.');
 }
 
-if (!talentDashboard.includes('activeGigId: string | null;') || !talentDashboard.includes('void activeGigId;')) {
-  failures.push('TalentDashboard must accept activeGigId as inert data plumbing only.');
+if (!talentDashboard.includes('activeGigId: string | null;')) {
+  failures.push('TalentDashboard must accept activeGigId route context.');
 }
 
 for (const forbidden of [

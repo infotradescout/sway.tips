@@ -169,6 +169,23 @@ export const gigAccessGrants = pgTable('gig_access_grants', {
   gigUserIdx: uniqueIndex('gig_access_grants_gig_user_idx').on(table.gigId, table.userId)
 }));
 
+export const activeRoomRegistry = pgTable('active_room_registry', {
+  gigId: uuid('gig_id').primaryKey().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  ownerActorUserId: uuid('owner_actor_user_id').references(() => users.id),
+  talentName: text('talent_name').notNull().default(''),
+  talentRole: text('talent_role').notNull().default('Performer'),
+  routePath: text('route_path').notNull(),
+  registryStatus: text('registry_status').notNull().default('active'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps
+}, (table) => ({
+  statusActivityIdx: index('active_room_registry_status_activity_idx').on(table.registryStatus, table.lastActivityAt),
+  performerIdx: index('active_room_registry_performer_idx').on(table.performerId)
+}));
+
 export const requests = pgTable('requests', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
