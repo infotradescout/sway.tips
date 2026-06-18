@@ -20,11 +20,11 @@ import {
   Layers, 
   Flame, 
   Activity,
-  Award,
-  QrCode
+  Award
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
+import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
@@ -147,7 +147,6 @@ export default function PatronView({
   // Search Venue Directory States
   const [directorySearch, setDirectorySearch] = useState('');
   const [selectedDirectoryPerformer, setSelectedDirectoryPerformer] = useState<PerformerProfile | null>(null);
-  const [showDirQrCodeModal, setShowDirQrCodeModal] = useState<PerformerProfile | null>(null);
   
   // Search parameters
   const [searchQuery, setSearchQuery] = useState('');
@@ -223,6 +222,15 @@ export default function PatronView({
               : latestRequest?.status === 'hold'
                 ? 'pending_review'
                 : 'pending_review';
+
+  const funnelTelemetryPayload = {
+    shell: 'patron' as const,
+    surface: 'room-entry' as const,
+    route_family: gigId ? 'patron-gig' : 'patron-root',
+    has_route_context: Boolean(gigId),
+    has_session_context: session.status !== 'inactive' || requests.length > 0 || performers.length > 0,
+    build_commit: 'unknown'
+  };
 
   useEffect(() => {
     const updateConnectionState = () => setDegraded(!navigator.onLine);
@@ -500,7 +508,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -564,6 +572,12 @@ export default function PatronView({
 
     const platformFee = session.feeType === 'patron' ? 1.0 : 0;
     const total = amt + platformFee;
+
+    if (type === 'request') {
+      sendRequestStarted(funnelTelemetryPayload);
+    } else {
+      sendBoostStarted(funnelTelemetryPayload);
+    }
 
     setPaymentConfirmationState(null);
     setCheckoutPayload({
@@ -719,7 +733,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -736,6 +750,7 @@ export default function PatronView({
     }
 
     const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+    sendRequestStarted(funnelTelemetryPayload);
     setPaymentConfirmationState(null);
     setCheckoutPayload({
       open: true,
@@ -798,8 +813,22 @@ export default function PatronView({
             <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
               {previewMode
                 ? 'Demo data only. No payment or moderation action will be sent.'
-                : `Sway ${session.talentName || 'this performer'} on stage through the live queue. Confirm payment to send your action for performer approval.`}
+                : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
+            <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
+              <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Request</p>
+                <p className="mt-1 text-[10px] text-slate-400">Start a paid live request</p>
+              </div>
+              <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
+                <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
+              </div>
+              <div className="rounded-xl border border-cyan-500/20 bg-slate-950/70 px-3 py-2 text-center">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">Boost</p>
+                <p className="mt-1 text-[10px] text-slate-400">Push an approved item up</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -945,7 +974,7 @@ export default function PatronView({
             }`}
           >
             {session.talentRole === 'DJ' ? <Music className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-            {session.talentRole === 'DJ' ? "Request Track" : "Action Menu"}
+            {session.talentRole === 'DJ' ? "Request" : "Request"}
           </button>
 
           <button
@@ -956,7 +985,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Coins className="w-4 h-4" /> Tip Only
+            <Coins className="w-4 h-4" /> Tip
           </button>
 
           <button
@@ -967,7 +996,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Activity className="w-4 h-4" /> Live Queue
+            <Activity className="w-4 h-4" /> Boost Queue
           </button>
 
           <button
@@ -1641,24 +1670,18 @@ export default function PatronView({
                           </div>
                         </div>
 
-                        {/* QR Code section & Quick Tip actions */}
+                        {/* Link truth + quick tip actions */}
                         <div className="flex items-center gap-3 shrink-0">
-                          {/* Distinct QR Code with custom indicators if Featured */}
-                          <button
-                            type="button"
-                            onClick={() => setShowDirQrCodeModal(p)}
-                            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+                          <div
+                            className={`rounded-xl border px-2.5 py-2 text-[9px] font-mono font-bold uppercase tracking-widest ${
                               p.isFeatured
-                                ? 'bg-amber-500/10 border border-amber-400/40 hover:bg-amber-500/20 shadow'
-                                : 'bg-slate-955 bg-slate-950 border border-white/5 hover:border-white/10'
+                                ? 'border-amber-400/40 bg-amber-500/10 text-amber-300'
+                                : 'border-white/10 bg-slate-950 text-slate-400'
                             }`}
-                            title="Open Distinct QR Flyer"
+                            title="Ask venue staff or the performer for a live room link."
                           >
-                            <QrCode className={`w-5 h-5 ${p.isFeatured ? 'text-amber-400 animate-pulse' : 'text-slate-450 text-slate-400'}`} />
-                            {p.isFeatured && (
-                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full animate-ping font-sans"></span>
-                            )}
-                          </button>
+                            Room link
+                          </div>
 
                           {/* Quick Tip action */}
                           <button
@@ -1750,7 +1773,7 @@ export default function PatronView({
                                 return;
                               }
                               if (!gigId) {
-                                const routeCopy = 'This QR route is missing a valid gig ID. Scan the performer gig QR again.';
+                                const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
                                 setDegraded(true);
                                 setPendingActionMessage(routeCopy);
                                 alert(routeCopy);
@@ -1758,6 +1781,7 @@ export default function PatronView({
                               }
                               // Open confirmation
                               const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+                              sendRequestStarted(funnelTelemetryPayload);
                               setPaymentConfirmationState(null);
                               setCheckoutPayload({
                                 open: true,
@@ -1914,76 +1938,6 @@ export default function PatronView({
                 </div>
               )}
 
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* 🌟 DISTINCT QR Code Modal Overlay for Featured Performer */}
-      <AnimatePresence>
-        {showDirQrCodeModal && (
-          <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ scale: 0.95, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className={`w-full max-w-xs p-6 text-center font-sans rounded-3xl border relative overflow-hidden shadow-2xl ${
-                showDirQrCodeModal.isFeatured
-                  ? 'bg-gradient-to-b from-amber-950 via-slate-900 to-slate-950 border-amber-400/40'
-                  : 'bg-slate-900 border-white/10'
-              }`}
-            >
-              {showDirQrCodeModal.isFeatured && (
-                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl -mr-8 -mt-8 animate-pulse"></div>
-              )}
-
-              {/* Header Indicator */}
-              <div className="space-y-1 mb-5">
-                {showDirQrCodeModal.isFeatured ? (
-                  <span className="text-[8px] font-black tracking-widest bg-amber-500 text-slate-950 px-2.5 py-1 rounded-full font-mono inline-block animate-bounce shadow">
-                    ACTIVE PERFORMER
-                  </span>
-                ) : (
-                  <span className="text-[8px] font-black tracking-widest bg-slate-950 text-slate-400 px-2.5 py-1 rounded-full font-mono inline-block">
-                    STANDARD VENUE LISTING
-                  </span>
-                )}
-                <h3 className="text-base font-black text-white mt-1 uppercase tracking-wide">{showDirQrCodeModal.name}</h3>
-                <p className="text-[10px] text-fuchsia-400 font-semibold">{showDirQrCodeModal.role}</p>
-                <p className="text-[9px] text-slate-400 mt-1">📍 Venue: {showDirQrCodeModal.venueName}</p>
-              </div>
-
-              {/* Distinct QR Visual Core Code wrapper */}
-              <div className="flex justify-center my-6 select-none relative">
-                {showDirQrCodeModal.isFeatured ? (
-                  /* PREMIUM AMBER/GOLD REVOLVING RING */
-                  <div className="bg-gradient-to-r from-amber-400 via-fuchsia-500 to-amber-400 p-2 rounded-2xl relative shadow-lg shadow-amber-500/25">
-                    <div className="bg-slate-900 p-3 rounded-xl">
-                      <QrCode className="w-28 h-28 text-amber-400 animate-pulse" />
-                    </div>
-                  </div>
-                ) : (
-                  /* STANDARD QR CODE CARD */
-                  <div className="bg-slate-950 border border-white/5 p-4 rounded-xl">
-                    <QrCode className="w-28 h-28 text-white" />
-                  </div>
-                )}
-              </div>
-
-              {/* Subtext info */}
-              <p className={`text-[10px] leading-relaxed max-w-xs mx-auto mb-4 font-sans ${showDirQrCodeModal.isFeatured ? 'text-amber-250 text-amber-200' : 'text-slate-400'}`}>
-                {showDirQrCodeModal.isFeatured
-                  ? 'Active performer. Scan to open their live request page.'
-                  : 'Direct Tip and Request page for this performer.'}
-              </p>
-
-              <button
-                type="button"
-                onClick={() => setShowDirQrCodeModal(null)}
-                className="w-full py-2 bg-slate-950 text-slate-300 hover:text-white border border-white/5 hover:border-white/10 rounded-xl text-xs font-bold transition-all cursor-pointer font-sans"
-              >
-                Close Flyer View
-              </button>
             </motion.div>
           </div>
         )}

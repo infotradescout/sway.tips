@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Flame, Smartphone, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import PatronView from '../components/PatronView';
@@ -12,7 +12,8 @@ import {
 } from './shared';
 import {
   sendPatronNoSessionRecoveryViewed,
-  sendPatronNoSessionReturnHomeClicked
+  sendPatronNoSessionReturnHomeClicked,
+  sendRoomEntryViewed
 } from './frictionClient';
 
 type PatronRoute =
@@ -64,6 +65,8 @@ export default function PatronApp() {
   const statePath = routeGigId ? `/api/state/${routeGigId}` : null;
   const { bState, isLoading, setBState, roomLookup } = useSwayState({ statePath });
   const demoMode = isDemoModeEnabled();
+  const roomEntryEventKeyRef = useRef<string | null>(null);
+  const recoveryEventKeyRef = useRef<string | null>(null);
 
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
@@ -169,25 +172,50 @@ export default function PatronApp() {
     roomLookup.status === 'missing' ||
     roomLookup.status === 'error' ||
     (!hasPatronRouteContext && !hasSessionContext);
-  const frictionPayload = {
-    shell: 'patron' as const,
-    surface: 'recovery-view' as const,
-    route_family: routeGigId ? 'patron-gig' : 'patron-root',
-    has_route_context: hasPatronRouteContext,
-    has_session_context: hasSessionContext,
-    build_commit: 'unknown'
-  };
+  const routeFamily = routeGigId ? 'patron-gig' : 'patron-root';
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
 
   useEffect(() => {
     if (isLoading || !shouldShowNoSessionRecovery) return;
-    sendPatronNoSessionRecoveryViewed(frictionPayload);
-  }, [frictionPayload, isLoading, shouldShowNoSessionRecovery]);
+    const eventKey = `${routeFamily}:${hasPatronRouteContext}:${hasSessionContext}:recovery`;
+    if (recoveryEventKeyRef.current === eventKey) return;
+    recoveryEventKeyRef.current = eventKey;
+    sendPatronNoSessionRecoveryViewed({
+      shell: 'patron',
+      surface: 'recovery-view',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown'
+    });
+  }, [hasPatronRouteContext, hasSessionContext, isLoading, routeFamily, shouldShowNoSessionRecovery]);
+
+  useEffect(() => {
+    if (isLoading || shouldShowNoSessionRecovery || shouldShowEndedRoomRecovery || !hasPatronRouteContext) return;
+    const eventKey = `${routeFamily}:${routeGigId ?? 'none'}:entry`;
+    if (roomEntryEventKeyRef.current === eventKey) return;
+    roomEntryEventKeyRef.current = eventKey;
+    sendRoomEntryViewed({
+      shell: 'patron',
+      surface: 'room-entry',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown'
+    });
+  }, [hasPatronRouteContext, hasSessionContext, isLoading, routeFamily, routeGigId, shouldShowEndedRoomRecovery, shouldShowNoSessionRecovery]);
 
   const handleReturnHomeClick = () => {
-    sendPatronNoSessionReturnHomeClicked(frictionPayload);
+    sendPatronNoSessionReturnHomeClicked({
+      shell: 'patron',
+      surface: 'recovery-view',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown'
+    });
   };
 
   if (isLoading) return <LoadingState />;

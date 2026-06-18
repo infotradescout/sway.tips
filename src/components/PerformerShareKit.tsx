@@ -1,9 +1,10 @@
 import { Check, Copy, Link as LinkIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { sendShareLinkCopied } from '../shells/frictionClient';
 
 const MISSING_CONTEXT_COPY = 'No active live session. Start a session to generate your room link.';
-const ACTIVE_BODY_COPY = 'Copy your live room link so patrons can Request, Tip, and Boost.';
-const QR_UNAVAILABLE_COPY = 'QR display is not available yet. Use the room link for now.';
+const ACTIVE_BODY_COPY = 'Copy this room link so patrons land in the right live room to Request, Tip, and Boost.';
+const QR_UNAVAILABLE_COPY = 'QR display is not available yet. Use the room link for now. This share kit is link-only for now. Use the print-ready room link until dynamic QR generation is available.';
 
 function resolveRoomLink(activeGigId: string | null) {
   if (!activeGigId) return null;
@@ -46,6 +47,14 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
 
       setCopied(true);
       setCopyFeedback(null);
+      sendShareLinkCopied({
+        shell: 'talent',
+        surface: 'share-kit',
+        route_family: 'talent-gigs',
+        has_route_context: Boolean(activeGigId),
+        has_session_context: Boolean(activeGigId),
+        build_commit: 'unknown'
+      });
     } catch {
       setCopied(false);
       setCopyFeedback('Copy failed. Select the room link and copy it manually.');
@@ -69,7 +78,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
       <div className="mt-4 space-y-3">
         <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
           <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room link</p>
-          <p className={`mt-2 break-all text-xs font-semibold ${roomLink ? 'text-white' : 'text-slate-500'}`}>
+          <p data-share-kit-room-link="true" className={`mt-2 break-all text-xs font-semibold ${roomLink ? 'text-white' : 'text-slate-500'}`}>
             {roomLink ?? MISSING_CONTEXT_COPY}
           </p>
         </div>

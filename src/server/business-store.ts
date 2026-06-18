@@ -1,6 +1,6 @@
 import { asc, desc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import type { BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
+import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
 import {
   activeRoomRegistry,
@@ -39,6 +39,7 @@ type PersistedSessionRow = {
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
 const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active', 'ending'] as const;
 const TRACKED_ROOM_STATUSES = ['active', 'ending'] as const;
+const READABLE_ACTIVE_ROOM_STATUSES = ['active'] as const;
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
   hold: 'held_for_review',
@@ -417,6 +418,38 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     return rows.map((row) => row.gigId);
   }
 
+  async function listActiveRoomSummaries(): Promise<ActiveRoomSummary[]> {
+    if (!db) return [];
+
+    const rows = await db
+      .select({
+        gigId: activeRoomRegistry.gigId,
+        performerName: activeRoomRegistry.talentName,
+        talentRole: activeRoomRegistry.talentRole,
+        routePath: activeRoomRegistry.routePath,
+        startedAt: activeRoomRegistry.startedAt
+      })
+      .from(activeRoomRegistry)
+      .where(inArray(activeRoomRegistry.registryStatus, [...READABLE_ACTIVE_ROOM_STATUSES]))
+      .orderBy(desc(activeRoomRegistry.lastActivityAt), desc(activeRoomRegistry.updatedAt));
+
+    const summaries = await Promise.all(rows.map(async (row) => {
+      const snapshot = await hydrateStateByGigId(row.gigId, createEmptyState(createInactiveSession));
+      const requestCount = snapshot.state.requests.filter((request) => !request.hidden && !request.removed).length;
+
+      return {
+        gigId: row.gigId,
+        performerName: row.performerName || 'Unassigned performer',
+        talentRole: row.talentRole as ActiveRoomSummary['talentRole'],
+        routePath: row.routePath,
+        startedAt: row.startedAt ? row.startedAt.toISOString() : null,
+        requestCount
+      };
+    }));
+
+    return summaries;
+  }
+
   async function persistState(input: PersistInput, options?: PersistOptions) {
     const executor = options?.executor ?? db;
     if (!executor || !input.activeGigId) return;
@@ -541,6 +574,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     hasDurableStore: Boolean(db),
     hydrateState,
     hydrateStateByGigId,
+    listActiveRoomSummaries,
     listTrackedGigIds,
     persistState,
     createGigId: () => randomUUID()

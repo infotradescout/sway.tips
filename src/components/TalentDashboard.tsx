@@ -28,7 +28,7 @@ import {
   Hourglass
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GigSession, RequestItem, RequestPreset } from '../types';
+import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
 import PerformerShareKit from './PerformerShareKit';
 
 interface TalentDashboardProps {
@@ -42,6 +42,9 @@ interface TalentDashboardProps {
   onHide: (requestId: string) => void;
   onRemove: (requestId: string) => void;
   activeGigId: string | null;
+  activeRooms?: ActiveRoomSummary[];
+  selectedGigId?: string | null;
+  onSelectGigId?: (gigId: string | null) => void;
   previewMode?: boolean;
 }
 
@@ -56,9 +59,12 @@ export default function TalentDashboard({
   onHide,
   onRemove,
   activeGigId,
+  activeRooms = [],
+  selectedGigId = null,
+  onSelectGigId = () => {},
   previewMode = false
 }: TalentDashboardProps) {
-  void activeGigId;
+  const writableGigId = selectedGigId ?? activeGigId;
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
@@ -72,6 +78,16 @@ export default function TalentDashboard({
   // Featured Status Management States
   const [selectedHours, setSelectedHours] = useState<number>(3);
   const [featureTimeLeft, setFeatureTimeLeft] = useState<string>('');
+
+  const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
+    const payload = writableGigId ? { ...body, gig_id: writableGigId } : body;
+
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  };
 
   useEffect(() => {
     if (!session.isFeatured || !session.featuredExpiresAt) {
@@ -105,11 +121,7 @@ export default function TalentDashboard({
 
   const handleToggleFeature = async (hours: number, cost: number, activate: boolean) => {
     try {
-      await fetch('/api/session/feature', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hours, cost, activate })
-      });
+      await postSessionJson('/api/session/feature', { hours, cost, activate });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
@@ -148,11 +160,7 @@ export default function TalentDashboard({
 
   const handleToggleRequests = async (open: boolean) => {
     try {
-      await fetch('/api/session/window/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ open })
-      });
+      await postSessionJson('/api/session/window/toggle', { open });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
@@ -161,11 +169,7 @@ export default function TalentDashboard({
 
   const handleSetMode = async (mode: 'manual' | 'open_call') => {
     try {
-      await fetch('/api/session/mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode })
-      });
+      await postSessionJson('/api/session/mode', { mode });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
@@ -174,11 +178,7 @@ export default function TalentDashboard({
 
   const handleActivatePreset = async (durationMinutes: number, label: string) => {
     try {
-      await fetch('/api/session/window/preset/activate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ durationMinutes, label })
-      });
+      await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
@@ -189,10 +189,9 @@ export default function TalentDashboard({
     e.preventDefault();
     if (!presetFormLabel.trim() || presetFormDuration <= 0) return;
     try {
-      const res = await fetch('/api/session/window/preset/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: presetFormLabel, durationMinutes: presetFormDuration })
+      const res = await postSessionJson('/api/session/window/preset/create', {
+        label: presetFormLabel,
+        durationMinutes: presetFormDuration
       });
       if (res.ok) {
         setPresetFormLabel('');
@@ -206,11 +205,7 @@ export default function TalentDashboard({
 
   const handleDeletePreset = async (presetId: string) => {
     try {
-      await fetch('/api/session/window/preset/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ presetId })
-      });
+      await postSessionJson('/api/session/window/preset/delete', { presetId });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
@@ -290,7 +285,7 @@ export default function TalentDashboard({
             <p className="text-xs text-slate-400 font-sans mt-0.5">
               {session.status === 'active' && '🎙️ Live taking crowd tips'}
               {session.status === 'ending' && '⏳ Post-Gig 5-Minute Sweep timer ticking'}
-              {session.status === 'inactive' && 'Select your performance rules to generate QR Code'}
+              {session.status === 'inactive' && 'Select your performance rules to prepare a print-ready room link'}
             </p>
             {previewMode && (
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
@@ -748,7 +743,47 @@ export default function TalentDashboard({
 
           {/* Right sidebar panel: Stats and options summary */}
           <div className="space-y-6">
-            <PerformerShareKit activeGigId={activeGigId} />
+            <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                    Share-kit context follows the selected live room. This selector stays read-only until another active room exists.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-mono font-bold text-cyan-300">
+                  {activeRooms.length} room{activeRooms.length === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <label className="mt-4 block text-[9px] font-mono uppercase tracking-widest text-slate-500">Selected room</label>
+              <select
+                data-sway-room-selector="true"
+                value={selectedGigId ?? ''}
+                onChange={(event) => onSelectGigId(event.target.value || null)}
+                disabled={activeRooms.length <= 1}
+                className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                {activeRooms.length === 0 ? (
+                  <option value="">No active rooms yet</option>
+                ) : (
+                  activeRooms.map((room) => (
+                    <option key={room.gigId} value={room.gigId}>
+                      {room.performerName} · {room.gigId.slice(0, 8)} · {room.requestCount} live items
+                    </option>
+                  ))
+                )}
+              </select>
+
+              {selectedGigId && (
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                  Share-kit target: <span className="font-mono text-slate-300">/g/{selectedGigId}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
+            <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
             
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
             <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${
