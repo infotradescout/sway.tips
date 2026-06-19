@@ -27,6 +27,7 @@ export type AccessControl = {
   requireDevSandboxAccess: (req: Request) => Promise<GuardResult>;
 };
 
+// Talent route families intentionally map to the persisted performer role during fallback smoke and verification.
 type FallbackRole = 'performer' | 'admin' | 'support';
 
 type FallbackAccessPolicy = {
