@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
@@ -24,6 +25,19 @@ export type AccessControl = {
   allowPublicPatronAccess: (req: Request) => Promise<GuardResult>;
   allowPublicOverlayAccess: (req: Request) => Promise<GuardResult>;
   requireDevSandboxAccess: (req: Request) => Promise<GuardResult>;
+};
+
+type FallbackRole = 'performer' | 'admin' | 'support';
+
+type FallbackAccessPolicy = {
+  performerActorIds: Set<string>;
+  adminActorIds: Set<string>;
+  supportActorIds: Set<string>;
+};
+
+type FallbackVerificationConfig = {
+  signatureSecret: string | null;
+  maxAgeMs: number;
 };
 
 function isBrowserHtmlRequest(req: Request) {
@@ -142,7 +156,194 @@ function missingActor(): GuardResult {
 }
 
 function missingPersistence(): GuardResult {
-  return { allowed: false, status: 503, reason: 'Persisted access store is required for this route family.' };
+  return {
+    allowed: false,
+    status: 503,
+    reason: 'Protected route authorization requires durable access persistence or an explicitly configured fallback actor allowlist.'
+  };
+}
+
+function fallbackVerificationUnavailable(): GuardResult {
+  return {
+    allowed: false,
+    status: 503,
+    reason: 'Protected route fallback authorization requires a verified internal actor assertion configuration.'
+  };
+}
+
+function invalidFallbackAssertion(): GuardResult {
+  return {
+    allowed: false,
+    status: 403,
+    reason: 'Verified internal actor assertion required for fallback authorization.'
+  };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_FALLBACK_ASSERTION_MAX_AGE_MS = 5 * 60 * 1000;
+
+function parseFallbackActorIds(rawValue: string | undefined) {
+  if (!rawValue) return new Set<string>();
+
+  return new Set(
+    rawValue
+      .split(/[,\s]+/)
+      .map((value) => value.trim())
+      .filter((value) => UUID_PATTERN.test(value))
+  );
+}
+
+function createFallbackAccessPolicy(): FallbackAccessPolicy {
+  return {
+    performerActorIds: parseFallbackActorIds(process.env.SWAY_FALLBACK_TALENT_ACTOR_IDS),
+    adminActorIds: parseFallbackActorIds(process.env.SWAY_FALLBACK_ADMIN_ACTOR_IDS),
+    supportActorIds: parseFallbackActorIds(process.env.SWAY_FALLBACK_SUPPORT_ACTOR_IDS)
+  };
+}
+
+function parseFallbackAssertionMaxAgeMs(rawValue: string | undefined) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_FALLBACK_ASSERTION_MAX_AGE_MS;
+  }
+  return Math.floor(parsed * 1000);
+}
+
+function createFallbackVerificationConfig(): FallbackVerificationConfig {
+  const secret = process.env.SWAY_FALLBACK_ACTOR_HEADER_SECRET?.trim() || null;
+
+  return {
+    signatureSecret: secret,
+    maxAgeMs: parseFallbackAssertionMaxAgeMs(process.env.SWAY_FALLBACK_ACTOR_SIGNATURE_MAX_AGE_SECONDS)
+  };
+}
+
+function hasConfiguredFallback(policy: FallbackAccessPolicy, role: FallbackRole) {
+  if (role === 'performer') return policy.performerActorIds.size > 0;
+  if (role === 'admin') return policy.adminActorIds.size > 0;
+  return policy.supportActorIds.size > 0;
+}
+
+function allowsFallbackRole(policy: FallbackAccessPolicy, actorId: string, role: FallbackRole) {
+  if (role === 'performer') return policy.performerActorIds.has(actorId);
+  if (role === 'admin') return policy.adminActorIds.has(actorId);
+  return policy.supportActorIds.has(actorId);
+}
+
+function fallbackRoleResult(actor: SwayActor, role: ActorRole): GuardResult {
+  return { allowed: true, actor, role };
+}
+
+function readHeaderValue(req: Request, key: string) {
+  const value = req.headers[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function createFallbackAssertionPayload(input: {
+  actorId: string;
+  sessionId: string | null;
+  role: FallbackRole;
+  timestamp: string;
+}) {
+  return [input.actorId, input.sessionId ?? '', input.role, input.timestamp].join('|');
+}
+
+function verifyFallbackAssertion(req: Request, actor: SwayActor, role: FallbackRole, config: FallbackVerificationConfig): GuardResult | null {
+  if (!config.signatureSecret) {
+    return fallbackVerificationUnavailable();
+  }
+
+  const assertedRole = readHeaderValue(req, 'x-sway-fallback-role');
+  const timestamp = readHeaderValue(req, 'x-sway-fallback-timestamp');
+  const signature = readHeaderValue(req, 'x-sway-fallback-signature');
+
+  if (!assertedRole || !timestamp || !signature) {
+    return invalidFallbackAssertion();
+  }
+
+  if (assertedRole !== role) {
+    return invalidFallbackAssertion();
+  }
+
+  const assertedAt = Date.parse(timestamp);
+  if (!Number.isFinite(assertedAt) || Math.abs(Date.now() - assertedAt) > config.maxAgeMs) {
+    return invalidFallbackAssertion();
+  }
+
+  const expectedSignature = createHmac('sha256', config.signatureSecret)
+    .update(createFallbackAssertionPayload({
+      actorId: actor.actorId ?? '',
+      sessionId: actor.sessionId,
+      role,
+      timestamp
+    }))
+    .digest('hex');
+
+  const signatureBuffer = Buffer.from(signature, 'hex');
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+
+  if (signatureBuffer.length !== expectedBuffer.length || !timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return invalidFallbackAssertion();
+  }
+
+  return null;
+}
+
+function resolveTalentFallbackAccess(
+  req: Request,
+  actor: SwayActor,
+  policy: FallbackAccessPolicy,
+  verificationConfig: FallbackVerificationConfig
+): GuardResult {
+  if (!actor.actorId) return missingActor();
+  if (!hasConfiguredFallback(policy, 'performer')) {
+    return missingPersistence();
+  }
+  const verificationFailure = verifyFallbackAssertion(req, actor, 'performer', verificationConfig);
+  if (verificationFailure) return verificationFailure;
+  if (allowsFallbackRole(policy, actor.actorId, 'performer')) {
+    return fallbackRoleResult(actor, 'performer');
+  }
+  return { allowed: false, status: 403, reason: 'Performer membership or gig access grant required.' };
+}
+
+function resolveAdminFallbackAccess(
+  req: Request,
+  actor: SwayActor,
+  policy: FallbackAccessPolicy,
+  verificationConfig: FallbackVerificationConfig,
+  options: { allowSupport: boolean }
+): GuardResult {
+  if (!actor.actorId) return missingActor();
+  if (!hasConfiguredFallback(policy, 'admin') && !(options.allowSupport && hasConfiguredFallback(policy, 'support'))) {
+    return missingPersistence();
+  }
+  let verifiedRole: FallbackRole | null = null;
+  let verificationFailure = verifyFallbackAssertion(req, actor, 'admin', verificationConfig);
+  if (!verificationFailure) {
+    verifiedRole = 'admin';
+  } else if (options.allowSupport) {
+    verificationFailure = verifyFallbackAssertion(req, actor, 'support', verificationConfig);
+    if (!verificationFailure) {
+      verifiedRole = 'support';
+    }
+  }
+
+  if (!verifiedRole) {
+    return verificationFailure ?? invalidFallbackAssertion();
+  }
+
+  if (verifiedRole === 'admin' && allowsFallbackRole(policy, actor.actorId, 'admin')) {
+    return fallbackRoleResult(actor, 'admin');
+  }
+  if (verifiedRole === 'support' && options.allowSupport && allowsFallbackRole(policy, actor.actorId, 'support')) {
+    return fallbackRoleResult(actor, 'support');
+  }
+  return {
+    allowed: false,
+    status: 403,
+    reason: options.allowSupport ? 'Admin or support authorization required.' : 'Admin authorization required.'
+  };
 }
 
 async function hasAdminRole(db: SwayDb, actorId: string) {
@@ -205,12 +406,16 @@ async function hasTalentRole(db: SwayDb, actorId: string) {
 
 export function createAccessControl({
   databaseUrl,
-  isProduction
+  isProduction,
+  dbOverride
 }: {
   databaseUrl?: string;
   isProduction: boolean;
+  dbOverride?: SwayDb | null;
 }): AccessControl {
-  const db = databaseUrl ? createSwayDb(databaseUrl) : null;
+  const db = dbOverride ?? (databaseUrl ? createSwayDb(databaseUrl) : null);
+  const fallbackPolicy = db ? null : createFallbackAccessPolicy();
+  const fallbackVerificationConfig = db ? null : createFallbackVerificationConfig();
 
   return {
     resolveServerActor(req) {
@@ -220,7 +425,14 @@ export function createAccessControl({
     async requireTalentAccess(req) {
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
-      if (!db) return missingPersistence();
+      if (!db) {
+        return resolveTalentFallbackAccess(
+          req,
+          actor,
+          fallbackPolicy ?? createFallbackAccessPolicy(),
+          fallbackVerificationConfig ?? createFallbackVerificationConfig()
+        );
+      }
       if (await hasTalentRole(db, actor.actorId)) {
         return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
       }
@@ -230,7 +442,15 @@ export function createAccessControl({
     async requireAdminAccess(req) {
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
-      if (!db) return missingPersistence();
+      if (!db) {
+        return resolveAdminFallbackAccess(
+          req,
+          actor,
+          fallbackPolicy ?? createFallbackAccessPolicy(),
+          fallbackVerificationConfig ?? createFallbackVerificationConfig(),
+          { allowSupport: false }
+        );
+      }
       if (await hasAdminRole(db, actor.actorId)) {
         return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
       }
@@ -240,7 +460,15 @@ export function createAccessControl({
     async requireAdminOrSupportAccess(req) {
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
-      if (!db) return missingPersistence();
+      if (!db) {
+        return resolveAdminFallbackAccess(
+          req,
+          actor,
+          fallbackPolicy ?? createFallbackAccessPolicy(),
+          fallbackVerificationConfig ?? createFallbackVerificationConfig(),
+          { allowSupport: true }
+        );
+      }
 
       if (await hasAdminRole(db, actor.actorId) || await hasSupportRole(db, actor.actorId)) {
         return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
