@@ -97,7 +97,11 @@ for (const forbidden of [
   }
 }
 
-for (const qrTerm of ['react-qr', 'qrcode', '@zxing', 'qr-image']) {
+if (!packageJson.includes('qrcode.react')) {
+  failures.push('Performer room share completion must install qrcode.react for room-specific QR rendering.');
+}
+
+for (const qrTerm of ['react-qr', '@zxing', 'qr-image']) {
   if (packageJson.includes(qrTerm)) {
     failures.push(`No QR dependency may be added in this prerequisite lane: ${qrTerm}`);
   }

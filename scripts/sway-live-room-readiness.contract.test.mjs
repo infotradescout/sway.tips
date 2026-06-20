@@ -41,7 +41,7 @@ requireIncludes(
 requireIncludes(
   talentDashboard,
   'print-ready room link',
-  'TalentDashboard must use truthful room-link copy instead of QR generation copy.'
+  'TalentDashboard must use truthful room-link copy.'
 );
 requireIncludes(
   talentApp,
@@ -68,6 +68,36 @@ requireIncludes(
   performerShareKit,
   'print-ready room link',
   'PerformerShareKit must describe the room link honestly.'
+);
+requireIncludes(
+  performerShareKit,
+  'data-share-kit-room-qr="true"',
+  'PerformerShareKit must expose a stable room QR surface when an active room exists.'
+);
+requireIncludes(
+  performerShareKit,
+  'QRCodeCanvas',
+  'PerformerShareKit must render a QRCodeCanvas for the active room route.'
+);
+requireIncludes(
+  performerShareKit,
+  'Download QR sign',
+  'PerformerShareKit must let performers download a QR sign for venue use.'
+);
+requireIncludes(
+  performerShareKit,
+  'Print QR sign',
+  'PerformerShareKit must let performers print a QR sign for venue use.'
+);
+requireIncludes(
+  performerShareKit,
+  'bgColor="#ffffff"',
+  'PerformerShareKit QR sign must stay black-on-white for venue scan clarity.'
+);
+requireIncludes(
+  performerShareKit,
+  'fgColor="#000000"',
+  'PerformerShareKit QR sign must stay black-on-white for venue scan clarity.'
 );
 
 requireIncludes(

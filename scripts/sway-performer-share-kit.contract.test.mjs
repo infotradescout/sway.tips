@@ -25,26 +25,41 @@ if (performerShareKit.includes('/room/')) {
 }
 
 for (const term of [
-  'No active live session. Start a session to generate your room link.',
+  'No active live session. Start a session to generate your room link and QR code.',
+  'Patrons can scan this QR code or open this room link to land directly in your live Request, Tip, and Boost room.',
+  'This print-ready room link and QR sign stay tied to the selected live room.',
   'Copy room link',
   'Copied',
-  'QR display is not available yet. Use the room link for now.'
+  'Download QR sign',
+  'Print QR sign',
+  'QR code appears here after you start a live room.',
+  'data-share-kit-room-qr="true"',
+  'bgColor="#ffffff"',
+  'fgColor="#000000"',
+  'value={roomLink}',
+  'key={roomLink}'
 ]) {
   if (!performerShareKit.includes(term)) {
     failures.push(`PerformerShareKit missing required copy: ${term}`);
   }
 }
 
+for (const term of [
+  'disabled={!roomLink}',
+  'href={roomLink ?? undefined}',
+  'aria-disabled={!roomLink}',
+  '[activeGigId]'
+]) {
+  if (!performerShareKit.includes(term)) {
+    failures.push(`PerformerShareKit missing required room-state guard: ${term}`);
+  }
+}
+
 for (const forbidden of [
-  'Download QR',
-  'Download QR Sign',
-  'Print QR',
+  'QR display is not available yet. Use the room link for now.',
   'Connect Your Audience',
   'Share Your Room',
-  '/room/',
-  'QRCode',
-  'qr-code',
-  'qrcode'
+  '/room/'
 ]) {
   if (performerShareKit.includes(forbidden) || talentDashboard.includes(forbidden)) {
     failures.push(`Performer share kit lane must not introduce forbidden term: ${forbidden}`);
@@ -55,11 +70,15 @@ if (!talentDashboard.includes("import PerformerShareKit from './PerformerShareKi
   failures.push('TalentDashboard must import PerformerShareKit.');
 }
 
-if (!talentDashboard.includes('<PerformerShareKit activeGigId={activeGigId} />')) {
-  failures.push('TalentDashboard must render PerformerShareKit.');
+if (!talentDashboard.includes('<PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />')) {
+  failures.push('TalentDashboard must render PerformerShareKit with the selected active room context.');
 }
 
-for (const forbiddenPackageTerm of ['react-qr', 'qrcode', '@zxing', 'qr-image']) {
+if (!packageJson.includes('qrcode.react')) {
+  failures.push('Performer share kit lane must install qrcode.react for room-specific QR rendering.');
+}
+
+for (const forbiddenPackageTerm of ['react-qr', '@zxing', 'qr-image']) {
   if (packageJson.includes(forbiddenPackageTerm)) {
     failures.push(`No QR dependency may be added in this lane: ${forbiddenPackageTerm}`);
   }
