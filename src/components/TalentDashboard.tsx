@@ -285,7 +285,7 @@ export default function TalentDashboard({
             <p className="text-xs text-slate-400 font-sans mt-0.5">
               {session.status === 'active' && '🎙️ Live taking crowd tips'}
               {session.status === 'ending' && '⏳ Post-Gig 5-Minute Sweep timer ticking'}
-              {session.status === 'inactive' && 'Select your performance rules to prepare a print-ready room link'}
+              {session.status === 'inactive' && 'Select your performance rules to prepare a print-ready room link and QR sign'}
             </p>
             {previewMode && (
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
@@ -748,7 +748,7 @@ export default function TalentDashboard({
                 <div>
                   <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
                   <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                    Share-kit context follows the selected live room. This selector stays read-only until another active room exists.
+                    Share-kit context follows the selected live room. Copy the room link, show the QR sign, or print it for the venue once a room is live.
                   </p>
                 </div>
                 <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-mono font-bold text-cyan-300">
