@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
+import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
 
 export type SwayActor = {
   actorId: string | null;
@@ -17,6 +18,7 @@ type GuardResult =
   | { allowed: false; status: number; reason: string };
 
 export type AccessControl = {
+  hydrateRequestActor: (req: Request) => Promise<SwayActor>;
   resolveServerActor: (req: Request) => SwayActor;
   requireTalentAccess: (req: Request) => Promise<GuardResult>;
   requireAdminAccess: (req: Request) => Promise<GuardResult>;
@@ -144,7 +146,40 @@ function renderProtectedRouteRecovery(status: number, reason: string) {
 </html>`;
 }
 
+function resolveRawActor(req: Request): SwayActor {
+  return {
+    actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
+    sessionId: typeof req.headers['x-sway-session-id'] === 'string' ? req.headers['x-sway-session-id'] : null,
+    patronDeviceIdHash: typeof req.headers['x-sway-device-id-hash'] === 'string' ? req.headers['x-sway-device-id-hash'] : null
+  };
+}
+
+function writeResolvedActor(req: Request, actor: SwayActor) {
+  req.headers[RESOLVED_ACTOR_HEADER] = actor.actorId ?? '';
+  req.headers[RESOLVED_SESSION_HEADER] = actor.sessionId ?? '';
+  req.headers[RESOLVED_DEVICE_HEADER] = actor.patronDeviceIdHash ?? '';
+  req.headers[HYDRATED_ACTOR_HEADER] = '1';
+}
+
+function hasResolvedActor(req: Request) {
+  return req.headers[HYDRATED_ACTOR_HEADER] === '1';
+}
+
 function resolveActor(req: Request): SwayActor {
+  if (hasResolvedActor(req)) {
+    return {
+      actorId: typeof req.headers[RESOLVED_ACTOR_HEADER] === 'string' && req.headers[RESOLVED_ACTOR_HEADER].length > 0
+        ? req.headers[RESOLVED_ACTOR_HEADER]
+        : null,
+      sessionId: typeof req.headers[RESOLVED_SESSION_HEADER] === 'string' && req.headers[RESOLVED_SESSION_HEADER].length > 0
+        ? req.headers[RESOLVED_SESSION_HEADER]
+        : null,
+      patronDeviceIdHash: typeof req.headers[RESOLVED_DEVICE_HEADER] === 'string' && req.headers[RESOLVED_DEVICE_HEADER].length > 0
+        ? req.headers[RESOLVED_DEVICE_HEADER]
+        : null
+    };
+  }
+
   return {
     actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
     sessionId: typeof req.headers['x-sway-session-id'] === 'string' ? req.headers['x-sway-session-id'] : null,
@@ -182,6 +217,10 @@ function invalidFallbackAssertion(): GuardResult {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_FALLBACK_ASSERTION_MAX_AGE_MS = 5 * 60 * 1000;
+const RESOLVED_ACTOR_HEADER = 'x-sway-resolved-actor-id';
+const RESOLVED_SESSION_HEADER = 'x-sway-resolved-session-id';
+const RESOLVED_DEVICE_HEADER = 'x-sway-resolved-device-id-hash';
+const HYDRATED_ACTOR_HEADER = 'x-sway-actor-hydrated';
 
 function parseFallbackActorIds(rawValue: string | undefined) {
   if (!rawValue) return new Set<string>();
@@ -408,22 +447,74 @@ async function hasTalentRole(db: SwayDb, actorId: string) {
 export function createAccessControl({
   databaseUrl,
   isProduction,
-  dbOverride
+  dbOverride,
+  performerSessionStoreOverride
 }: {
   databaseUrl?: string;
   isProduction: boolean;
   dbOverride?: SwayDb | null;
+  performerSessionStoreOverride?: ReturnType<typeof createPerformerSessionStore> | null;
 }): AccessControl {
   const db = dbOverride ?? (databaseUrl ? createSwayDb(databaseUrl) : null);
   const fallbackPolicy = db ? null : createFallbackAccessPolicy();
   const fallbackVerificationConfig = db ? null : createFallbackVerificationConfig();
+  const performerSessionStore = db
+    ? (performerSessionStoreOverride ?? createPerformerSessionStore({ databaseUrl, dbOverride: db }))
+    : null;
+
+  function actorFromSession(session: ResolvedPerformerSession | null, req: Request): SwayActor {
+    const rawActor = resolveRawActor(req);
+    return {
+      actorId: session?.actorUserId ?? null,
+      sessionId: session?.sessionId ?? null,
+      patronDeviceIdHash: rawActor.patronDeviceIdHash
+    };
+  }
+
+  async function hydrateRequestActor(req: Request) {
+    if (hasResolvedActor(req)) {
+      return resolveActor(req);
+    }
+
+    if (!db) {
+      const rawActor = resolveRawActor(req);
+      writeResolvedActor(req, rawActor);
+      return rawActor;
+    }
+
+    const sessionToken = performerSessionStore?.readSessionTokenFromRequest(req) ?? null;
+    if (!sessionToken) {
+      const anonymousActor = actorFromSession(null, req);
+      writeResolvedActor(req, anonymousActor);
+      return anonymousActor;
+    }
+
+    const resolvedSession = await performerSessionStore?.resolveSessionFromToken(sessionToken) ?? null;
+    if (!resolvedSession) {
+      console.warn('Protected performer session rejected.', {
+        path: req.path,
+        ip: req.ip || null,
+        reason: 'invalid_or_expired_session'
+      });
+      const rejectedActor = actorFromSession(null, req);
+      writeResolvedActor(req, rejectedActor);
+      return rejectedActor;
+    }
+
+    const hydratedActor = actorFromSession(resolvedSession, req);
+    writeResolvedActor(req, hydratedActor);
+    return hydratedActor;
+  }
 
   return {
+    hydrateRequestActor,
+
     resolveServerActor(req) {
       return resolveActor(req);
     },
 
     async requireTalentAccess(req) {
+      await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
       if (!db) {
@@ -441,6 +532,7 @@ export function createAccessControl({
     },
 
     async requireAdminAccess(req) {
+      await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
       if (!db) {
@@ -459,6 +551,7 @@ export function createAccessControl({
     },
 
     async requireAdminOrSupportAccess(req) {
+      await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
       if (!db) {
@@ -479,6 +572,7 @@ export function createAccessControl({
     },
 
     async requireGigMutationAccess(req, gigId) {
+      await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
       if (!db) return missingPersistence();
@@ -583,8 +677,11 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       (shell === 'talent' || shell === 'admin');
 
     if (demoPreviewShellAllowed) {
-      req.headers['x-sway-resolved-actor-id'] = '';
-      req.headers['x-sway-resolved-device-id-hash'] = '';
+      writeResolvedActor(req, {
+        actorId: null,
+        sessionId: null,
+        patronDeviceIdHash: null
+      });
       next();
       return;
     }
@@ -613,8 +710,7 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       return;
     }
 
-    req.headers['x-sway-resolved-actor-id'] = result.actor.actorId ?? '';
-    req.headers['x-sway-resolved-device-id-hash'] = result.actor.patronDeviceIdHash ?? '';
+    writeResolvedActor(req, result.actor);
     next();
   };
 }

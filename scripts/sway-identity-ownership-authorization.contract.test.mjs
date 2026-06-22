@@ -16,6 +16,7 @@ const businessStoreSource = existsSync(businessStorePath) ? readFileSync(busines
 const serverSource = readFileSync(serverPath, 'utf8');
 
 for (const term of [
+  'hydrateRequestActor',
   'resolveServerActor',
   'requireAdminOrSupportAccess',
   'requireGigMutationAccess',
@@ -37,6 +38,7 @@ for (const term of [
   'writeAuditEvent',
   'businessDb.transaction',
   '/api/session/start',
+  '/api/talent/session/bootstrap',
   '/api/request/triage',
   '/api/request/fulfill',
   '/api/moderation/block',

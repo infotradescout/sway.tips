@@ -26,6 +26,7 @@ const patronView = read('src/components/PatronView.tsx');
 const frictionClient = read('src/shells/frictionClient.ts');
 const server = read('server.ts');
 const businessStore = read('src/server/business-store.ts');
+const performerBootstrapRunbook = read('docs/runbooks/performer-browser-session-bootstrap.md');
 const packageJson = JSON.parse(read('package.json'));
 
 requireIncludes(
@@ -47,6 +48,11 @@ requireIncludes(
   talentApp,
   "fetch('/api/talent/active-rooms')",
   'TalentApp must load read-only active room summaries from /api/talent/active-rooms.'
+);
+requireIncludes(
+  talentApp,
+  'secure Sway session link',
+  'TalentApp talent access copy must describe the secure performer session path truthfully.'
 );
 requireIncludes(
   talentApp,
@@ -172,6 +178,16 @@ requireIncludes(
   server,
   'app.get("/api/talent/active-rooms"',
   'server must expose /api/talent/active-rooms.'
+);
+requireIncludes(
+  server,
+  "app.get('/api/talent/session/bootstrap'",
+  'server must expose the performer browser session bootstrap endpoint.'
+);
+requireIncludes(
+  performerBootstrapRunbook,
+  '/api/talent/session/bootstrap?token=',
+  'Performer browser session runbook must document the bootstrap URL format.'
 );
 requireIncludes(
   server,

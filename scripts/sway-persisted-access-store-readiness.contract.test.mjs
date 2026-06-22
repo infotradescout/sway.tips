@@ -55,7 +55,7 @@ function createSignedFallbackHeaders({
   };
 }
 
-function createEmptyDbStub() {
+function createQueuedDbStub(responses = []) {
   let queryCount = 0;
   const builder = {
     from() {
@@ -66,7 +66,7 @@ function createEmptyDbStub() {
     },
     limit() {
       queryCount += 1;
-      return Promise.resolve([]);
+      return Promise.resolve(responses[queryCount - 1] ?? []);
     }
   };
 
@@ -78,6 +78,22 @@ function createEmptyDbStub() {
     },
     getQueryCount() {
       return queryCount;
+    }
+  };
+}
+
+function createSessionStoreStub(validSessions = {}) {
+  return {
+    cookieName: 'sway_performer_session',
+    hasDurableStore: true,
+    readSessionTokenFromRequest(req) {
+      const cookieHeader = req.headers.cookie;
+      if (typeof cookieHeader !== 'string') return null;
+      const match = cookieHeader.match(/sway_performer_session=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : null;
+    },
+    async resolveSessionFromToken(token) {
+      return validSessions[token] ?? null;
     }
   };
 }
@@ -238,14 +254,14 @@ async function main() {
     assert.equal(mutationUnavailable.allowed, false, 'Fallback must not silently authorize gig mutations without durable persistence.');
     assert.equal(mutationUnavailable.status, 503);
 
-    const stub = createEmptyDbStub();
-    const databaseBackedAccess = createAccessControl({
+    const anonymousDbStub = createQueuedDbStub();
+    const databaseBackedAnonymousAccess = createAccessControl({
       databaseUrl: 'postgres://db-present.example/sway',
       isProduction: true,
-      dbOverride: stub.db
+      dbOverride: anonymousDbStub.db
     });
 
-    const fallbackIgnoredForTalent = await databaseBackedAccess.requireTalentAccess(
+    const fallbackIgnoredForTalent = await databaseBackedAnonymousAccess.requireTalentAccess(
       makeReq('11111111-1111-4111-8111-111111111111', createSignedFallbackHeaders({
         actorId: '11111111-1111-4111-8111-111111111111',
         role: 'performer',
@@ -253,9 +269,9 @@ async function main() {
       }))
     );
     assert.equal(fallbackIgnoredForTalent.allowed, false, 'Fallback performer IDs must become inactive when durable DB access exists.');
-    assert.equal(fallbackIgnoredForTalent.status, 403);
+    assert.equal(fallbackIgnoredForTalent.status, 401);
 
-    const fallbackIgnoredForAdmin = await databaseBackedAccess.requireAdminOrSupportAccess(
+    const fallbackIgnoredForAdmin = await databaseBackedAnonymousAccess.requireAdminOrSupportAccess(
       makeReq('22222222-2222-4222-8222-222222222222', createSignedFallbackHeaders({
         actorId: '22222222-2222-4222-8222-222222222222',
         role: 'admin',
@@ -263,9 +279,50 @@ async function main() {
       }))
     );
     assert.equal(fallbackIgnoredForAdmin.allowed, false, 'Fallback admin IDs must not bypass DB-backed authorization.');
-    assert.equal(fallbackIgnoredForAdmin.status, 403);
+    assert.equal(fallbackIgnoredForAdmin.status, 401);
 
-    assert.ok(stub.getQueryCount() >= 5, 'DB-backed route checks must consult the durable store instead of fallback allowlists.');
+    assert.equal(anonymousDbStub.getQueryCount(), 0, 'DB-backed browser access must not trust raw actor headers when no valid session cookie is present.');
+
+    const validSessionDbStub = createQueuedDbStub([
+      [{ id: 'performer-owner-row' }],
+      [{ role: 'performer' }]
+    ]);
+    const databaseBackedSessionAccess = createAccessControl({
+      databaseUrl: 'postgres://db-present.example/sway',
+      isProduction: true,
+      dbOverride: validSessionDbStub.db,
+      performerSessionStoreOverride: createSessionStoreStub({
+        'session-valid': {
+          sessionId: 'session-valid',
+          actorUserId: '11111111-1111-4111-8111-111111111111',
+          expiresAt: new Date(Date.now() + 60_000)
+        }
+      })
+    });
+
+    const validSessionTalent = await databaseBackedSessionAccess.requireTalentAccess(
+      makeReq(null, { cookie: 'sway_performer_session=session-valid' })
+    );
+    assert.equal(validSessionTalent.allowed, true, 'Valid performer session cookie must resolve actor context in DB-backed mode.');
+    assert.equal(validSessionTalent.role, 'performer');
+    assert.ok(validSessionDbStub.getQueryCount() >= 2, 'DB-backed cookie access must consult the durable performer authorization tables.');
+
+    const invalidSessionAccess = createAccessControl({
+      databaseUrl: 'postgres://db-present.example/sway',
+      isProduction: true,
+      dbOverride: createQueuedDbStub().db,
+      performerSessionStoreOverride: createSessionStoreStub({})
+    });
+
+    for (const cookieValue of [
+      'sway_performer_session=session-tampered',
+      'sway_performer_session=session-expired',
+      'sway_performer_session=session-revoked'
+    ]) {
+      const invalidSessionResult = await invalidSessionAccess.requireTalentAccess(makeReq(null, { cookie: cookieValue }));
+      assert.equal(invalidSessionResult.allowed, false, `Invalid performer session cookie must fail closed: ${cookieValue}`);
+      assert.equal(invalidSessionResult.status, 401);
+    }
 
     console.log('Persisted access store readiness contract passed.');
   } finally {
