@@ -21,6 +21,8 @@ import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { createPaymentService } from "./src/server/payment-service";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
+import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
+import { createPerformerSessionStore } from "./src/server/performer-session-store";
 
 dotenv.config();
 
@@ -39,6 +41,10 @@ const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
+const performerSessionStore = createPerformerSessionStore({
+  databaseUrl: process.env.DATABASE_URL,
+  dbOverride: businessDb
+});
 const paymentProvider = createConfiguredPaymentProvider(process.env);
 const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
@@ -96,6 +102,15 @@ app.use(express.json({
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
   }
 }));
+
+app.use(async (req, _res, next) => {
+  try {
+    await accessControl.hydrateRequestActor(req);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.use((_req, res, next) => {
   res.setHeader('x-sway-build', `${buildMarker.commit}:${buildMarker.buildTimestamp}`);
@@ -499,6 +514,29 @@ async function resolveProtectedMutationActor(req: express.Request, res: express.
   };
 }
 
+async function resolveBootstrapTalentActor(actorUserId: string): Promise<ProtectedMutationActor | null> {
+  const bootstrapReq = {
+    headers: {
+      'x-sway-resolved-actor-id': actorUserId,
+      'x-sway-resolved-session-id': '',
+      'x-sway-resolved-device-id-hash': '',
+      'x-sway-actor-hydrated': '1'
+    },
+    path: '/api/talent/session/bootstrap',
+    ip: null
+  } as unknown as express.Request;
+
+  const talentAccess = await accessControl.requireTalentAccess(bootstrapReq);
+  if (talentAccess.allowed === false || !talentAccess.actor.actorId) {
+    return null;
+  }
+
+  return {
+    actorId: talentAccess.actor.actorId,
+    actorType: talentAccess.role ?? 'performer'
+  };
+}
+
 async function persistStateWithAudit(input: {
   roomState: BackendState;
   gigId: string;
@@ -684,6 +722,115 @@ app.get("/api/health/network-probe", (_req, res) => {
 app.get("/api/build-marker", (_req, res) => {
   applyNoStoreHeaders(res);
   res.json(buildMarker);
+});
+
+app.get('/api/talent/session/bootstrap', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!requirePersistentBusinessStore(res)) {
+    return;
+  }
+
+  if (!performerSessionStore.hasDurableStore) {
+    res.status(503).json({
+      error: 'Performer browser session bootstrap requires durable session persistence.'
+    });
+    return;
+  }
+
+  const bootstrapSecret = process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim() || '';
+  if (!bootstrapSecret) {
+    res.status(503).json({
+      error: 'Performer browser session bootstrap is not configured.'
+    });
+    return;
+  }
+
+  const bootstrapToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  const verifiedBootstrap = verifyPerformerBootstrapToken(bootstrapToken, bootstrapSecret);
+  if (!verifiedBootstrap.valid) {
+    console.warn('Performer bootstrap token rejected.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: verifiedBootstrap.reason
+    });
+    res.status(401).json({ error: 'Valid performer session bootstrap token required.' });
+    return;
+  }
+
+  const actor = await resolveBootstrapTalentActor(verifiedBootstrap.claims.actorUserId);
+  if (!actor) {
+    console.warn('Performer bootstrap actor rejected.', {
+      path: req.path,
+      ip: req.ip || null,
+      actorUserId: verifiedBootstrap.claims.actorUserId
+    });
+    res.status(403).json({ error: 'Authorized performer access is required.' });
+    return;
+  }
+
+  const issuedSession = await performerSessionStore.issueSession({
+    actorUserId: actor.actorId,
+    issuedBy: actor.actorId
+  });
+
+  if (businessDb) {
+    await writeAuditEvent(businessDb, {
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      entityType: 'performer_session',
+      entityId: issuedSession.sessionId,
+      eventType: 'performer_session.issue',
+      previousStatus: null,
+      nextStatus: 'active',
+      metadata: {
+        expiresAt: issuedSession.expiresAt.toISOString()
+      }
+    });
+  }
+
+  res.cookie(performerSessionStore.cookieName, issuedSession.token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    expires: issuedSession.expiresAt
+  });
+  res.redirect('/talent');
+});
+
+app.post('/api/talent/session/logout', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const actor = accessControl.resolveServerActor(req);
+  const sessionToken = performerSessionStore.readSessionTokenFromRequest(req);
+  const revokedSession = sessionToken
+    ? await performerSessionStore.revokeSessionFromToken(sessionToken)
+    : null;
+
+  res.clearCookie(performerSessionStore.cookieName, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/'
+  });
+
+  if (businessDb && revokedSession && actor.actorId) {
+    await writeAuditEvent(businessDb, {
+      actorId: actor.actorId,
+      actorType: 'performer',
+      entityType: 'performer_session',
+      entityId: revokedSession.sessionId,
+      eventType: 'performer_session.revoke',
+      previousStatus: 'active',
+      nextStatus: 'revoked',
+      metadata: {
+        revokedActorUserId: revokedSession.actorUserId
+      }
+    });
+  }
+
+  res.json({ success: true });
 });
 
 const shellTelemetryAllowedEvents = new Set([

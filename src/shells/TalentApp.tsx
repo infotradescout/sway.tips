@@ -164,8 +164,8 @@ export default function TalentApp() {
     return (
       <ShellMessage
         icon={<Lock className="h-5 w-5" />}
-        title="Talent Login"
-        body="Account authentication is the next production milestone. This route is separated now so talent-only screens are no longer reachable through the patron surface."
+        title="Talent Access"
+        body="Talent access is issued through a secure Sway session link for authorized performers and room operators."
         actions={
           <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/gigs">
             Continue to gigs

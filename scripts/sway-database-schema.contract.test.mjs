@@ -54,6 +54,7 @@ const requiredTables = [
   'performer_memberships',
   'gig_sessions',
   'gig_access_grants',
+  'performer_sessions',
   'requests',
   'request_boosts',
   'payments',
@@ -222,6 +223,16 @@ const requiredTableColumns = {
     'updated_at',
     'revoked_at',
     'metadata'
+  ],
+  performer_sessions: [
+    'id',
+    'actor_user_id',
+    'token_hash',
+    'expires_at',
+    'revoked_at',
+    'last_seen_at',
+    'issued_by',
+    'created_at'
   ]
 };
 
@@ -247,6 +258,10 @@ for (const term of [
   "ownerActorUserId: uuid('owner_actor_user_id')",
   "lastMutationActorUserId: uuid('last_mutation_actor_user_id')",
   "actorUserId: uuid('actor_user_id')",
+  "export const performerSessions",
+  "tokenHash: text('token_hash').notNull()",
+  "expiresAt: timestamp('expires_at'",
+  "revokedAt: timestamp('revoked_at'",
   "export const activeBlocks",
   'export const idempotencyKeys',
   'export const clientPendingActions'

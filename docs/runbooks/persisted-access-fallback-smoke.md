@@ -4,6 +4,8 @@
 
 This runbook turns the persisted-access fallback smoke flow into a repeatable production check instead of tribal knowledge. Use it when durable DB-backed access is not yet available for authenticated talent/admin smoke and the signed fallback assertion path must be verified.
 
+This is not the supported browser login path for `/talent`. Browser performer access must use the DB-backed performer session bootstrap flow instead.
+
 ## Required Render env vars
 
 Set these on the Render service when fallback smoke is needed:

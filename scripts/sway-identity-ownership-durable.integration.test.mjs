@@ -93,15 +93,54 @@ async function loadFactories() {
   };
 }
 
-function makeReq(actorId) {
+function makeReq(sessionToken) {
   const headers = {
-    'x-sway-session-id': 'sess-test',
+    cookie: sessionToken ? `sway_performer_session=${sessionToken}` : '',
     'x-sway-device-id-hash': 'device-test'
   };
-  if (actorId) {
-    headers['x-sway-actor-id'] = actorId;
-  }
   return { headers };
+}
+
+function createSessionStoreStub(validSessions = {}) {
+  return {
+    cookieName: 'sway_performer_session',
+    hasDurableStore: true,
+    readSessionTokenFromRequest(req) {
+      const cookieHeader = req.headers.cookie;
+      if (typeof cookieHeader !== 'string') return null;
+      const match = cookieHeader.match(/sway_performer_session=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : null;
+    },
+    async resolveSessionFromToken(token) {
+      return validSessions[token] ?? null;
+    }
+  };
+}
+
+function createValidSessions() {
+  const futureExpiry = new Date(Date.now() + 60_000);
+  return {
+    'session-performer-a': {
+      sessionId: 'session-performer-a',
+      actorUserId: '11111111-1111-4111-8111-111111111111',
+      expiresAt: futureExpiry
+    },
+    'session-performer-b': {
+      sessionId: 'session-performer-b',
+      actorUserId: '22222222-2222-4222-8222-222222222222',
+      expiresAt: futureExpiry
+    },
+    'session-patron': {
+      sessionId: 'session-patron',
+      actorUserId: '33333333-3333-4333-8333-333333333333',
+      expiresAt: futureExpiry
+    },
+    'session-support': {
+      sessionId: 'session-support',
+      actorUserId: '44444444-4444-4444-8444-444444444444',
+      expiresAt: futureExpiry
+    }
+  }
 }
 
 function createInactiveSession() {
@@ -220,33 +259,41 @@ async function main() {
 
   await store.persistState({ state: initialState, activeGigId: gigId });
 
-  const accessA = createAccessControl({ databaseUrl, isProduction: true });
+  const accessA = createAccessControl({
+    databaseUrl,
+    isProduction: true,
+    performerSessionStoreOverride: createSessionStoreStub(createValidSessions())
+  });
 
   const missingActorResult = await accessA.requireTalentAccess(makeReq(null));
   assert.equal(missingActorResult.allowed, false, 'Missing actor must be rejected for protected talent routes.');
 
-  const patronTalentResult = await accessA.requireTalentAccess(makeReq('33333333-3333-4333-8333-333333333333'));
+  const patronTalentResult = await accessA.requireTalentAccess(makeReq('session-patron'));
   assert.equal(patronTalentResult.allowed, false, 'Patron actors must be rejected for protected talent routes.');
 
-  const ownerBootstrapResult = await accessA.requireTalentAccess(makeReq('11111111-1111-4111-8111-111111111111'));
+  const ownerBootstrapResult = await accessA.requireTalentAccess(makeReq('session-performer-a'));
   assert.equal(ownerBootstrapResult.allowed, true, 'Performer owner must be allowed to bootstrap session start without membership/grant rows.');
 
-  const performerAResult = await accessA.requireGigMutationAccess(makeReq('11111111-1111-4111-8111-111111111111'), gigId);
+  const performerAResult = await accessA.requireGigMutationAccess(makeReq('session-performer-a'), gigId);
   assert.equal(performerAResult.allowed, true, 'Performer A should be authorized for own gig mutations.');
 
-  const performerBResult = await accessA.requireGigMutationAccess(makeReq('22222222-2222-4222-8222-222222222222'), gigId);
+  const performerBResult = await accessA.requireGigMutationAccess(makeReq('session-performer-b'), gigId);
   assert.equal(performerBResult.allowed, false, 'Performer B must be rejected for Performer A gig mutations.');
 
-  const patronResult = await accessA.requireGigMutationAccess(makeReq('33333333-3333-4333-8333-333333333333'), gigId);
+  const patronResult = await accessA.requireGigMutationAccess(makeReq('session-patron'), gigId);
   assert.equal(patronResult.allowed, false, 'Patron actors must not escalate into gig mutation authority.');
 
-  const supportResult = await accessA.requireGigMutationAccess(makeReq('44444444-4444-4444-8444-444444444444'), gigId);
+  const supportResult = await accessA.requireGigMutationAccess(makeReq('session-support'), gigId);
   assert.equal(supportResult.allowed, true, 'Support role should have privileged moderation/mutation access.');
 
   // Fresh instance durability proof for authorization and ownership.
-  const accessB = createAccessControl({ databaseUrl, isProduction: true });
-  const performerAReinit = await accessB.requireGigMutationAccess(makeReq('11111111-1111-4111-8111-111111111111'), gigId);
-  const performerBReinit = await accessB.requireGigMutationAccess(makeReq('22222222-2222-4222-8222-222222222222'), gigId);
+  const accessB = createAccessControl({
+    databaseUrl,
+    isProduction: true,
+    performerSessionStoreOverride: createSessionStoreStub(createValidSessions())
+  });
+  const performerAReinit = await accessB.requireGigMutationAccess(makeReq('session-performer-a'), gigId);
+  const performerBReinit = await accessB.requireGigMutationAccess(makeReq('session-performer-b'), gigId);
   assert.equal(performerAReinit.allowed, true, 'Performer A must remain authorized after fresh service instance.');
   assert.equal(performerBReinit.allowed, false, 'Performer B must remain rejected after fresh service instance.');
 

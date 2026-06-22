@@ -186,6 +186,20 @@ export const activeRoomRegistry = pgTable('active_room_registry', {
   performerIdx: index('active_room_registry_performer_idx').on(table.performerId)
 }));
 
+export const performerSessions = pgTable('performer_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  issuedBy: uuid('issued_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  tokenHashIdx: uniqueIndex('performer_sessions_token_hash_idx').on(table.tokenHash),
+  actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt)
+}));
+
 export const requests = pgTable('requests', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
