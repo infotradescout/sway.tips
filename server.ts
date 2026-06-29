@@ -724,6 +724,18 @@ app.get("/api/build-marker", (_req, res) => {
   res.json(buildMarker);
 });
 
+app.get('/api/runtime-config-status', (_req, res) => {
+  applyNoStoreHeaders(res);
+  res.json({
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
+    hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
+    nodeEnv: process.env.NODE_ENV ?? null,
+    commit: buildMarker.commit,
+    branch: buildMarker.branch,
+    buildTimestamp: buildMarker.buildTimestamp
+  });
+});
+
 app.get('/api/talent/session/bootstrap', async (req, res) => {
   applyNoStoreHeaders(res);
 
