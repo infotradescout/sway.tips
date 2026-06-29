@@ -12,12 +12,40 @@ function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
 }
 
+type TalentPerformerProfile = {
+  performer_id: string;
+  display_name: string;
+  handle: string;
+  owner_user_id: string;
+} | null;
+
 export default function TalentApp() {
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
+  const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
   const statePath = selectedGigId ? `/api/state/${selectedGigId}` : '/api/state';
   const { bState, isLoading, setBState } = useSwayState({ statePath });
+
+  const refreshPerformerProfile = async () => {
+    if (demoMode) {
+      setPerformerProfile(null);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/state');
+      if (!response.ok) {
+        setPerformerProfile(null);
+        return;
+      }
+      const data = await response.json();
+      setPerformerProfile(data?.performerProfile ?? null);
+    } catch (error) {
+      console.warn('Unable to load performer profile:', error);
+      setPerformerProfile(null);
+    }
+  };
 
   const refreshActiveRooms = async () => {
     if (demoMode) {
@@ -50,6 +78,10 @@ export default function TalentApp() {
   }, [demoMode, bState.activeGigId, bState.requests.length, bState.session.status]);
 
   useEffect(() => {
+    void refreshPerformerProfile();
+  }, [demoMode]);
+
+  useEffect(() => {
     if (selectedGigId && activeRooms.some((room) => room.gigId === selectedGigId)) return;
     if (bState.activeGigId && activeRooms.some((room) => room.gigId === bState.activeGigId)) {
       setSelectedGigId(bState.activeGigId);
@@ -70,7 +102,14 @@ export default function TalentApp() {
   }) => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/session/start', setupData);
+      const performerIdentityName =
+        performerProfile?.display_name?.trim()
+        || performerProfile?.handle?.trim()
+        || '';
+      const data = await postJson('/api/session/start', {
+        ...setupData,
+        talentName: setupData.talentName.trim() || performerIdentityName
+      });
       setBState(data.state);
       setSelectedGigId(data.state?.activeGigId ?? null);
       await refreshActiveRooms();
@@ -179,6 +218,11 @@ export default function TalentApp() {
 
   const { session, requests } = bState;
   const { activeGigId } = bState;
+  const performerIdentityName =
+    performerProfile?.display_name?.trim()
+    || performerProfile?.handle?.trim()
+    || session.talentName
+    || 'Unassigned performer';
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
 
@@ -207,15 +251,17 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title="Performer Console"
-            eyebrow="Operator App"
-            primaryLabel="Now Playing, Pending Requests, Approved Queue, and Controls"
-            secondaryLabel="Room State"
-            isEmpty={session.status === 'inactive' && requests.length === 0}
+            title={session.status === 'inactive' ? 'Sway to Play' : 'Performer Console'}
+            eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
+            primaryLabel={session.status === 'inactive'
+              ? 'Start a live room and let the crowd send Requests, Tips, and Boosts'
+              : 'Now Playing, Pending Requests, Approved Queue, and Controls'}
+            secondaryLabel={session.status === 'inactive' ? 'Performer profile' : 'Room State'}
+            isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
-                <p className="text-sm font-bold text-white">No active session yet</p>
-                <p className="mt-2 text-xs text-slate-400">Start a session to open the request queue and room controls.</p>
+                <p className="text-sm font-bold text-white">Sway to Play</p>
+                <p className="mt-2 text-xs text-slate-400">Start a live room and let the crowd send Requests, Tips, and Boosts.</p>
               </div>
             }
             primary={
@@ -234,14 +280,19 @@ export default function TalentApp() {
                 selectedGigId={selectedGigId}
                 onSelectGigId={setSelectedGigId}
                 previewMode={demoMode}
+                performerProfile={performerProfile}
               />
             }
             secondary={
               <div className="space-y-4 text-sm">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
-                  <p className="mt-1 font-bold text-white">{session.talentName || 'Unassigned performer'}</p>
-                  <p className="text-xs text-slate-400">{session.status} / {session.talentRole}</p>
+                  <p className="mt-1 font-bold text-white">{session.status === 'inactive' ? performerIdentityName : (session.talentName || performerIdentityName)}</p>
+                  <p className="text-xs text-slate-400">
+                    {session.status === 'inactive'
+                      ? `Ready to start live room${performerProfile?.handle ? ` @${performerProfile.handle}` : ''}`
+                      : `${session.status} / ${session.talentRole}`}
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg bg-slate-950 p-3">

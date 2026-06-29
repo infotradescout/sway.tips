@@ -10,9 +10,10 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
+import { eq } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, moderationEvents } from "./src/db/schema";
+import { activeBlocks, moderationEvents, performers } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -460,6 +461,34 @@ type ProtectedMutationActor = {
   actorId: string;
   actorType: string;
 };
+
+async function loadAuthenticatedPerformerProfile(req: express.Request) {
+  if (!businessDb) return null;
+
+  const actor = accessControl.resolveServerActor(req);
+  if (!actor.actorId) return null;
+
+  try {
+    const [performerRow] = await businessDb
+      .select({
+        performer_id: performers.id,
+        display_name: performers.displayName,
+        handle: performers.handle,
+        owner_user_id: performers.ownerUserId
+      })
+      .from(performers)
+      .where(eq(performers.ownerUserId, actor.actorId))
+      .limit(1);
+
+    return performerRow ?? null;
+  } catch (error) {
+    console.warn('Unable to resolve authenticated performer profile for /api/state.', {
+      actorUserId: actor.actorId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
 
 async function resolveProtectedMutationActor(req: express.Request, res: express.Response, gigId?: string | null): Promise<ProtectedMutationActor | null> {
   if (!requirePersistentBusinessStore(res)) {
@@ -1017,12 +1046,16 @@ app.post("/api/payment/webhook", async (req, res) => {
 app.get("/api/state", async (req, res) => {
   await refreshBusinessState();
   const talentAccess = await accessControl.requireTalentAccess(req);
+  const performerProfile = talentAccess.allowed
+    ? await loadAuthenticatedPerformerProfile(req)
+    : null;
   applyNoStoreHeaders(res);
   res.json({
     session: state.session,
     requests: state.requests,
     performers: state.performers,
-    activeGigId: talentAccess.allowed ? state.activeGigId : null
+    activeGigId: talentAccess.allowed ? state.activeGigId : null,
+    performerProfile
   });
 });
 

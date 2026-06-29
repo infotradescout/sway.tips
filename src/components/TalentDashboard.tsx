@@ -46,6 +46,12 @@ interface TalentDashboardProps {
   selectedGigId?: string | null;
   onSelectGigId?: (gigId: string | null) => void;
   previewMode?: boolean;
+  performerProfile?: {
+    performer_id: string;
+    display_name: string;
+    handle: string;
+    owner_user_id: string;
+  } | null;
 }
 
 export default function TalentDashboard({
@@ -62,9 +68,12 @@ export default function TalentDashboard({
   activeRooms = [],
   selectedGigId = null,
   onSelectGigId = () => {},
-  previewMode = false
+  previewMode = false,
+  performerProfile = null
 }: TalentDashboardProps) {
   const writableGigId = selectedGigId ?? activeGigId;
+  const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
+  const welcomePerformerName = defaultPerformerName || session.talentName || 'Performer';
   // Session Configuration Setup States (for Starting New Session)
   const [setupName, setSetupName] = useState('');
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
@@ -88,6 +97,12 @@ export default function TalentDashboard({
       body: JSON.stringify(payload)
     });
   };
+
+  useEffect(() => {
+    if (session.status !== 'inactive') return;
+    if (!defaultPerformerName || setupName.trim()) return;
+    setSetupName(defaultPerformerName);
+  }, [defaultPerformerName, session.status, setupName]);
 
   useEffect(() => {
     if (!session.isFeatured || !session.featuredExpiresAt) {
@@ -329,109 +344,150 @@ export default function TalentDashboard({
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-2xl mx-auto space-y-6 glow-fuchsia"
+          className="bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-3xl mx-auto space-y-6 glow-fuchsia"
         >
-          <div className="text-center space-y-2">
-            <h3 className="font-display text-2xl font-black text-white tracking-tight uppercase">Set Up Your Session</h3>
-            <p className="text-sm text-slate-400 font-sans">Set your performance rules before patrons start sending requests and tips.</p>
-          </div>
-
-          <form onSubmit={handleStart} className="space-y-6">
-            
-            {/* Performer Vitals */}
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMER NAME</label>
-                <input 
-                  type="text" 
-                  value={setupName}
-                  onChange={(e) => setSetupName(e.target.value)}
-                  placeholder="e.g. DJ Luna, Bartender Dave"
-                  required
-                  className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMANCE TYPE</label>
-                <select 
-                  value={setupRole}
-                  onChange={(e) => setSetupRole(e.target.value as any)}
-                  className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-slate-300 text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium cursor-pointer"
-                >
-                  <option value="DJ">🎵 DJ (Music search + Album Art)</option>
-                  <option value="Bartender">🍸 Bartender (Cocktail menu triggers)</option>
-                  <option value="Performer">🎤 Street Magician / Live Artist (Action list)</option>
-                </select>
-              </div>
+          <div className="space-y-4 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-fuchsia-300">
+              <Radio className="h-3.5 w-3.5" />
+              Sway to Play
             </div>
-
-            {/* Platform Fee Responsibility */}
             <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">EAT PLATFORM TRANSACTION FEE ($1.00)</label>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PLATFORM FEE</span>
-              </div>
-              
-              <div className="grid sm:grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setSetupFeeType('patron')}
-                  className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                    setupFeeType === 'patron'
-                      ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
-                      : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
-                  }`}
-                >
-                  <span className="text-xs font-bold text-white mb-1">Pass as Convenience Fee</span>
-                  <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                    Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSetupFeeType('talent')}
-                  className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                    setupFeeType === 'talent'
-                      ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
-                      : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
-                  }`}
-                >
-                  <span className="text-xs font-bold text-white mb-1">Absorb Processing Cost</span>
-                  <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                    Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.
-                  </p>
-                </button>
-              </div>
-            </div>
-
-            {/* Minimum Entrance Bar Check */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
-              <div className="flex justify-between items-center text-sm font-mono text-slate-400">
-                <span>Minimum Tip</span>
-                <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
-              </div>
-              <input 
-                type="range" 
-                min="1" 
-                max="25" 
-                step="1"
-                value={setupMinTip}
-                onChange={(e) => setSetupMinTip(Number(e.target.value))}
-                className="w-full accent-fuchsia-500 cursor-pointer"
-              />
-              <p className="text-[11px] text-slate-500 font-sans font-medium">
-                Every request requires this baseline to prevent micro-transaction spam and system clutter.
+              <h3 className="font-display text-3xl font-black tracking-tight text-white">Welcome, {welcomePerformerName}</h3>
+              <p className="mx-auto max-w-xl text-sm leading-6 text-slate-300">
+                Start a live room and let the crowd send Requests, Tips, and Boosts.
               </p>
             </div>
+          </div>
 
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white font-bold rounded-xl text-sm transition-all shadow-lg glow-fuchsia transform active:scale-95 cursor-pointer"
+          <form onSubmit={handleStart} className="space-y-5">
+            <div className="rounded-2xl border border-fuchsia-500/20 bg-slate-950/70 p-5 text-left">
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">First Run</p>
+              <h4 className="mt-2 font-display text-2xl font-black text-white">Start your live room</h4>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                Open a live room for tonight and share it with the crowd in one step. Your room-specific link and QR appear after the room goes live.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-semibold text-white">
+                  Performer: {welcomePerformerName}
+                </span>
+                {performerProfile?.handle ? (
+                  <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-mono text-cyan-300">
+                    @{performerProfile.handle}
+                  </span>
+                ) : null}
+              </div>
+              <button
+                type="submit"
+                className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
+              >
+                <Play className="h-4 w-4" /> Start Live Room
+              </button>
+            </div>
+
+            <details
+              className="group rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+              open={showSettings}
+              onToggle={(event) => setShowSettings((event.currentTarget as HTMLDetailsElement).open)}
             >
-              <Play className="w-4 h-4" /> Start Live Session
-            </button>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Advanced room settings</p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Adjust performer name, role, fee handling, and minimum tip if tonight needs custom rules.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
+                  {showSettings ? 'Collapse' : 'Expand'}
+                </span>
+              </summary>
+
+              <div className="mt-4 space-y-6">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMER NAME</label>
+                    <input
+                      type="text"
+                      value={setupName}
+                      onChange={(e) => setSetupName(e.target.value)}
+                      placeholder="e.g. DJ Luna, Bartender Dave"
+                      required
+                      className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMANCE TYPE</label>
+                    <select
+                      value={setupRole}
+                      onChange={(e) => setSetupRole(e.target.value as any)}
+                      className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-slate-300 text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium cursor-pointer"
+                    >
+                      <option value="DJ">DJ</option>
+                      <option value="Bartender">Bartender</option>
+                      <option value="Performer">Performer</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">EAT PLATFORM TRANSACTION FEE ($1.00)</label>
+                    <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PLATFORM FEE</span>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setSetupFeeType('patron')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                        setupFeeType === 'patron'
+                          ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
+                          : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-white mb-1">Pass as Convenience Fee</span>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                        Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSetupFeeType('talent')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                        setupFeeType === 'talent'
+                          ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
+                          : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-white mb-1">Absorb Processing Cost</span>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                        Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
+                  <div className="flex justify-between items-center text-sm font-mono text-slate-400">
+                    <span>Minimum Tip</span>
+                    <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="25"
+                    step="1"
+                    value={setupMinTip}
+                    onChange={(e) => setSetupMinTip(Number(e.target.value))}
+                    className="w-full accent-fuchsia-500 cursor-pointer"
+                  />
+                  <p className="text-[11px] text-slate-500 font-sans font-medium">
+                    Every request requires this baseline to prevent micro-transaction spam and system clutter.
+                  </p>
+                </div>
+              </div>
+            </details>
           </form>
         </motion.div>
       )}
