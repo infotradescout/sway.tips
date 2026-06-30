@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This runbook is the supported production path for an already-authorized performer or room operator to reach `/talent` in a normal browser without manual header injection.
+This runbook is the operator/support fallback path for an already-authorized performer or room operator to reach `/talent` in a normal browser without manual header injection.
 
 It is intentionally narrow:
 
@@ -10,6 +10,7 @@ It is intentionally narrow:
 - no patron login
 - no password flow
 - no fallback headers as browser auth
+- no replacement for the performer-facing email magic-link login flow
 
 ## Required production env vars
 
@@ -22,7 +23,7 @@ It is intentionally narrow:
 ## Access model
 
 1. The performer/operator already exists in the database and already passes persisted performer ownership, membership, or gig-access authorization.
-2. An operator generates a short-lived bootstrap link.
+2. An operator or support teammate generates a short-lived bootstrap link.
 3. The bootstrap endpoint verifies the signed token, issues a DB-backed `performer_sessions` row, sets the `HttpOnly` browser cookie, and redirects to `/talent`.
 4. `/talent` and protected performer mutations resolve actor context from that cookie.
 
@@ -101,5 +102,6 @@ Use this lane’s verification after the browser session is established:
 ## Do not do this
 
 - Do not treat fallback headers as production browser login.
+- Do not present bootstrap links as the primary public performer sign-in experience.
 - Do not pass `x-sway-actor-id` manually in the browser.
 - Do not share long-lived bootstrap links.

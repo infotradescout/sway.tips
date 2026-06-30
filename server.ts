@@ -10,10 +10,10 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, moderationEvents, performers } from "./src/db/schema";
+import { activeBlocks, gigAccessGrants, moderationEvents, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -24,6 +24,15 @@ import { createPaymentService } from "./src/server/payment-service";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
+import {
+  createPerformerLoginChallengeStore,
+  createPerformerLoginRateLimiter,
+  hashPerformerLoginRequesterIp,
+  normalizePerformerLoginEmail,
+  PERFORMER_LOGIN_SUCCESS_COPY,
+  resolvePerformerLoginRedirectPath
+} from "./src/server/performer-login";
+import { createPerformerLoginMailer, resolvePerformerLoginBaseUrl } from "./src/server/performer-login-mailer";
 
 dotenv.config();
 
@@ -45,6 +54,15 @@ const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
+});
+const performerLoginChallengeStore = createPerformerLoginChallengeStore({
+  databaseUrl: process.env.DATABASE_URL,
+  dbOverride: businessDb
+});
+const performerLoginRateLimiter = createPerformerLoginRateLimiter();
+const performerLoginMailer = createPerformerLoginMailer({
+  env: process.env,
+  isProduction
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
 const paymentService = createPaymentService({
@@ -566,6 +584,64 @@ async function resolveBootstrapTalentActor(actorUserId: string): Promise<Protect
   };
 }
 
+async function loadAuthorizedPerformerOwnerByEmail(email: string) {
+  if (!businessDb) return null;
+
+  const [row] = await businessDb
+    .select({
+      actorUserId: users.id,
+      performerId: performers.id,
+      performerHandle: performers.handle,
+      performerDisplayName: performers.displayName
+    })
+    .from(users)
+    .innerJoin(performers, eq(performers.ownerUserId, users.id))
+    .where(sql`lower(${users.email}) = ${email}`)
+    .limit(1);
+
+  return row ?? null;
+}
+
+async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
+  const [ownerRow] = await executor
+    .select({ id: performers.id })
+    .from(performers)
+    .where(eq(performers.ownerUserId, actorUserId))
+    .limit(1);
+
+  if (ownerRow) return true;
+
+  const [membershipRow] = await executor
+    .select({ id: performerMemberships.id })
+    .from(performerMemberships)
+    .where(eq(performerMemberships.userId, actorUserId))
+    .limit(1);
+
+  if (membershipRow) return true;
+
+  const [grantRow] = await executor
+    .select({ id: gigAccessGrants.id })
+    .from(gigAccessGrants)
+    .where(eq(gigAccessGrants.userId, actorUserId))
+    .limit(1);
+
+  return Boolean(grantRow);
+}
+
+function performerLoginSuccessResponse() {
+  return {
+    success: true,
+    message: PERFORMER_LOGIN_SUCCESS_COPY
+  };
+}
+
+function performerLoginFailureRedirect(status: 'invalid-link' | 'unavailable' = 'invalid-link') {
+  if (status === 'unavailable') {
+    return '/talent/login?status=unavailable';
+  }
+  return '/talent/login?status=invalid-link';
+}
+
 async function persistStateWithAudit(input: {
   roomState: BackendState;
   gigId: string;
@@ -763,6 +839,185 @@ app.get('/api/runtime-config-status', (_req, res) => {
     branch: buildMarker.branch,
     buildTimestamp: buildMarker.buildTimestamp
   });
+});
+
+app.post('/api/talent/login/request', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer login requires durable persistence.' });
+    return;
+  }
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer login is temporarily unavailable.' });
+    return;
+  }
+
+  const rawEmailInput = typeof req.body?.email === 'string'
+    ? req.body.email.trim().toLowerCase()
+    : '';
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitKeyEmail = normalizedEmail ?? rawEmailInput ?? '__invalid__';
+  const rateLimitResult = performerLoginRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: rateLimitKeyEmail
+  });
+
+  if (!rateLimitResult.allowed) {
+    res.status(202).json(performerLoginSuccessResponse());
+    return;
+  }
+
+  if (!normalizedEmail) {
+    res.status(202).json(performerLoginSuccessResponse());
+    return;
+  }
+
+  const performerOwner = await loadAuthorizedPerformerOwnerByEmail(normalizedEmail);
+  if (!performerOwner) {
+    res.status(202).json(performerLoginSuccessResponse());
+    return;
+  }
+
+  const issuedChallenge = await performerLoginChallengeStore.issueChallenge({
+    actorUserId: performerOwner.actorUserId,
+    targetEmail: normalizedEmail,
+    requesterIpHash
+  });
+
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const magicLink = `${appBaseUrl}/api/talent/login/consume?token=${encodeURIComponent(issuedChallenge.token)}`;
+  const deliveryResult = await performerLoginMailer.sendMagicLink({
+    toEmail: normalizedEmail,
+    magicLink
+  });
+
+  if (!deliveryResult.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({
+      challengeId: issuedChallenge.challengeId
+    });
+  }
+
+  res.status(202).json(performerLoginSuccessResponse());
+});
+
+app.get('/api/talent/login/consume', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const redirectPath = resolvePerformerLoginRedirectPath(req.query.redirect);
+  if (!businessStore.hasDurableStore) {
+    return res.redirect(performerLoginFailureRedirect('unavailable'));
+  }
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    return res.redirect(performerLoginFailureRedirect('unavailable'));
+  }
+
+  const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  if (!token) {
+    return res.redirect(performerLoginFailureRedirect());
+  }
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const consumedChallenge = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        executor: tx
+      });
+
+      if (!consumedChallenge) {
+        return null;
+      }
+
+      const stillAuthorized = await actorHasDurableTalentAccess(tx, consumedChallenge.actorUserId);
+      if (!stillAuthorized) {
+        throw new Error('actor_no_longer_authorized');
+      }
+
+      const revokedSessions = await performerSessionStore.revokeActiveSessionsForActorUser({
+        actorUserId: consumedChallenge.actorUserId,
+        executor: tx
+      });
+      const issuedSession = await performerSessionStore.issueSession({
+        actorUserId: consumedChallenge.actorUserId,
+        issuedBy: consumedChallenge.actorUserId,
+        executor: tx
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: consumedChallenge.actorUserId,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: consumedChallenge.id,
+        eventType: 'performer_login.consume',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          targetEmail: consumedChallenge.targetEmail,
+          requestedAt: consumedChallenge.requestedAt.toISOString()
+        }
+      });
+
+      for (const revokedSession of revokedSessions) {
+        await writeAuditEvent(tx, {
+          actorId: consumedChallenge.actorUserId,
+          actorType: 'performer',
+          entityType: 'performer_session',
+          entityId: revokedSession.id,
+          eventType: 'performer_session.revoke',
+          previousStatus: 'active',
+          nextStatus: 'revoked',
+          metadata: {
+            revokedActorUserId: revokedSession.actorUserId,
+            revokedBy: 'performer_login.consume'
+          }
+        });
+      }
+
+      await writeAuditEvent(tx, {
+        actorId: consumedChallenge.actorUserId,
+        actorType: 'performer',
+        entityType: 'performer_session',
+        entityId: issuedSession.sessionId,
+        eventType: 'performer_session.issue',
+        previousStatus: null,
+        nextStatus: 'active',
+        metadata: {
+          expiresAt: issuedSession.expiresAt.toISOString(),
+          source: 'performer_login.consume'
+        }
+      });
+
+      return {
+        issuedSession
+      };
+    });
+
+    if (!outcome) {
+      return res.redirect(performerLoginFailureRedirect());
+    }
+
+    res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+      expires: outcome.issuedSession.expiresAt
+    });
+    return res.redirect(redirectPath || '/talent');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (reason !== 'actor_no_longer_authorized') {
+      console.warn('Performer login consume failed.', {
+        path: req.path,
+        ip: req.ip || null,
+        reason
+      });
+    }
+    return res.redirect(performerLoginFailureRedirect());
+  }
 });
 
 app.get('/api/talent/session/bootstrap', async (req, res) => {
