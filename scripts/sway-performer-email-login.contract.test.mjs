@@ -53,6 +53,7 @@ function createInsertSpyDb() {
 
 async function main() {
   const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
+  const accessControlSource = readFileSync(join(root, 'src/server/access-control.ts'), 'utf8');
   const talentAppSource = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
   const talentLoginCardSource = readFileSync(join(root, 'src/components/TalentLoginCard.tsx'), 'utf8');
   const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8');
@@ -96,6 +97,26 @@ async function main() {
     !talentAppSource.includes('secure Sway session link'),
     'TalentApp must not present bootstrap session links as the primary performer login UX.'
   );
+  assert.ok(
+    accessControlSource.includes("function isPublicTalentLoginEntryRoute(req: Request)"),
+    'Access control must define a dedicated public talent login entry-route guard.'
+  );
+  assert.ok(
+    accessControlSource.includes("return req.method === 'GET' && req.path === '/talent/login';"),
+    'Public talent login entry-route guard must stay limited to GET /talent/login.'
+  );
+  assert.ok(
+    accessControlSource.includes("if (shell === 'talent' && isPublicTalentLoginEntryRoute(req))"),
+    'Route-family guard must allow the public talent login entry before protected talent access runs.'
+  );
+  assert.ok(
+    accessControlSource.includes('accessControl.requireTalentAccess'),
+    'Protected talent shell guard must remain in place for authenticated talent surfaces.'
+  );
+  assert.ok(
+    accessControlSource.includes('res.status(result.status).json({ error: result.reason });'),
+    'Protected non-public talent routes must continue failing closed outside the login entry route.'
+  );
 
   for (const term of [
     "app.post('/api/talent/login/request'",
@@ -118,6 +139,7 @@ async function main() {
   assert.equal(normalizePerformerLoginEmail('not-an-email'), null, 'Malformed emails must be rejected before challenge issuance.');
   assert.equal(resolvePerformerLoginRedirectPath('https://evil.com'), '/talent', 'External redirect URLs must be ignored.');
   assert.equal(resolvePerformerLoginRedirectPath('/talent/gigs?room=1'), '/talent/gigs?room=1', 'Allowlisted internal talent redirects may pass through.');
+  assert.equal(resolvePerformerLoginRedirectPath('/talent/login'), '/talent/login', 'Talent login redirect path must remain a local internal route.');
   assert.equal(resolvePerformerLoginBaseUrl({ SWAY_APP_BASE_URL: 'https://app.sway.tips', APP_URL: 'https://fallback.sway.tips' }), 'https://app.sway.tips');
 
   const insertSpy = createInsertSpyDb();

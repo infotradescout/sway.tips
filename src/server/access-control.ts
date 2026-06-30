@@ -48,6 +48,10 @@ function isBrowserHtmlRequest(req: Request) {
   return req.method === 'GET' && typeof accept === 'string' && accept.includes('text/html');
 }
 
+function isPublicTalentLoginEntryRoute(req: Request) {
+  return req.method === 'GET' && req.path === '/talent/login';
+}
+
 function escapeHtml(input: string) {
   return input
     .replace(/&/g, '&amp;')
@@ -677,6 +681,16 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       (shell === 'talent' || shell === 'admin');
 
     if (demoPreviewShellAllowed) {
+      writeResolvedActor(req, {
+        actorId: null,
+        sessionId: null,
+        patronDeviceIdHash: null
+      });
+      next();
+      return;
+    }
+
+    if (shell === 'talent' && isPublicTalentLoginEntryRoute(req)) {
       writeResolvedActor(req, {
         actorId: null,
         sessionId: null,
