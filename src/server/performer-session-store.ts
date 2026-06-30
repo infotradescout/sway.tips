@@ -19,6 +19,8 @@ export type ResolvedPerformerSession = {
   expiresAt: Date;
 };
 
+type DbExecutor = SwayDb | any;
+
 function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -71,6 +73,10 @@ export function createPerformerSessionStore({
 }) {
   const db = dbOverride ?? (databaseUrl ? createSwayDb(databaseUrl) : null);
 
+  function executorOrDb(executor?: DbExecutor | null) {
+    return executor ?? db;
+  }
+
   return {
     cookieName,
     hasDurableStore: Boolean(db),
@@ -81,12 +87,15 @@ export function createPerformerSessionStore({
 
     async issueSession({
       actorUserId,
-      issuedBy
+      issuedBy,
+      executor
     }: {
       actorUserId: string;
       issuedBy?: string | null;
+      executor?: DbExecutor | null;
     }): Promise<IssuedPerformerSession> {
-      if (!db) {
+      const writer = executorOrDb(executor);
+      if (!writer) {
         throw new Error('Performer session issuance requires a durable database connection.');
       }
 
@@ -95,7 +104,7 @@ export function createPerformerSessionStore({
       const now = new Date();
       const expiresAt = new Date(now.getTime() + sessionTtlHours * 60 * 60 * 1000);
 
-      const [inserted] = await db
+      const [inserted] = await writer
         .insert(performerSessions)
         .values({
           actorUserId,
@@ -174,6 +183,34 @@ export function createPerformerSessionStore({
         sessionId: revoked.id,
         actorUserId: revoked.actorUserId
       };
+    },
+
+    async revokeActiveSessionsForActorUser({
+      actorUserId,
+      executor,
+      now = new Date()
+    }: {
+      actorUserId: string;
+      executor?: DbExecutor | null;
+      now?: Date;
+    }) {
+      const writer = executorOrDb(executor);
+      if (!writer) return [];
+
+      return writer
+        .update(performerSessions)
+        .set({
+          revokedAt: now
+        })
+        .where(and(
+          eq(performerSessions.actorUserId, actorUserId),
+          isNull(performerSessions.revokedAt),
+          gt(performerSessions.expiresAt, now)
+        ))
+        .returning({
+          id: performerSessions.id,
+          actorUserId: performerSessions.actorUserId
+        });
     }
   };
 }

@@ -3,6 +3,7 @@ import { CalendarDays, Flame, Lock, Smartphone, Tv, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
+import TalentLoginCard from './components/TalentLoginCard';
 import PatronView from './components/PatronView';
 import VictoryScreen from './components/VictoryScreen';
 
@@ -524,18 +525,7 @@ export default function App() {
   }
 
   if (route.name === 'talent-login') {
-    return (
-      <ShellMessage
-        icon={<Lock className="h-5 w-5" />}
-        title="Talent Access"
-        body="Talent access is issued through a secure Sway session link for authorized performers and room operators."
-        actions={
-          <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/gigs">
-            Continue to gigs
-          </a>
-        }
-      />
-    );
+    return <TalentLoginCard />;
   }
 
   if (route.name === 'not-found') {

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Lock, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
+import TalentLoginCard from '../components/TalentLoginCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
-import { LoadingState, ShellMessage, postJson, useSwayState } from './shared';
+import { LoadingState, postJson, useSwayState } from './shared';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -200,18 +201,7 @@ export default function TalentApp() {
   };
 
   if (isTalentLogin(window.location.pathname)) {
-    return (
-      <ShellMessage
-        icon={<Lock className="h-5 w-5" />}
-        title="Talent Access"
-        body="Talent access is issued through a secure Sway session link for authorized performers and room operators."
-        actions={
-          <a className="rounded-xl bg-fuchsia-600 px-4 py-2 text-center text-sm font-bold text-white hover:bg-fuchsia-500" href="/talent/gigs">
-            Continue to gigs
-          </a>
-        }
-      />
-    );
+    return <TalentLoginCard />;
   }
 
   if (isLoading) return <LoadingState />;

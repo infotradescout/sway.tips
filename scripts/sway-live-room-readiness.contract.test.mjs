@@ -17,6 +17,7 @@ function requireExcludes(source, term, message) {
 }
 
 const talentApp = read('src/shells/TalentApp.tsx');
+const talentLoginCard = read('src/components/TalentLoginCard.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const performerShareKit = read('src/components/PerformerShareKit.tsx');
 const adminApp = read('src/shells/AdminApp.tsx');
@@ -50,9 +51,24 @@ requireIncludes(
   'TalentApp must load read-only active room summaries from /api/talent/active-rooms.'
 );
 requireIncludes(
-  talentApp,
+  talentLoginCard,
+  'Email me a secure sign-in link',
+  'Talent login must expose the performer email magic-link CTA.'
+);
+requireIncludes(
+  talentLoginCard,
+  'If this email is on an approved Sway performer account, we sent a link.',
+  'Talent login must keep enumeration-safe performer success copy.'
+);
+requireIncludes(
+  talentLoginCard,
+  'approved performer account',
+  'Talent login must stay focused on approved performer access.'
+);
+requireExcludes(
+  talentApp + talentLoginCard,
   'secure Sway session link',
-  'TalentApp talent access copy must describe the secure performer session path truthfully.'
+  'Public talent login UX must not present bootstrap session links as the primary performer sign-in path.'
 );
 requireIncludes(
   talentApp,

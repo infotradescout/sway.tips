@@ -200,6 +200,24 @@ export const performerSessions = pgTable('performer_sessions', {
   actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt)
 }));
 
+export const performerLoginChallenges = pgTable('performer_login_challenges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  targetEmail: text('target_email').notNull(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  sendCount: integer('send_count').notNull().default(1),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  requesterIpHash: text('requester_ip_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  tokenHashIdx: uniqueIndex('performer_login_challenges_token_hash_idx').on(table.tokenHash),
+  actorExpiresIdx: index('performer_login_challenges_actor_expires_idx').on(table.actorUserId, table.expiresAt),
+  requestBucketIdx: index('performer_login_challenges_request_bucket_idx').on(table.requesterIpHash, table.targetEmail, table.requestedAt)
+}));
+
 export const requests = pgTable('requests', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),

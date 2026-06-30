@@ -55,6 +55,7 @@ const requiredTables = [
   'gig_sessions',
   'gig_access_grants',
   'performer_sessions',
+  'performer_login_challenges',
   'requests',
   'request_boosts',
   'payments',
@@ -233,6 +234,19 @@ const requiredTableColumns = {
     'last_seen_at',
     'issued_by',
     'created_at'
+  ],
+  performer_login_challenges: [
+    'id',
+    'target_email',
+    'actor_user_id',
+    'token_hash',
+    'expires_at',
+    'consumed_at',
+    'revoked_at',
+    'send_count',
+    'requested_at',
+    'requester_ip_hash',
+    'created_at'
   ]
 };
 
@@ -262,6 +276,10 @@ for (const term of [
   "tokenHash: text('token_hash').notNull()",
   "expiresAt: timestamp('expires_at'",
   "revokedAt: timestamp('revoked_at'",
+  'export const performerLoginChallenges',
+  "targetEmail: text('target_email').notNull()",
+  "consumedAt: timestamp('consumed_at'",
+  "requesterIpHash: text('requester_ip_hash').notNull()",
   "export const activeBlocks",
   'export const idempotencyKeys',
   'export const clientPendingActions'
