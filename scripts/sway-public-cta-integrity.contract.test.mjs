@@ -11,6 +11,10 @@ const allowedHrefPatterns = [
   /^\/talent\/gigs$/,
   /^\/admin$/,
   /^\/overlay\/live$/,
+  /^\/privacy$/,
+  /^\/terms$/,
+  /^\/support$/,
+  /^\/privacy\/data-deletion$/,
   /^https:\/\/app\.sway\.tips\/$/
 ];
 

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
+import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
@@ -190,7 +191,7 @@ export default function PatronView({
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
-  const [degraded, setDegraded] = useState(!navigator.onLine);
+  const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
@@ -237,13 +238,9 @@ export default function PatronView({
   };
 
   useEffect(() => {
-    const updateConnectionState = () => setDegraded(!navigator.onLine);
-    window.addEventListener('online', updateConnectionState);
-    window.addEventListener('offline', updateConnectionState);
-    return () => {
-      window.removeEventListener('online', updateConnectionState);
-      window.removeEventListener('offline', updateConnectionState);
-    };
+    return subscribeToNetworkStatus((status) => {
+      setDegraded(!status.connected);
+    });
   }, []);
 
   useEffect(() => {

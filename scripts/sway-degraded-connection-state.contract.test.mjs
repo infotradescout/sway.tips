@@ -11,8 +11,12 @@ for (const term of ['local pending action record', 'offline/degraded indicator',
   if (!doc.includes(term)) failures.push(`Missing degraded-connection contract term: ${term}`);
 }
 
-for (const term of ['pendingAction', 'navigator.onLine', 'degraded', 'localStorage']) {
+for (const term of ['pendingAction', 'degraded', 'localStorage']) {
   if (!patron.includes(term)) failures.push(`Patron client missing degraded-connection state: ${term}`);
+}
+
+if (!patron.includes('navigator.onLine') && !patron.includes('getInitialNetworkStatus')) {
+  failures.push('Patron client must use browser network state or a stronger native-aware network status bridge.');
 }
 
 if (/WebSocket-only transaction state/i.test(patron)) {

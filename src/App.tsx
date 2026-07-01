@@ -430,6 +430,9 @@ export default function App() {
         body: data
       });
     }
+    if (typeof data?.supportPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.supportPath, '_blank', 'noopener,noreferrer');
+    }
     return data;
   };
 
@@ -437,7 +440,7 @@ export default function App() {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
     }
-    const response = await fetch('/api/privacy/data-deletion-placeholder', {
+    const response = await fetch('/api/privacy/data-deletion', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: 'patron_ui_placeholder' })
@@ -448,6 +451,9 @@ export default function App() {
         status: response.status,
         body: data
       });
+    }
+    if (typeof data?.dataDeletionInfoPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.dataDeletionInfoPath, '_blank', 'noopener,noreferrer');
     }
     return data;
   };

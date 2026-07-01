@@ -150,12 +150,19 @@ export default function PatronApp() {
         body: data
       });
     }
+    if (typeof data?.supportPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.supportPath, '_blank', 'noopener,noreferrer');
+    }
     return data;
   };
 
   const handleDataDeletionPlaceholder = async () => {
     if (demoMode) return rejectDemoMutation();
-    return postJson('/api/privacy/data-deletion-placeholder', { source: 'patron_shell_placeholder' });
+    const data = await postJson('/api/privacy/data-deletion', { source: 'patron_shell_placeholder' });
+    if (typeof data?.dataDeletionInfoPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.dataDeletionInfoPath, '_blank', 'noopener,noreferrer');
+    }
+    return data;
   };
 
   const { session, requests } = bState;

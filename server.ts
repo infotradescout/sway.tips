@@ -195,6 +195,215 @@ function isShellAllowed(shell: SwayShell): boolean {
   return !(isProduction && shell === 'dev-sandbox');
 }
 
+function renderStaticDocument(title: string, description: string, bodyHtml: string) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${title}</title>
+    <meta name="description" content="${description}" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #06070b;
+        --panel: #11141b;
+        --line: rgba(255, 255, 255, 0.10);
+        --text: #f5f7ff;
+        --muted: #a1a8bb;
+        --accent: #35d59a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(720px 420px at 20% -10%, rgba(53, 213, 154, 0.18), transparent 60%),
+          radial-gradient(720px 420px at 90% 0%, rgba(124, 92, 255, 0.18), transparent 58%),
+          var(--bg);
+      }
+      main {
+        width: min(860px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 40px 0 72px;
+      }
+      .eyebrow {
+        display: inline-flex;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 16px 0 10px;
+        font-size: clamp(34px, 7vw, 56px);
+        line-height: 1;
+      }
+      .lede {
+        margin: 0 0 22px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .panel {
+        padding: 24px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(17, 20, 27, 0.9);
+      }
+      h2 {
+        margin: 24px 0 10px;
+        font-size: 18px;
+      }
+      p, li {
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      a {
+        color: #9fe8cb;
+      }
+      .nav {
+        margin-top: 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">Sway trust center</span>
+      <h1>${title}</h1>
+      <p class="lede">${description}</p>
+      <section class="panel">
+        ${bodyHtml}
+        <div class="nav">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms</a>
+          <a href="/support">Support</a>
+          <a href="/privacy/data-deletion">Data deletion</a>
+          <a href="/legal/payments">Payment terms</a>
+          <a href="/legal/payouts">Payout terms</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+const supportPageHtml = renderStaticDocument(
+  'Sway Support',
+  'How to reach Sway support, report a problem, and request safety or account help.',
+  `
+    <p>Sway support is for safety issues, payment issues, performer account problems, and live-room failures.</p>
+    <h2>Use Sway support for</h2>
+    <ul>
+      <li>reporting harassment, unsafe behavior, or abusive requests</li>
+      <li>requesting help with a performer account or live room</li>
+      <li>questioning a payment, refund, or missing request status</li>
+      <li>starting a data deletion request</li>
+    </ul>
+    <h2>Current contact path</h2>
+    <p>Use the in-app safety controls first when they are available. If you cannot access the app, use the published support route from this page and the data deletion route below.</p>
+    <p>Support and review teams should verify the linked policies and live backend status before launch claims are made.</p>
+  `
+);
+
+const privacyPageHtml = renderStaticDocument(
+  'Sway Privacy Policy',
+  'What Sway stores for performer accounts, live-room requests, payments, moderation, and support workflows.',
+  `
+    <p>Sway processes performer account data, live-room request data, payment-related records, moderation records, and support/deletion requests so the service can run and be audited.</p>
+    <h2>Data Sway may store</h2>
+    <ul>
+      <li>performer account profile and login records</li>
+      <li>live-room session, queue, request, tip, and boost records</li>
+      <li>payment processor identifiers and related lifecycle status</li>
+      <li>moderation reports, blocks, and audit events</li>
+      <li>support and data deletion request metadata</li>
+      <li>limited device, route, and friction telemetry needed to keep the service working</li>
+    </ul>
+    <h2>Third-party services</h2>
+    <p>Sway may rely on payment, email, hosting, and database providers when configured. Those providers may process information required to deliver the service.</p>
+    <h2>Deletion requests</h2>
+    <p>Use <a href="/privacy/data-deletion">the data deletion page</a> or submit the API request path from inside the app. Sway may retain records that must be preserved for payments, fraud prevention, disputes, moderation, legal obligations, or audit history.</p>
+  `
+);
+
+const termsPageHtml = renderStaticDocument(
+  'Sway Terms',
+  'Core rules for live performer rooms, paid requests, tips, refunds, and account use.',
+  `
+    <p>Sway is a live-event request and tipping platform. Patrons use Sway to support real-world performers and DJs during live sessions.</p>
+    <h2>Service rules</h2>
+    <ul>
+      <li>a paid request is a paid submission for performer review, not a guaranteed performance</li>
+      <li>performers control queue order, approval, denial, and fulfillment decisions</li>
+      <li>tips and support payments may be voluntary even when no song is approved</li>
+      <li>abuse, fraud, harassment, and attempts to bypass safety controls may result in blocks or account action</li>
+    </ul>
+    <h2>Money terms</h2>
+    <p>Payment, refund, and payout behavior must match the live backend and processor state exactly. See the dedicated payment and payout terms below for the current operating rules.</p>
+  `
+);
+
+const paymentTermsPageHtml = renderStaticDocument(
+  'Sway Payment And Refund Terms',
+  'How request, tip, boost, capture, void, and refund outcomes are represented in Sway.',
+  `
+    <p>Sway must only describe payment behavior that is actually implemented by the backend and processor configuration.</p>
+    <ul>
+      <li>request, tip, and boost submissions create payment-related records tied to the live room and request lifecycle</li>
+      <li>a denied or unresolved request may be voided or refunded according to the implemented lifecycle</li>
+      <li>payment success is not final until backend confirmation is recorded</li>
+      <li>processor timelines, disputes, and refunds may affect final settlement timing</li>
+    </ul>
+    <p>If a patron needs help with a charge or refund outcome, use <a href="/support">Sway support</a>.</p>
+  `
+);
+
+const payoutTermsPageHtml = renderStaticDocument(
+  'Sway Performer Payout Terms',
+  'How performer payout eligibility and verification constraints work in Sway.',
+  `
+    <p>Sway must not promise payouts before required verification and payout enablement are complete.</p>
+    <ul>
+      <li>performer payout access may require identity, tax, banking, or other verification steps</li>
+      <li>processor rules, disputes, reserve periods, and compliance reviews may delay payout timing</li>
+      <li>unverified performers must not be shown payout promises that the processor cannot support</li>
+    </ul>
+    <p>Current payout terms must stay aligned with the configured payment provider and KYC state.</p>
+  `
+);
+
+const dataDeletionPageHtml = renderStaticDocument(
+  'Sway Data Deletion',
+  'How to request deletion of account or support-related data from Sway.',
+  `
+    <p>You can request deletion from inside the app or by posting to Sway’s data deletion API route.</p>
+    <h2>What to include</h2>
+    <ul>
+      <li>your contact email if you want a follow-up</li>
+      <li>whether you are a patron or performer</li>
+      <li>what account, room, or request you want reviewed</li>
+    </ul>
+    <h2>API path</h2>
+    <p>POST <code>/api/privacy/data-deletion</code> with JSON such as <code>{ "email": "you@example.com", "details": "Delete my account data." }</code>.</p>
+    <p>Sway may keep records that must remain for payments, disputes, moderation, security, or legal obligations.</p>
+  `
+);
+
 app.use((req, _res, next) => {
   req.headers['x-sway-shell'] = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
   next();
@@ -3584,19 +3793,76 @@ app.get('/api/moderation/placeholders', (_req, res) => {
   });
 });
 
+app.get('/support', (_req, res) => {
+  res.type('html').send(supportPageHtml);
+});
+
+app.get('/privacy', (_req, res) => {
+  res.type('html').send(privacyPageHtml);
+});
+
+app.get('/terms', (_req, res) => {
+  res.type('html').send(termsPageHtml);
+});
+
+app.get('/legal/payments', (_req, res) => {
+  res.type('html').send(paymentTermsPageHtml);
+});
+
+app.get('/legal/payouts', (_req, res) => {
+  res.type('html').send(payoutTermsPageHtml);
+});
+
+app.get('/privacy/data-deletion', (_req, res) => {
+  res.type('html').send(dataDeletionPageHtml);
+});
+
 app.get('/api/support/contact', (_req, res) => {
   return res.json({
     success: true,
-    message: 'Support options are available through the in-app safety controls.'
+    message: 'Support options are published on the Sway support page.',
+    supportPath: '/support',
+    privacyPolicyPath: '/privacy',
+    termsPath: '/terms',
+    dataDeletionPath: '/privacy/data-deletion',
+    paymentTermsPath: '/legal/payments',
+    payoutTermsPath: '/legal/payouts'
   });
 });
 
-app.post('/api/privacy/data-deletion-placeholder', (_req, res) => {
-  return res.json({
+async function handleDataDeletionRequest(req: express.Request, res: express.Response) {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().slice(0, 320) : null;
+  const details = typeof req.body?.details === 'string' ? req.body.details.trim().slice(0, 2000) : null;
+  const source = typeof req.body?.source === 'string' ? req.body.source.trim().slice(0, 120) : 'unknown';
+  const actor = accessControl.resolveServerActor(req);
+  const requestFingerprint = `${source}:${email ?? 'anonymous'}:${req.ip ?? 'no-ip'}:${Date.now()}`;
+
+  if (businessDb) {
+    await writeAuditEvent(businessDb, {
+      actorId: actor.actorId,
+      actorType: actor.actorId ? 'resolved_actor' : 'anonymous',
+      entityType: 'privacy_request',
+      entityId: requestFingerprint,
+      eventType: 'privacy.data_deletion.requested',
+      nextStatus: 'requested',
+      metadata: {
+        email,
+        details,
+        source
+      }
+    });
+  }
+
+  return res.status(202).json({
     success: true,
-    message: 'Data deletion request received.'
+    message: 'Data deletion request received for review.',
+    requestAccepted: true,
+    dataDeletionInfoPath: '/privacy/data-deletion'
   });
-});
+}
+
+app.post('/api/privacy/data-deletion', handleDataDeletionRequest);
+app.post('/api/privacy/data-deletion-placeholder', handleDataDeletionRequest);
 
 // Truthful request helper only. This is not a licensed music-catalog integration.
 app.post("/api/music/search", (req, res) => {
