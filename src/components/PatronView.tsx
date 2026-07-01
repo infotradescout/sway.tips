@@ -24,12 +24,13 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
+import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
 const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired before confirmation was completed.';
-const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request.';
+const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-in or switch to cellular before sending a request.';
 const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Payment authorization required. Confirm payment to finalize your request.';
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'This request is waiting for payment confirmation. Do not close this page until payment confirmation is complete.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Your payment method may be authorized now and charged when the action is finalized.';
@@ -73,6 +74,10 @@ type SearchTrack = {
   targetType?: 'music' | 'custom';
 };
 
+const REQUEST_ART_PLACEHOLDER = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80';
+const MANUAL_REQUEST_SOURCE = 'Manual request';
+const PRESET_REQUEST_SOURCE = 'Preset';
+
 type PaymentConfirmationState = {
   phase: 'PAYMENT_PENDING_CONFIRMATION';
   actionType: 'request' | 'boost';
@@ -81,36 +86,36 @@ type PaymentConfirmationState = {
 
 const previewCatalog: SearchTrack[] = [
   {
-    id: 'spotify-1',
-    title: 'Levitating',
-    artist: 'Dua Lipa',
-    albumArt: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-1',
+    title: 'High-energy opener',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'Spotify'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'apple-1',
-    title: 'Blinding Lights',
-    artist: 'The Weeknd',
-    albumArt: 'https://images.unsplash.com/photo-1518976024611-28bf4b48222e?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-2',
+    title: 'Big sing-along anthem',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'Apple Music'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'youtube-1',
-    title: 'Titanium',
-    artist: 'David Guetta ft. Sia',
-    albumArt: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-3',
+    title: 'Late-night dance track',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'YouTube Music'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'tidal-1',
-    title: 'About Damn Time',
-    artist: 'Lizzo',
-    albumArt: 'https://images.unsplash.com/photo-1461783436728-0a9217714694?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-4',
+    title: 'Crowd-favorite closer',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'TIDAL'
+    source: MANUAL_REQUEST_SOURCE
   }
 ];
 
@@ -186,7 +191,7 @@ export default function PatronView({
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
-  const [degraded, setDegraded] = useState(!navigator.onLine);
+  const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
@@ -233,13 +238,9 @@ export default function PatronView({
   };
 
   useEffect(() => {
-    const updateConnectionState = () => setDegraded(!navigator.onLine);
-    window.addEventListener('online', updateConnectionState);
-    window.addEventListener('offline', updateConnectionState);
-    return () => {
-      window.removeEventListener('online', updateConnectionState);
-      window.removeEventListener('offline', updateConnectionState);
-    };
+    return subscribeToNetworkStatus((status) => {
+      setDegraded(!status.connected);
+    });
   }, []);
 
   useEffect(() => {
@@ -385,15 +386,15 @@ export default function PatronView({
 
     const firstPreset = requestPresets[0];
     setSelectedPresetId(firstPreset.id);
-    setSelectedTrack({
-      id: firstPreset.id,
-      title: firstPreset.label.replace(/^\$\d+\s*/, ''),
-      artist: firstPreset.subtitle,
-      albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
-      basePrice: firstPreset.amount,
-      targetType: firstPreset.targetType,
-      source: 'Sway Preset'
-    });
+      setSelectedTrack({
+        id: firstPreset.id,
+        title: firstPreset.label.replace(/^\$\d+\s*/, ''),
+        artist: firstPreset.subtitle,
+        albumArt: REQUEST_ART_PLACEHOLDER,
+        basePrice: firstPreset.amount,
+        targetType: firstPreset.targetType,
+        source: PRESET_REQUEST_SOURCE
+      });
     setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
   }, [activeTab, selectedTrack, requestPresets, session.minimumTip]);
 
@@ -434,19 +435,18 @@ export default function PatronView({
       const filtered = previewCatalog.filter((song) => {
         if (!query) return true;
         return song.title.toLowerCase().includes(query)
-          || song.artist.toLowerCase().includes(query)
-          || (song.source || '').toLowerCase().includes(query);
+          || song.artist.toLowerCase().includes(query);
       });
 
       const anySongOption: SearchTrack | null = query
         ? {
             id: `any-${query.replace(/\s+/g, '-')}`,
             title: val.trim(),
-            artist: 'Request by name',
-            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+            artist: 'Manual song request',
+            albumArt: REQUEST_ART_PLACEHOLDER,
             basePrice: session.minimumTip,
             description: 'Send this as an open request',
-            source: 'Open request'
+            source: MANUAL_REQUEST_SOURCE
           }
         : null;
 
@@ -458,21 +458,21 @@ export default function PatronView({
     const trimmed = val.trim();
     const openSongOption: SearchTrack | null = (session.talentRole === 'DJ' && trimmed)
       ? {
-          id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
-          title: trimmed,
-          artist: 'Request by name',
-          albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
-          basePrice: session.minimumTip,
-          targetType: 'music',
-          source: 'Open request'
-        }
+        id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
+        title: trimmed,
+        artist: 'Manual song request',
+        albumArt: REQUEST_ART_PLACEHOLDER,
+        basePrice: session.minimumTip,
+        targetType: 'music',
+        source: MANUAL_REQUEST_SOURCE
+      }
       : null;
 
     try {
       const response = await fetch('/api/music/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: val })
+        body: JSON.stringify({ query: val, gig_id: gigId })
       });
       const data = await response.json();
       const results: SearchTrack[] = Array.isArray(data.results) ? data.results : [];
@@ -508,7 +508,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -694,7 +694,7 @@ export default function PatronView({
       } else if (status === 403) {
         setDegraded(true);
         setPaymentConfirmationState(null);
-        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask venue staff for help.');
+        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask the performer for help.');
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
@@ -733,7 +733,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -1007,7 +1007,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Sparkles className="w-4 h-4" /> Discover Stage
+            <Sparkles className="w-4 h-4" /> Browse Performers
           </button>
         </div>
       )}
@@ -1116,7 +1116,7 @@ export default function PatronView({
             ) : (
               <>
             
-            {/* If DJ Role: Search verified catalog */}
+            {/* If DJ Role: Manual request entry */}
             {session.talentRole === 'DJ' && (
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -1134,10 +1134,10 @@ export default function PatronView({
                             id: preset.id,
                             title: preset.label.replace(/^\$\d+\s*/, ''),
                             artist: preset.subtitle,
-                            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+                            albumArt: REQUEST_ART_PLACEHOLDER,
                             basePrice: preset.amount,
                             targetType: preset.targetType,
-                            source: 'Sway Preset'
+                            source: PRESET_REQUEST_SOURCE
                           });
                           setTipAmount(Math.max(session.minimumTip, preset.amount));
                         }}
@@ -1152,9 +1152,12 @@ export default function PatronView({
 
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    Request any song
+                    Request by song or artist
                   </span>
                 </div>
+                <p className="text-[11px] leading-relaxed text-slate-400">
+                  Enter the song or artist you want. Sway records the request for performer review, but it does not verify streaming-platform or DJ-library availability yet.
+                </p>
                  {/* Form input fields */}
                 <form onSubmit={triggerSearchSubmit} className="flex gap-2">
                   <div className="relative flex-1">
@@ -1163,7 +1166,7 @@ export default function PatronView({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Type a song or artist..."
+                      placeholder="Type the song or artist you want..."
                       className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
                     />
                   </div>
@@ -1257,7 +1260,7 @@ export default function PatronView({
                             artist: preset.subtitle,
                             basePrice: preset.amount,
                             targetType: preset.targetType,
-                            source: 'Sway Preset'
+                            source: PRESET_REQUEST_SOURCE
                           });
                           setTipAmount(Math.max(session.minimumTip, preset.amount));
                         }}
@@ -1577,10 +1580,10 @@ export default function PatronView({
           <div className="space-y-5">
             <div className="flex flex-col space-y-2 select-none animate-fade-in font-sans">
               <h3 className="font-display text-sm font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Discover Artists &amp; Venues
+                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Browse Live Performers
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Browse on-duty mixers, acoustic performers, and craft bartenders at this venue. Active performers are shown with their live request pages.
+                Browse active performers and DJs, then jump into the live room link they are currently using.
               </p>
             </div>
 
@@ -1591,7 +1594,7 @@ export default function PatronView({
                 type="text"
                 value={directorySearch}
                 onChange={(e) => setDirectorySearch(e.target.value)}
-                placeholder="Search by artist, category, or venue stage..."
+                placeholder="Search by performer, role, or live room..."
                 className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 outline-none font-sans"
               />
             </div>
@@ -1611,7 +1614,7 @@ export default function PatronView({
                     <div className="text-center py-10 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none">
                       <Search className="w-6 h-6 text-slate-500 mx-auto mb-1 animate-bounce" />
                       <div className="text-xs text-slate-400 font-bold">No performers found</div>
-                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active venue sessions</p>
+                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active live rooms</p>
                     </div>
                   );
                 }
@@ -1656,7 +1659,7 @@ export default function PatronView({
                               <h4 className="text-sm font-bold text-white truncate">{p.name}</h4>
                             </div>
                             <p className="text-[10px] text-slate-400 truncate font-semibold mt-0.5 flex items-center gap-1 font-sans">
-                              📍 Stage: {p.venueName}
+                              Live room: {p.venueName}
                             </p>
                             
                             <div className="flex items-center gap-2 mt-2">
@@ -1678,7 +1681,7 @@ export default function PatronView({
                                 ? 'border-amber-400/40 bg-amber-500/10 text-amber-300'
                                 : 'border-white/10 bg-slate-950 text-slate-400'
                             }`}
-                            title="Ask venue staff or the performer for a live room link."
+                            title="Ask the performer for a live room link."
                           >
                             Room link
                           </div>
@@ -1773,7 +1776,7 @@ export default function PatronView({
                                 return;
                               }
                               if (!gigId) {
-                                const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+                                const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
                                 setDegraded(true);
                                 setPendingActionMessage(routeCopy);
                                 alert(routeCopy);
@@ -1787,7 +1790,7 @@ export default function PatronView({
                                 open: true,
                                 type: 'request',
                                 title: `Directory Tip to ${p.name}`,
-                                artist: `Straight tip supporting ${p.name} at ${p.venueName}`,
+                                artist: `Straight tip supporting ${p.name} in this live room`,
                                 amount: tipAmount,
                                 fee: platformFee,
                                 total: tipAmount + platformFee,

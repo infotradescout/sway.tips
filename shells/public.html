@@ -3,10 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07080c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/sway.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Sway" />
     <meta property="og:title" content="Sway | Live Crowd Requests" />
-    <meta property="og:description" content="Sway is a live request and tipping app for performers, DJs, bartenders, and venues. Fans scan, request, tip, and follow the queue in real time." />
+    <meta property="og:description" content="Sway is a live request and tipping app for performers and DJs. Fans scan, request, tip, and follow the queue in real time." />
     <meta property="og:url" content="https://sway.tips/" />
     <meta property="og:image" content="https://sway.tips/419c8589-e2ef-4199-8221-4794e7420df4.png?v=3" />
     <meta property="og:image:secure_url" content="https://sway.tips/419c8589-e2ef-4199-8221-4794e7420df4.png?v=3" />
@@ -16,12 +21,12 @@
     <meta property="og:image:alt" content="Sway live tips and requests" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Sway | Live Crowd Requests" />
-    <meta name="twitter:description" content="Sway is a live request and tipping app for performers, DJs, bartenders, and venues. Fans scan, request, tip, and follow the queue in real time." />
+    <meta name="twitter:description" content="Sway is a live request and tipping app for performers and DJs. Fans scan, request, tip, and follow the queue in real time." />
     <meta name="twitter:image" content="https://sway.tips/419c8589-e2ef-4199-8221-4794e7420df4.png?v=3" />
     <title>Sway | Live Crowd Requests</title>
     <meta
       name="description"
-      content="Sway is a live request and tipping app for performers, DJs, bartenders, and venues. Fans scan, request, tip, and follow the queue in real time."
+      content="Sway is a live request and tipping app for performers and DJs. Fans scan, request, tip, and follow the queue in real time."
     />
     <style>
       :root {
@@ -268,8 +273,8 @@
       <header class="topbar">
         <a class="wordmark" href="/"><span class="dot"></span>Sway</a>
         <nav class="topnav" aria-label="sign in">
-          <a class="ghost hide-sm" href="/talent/gigs">Performer sign in</a>
-          <a class="ghost" href="/admin">Venue sign in</a>
+          <a class="ghost hide-sm" href="/talent/login">Performer sign in</a>
+          <a class="ghost hide-sm" href="/support">Support</a>
         </nav>
       </header>
 
@@ -279,10 +284,10 @@
           <h1>Run the room.<br /><span class="grad">Move the queue.</span></h1>
           <p class="sub">
             Sway turns any live floor into a connected experience. The crowd requests and tips from their phones,
-            performers approve and reorder in real time, and the overlay shows the room what is playing next.
+            performers and DJs approve and reorder in real time, and the overlay shows the room what is playing next.
           </p>
           <div class="cta-row">
-            <a class="btn primary" href="https://app.sway.tips/">Audience: explore Sway</a>
+            <a class="btn primary" href="https://app.sway.tips/">Audience: join a live room</a>
             <a class="btn" href="/overlay/live">Open overlay</a>
           </div>
         </section>
@@ -293,8 +298,8 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             </span>
             <h2>For the crowd</h2>
-            <p>Scan, send a request or tip, then boost it up the queue and watch your spot move &mdash; no app install, no page reloads.</p>
-            <a class="card-link" href="https://app.sway.tips/">Audience: explore Sway <span class="arrow">&rarr;</span></a>
+            <p>Scan a live room QR code or open a performer link to join the queue, send a request or tip, and watch your spot move in real time.</p>
+            <a class="card-link" href="https://app.sway.tips/">Audience: join a live room <span class="arrow">&rarr;</span></a>
           </article>
           <article class="card">
             <span class="icon b" aria-hidden="true">
@@ -302,15 +307,15 @@
             </span>
             <h2>For performers</h2>
             <p>Approve or decline pending requests, pause submissions instantly, and reorder the approved queue from one console.</p>
-            <a class="card-link" href="/talent/gigs">Performer: open console <span class="arrow">&rarr;</span></a>
+            <a class="card-link" href="/talent/login">Performer: sign in <span class="arrow">&rarr;</span></a>
           </article>
           <article class="card">
             <span class="icon c" aria-hidden="true">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             </span>
-            <h2>For venues</h2>
-            <p>Oversee sessions, run moderation and safety response, and keep every floor accountable from protected operator routes.</p>
-            <a class="card-link" href="/admin">Venue: operator tools <span class="arrow">&rarr;</span></a>
+            <h2>How it works</h2>
+            <p>Performers share one live room link or QR, the crowd joins from their phones, and every paid request or tip stays tied to the right room.</p>
+            <a class="card-link" href="/talent/login">Performer: sign in or create account <span class="arrow">&rarr;</span></a>
           </article>
         </section>
 
@@ -335,8 +340,12 @@
       </main>
 
       <footer>
-        <p class="meta">Live tips and request moderation run on session state. Rich image metadata is set for social link shares.</p>
+        <p class="meta">Live requests and tipping open when you join an active Sway room. Rich image metadata is set for social link shares.</p>
         <div class="foot-links">
+          <a class="ghost" href="/privacy">Privacy</a>
+          <a class="ghost" href="/terms">Terms</a>
+          <a class="ghost" href="/support">Support</a>
+          <a class="ghost" href="/privacy/data-deletion">Data deletion</a>
           <a class="ghost" href="/overlay/live">Open overlay</a>
         </div>
       </footer>

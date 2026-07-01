@@ -14,6 +14,7 @@ const requiredFiles = [
 
 const requiredAppRoutes = [
   '/talent/login',
+  '/talent/signup',
   '/talent/gigs',
   '/g/',
   '/p/',

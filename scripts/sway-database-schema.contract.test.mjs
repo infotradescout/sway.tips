@@ -123,6 +123,14 @@ for (const [enumName, values] of Object.entries(requiredEnums)) {
 }
 
 const requiredTableColumns = {
+  users: [
+    'email',
+    'display_name',
+    'password_hash',
+    'email_verified_at',
+    'terms_accepted_at',
+    'role'
+  ],
   gig_sessions: [
     'owner_actor_user_id',
     'last_mutation_actor_user_id',
@@ -138,6 +146,7 @@ const requiredTableColumns = {
     'closeout_policy'
   ],
   performers: [
+    'is_active',
     'onboarding_status',
     'payment_account_status',
     'kyc_status',
@@ -239,7 +248,9 @@ const requiredTableColumns = {
     'id',
     'target_email',
     'actor_user_id',
+    'challenge_type',
     'token_hash',
+    'challenge_metadata',
     'expires_at',
     'consumed_at',
     'revoked_at',
@@ -264,6 +275,12 @@ for (const [table, columns] of Object.entries(requiredTableColumns)) {
 
 for (const term of [
   "verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000)",
+  "passwordHash: text('password_hash')",
+  "emailVerifiedAt: timestamp('email_verified_at'",
+  "termsAcceptedAt: timestamp('terms_accepted_at'",
+  "handle: text('handle')",
+  "isActive: boolean('is_active').notNull().default(false)",
+  `uniqueIndex('idx_performers_handle').on(table.handle).where(sql`,
   "autoCloseoutAt: timestamp('auto_closeout_at'",
   "expiresAt: timestamp('expires_at'",
   "runtimeSessionState: jsonb('runtime_session_state')",
@@ -278,6 +295,8 @@ for (const term of [
   "revokedAt: timestamp('revoked_at'",
   'export const performerLoginChallenges',
   "targetEmail: text('target_email').notNull()",
+  "challengeType: text('challenge_type').notNull().default('login')",
+  "challengeMetadata: jsonb('challenge_metadata')",
   "consumedAt: timestamp('consumed_at'",
   "requesterIpHash: text('requester_ip_hash').notNull()",
   "export const activeBlocks",

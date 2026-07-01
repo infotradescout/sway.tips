@@ -25,7 +25,8 @@ import {
   Sliders,
   ToggleLeft,
   ToggleRight,
-  Hourglass
+  Hourglass,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
@@ -49,9 +50,10 @@ interface TalentDashboardProps {
   performerProfile?: {
     performer_id: string;
     display_name: string;
-    handle: string;
+    handle: string | null;
     owner_user_id: string;
   } | null;
+  performerEmailVerified?: boolean;
 }
 
 export default function TalentDashboard({
@@ -69,7 +71,8 @@ export default function TalentDashboard({
   selectedGigId = null,
   onSelectGigId = () => {},
   previewMode = false,
-  performerProfile = null
+  performerProfile = null,
+  performerEmailVerified = true
 }: TalentDashboardProps) {
   const writableGigId = selectedGigId ?? activeGigId;
   const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
@@ -87,6 +90,24 @@ export default function TalentDashboard({
   // Featured Status Management States
   const [selectedHours, setSelectedHours] = useState<number>(3);
   const [featureTimeLeft, setFeatureTimeLeft] = useState<string>('');
+  const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
+  const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [libraryLinkMessage, setLibraryLinkMessage] = useState<string | null>(null);
+  const [linkedSources, setLinkedSources] = useState<Array<{
+    id: string;
+    sourceKey: string;
+    sourceLabel: string;
+    syncKeyPreview: string;
+    connectionStatus: string;
+    lastSyncedAt: string | null;
+    trackCount: number;
+  }>>([]);
+  const [issuedSyncKey, setIssuedSyncKey] = useState<{
+    sourceKey: string;
+    sourceLabel: string;
+    syncKey: string;
+    syncEndpointPath: string;
+  } | null>(null);
 
   const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
     const payload = writableGigId ? { ...body, gig_id: writableGigId } : body;
@@ -224,6 +245,99 @@ export default function TalentDashboard({
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const refreshLinkedSources = async () => {
+    if (previewMode) return;
+    try {
+      const response = await fetch('/api/talent/library/sources');
+      if (!response.ok) return;
+      const data = await response.json();
+      setLinkedSources(Array.isArray(data?.sources) ? data.sources : []);
+    } catch (error) {
+      console.warn('Unable to load linked library sources:', error);
+    }
+  };
+
+  useEffect(() => {
+    void refreshLinkedSources();
+  }, [previewMode]);
+
+  const handleLibraryLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (previewMode || libraryLinkStatus === 'submitting') return;
+
+    setLibraryLinkStatus('submitting');
+    setLibraryLinkMessage(null);
+    setIssuedSyncKey(null);
+
+    try {
+      const response = await fetch('/api/talent/library/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceKey: librarySourceLabel,
+          sourceLabel: librarySourceLabel
+        })
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Library link failed.');
+      }
+
+      setLibraryLinkStatus('success');
+      setLibraryLinkMessage(`Linked ${data?.sourceLabel ?? librarySourceLabel}. Use the sync key below from any compatible program or companion tool.`);
+      setIssuedSyncKey(data);
+      await refreshLinkedSources();
+    } catch (error) {
+      setLibraryLinkStatus('error');
+      setLibraryLinkMessage(error instanceof Error ? error.message : 'Library link failed.');
+    }
+  };
+
+  const handleRotateLinkedSource = async (sourceId: string) => {
+    if (previewMode) return;
+    setLibraryLinkStatus('submitting');
+    setLibraryLinkMessage(null);
+    try {
+      const response = await fetch(`/api/talent/library/sources/${sourceId}/rotate-key`, {
+        method: 'POST'
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to rotate sync key.');
+      }
+      setIssuedSyncKey(data);
+      setLibraryLinkStatus('success');
+      setLibraryLinkMessage(`Rotated sync key for ${data?.sourceLabel ?? 'linked source'}. Update the connected program now.`);
+      await refreshLinkedSources();
+    } catch (error) {
+      setLibraryLinkStatus('error');
+      setLibraryLinkMessage(error instanceof Error ? error.message : 'Unable to rotate sync key.');
+    }
+  };
+
+  const handleRevokeLinkedSource = async (sourceId: string, sourceLabel: string) => {
+    if (previewMode) return;
+    setLibraryLinkStatus('submitting');
+    setLibraryLinkMessage(null);
+    try {
+      const response = await fetch(`/api/talent/library/sources/${sourceId}/revoke`, {
+        method: 'POST'
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to revoke linked source.');
+      }
+      setIssuedSyncKey(null);
+      setLibraryLinkStatus('success');
+      setLibraryLinkMessage(`Revoked ${sourceLabel}. Existing sync keys for that source will no longer work.`);
+      await refreshLinkedSources();
+    } catch (error) {
+      setLibraryLinkStatus('error');
+      setLibraryLinkMessage(error instanceof Error ? error.message : 'Unable to revoke linked source.');
     }
   };
 
@@ -376,8 +490,14 @@ export default function TalentDashboard({
                   </span>
                 ) : null}
               </div>
+              {!performerEmailVerified ? (
+                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  Verify your email before starting a live room.
+                </div>
+              ) : null}
               <button
                 type="submit"
+                disabled={!performerEmailVerified}
                 className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
               >
                 <Play className="h-4 w-4" /> Start Live Room
@@ -409,7 +529,7 @@ export default function TalentDashboard({
                       type="text"
                       value={setupName}
                       onChange={(e) => setSetupName(e.target.value)}
-                      placeholder="e.g. DJ Luna, Bartender Dave"
+                      placeholder="e.g. DJ Luna, Neon Atlas"
                       required
                       className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
                     />
@@ -423,7 +543,6 @@ export default function TalentDashboard({
                       className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-slate-300 text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium cursor-pointer"
                     >
                       <option value="DJ">DJ</option>
-                      <option value="Bartender">Bartender</option>
                       <option value="Performer">Performer</option>
                     </select>
                   </div>
@@ -804,7 +923,7 @@ export default function TalentDashboard({
                 <div>
                   <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
                   <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                    Share-kit context follows the selected live room. Copy the room link, show the QR sign, or print it for the venue once a room is live.
+                    Share-kit context follows the selected live room. Copy the room link, show the QR sign in the room, or open the separate overlay route in a browser or OBS browser source manually.
                   </p>
                 </div>
                 <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-mono font-bold text-cyan-300">
@@ -840,6 +959,110 @@ export default function TalentDashboard({
 
             {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
             <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+
+            <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                    Create a secure sync source for any DJ app, library manager, or companion tool. Patron search uses whatever that linked source syncs as available for this performer.
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                    Use the local bridge command `npm run library:bridge -- --sync-key ...` if your software can post JSON to localhost.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
+                  <Upload className="h-4 w-4" />
+                </div>
+              </div>
+
+              <form className="mt-4 space-y-3" onSubmit={handleLibraryLink}>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Source label</label>
+                  <input
+                    type="text"
+                    value={librarySourceLabel}
+                    onChange={(event) => setLibrarySourceLabel(event.target.value)}
+                    placeholder="Serato laptop, Rekordbox booth USB, Traktor rig, custom app"
+                    className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {libraryLinkMessage ? (
+                  <div
+                    className={`rounded-xl px-3 py-3 text-xs ${
+                      libraryLinkStatus === 'success'
+                        ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+                        : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
+                    }`}
+                  >
+                    {libraryLinkMessage}
+                  </div>
+                ) : null}
+
+                {issuedSyncKey ? (
+                  <div className="rounded-xl border border-emerald-500/20 bg-slate-950 px-3 py-3 text-xs text-slate-300">
+                    <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync endpoint</p>
+                    <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncEndpointPath}</p>
+                    <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync key</p>
+                    <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
+                    <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
+                      Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
+                    </p>
+                    <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                      First-party bridge: run `npm run library:bridge -- --sync-key ...` and point local software at `http://127.0.0.1:4314/ingest`.
+                    </p>
+                  </div>
+                ) : null}
+
+                {linkedSources.length > 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
+                    <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Linked sources</p>
+                    <div className="mt-3 space-y-2">
+                      {linkedSources.map((source) => (
+                        <div key={source.id} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-3">
+                          <p className="text-xs font-bold text-white">{source.sourceLabel}</p>
+                          <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-slate-500">{source.sourceKey}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">Key reference: {source.syncKeyPreview}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">Tracks available: {source.trackCount}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">Status: {source.connectionStatus}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            {source.lastSyncedAt ? `Last synced ${new Date(source.lastSyncedAt).toLocaleString()}` : 'No sync received yet'}
+                          </p>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRotateLinkedSource(source.id)}
+                              disabled={previewMode || libraryLinkStatus === 'submitting'}
+                              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              Rotate key
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeLinkedSource(source.id, source.sourceLabel)}
+                              disabled={previewMode || libraryLinkStatus === 'submitting' || source.connectionStatus === 'revoked'}
+                              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[10px] font-bold text-rose-200 transition-all hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {source.connectionStatus === 'revoked' ? 'Revoked' : 'Revoke source'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={previewMode || libraryLinkStatus === 'submitting'}
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <Upload className="h-4 w-4" />
+                  {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
+                </button>
+              </form>
+            </div>
             
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
             <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${
@@ -1034,7 +1257,7 @@ export default function TalentDashboard({
                   <div className="p-3 bg-amber-950/15 border border-amber-500/35 rounded-xl text-center select-none shadow shadow-amber-500/5">
                     <p className="text-[10px] text-amber-300 font-mono font-bold uppercase tracking-wider">BOOST TIMER</p>
                     <p className="text-lg font-black font-mono text-amber-400 mt-1">{featureTimeLeft || 'Computing...'}</p>
-                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted in venue search.</p>
+                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted for faster crowd entry.</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-center text-[10px] bg-slate-950 p-2.5 rounded-xl border border-white/5 font-mono select-none">
@@ -1061,7 +1284,7 @@ export default function TalentDashboard({
                 // CONFIGURATION / EARN STATE
                 <div className="space-y-4 font-sans">
                   <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                    Highlight this performer in venue search so patrons can reach the live request page quickly.
+                    Highlight this performer so people can reach the live request page quickly.
                   </p>
 
                   {/* Hours Selector */}

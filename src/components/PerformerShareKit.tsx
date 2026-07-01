@@ -5,8 +5,8 @@ import { sendShareLinkCopied } from '../shells/frictionClient';
 
 const MISSING_CONTEXT_COPY = 'No active live session. Start a session to generate your room link and QR code.';
 const ACTIVE_BODY_COPY = 'Patrons can scan this QR code or open this room link to land directly in your live Request, Tip, and Boost room.';
-const ACTIVE_HELP_COPY = 'This print-ready room link and QR sign stay tied to the selected live room.';
-const DOWNLOAD_SUCCESS_COPY = 'QR sign downloaded. Print it on white paper for the clearest venue scan.';
+const ACTIVE_HELP_COPY = 'This print-ready room link and QR sign stay tied to the selected live room. For streams, open the matching overlay route in a browser source manually.';
+const DOWNLOAD_SUCCESS_COPY = 'QR sign downloaded. Print it on white paper for the clearest room scan.';
 const PRINT_HINT_COPY = 'Print the QR sign or place it near the room so patrons land in the correct live queue.';
 const QR_EMPTY_STATE_COPY = 'QR code appears here after you start a live room.';
 
@@ -20,9 +20,21 @@ function resolveRoomLink(activeGigId: string | null) {
   return new URL(`/g/${activeGigId}`, window.location.origin).toString();
 }
 
+function resolveOverlayLink(activeGigId: string | null) {
+  if (!activeGigId) return null;
+
+  if (typeof window === 'undefined') {
+    return `/overlay/${activeGigId}`;
+  }
+
+  return new URL(`/overlay/${activeGigId}`, window.location.origin).toString();
+}
+
 export default function PerformerShareKit({ activeGigId }: { activeGigId: string | null }) {
   const roomLink = resolveRoomLink(activeGigId);
   const roomPath = activeGigId ? `/g/${activeGigId}` : null;
+  const overlayLink = resolveOverlayLink(activeGigId);
+  const overlayPath = activeGigId ? `/overlay/${activeGigId}` : null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -183,6 +195,16 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
           </p>
         </div>
 
+        <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
+          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Browser overlay</p>
+          <p className={`mt-2 break-all text-xs font-semibold ${overlayLink ? 'text-white' : 'text-slate-500'}`}>
+            {overlayLink ?? 'Start a live room to generate the browser overlay route.'}
+          </p>
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+            {overlayPath ? `Use ${overlayPath} in a browser or OBS browser source manually.` : 'Overlay route appears here after the room goes live.'}
+          </p>
+        </div>
+
         {roomLink ? (
           <div className="rounded-2xl border border-white/10 bg-slate-950 p-4">
             <div className="rounded-2xl bg-white p-4 shadow-inner" data-share-kit-room-qr="true">
@@ -233,6 +255,21 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
             Open patron room
           </a>
         </div>
+
+        <a
+          href={overlayLink ?? undefined}
+          target="_blank"
+          rel="noreferrer"
+          aria-disabled={!overlayLink}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-xs font-bold transition-all ${
+            overlayLink
+              ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:border-cyan-400 hover:text-white'
+              : 'pointer-events-none cursor-not-allowed border-white/10 bg-slate-800 text-slate-500'
+          }`}
+        >
+          <ExternalLink className="h-4 w-4" />
+          Open browser overlay
+        </a>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <button

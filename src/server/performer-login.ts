@@ -4,9 +4,12 @@ import { createSwayDb, type SwayDb } from '../db/client';
 import { performerLoginChallenges } from '../db/schema';
 
 export const PERFORMER_LOGIN_SUCCESS_COPY = 'If this email is on an approved Sway performer account, we sent a link.';
+export const PERFORMER_SIGNUP_SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 export const PERFORMER_LOGIN_LINK_TTL_MS = 15 * 60 * 1000;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_MAX = 3;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+export const PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN = 'login';
+export const PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL = 'verify_email';
 
 type DbExecutor = SwayDb | any;
 
@@ -24,6 +27,27 @@ export function normalizePerformerLoginEmail(rawValue: unknown) {
   const normalized = rawValue.trim().toLowerCase();
   if (!normalized) return null;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null;
+
+  return normalized;
+}
+
+export function normalizePerformerHandle(rawValue: unknown) {
+  if (typeof rawValue !== 'string') return null;
+
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  if (trimmed !== trimmed.toLowerCase()) return null;
+  if (!/^[a-z0-9_-]+$/.test(trimmed)) return null;
+
+  return trimmed;
+}
+
+export function normalizePerformerDisplayName(rawValue: unknown) {
+  if (typeof rawValue !== 'string') return null;
+
+  const normalized = rawValue.trim();
+  if (!normalized) return null;
+  if (normalized.length > 80) return null;
 
   return normalized;
 }
@@ -118,13 +142,17 @@ export function createPerformerLoginChallengeStore({
     async issueChallenge({
       actorUserId,
       targetEmail,
+      challengeType = PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
+      challengeMetadata = null,
       requesterIpHash,
       sendCount = 1,
       executor,
       now = new Date()
     }: {
-      actorUserId: string;
+      actorUserId?: string | null;
       targetEmail: string;
+      challengeType?: string;
+      challengeMetadata?: Record<string, unknown> | null;
       requesterIpHash: string;
       sendCount?: number;
       executor?: DbExecutor | null;
@@ -142,9 +170,11 @@ export function createPerformerLoginChallengeStore({
       const [inserted] = await writer
         .insert(performerLoginChallenges)
         .values({
-          actorUserId,
+          actorUserId: actorUserId ?? null,
           targetEmail,
+          challengeType,
           tokenHash,
+          challengeMetadata,
           expiresAt,
           consumedAt: null,
           revokedAt: null,
@@ -154,11 +184,13 @@ export function createPerformerLoginChallengeStore({
         })
         .returning({
           id: performerLoginChallenges.id,
+          challengeType: performerLoginChallenges.challengeType,
           expiresAt: performerLoginChallenges.expiresAt
         });
 
       return {
         challengeId: inserted.id,
+        challengeType: inserted.challengeType,
         token,
         expiresAt: inserted.expiresAt
       };
@@ -191,7 +223,9 @@ export function createPerformerLoginChallengeStore({
         .returning({
           id: performerLoginChallenges.id,
           actorUserId: performerLoginChallenges.actorUserId,
+          challengeType: performerLoginChallenges.challengeType,
           targetEmail: performerLoginChallenges.targetEmail,
+          challengeMetadata: performerLoginChallenges.challengeMetadata,
           expiresAt: performerLoginChallenges.expiresAt,
           requestedAt: performerLoginChallenges.requestedAt
         });

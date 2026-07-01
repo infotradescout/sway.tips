@@ -13,15 +13,19 @@ export function createPerformerLoginMailer({
   env: MailerEnv;
   isProduction: boolean;
 }) {
-  async function sendMagicLink({
+  async function deliverLink({
     toEmail,
-    magicLink
+    link,
+    subject,
+    introLine
   }: {
     toEmail: string;
-    magicLink: string;
+    link: string;
+    subject: string;
+    introLine: string;
   }) {
     if (!isProduction) {
-      console.log(`[SWAY_EMAIL_MOCK] Performer magic link for ${toEmail}: ${magicLink}`);
+      console.log(`[SWAY_EMAIL_MOCK] ${subject} for ${toEmail}: ${link}`);
       return { delivered: true as const, provider: 'mock' as const };
     }
 
@@ -49,11 +53,11 @@ export function createPerformerLoginMailer({
       body: JSON.stringify({
         from: fromAddress,
         to: [toEmail],
-        subject: 'Your Sway performer sign-in link',
+        subject,
         text: [
-          'Open your secure Sway performer link on the device you want to use tonight.',
+          introLine,
           '',
-          magicLink,
+          link,
           '',
           'This link expires in 15 minutes.'
         ].join('\n')
@@ -72,6 +76,34 @@ export function createPerformerLoginMailer({
   }
 
   return {
-    sendMagicLink
+    sendMagicLink({
+      toEmail,
+      magicLink
+    }: {
+      toEmail: string;
+      magicLink: string;
+    }) {
+      return deliverLink({
+        toEmail,
+        link: magicLink,
+        subject: 'Your Sway performer sign-in link',
+        introLine: 'Open your secure Sway performer link on the device you want to use tonight.'
+      });
+    },
+
+    sendVerificationLink({
+      toEmail,
+      verificationLink
+    }: {
+      toEmail: string;
+      verificationLink: string;
+    }) {
+      return deliverLink({
+        toEmail,
+        link: verificationLink,
+        subject: 'Verify your Sway performer account',
+        introLine: 'Verify your Sway performer email so you can start live rooms with your account.'
+      });
+    }
   };
 }

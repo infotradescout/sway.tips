@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
 import TalentLoginCard from './components/TalentLoginCard';
+import TalentSignupCard from './components/TalentSignupCard';
 import PatronView from './components/PatronView';
 import VictoryScreen from './components/VictoryScreen';
 
@@ -33,7 +34,7 @@ const emptySession: GigSession = {
   }
 };
 
-const routeSpine = ['/talent/login', '/talent/gigs', '/g/', '/p/', '/overlay/', '/admin'];
+const routeSpine = ['/talent/login', '/talent/signup', '/talent/gigs', '/g/', '/p/', '/overlay/', '/admin'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATA_MODE_STORAGE_KEY = 'sway.dataMode';
 
@@ -51,6 +52,7 @@ type DemoFixturePayload = {
 
 type AppRoute =
   | { name: 'talent-login' }
+  | { name: 'talent-signup' }
   | { name: 'talent-gigs'; gigId?: string }
   | { name: 'patron-gig'; gigId: string }
   | { name: 'performer'; performerHandle: string }
@@ -64,6 +66,7 @@ function resolveRoute(pathname: string): AppRoute {
 
   if (parts.length === 0) return { name: 'home' };
   if (parts[0] === 'talent' && parts[1] === 'login' && parts.length === 2) return { name: 'talent-login' };
+  if (parts[0] === 'talent' && parts[1] === 'signup' && parts.length === 2) return { name: 'talent-signup' };
   if (parts[0] === 'talent' && parts[1] === 'gigs') return { name: 'talent-gigs', gigId: parts[2] };
   if (parts[0] === 'g' && parts[1]) return { name: 'patron-gig', gigId: parts[1] };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
@@ -427,6 +430,9 @@ export default function App() {
         body: data
       });
     }
+    if (typeof data?.supportPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.supportPath, '_blank', 'noopener,noreferrer');
+    }
     return data;
   };
 
@@ -434,7 +440,7 @@ export default function App() {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
     }
-    const response = await fetch('/api/privacy/data-deletion-placeholder', {
+    const response = await fetch('/api/privacy/data-deletion', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: 'patron_ui_placeholder' })
@@ -445,6 +451,9 @@ export default function App() {
         status: response.status,
         body: data
       });
+    }
+    if (typeof data?.dataDeletionInfoPath === 'string' && typeof window !== 'undefined') {
+      window.open(data.dataDeletionInfoPath, '_blank', 'noopener,noreferrer');
     }
     return data;
   };
@@ -526,6 +535,10 @@ export default function App() {
 
   if (route.name === 'talent-login') {
     return <TalentLoginCard />;
+  }
+
+  if (route.name === 'talent-signup') {
+    return <TalentSignupCard />;
   }
 
   if (route.name === 'not-found') {

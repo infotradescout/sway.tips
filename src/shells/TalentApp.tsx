@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
 import TalentLoginCard from '../components/TalentLoginCard';
+import TalentSignupCard from '../components/TalentSignupCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -13,11 +14,16 @@ function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
 }
 
+function isTalentSignup(pathname: string) {
+  return pathname === '/talent/signup';
+}
+
 type TalentPerformerProfile = {
   performer_id: string;
   display_name: string;
-  handle: string;
+  handle: string | null;
   owner_user_id: string;
+  email_verified_at: string | null;
 } | null;
 
 export default function TalentApp() {
@@ -204,6 +210,10 @@ export default function TalentApp() {
     return <TalentLoginCard />;
   }
 
+  if (isTalentSignup(window.location.pathname)) {
+    return <TalentSignupCard />;
+  }
+
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
@@ -215,6 +225,8 @@ export default function TalentApp() {
     || 'Unassigned performer';
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
+
+  const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
 
   if (session.status === 'closed') {
     return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
@@ -271,6 +283,7 @@ export default function TalentApp() {
                 onSelectGigId={setSelectedGigId}
                 previewMode={demoMode}
                 performerProfile={performerProfile}
+                performerEmailVerified={performerEmailVerified}
               />
             }
             secondary={

@@ -45,7 +45,7 @@ requireIncludes(
 
 requirePattern(
   access,
-  /if \(isBrowserHtmlRequest\(req\)\) \{[\s\S]*?\.set\(\{ ['"]Content-Type['"]:\s*['"]text\/html; charset=utf-8['"] \}\)[\s\S]*?\.send\(renderProtectedRouteRecovery\(result\.status, result\.reason\)\);[\s\S]*?return;[\s\S]*?\}\s*res\.status\(result\.status\)\.json\(\{ error: result\.reason \}\);/,
+  /if \(isBrowserHtmlRequest\(req\)\) \{[\s\S]*?\.set\(\{ ['"]Content-Type['"]:\s*['"]text\/html; charset=utf-8['"] \}\)[\s\S]*?\.send\(renderProtectedRouteRecovery\(result\.status, result\.reason(?:,[\s\S]*?)?\)\);[\s\S]*?return;[\s\S]*?\}\s*res\.status\(result\.status\)\.json\(\{ error: result\.reason \}\);/,
   'HTML recovery branch must return before the JSON fallback, and JSON fallback must remain after it.'
 );
 
@@ -76,6 +76,12 @@ for (const term of [
 ]) {
   requireIncludes(access, term, `Recovery HTML missing Sway-safe copy: ${term}`);
 }
+
+requireIncludes(
+  access,
+  "shell === 'talent' ? '/talent/login' : null",
+  'Talent recovery HTML must link to the performer sign-in page, not just the homepage.'
+);
 
 for (const forbidden of [
   /checkout/i,

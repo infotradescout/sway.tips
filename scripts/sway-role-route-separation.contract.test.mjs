@@ -8,6 +8,7 @@ const failures = [];
 
 const requiredRoutes = [
   '/talent/login',
+  '/talent/signup',
   '/talent/gigs',
   '/g/',
   '/p/',

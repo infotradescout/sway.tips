@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -99,6 +100,9 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email'),
   displayName: text('display_name'),
+  passwordHash: text('password_hash'),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
   role: userRoleEnum('role').notNull().default('patron'),
   ...timestamps
 }, (table) => ({
@@ -108,9 +112,10 @@ export const users = pgTable('users', {
 export const performers = pgTable('performers', {
   id: uuid('id').primaryKey().defaultRandom(),
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
-  handle: text('handle').notNull(),
+  handle: text('handle'),
   displayName: text('display_name').notNull(),
   bio: text('bio'),
+  isActive: boolean('is_active').notNull().default(false),
   onboardingStatus: performerOnboardingStatusEnum('onboarding_status').notNull().default('created'),
   paymentAccountStatus: paymentAccountStatusEnum('payment_account_status').notNull().default('not_started'),
   kycStatus: kycStatusEnum('kyc_status').notNull().default('not_required'),
@@ -121,7 +126,7 @@ export const performers = pgTable('performers', {
   verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000),
   ...timestamps
 }, (table) => ({
-  handleIdx: uniqueIndex('performers_handle_idx').on(table.handle),
+  handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 
@@ -203,8 +208,10 @@ export const performerSessions = pgTable('performer_sessions', {
 export const performerLoginChallenges = pgTable('performer_login_challenges', {
   id: uuid('id').primaryKey().defaultRandom(),
   targetEmail: text('target_email').notNull(),
-  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  actorUserId: uuid('actor_user_id').references(() => users.id),
+  challengeType: text('challenge_type').notNull().default('login'),
   tokenHash: text('token_hash').notNull(),
+  challengeMetadata: jsonb('challenge_metadata'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
@@ -216,6 +223,45 @@ export const performerLoginChallenges = pgTable('performer_login_challenges', {
   tokenHashIdx: uniqueIndex('performer_login_challenges_token_hash_idx').on(table.tokenHash),
   actorExpiresIdx: index('performer_login_challenges_actor_expires_idx').on(table.actorUserId, table.expiresAt),
   requestBucketIdx: index('performer_login_challenges_request_bucket_idx').on(table.requesterIpHash, table.targetEmail, table.requestedAt)
+}));
+
+export const performerLibrarySources = pgTable('performer_library_sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull(),
+  sourceLabel: text('source_label').notNull(),
+  syncKeyHash: text('sync_key_hash').notNull(),
+  syncKeyPreview: text('sync_key_preview').notNull(),
+  connectionStatus: text('connection_status').notNull().default('active'),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  performerSourceIdx: uniqueIndex('performer_library_sources_performer_source_idx').on(table.performerId, table.sourceKey),
+  syncKeyHashIdx: uniqueIndex('performer_library_sources_sync_key_hash_idx').on(table.syncKeyHash)
+}));
+
+export const performerLibraryTracks = pgTable('performer_library_tracks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull(),
+  sourceLabel: text('source_label').notNull(),
+  externalTrackId: text('external_track_id').notNull(),
+  title: text('title').notNull(),
+  artist: text('artist').notNull(),
+  album: text('album'),
+  artworkUrl: text('artwork_url'),
+  searchableText: text('searchable_text').notNull(),
+  metadata: jsonb('metadata'),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps
+}, (table) => ({
+  performerSourceTrackIdx: uniqueIndex('performer_library_tracks_performer_source_track_idx').on(
+    table.performerId,
+    table.sourceKey,
+    table.externalTrackId
+  ),
+  performerSearchIdx: index('performer_library_tracks_performer_search_idx').on(table.performerId, table.lastSeenAt)
 }));
 
 export const requests = pgTable('requests', {

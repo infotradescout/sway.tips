@@ -2,13 +2,11 @@
 
 ## Purpose
 
-This is the primary performer-facing browser login flow for already-authorized performer owners.
+This is the secondary performer recovery flow for performer owners who need help getting back into a real email+password account.
 
 It is intentionally narrow:
 
-- no public self-signup
 - no patron login
-- no passwords
 - no SMS login
 - no social auth
 
@@ -26,9 +24,10 @@ It is intentionally narrow:
 
 1. The performer already exists in the database.
 2. The performer owner user already has an approved email on `users.email`.
-3. `/talent/login` accepts the performer email and always returns enumeration-safe success copy.
-4. If the email belongs to an authorized performer owner, the server creates a short-lived durable login challenge and delivers a secure sign-in link.
-5. Consuming the link revokes older active `performer_sessions`, issues a fresh DB-backed browser session cookie, and redirects to `/talent`.
+3. `/talent/login` keeps this recovery option secondary to the primary email+password form.
+4. `/api/talent/login/request` accepts the performer email and always returns enumeration-safe success copy.
+5. If the email belongs to an authorized performer owner, the server creates a short-lived durable login challenge and delivers a secure sign-in link.
+6. Consuming the link revokes older active `performer_sessions`, issues a fresh DB-backed browser session cookie, and redirects to `/talent`.
 
 ## Link contract
 
