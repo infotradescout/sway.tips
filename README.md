@@ -22,10 +22,17 @@ Prerequisite: Node.js
 2. Copy `.env.example` to `.env.local` and fill in the values needed for your environment.
 3. Run the app: `npm run dev`
 
+Important:
+
+- do not open repo HTML files directly with `file://`
+- always run Sway through `npm run dev` or `npm start`
+- if you want a production-style local check, use `npm run build` then `npm start`
+
 Useful checks:
 
 - `npm run lint`
 - `npm run build`
+- `npm run smoke:local:app`
 
 ## Performer Library Bridge
 
