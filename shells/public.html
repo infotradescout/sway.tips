@@ -89,6 +89,7 @@
         width: 6px; border-radius: 999px 999px 0 0;
         background: linear-gradient(to top, #d946ef, #67e8f9);
         height: 15%;
+        transform-origin: bottom;
         animation: eq-bar 1.6s ease-in-out infinite;
       }
       @keyframes eq-bar {
@@ -260,5 +261,27 @@
         <a href="/overlay/live">Open overlay</a>
       </footer>
     </div>
+    <script>
+      (function () {
+        var bars = Array.prototype.slice.call(document.querySelectorAll('.eq span'));
+        if (!bars.length) return;
+        window.addEventListener('pointerdown', function (event) {
+          var maxDistance = Math.max(window.innerWidth * 0.6, 240);
+          bars.forEach(function (bar) {
+            var rect = bar.getBoundingClientRect();
+            var centerX = rect.left + rect.width / 2;
+            var distance = Math.abs(event.clientX - centerX);
+            var strength = Math.max(0, 1 - distance / maxDistance);
+            var scale = 1 + strength * 1.8;
+            bar.style.transition = 'transform 100ms ease-out';
+            bar.style.transform = 'scaleY(' + scale + ')';
+            window.setTimeout(function () {
+              bar.style.transition = 'transform 500ms cubic-bezier(0.22, 1, 0.36, 1)';
+              bar.style.transform = 'scaleY(1)';
+            }, 120);
+          });
+        });
+      })();
+    </script>
   </body>
 </html>

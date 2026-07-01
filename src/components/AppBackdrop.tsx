@@ -1,6 +1,36 @@
+import { useEffect, useRef } from 'react';
+
 const EQ_BARS = Array.from({ length: 28 }, (_, i) => i);
 
 export default function AppBackdrop() {
+  const barRefs = useRef<(HTMLSpanElement | null)[]>([]);
+
+  useEffect(() => {
+    function handleTap(event: PointerEvent) {
+      const bars = barRefs.current.filter((bar): bar is HTMLSpanElement => bar !== null);
+      if (!bars.length) return;
+      const maxDistance = Math.max(window.innerWidth * 0.6, 240);
+
+      bars.forEach((bar) => {
+        const rect = bar.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const distance = Math.abs(event.clientX - centerX);
+        const strength = Math.max(0, 1 - distance / maxDistance);
+        const scale = 1 + strength * 1.8;
+
+        bar.style.transition = 'transform 100ms ease-out';
+        bar.style.transform = `scaleY(${scale})`;
+        window.setTimeout(() => {
+          bar.style.transition = 'transform 500ms cubic-bezier(0.22, 1, 0.36, 1)';
+          bar.style.transform = 'scaleY(1)';
+        }, 120);
+      });
+    }
+
+    window.addEventListener('pointerdown', handleTap);
+    return () => window.removeEventListener('pointerdown', handleTap);
+  }, []);
+
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="grid-bg absolute inset-0" />
@@ -15,7 +45,8 @@ export default function AppBackdrop() {
         {EQ_BARS.map((i) => (
           <span
             key={i}
-            className="eq-bar w-1.5 rounded-t-full bg-gradient-to-t from-fuchsia-500 to-cyan-300"
+            ref={(el) => { barRefs.current[i] = el; }}
+            className="eq-bar w-1.5 origin-bottom rounded-t-full bg-gradient-to-t from-fuchsia-500 to-cyan-300"
             style={{ animationDelay: `${(i % 7) * 0.15}s`, animationDuration: `${1.3 + (i % 5) * 0.2}s` }}
           />
         ))}
