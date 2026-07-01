@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
-import { Flame, Smartphone, Tv } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Flame, QrCode, Smartphone, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import PatronView from '../components/PatronView';
+import QrScanner from '../components/QrScanner';
 import SplitViewShell from '../components/SplitViewShell';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import {
@@ -33,42 +34,50 @@ function PatronNoSessionRecovery({
 }: {
   onReturnHomeClick: () => void;
 }) {
+  const [scannerOpen, setScannerOpen] = useState(false);
+
   return (
-    <div className="mx-auto flex w-full max-w-xl items-center px-4 py-10">
-      <div className="w-full rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl">
-        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
-          <Flame className="h-5 w-5" />
-        </div>
-        <h1 className="font-display text-2xl font-black text-white">Join a Live Room</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          Sway helps you request songs, send tips, and boost queue placement. Scan a live room&apos;s QR code
-          or open the exact performer&apos;s link you were given.
-        </p>
-        <p className="mt-3 text-sm leading-6 text-slate-400">
-          If you are the performer, sign in to start your room. If you are in the crowd, use a Sway room link or performer&apos;s link to join the live session.
-        </p>
-        <div className="mt-6 grid gap-3">
-          <a
-            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white hover:bg-fuchsia-500"
-            href="/talent/login"
-          >
-            Performer sign in
-          </a>
-          <a
-            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold text-white hover:border-fuchsia-500/40"
-            href="https://sway.tips/"
-            onClick={onReturnHomeClick}
-          >
-            Return to Sway home
-          </a>
-        </div>
-        <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.26em] text-fuchsia-300">Use it like an app</p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Install Sway from your browser so you can reopen it from the home screen after you scan a room once.
-          </p>
-        </div>
-      </div>
+    <div className="relative isolate flex min-h-[80vh] items-center overflow-hidden">
+      <div className="grid-bg pointer-events-none absolute inset-0" />
+      <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-fuchsia-600/30 blur-[100px]" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-cyan-500/20 blur-[100px]" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="relative mx-auto grid w-full max-w-sm gap-3 px-4 py-14"
+      >
+        <button
+          type="button"
+          onClick={() => setScannerOpen(true)}
+          className="glow-fuchsia inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
+        >
+          <QrCode className="h-5 w-5" />
+          Scan
+        </button>
+        <a
+          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
+          href="/talent/signup"
+        >
+          Create account
+        </a>
+        <a
+          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
+          href="/talent/login"
+        >
+          Login
+        </a>
+        <a
+          className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-black uppercase tracking-[0.2em] text-fuchsia-300 transition-colors hover:text-fuchsia-200"
+          href="https://sway.tips/"
+          onClick={onReturnHomeClick}
+        >
+          Sway to Play
+        </a>
+      </motion.div>
+
+      {scannerOpen ? <QrScanner onClose={() => setScannerOpen(false)} /> : null}
     </div>
   );
 }
