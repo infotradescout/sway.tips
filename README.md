@@ -44,6 +44,15 @@ That starts a localhost endpoint at `http://127.0.0.1:4314/ingest` so any DJ app
 - `https://sway.tips/legal/payments`
 - `https://sway.tips/legal/payouts`
 
+## Installable App Behavior
+
+Sway is now intended to behave like an installable browser app, not just a website:
+
+- installable from supported browsers via the app manifest
+- home-screen install guidance for iPhone/iPad Safari
+- lightweight service worker with offline fallback shell
+- QR-first patron entry and repeat-use performer browser login
+
 ## Production Gaps
 
 Do not submit this app for public App Store review until the launch gate is complete. Production business writes are blocked until a persistent store is configured, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.
