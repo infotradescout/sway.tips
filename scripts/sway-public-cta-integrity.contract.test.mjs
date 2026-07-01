@@ -58,7 +58,7 @@ if (!audienceCtas.length) {
 }
 
 const immediateRequestCopyPattern = /\b(start request|request now|send request|open request)\b/i;
-const truthfulAudienceCopyPattern = /\b(explore sway|browse|discover|learn more)\b/i;
+const truthfulAudienceCopyPattern = /\b(explore sway|browse|discover|learn more|join a live room)\b/i;
 
 for (const cta of audienceCtas) {
   if (cta.href === 'https://app.sway.tips/' && immediateRequestCopyPattern.test(cta.text)) {

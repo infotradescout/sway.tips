@@ -173,6 +173,11 @@ export default function PatronApp() {
     roomLookup.status === 'error' ||
     (!hasPatronRouteContext && !hasSessionContext);
   const routeFamily = routeGigId ? 'patron-gig' : 'patron-root';
+  const patronTopbarSubtitle = route.name === 'performer'
+    ? `Performer: ${route.performerHandle}`
+    : shouldShowNoSessionRecovery
+      ? 'Join a live room to request, tip, and boost'
+      : 'Request, Tip, and Boost live';
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
@@ -232,14 +237,16 @@ export default function PatronApp() {
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
               <p className="text-[9px] text-slate-400">
-                {route.name === 'performer' ? `Performer: ${route.performerHandle}` : 'Request, Tip, and Boost live'}
+                {patronTopbarSubtitle}
               </p>
             </div>
           </div>
           <DemoModeBanner compact />
-          <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
-            <Tv className="h-4 w-4" />
-          </a>
+          {routeGigId ? (
+            <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
+              <Tv className="h-4 w-4" />
+            </a>
+          ) : null}
         </div>
       </div>
 
