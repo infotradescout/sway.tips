@@ -60,8 +60,9 @@ function escapeHtml(input: string) {
     .replace(/"/g, '&quot;');
 }
 
-function renderProtectedRouteRecovery(status: number, reason: string) {
+function renderProtectedRouteRecovery(status: number, reason: string, shell?: string) {
   const safeReason = escapeHtml(reason);
+  const signInHref = shell === 'talent' ? '/talent/login' : null;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -144,6 +145,7 @@ function renderProtectedRouteRecovery(status: number, reason: string) {
       <p><strong>Sign in to continue.</strong></p>
       <p>This Sway area needs an active performer or operator session.</p>
       <div class="reason">Status ${status}: ${safeReason}</div>
+      ${signInHref ? `<a href="${signInHref}">Sign in</a>` : ''}
       <a href="/">Return home</a>
     </main>
   </body>
@@ -722,7 +724,7 @@ export function routeFamilyGuard(accessControl: AccessControl) {
         res
           .status(result.status)
           .set({ 'Content-Type': 'text/html; charset=utf-8' })
-          .send(renderProtectedRouteRecovery(result.status, result.reason));
+          .send(renderProtectedRouteRecovery(result.status, result.reason, typeof shell === 'string' ? shell : undefined));
         return;
       }
       res.status(result.status).json({ error: result.reason });
