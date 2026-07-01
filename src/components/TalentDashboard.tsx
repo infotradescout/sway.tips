@@ -529,7 +529,7 @@ export default function TalentDashboard({
                       type="text"
                       value={setupName}
                       onChange={(e) => setSetupName(e.target.value)}
-                      placeholder="e.g. DJ Luna, Bartender Dave"
+                      placeholder="e.g. DJ Luna, Neon Atlas"
                       required
                       className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
                     />
@@ -543,7 +543,6 @@ export default function TalentDashboard({
                       className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-slate-300 text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium cursor-pointer"
                     >
                       <option value="DJ">DJ</option>
-                      <option value="Bartender">Bartender</option>
                       <option value="Performer">Performer</option>
                     </select>
                   </div>
@@ -1258,7 +1257,7 @@ export default function TalentDashboard({
                   <div className="p-3 bg-amber-950/15 border border-amber-500/35 rounded-xl text-center select-none shadow shadow-amber-500/5">
                     <p className="text-[10px] text-amber-300 font-mono font-bold uppercase tracking-wider">BOOST TIMER</p>
                     <p className="text-lg font-black font-mono text-amber-400 mt-1">{featureTimeLeft || 'Computing...'}</p>
-                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted in venue search.</p>
+                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted for faster crowd entry.</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-center text-[10px] bg-slate-950 p-2.5 rounded-xl border border-white/5 font-mono select-none">
@@ -1285,7 +1284,7 @@ export default function TalentDashboard({
                 // CONFIGURATION / EARN STATE
                 <div className="space-y-4 font-sans">
                   <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                    Highlight this performer in venue search so patrons can reach the live request page quickly.
+                    Highlight this performer so people can reach the live request page quickly.
                   </p>
 
                   {/* Hours Selector */}

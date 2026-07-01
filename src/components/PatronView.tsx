@@ -30,7 +30,7 @@ import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
 const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired before confirmation was completed.';
-const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Connect to the venue Wi-Fi or switch to cellular before sending a request.';
+const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-in or switch to cellular before sending a request.';
 const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Payment authorization required. Confirm payment to finalize your request.';
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'This request is waiting for payment confirmation. Do not close this page until payment confirmation is complete.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Your payment method may be authorized now and charged when the action is finalized.';
@@ -508,7 +508,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -694,7 +694,7 @@ export default function PatronView({
       } else if (status === 403) {
         setDegraded(true);
         setPaymentConfirmationState(null);
-        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask venue staff for help.');
+        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask the performer for help.');
         setPendingAction(null);
         setCheckoutPayload(null);
         localStorage.removeItem('sway.pendingAction');
@@ -733,7 +733,7 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+      const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
       alert(routeCopy);
@@ -1007,7 +1007,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Sparkles className="w-4 h-4" /> Discover Stage
+            <Sparkles className="w-4 h-4" /> Browse Performers
           </button>
         </div>
       )}
@@ -1580,10 +1580,10 @@ export default function PatronView({
           <div className="space-y-5">
             <div className="flex flex-col space-y-2 select-none animate-fade-in font-sans">
               <h3 className="font-display text-sm font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Discover Artists &amp; Venues
+                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Browse Live Performers
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Browse on-duty mixers, acoustic performers, and craft bartenders at this venue. Active performers are shown with their live request pages.
+                Browse active performers and DJs, then jump into the live room link they are currently using.
               </p>
             </div>
 
@@ -1594,7 +1594,7 @@ export default function PatronView({
                 type="text"
                 value={directorySearch}
                 onChange={(e) => setDirectorySearch(e.target.value)}
-                placeholder="Search by artist, category, or venue stage..."
+                placeholder="Search by performer, role, or live room..."
                 className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 outline-none font-sans"
               />
             </div>
@@ -1614,7 +1614,7 @@ export default function PatronView({
                     <div className="text-center py-10 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none">
                       <Search className="w-6 h-6 text-slate-500 mx-auto mb-1 animate-bounce" />
                       <div className="text-xs text-slate-400 font-bold">No performers found</div>
-                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active venue sessions</p>
+                      <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active live rooms</p>
                     </div>
                   );
                 }
@@ -1659,7 +1659,7 @@ export default function PatronView({
                               <h4 className="text-sm font-bold text-white truncate">{p.name}</h4>
                             </div>
                             <p className="text-[10px] text-slate-400 truncate font-semibold mt-0.5 flex items-center gap-1 font-sans">
-                              📍 Stage: {p.venueName}
+                              Live room: {p.venueName}
                             </p>
                             
                             <div className="flex items-center gap-2 mt-2">
@@ -1681,7 +1681,7 @@ export default function PatronView({
                                 ? 'border-amber-400/40 bg-amber-500/10 text-amber-300'
                                 : 'border-white/10 bg-slate-950 text-slate-400'
                             }`}
-                            title="Ask venue staff or the performer for a live room link."
+                            title="Ask the performer for a live room link."
                           >
                             Room link
                           </div>
@@ -1776,7 +1776,7 @@ export default function PatronView({
                                 return;
                               }
                               if (!gigId) {
-                                const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer or venue staff for the latest room link.';
+                                const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
                                 setDegraded(true);
                                 setPendingActionMessage(routeCopy);
                                 alert(routeCopy);
@@ -1790,7 +1790,7 @@ export default function PatronView({
                                 open: true,
                                 type: 'request',
                                 title: `Directory Tip to ${p.name}`,
-                                artist: `Straight tip supporting ${p.name} at ${p.venueName}`,
+                                artist: `Straight tip supporting ${p.name} in this live room`,
                                 amount: tipAmount,
                                 fee: platformFee,
                                 total: tipAmount + platformFee,
