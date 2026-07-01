@@ -73,7 +73,7 @@ export default function SwayInstallPrompt() {
                 ? 'Open rooms faster, rejoin your performer flow, and launch Sway without hunting for a browser tab.'
                 : showIosHelp
                   ? 'On iPhone or iPad, tap Share in Safari, then tap Add to Home Screen.'
-                  : 'Your browser can still save Sway to the home screen when install support is available.'}
+                  : "This browser doesn't support one-tap installs yet. Look for \"Install app\" or \"Add to Home Screen\" in your browser's menu."}
             </p>
           </div>
           <button

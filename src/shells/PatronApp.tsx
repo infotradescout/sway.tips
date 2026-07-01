@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Flame, QrCode, Smartphone, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
+import AppBackdrop from '../components/AppBackdrop';
 import PatronView from '../components/PatronView';
 import QrScanner from '../components/QrScanner';
 import SplitViewShell from '../components/SplitViewShell';
@@ -38,9 +39,7 @@ function PatronNoSessionRecovery({
 
   return (
     <div className="relative isolate flex min-h-[80vh] items-center overflow-hidden">
-      <div className="grid-bg pointer-events-none absolute inset-0" />
-      <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-fuchsia-600/30 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-cyan-500/20 blur-[100px]" />
+      <AppBackdrop />
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}

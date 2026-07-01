@@ -48,6 +48,22 @@
   background-size: 24px 24px;
 }
 
+@keyframes orb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(34px, 24px) scale(1.08); }
+}
+@keyframes orb-drift-slow {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-28px, 26px) scale(1.06); }
+}
+@keyframes orb-drift-reverse {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(24px, -22px) scale(1.1); }
+}
+.orb-drift { animation: orb-drift 14s ease-in-out infinite; }
+.orb-drift-slow { animation: orb-drift-slow 20s ease-in-out infinite; }
+.orb-drift-reverse { animation: orb-drift-reverse 17s ease-in-out infinite; }
+
 /* Custom scrollbar matching Vibrant Palette tone */
 ::-webkit-scrollbar {
   width: 6px;
