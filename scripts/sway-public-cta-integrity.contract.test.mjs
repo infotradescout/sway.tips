@@ -8,6 +8,7 @@ const failures = [];
 const allowedHrefPatterns = [
   /^\/$/,
   /^\/talent\/login$/,
+  /^\/talent\/signup$/,
   /^\/talent\/gigs$/,
   /^\/admin$/,
   /^\/overlay\/live$/,
