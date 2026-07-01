@@ -49,7 +49,7 @@ function isBrowserHtmlRequest(req: Request) {
 }
 
 function isPublicTalentLoginEntryRoute(req: Request) {
-  return req.method === 'GET' && req.path === '/talent/login';
+  return req.method === 'GET' && (req.path === '/talent/login' || req.path === '/talent/signup');
 }
 
 function escapeHtml(input: string) {
@@ -713,6 +713,11 @@ export function routeFamilyGuard(accessControl: AccessControl) {
 
     const result = await guard(req);
     if (result.allowed === false) {
+      if (shell === 'talent' && req.method === 'GET' && req.path === '/talent' && isBrowserHtmlRequest(req)) {
+        res.redirect('/talent/login');
+        return;
+      }
+
       if (isBrowserHtmlRequest(req)) {
         res
           .status(result.status)

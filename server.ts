@@ -28,11 +28,23 @@ import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
   hashPerformerLoginRequesterIp,
+  normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
+  normalizePerformerHandle,
+  PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
+  PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_LOGIN_SUCCESS_COPY,
+  PERFORMER_SIGNUP_SUCCESS_COPY,
   resolvePerformerLoginRedirectPath
 } from "./src/server/performer-login";
 import { createPerformerLoginMailer, resolvePerformerLoginBaseUrl } from "./src/server/performer-login-mailer";
+import {
+  createPerformerPasswordLoginRateLimiter,
+  hashPerformerPassword,
+  normalizePerformerPassword,
+  validatePerformerPasswordStrength,
+  verifyPerformerPassword
+} from "./src/server/performer-password-auth";
 
 dotenv.config();
 
@@ -60,6 +72,11 @@ const performerLoginChallengeStore = createPerformerLoginChallengeStore({
   dbOverride: businessDb
 });
 const performerLoginRateLimiter = createPerformerLoginRateLimiter();
+const performerSignupRateLimiter = createPerformerLoginRateLimiter({
+  maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX, 3),
+  windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
+});
+const performerPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter();
 const performerLoginMailer = createPerformerLoginMailer({
   env: process.env,
   isProduction
@@ -90,6 +107,14 @@ function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
+}
+
+function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackValue;
+  }
+  return Math.floor(parsed);
 }
 
 const buildMarker = {
@@ -492,7 +517,8 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         performer_id: performers.id,
         display_name: performers.displayName,
         handle: performers.handle,
-        owner_user_id: performers.ownerUserId
+        owner_user_id: performers.ownerUserId,
+        email_verified_at: users.emailVerifiedAt
       })
       .from(performers)
       .where(eq(performers.ownerUserId, actor.actorId))
@@ -602,6 +628,60 @@ async function loadAuthorizedPerformerOwnerByEmail(email: string) {
   return row ?? null;
 }
 
+async function loadPerformerPasswordAccountByEmail(executor: any, email: string) {
+  const [row] = await executor
+    .select({
+      actorUserId: users.id,
+      passwordHash: users.passwordHash,
+      emailVerifiedAt: users.emailVerifiedAt,
+      performerId: performers.id,
+      performerIsActive: performers.isActive
+    })
+    .from(users)
+    .innerJoin(performers, eq(performers.ownerUserId, users.id))
+    .where(sql`lower(${users.email}) = ${email}`)
+    .limit(1);
+
+  return row ?? null;
+}
+
+async function performerSignupEmailExists(executor: any, email: string) {
+  const [row] = await executor
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${email}`)
+    .limit(1);
+
+  return Boolean(row);
+}
+
+async function performerHandleExists(executor: any, handle: string) {
+  const [row] = await executor
+    .select({ id: performers.id })
+    .from(performers)
+    .where(eq(performers.handle, handle))
+    .limit(1);
+
+  return Boolean(row);
+}
+
+async function loadPerformerOwnerVerificationState(actorUserId: string) {
+  if (!businessDb) return null;
+
+  const [row] = await businessDb
+    .select({
+      performerId: performers.id,
+      isActive: performers.isActive,
+      emailVerifiedAt: users.emailVerifiedAt
+    })
+    .from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .where(eq(performers.ownerUserId, actorUserId))
+    .limit(1);
+
+  return row ?? null;
+}
+
 async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
   const [ownerRow] = await executor
     .select({ id: performers.id })
@@ -635,11 +715,51 @@ function performerLoginSuccessResponse() {
   };
 }
 
+function performerPasswordLoginSuccessResponse(redirectPath: string) {
+  return {
+    success: true,
+    redirectPath
+  };
+}
+
+function performerSignupSuccessResponse() {
+  return {
+    success: true,
+    message: PERFORMER_SIGNUP_SUCCESS_COPY
+  };
+}
+
+function performerCredentialFailureResponse() {
+  return {
+    error: 'Invalid email or password.'
+  };
+}
+
 function performerLoginFailureRedirect(status: 'invalid-link' | 'unavailable' = 'invalid-link') {
   if (status === 'unavailable') {
     return '/talent/login?status=unavailable';
   }
   return '/talent/login?status=invalid-link';
+}
+
+function performerVerifyEmailFailureRedirect(status: 'invalid-link' | 'unavailable' = 'invalid-link') {
+  if (status === 'unavailable') {
+    return '/talent/login?status=unavailable';
+  }
+  return '/talent/login?status=invalid-link';
+}
+
+function performerVerifyEmailSuccessRedirect() {
+  return '/talent/login?status=verified';
+}
+
+function isUniqueConstraintViolation(error: unknown, constraintName: string) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const candidate = error as { code?: string; constraint?: string };
+  return candidate.code === '23505' && candidate.constraint === constraintName;
 }
 
 async function persistStateWithAudit(input: {
@@ -834,11 +954,325 @@ app.get('/api/runtime-config-status', (_req, res) => {
   res.json({
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
     hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
+    hasPerformerLoginEmailConfig: !isProduction || Boolean(
+      process.env.SWAY_EMAIL_PROVIDER?.trim()
+      && process.env.SWAY_EMAIL_API_KEY?.trim()
+      && process.env.SWAY_EMAIL_FROM?.trim()
+      && (process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim())
+    ),
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
     branch: buildMarker.branch,
     buildTimestamp: buildMarker.buildTimestamp
   });
+});
+
+app.post('/api/talent/signup', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer signup requires durable persistence.' });
+    return;
+  }
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer signup is temporarily unavailable.' });
+    return;
+  }
+
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const normalizedHandle = normalizePerformerHandle(req.body?.handle);
+  const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const termsAccepted = req.body?.termsAccepted === true;
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_signup__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    res.status(429).json({ error: 'Too many performer signup attempts. Please try again later.' });
+    return;
+  }
+
+  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+    res.status(422).json({ error: 'Performer name, handle, and email are required.' });
+    return;
+  }
+
+  if (!termsAccepted) {
+    res.status(422).json({ error: 'Terms acceptance is required before creating a performer account.' });
+    return;
+  }
+
+  if (!password) {
+    res.status(422).json({ error: 'Password is required.' });
+    return;
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    res.status(422).json({ error: passwordValidation.error });
+    return;
+  }
+
+  if (!confirmPassword || password !== confirmPassword) {
+    res.status(422).json({ error: 'Password confirmation does not match.' });
+    return;
+  }
+
+  if (await performerHandleExists(businessDb, normalizedHandle)) {
+    res.status(409).json({ error: 'This handle is already taken.' });
+    return;
+  }
+
+  if (await performerSignupEmailExists(businessDb, normalizedEmail)) {
+    res.status(409).json({ error: 'This email or handle is already in use.' });
+    return;
+  }
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const passwordHash = await hashPerformerPassword(password);
+      const [createdUser] = await tx
+        .insert(users)
+        .values({
+          email: normalizedEmail,
+          displayName: normalizedDisplayName,
+          passwordHash,
+          emailVerifiedAt: null,
+          termsAcceptedAt: new Date(),
+          role: 'performer'
+        })
+        .returning({
+          id: users.id
+        });
+
+      const [createdPerformer] = await tx
+        .insert(performers)
+        .values({
+          ownerUserId: createdUser.id,
+          handle: normalizedHandle,
+          displayName: normalizedDisplayName,
+          isActive: false,
+          onboardingStatus: 'profile_started'
+        })
+        .returning({
+          id: performers.id
+        });
+
+      const issuedChallenge = await performerLoginChallengeStore.issueChallenge({
+        actorUserId: createdUser.id,
+        targetEmail: normalizedEmail,
+        challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
+        requesterIpHash,
+        executor: tx
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: createdUser.id,
+        actorType: 'performer',
+        entityType: 'user',
+        entityId: createdUser.id,
+        eventType: 'performer_signup.user_create',
+        previousStatus: null,
+        nextStatus: 'created',
+        metadata: {
+          targetEmail: normalizedEmail,
+          emailVerifiedAt: null
+        }
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: createdUser.id,
+        actorType: 'performer',
+        entityType: 'performer',
+        entityId: createdPerformer.id,
+        eventType: 'performer_signup.profile_create',
+        previousStatus: null,
+        nextStatus: 'profile_started',
+        metadata: {
+          handle: normalizedHandle,
+          isActive: false
+        }
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: createdUser.id,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: issuedChallenge.challengeId,
+        eventType: 'performer_verify_email.issue',
+        previousStatus: null,
+        nextStatus: 'pending',
+        metadata: {
+          targetEmail: normalizedEmail,
+          challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL
+        }
+      });
+
+      return {
+        createdUserId: createdUser.id,
+        challengeId: issuedChallenge.challengeId,
+        token: issuedChallenge.token
+      };
+    });
+
+    const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+    const verificationLink = `${appBaseUrl}/api/talent/verify-email/consume?token=${encodeURIComponent(outcome.token)}`;
+    const deliveryResult = await performerLoginMailer.sendVerificationLink({
+      toEmail: normalizedEmail,
+      verificationLink
+    });
+
+    if (!deliveryResult.delivered) {
+      await performerLoginChallengeStore.revokeChallengeById({
+        challengeId: outcome.challengeId
+      });
+      res.status(503).json({ error: 'Performer verification email delivery is temporarily unavailable.' });
+      return;
+    }
+
+    res.status(202).json(performerSignupSuccessResponse());
+  } catch (error) {
+    if (isUniqueConstraintViolation(error, 'idx_performers_handle')) {
+      res.status(409).json({ error: 'This handle is already taken.' });
+      return;
+    }
+
+    if (isUniqueConstraintViolation(error, 'users_email_idx')) {
+      res.status(409).json({ error: 'This email or handle is already in use.' });
+      return;
+    }
+
+    console.warn('Performer signup failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    res.status(500).json({ error: 'Unable to create your performer account right now.' });
+  }
+});
+
+app.post('/api/talent/login', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer login requires durable persistence.' });
+    return;
+  }
+
+  if (!businessDb || !performerSessionStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer login is temporarily unavailable.' });
+    return;
+  }
+
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const password = normalizePerformerPassword(req.body?.password);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const accountKey = normalizedEmail ?? '__invalid__';
+  const rateLimitState = performerPasswordLoginRateLimiter.check({
+    requesterIpHash,
+    accountKey
+  });
+
+  if (!rateLimitState.allowed) {
+    res.status(429).json({ error: 'Too many failed sign-in attempts. Please try again later.' });
+    return;
+  }
+
+  if (!normalizedEmail || !password) {
+    performerPasswordLoginRateLimiter.recordFailure({
+      requesterIpHash,
+      accountKey
+    });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const performerAccount = await loadPerformerPasswordAccountByEmail(businessDb, normalizedEmail);
+  if (!performerAccount?.passwordHash) {
+    performerPasswordLoginRateLimiter.recordFailure({
+      requesterIpHash,
+      accountKey
+    });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const passwordMatches = await verifyPerformerPassword(password, performerAccount.passwordHash);
+  if (!passwordMatches) {
+    performerPasswordLoginRateLimiter.recordFailure({
+      requesterIpHash,
+      accountKey
+    });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const redirectPath = resolvePerformerLoginRedirectPath(req.body?.redirect ?? req.query.redirect);
+
+  const outcome = await businessDb.transaction(async (tx) => {
+    const revokedSessions = await performerSessionStore.revokeActiveSessionsForActorUser({
+      actorUserId: performerAccount.actorUserId,
+      executor: tx
+    });
+    const issuedSession = await performerSessionStore.issueSession({
+      actorUserId: performerAccount.actorUserId,
+      issuedBy: performerAccount.actorUserId,
+      executor: tx
+    });
+
+    for (const revokedSession of revokedSessions) {
+      await writeAuditEvent(tx, {
+        actorId: performerAccount.actorUserId,
+        actorType: 'performer',
+        entityType: 'performer_session',
+        entityId: revokedSession.id,
+        eventType: 'performer_session.revoke',
+        previousStatus: 'active',
+        nextStatus: 'revoked',
+        metadata: {
+          revokedActorUserId: revokedSession.actorUserId,
+          revokedBy: 'performer_login.password'
+        }
+      });
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: performerAccount.actorUserId,
+      actorType: 'performer',
+      entityType: 'performer_session',
+      entityId: issuedSession.sessionId,
+      eventType: 'performer_session.issue',
+      previousStatus: null,
+      nextStatus: 'active',
+      metadata: {
+        expiresAt: issuedSession.expiresAt.toISOString(),
+        source: 'performer_login.password'
+      }
+    });
+
+    return {
+      issuedSession
+    };
+  });
+
+  performerPasswordLoginRateLimiter.reset({
+    requesterIpHash,
+    accountKey
+  });
+
+  res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    expires: outcome.issuedSession.expiresAt
+  });
+  res.json(performerPasswordLoginSuccessResponse(redirectPath || '/talent'));
 });
 
 app.post('/api/talent/login/request', async (req, res) => {
@@ -883,6 +1317,7 @@ app.post('/api/talent/login/request', async (req, res) => {
 
   const issuedChallenge = await performerLoginChallengeStore.issueChallenge({
     actorUserId: performerOwner.actorUserId,
+    challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
     targetEmail: normalizedEmail,
     requesterIpHash
   });
@@ -931,10 +1366,34 @@ app.get('/api/talent/login/consume', async (req, res) => {
         return null;
       }
 
+      if (consumedChallenge.challengeType !== PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN || !consumedChallenge.actorUserId) {
+        return null;
+      }
+
       const stillAuthorized = await actorHasDurableTalentAccess(tx, consumedChallenge.actorUserId);
       if (!stillAuthorized) {
         throw new Error('actor_no_longer_authorized');
       }
+
+      await tx
+        .update(users)
+        .set({
+          emailVerifiedAt: new Date()
+        })
+        .where(and(
+          eq(users.id, consumedChallenge.actorUserId),
+          isNull(users.emailVerifiedAt)
+        ));
+
+      await tx
+        .update(performers)
+        .set({
+          isActive: true
+        })
+        .where(and(
+          eq(performers.ownerUserId, consumedChallenge.actorUserId),
+          eq(performers.isActive, false)
+        ));
 
       const revokedSessions = await performerSessionStore.revokeActiveSessionsForActorUser({
         actorUserId: consumedChallenge.actorUserId,
@@ -1017,6 +1476,118 @@ app.get('/api/talent/login/consume', async (req, res) => {
       });
     }
     return res.redirect(performerLoginFailureRedirect());
+  }
+});
+
+app.get('/api/talent/verify-email/consume', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const redirectPath = resolvePerformerLoginRedirectPath(req.query.redirect);
+
+  if (!businessStore.hasDurableStore) {
+    return res.redirect(performerVerifyEmailFailureRedirect('unavailable'));
+  }
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.redirect(performerVerifyEmailFailureRedirect('unavailable'));
+  }
+
+  const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  if (!token) {
+    return res.redirect(performerVerifyEmailFailureRedirect());
+  }
+
+  try {
+    const verified = await businessDb.transaction(async (tx) => {
+      const consumedChallenge = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        executor: tx
+      });
+
+      if (!consumedChallenge) {
+        return null;
+      }
+
+      if (consumedChallenge.challengeType !== PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL || !consumedChallenge.actorUserId) {
+        return null;
+      }
+
+      const verifiedAt = new Date();
+      await tx
+        .update(users)
+        .set({
+          emailVerifiedAt: verifiedAt
+        })
+        .where(eq(users.id, consumedChallenge.actorUserId));
+
+      const [verifiedPerformer] = await tx
+        .update(performers)
+        .set({
+          isActive: true
+        })
+        .where(eq(performers.ownerUserId, consumedChallenge.actorUserId))
+        .returning({
+          id: performers.id
+        });
+
+      await writeAuditEvent(tx, {
+        actorId: consumedChallenge.actorUserId,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: consumedChallenge.id,
+        eventType: 'performer_verify_email.consume',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          targetEmail: consumedChallenge.targetEmail,
+          verifiedAt: verifiedAt.toISOString()
+        }
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: consumedChallenge.actorUserId,
+        actorType: 'performer',
+        entityType: 'user',
+        entityId: consumedChallenge.actorUserId,
+        eventType: 'performer_verify_email.complete',
+        previousStatus: 'unverified',
+        nextStatus: 'verified',
+        metadata: {
+          targetEmail: consumedChallenge.targetEmail
+        }
+      });
+
+      if (verifiedPerformer) {
+        await writeAuditEvent(tx, {
+          actorId: consumedChallenge.actorUserId,
+          actorType: 'performer',
+          entityType: 'performer',
+          entityId: verifiedPerformer.id,
+          eventType: 'performer_verify_email.activate',
+          previousStatus: 'inactive',
+          nextStatus: 'active',
+          metadata: {
+            targetEmail: consumedChallenge.targetEmail
+          }
+        });
+      }
+
+      return true;
+    });
+
+    if (!verified) {
+      return res.redirect(performerVerifyEmailFailureRedirect());
+    }
+
+    return res.redirect(redirectPath || performerVerifyEmailSuccessRedirect());
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn('Performer verify-email consume failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason
+    });
+    return res.redirect(performerVerifyEmailFailureRedirect());
   }
 });
 
@@ -1405,6 +1976,14 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
 app.post("/api/session/start", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res);
   if (!actor) return;
+
+  if (actor.actorType === 'performer') {
+    const verificationState = await loadPerformerOwnerVerificationState(actor.actorId);
+    if (verificationState && !verificationState.emailVerifiedAt) {
+      return res.status(403).json({ error: 'Verified performer email is required before starting a live room.' });
+    }
+  }
+
   await refreshBusinessState();
   const { talentName, talentRole, feeType, minimumTip, gig_id } = req.body;
 

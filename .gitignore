@@ -3,6 +3,8 @@ build/
 dist/
 coverage/
 artifacts/
+.tmp/
+.tmp/**
 .DS_Store
 *.log
 .env*

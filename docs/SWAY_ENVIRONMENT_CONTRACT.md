@@ -19,6 +19,10 @@ Production:
 - `SWAY_EMAIL_FROM`
 - `SWAY_PERFORMER_LOGIN_RATE_LIMIT_MAX` optional
 - `SWAY_PERFORMER_LOGIN_RATE_LIMIT_WINDOW_MS` optional
+- `SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX` optional
+- `SWAY_PERFORMER_SIGNUP_RATE_LIMIT_WINDOW_MS` optional
+- `SWAY_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_MAX` optional
+- `SWAY_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS` optional
 - payment processor keys
 - payout processor or connected-account configuration
 - published Privacy Policy URL
@@ -35,4 +39,5 @@ Production:
 - Moderation must remain deterministic and active when external services are unavailable.
 - Missing production infrastructure must fail closed with a clear server error.
 - Performer browser access must use DB-backed `performer_sessions` cookies, not fallback actor headers.
-- Public performer browser login must be enumeration-safe and issue only short-lived magic links backed by durable server state.
+- Public performer browser login must support email+password as the primary flow, with enumeration-safe magic-link recovery kept secondary.
+- Public performer signup must require terms acceptance, password hashing, durable user/profile creation, and short-lived email verification links before live-room start is allowed.

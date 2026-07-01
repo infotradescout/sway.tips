@@ -49,9 +49,10 @@ interface TalentDashboardProps {
   performerProfile?: {
     performer_id: string;
     display_name: string;
-    handle: string;
+    handle: string | null;
     owner_user_id: string;
   } | null;
+  performerEmailVerified?: boolean;
 }
 
 export default function TalentDashboard({
@@ -69,7 +70,8 @@ export default function TalentDashboard({
   selectedGigId = null,
   onSelectGigId = () => {},
   previewMode = false,
-  performerProfile = null
+  performerProfile = null,
+  performerEmailVerified = true
 }: TalentDashboardProps) {
   const writableGigId = selectedGigId ?? activeGigId;
   const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
@@ -376,8 +378,14 @@ export default function TalentDashboard({
                   </span>
                 ) : null}
               </div>
+              {!performerEmailVerified ? (
+                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  Verify your email before starting a live room.
+                </div>
+              ) : null}
               <button
                 type="submit"
+                disabled={!performerEmailVerified}
                 className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
               >
                 <Play className="h-4 w-4" /> Start Live Room
