@@ -64,6 +64,20 @@
       "when": 1782867600000,
       "tag": "0008_performer_self_serve_signup",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782955200000,
+      "tag": "0009_performer_library_tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782957000000,
+      "tag": "0010_performer_library_sources",
+      "breakpoints": true
     }
   ]
 }

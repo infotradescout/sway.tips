@@ -8,12 +8,12 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { readFileSync } from "fs";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, gigAccessGrants, moderationEvents, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -680,6 +680,132 @@ async function loadPerformerOwnerVerificationState(actorUserId: string) {
     .limit(1);
 
   return row ?? null;
+}
+
+async function loadOwnedPerformerByActorUserId(actorUserId: string) {
+  if (!businessDb) return null;
+
+  const [row] = await businessDb
+    .select({
+      performerId: performers.id,
+      displayName: performers.displayName,
+      handle: performers.handle
+    })
+    .from(performers)
+    .where(eq(performers.ownerUserId, actorUserId))
+    .limit(1);
+
+  return row ?? null;
+}
+
+function normalizeLibraryText(value: unknown, maxLength = 160) {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function normalizeLibrarySourceKey(value: unknown) {
+  const normalized = normalizeLibraryText(value, 64).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || null;
+}
+
+function buildLibraryExternalTrackId(input: {
+  externalTrackId: string;
+  title: string;
+  artist: string;
+  album: string;
+}) {
+  if (input.externalTrackId) return input.externalTrackId;
+
+  return createHash('sha256')
+    .update(`${input.title}|${input.artist}|${input.album}`, 'utf8')
+    .digest('hex');
+}
+
+function issueLibrarySyncKey() {
+  return `sway_lib_${randomBytes(24).toString('hex')}`;
+}
+
+function hashLibrarySyncKey(syncKey: string) {
+  return createHash('sha256').update(syncKey, 'utf8').digest('hex');
+}
+
+async function upsertPerformerLibraryTrackBatch(executor: any, input: {
+  performerId: string;
+  sourceKey: string;
+  sourceLabel: string;
+  rawTracks: unknown[];
+}) {
+  const normalizedTracks = input.rawTracks
+    .slice(0, 1000)
+    .map((track) => {
+      const title = normalizeLibraryText((track as any)?.title, 160);
+      const artist = normalizeLibraryText((track as any)?.artist, 160) || 'Unknown artist';
+      const album = normalizeLibraryText((track as any)?.album, 160);
+      const artworkUrl = normalizeLibraryText((track as any)?.artworkUrl, 512);
+      const externalTrackId = normalizeLibraryText((track as any)?.externalTrackId, 256);
+      const searchableText = [title, artist, album].filter(Boolean).join(' ').toLowerCase();
+
+      if (!title) return null;
+
+      return {
+        performerId: input.performerId,
+        sourceKey: input.sourceKey,
+        sourceLabel: input.sourceLabel,
+        externalTrackId: buildLibraryExternalTrackId({ externalTrackId, title, artist, album }),
+        title,
+        artist,
+        album: album || null,
+        artworkUrl: artworkUrl || null,
+        searchableText,
+        metadata: (track as any)?.metadata && typeof (track as any).metadata === 'object' ? (track as any).metadata : null,
+        lastSeenAt: new Date(),
+        updatedAt: new Date()
+      };
+    })
+    .filter(Boolean) as Array<{
+      performerId: string;
+      sourceKey: string;
+      sourceLabel: string;
+      externalTrackId: string;
+      title: string;
+      artist: string;
+      album: string | null;
+      artworkUrl: string | null;
+      searchableText: string;
+      metadata: Record<string, unknown> | null;
+      lastSeenAt: Date;
+      updatedAt: Date;
+    }>;
+
+  if (!normalizedTracks.length) {
+    return { importedCount: 0 };
+  }
+
+  for (const track of normalizedTracks) {
+    await executor
+      .insert(performerLibraryTracks)
+      .values(track)
+      .onConflictDoUpdate({
+        target: [
+          performerLibraryTracks.performerId,
+          performerLibraryTracks.sourceKey,
+          performerLibraryTracks.externalTrackId
+        ],
+        set: {
+          sourceLabel: track.sourceLabel,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          artworkUrl: track.artworkUrl,
+          searchableText: track.searchableText,
+          metadata: track.metadata,
+          lastSeenAt: track.lastSeenAt,
+          updatedAt: new Date()
+        }
+      });
+  }
+
+  return { importedCount: normalizedTracks.length };
 }
 
 async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
@@ -1846,6 +1972,291 @@ app.post("/api/analytics/shell", async (req, res) => {
   } catch {
     return res.status(500).json({ error: 'Unable to capture shell telemetry event.' });
   }
+});
+
+app.post('/api/talent/library/import', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId) {
+    return res.status(401).json({ error: 'Performer session resolution required.' });
+  }
+
+  if (!businessDb) {
+    return res.status(503).json({ error: 'Performer library import requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can import available tracks.' });
+  }
+
+  const sourceKey = normalizeLibrarySourceKey(req.body?.sourceKey);
+  const sourceLabel = normalizeLibraryText(req.body?.sourceLabel || req.body?.sourceKey, 80);
+  const rawTracks = Array.isArray(req.body?.tracks) ? req.body.tracks : [];
+
+  if (!sourceKey || !sourceLabel) {
+    return res.status(422).json({ error: 'A sourceKey and sourceLabel are required for performer library import.' });
+  }
+
+  if (!rawTracks.length) {
+    return res.status(422).json({ error: 'At least one track is required for performer library import.' });
+  }
+
+  await businessDb.transaction(async (tx) => {
+    const result = await upsertPerformerLibraryTrackBatch(tx, {
+      performerId: performerOwner.performerId,
+      sourceKey,
+      sourceLabel,
+      rawTracks
+    });
+    if (!result.importedCount) {
+      throw new Error('Imported tracks must include at least one valid title.');
+    }
+  });
+
+  return res.status(202).json({
+    success: true,
+    performerId: performerOwner.performerId,
+    sourceKey,
+    sourceLabel,
+    importedCount: rawTracks.length
+  });
+});
+
+app.get('/api/talent/library/sources', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer library sources require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage linked library sources.' });
+  }
+
+  const sources = await businessDb
+    .select({
+      id: performerLibrarySources.id,
+      sourceKey: performerLibrarySources.sourceKey,
+      sourceLabel: performerLibrarySources.sourceLabel,
+      syncKeyPreview: performerLibrarySources.syncKeyPreview,
+      connectionStatus: performerLibrarySources.connectionStatus,
+      lastSyncedAt: performerLibrarySources.lastSyncedAt,
+      trackCount: sql<number>`(
+        select count(*)::int
+        from ${performerLibraryTracks}
+        where ${performerLibraryTracks.performerId} = ${performerLibrarySources.performerId}
+          and ${performerLibraryTracks.sourceKey} = ${performerLibrarySources.sourceKey}
+      )`
+    })
+    .from(performerLibrarySources)
+    .where(eq(performerLibrarySources.performerId, performerOwner.performerId));
+
+  return res.json({ sources });
+});
+
+app.post('/api/talent/library/sources', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer library sources require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can link library sources.' });
+  }
+
+  const sourceKey = normalizeLibrarySourceKey(req.body?.sourceKey || req.body?.sourceLabel);
+  const sourceLabel = normalizeLibraryText(req.body?.sourceLabel || req.body?.sourceKey, 80);
+  if (!sourceKey || !sourceLabel) {
+    return res.status(422).json({ error: 'A sourceLabel is required to link a performer library source.' });
+  }
+
+  const syncKey = issueLibrarySyncKey();
+  const syncKeyHash = hashLibrarySyncKey(syncKey);
+  const syncKeyPreview = `${syncKey.slice(0, 12)}...`;
+
+  await businessDb
+    .insert(performerLibrarySources)
+    .values({
+      performerId: performerOwner.performerId,
+      sourceKey,
+      sourceLabel,
+      syncKeyHash,
+      syncKeyPreview,
+      connectionStatus: 'active',
+      updatedAt: new Date()
+    })
+    .onConflictDoUpdate({
+      target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
+      set: {
+        sourceLabel,
+        syncKeyHash,
+        syncKeyPreview,
+        connectionStatus: 'active',
+        updatedAt: new Date()
+      }
+    });
+
+  return res.status(201).json({
+    success: true,
+    sourceKey,
+    sourceLabel,
+    syncKey,
+    syncEndpointPath: '/api/library/sync'
+  });
+});
+
+app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer library source rotation requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  const sourceId = parseDurableGigId(req.params.sourceId);
+  if (!performerOwner || !sourceId) {
+    return res.status(404).json({ error: 'Linked library source not found.' });
+  }
+
+  const nextSyncKey = issueLibrarySyncKey();
+  const nextSyncKeyHash = hashLibrarySyncKey(nextSyncKey);
+  const nextSyncKeyPreview = `${nextSyncKey.slice(0, 12)}...`;
+
+  const [rotated] = await businessDb
+    .update(performerLibrarySources)
+    .set({
+      syncKeyHash: nextSyncKeyHash,
+      syncKeyPreview: nextSyncKeyPreview,
+      connectionStatus: 'active',
+      updatedAt: new Date()
+    })
+    .where(and(
+      eq(performerLibrarySources.id, sourceId),
+      eq(performerLibrarySources.performerId, performerOwner.performerId)
+    ))
+    .returning({
+      sourceKey: performerLibrarySources.sourceKey,
+      sourceLabel: performerLibrarySources.sourceLabel
+    });
+
+  if (!rotated) {
+    return res.status(404).json({ error: 'Linked library source not found.' });
+  }
+
+  return res.json({
+    success: true,
+    sourceKey: rotated.sourceKey,
+    sourceLabel: rotated.sourceLabel,
+    syncKey: nextSyncKey,
+    syncEndpointPath: '/api/library/sync'
+  });
+});
+
+app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer library source revoke requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  const sourceId = parseDurableGigId(req.params.sourceId);
+  if (!performerOwner || !sourceId) {
+    return res.status(404).json({ error: 'Linked library source not found.' });
+  }
+
+  const [revoked] = await businessDb
+    .update(performerLibrarySources)
+    .set({
+      connectionStatus: 'revoked',
+      updatedAt: new Date()
+    })
+    .where(and(
+      eq(performerLibrarySources.id, sourceId),
+      eq(performerLibrarySources.performerId, performerOwner.performerId)
+    ))
+    .returning({ id: performerLibrarySources.id });
+
+  if (!revoked) {
+    return res.status(404).json({ error: 'Linked library source not found.' });
+  }
+
+  return res.json({ success: true, revoked: true });
+});
+
+app.post('/api/library/sync', async (req, res) => {
+  if (!businessDb) {
+    return res.status(503).json({ error: 'Library sync requires a durable database connection.' });
+  }
+
+  const bearerToken = req.header('authorization')?.startsWith('Bearer ')
+    ? req.header('authorization')?.slice('Bearer '.length).trim()
+    : null;
+  const rawSyncKey = req.header('x-sway-library-key')?.trim() || bearerToken || null;
+  if (!rawSyncKey) {
+    return res.status(401).json({ error: 'A valid library sync key is required.' });
+  }
+
+  const syncKeyHash = hashLibrarySyncKey(rawSyncKey);
+  const [sourceRow] = await businessDb
+    .select({
+      id: performerLibrarySources.id,
+      performerId: performerLibrarySources.performerId,
+      sourceKey: performerLibrarySources.sourceKey,
+      sourceLabel: performerLibrarySources.sourceLabel
+    })
+    .from(performerLibrarySources)
+    .where(eq(performerLibrarySources.syncKeyHash, syncKeyHash))
+    .limit(1);
+
+  if (!sourceRow) {
+    return res.status(403).json({ error: 'Invalid library sync key.' });
+  }
+
+  const rawTracks = Array.isArray(req.body?.tracks) ? req.body.tracks : [];
+  if (!rawTracks.length) {
+    return res.status(422).json({ error: 'At least one track is required for library sync.' });
+  }
+
+  const result = await businessDb.transaction(async (tx) => {
+    const imported = await upsertPerformerLibraryTrackBatch(tx, {
+      performerId: sourceRow.performerId,
+      sourceKey: sourceRow.sourceKey,
+      sourceLabel: sourceRow.sourceLabel,
+      rawTracks
+    });
+
+    await tx
+      .update(performerLibrarySources)
+      .set({
+        connectionStatus: 'active',
+        lastSyncedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(performerLibrarySources.id, sourceRow.id));
+
+    return imported;
+  });
+
+  return res.status(202).json({
+    success: true,
+    sourceKey: sourceRow.sourceKey,
+    importedCount: result.importedCount
+  });
 });
 
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
@@ -3167,40 +3578,84 @@ app.post('/api/privacy/data-deletion-placeholder', (_req, res) => {
   });
 });
 
-// Development catalog only. Production must use a licensed/verifiable catalog integration.
+// Truthful request helper only. This is not a licensed music-catalog integration.
 app.post("/api/music/search", (req, res) => {
-  if (isProduction) {
-    return res.status(503).json({
-      error: "Music catalog integration is not configured for production.",
-      results: []
+  const rawQuery = typeof req.body?.query === 'string' ? req.body.query : '';
+  const query = rawQuery.trim();
+  const requestedGigId = parseDurableGigId(req.body?.gig_id);
+  const albumArt = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80';
+  const manualResults = query
+    ? [{
+        id: `manual-${query.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'request'}`,
+        title: query,
+        artist: 'Manual song request',
+        albumArt,
+        description: 'Performer will review this request manually.'
+      }]
+    : [];
+
+  if (!businessDb || !requestedGigId) {
+    return res.json({
+      results: manualResults,
+      integrationMode: 'manual_request_only'
     });
   }
 
-  const { query } = req.body;
-  const songs = [
-    { id: "s1", title: "Mr. Brightside", artist: "The Killers", albumArt: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop", genre: "Rock" },
-    { id: "s2", title: "Dancing Queen", artist: "ABBA", albumArt: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150&h=150&fit=crop", genre: "Pop" },
-    { id: "s3", title: "Bohemian Rhapsody", artist: "Queen", albumArt: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&h=150&fit=crop", genre: "Classic Rock" },
-    { id: "s4", title: "Blinding Lights", artist: "The Weeknd", albumArt: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&h=150&fit=crop", genre: "Synthpop" },
-    { id: "s5", title: "September", artist: "Earth, Wind & Fire", albumArt: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=150&h=150&fit=crop", genre: "Funk" },
-    { id: "s6", title: "Billie Jean", artist: "Michael Jackson", albumArt: "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=150&h=150&fit=crop", genre: "Pop" },
-    { id: "s7", title: "Don't Stop Believin'", artist: "Journey", albumArt: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop", genre: "Rock" },
-    { id: "s8", title: "Flowers", artist: "Miley Cyrus", albumArt: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=150&h=150&fit=crop", genre: "Pop" },
-    { id: "s9", title: "Stayin' Alive", artist: "Bee Gees", albumArt: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=150&h=150&fit=crop", genre: "Disco" }
-  ];
+  void (async () => {
+    const [gigRow] = await businessDb
+      .select({ performerId: gigSessions.performerId })
+      .from(gigSessions)
+      .where(eq(gigSessions.id, requestedGigId))
+      .limit(1);
 
-  if (!query) {
-    return res.json({ results: songs.slice(0, 5) });
-  }
+    if (!gigRow) {
+      return res.json({
+        results: manualResults,
+        integrationMode: 'manual_request_only'
+      });
+    }
 
-  const normalizedQuery = query.toLowerCase();
-  const matched = songs.filter(s => 
-    s.title.toLowerCase().includes(normalizedQuery) || 
-    s.artist.toLowerCase().includes(normalizedQuery) ||
-    (s.genre && s.genre.toLowerCase().includes(normalizedQuery))
-  );
+    const lowerQuery = query.toLowerCase();
+    const likeQuery = `%${lowerQuery}%`;
+    const libraryRows = await businessDb
+      .select({
+        id: performerLibraryTracks.id,
+        title: performerLibraryTracks.title,
+        artist: performerLibraryTracks.artist,
+        album: performerLibraryTracks.album,
+        artworkUrl: performerLibraryTracks.artworkUrl,
+        sourceLabel: performerLibraryTracks.sourceLabel
+      })
+      .from(performerLibraryTracks)
+      .where(
+        query
+          ? and(
+              eq(performerLibraryTracks.performerId, gigRow.performerId),
+              sql`lower(${performerLibraryTracks.searchableText}) like ${likeQuery}`
+            )
+          : eq(performerLibraryTracks.performerId, gigRow.performerId)
+      )
+      .limit(25);
 
-  return res.json({ results: matched.length ? matched : songs.slice(0, 3) });
+    return res.json({
+      results: libraryRows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        albumArt: row.artworkUrl || albumArt,
+        description: row.album || 'Available in performer library',
+        source: row.sourceLabel,
+        targetType: 'music'
+      })),
+      integrationMode: 'performer_library'
+    });
+  })().catch((error) => {
+    console.warn('Performer library search failed:', error);
+    return res.json({
+      results: manualResults,
+      integrationMode: 'manual_request_only'
+    });
+  });
 });
 
 app.use('/api', (_req, res) => {

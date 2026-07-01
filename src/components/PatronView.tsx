@@ -73,6 +73,10 @@ type SearchTrack = {
   targetType?: 'music' | 'custom';
 };
 
+const REQUEST_ART_PLACEHOLDER = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80';
+const MANUAL_REQUEST_SOURCE = 'Manual request';
+const PRESET_REQUEST_SOURCE = 'Preset';
+
 type PaymentConfirmationState = {
   phase: 'PAYMENT_PENDING_CONFIRMATION';
   actionType: 'request' | 'boost';
@@ -81,36 +85,36 @@ type PaymentConfirmationState = {
 
 const previewCatalog: SearchTrack[] = [
   {
-    id: 'spotify-1',
-    title: 'Levitating',
-    artist: 'Dua Lipa',
-    albumArt: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-1',
+    title: 'High-energy opener',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'Spotify'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'apple-1',
-    title: 'Blinding Lights',
-    artist: 'The Weeknd',
-    albumArt: 'https://images.unsplash.com/photo-1518976024611-28bf4b48222e?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-2',
+    title: 'Big sing-along anthem',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'Apple Music'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'youtube-1',
-    title: 'Titanium',
-    artist: 'David Guetta ft. Sia',
-    albumArt: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-3',
+    title: 'Late-night dance track',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'YouTube Music'
+    source: MANUAL_REQUEST_SOURCE
   },
   {
-    id: 'tidal-1',
-    title: 'About Damn Time',
-    artist: 'Lizzo',
-    albumArt: 'https://images.unsplash.com/photo-1461783436728-0a9217714694?auto=format&fit=crop&w=240&q=80',
+    id: 'manual-4',
+    title: 'Crowd-favorite closer',
+    artist: 'Example request',
+    albumArt: REQUEST_ART_PLACEHOLDER,
     basePrice: 8,
-    source: 'TIDAL'
+    source: MANUAL_REQUEST_SOURCE
   }
 ];
 
@@ -385,15 +389,15 @@ export default function PatronView({
 
     const firstPreset = requestPresets[0];
     setSelectedPresetId(firstPreset.id);
-    setSelectedTrack({
-      id: firstPreset.id,
-      title: firstPreset.label.replace(/^\$\d+\s*/, ''),
-      artist: firstPreset.subtitle,
-      albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
-      basePrice: firstPreset.amount,
-      targetType: firstPreset.targetType,
-      source: 'Sway Preset'
-    });
+      setSelectedTrack({
+        id: firstPreset.id,
+        title: firstPreset.label.replace(/^\$\d+\s*/, ''),
+        artist: firstPreset.subtitle,
+        albumArt: REQUEST_ART_PLACEHOLDER,
+        basePrice: firstPreset.amount,
+        targetType: firstPreset.targetType,
+        source: PRESET_REQUEST_SOURCE
+      });
     setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
   }, [activeTab, selectedTrack, requestPresets, session.minimumTip]);
 
@@ -434,19 +438,18 @@ export default function PatronView({
       const filtered = previewCatalog.filter((song) => {
         if (!query) return true;
         return song.title.toLowerCase().includes(query)
-          || song.artist.toLowerCase().includes(query)
-          || (song.source || '').toLowerCase().includes(query);
+          || song.artist.toLowerCase().includes(query);
       });
 
       const anySongOption: SearchTrack | null = query
         ? {
             id: `any-${query.replace(/\s+/g, '-')}`,
             title: val.trim(),
-            artist: 'Request by name',
-            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+            artist: 'Manual song request',
+            albumArt: REQUEST_ART_PLACEHOLDER,
             basePrice: session.minimumTip,
             description: 'Send this as an open request',
-            source: 'Open request'
+            source: MANUAL_REQUEST_SOURCE
           }
         : null;
 
@@ -458,21 +461,21 @@ export default function PatronView({
     const trimmed = val.trim();
     const openSongOption: SearchTrack | null = (session.talentRole === 'DJ' && trimmed)
       ? {
-          id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
-          title: trimmed,
-          artist: 'Request by name',
-          albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
-          basePrice: session.minimumTip,
-          targetType: 'music',
-          source: 'Open request'
-        }
+        id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
+        title: trimmed,
+        artist: 'Manual song request',
+        albumArt: REQUEST_ART_PLACEHOLDER,
+        basePrice: session.minimumTip,
+        targetType: 'music',
+        source: MANUAL_REQUEST_SOURCE
+      }
       : null;
 
     try {
       const response = await fetch('/api/music/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: val })
+        body: JSON.stringify({ query: val, gig_id: gigId })
       });
       const data = await response.json();
       const results: SearchTrack[] = Array.isArray(data.results) ? data.results : [];
@@ -1116,7 +1119,7 @@ export default function PatronView({
             ) : (
               <>
             
-            {/* If DJ Role: Search verified catalog */}
+            {/* If DJ Role: Manual request entry */}
             {session.talentRole === 'DJ' && (
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -1134,10 +1137,10 @@ export default function PatronView({
                             id: preset.id,
                             title: preset.label.replace(/^\$\d+\s*/, ''),
                             artist: preset.subtitle,
-                            albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80',
+                            albumArt: REQUEST_ART_PLACEHOLDER,
                             basePrice: preset.amount,
                             targetType: preset.targetType,
-                            source: 'Sway Preset'
+                            source: PRESET_REQUEST_SOURCE
                           });
                           setTipAmount(Math.max(session.minimumTip, preset.amount));
                         }}
@@ -1152,9 +1155,12 @@ export default function PatronView({
 
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
-                    Request any song
+                    Request by song or artist
                   </span>
                 </div>
+                <p className="text-[11px] leading-relaxed text-slate-400">
+                  Enter the song or artist you want. Sway records the request for performer review, but it does not verify streaming-platform or DJ-library availability yet.
+                </p>
                  {/* Form input fields */}
                 <form onSubmit={triggerSearchSubmit} className="flex gap-2">
                   <div className="relative flex-1">
@@ -1163,7 +1169,7 @@ export default function PatronView({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Type a song or artist..."
+                      placeholder="Type the song or artist you want..."
                       className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
                     />
                   </div>
@@ -1257,7 +1263,7 @@ export default function PatronView({
                             artist: preset.subtitle,
                             basePrice: preset.amount,
                             targetType: preset.targetType,
-                            source: 'Sway Preset'
+                            source: PRESET_REQUEST_SOURCE
                           });
                           setTipAmount(Math.max(session.minimumTip, preset.amount));
                         }}

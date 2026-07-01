@@ -1,8 +1,8 @@
 # Sway Tips
 
-Sway lets live performers, DJs, bartenders, and event acts accept paid tips, requests, and audience boosts through a QR-powered live ladder.
+Sway is a simple live-room app where audiences tip performers or DJs and pay for song requests from their phones.
 
-This repo is moving from prototype behavior toward a production-ready web app and eventual App Store wrapper. The current implementation includes separated patron, talent, and overlay routes, with the persistent database, real payment processor flow, moderation controls, and App Store review package tracked in the roadmap docs.
+This repo is moving from prototype behavior toward a production-ready web app and eventual App Store wrapper. The current implementation includes separated audience, performer, and overlay routes, with the persistent database, real payment processor flow, moderation controls, and App Store review package tracked in the roadmap docs.
 
 ## Routes
 
@@ -12,7 +12,7 @@ This repo is moving from prototype behavior toward a production-ready web app an
 - `/g/:gigId`
 - `/p/:performerHandle`
 - `/overlay/:gigId`
-- `/admin`
+- `/admin` internal-only
 
 ## Local Development
 
@@ -40,7 +40,7 @@ Do not submit this app for public App Store review until the launch gate is comp
 	- `/p/*` patron shell
 	- `/talent/*` talent shell
 	- `/overlay/*` overlay shell
-	- `/admin/*` admin shell (still auth/role gated)
+	- `/admin/*` admin shell (internal-only and auth/role gated)
 
 ### Deploy Verification Checklist
 
