@@ -41,19 +41,33 @@ function PatronNoSessionRecovery({
         </div>
         <h1 className="font-display text-2xl font-black text-white">Join a Live Room</h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">
-          Sway helps you request songs, send tips, and boost queue placement. Scan a live room&apos;s QR code,
-          tap a performer&apos;s link, or return to our homepage to explore.
+          Sway helps you request songs, send tips, and boost queue placement. Scan a live room&apos;s QR code
+          or open the exact performer&apos;s link you were given.
         </p>
         <p className="mt-3 text-sm leading-6 text-slate-400">
-          Use a Sway room link or performer&apos;s link to join a live session.
+          If you are the performer, sign in to start your room. If you are in the crowd, use a Sway room link or performer&apos;s link to join the live session.
         </p>
-        <a
-          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white hover:bg-fuchsia-500"
-          href="https://sway.tips/"
-          onClick={onReturnHomeClick}
-        >
-          Return to Sway home
-        </a>
+        <div className="mt-6 grid gap-3">
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white hover:bg-fuchsia-500"
+            href="/talent/login"
+          >
+            Performer sign in
+          </a>
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold text-white hover:border-fuchsia-500/40"
+            href="https://sway.tips/"
+            onClick={onReturnHomeClick}
+          >
+            Return to Sway home
+          </a>
+        </div>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.26em] text-fuchsia-300">Use it like an app</p>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Install Sway from your browser so you can reopen it from the home screen after you scan a room once.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -183,7 +197,7 @@ export default function PatronApp() {
   const patronTopbarSubtitle = route.name === 'performer'
     ? `Performer: ${route.performerHandle}`
     : shouldShowNoSessionRecovery
-      ? 'Join a live room to request, tip, and boost'
+      ? 'Open a room link or sign in as the performer'
       : 'Request, Tip, and Boost live';
   const topRequest = requests
     .filter((request) => request.status === 'approved')
