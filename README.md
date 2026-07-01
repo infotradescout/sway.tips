@@ -27,6 +27,14 @@ Useful checks:
 - `npm run lint`
 - `npm run build`
 
+## Performer Library Bridge
+
+Performers can create a linked library source from the dashboard and run the local bridge:
+
+- `npm run library:bridge -- --sync-key YOUR_SYNC_KEY`
+
+That starts a localhost endpoint at `http://127.0.0.1:4314/ingest` so any DJ app, library manager, or companion script can push available-track snapshots into Sway. See `docs/SWAY_LIBRARY_CONNECTOR_BRIDGE.md` for payload details.
+
 ## Production Gaps
 
 Do not submit this app for public App Store review until the launch gate is complete. Production business writes are blocked until a persistent store is configured, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.

@@ -12,6 +12,9 @@ const schema = read('src/db/schema.ts');
 const server = read('server.ts');
 const patronView = read('src/components/PatronView.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
+const packageJson = read('package.json');
+const bridgeScript = read('scripts/sway-library-bridge.mjs');
+const bridgeDoc = read('docs/SWAY_LIBRARY_CONNECTOR_BRIDGE.md');
 const migration = read('drizzle/0009_performer_library_tracks.sql');
 const sourceMigration = read('drizzle/0010_performer_library_sources.sql');
 
@@ -51,6 +54,8 @@ for (const term of [
   "app.post('/api/library/sync'",
   'performerLibraryTracks',
   'performerLibrarySources',
+  'replaceExisting',
+  'removedCount',
   "app.post(\"/api/music/search\"",
   "integrationMode: 'performer_library'"
 ]) {
@@ -74,9 +79,22 @@ for (const term of [
   'x-sway-library-key',
   'Rotate key',
   'Revoke source',
-  'Tracks available:'
+  'Tracks available:',
+  'npm run library:bridge -- --sync-key'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing linked-source UX term: ${term}`);
+}
+
+for (const term of [
+  '"library:bridge": "node scripts/sway-library-bridge.mjs"',
+  'Sway Library Bridge',
+  'POST /ingest',
+  'replaceExisting',
+  'x-sway-library-key'
+]) {
+  if (!packageJson.includes(term) && !bridgeScript.includes(term) && !bridgeDoc.includes(term)) {
+    failures.push(`Bridge implementation missing term: ${term}`);
+  }
 }
 
 if (failures.length) {

@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
+    "library:bridge": "node scripts/sway-library-bridge.mjs",
     "performer:access:link": "node scripts/sway-performer-access-link.mjs",
     "test:integration:moderation-active-blocks": "node scripts/sway-moderation-active-blocks.integration.test.mjs",
     "test:integration:business-store-process-kill": "node scripts/sway-business-store-process-kill.integration.test.mjs",

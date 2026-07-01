@@ -968,6 +968,9 @@ export default function TalentDashboard({
                   <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
                     Create a secure sync source for any DJ app, library manager, or companion tool. Patron search uses whatever that linked source syncs as available for this performer.
                   </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                    Use the local bridge command `npm run library:bridge -- --sync-key ...` if your software can post JSON to localhost.
+                  </p>
                 </div>
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
                   <Upload className="h-4 w-4" />
@@ -1006,6 +1009,9 @@ export default function TalentDashboard({
                     <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
                     <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
                       Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
+                    </p>
+                    <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                      First-party bridge: run `npm run library:bridge -- --sync-key ...` and point local software at `http://127.0.0.1:4314/ingest`.
                     </p>
                   </div>
                 ) : null}

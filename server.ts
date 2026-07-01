@@ -10,7 +10,7 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash, randomBytes } from "crypto";
 import { readFileSync } from "fs";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerMemberships, performers, users } from "./src/db/schema";
@@ -734,6 +734,7 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   sourceKey: string;
   sourceLabel: string;
   rawTracks: unknown[];
+  replaceExisting?: boolean;
 }) {
   const normalizedTracks = input.rawTracks
     .slice(0, 1000)
@@ -778,7 +779,7 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
     }>;
 
   if (!normalizedTracks.length) {
-    return { importedCount: 0 };
+    return { importedCount: 0, removedCount: 0 };
   }
 
   for (const track of normalizedTracks) {
@@ -805,7 +806,22 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
       });
   }
 
-  return { importedCount: normalizedTracks.length };
+  let removedCount = 0;
+  if (input.replaceExisting) {
+    const retainedExternalTrackIds = normalizedTracks.map((track) => track.externalTrackId);
+    const staleRows = await executor
+      .delete(performerLibraryTracks)
+      .where(and(
+        eq(performerLibraryTracks.performerId, input.performerId),
+        eq(performerLibraryTracks.sourceKey, input.sourceKey),
+        notInArray(performerLibraryTracks.externalTrackId, retainedExternalTrackIds)
+      ))
+      .returning({ id: performerLibraryTracks.id });
+
+    removedCount = staleRows.length;
+  }
+
+  return { importedCount: normalizedTracks.length, removedCount };
 }
 
 async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
@@ -2228,6 +2244,7 @@ app.post('/api/library/sync', async (req, res) => {
   }
 
   const rawTracks = Array.isArray(req.body?.tracks) ? req.body.tracks : [];
+  const replaceExisting = req.body?.replaceExisting === true;
   if (!rawTracks.length) {
     return res.status(422).json({ error: 'At least one track is required for library sync.' });
   }
@@ -2237,7 +2254,8 @@ app.post('/api/library/sync', async (req, res) => {
       performerId: sourceRow.performerId,
       sourceKey: sourceRow.sourceKey,
       sourceLabel: sourceRow.sourceLabel,
-      rawTracks
+      rawTracks,
+      replaceExisting
     });
 
     await tx
@@ -2255,7 +2273,9 @@ app.post('/api/library/sync', async (req, res) => {
   return res.status(202).json({
     success: true,
     sourceKey: sourceRow.sourceKey,
-    importedCount: result.importedCount
+    importedCount: result.importedCount,
+    removedCount: result.removedCount,
+    replaceExisting
   });
 });
 
