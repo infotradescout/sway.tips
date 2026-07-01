@@ -11,19 +11,13 @@ function requireIncludes(source, term, message) {
 }
 
 for (const term of [
-  'Join a Live Room',
-  'request songs',
-  'send tips',
-  'boost queue placement',
-  'Scan a live room',
-  'Return to Sway home',
+  'Scan',
+  'Create account',
+  'Login',
+  'sway to play',
   'https://sway.tips/'
 ]) {
   requireIncludes(patronApp, term, `Patron recovery copy missing required term: ${term}`);
-}
-
-if (!patronApp.includes("performer's link") && !patronApp.includes('performer&apos;s link')) {
-  failures.push("Patron recovery copy missing required term: performer's link");
 }
 
 for (const forbidden of [

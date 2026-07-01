@@ -25,8 +25,8 @@ if (!patronSource.includes('if (isLoading || !shouldShowNoSessionRecovery) retur
   failures.push('PatronApp.tsx must gate recovery telemetry until loading completes.');
 }
 
-if (!patronSource.includes('Join a Live Room')) {
-  failures.push('PatronApp.tsx must render visible "Join a Live Room" recovery copy for invalid /g/:gigId routes.');
+if (!patronSource.includes('Scan') || !patronSource.includes('Create account') || !patronSource.includes('Login')) {
+  failures.push('PatronApp.tsx must render visible Scan/Create account/Login recovery CTAs for invalid /g/:gigId routes.');
 }
 
 if (!patronSource.includes("const statePath = routeGigId ? `/api/state/${routeGigId}` : null;")) {

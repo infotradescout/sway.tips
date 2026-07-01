@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flame, QrCode, Smartphone, Tv } from 'lucide-react';
+import { Flame, Smartphone, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import AppBackdrop from '../components/AppBackdrop';
 import PatronView from '../components/PatronView';
@@ -50,9 +50,8 @@ function PatronNoSessionRecovery({
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
-          className="glow-fuchsia inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
+          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
         >
-          <QrCode className="h-5 w-5" />
           Scan
         </button>
         <a
@@ -68,11 +67,11 @@ function PatronNoSessionRecovery({
           Login
         </a>
         <a
-          className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-black uppercase tracking-[0.2em] text-fuchsia-300 transition-colors hover:text-fuchsia-200"
+          className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
           href="https://sway.tips/"
           onClick={onReturnHomeClick}
         >
-          Sway to Play
+          sway to play
         </a>
       </motion.div>
 
@@ -256,28 +255,30 @@ export default function PatronApp() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      <DemoModeBanner />
-      <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
-        <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
-              {route.name === 'performer' ? <Smartphone className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
+      {shouldShowNoSessionRecovery ? null : <DemoModeBanner />}
+      {shouldShowNoSessionRecovery ? null : (
+        <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
+          <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
+                {route.name === 'performer' ? <Smartphone className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
+              </div>
+              <div>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
+                <p className="text-[9px] text-slate-400">
+                  {patronTopbarSubtitle}
+                </p>
+              </div>
             </div>
-            <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
-              <p className="text-[9px] text-slate-400">
-                {patronTopbarSubtitle}
-              </p>
-            </div>
+            <DemoModeBanner compact />
+            {routeGigId ? (
+              <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
+                <Tv className="h-4 w-4" />
+              </a>
+            ) : null}
           </div>
-          <DemoModeBanner compact />
-          {routeGigId ? (
-            <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
-              <Tv className="h-4 w-4" />
-            </a>
-          ) : null}
         </div>
-      </div>
+      )}
 
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
