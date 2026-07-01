@@ -42,10 +42,10 @@
 }
 
 .grid-bg {
-  background-image: 
-    linear-gradient(rgba(192, 38, 211, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(192, 38, 211, 0.03) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-image:
+    linear-gradient(rgba(192, 38, 211, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(192, 38, 211, 0.09) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 @keyframes orb-drift {
@@ -63,6 +63,15 @@
 .orb-drift { animation: orb-drift 14s ease-in-out infinite; }
 .orb-drift-slow { animation: orb-drift-slow 20s ease-in-out infinite; }
 .orb-drift-reverse { animation: orb-drift-reverse 17s ease-in-out infinite; }
+
+@keyframes eq-bar {
+  0%, 100% { height: 15%; }
+  50% { height: 95%; }
+}
+.eq-bar {
+  height: 15%;
+  animation: eq-bar 1.6s ease-in-out infinite;
+}
 
 /* Custom scrollbar matching Vibrant Palette tone */
 ::-webkit-scrollbar {

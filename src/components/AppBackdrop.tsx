@@ -1,11 +1,25 @@
+const EQ_BARS = Array.from({ length: 28 }, (_, i) => i);
+
 export default function AppBackdrop() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="grid-bg absolute inset-0" />
-      <div className="orb-drift absolute -top-40 left-[8%] h-[420px] w-[420px] rounded-full bg-fuchsia-600/30 blur-[110px]" />
-      <div className="orb-drift-slow absolute top-1/3 -right-24 h-[380px] w-[380px] rounded-full bg-cyan-500/25 blur-[110px]" />
-      <div className="orb-drift-reverse absolute -bottom-32 left-1/4 h-[360px] w-[360px] rounded-full bg-violet-600/25 blur-[110px]" />
-      <div className="orb-drift-slow absolute bottom-0 right-[12%] h-[300px] w-[300px] rounded-full bg-pink-500/20 blur-[100px]" />
+
+      <div className="absolute left-1/2 top-1/2 h-[640px] w-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-fuchsia-600/20 blur-[150px]" />
+      <div className="orb-drift absolute -top-40 left-[6%] h-[460px] w-[460px] rounded-full bg-fuchsia-600/45 blur-[110px]" />
+      <div className="orb-drift-slow absolute top-1/4 -right-32 h-[420px] w-[420px] rounded-full bg-cyan-500/40 blur-[110px]" />
+      <div className="orb-drift-reverse absolute bottom-1/4 left-[14%] h-[400px] w-[400px] rounded-full bg-violet-600/40 blur-[110px]" />
+      <div className="orb-drift-slow absolute -bottom-28 right-[8%] h-[360px] w-[360px] rounded-full bg-pink-500/35 blur-[105px]" />
+
+      <div className="absolute inset-x-0 bottom-0 flex h-40 items-end justify-center gap-1.5 opacity-50 [mask-image:linear-gradient(to_top,black,transparent)]">
+        {EQ_BARS.map((i) => (
+          <span
+            key={i}
+            className="eq-bar w-1.5 rounded-t-full bg-gradient-to-t from-fuchsia-500 to-cyan-300"
+            style={{ animationDelay: `${(i % 7) * 0.15}s`, animationDuration: `${1.3 + (i % 5) * 0.2}s` }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
