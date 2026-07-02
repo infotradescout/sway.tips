@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import SwayMark from './SwayMark';
 
 const EQ_BARS = Array.from({ length: 28 }, (_, i) => i);
 
@@ -34,6 +35,8 @@ export default function AppBackdrop() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="grid-bg absolute inset-0" />
+
+      <SwayMark glow={false} className="absolute left-1/2 top-1/2 h-[85vh] max-h-[900px] w-auto -translate-x-1/2 -translate-y-1/2 opacity-[0.05]" />
 
       <div className="absolute left-1/2 top-1/2 h-[640px] w-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-fuchsia-600/20 blur-[150px]" />
       <div className="orb-drift absolute -top-40 left-[6%] h-[460px] w-[460px] rounded-full bg-fuchsia-600/45 blur-[110px]" />
