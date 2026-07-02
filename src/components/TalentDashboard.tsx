@@ -295,7 +295,7 @@ export default function TalentDashboard({
     setStripeConnectError(null);
     try {
       const response = await fetch('/api/talent/connect/onboard', { method: 'POST' });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to start Stripe onboarding.');
       }

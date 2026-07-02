@@ -2452,30 +2452,39 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
   }
 
-  const [performerRow] = await businessDb
-    .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
-    .from(performers)
-    .where(eq(performers.id, performerOwner.performerId))
-    .limit(1);
+  try {
+    const [performerRow] = await businessDb
+      .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
+      .from(performers)
+      .where(eq(performers.id, performerOwner.performerId))
+      .limit(1);
 
-  let accountId = performerRow?.stripeConnectedAccountId ?? null;
-  if (!accountId) {
-    const created = await stripeConnectService.createExpressAccount();
-    accountId = created.accountId;
-    await businessDb
-      .update(performers)
-      .set({ stripeConnectedAccountId: accountId })
-      .where(eq(performers.id, performerOwner.performerId));
+    let accountId = performerRow?.stripeConnectedAccountId ?? null;
+    if (!accountId) {
+      const created = await stripeConnectService.createExpressAccount();
+      accountId = created.accountId;
+      await businessDb
+        .update(performers)
+        .set({ stripeConnectedAccountId: accountId })
+        .where(eq(performers.id, performerOwner.performerId));
+    }
+
+    const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+    const { url } = await stripeConnectService.createOnboardingLink({
+      accountId,
+      refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
+      returnUrl: `${appBaseUrl}/talent/connect/return`
+    });
+
+    return res.json({ success: true, url });
+  } catch (error) {
+    console.error('Stripe Connect onboarding failed.', {
+      message: error instanceof Error ? error.message : 'unknown_error'
+    });
+    return res.status(502).json({
+      error: 'Stripe Connect onboarding could not be started. Confirm Stripe Connect is enabled for the Stripe account and Render is using test-mode Stripe keys.'
+    });
   }
-
-  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  const { url } = await stripeConnectService.createOnboardingLink({
-    accountId,
-    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
-    returnUrl: `${appBaseUrl}/talent/connect/return`
-  });
-
-  return res.json({ success: true, url });
 });
 
 app.get('/talent/connect/refresh', (_req, res) => {
