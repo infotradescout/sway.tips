@@ -3,7 +3,7 @@ type MailerEnv = Record<string, string | undefined>;
 export function resolvePerformerLoginBaseUrl(env: MailerEnv) {
   return env.SWAY_APP_BASE_URL?.trim()
     || env.APP_URL?.trim()
-    || 'http://localhost:3000';
+    || (env.NODE_ENV === 'production' ? 'https://app.sway.tips' : 'http://localhost:3000');
 }
 
 export function createPerformerLoginMailer({
