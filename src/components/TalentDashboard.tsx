@@ -221,6 +221,15 @@ export default function TalentDashboard({
     }
   };
 
+  const handleSetPaymentsEnabled = async (enabled: boolean) => {
+    try {
+      await postSessionJson('/api/session/payments-enabled', { enabled });
+      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleActivatePreset = async (durationMinutes: number, label: string) => {
     try {
       await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
@@ -834,6 +843,42 @@ export default function TalentDashboard({
                   }`}
                 >
                   Open Catalog
+                </button>
+              </div>
+            </div>
+
+            {/* 3c. PAYMENTS TOGGLE */}
+            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Payments</p>
+                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
+                  {session.paymentsEnabled === false
+                    ? 'Free event: tips are off, boosts are free upvotes, requests carry no charge.'
+                    : 'Paid room: tips, boosts, and paid requests are all active.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSetPaymentsEnabled(true)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.paymentsEnabled !== false
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                  }`}
+                >
+                  Paid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetPaymentsEnabled(false)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.paymentsEnabled === false
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                  }`}
+                >
+                  Free Event
                 </button>
               </div>
             </div>
