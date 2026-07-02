@@ -26,6 +26,7 @@ const emptySession: GigSession = {
   requestWindowLabel: null,
   requestPresets: [],
   operatingMode: 'manual',
+  searchScope: 'library',
   totals: {
     totalTips: 0,
     accumulatedFees: 0,

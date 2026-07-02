@@ -45,6 +45,7 @@ import {
   validatePerformerPasswordStrength,
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
+import { searchCatalog } from "./src/server/spotify-catalog";
 
 dotenv.config();
 
@@ -444,6 +445,7 @@ function createInactiveSession(): GigSession {
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
+    searchScope: 'library',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -2651,6 +2653,7 @@ app.post("/api/session/start", async (req, res) => {
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
+    searchScope: 'library',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -2850,6 +2853,38 @@ app.post("/api/session/mode", async (req, res) => {
     previousStatus: previousMode,
     nextStatus: mode,
     metadata: { operatingMode: mode }
+  });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
+});
+
+// Operator selects the song search scope for this room: their own synced library
+// only (default, safest) or the full open catalog when they explicitly opt in.
+app.post("/api/session/search-scope", async (req, res) => {
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
+  if (!actor) return;
+  const { scope } = req.body;
+  const roomState = roomContext.state;
+
+  if (scope !== 'library' && scope !== 'catalog') {
+    return res.status(400).json({ error: "scope must be 'library' or 'catalog'." });
+  }
+
+  const previousScope = roomState.session.searchScope;
+  roomState.session.searchScope = scope;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'gig_session',
+    entityId: roomContext.gigId,
+    eventType: 'session.search_scope',
+    previousStatus: previousScope,
+    nextStatus: scope,
+    metadata: { searchScope: scope }
   });
   res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
@@ -3899,6 +3934,30 @@ app.post("/api/music/search", (req, res) => {
         results: manualResults,
         integrationMode: 'manual_request_only'
       });
+    }
+
+    const roomSnapshot = await loadRoomState(requestedGigId);
+    const searchScope = roomSnapshot.state.session.searchScope;
+
+    if (searchScope === 'catalog') {
+      const catalog = await searchCatalog({ query, env: process.env });
+      if (catalog.configured) {
+        return res.json({
+          results: catalog.results.map((track) => ({
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            albumArt: track.albumArt || albumArt,
+            description: track.album || 'Open catalog',
+            spotifyUri: track.spotifyUri,
+            spotifyUrl: track.spotifyUrl,
+            targetType: 'music'
+          })),
+          integrationMode: 'open_catalog'
+        });
+      }
+      // Room is set to catalog mode but no catalog provider is configured yet --
+      // fall through to the performer's own library instead of erroring.
     }
 
     const lowerQuery = query.toLowerCase();

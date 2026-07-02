@@ -97,6 +97,9 @@ export interface GigSession {
   requestPresets: RequestPreset[]; // Buildable custom/system presets list
   // Operating posture for the room layer.
   operatingMode: 'manual' | 'open_call';
+  // Song search scope for this room: performer's own synced library only, or the
+  // full open catalog when the performer explicitly opts in.
+  searchScope: 'library' | 'catalog';
   totals: {
     totalTips: number;
     accumulatedFees: number;
