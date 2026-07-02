@@ -94,6 +94,9 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     operatingMode: input.operatingMode === 'open_call'
       ? input.operatingMode
       : (fallback.operatingMode ?? 'manual'),
+    searchScope: input.searchScope === 'catalog'
+      ? input.searchScope
+      : (fallback.searchScope ?? 'library'),
     totals: input.totals ?? fallback.totals
   };
 }

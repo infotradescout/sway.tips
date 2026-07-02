@@ -212,6 +212,15 @@ export default function TalentDashboard({
     }
   };
 
+  const handleSetSearchScope = async (scope: 'library' | 'catalog') => {
+    try {
+      await postSessionJson('/api/session/search-scope', { scope });
+      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleActivatePreset = async (durationMinutes: number, label: string) => {
     try {
       await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
@@ -794,7 +803,41 @@ export default function TalentDashboard({
                 </button>
               </div>
             </div>
-            
+
+            {/* 3b. SONG SEARCH SCOPE */}
+            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Song Search Scope</p>
+                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
+                  Restrict patrons to your synced library, or open full catalog search for this room.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSetSearchScope('library')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.searchScope !== 'catalog'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                  }`}
+                >
+                  My Library
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetSearchScope('catalog')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.searchScope === 'catalog'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                  }`}
+                >
+                  Open Catalog
+                </button>
+              </div>
+            </div>
+
             {/* 3a. POST-GIG FINAL SWEEP INDICATOR */}
             {session.status === 'ending' && (
               <div className="bg-amber-950/40 p-5 rounded-2xl border border-amber-900/30 flex items-start gap-4">
