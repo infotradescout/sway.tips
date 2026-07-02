@@ -26,6 +26,7 @@ function createInactiveSession() {
     requestWindowDuration: null,
     requestWindowLabel: null,
     operatingMode: 'manual',
+    searchScope: 'library',
     requestPresets: [
       { id: 'p-sys-15', label: 'Speed Round', duration: 15, isSystem: true },
       { id: 'p-sys-30', label: 'Mid-Gig Rush', duration: 30, isSystem: true },
