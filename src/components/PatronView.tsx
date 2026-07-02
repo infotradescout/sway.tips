@@ -195,12 +195,52 @@ export default function PatronView({
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyricsStatus, setLyricsStatus] = useState<'idle' | 'loading' | 'found' | 'not-found'>('idle');
+  const [lyricsText, setLyricsText] = useState<string | null>(null);
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isSubmitLocked = isPaying || isPaymentConfirmationPending;
 
   const latestRequest = [...requests]
     .filter((item) => !item.hidden && !item.removed)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  const nowPlayingRequest = requests
+    .filter((item) => !item.hidden && !item.removed && !item.shadowBanned)
+    .filter((item) => item.status === 'fulfilled' && item.type !== 'tip')
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+
+  useEffect(() => {
+    setLyricsOpen(false);
+    setLyricsStatus('idle');
+    setLyricsText(null);
+  }, [nowPlayingRequest?.id]);
+
+  useEffect(() => {
+    if (!lyricsOpen || !nowPlayingRequest) return;
+    let cancelled = false;
+    setLyricsStatus('loading');
+    const params = new URLSearchParams({
+      title: nowPlayingRequest.title,
+      artist: nowPlayingRequest.subtitle || ''
+    });
+    fetch(`/api/lyrics?${params}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.found && (data.plainLyrics || data.instrumental)) {
+          setLyricsText(data.instrumental ? 'Instrumental — no lyrics.' : data.plainLyrics);
+          setLyricsStatus('found');
+        } else {
+          setLyricsStatus('not-found');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLyricsStatus('not-found');
+      });
+    return () => { cancelled = true; };
+  }, [lyricsOpen, nowPlayingRequest]);
 
   const activePatronStatus: 'Syncing' | 'Pending' | 'Approved' | 'Paused' | 'Ended' =
     session.status === 'closed'
@@ -835,10 +875,7 @@ export default function PatronView({
       {/* Room Layer: Now Playing / Up Next + honest operating mode */}
       {(() => {
         const visible = requests.filter(r => !r.hidden && !r.removed && !r.shadowBanned);
-        const nowPlaying = visible
-          .filter(r => r.status === 'fulfilled' && r.type !== 'tip')
-          .slice()
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+        const nowPlaying = nowPlayingRequest;
         const upNext = visible
           .filter(r => r.status === 'approved')
           .slice()
@@ -864,16 +901,41 @@ export default function PatronView({
             </div>
 
             {nowPlaying ? (
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
-                  <Music className="w-5 h-5 text-cyan-300" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-white truncate">{nowPlaying.title}</div>
-                  {nowPlaying.subtitle && (
-                    <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  {nowPlaying.albumArt ? (
+                    <img
+                      src={nowPlaying.albumArt}
+                      alt=""
+                      className="w-11 h-11 rounded-xl border border-white/10 object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
+                      <Music className="w-5 h-5 text-cyan-300" />
+                    </div>
                   )}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-white truncate">{nowPlaying.title}</div>
+                    {nowPlaying.subtitle && (
+                      <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLyricsOpen((open) => !open)}
+                    className="shrink-0 rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:border-cyan-500/40 hover:text-white"
+                  >
+                    {lyricsOpen ? 'Hide lyrics' : 'Lyrics'}
+                  </button>
                 </div>
+
+                {lyricsOpen && (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3 text-xs leading-relaxed text-slate-300 max-h-48 overflow-y-auto whitespace-pre-line">
+                    {lyricsStatus === 'loading' && 'Looking up lyrics...'}
+                    {lyricsStatus === 'not-found' && 'No lyrics found for this song.'}
+                    {lyricsStatus === 'found' && lyricsText}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-[11px] text-slate-400">{modeHint}.</p>

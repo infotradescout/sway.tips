@@ -45,6 +45,7 @@ import {
   validatePerformerPasswordStrength,
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
+import { lookupLyrics } from "./src/server/lyrics-provider";
 
 dotenv.config();
 
@@ -2523,6 +2524,19 @@ app.get("/api/state", async (req, res) => {
     activeGigId: talentAccess.allowed ? state.activeGigId : null,
     performerProfile
   });
+});
+
+app.get("/api/lyrics", async (req, res) => {
+  applyNoStoreHeaders(res);
+  const title = typeof req.query.title === 'string' ? req.query.title.trim() : '';
+  const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+
+  if (!title) {
+    return res.status(422).json({ error: 'A song title is required to look up lyrics.' });
+  }
+
+  const result = await lookupLyrics({ title, artist });
+  return res.json(result);
 });
 
 app.get("/api/state/:gigId", async (req, res) => {
