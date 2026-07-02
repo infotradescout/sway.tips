@@ -39,40 +39,73 @@ export function createPerformerLoginMailer({
       return { delivered: false as const, provider: provider || 'missing' };
     }
 
-    if (provider !== 'resend') {
-      console.error(`Performer login email delivery unavailable: unsupported SWAY_EMAIL_PROVIDER "${provider}".`);
-      return { delivered: false as const, provider };
-    }
+    const bodyText = [
+      introLine,
+      '',
+      link,
+      '',
+      'This link expires in 15 minutes.'
+    ].join('\n');
 
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: fromAddress,
-        to: [toEmail],
-        subject,
-        text: [
-          introLine,
-          '',
-          link,
-          '',
-          'This link expires in 15 minutes.'
-        ].join('\n')
-      })
-    });
-
-    if (!response.ok) {
-      console.error('Performer login email delivery failed via Resend.', {
-        status: response.status,
-        statusText: response.statusText
+    if (provider === 'resend') {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [toEmail],
+          subject,
+          text: bodyText
+        })
       });
-      return { delivered: false as const, provider };
+
+      if (!response.ok) {
+        console.error('Performer login email delivery failed via Resend.', {
+          status: response.status,
+          statusText: response.statusText
+        });
+        return { delivered: false as const, provider };
+      }
+
+      return { delivered: true as const, provider };
     }
 
-    return { delivered: true as const, provider };
+    if (provider === 'brevo') {
+      const fromMatch = fromAddress.match(/^(.*)<(.+)>$/);
+      const senderEmail = (fromMatch ? fromMatch[2] : fromAddress).trim();
+      const senderName = (fromMatch ? fromMatch[1] : 'Sway').trim() || 'Sway';
+
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json',
+          accept: 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: senderName, email: senderEmail },
+          to: [{ email: toEmail }],
+          subject,
+          textContent: bodyText
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Performer login email delivery failed via Brevo.', {
+          status: response.status,
+          statusText: response.statusText
+        });
+        return { delivered: false as const, provider };
+      }
+
+      return { delivered: true as const, provider };
+    }
+
+    console.error(`Performer login email delivery unavailable: unsupported SWAY_EMAIL_PROVIDER "${provider}".`);
+    return { delivered: false as const, provider };
   }
 
   return {
