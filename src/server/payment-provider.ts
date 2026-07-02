@@ -20,6 +20,13 @@ export type ProviderAuthorizeInput = {
   paymentMethod?: string;
   confirm?: boolean;
   metadata?: Record<string, string>;
+  // Passthrough (destination charge) target: when set, Stripe automatically
+  // routes the charge (minus applicationFeeAmountCents) to this connected
+  // account once the PaymentIntent is captured. Omitted entirely for callers
+  // whose performer hasn't connected Stripe yet -- the charge still succeeds
+  // into the platform balance in that case.
+  destinationAccountId?: string;
+  applicationFeeAmountCents?: number;
 };
 
 export type ProviderAuthorizeResult = {
@@ -135,6 +142,12 @@ export function createStripeProviderAdapter(config: {
           capture_method: 'manual',
           ...(input.paymentMethod ? { payment_method: input.paymentMethod } : {}),
           ...(input.confirm ? { confirm: true } : {}),
+          ...(input.destinationAccountId
+            ? {
+                transfer_data: { destination: input.destinationAccountId },
+                application_fee_amount: input.applicationFeeAmountCents ?? 0
+              }
+            : {}),
           metadata: input.metadata ?? {}
         },
         { idempotencyKey: input.idempotencyKey }

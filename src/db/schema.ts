@@ -121,6 +121,7 @@ export const performers = pgTable('performers', {
   kycStatus: kycStatusEnum('kyc_status').notNull().default('not_required'),
   payoutsEnabled: boolean('payouts_enabled').notNull().default(false),
   chargesEnabled: boolean('charges_enabled').notNull().default(false),
+  stripeConnectedAccountId: text('stripe_connected_account_id'),
   lifetimeGrossVolume: integer('lifetime_gross_volume').notNull().default(0),
   payoutHoldReason: text('payout_hold_reason'),
   verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000),

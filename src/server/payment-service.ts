@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
-import { payments } from '../db/schema';
+import { payments, gigSessions, performers } from '../db/schema';
 import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
 
@@ -91,6 +91,24 @@ export function createPaymentService(config: {
 
     const paymentId = created.id;
 
+    // Passthrough target: only attached when the performer has a Stripe
+    // Connect account that can actually accept charges. If not (not yet
+    // connected, or still onboarding), the charge still proceeds without a
+    // destination -- paid actions are never blocked on Connect onboarding.
+    const [destinationRow] = await db
+      .select({
+        stripeConnectedAccountId: performers.stripeConnectedAccountId,
+        chargesEnabled: performers.chargesEnabled
+      })
+      .from(gigSessions)
+      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+      .where(eq(gigSessions.id, input.gigId))
+      .limit(1);
+
+    const destinationAccountId = destinationRow?.chargesEnabled
+      ? destinationRow.stripeConnectedAccountId ?? undefined
+      : undefined;
+
     try {
       const authorization = await provider.authorizePayment({
         amountTotalCents,
@@ -98,6 +116,9 @@ export function createPaymentService(config: {
         idempotencyKey: `authorize:${input.idempotencyKey}`,
         paymentMethod: input.paymentMethod,
         confirm: input.confirm,
+        ...(destinationAccountId
+          ? { destinationAccountId, applicationFeeAmountCents: input.platformFeeCents }
+          : {}),
         metadata: {
           sway_payment_id: paymentId,
           sway_gig_id: input.gigId,

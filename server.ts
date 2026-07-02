@@ -46,6 +46,7 @@ import {
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
 import { searchCatalog } from "./src/server/spotify-catalog";
+import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 
 dotenv.config();
 
@@ -90,6 +91,7 @@ const paymentService = createPaymentService({
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
   : null;
+const stripeConnectService = createConfiguredStripeConnectService(process.env);
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -446,6 +448,7 @@ function createInactiveSession(): GigSession {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: 'library',
+    paymentsEnabled: true,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -729,9 +732,13 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         display_name: performers.displayName,
         handle: performers.handle,
         owner_user_id: performers.ownerUserId,
-        email_verified_at: users.emailVerifiedAt
+        email_verified_at: users.emailVerifiedAt,
+        charges_enabled: performers.chargesEnabled,
+        payouts_enabled: performers.payoutsEnabled,
+        stripe_connected_account_id: performers.stripeConnectedAccountId
       })
       .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
@@ -2425,6 +2432,60 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   return res.json({ success: true, revoked: true });
 });
 
+// Creates (if needed) the performer's Stripe Express connected account and
+// returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
+// existing connected account on repeat calls instead of creating duplicates.
+app.post('/api/talent/connect/onboard', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
+  }
+  if (!stripeConnectService) {
+    return res.status(503).json({ error: 'Stripe Connect is not configured yet.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
+  }
+
+  const [performerRow] = await businessDb
+    .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
+    .from(performers)
+    .where(eq(performers.id, performerOwner.performerId))
+    .limit(1);
+
+  let accountId = performerRow?.stripeConnectedAccountId ?? null;
+  if (!accountId) {
+    const created = await stripeConnectService.createExpressAccount();
+    accountId = created.accountId;
+    await businessDb
+      .update(performers)
+      .set({ stripeConnectedAccountId: accountId })
+      .where(eq(performers.id, performerOwner.performerId));
+  }
+
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const { url } = await stripeConnectService.createOnboardingLink({
+    accountId,
+    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
+    returnUrl: `${appBaseUrl}/talent/connect/return`
+  });
+
+  return res.json({ success: true, url });
+});
+
+app.get('/talent/connect/refresh', (_req, res) => {
+  res.redirect('/talent');
+});
+
+app.get('/talent/connect/return', (_req, res) => {
+  res.redirect('/talent');
+});
+
 app.post('/api/library/sync', async (req, res) => {
   if (!businessDb) {
     return res.status(503).json({ error: 'Library sync requires a durable database connection.' });
@@ -2493,14 +2554,39 @@ app.post('/api/library/sync', async (req, res) => {
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
-  if (!paymentWebhookService) {
-    return res.status(503).json({ error: "Payment provider is not configured." });
-  }
   const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
   if (typeof rawBody !== 'string') {
     return res.status(400).json({ error: "Raw request body unavailable for signature verification." });
   }
   const signatureHeader = req.header('stripe-signature') ?? null;
+
+  // Stripe can send both payment and Connect events to one endpoint. Try the
+  // Connect (account.updated) branch first -- it's a no-op for any other
+  // event type or an invalid signature, so it never interferes with the
+  // payment webhook path below.
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (stripeConnectService && webhookSecret && businessDb) {
+    const accountEvent = stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
+    if (accountEvent) {
+      const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
+      const paymentAccountStatus = payoutsEnabled
+        ? 'payouts_enabled'
+        : chargesEnabled
+          ? 'charges_enabled'
+          : detailsSubmitted
+            ? 'created'
+            : 'not_started';
+      await businessDb
+        .update(performers)
+        .set({ chargesEnabled, payoutsEnabled, paymentAccountStatus })
+        .where(eq(performers.stripeConnectedAccountId, accountEvent.accountId));
+      return res.json({ received: true, result: { type: 'account.updated' } });
+    }
+  }
+
+  if (!paymentWebhookService) {
+    return res.status(503).json({ error: "Payment provider is not configured." });
+  }
   try {
     const result = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
     return res.json({ received: true, result });
@@ -2654,6 +2740,7 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: 'library',
+    paymentsEnabled: true,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -2889,6 +2976,39 @@ app.post("/api/session/search-scope", async (req, res) => {
   res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
+// Operator toggles whether this room accepts payment at all. Off means a free
+// event: tips are rejected, boosts become free upvotes, requests carry no
+// payment step. Defaults to true (paid) for every room.
+app.post("/api/session/payments-enabled", async (req, res) => {
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
+  if (!actor) return;
+  const { enabled } = req.body;
+  const roomState = roomContext.state;
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: "enabled must be a boolean." });
+  }
+
+  const previousEnabled = roomState.session.paymentsEnabled;
+  roomState.session.paymentsEnabled = enabled;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'gig_session',
+    entityId: roomContext.gigId,
+    eventType: 'session.payments_enabled',
+    previousStatus: String(previousEnabled),
+    nextStatus: String(enabled),
+    metadata: { paymentsEnabled: enabled }
+  });
+  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
+});
+
 // Activate standard/custom preset time window
 app.post("/api/session/window/preset/activate", async (req, res) => {
   const roomContext = await resolveLegacyWritableRoom(req, res);
@@ -3032,8 +3152,14 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
   const roomState = roomSnapshot.state;
+  // Only song requests are gated by the room's payments toggle. Tips support the
+  // performer directly and are always allowed, regardless of room state.
+  const isStraightTip = targetType === 'straight_tip' || type === 'tip';
+  const paymentsEnabledForAction = isStraightTip || roomState.session.paymentsEnabled !== false;
 
-  const amount_cents = Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100);
+  const amount_cents = paymentsEnabledForAction
+    ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
+    : 0;
   const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
@@ -3087,11 +3213,9 @@ app.post("/api/request/create", async (req, res) => {
     return res.json(responseBody);
   }
 
-  const tipAmount = Math.max(Number(amount) || 0, roomState.session.minimumTip);
+  const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
   const holdAmount = tipAmount;
-  const platformFee = 1.0; 
-
-  const isStraightTip = targetType === 'straight_tip' || type === 'tip';
+  const platformFee = paymentsEnabledForAction ? 1.0 : 0;
 
   // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
   if (!isStraightTip && (!roomState.session.requestsOpen || roomState.session.status !== 'active')) {
@@ -3174,7 +3298,10 @@ app.post("/api/request/create", async (req, res) => {
   // Provider-backed authorization/hold. A paid request/tip must NOT enter app
   // state or Private Triage until the provider confirms a real hold
   // (PaymentIntent requires_capture). Fail safe / fail closed otherwise.
-  if (paymentService.isEnabled()) {
+  if (!paymentsEnabledForAction) {
+    // Free room, non-tip request: no money changes hands, nothing to authorize.
+    newItem.paymentStatus = 'not_applicable';
+  } else if (paymentService.isEnabled()) {
     const platformFeeCents = roomState.session.feeType === 'patron' ? 100 : 0;
     const authorization = await paymentService.authorizeAction({
       gigId: durableGigId,
@@ -3269,7 +3396,7 @@ app.post("/api/request/boost", async (req, res) => {
     expires_at,
     payment_method
   } = req.body;
-  const amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
+  let amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
@@ -3284,6 +3411,11 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
   const roomState = roomSnapshot.state;
+  const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
+  if (!paymentsEnabledForRoom) {
+    // Free room: boosts become free upvotes -- fixed 1-unit weight, no money.
+    amt = 1;
+  }
 
   const request = roomState.requests.find(r => r.id === requestId);
   if (!request) {
@@ -3411,7 +3543,10 @@ app.post("/api/request/boost", async (req, res) => {
   // Provider-backed authorization/hold for the boost. The booster only reaches
   // this point because the target request already cleared Private Triage, so the
   // boost never grants approval authority. Fail safe on provider rejection.
-  if (paymentService.isEnabled()) {
+  if (!paymentsEnabledForRoom) {
+    // Free room: the boost is a free upvote, nothing to authorize.
+    newBoost.paymentStatus = 'not_applicable';
+  } else if (paymentService.isEnabled()) {
     const authorization = await paymentService.authorizeAction({
       gigId: durableGigId,
       actionType: 'boost',

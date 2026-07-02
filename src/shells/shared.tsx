@@ -22,6 +22,7 @@ export const emptySession: GigSession = {
   requestPresets: [],
   operatingMode: 'manual',
   searchScope: 'library',
+  paymentsEnabled: true,
   totals: {
     totalTips: 0,
     accumulatedFees: 0,

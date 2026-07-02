@@ -24,6 +24,9 @@ type TalentPerformerProfile = {
   handle: string | null;
   owner_user_id: string;
   email_verified_at: string | null;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  stripe_connected_account_id: string | null;
 } | null;
 
 export default function TalentApp() {

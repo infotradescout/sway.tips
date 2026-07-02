@@ -97,6 +97,9 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     searchScope: input.searchScope === 'catalog'
       ? input.searchScope
       : (fallback.searchScope ?? 'library'),
+    paymentsEnabled: typeof input.paymentsEnabled === 'boolean'
+      ? input.paymentsEnabled
+      : (fallback.paymentsEnabled ?? true),
     totals: input.totals ?? fallback.totals
   };
 }

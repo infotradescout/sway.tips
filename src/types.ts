@@ -100,6 +100,9 @@ export interface GigSession {
   // Song search scope for this room: performer's own synced library only, or the
   // full open catalog when the performer explicitly opts in.
   searchScope: 'library' | 'catalog';
+  // When false, this room is a free event: tips are rejected, boosts become
+  // free upvotes, and requests are created with no payment step at all.
+  paymentsEnabled: boolean;
   totals: {
     totalTips: number;
     accumulatedFees: number;

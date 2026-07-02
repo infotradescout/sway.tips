@@ -186,6 +186,9 @@ export default function PatronView({
     idempotencyKey: string;
     expires_at: string;
     gigId: string;
+    // A straight tip always goes through real payment, regardless of the room's
+    // free/paid toggle -- only song requests and boosts are room-specific.
+    isTip?: boolean;
   } | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
@@ -525,12 +528,14 @@ export default function PatronView({
     let trackArt = '';
     let amt = 0;
 
+    const paymentsEnabledForRoom = session.paymentsEnabled !== false;
+
     if (type === 'request') {
       if (!senderName) {
         alert("Please enter a Patron Name so the Performer knows who tipped!");
         return;
       }
-      if (tipAmount < session.minimumTip) {
+      if (paymentsEnabledForRoom && tipAmount < session.minimumTip) {
         alert(`Minimum tip required is $${session.minimumTip}`);
         return;
       }
@@ -553,7 +558,7 @@ export default function PatronView({
         artist = selectedTrack.description;
         trackArt = '';
       }
-      amt = tipAmount;
+      amt = paymentsEnabledForRoom ? tipAmount : 0;
     } else {
       // Boost check
       if (!boostingItem) return;
@@ -561,16 +566,16 @@ export default function PatronView({
         alert("Please enter your sponsor name for the boost!");
         return;
       }
-      if (boostAmount < 1) {
+      if (paymentsEnabledForRoom && boostAmount < 1) {
         alert("Minimum boost is $1");
         return;
       }
       title = boostingItem.title;
       artist = boostingItem.subtitle;
-      amt = boostAmount;
+      amt = paymentsEnabledForRoom ? boostAmount : 1;
     }
 
-    const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+    const platformFee = paymentsEnabledForRoom && session.feeType === 'patron' ? 1.0 : 0;
     const total = amt + platformFee;
 
     if (type === 'request') {
@@ -617,8 +622,8 @@ export default function PatronView({
       if (checkoutPayload.type === 'request') {
         const isCustom = session.talentRole !== 'DJ';
         await submitWithBoundedRetry(() => onCreateRequest({
-          type: 'request',
-          targetType: selectedTrack?.targetType || (isCustom ? 'custom' : 'music'),
+          type: checkoutPayload.isTip ? 'tip' : 'request',
+          targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
           title: checkoutPayload.title,
           subtitle: checkoutPayload.artist || '',
           senderName: senderName,
@@ -755,6 +760,7 @@ export default function PatronView({
     setCheckoutPayload({
       open: true,
       type: 'request',
+      isTip: true,
       title: 'Classic Tip',
       artist: 'Straight tip supporting the performer directly!',
       amount: tipAmount,
@@ -813,19 +819,25 @@ export default function PatronView({
             <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
               {previewMode
                 ? 'Demo data only. No payment or moderation action will be sent.'
-                : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
+                : session.paymentsEnabled === false
+                  ? `Send a free request, upvote an approved queue item, or send a direct tip for ${session.talentName || 'this performer'}. Song requests and boosts are free for this event; tips always go through payment.`
+                  : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
             <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
               <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
                 <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Request</p>
-                <p className="mt-1 text-[10px] text-slate-400">Start a paid live request</p>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {session.paymentsEnabled === false ? 'Send a free live request' : 'Start a paid live request'}
+                </p>
               </div>
               <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
                 <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
                 <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
               </div>
               <div className="rounded-xl border border-cyan-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">Boost</p>
+                <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">
+                  {session.paymentsEnabled === false ? 'Upvote' : 'Boost'}
+                </p>
                 <p className="mt-1 text-[10px] text-slate-400">Push an approved item up</p>
               </div>
             </div>
@@ -1863,29 +1875,41 @@ export default function PatronView({
                   </div>
 
                   {/* Pricing detail sheets */}
-                  <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
-                    <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-550 text-slate-500">Request:</span>
-                      <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
-                    </div>
+                  {checkoutPayload.isTip || session.paymentsEnabled !== false ? (
+                    <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span className="text-slate-550 text-slate-500">Request:</span>
+                        <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
+                      </div>
 
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-500 mt-0.5">Tip:</span>
-                      <span className="text-white">${checkoutPayload.amount}.00</span>
-                    </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500 mt-0.5">Tip:</span>
+                        <span className="text-white">${checkoutPayload.amount}.00</span>
+                      </div>
 
-                    <div className="flex justify-between text-xs font-sans">
-                      <span className="text-slate-500">Service Fee:</span>
-                      <span className="text-fuchsia-400 font-bold">
-                        {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
-                      </span>
-                    </div>
+                      <div className="flex justify-between text-xs font-sans">
+                        <span className="text-slate-500">Service Fee:</span>
+                        <span className="text-fuchsia-400 font-bold">
+                          {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
+                        </span>
+                      </div>
 
-                    <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                      <span className="text-slate-400">Request Total:</span>
-                      <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
+                      <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
+                        <span className="text-slate-400">Request Total:</span>
+                        <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5 text-left font-mono">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span className="text-slate-550 text-slate-500">
+                          {checkoutPayload.type === 'boost' ? 'Upvote:' : 'Request:'}
+                        </span>
+                        <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
+                      </div>
+                      <p className="text-[10px] text-emerald-300 font-sans">Free event — no payment required.</p>
+                    </div>
+                  )}
 
                   {/* Quick boost credentials if boosting item */}
                   {checkoutPayload.type === 'boost' && (
@@ -1902,17 +1926,19 @@ export default function PatronView({
                         />
                       </div>
                       
-                      <div className="space-y-1">
-                        <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">BOOST STACK AMOUNT</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={50}
-                          value={boostAmount}
-                          onChange={(e) => setBoostAmount(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-white/10 px-4 py-2 text-xs rounded-xl text-white focus:border-fuchsia-500 outline-none"
-                        />
-                      </div>
+                      {session.paymentsEnabled !== false && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">BOOST STACK AMOUNT</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={boostAmount}
+                            onChange={(e) => setBoostAmount(Number(e.target.value))}
+                            className="w-full bg-slate-950 border border-white/10 px-4 py-2 text-xs rounded-xl text-white focus:border-fuchsia-500 outline-none"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1925,7 +1951,16 @@ export default function PatronView({
                       disabled={isSubmitLocked || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <Lock className="w-3.5 h-3.5 text-white" /> {previewMode ? 'Demo only: sending disabled' : isPaymentConfirmationPending ? 'Payment authorization required' : isPaying ? "Sending..." : "Confirm Payment"}
+                      {(checkoutPayload.isTip || session.paymentsEnabled !== false) && <Lock className="w-3.5 h-3.5 text-white" />}
+                      {previewMode
+                        ? 'Demo only: sending disabled'
+                        : isPaymentConfirmationPending
+                          ? 'Payment authorization required'
+                          : isPaying
+                            ? "Sending..."
+                            : !checkoutPayload.isTip && session.paymentsEnabled === false
+                              ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
+                              : "Confirm Payment"}
                     </button>
 
                     <button
