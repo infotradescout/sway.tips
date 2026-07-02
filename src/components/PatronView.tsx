@@ -186,6 +186,9 @@ export default function PatronView({
     idempotencyKey: string;
     expires_at: string;
     gigId: string;
+    // A straight tip always goes through real payment, regardless of the room's
+    // free/paid toggle -- only song requests and boosts are room-specific.
+    isTip?: boolean;
   } | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
@@ -619,8 +622,8 @@ export default function PatronView({
       if (checkoutPayload.type === 'request') {
         const isCustom = session.talentRole !== 'DJ';
         await submitWithBoundedRetry(() => onCreateRequest({
-          type: 'request',
-          targetType: selectedTrack?.targetType || (isCustom ? 'custom' : 'music'),
+          type: checkoutPayload.isTip ? 'tip' : 'request',
+          targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
           title: checkoutPayload.title,
           subtitle: checkoutPayload.artist || '',
           senderName: senderName,
@@ -757,6 +760,7 @@ export default function PatronView({
     setCheckoutPayload({
       open: true,
       type: 'request',
+      isTip: true,
       title: 'Classic Tip',
       artist: 'Straight tip supporting the performer directly!',
       amount: tipAmount,
@@ -816,22 +820,20 @@ export default function PatronView({
               {previewMode
                 ? 'Demo data only. No payment or moderation action will be sent.'
                 : session.paymentsEnabled === false
-                  ? `Send a free request or upvote an approved queue item for ${session.talentName || 'this performer'}. This is a free event — no payment is involved.`
+                  ? `Send a free request, upvote an approved queue item, or send a direct tip for ${session.talentName || 'this performer'}. Song requests and boosts are free for this event; tips always go through payment.`
                   : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
-            <div className={`grid w-full max-w-md gap-2 pt-2 ${session.paymentsEnabled === false ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
               <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
                 <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Request</p>
                 <p className="mt-1 text-[10px] text-slate-400">
                   {session.paymentsEnabled === false ? 'Send a free live request' : 'Start a paid live request'}
                 </p>
               </div>
-              {session.paymentsEnabled !== false && (
-                <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
-                  <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
-                </div>
-              )}
+              <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
+                <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
+              </div>
               <div className="rounded-xl border border-cyan-500/20 bg-slate-950/70 px-3 py-2 text-center">
                 <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">
                   {session.paymentsEnabled === false ? 'Upvote' : 'Boost'}
@@ -987,18 +989,16 @@ export default function PatronView({
             {session.talentRole === 'DJ' ? "Request" : "Request"}
           </button>
 
-          {session.paymentsEnabled !== false && (
-            <button
-              onClick={() => { setActiveTab('tip'); setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip }); }}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === 'tip'
-                  ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Coins className="w-4 h-4" /> Tip
-            </button>
-          )}
+          <button
+            onClick={() => { setActiveTab('tip'); setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip }); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'tip'
+                ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Coins className="w-4 h-4" /> Tip
+          </button>
 
           <button
             onClick={() => setActiveTab('queue')}
@@ -1875,7 +1875,7 @@ export default function PatronView({
                   </div>
 
                   {/* Pricing detail sheets */}
-                  {session.paymentsEnabled !== false ? (
+                  {checkoutPayload.isTip || session.paymentsEnabled !== false ? (
                     <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
                       <div className="flex justify-between text-xs font-semibold">
                         <span className="text-slate-550 text-slate-500">Request:</span>
@@ -1951,14 +1951,14 @@ export default function PatronView({
                       disabled={isSubmitLocked || previewMode}
                       className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {session.paymentsEnabled !== false && <Lock className="w-3.5 h-3.5 text-white" />}
+                      {(checkoutPayload.isTip || session.paymentsEnabled !== false) && <Lock className="w-3.5 h-3.5 text-white" />}
                       {previewMode
                         ? 'Demo only: sending disabled'
                         : isPaymentConfirmationPending
                           ? 'Payment authorization required'
                           : isPaying
                             ? "Sending..."
-                            : session.paymentsEnabled === false
+                            : !checkoutPayload.isTip && session.paymentsEnabled === false
                               ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
                               : "Confirm Payment"}
                     </button>

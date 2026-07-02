@@ -3067,9 +3067,12 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
   const roomState = roomSnapshot.state;
-  const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
+  // Only song requests are gated by the room's payments toggle. Tips support the
+  // performer directly and are always allowed, regardless of room state.
+  const isStraightTip = targetType === 'straight_tip' || type === 'tip';
+  const paymentsEnabledForAction = isStraightTip || roomState.session.paymentsEnabled !== false;
 
-  const amount_cents = paymentsEnabledForRoom
+  const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
     : 0;
   const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
@@ -3125,15 +3128,9 @@ app.post("/api/request/create", async (req, res) => {
     return res.json(responseBody);
   }
 
-  const tipAmount = paymentsEnabledForRoom ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
+  const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
   const holdAmount = tipAmount;
-  const platformFee = paymentsEnabledForRoom ? 1.0 : 0;
-
-  const isStraightTip = targetType === 'straight_tip' || type === 'tip';
-
-  if (isStraightTip && !paymentsEnabledForRoom) {
-    return res.status(400).json({ error: "Tips are disabled for this room." });
-  }
+  const platformFee = paymentsEnabledForAction ? 1.0 : 0;
 
   // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
   if (!isStraightTip && (!roomState.session.requestsOpen || roomState.session.status !== 'active')) {
@@ -3216,8 +3213,8 @@ app.post("/api/request/create", async (req, res) => {
   // Provider-backed authorization/hold. A paid request/tip must NOT enter app
   // state or Private Triage until the provider confirms a real hold
   // (PaymentIntent requires_capture). Fail safe / fail closed otherwise.
-  if (!paymentsEnabledForRoom) {
-    // Free room: no money changes hands, so there is nothing to authorize.
+  if (!paymentsEnabledForAction) {
+    // Free room, non-tip request: no money changes hands, nothing to authorize.
     newItem.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
     const platformFeeCents = roomState.session.feeType === 'patron' ? 100 : 0;
