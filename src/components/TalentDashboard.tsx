@@ -26,7 +26,8 @@ import {
   ToggleLeft,
   ToggleRight,
   Hourglass,
-  Upload
+  Upload,
+  CreditCard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
@@ -52,6 +53,9 @@ interface TalentDashboardProps {
     display_name: string;
     handle: string | null;
     owner_user_id: string;
+    charges_enabled?: boolean;
+    payouts_enabled?: boolean;
+    stripe_connected_account_id?: string | null;
   } | null;
   performerEmailVerified?: boolean;
 }
@@ -281,6 +285,30 @@ export default function TalentDashboard({
   useEffect(() => {
     void refreshLinkedSources();
   }, [previewMode]);
+
+  const [stripeConnectStatus, setStripeConnectStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
+  const [stripeConnectError, setStripeConnectError] = useState<string | null>(null);
+
+  const handleConnectStripe = async () => {
+    if (previewMode || stripeConnectStatus === 'submitting') return;
+    setStripeConnectStatus('submitting');
+    setStripeConnectError(null);
+    try {
+      const response = await fetch('/api/talent/connect/onboard', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to start Stripe onboarding.');
+      }
+      if (typeof data?.url === 'string') {
+        window.location.href = data.url;
+        return;
+      }
+      throw new Error('Stripe did not return an onboarding link.');
+    } catch (error) {
+      setStripeConnectStatus('error');
+      setStripeConnectError(error instanceof Error ? error.message : 'Unable to start Stripe onboarding.');
+    }
+  };
 
   const handleLibraryLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -574,6 +602,44 @@ export default function TalentDashboard({
             {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
           </button>
         </form>
+      </div>
+
+      {/* 1c. Stripe payout connection is available before, during, and after a live room. */}
+      <div className="rounded-2xl p-4 border border-white/10 bg-slate-900 shadow-lg max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3 select-none">
+        <div className="min-w-0 flex items-start gap-3">
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300 shrink-0">
+            <CreditCard className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Get Paid</p>
+            {performerProfile?.payouts_enabled ? (
+              <p className="mt-0.5 text-[11px] text-emerald-300">Payouts active. Paid requests, tips, and boosts route to your bank automatically.</p>
+            ) : performerProfile?.charges_enabled ? (
+              <p className="mt-0.5 text-[11px] text-amber-300">Stripe is accepting charges, but payouts aren't enabled yet -- finish your Stripe setup.</p>
+            ) : performerProfile?.stripe_connected_account_id ? (
+              <p className="mt-0.5 text-[11px] text-slate-500">Stripe onboarding started but not finished yet.</p>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-slate-500">Connect Stripe so paid requests, tips, and boosts pay out directly to you.</p>
+            )}
+            {stripeConnectError && (
+              <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p>
+            )}
+          </div>
+        </div>
+        {!performerProfile?.payouts_enabled && (
+          <button
+            type="button"
+            onClick={handleConnectStripe}
+            disabled={previewMode || stripeConnectStatus === 'submitting'}
+            className="shrink-0 px-4 py-2 rounded-lg text-xs font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {stripeConnectStatus === 'submitting'
+              ? 'Opening Stripe...'
+              : performerProfile?.stripe_connected_account_id
+                ? 'Finish Stripe setup'
+                : 'Connect Stripe'}
+          </button>
+        )}
       </div>
 
       {/* 2. Inactive Session Configuration Form */}

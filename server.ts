@@ -46,6 +46,7 @@ import {
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
 import { searchCatalog } from "./src/server/spotify-catalog";
+import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 
 dotenv.config();
 
@@ -90,6 +91,7 @@ const paymentService = createPaymentService({
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
   : null;
+const stripeConnectService = createConfiguredStripeConnectService(process.env);
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -730,9 +732,13 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         display_name: performers.displayName,
         handle: performers.handle,
         owner_user_id: performers.ownerUserId,
-        email_verified_at: users.emailVerifiedAt
+        email_verified_at: users.emailVerifiedAt,
+        charges_enabled: performers.chargesEnabled,
+        payouts_enabled: performers.payoutsEnabled,
+        stripe_connected_account_id: performers.stripeConnectedAccountId
       })
       .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
@@ -2426,6 +2432,60 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   return res.json({ success: true, revoked: true });
 });
 
+// Creates (if needed) the performer's Stripe Express connected account and
+// returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
+// existing connected account on repeat calls instead of creating duplicates.
+app.post('/api/talent/connect/onboard', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
+  }
+  if (!stripeConnectService) {
+    return res.status(503).json({ error: 'Stripe Connect is not configured yet.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
+  }
+
+  const [performerRow] = await businessDb
+    .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
+    .from(performers)
+    .where(eq(performers.id, performerOwner.performerId))
+    .limit(1);
+
+  let accountId = performerRow?.stripeConnectedAccountId ?? null;
+  if (!accountId) {
+    const created = await stripeConnectService.createExpressAccount();
+    accountId = created.accountId;
+    await businessDb
+      .update(performers)
+      .set({ stripeConnectedAccountId: accountId })
+      .where(eq(performers.id, performerOwner.performerId));
+  }
+
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const { url } = await stripeConnectService.createOnboardingLink({
+    accountId,
+    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
+    returnUrl: `${appBaseUrl}/talent/connect/return`
+  });
+
+  return res.json({ success: true, url });
+});
+
+app.get('/talent/connect/refresh', (_req, res) => {
+  res.redirect('/talent');
+});
+
+app.get('/talent/connect/return', (_req, res) => {
+  res.redirect('/talent');
+});
+
 app.post('/api/library/sync', async (req, res) => {
   if (!businessDb) {
     return res.status(503).json({ error: 'Library sync requires a durable database connection.' });
@@ -2494,14 +2554,39 @@ app.post('/api/library/sync', async (req, res) => {
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
-  if (!paymentWebhookService) {
-    return res.status(503).json({ error: "Payment provider is not configured." });
-  }
   const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
   if (typeof rawBody !== 'string') {
     return res.status(400).json({ error: "Raw request body unavailable for signature verification." });
   }
   const signatureHeader = req.header('stripe-signature') ?? null;
+
+  // Stripe can send both payment and Connect events to one endpoint. Try the
+  // Connect (account.updated) branch first -- it's a no-op for any other
+  // event type or an invalid signature, so it never interferes with the
+  // payment webhook path below.
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (stripeConnectService && webhookSecret && businessDb) {
+    const accountEvent = stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
+    if (accountEvent) {
+      const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
+      const paymentAccountStatus = payoutsEnabled
+        ? 'payouts_enabled'
+        : chargesEnabled
+          ? 'charges_enabled'
+          : detailsSubmitted
+            ? 'created'
+            : 'not_started';
+      await businessDb
+        .update(performers)
+        .set({ chargesEnabled, payoutsEnabled, paymentAccountStatus })
+        .where(eq(performers.stripeConnectedAccountId, accountEvent.accountId));
+      return res.json({ received: true, result: { type: 'account.updated' } });
+    }
+  }
+
+  if (!paymentWebhookService) {
+    return res.status(503).json({ error: "Payment provider is not configured." });
+  }
   try {
     const result = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
     return res.json({ received: true, result });
