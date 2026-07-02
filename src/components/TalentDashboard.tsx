@@ -453,6 +453,111 @@ export default function TalentDashboard({
         )}
       </div>
 
+      {/* 1b. Library linking is available before, during, and after a live room. */}
+      <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg max-w-3xl mx-auto">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+              Create a secure sync source for any DJ app, library manager, or companion tool. Patron search uses whatever that linked source syncs as available for this performer.
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+              Use the local bridge command `npm run library:bridge -- --sync-key ...` if your software can post JSON to localhost.
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
+            <Upload className="h-4 w-4" />
+          </div>
+        </div>
+
+        <form className="mt-4 space-y-3" onSubmit={handleLibraryLink}>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Source label</label>
+            <input
+              type="text"
+              value={librarySourceLabel}
+              onChange={(event) => setLibrarySourceLabel(event.target.value)}
+              placeholder="Serato laptop, Rekordbox booth USB, Traktor rig, custom app"
+              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          {libraryLinkMessage ? (
+            <div
+              className={`rounded-xl px-3 py-3 text-xs ${
+                libraryLinkStatus === 'success'
+                  ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+                  : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
+              }`}
+            >
+              {libraryLinkMessage}
+            </div>
+          ) : null}
+
+          {issuedSyncKey ? (
+            <div className="rounded-xl border border-emerald-500/20 bg-slate-950 px-3 py-3 text-xs text-slate-300">
+              <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync endpoint</p>
+              <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncEndpointPath}</p>
+              <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync key</p>
+              <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
+              <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
+                Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
+              </p>
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                First-party bridge: run `npm run library:bridge -- --sync-key ...` and point local software at `http://127.0.0.1:4314/ingest`.
+              </p>
+            </div>
+          ) : null}
+
+          {linkedSources.length > 0 ? (
+            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
+              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Linked sources</p>
+              <div className="mt-3 space-y-2">
+                {linkedSources.map((source) => (
+                  <div key={source.id} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-3">
+                    <p className="text-xs font-bold text-white">{source.sourceLabel}</p>
+                    <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-slate-500">{source.sourceKey}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Key reference: {source.syncKeyPreview}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Tracks available: {source.trackCount}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Status: {source.connectionStatus}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      {source.lastSyncedAt ? `Last synced ${new Date(source.lastSyncedAt).toLocaleString()}` : 'No sync received yet'}
+                    </p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRotateLinkedSource(source.id)}
+                        disabled={previewMode || libraryLinkStatus === 'submitting'}
+                        className="inline-flex min-h-10 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        Rotate key
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRevokeLinkedSource(source.id, source.sourceLabel)}
+                        disabled={previewMode || libraryLinkStatus === 'submitting' || source.connectionStatus === 'revoked'}
+                        className="inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[10px] font-bold text-rose-200 transition-all hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {source.connectionStatus === 'revoked' ? 'Revoked' : 'Revoke source'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={previewMode || libraryLinkStatus === 'submitting'}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <Upload className="h-4 w-4" />
+            {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
+          </button>
+        </form>
+      </div>
+
       {/* 2. Inactive Session Configuration Form */}
       {session.status === 'inactive' && (
         <motion.div 
@@ -960,110 +1065,6 @@ export default function TalentDashboard({
             {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
             <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
 
-            <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
-                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                    Create a secure sync source for any DJ app, library manager, or companion tool. Patron search uses whatever that linked source syncs as available for this performer.
-                  </p>
-                  <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                    Use the local bridge command `npm run library:bridge -- --sync-key ...` if your software can post JSON to localhost.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
-                  <Upload className="h-4 w-4" />
-                </div>
-              </div>
-
-              <form className="mt-4 space-y-3" onSubmit={handleLibraryLink}>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Source label</label>
-                  <input
-                    type="text"
-                    value={librarySourceLabel}
-                    onChange={(event) => setLibrarySourceLabel(event.target.value)}
-                    placeholder="Serato laptop, Rekordbox booth USB, Traktor rig, custom app"
-                    className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                {libraryLinkMessage ? (
-                  <div
-                    className={`rounded-xl px-3 py-3 text-xs ${
-                      libraryLinkStatus === 'success'
-                        ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
-                        : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
-                    }`}
-                  >
-                    {libraryLinkMessage}
-                  </div>
-                ) : null}
-
-                {issuedSyncKey ? (
-                  <div className="rounded-xl border border-emerald-500/20 bg-slate-950 px-3 py-3 text-xs text-slate-300">
-                    <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync endpoint</p>
-                    <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncEndpointPath}</p>
-                    <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync key</p>
-                    <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
-                    <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-                      Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
-                    </p>
-                    <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                      First-party bridge: run `npm run library:bridge -- --sync-key ...` and point local software at `http://127.0.0.1:4314/ingest`.
-                    </p>
-                  </div>
-                ) : null}
-
-                {linkedSources.length > 0 ? (
-                  <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
-                    <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Linked sources</p>
-                    <div className="mt-3 space-y-2">
-                      {linkedSources.map((source) => (
-                        <div key={source.id} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-3">
-                          <p className="text-xs font-bold text-white">{source.sourceLabel}</p>
-                          <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-slate-500">{source.sourceKey}</p>
-                          <p className="mt-1 text-[10px] text-slate-400">Key reference: {source.syncKeyPreview}</p>
-                          <p className="mt-1 text-[10px] text-slate-400">Tracks available: {source.trackCount}</p>
-                          <p className="mt-1 text-[10px] text-slate-400">Status: {source.connectionStatus}</p>
-                          <p className="mt-1 text-[10px] text-slate-400">
-                            {source.lastSyncedAt ? `Last synced ${new Date(source.lastSyncedAt).toLocaleString()}` : 'No sync received yet'}
-                          </p>
-                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                            <button
-                              type="button"
-                              onClick={() => handleRotateLinkedSource(source.id)}
-                              disabled={previewMode || libraryLinkStatus === 'submitting'}
-                              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              Rotate key
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRevokeLinkedSource(source.id, source.sourceLabel)}
-                              disabled={previewMode || libraryLinkStatus === 'submitting' || source.connectionStatus === 'revoked'}
-                              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[10px] font-bold text-rose-200 transition-all hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {source.connectionStatus === 'revoked' ? 'Revoked' : 'Revoke source'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <button
-                  type="submit"
-                  disabled={previewMode || libraryLinkStatus === 'submitting'}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <Upload className="h-4 w-4" />
-                  {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
-                </button>
-              </form>
-            </div>
-            
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
             <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${
               session.requestsOpen 
