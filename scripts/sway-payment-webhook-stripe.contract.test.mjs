@@ -4,6 +4,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 const providerSource = readFileSync(join(root, 'src/server/payment-provider.ts'), 'utf8');
 const webhookSource = readFileSync(join(root, 'src/server/payment-webhook.ts'), 'utf8');
+const lifecycleSource = readFileSync(join(root, 'src/server/payment-lifecycle.ts'), 'utf8');
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 
 const failures = [];
@@ -34,12 +35,27 @@ const requiredWebhookTerms = [
   'mapProviderEventToPaymentState',
   'resolvePaymentIdByIntent',
   'transitionPaymentState',
+  'allowOutOfOrderNoop: true',
   "actorType: 'provider_webhook'"
 ];
 
 for (const term of requiredWebhookTerms) {
   if (!webhookSource.includes(term)) {
     failures.push(`Webhook service missing required verification term: ${term}`);
+  }
+}
+
+const requiredReplayTerms = [
+  'duplicate_event',
+  'noop_current_state',
+  'ignored_out_of_order',
+  'concurrent_noop',
+  'canTransitionPaymentState(previousStatus, input.nextStatus)'
+];
+
+for (const term of requiredReplayTerms) {
+  if (!lifecycleSource.includes(term)) {
+    failures.push(`Webhook lifecycle replay handling missing required term: ${term}`);
   }
 }
 

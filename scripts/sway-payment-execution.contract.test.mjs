@@ -5,6 +5,7 @@ const root = process.cwd();
 const providerSource = readFileSync(join(root, 'src/server/payment-provider.ts'), 'utf8');
 const serviceSource = readFileSync(join(root, 'src/server/payment-service.ts'), 'utf8');
 const lifecycleSource = readFileSync(join(root, 'src/server/payment-lifecycle.ts'), 'utf8');
+const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const failures = [];
 
@@ -13,6 +14,9 @@ const requiredProviderTerms = [
   "import Stripe from 'stripe'",
   'createStripeProviderAdapter',
   'createConfiguredPaymentProvider',
+  'STRIPE_API_VERSION',
+  "apiVersion: STRIPE_API_VERSION",
+  '2026-06-24.dahlia',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
   "capture_method: 'manual'",
@@ -26,6 +30,10 @@ for (const term of requiredProviderTerms) {
   if (!providerSource.includes(term)) {
     failures.push(`Payment provider missing required Stripe execution term: ${term}`);
   }
+}
+
+if (packageJson.dependencies?.stripe !== '^22.3.0') {
+  failures.push(`Stripe SDK must stay on the verified current release (^22.3.0); found ${packageJson.dependencies?.stripe ?? 'missing'}.`);
 }
 
 // Orchestration must create provider-backed authorizations, capture on approval,
@@ -61,6 +69,10 @@ const requiredLifecycleTerms = [
   "captured: ['refunded', 'disputed', 'paid_out']",
   'assertPaymentTransition',
   'transitionPaymentState',
+  'duplicate_event',
+  'noop_current_state',
+  'ignored_out_of_order',
+  'concurrent_noop',
   'db.transaction',
   'update(payments)',
   'insert(paymentEvents).values',

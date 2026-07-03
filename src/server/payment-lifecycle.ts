@@ -39,6 +39,7 @@ export type TransitionPaymentInput = {
   actorType: 'system' | 'provider_webhook' | 'operator';
   actorId?: string | null;
   metadata?: Record<string, unknown>;
+  allowOutOfOrderNoop?: boolean;
 };
 
 export function createPaymentLifecycleService(databaseUrl?: string) {
@@ -47,6 +48,26 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
   async function transitionPaymentState(input: TransitionPaymentInput) {
     if (!db) {
       return { status: 'unavailable' as const };
+    }
+
+    if (input.processorEventId) {
+      const duplicateRows = await db
+        .select({
+          paymentId: paymentEvents.paymentId,
+          previousStatus: paymentEvents.previousStatus,
+          nextStatus: paymentEvents.nextStatus
+        })
+        .from(paymentEvents)
+        .where(eq(paymentEvents.processorEventId, input.processorEventId))
+        .limit(1);
+
+      if (duplicateRows.length) {
+        return {
+          status: 'duplicate_event' as const,
+          previousStatus: duplicateRows[0].previousStatus,
+          nextStatus: duplicateRows[0].nextStatus
+        };
+      }
     }
 
     const currentRows = await db
@@ -63,10 +84,43 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
     }
 
     const previousStatus = currentRows[0].paymentStatus;
-    assertPaymentTransition(previousStatus, input.nextStatus);
+    if (previousStatus === input.nextStatus) {
+      return {
+        status: 'noop_current_state' as const,
+        previousStatus,
+        nextStatus: input.nextStatus
+      };
+    }
 
-    await db.transaction(async (tx) => {
-      await tx
+    if (!canTransitionPaymentState(previousStatus, input.nextStatus)) {
+      if (input.allowOutOfOrderNoop) {
+        return {
+          status: 'ignored_out_of_order' as const,
+          previousStatus,
+          nextStatus: input.nextStatus
+        };
+      }
+      assertPaymentTransition(previousStatus, input.nextStatus);
+    }
+
+    return db.transaction(async (tx) => {
+      if (input.processorEventId) {
+        const duplicateRows = await tx
+          .select({ paymentId: paymentEvents.paymentId })
+          .from(paymentEvents)
+          .where(eq(paymentEvents.processorEventId, input.processorEventId))
+          .limit(1);
+
+        if (duplicateRows.length) {
+          return {
+            status: 'duplicate_event' as const,
+            previousStatus,
+            nextStatus: input.nextStatus
+          };
+        }
+      }
+
+      const updatedRows = await tx
         .update(payments)
         .set({
           paymentStatus: input.nextStatus,
@@ -75,7 +129,16 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
         .where(and(
           eq(payments.id, input.paymentId),
           eq(payments.paymentStatus, previousStatus)
-        ));
+        ))
+        .returning({ id: payments.id });
+
+      if (!updatedRows.length) {
+        return {
+          status: 'concurrent_noop' as const,
+          previousStatus,
+          nextStatus: input.nextStatus
+        };
+      }
 
       await tx.insert(paymentEvents).values({
         paymentId: input.paymentId,
@@ -101,13 +164,13 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
           ...(input.metadata ?? {})
         }
       });
-    });
 
-    return {
-      status: 'transitioned' as const,
-      previousStatus,
-      nextStatus: input.nextStatus
-    };
+      return {
+        status: 'transitioned' as const,
+        previousStatus,
+        nextStatus: input.nextStatus
+      };
+    });
   }
 
   return {

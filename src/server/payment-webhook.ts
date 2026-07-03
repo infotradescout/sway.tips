@@ -79,6 +79,7 @@ export function createPaymentWebhookService({
       eventType: providerEvent.providerType,
       processorEventId: providerEvent.providerEventId,
       actorType: 'provider_webhook',
+      allowOutOfOrderNoop: true,
       metadata: {
         providerPayload: providerEvent.metadata ?? {},
         processorPaymentIntentId: providerEvent.processorPaymentIntentId ?? null,
