@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
 
+export const STRIPE_API_VERSION = '2026-06-24.dahlia' as const;
+
 export type ProviderWebhookEnvelope = {
   providerEventId: string;
   providerType: string;
@@ -85,7 +87,7 @@ export function createStripeProviderAdapter(config: {
   webhookSecret: string;
   processor?: string;
 }): PaymentProviderAdapter {
-  const stripe = new Stripe(config.secretKey);
+  const stripe = new Stripe(config.secretKey, { apiVersion: STRIPE_API_VERSION });
   const processor = config.processor ?? 'stripe';
 
   return {
@@ -164,6 +166,7 @@ export function createStripeProviderAdapter(config: {
     async capturePayment(input) {
       const intent = await stripe.paymentIntents.capture(
         input.processorPaymentIntentId,
+        undefined,
         input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
       );
 
@@ -177,6 +180,7 @@ export function createStripeProviderAdapter(config: {
     async voidPayment(input) {
       const intent = await stripe.paymentIntents.cancel(
         input.processorPaymentIntentId,
+        undefined,
         input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
       );
 

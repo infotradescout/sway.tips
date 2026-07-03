@@ -2432,7 +2432,7 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   return res.json({ success: true, revoked: true });
 });
 
-// Creates (if needed) the performer's Stripe Express connected account and
+// Creates (if needed) the performer's Stripe recipient connected account and
 // returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
 // existing connected account on repeat calls instead of creating duplicates.
 app.post('/api/talent/connect/onboard', async (req, res) => {
@@ -2461,7 +2461,9 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
 
     let accountId = performerRow?.stripeConnectedAccountId ?? null;
     if (!accountId) {
-      const created = await stripeConnectService.createExpressAccount();
+      const created = await stripeConnectService.createRecipientAccount({
+        displayName: performerOwner.displayName
+      });
       accountId = created.accountId;
       await businessDb
         .update(performers)
@@ -2575,7 +2577,7 @@ app.post("/api/payment/webhook", async (req, res) => {
   // payment webhook path below.
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (stripeConnectService && webhookSecret && businessDb) {
-    const accountEvent = stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
+    const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
     if (accountEvent) {
       const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
       const paymentAccountStatus = payoutsEnabled

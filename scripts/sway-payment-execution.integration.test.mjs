@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
+import dotenv from 'dotenv';
 
 /**
  * Real Stripe test-mode payment execution integration test.
@@ -18,6 +19,9 @@ import { Client } from 'pg';
  * Skips cleanly when STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / DATABASE_URL
  * are not provisioned, so the contract gate is never blocked by missing secrets.
  */
+
+dotenv.config({ path: '.env.local', override: false, quiet: true });
+dotenv.config({ override: false, quiet: true });
 
 const databaseUrl = process.env.DATABASE_URL;
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
