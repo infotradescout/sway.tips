@@ -113,7 +113,7 @@
           linear-gradient(112deg, transparent 0 18%, rgba(236, 72, 153, 0.24) 34%, transparent 56%),
           linear-gradient(248deg, transparent 0 20%, rgba(34, 211, 238, 0.22) 42%, transparent 66%),
           linear-gradient(180deg, rgba(10, 3, 28, 0.72), rgba(2, 3, 10, 0.06) 42%, rgba(3, 12, 28, 0.7));
-        filter: blur(16px) saturate(1.1);
+        filter: none;
         opacity: 0.74;
         transform-origin: center;
         animation: landing-aurora-pan 16s ease-in-out infinite alternate;
@@ -131,7 +131,7 @@
           radial-gradient(circle at 34% 34%, rgba(244, 114, 182, 0.52), transparent 44%),
           radial-gradient(circle at 70% 64%, rgba(34, 211, 238, 0.48), transparent 46%),
           radial-gradient(circle at 52% 56%, rgba(99, 102, 241, 0.34), transparent 52%);
-        filter: blur(2px) saturate(1.14);
+        filter: none;
         mix-blend-mode: screen;
         opacity: 0.72;
         animation: landing-mesh-drift 12s ease-in-out infinite alternate;
@@ -150,7 +150,7 @@
         width: min(42vw, 360px);
         height: min(42vw, 360px);
         background: radial-gradient(circle, rgba(217, 70, 239, 0.46), transparent 66%);
-        filter: blur(6px);
+        filter: none;
         opacity: 0.62;
         animation: landing-orb-a 14s ease-in-out infinite alternate;
       }
@@ -161,7 +161,7 @@
         width: min(46vw, 420px);
         height: min(46vw, 420px);
         background: radial-gradient(circle, rgba(6, 182, 212, 0.4), transparent 68%);
-        filter: blur(8px);
+        filter: none;
         opacity: 0.6;
         animation: landing-orb-b 16s ease-in-out infinite alternate;
       }
@@ -172,7 +172,7 @@
         width: min(34vw, 300px);
         height: min(34vw, 300px);
         background: radial-gradient(circle, rgba(129, 140, 248, 0.34), transparent 72%);
-        filter: blur(5px);
+        filter: none;
         opacity: 0.46;
         animation: landing-orb-c 10s ease-in-out infinite alternate;
       }
@@ -205,7 +205,7 @@
         height: 36vh;
         height: calc(var(--sway-viewport-height, 100vh) * 0.36);
         background: linear-gradient(90deg, rgba(236, 72, 153, 0.28), rgba(6, 182, 212, 0.28));
-        filter: blur(18px);
+        filter: none;
         opacity: 0.58;
         animation: landing-neon-breathe 4.8s ease-in-out infinite;
       }
@@ -220,7 +220,7 @@
           linear-gradient(105deg, transparent 0%, rgba(236, 72, 153, 0.34) 18%, transparent 35%),
           linear-gradient(78deg, transparent 22%, rgba(34, 211, 238, 0.32) 54%, transparent 80%),
           radial-gradient(ellipse at 48% 82%, rgba(236, 72, 153, 0.36), transparent 60%);
-        filter: blur(6px);
+        filter: none;
         mix-blend-mode: screen;
         -webkit-mask-image: linear-gradient(to top, transparent, #000 26%, #000 74%, transparent);
         mask-image: linear-gradient(to top, transparent, #000 26%, #000 74%, transparent);
@@ -236,7 +236,7 @@
         background:
           radial-gradient(ellipse at 30% 58%, rgba(236, 72, 153, 0.28), transparent 56%),
           radial-gradient(ellipse at 70% 52%, rgba(34, 211, 238, 0.28), transparent 58%);
-        filter: blur(12px);
+        filter: none;
         mix-blend-mode: screen;
         opacity: 0.72;
         animation: landing-neon-breathe 5.2s ease-in-out infinite reverse;
@@ -275,15 +275,15 @@
       @keyframes landing-aurora-pan {
         0% {
           transform: scale(1.02) translate3d(-2.4%, -1.6%, 0);
-          filter: blur(14px) saturate(1.04) brightness(0.9) contrast(1.03);
+          filter: none;
         }
         50% {
           transform: scale(1.08) translate3d(2.2%, 1%, 0);
-          filter: blur(18px) saturate(1.14) brightness(1) contrast(1.05);
+          filter: none;
         }
         100% {
           transform: scale(1.04) translate3d(-1.2%, 2.2%, 0);
-          filter: blur(15px) saturate(1.08) brightness(0.92) contrast(1.04);
+          filter: none;
         }
       }
 
@@ -367,8 +367,8 @@
         border-radius: 22px;
         border: 1px solid rgba(255, 255, 255, 0.14);
         background: rgba(2, 6, 23, 0.34);
-        box-shadow: 0 24px 72px rgba(2, 6, 23, 0.62);
-        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 24px rgba(2, 6, 23, 0.42);
+        backdrop-filter: none;
         text-align: center;
       }
 
@@ -385,8 +385,8 @@
         font-weight: 900;
         line-height: 1;
         text-decoration: none;
-        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(6px);
+        text-shadow: none;
+        backdrop-filter: none;
         transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
       }
 
@@ -395,7 +395,7 @@
         letter-spacing: 0.04em;
         background: linear-gradient(90deg, rgba(219, 39, 219, 0.95), rgba(217, 70, 239, 0.92));
         border-color: rgba(244, 114, 182, 0.48);
-        box-shadow: 0 0 34px rgba(217, 70, 239, 0.42);
+        box-shadow: 0 0 10px rgba(217, 70, 239, 0.28);
       }
 
       .btn.secondary {
@@ -406,7 +406,7 @@
       .btn:hover {
         transform: translateY(-1px);
         border-color: rgba(232, 121, 249, 0.55);
-        box-shadow: 0 0 34px rgba(217, 70, 239, 0.26);
+        box-shadow: 0 0 8px rgba(217, 70, 239, 0.2);
       }
 
 
@@ -447,7 +447,7 @@
         .landing-wave-ribbon {
           bottom: 24%;
           height: 26vh;
-          filter: blur(5px);
+          filter: none;
         }
 
         .landing-particles {
