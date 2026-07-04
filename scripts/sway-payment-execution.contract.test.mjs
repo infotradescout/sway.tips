@@ -20,7 +20,9 @@ const requiredProviderTerms = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
   "capture_method: 'manual'",
+  "automatic_payment_methods: { enabled: true, allow_redirects: 'never' }",
   'stripe.paymentIntents.create',
+  'stripe.paymentIntents.retrieve',
   'stripe.paymentIntents.capture',
   'stripe.paymentIntents.cancel',
   'stripe.refunds.create'
@@ -40,6 +42,7 @@ if (packageJson.dependencies?.stripe !== '^22.3.0') {
 // void/refund on denial, and aggregate closeout totals from the database.
 const requiredServiceTerms = [
   'authorizeAction',
+  'confirmAuthorizedAction',
   'captureAuthorization',
   'voidOrRefund',
   'aggregateCapturedTotals',

@@ -4,6 +4,7 @@ Stripe payment execution is allowed only when the server has all of:
 
 ```text
 DATABASE_URL
+STRIPE_PUBLISHABLE_KEY
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
 ```

@@ -108,16 +108,20 @@ for (const term of [
 
 const completePaymentBody = extractFunctionBody(patron, 'completePayment');
 if (!completePaymentBody) failures.push('Patron client missing completePayment function.');
+const completeCheckoutSuccessBody = extractFunctionBody(patron, 'completeCheckoutSuccess');
+if (!completeCheckoutSuccessBody) failures.push('Patron client missing completeCheckoutSuccess function.');
+const boundedRetryBody = extractFunctionBody(patron, 'submitWithBoundedRetry');
+if (!boundedRetryBody) failures.push('Patron client missing submitWithBoundedRetry function.');
 
-if (completePaymentBody.indexOf('localStorage.setItem') > completePaymentBody.indexOf('submitWithBoundedRetry')) {
+if (completePaymentBody.indexOf('beginPendingSubmit') === -1 || completePaymentBody.indexOf('beginPendingSubmit') > completePaymentBody.indexOf('submitCheckoutPayload')) {
   failures.push('Patron client must persist pending action before network submit.');
 }
 
-if (completePaymentBody.indexOf('setBackendConfirmed(true)') < completePaymentBody.indexOf('submitWithBoundedRetry')) {
+if (completePaymentBody.indexOf('completeCheckoutSuccess') < completePaymentBody.indexOf('submitCheckoutPayload')) {
   failures.push('Patron client must not show success before backend confirmation.');
 }
 
-if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(completePaymentBody)) {
+if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(completeCheckoutSuccessBody)) {
   failures.push('Patron client must clear pending action only after backend confirmation.');
 }
 
@@ -152,12 +156,13 @@ for (const pattern of [
   }
 }
 
-// Provider coupling must stay out of the idempotency store and patron client.
-// Payment provider integration legitimately lands in server.ts at Slice 5, so
-// server.ts is intentionally excluded from the provider-term ban.
+// Provider coupling must stay out of the idempotency store and bounded retry
+// helper. The patron component may render Stripe's confirmation surface after
+// the backend returns client_secret, but retry/idempotency itself must remain
+// provider-agnostic.
 for (const pattern of [/stripe/i, /PaymentIntent/i, /webhook/i]) {
-  if (pattern.test(store) || pattern.test(patron)) {
-    failures.push(`Idempotency store/patron client must stay provider-free: ${pattern}`);
+  if (pattern.test(store) || pattern.test(boundedRetryBody)) {
+    failures.push(`Idempotency store/retry helper must stay provider-free: ${pattern}`);
   }
 }
 

@@ -43,6 +43,31 @@ function assertRequiresConfirmationHandling() {
     /status === 402[\s\S]*setPaymentConfirmationState\(/,
     'PatronView.tsx must route 402 requires_confirmation into a dedicated payment confirmation state.'
   );
+  requireIncludes(
+    patronView,
+    'PaymentElement',
+    'PatronView.tsx must render Stripe Payment Element after requires_confirmation.'
+  );
+  requireIncludes(
+    patronView,
+    'stripe.confirmPayment',
+    'PatronView.tsx must confirm the PaymentIntent through Stripe.js.'
+  );
+  requireIncludes(
+    patronView,
+    "result.paymentIntent?.status !== 'requires_capture'",
+    'PatronView.tsx must require a capturable PaymentIntent before finalizing app state.'
+  );
+  requireIncludes(
+    patronView,
+    'payment_intent_id: paymentIntentId',
+    'PatronView.tsx must send the confirmed PaymentIntent id back to the backend finalization path.'
+  );
+  requireIncludes(
+    patronView,
+    'error?.status === 402',
+    'PatronView.tsx must not retry 402 requires_confirmation as a transient network error.'
+  );
 }
 
 function assertPaymentConfirmationState() {
@@ -85,6 +110,14 @@ assertForbiddenCopy();
 assertRequiresConfirmationHandling();
 assertPaymentConfirmationState();
 assertDoubleSubmitGuard();
+
+if (packageJson.dependencies?.['@stripe/react-stripe-js'] !== '^6.7.0') {
+  failures.push(`@stripe/react-stripe-js must stay on the verified current release (^6.7.0); found ${packageJson.dependencies?.['@stripe/react-stripe-js'] ?? 'missing'}.`);
+}
+
+if (packageJson.dependencies?.['@stripe/stripe-js'] !== '^9.9.0') {
+  failures.push(`@stripe/stripe-js must stay on the verified current release (^9.9.0); found ${packageJson.dependencies?.['@stripe/stripe-js'] ?? 'missing'}.`);
+}
 
 requireIncludes(
   packageJson.scripts?.['test:contracts'] ?? '',

@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 import { 
   CreditCard, 
   Search, 
@@ -53,8 +55,9 @@ interface PatronViewProps {
     idempotency_key?: string;
     expires_at?: string;
     gig_id?: string;
+    payment_intent_id?: string;
   }) => Promise<any>;
-  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string) => Promise<any>;
+  onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string, paymentIntentId?: string) => Promise<any>;
   onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string) => Promise<any>;
   onReportContent: (requestId: string, reason: string, details?: string) => Promise<any>;
   onBlockFoundation: (scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name', value: string, reason: string) => Promise<any>;
@@ -118,6 +121,86 @@ const previewCatalog: SearchTrack[] = [
     source: MANUAL_REQUEST_SOURCE
   }
 ];
+
+function StripeAuthorizationForm({
+  disabled,
+  onAuthorized,
+  onError,
+  onCancel
+}: {
+  disabled: boolean;
+  onAuthorized: (paymentIntentId: string) => Promise<void>;
+  onError: (message: string) => void;
+  onCancel: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
+
+  const handleAuthorize = async () => {
+    if (!stripe || !elements || disabled || isAuthorizing) return;
+    setIsAuthorizing(true);
+    setLocalMessage(null);
+
+    try {
+      const result = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required'
+      });
+
+      if (result.error) {
+        const message = result.error.message || 'Payment authorization failed.';
+        setLocalMessage(message);
+        onError(message);
+        return;
+      }
+
+      if (result.paymentIntent?.status !== 'requires_capture') {
+        const message = `Payment authorization did not reach capturable status (${result.paymentIntent?.status ?? 'unknown'}).`;
+        setLocalMessage(message);
+        onError(message);
+        return;
+      }
+
+      await onAuthorized(result.paymentIntent.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Payment authorization failed.';
+      setLocalMessage(message);
+      onError(message);
+    } finally {
+      setIsAuthorizing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 text-left">
+      <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
+        <PaymentElement />
+      </div>
+      {localMessage && (
+        <p className="text-[10px] font-bold text-rose-300">{localMessage}</p>
+      )}
+      <button
+        type="button"
+        onClick={handleAuthorize}
+        disabled={!stripe || !elements || disabled || isAuthorizing}
+        className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Lock className="w-3.5 h-3.5 text-white" />
+        {isAuthorizing || disabled ? 'Authorizing...' : 'Authorize Payment'}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={disabled || isAuthorizing}
+        className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
 
 export default function PatronView({
   session,
@@ -189,17 +272,28 @@ export default function PatronView({
     // A straight tip always goes through real payment, regardless of the room's
     // free/paid toggle -- only song requests and boosts are room-specific.
     isTip?: boolean;
+    clientSecret?: string;
+    paymentIntentId?: string;
   } | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
+  const [stripePublishableKey, setStripePublishableKey] = useState<string | null>(null);
+  const [stripeConfigError, setStripeConfigError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isSubmitLocked = isPaying || isPaymentConfirmationPending;
+  const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
+  const stripeElementsOptions = useMemo(() => checkoutPayload?.clientSecret
+    ? {
+        clientSecret: checkoutPayload.clientSecret,
+        appearance: { theme: 'night' as const }
+      }
+    : null, [checkoutPayload?.clientSecret]);
 
   const latestRequest = [...requests]
     .filter((item) => !item.hidden && !item.removed)
@@ -338,6 +432,18 @@ export default function PatronView({
     };
   };
 
+  const ensureStripePublishableKey = async () => {
+    if (stripePublishableKey) return stripePublishableKey;
+    setStripeConfigError(null);
+    const response = await fetch('/api/payment/config', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || typeof data.publishableKey !== 'string' || !data.publishableKey.startsWith('pk_')) {
+      throw new Error(data?.error || 'Payment form is not configured.');
+    }
+    setStripePublishableKey(data.publishableKey);
+    return data.publishableKey;
+  };
+
   const waitForRetryBackoff = (attempt: number) =>
     new Promise((resolve) => window.setTimeout(resolve, Math.min(2 ** attempt * 500, 3000)));
 
@@ -355,7 +461,7 @@ export default function PatronView({
         throw new Error('Backend did not confirm the action.');
       } catch (error: any) {
         lastError = error;
-        if (error?.status === 409 || error?.status === 410 || error?.status === 400 || error?.status === 403 || error?.status === 429) throw error;
+        if (error?.status === 402 || error?.status === 409 || error?.status === 410 || error?.status === 400 || error?.status === 403 || error?.status === 429) throw error;
         setDegraded(true);
         setPendingActionMessage('Connection degraded. Retrying safely with the same idempotency key.');
         if (attempt < MAX_PENDING_ACTION_RETRIES - 1) {
@@ -600,7 +706,135 @@ export default function PatronView({
     });
   };
 
-  // Process optimistic success payment
+  const submitCheckoutPayload = async (paymentIntentId?: string) => {
+    if (!checkoutPayload) return;
+
+    if (checkoutPayload.type === 'request') {
+      const isCustom = session.talentRole !== 'DJ';
+      await submitWithBoundedRetry(() => onCreateRequest({
+        type: checkoutPayload.isTip ? 'tip' : 'request',
+        targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
+        title: checkoutPayload.title,
+        subtitle: checkoutPayload.artist || '',
+        senderName: senderName,
+        message: commentMessage,
+        amount: checkoutPayload.amount,
+        albumArt: checkoutPayload.trackArt,
+        client_request_id: checkoutPayload.clientRequestId,
+        idempotency_key: checkoutPayload.idempotencyKey,
+        expires_at: checkoutPayload.expires_at,
+        gig_id: checkoutPayload.gigId,
+        payment_intent_id: paymentIntentId
+      }), checkoutPayload.expires_at);
+      return;
+    }
+
+    if (checkoutPayload.targetId) {
+      await submitWithBoundedRetry(() => onBoostRequest(
+        checkoutPayload.targetId,
+        boostPatronName,
+        checkoutPayload.amount,
+        checkoutPayload.clientRequestId,
+        checkoutPayload.idempotencyKey,
+        checkoutPayload.expires_at,
+        checkoutPayload.gigId,
+        paymentIntentId
+      ), checkoutPayload.expires_at);
+    }
+  };
+
+  const completeCheckoutSuccess = (completedActionType: 'request' | 'boost') => {
+    setBackendConfirmed(true);
+    setPaymentConfirmationState(null);
+    setStripeConfigError(null);
+    setPendingAction(null);
+    localStorage.removeItem('sway.pendingAction');
+    setTimeout(() => {
+      setBackendConfirmed(false);
+      setCheckoutPayload(null);
+      setBoostingItem(null);
+      setSelectedTrack(null);
+      setCommentMessage('');
+      setSenderName('');
+      setBoostPatronName('');
+      setTipAmount(session.minimumTip);
+      setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
+    }, 2000);
+  };
+
+  const handleCheckoutError = async (e: unknown) => {
+    console.error(e);
+    const status = (e as any)?.status;
+    const body = (e as any)?.body;
+    const backendMessage = body?.error;
+    const paymentStatus = body?.payment_status;
+
+    if (status === 402 && paymentStatus === 'requires_confirmation') {
+      setDegraded(false);
+      setPaymentConfirmationState({
+        phase: 'PAYMENT_PENDING_CONFIRMATION',
+        actionType: checkoutPayload?.type ?? 'request',
+        message: backendMessage || PAYMENT_AUTHORIZATION_REQUIRED_COPY
+      });
+      setCheckoutPayload((current) => current ? {
+        ...current,
+        clientSecret: typeof body?.client_secret === 'string' ? body.client_secret : current.clientSecret,
+        paymentIntentId: typeof body?.payment_intent_id === 'string' ? body.payment_intent_id : current.paymentIntentId
+      } : current);
+      setPendingAction(null);
+      setPendingActionMessage(PAYMENT_CONFIRMATION_WAITING_COPY);
+      localStorage.removeItem('sway.pendingAction');
+
+      try {
+        await ensureStripePublishableKey();
+      } catch (configError) {
+        const message = configError instanceof Error ? configError.message : 'Payment form is not configured.';
+        setStripeConfigError(message);
+      }
+      return;
+    }
+
+    if (status === 410) {
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
+    } else if (status === 403) {
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask the performer for help.');
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
+    } else if (status === 429) {
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(backendMessage || "You've reached the request limit for this session. Try again later as the queue moves.");
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
+    } else if (status === 409 || status === 400) {
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(backendMessage || 'This action is not available right now.');
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
+    } else {
+      setDegraded(true);
+    }
+  };
+
+  const beginPendingSubmit = (payload = checkoutPayload) => {
+    if (!payload) return;
+    const serializedPendingAction = JSON.stringify(payload);
+    setPendingAction(serializedPendingAction);
+    localStorage.setItem('sway.pendingAction', serializedPendingAction);
+  };
+
+  // Create the pending PaymentIntent or complete a no-payment action.
   const completePayment = async () => {
     if (!checkoutPayload || isSubmitLocked) return;
 
@@ -614,112 +848,30 @@ export default function PatronView({
     }
 
     setIsPaying(true);
-    const serializedPendingAction = JSON.stringify(checkoutPayload);
-    setPendingAction(serializedPendingAction);
-    localStorage.setItem('sway.pendingAction', serializedPendingAction);
+    beginPendingSubmit();
 
     try {
-      if (checkoutPayload.type === 'request') {
-        const isCustom = session.talentRole !== 'DJ';
-        await submitWithBoundedRetry(() => onCreateRequest({
-          type: checkoutPayload.isTip ? 'tip' : 'request',
-          targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
-          title: checkoutPayload.title,
-          subtitle: checkoutPayload.artist || '',
-          senderName: senderName,
-          message: commentMessage,
-          amount: checkoutPayload.amount,
-          albumArt: checkoutPayload.trackArt,
-          client_request_id: checkoutPayload.clientRequestId,
-          idempotency_key: checkoutPayload.idempotencyKey,
-          expires_at: checkoutPayload.expires_at,
-          gig_id: checkoutPayload.gigId
-        }), checkoutPayload.expires_at);
-      } else {
-        // Boost routing!
-        if (checkoutPayload.targetId) {
-          await submitWithBoundedRetry(() => onBoostRequest(
-            checkoutPayload.targetId,
-            boostPatronName,
-            checkoutPayload.amount,
-            checkoutPayload.clientRequestId,
-            checkoutPayload.idempotencyKey,
-            checkoutPayload.expires_at,
-            checkoutPayload.gigId
-          ), checkoutPayload.expires_at);
-        }
-      }
-
-      // Show high impact check animation
-      const completedActionType = checkoutPayload.type;
-      setBackendConfirmed(true);
-      setPaymentConfirmationState(null);
-      setPendingAction(null);
-      localStorage.removeItem('sway.pendingAction');
-      setTimeout(() => {
-        // Reset inputs
-        setBackendConfirmed(false);
-        setCheckoutPayload(null);
-        setBoostingItem(null);
-        setSelectedTrack(null);
-        setCommentMessage('');
-        setSenderName('');
-        setBoostPatronName('');
-        setTipAmount(session.minimumTip);
-        // A boost lands on an already-approved item, so the queue shows the result.
-        // A new request is pending approval and is not on the queue yet, so keep the
-        // patron on the request surface where the persistent Request status panel
-        // shows it as Pending instead of dumping them on an approved-only queue.
-        setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
-      }, 2000);
-
+      await submitCheckoutPayload();
+      completeCheckoutSuccess(checkoutPayload.type);
     } catch (e) {
-      console.error(e);
-      const status = (e as any)?.status;
-      const backendMessage = (e as any)?.body?.error;
-      const paymentStatus = (e as any)?.body?.payment_status;
+      await handleCheckoutError(e);
+    } finally {
+      setIsPaying(false);
+    }
+  };
 
-      if (status === 402 && paymentStatus === 'requires_confirmation') {
-        setDegraded(false);
-        setPaymentConfirmationState({
-          phase: 'PAYMENT_PENDING_CONFIRMATION',
-          actionType: checkoutPayload.type,
-          message: backendMessage || PAYMENT_AUTHORIZATION_REQUIRED_COPY
-        });
-        setPendingAction(null);
-        setPendingActionMessage(PAYMENT_CONFIRMATION_WAITING_COPY);
-        localStorage.removeItem('sway.pendingAction');
-      } else if (status === 410) {
-        setDegraded(true);
-        setPaymentConfirmationState(null);
-        setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
-        setPendingAction(null);
-        setCheckoutPayload(null);
-        localStorage.removeItem('sway.pendingAction');
-      } else if (status === 403) {
-        setDegraded(true);
-        setPaymentConfirmationState(null);
-        setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask the performer for help.');
-        setPendingAction(null);
-        setCheckoutPayload(null);
-        localStorage.removeItem('sway.pendingAction');
-      } else if (status === 429) {
-        setDegraded(true);
-        setPaymentConfirmationState(null);
-        setPendingActionMessage(backendMessage || "You've reached the request limit for this session. Try again later as the queue moves.");
-        setPendingAction(null);
-        setCheckoutPayload(null);
-        localStorage.removeItem('sway.pendingAction');
-      } else if (status === 409 || status === 400) {
-        setDegraded(true);
-        setPaymentConfirmationState(null);
-        setPendingActionMessage(backendMessage || 'This action is not available right now.');
-        setPendingAction(null);
-        setCheckoutPayload(null);
-        localStorage.removeItem('sway.pendingAction');
-      } else {
-        setDegraded(true);
-      }
+  const finalizeStripeAuthorization = async (paymentIntentId: string) => {
+    if (!checkoutPayload || isPaying) return;
+    const payloadWithIntent = { ...checkoutPayload, paymentIntentId };
+    setCheckoutPayload(payloadWithIntent);
+    setIsPaying(true);
+    beginPendingSubmit(payloadWithIntent);
+
+    try {
+      await submitCheckoutPayload(paymentIntentId);
+      completeCheckoutSuccess(checkoutPayload.type);
+    } catch (e) {
+      await handleCheckoutError(e);
     } finally {
       setIsPaying(false);
     }
@@ -1944,33 +2096,59 @@ export default function PatronView({
 
                   {/* Submit action */}
                   <div className="space-y-2">
+                    {checkoutPayload.clientSecret && stripePromise && stripeElementsOptions ? (
+                      <Elements stripe={stripePromise} options={stripeElementsOptions} key={checkoutPayload.clientSecret}>
+                        <StripeAuthorizationForm
+                          disabled={isPaying || previewMode}
+                          onAuthorized={finalizeStripeAuthorization}
+                          onError={(message) => {
+                            setStripeConfigError(message);
+                            setPendingActionMessage(message);
+                          }}
+                          onCancel={() => {
+                            setCheckoutPayload(null);
+                            setBoostingItem(null);
+                            setPaymentConfirmationState(null);
+                            setStripeConfigError(null);
+                          }}
+                        />
+                      </Elements>
+                    ) : (
+                      <>
+                        {stripeConfigError && (
+                          <p className="text-[10px] font-bold text-rose-300">{stripeConfigError}</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={completePayment}
+                          disabled={isSubmitLocked || previewMode}
+                          className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {(checkoutPayload.isTip || session.paymentsEnabled !== false) && <Lock className="w-3.5 h-3.5 text-white" />}
+                          {previewMode
+                            ? 'Demo only: sending disabled'
+                            : isPaying
+                              ? "Sending..."
+                              : !checkoutPayload.isTip && session.paymentsEnabled === false
+                                ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
+                                : "Confirm Payment"}
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={completePayment}
-                      disabled={isSubmitLocked || previewMode}
-                      className="w-full flex items-center justify-center gap-2 py-3 auction-gradient text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {(checkoutPayload.isTip || session.paymentsEnabled !== false) && <Lock className="w-3.5 h-3.5 text-white" />}
-                      {previewMode
-                        ? 'Demo only: sending disabled'
-                        : isPaymentConfirmationPending
-                          ? 'Payment authorization required'
-                          : isPaying
-                            ? "Sending..."
-                            : !checkoutPayload.isTip && session.paymentsEnabled === false
-                              ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
-                              : "Confirm Payment"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => { setCheckoutPayload(null); setBoostingItem(null); setPaymentConfirmationState(null); }}
-                      disabled={isPaying}
-                      className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCheckoutPayload(null);
+                            setBoostingItem(null);
+                            setPaymentConfirmationState(null);
+                            setStripeConfigError(null);
+                          }}
+                          disabled={isPaying}
+                          className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
                   </div>
 
                 </div>

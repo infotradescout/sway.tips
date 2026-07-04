@@ -1327,6 +1327,22 @@ app.get('/api/runtime-config-status', (_req, res) => {
   });
 });
 
+app.get('/api/payment/config', (_req, res) => {
+  applyNoStoreHeaders(res);
+  const publishableKey = (process.env.STRIPE_PUBLISHABLE_KEY || process.env.VITE_STRIPE_PUBLISHABLE_KEY || '').trim();
+  const mode = publishableKey.startsWith('pk_test_')
+    ? 'test'
+    : publishableKey.startsWith('pk_live_')
+      ? 'live'
+      : null;
+
+  if (!publishableKey || !mode) {
+    return res.status(503).json({ error: 'Payment form is not configured.' });
+  }
+
+  return res.json({ publishableKey, mode });
+});
+
 app.post('/api/talent/signup', async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -3146,7 +3162,8 @@ app.post("/api/request/create", async (req, res) => {
     gig_id,
     currency = "USD",
     expires_at,
-    payment_method
+    payment_method,
+    payment_intent_id
   } = req.body;
 
   if (!client_request_id || !idempotency_key) {
@@ -3154,6 +3171,9 @@ app.post("/api/request/create", async (req, res) => {
   }
 
   const durableGigId = parseDurableGigId(gig_id);
+  const confirmedPaymentIntentId = typeof payment_intent_id === 'string' && payment_intent_id.trim()
+    ? payment_intent_id.trim()
+    : null;
   if (!durableGigId) {
     return res.status(422).json({ error: "A valid route gig_id is required for durable request submission." });
   }
@@ -3314,18 +3334,29 @@ app.post("/api/request/create", async (req, res) => {
     newItem.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
     const platformFeeCents = roomState.session.feeType === 'patron' ? 100 : 0;
-    const authorization = await paymentService.authorizeAction({
-      gigId: durableGigId,
-      actionType: isStraightTip ? 'tip' : 'request',
-      amountSubtotalCents: amount_cents,
-      platformFeeCents,
-      currency: String(currency).toUpperCase(),
-      idempotencyKey: idempotency_key,
-      runtimeRequestId: newItem.id,
-      clientRequestId: client_request_id,
-      paymentMethod: payment_method,
-      confirm: typeof payment_method === 'string' && payment_method.length > 0
-    });
+    const authorization = confirmedPaymentIntentId
+      ? await paymentService.confirmAuthorizedAction({
+          gigId: durableGigId,
+          actionType: isStraightTip ? 'tip' : 'request',
+          amountSubtotalCents: amount_cents,
+          platformFeeCents,
+          currency: String(currency).toUpperCase(),
+          runtimeRequestId: newItem.id,
+          clientRequestId: client_request_id,
+          processorPaymentIntentId: confirmedPaymentIntentId
+        })
+      : await paymentService.authorizeAction({
+          gigId: durableGigId,
+          actionType: isStraightTip ? 'tip' : 'request',
+          amountSubtotalCents: amount_cents,
+          platformFeeCents,
+          currency: String(currency).toUpperCase(),
+          idempotencyKey: idempotency_key,
+          runtimeRequestId: newItem.id,
+          clientRequestId: client_request_id,
+          paymentMethod: payment_method,
+          confirm: typeof payment_method === 'string' && payment_method.length > 0
+        });
     if (authorization.status === 'failed') {
       return res.status(402).json({
         error: "Payment authorization failed. Your card was not charged and no request was created.",
@@ -3339,6 +3370,7 @@ app.post("/api/request/create", async (req, res) => {
       return res.status(402).json({
         error: "Payment confirmation is required before your request is submitted.",
         payment_status: 'requires_confirmation',
+        payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
         client_secret: authorization.clientSecret
       });
@@ -3405,7 +3437,8 @@ app.post("/api/request/boost", async (req, res) => {
     gig_id,
     currency = "USD",
     expires_at,
-    payment_method
+    payment_method,
+    payment_intent_id
   } = req.body;
   let amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
   if (!client_request_id || !idempotency_key) {
@@ -3413,6 +3446,9 @@ app.post("/api/request/boost", async (req, res) => {
   }
 
   const durableGigId = parseDurableGigId(gig_id);
+  const confirmedPaymentIntentId = typeof payment_intent_id === 'string' && payment_intent_id.trim()
+    ? payment_intent_id.trim()
+    : null;
   if (!durableGigId) {
     return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
   }
@@ -3558,18 +3594,29 @@ app.post("/api/request/boost", async (req, res) => {
     // Free room: the boost is a free upvote, nothing to authorize.
     newBoost.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
-    const authorization = await paymentService.authorizeAction({
-      gigId: durableGigId,
-      actionType: 'boost',
-      amountSubtotalCents: amount_cents,
-      platformFeeCents: 100,
-      currency: String(currency).toUpperCase(),
-      idempotencyKey: idempotency_key,
-      runtimeRequestId: request.id,
-      clientRequestId: client_request_id,
-      paymentMethod: payment_method,
-      confirm: typeof payment_method === 'string' && payment_method.length > 0
-    });
+    const authorization = confirmedPaymentIntentId
+      ? await paymentService.confirmAuthorizedAction({
+          gigId: durableGigId,
+          actionType: 'boost',
+          amountSubtotalCents: amount_cents,
+          platformFeeCents: 100,
+          currency: String(currency).toUpperCase(),
+          runtimeRequestId: request.id,
+          clientRequestId: client_request_id,
+          processorPaymentIntentId: confirmedPaymentIntentId
+        })
+      : await paymentService.authorizeAction({
+          gigId: durableGigId,
+          actionType: 'boost',
+          amountSubtotalCents: amount_cents,
+          platformFeeCents: 100,
+          currency: String(currency).toUpperCase(),
+          idempotencyKey: idempotency_key,
+          runtimeRequestId: request.id,
+          clientRequestId: client_request_id,
+          paymentMethod: payment_method,
+          confirm: typeof payment_method === 'string' && payment_method.length > 0
+        });
     if (authorization.status === 'failed') {
       return res.status(402).json({
         error: "Boost authorization failed. Your card was not charged.",
@@ -3582,6 +3629,7 @@ app.post("/api/request/boost", async (req, res) => {
       return res.status(402).json({
         error: "Payment confirmation is required before your boost is applied.",
         payment_status: 'requires_confirmation',
+        payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
         client_secret: authorization.clientSecret
       });
