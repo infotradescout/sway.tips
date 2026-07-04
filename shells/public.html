@@ -286,6 +286,46 @@
         text-align: center;
       }
 
+      .entry-card {
+        display: grid;
+        gap: 14px;
+        padding: 20px 18px 16px;
+        border-radius: 28px;
+        border: 1px solid rgba(244, 114, 182, 0.2);
+        background: linear-gradient(180deg, rgba(2, 6, 23, 0.58), rgba(2, 6, 23, 0.78));
+        box-shadow: 0 28px 80px rgba(2, 6, 23, 0.72);
+        backdrop-filter: blur(18px);
+      }
+
+      .entry-copy {
+        display: grid;
+        gap: 6px;
+      }
+
+      .entry-eyebrow {
+        color: rgba(240, 171, 252, 0.96);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+      }
+
+      .entry-title {
+        margin: 0;
+        color: #fff;
+        font-size: clamp(28px, 7vw, 36px);
+        font-weight: 900;
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+      }
+
+      .entry-support {
+        margin: 0;
+        color: rgba(226, 232, 240, 0.88);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
       .btn {
         display: inline-flex;
         align-items: center;
@@ -334,6 +374,13 @@
         letter-spacing: 0.18em;
         text-decoration: none;
         text-shadow: 0 0 18px rgba(217, 70, 239, 0.58);
+      }
+
+      .entry-note {
+        margin: 0;
+        color: rgba(203, 213, 225, 0.82);
+        font-size: 12px;
+        font-weight: 600;
       }
 
       footer {
@@ -392,6 +439,20 @@
         .cta-stack {
           width: min(100%, 390px);
           gap: 10px;
+        }
+
+        .entry-card {
+          gap: 12px;
+          padding: 18px 16px 14px;
+          border-radius: 24px;
+        }
+
+        .entry-title {
+          font-size: 30px;
+        }
+
+        .entry-support {
+          font-size: 13px;
         }
 
         .btn {
@@ -594,10 +655,18 @@
     <div class="shell">
       <main>
         <nav class="cta-stack" aria-label="Sway entry actions">
-          <a class="btn primary" href="/home">SCAN</a>
-          <a class="btn secondary" href="/talent/signup">Create account</a>
-          <a class="btn secondary" href="/talent/login">Login</a>
-          <a class="tagline" href="/faq">sway to play</a>
+          <div class="entry-card">
+            <div class="entry-copy">
+              <span class="entry-eyebrow">Sway entry</span>
+              <h1 class="entry-title">Join the live room.</h1>
+              <p class="entry-support">Scan the venue QR, send a request or tip, and track the queue from your phone.</p>
+            </div>
+            <a class="btn primary" href="/home">SCAN</a>
+            <a class="btn secondary" href="/talent/signup">Create account</a>
+            <a class="btn secondary" href="/talent/login">Login</a>
+            <p class="entry-note">Performer tools stay behind your private sign-in.</p>
+            <a class="tagline" href="/faq">Sway to play</a>
+          </div>
         </nav>
       </main>
 
