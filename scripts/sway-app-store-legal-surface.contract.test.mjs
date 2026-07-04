@@ -12,6 +12,7 @@ const failures = [];
 
 for (const term of [
   "app.get('/support'",
+  "app.get('/faq'",
   "app.get('/privacy'",
   "app.get('/terms'",
   "app.get('/legal/payments'",
@@ -20,12 +21,13 @@ for (const term of [
   "app.post('/api/privacy/data-deletion'",
   "app.post('/api/privacy/data-deletion-placeholder'",
   "supportPath: '/support'",
+  "faqPath: '/faq'",
   "dataDeletionInfoPath: '/privacy/data-deletion'"
 ]) {
   if (!server.includes(term)) failures.push(`Server missing legal/support surface: ${term}`);
 }
 
-for (const href of ['/privacy', '/terms', '/support', '/privacy/data-deletion']) {
+for (const href of ['/privacy', '/terms', '/faq', '/support', '/privacy/data-deletion']) {
   if (!publicHtml.includes(`href="${href}"`)) {
     failures.push(`Public landing missing trust link: ${href}`);
   }
