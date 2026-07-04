@@ -13,6 +13,12 @@
   --sway-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+@supports (height: 100svh) {
+  :root {
+    --sway-viewport-height: 100svh;
+  }
+}
+
 /* Base custom interactive effects for Vibrant Palette */
 .ladder-row {
   transition: transform 0.2s ease, box-shadow 0.2s ease;

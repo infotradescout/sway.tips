@@ -51,6 +51,10 @@ if (!publicHtml.includes(approvedRoute)) {
   failures.push('Public landing must reference the approved S-only no-text background asset.');
 }
 
+if (!publicHtml.includes(`rel="preload" as="image" href="${approvedRoute}"`) || !publicHtml.includes('fetchpriority="high"')) {
+  failures.push('Public landing must preload the approved S-only background for cold mobile first paint.');
+}
+
 if (!appBackdrop.includes(approvedRoute)) {
   failures.push('Patron no-session backdrop must reference the approved S-only no-text background asset.');
 }
@@ -63,6 +67,18 @@ if (publicApprovedImageRefs.length !== 1) {
 const appApprovedImageRefs = appBackdrop.match(/src=\{SWAY_S_ONLY_BACKGROUND_SRC\}/g) ?? [];
 if (appApprovedImageRefs.length !== 1) {
   failures.push(`Patron backdrop must render exactly one approved S background image, found ${appApprovedImageRefs.length}.`);
+}
+
+for (const publicImageTerm of ['width="1024"', 'height="1536"', 'loading="eager"', 'decoding="async"', 'fetchpriority="high"']) {
+  if (!publicHtml.includes(publicImageTerm)) {
+    failures.push(`Public landing S background image missing first-load stability hint: ${publicImageTerm}`);
+  }
+}
+
+for (const appImageTerm of ['width={1024}', 'height={1536}', 'loading="eager"', 'decoding="async"', 'fetchPriority="high"']) {
+  if (!appBackdrop.includes(appImageTerm)) {
+    failures.push(`Patron backdrop S background image missing first-load stability hint: ${appImageTerm}`);
+  }
 }
 
 for (const source of [
@@ -133,6 +149,8 @@ for (const cssTerm of [
   'html.is-meta-in-app-browser',
   'html.is-compact-viewport',
   'html.is-compact-landscape',
+  '@supports (height: 100svh)',
+  '--sway-viewport-height: 100svh',
   '@media (max-width: 640px)',
   '@media (max-width: 640px) and (max-height: 760px)',
   '@media (max-height: 480px) and (orientation: landscape)'

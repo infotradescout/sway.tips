@@ -32,6 +32,7 @@
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="image" href="/assets/sway-s-only-no-text-background.png" fetchpriority="high" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700;800;900&display=swap" rel="stylesheet" />
     <script>
       (() => {
@@ -63,6 +64,11 @@
         --sway-viewport-width: 100vw;
         --sway-viewport-height: 100vh;
         --sway-safe-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      @supports (height: 100svh) {
+        :root {
+          --sway-viewport-height: 100svh;
+        }
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; min-height: 100%; }
@@ -581,7 +587,16 @@
   <body>
     <div class="backdrop" aria-hidden="true">
       <div class="landing-aurora-field"></div>
-      <img class="landing-bg-art" src="/assets/sway-s-only-no-text-background.png" alt="" decoding="async" />
+      <img
+        class="landing-bg-art"
+        src="/assets/sway-s-only-no-text-background.png"
+        alt=""
+        width="1024"
+        height="1536"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+      />
       <div class="landing-wave-ribbon"></div>
       <div class="landing-neon-breathe"></div>
       <div class="landing-light-sweep"></div>

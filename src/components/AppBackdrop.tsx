@@ -8,7 +8,11 @@ export default function AppBackdrop() {
         className="landing-bg-art absolute left-1/2 top-1/2"
         src={SWAY_S_ONLY_BACKGROUND_SRC}
         alt=""
+        width={1024}
+        height={1536}
+        loading="eager"
         decoding="async"
+        fetchPriority="high"
       />
       <div className="landing-wave-ribbon absolute" />
       <div className="landing-neon-breathe absolute" />
