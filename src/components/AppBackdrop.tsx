@@ -15,6 +15,10 @@ export default function AppBackdrop() {
         alt=""
         decoding="async"
       />
+      <div className="landing-wave-ribbon absolute" />
+      <div className="landing-neon-breathe absolute" />
+      <div className="landing-light-sweep absolute" />
+      <div className="landing-particles absolute" />
       <div className="landing-glow absolute inset-x-0 bottom-0" />
       <div className="landing-vignette absolute inset-0" />
     </div>
