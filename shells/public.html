@@ -281,49 +281,9 @@
 
       .cta-stack {
         display: grid;
-        width: min(430px, 100%);
-        gap: 12px;
+        width: min(360px, 100%);
+        gap: 10px;
         text-align: center;
-      }
-
-      .entry-card {
-        display: grid;
-        gap: 14px;
-        padding: 20px 18px 16px;
-        border-radius: 28px;
-        border: 1px solid rgba(244, 114, 182, 0.2);
-        background: linear-gradient(180deg, rgba(2, 6, 23, 0.58), rgba(2, 6, 23, 0.78));
-        box-shadow: 0 28px 80px rgba(2, 6, 23, 0.72);
-        backdrop-filter: blur(18px);
-      }
-
-      .entry-copy {
-        display: grid;
-        gap: 6px;
-      }
-
-      .entry-eyebrow {
-        color: rgba(240, 171, 252, 0.96);
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.26em;
-        text-transform: uppercase;
-      }
-
-      .entry-title {
-        margin: 0;
-        color: #fff;
-        font-size: clamp(28px, 7vw, 36px);
-        font-weight: 900;
-        line-height: 1.02;
-        letter-spacing: -0.04em;
-      }
-
-      .entry-support {
-        margin: 0;
-        color: rgba(226, 232, 240, 0.88);
-        font-size: 14px;
-        line-height: 1.45;
       }
 
       .btn {
@@ -332,7 +292,7 @@
         justify-content: center;
         min-height: 58px;
         padding: 0 20px;
-        border-radius: 12px;
+        border-radius: 14px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         color: #f8fafc;
         font-size: 16px;
@@ -340,7 +300,7 @@
         line-height: 1;
         text-decoration: none;
         text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(16px);
+        backdrop-filter: blur(12px);
         transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
       }
 
@@ -353,7 +313,7 @@
       }
 
       .btn.secondary {
-        background: rgba(2, 6, 23, 0.62);
+        background: rgba(2, 6, 23, 0.5);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
       }
 
@@ -361,47 +321,20 @@
         transform: translateY(-1px);
         border-color: rgba(232, 121, 249, 0.55);
         box-shadow: 0 0 34px rgba(217, 70, 239, 0.26);
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
       }
 
-      .tagline {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 42px;
-        color: #f0abfc;
-        font-size: 15px;
-        font-weight: 800;
-        letter-spacing: 0.18em;
-        text-decoration: none;
-        text-shadow: 0 0 18px rgba(217, 70, 239, 0.58);
-      }
-
-      .entry-note {
-        margin: 0;
-        color: rgba(203, 213, 225, 0.82);
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      footer {
-        width: min(1120px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 22px 0 30px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        align-items: center;
-        justify-content: center;
-      }
-
-      footer a {
-        color: rgba(148, 163, 184, 0.76);
-        font-size: 12px;
-        font-weight: 700;
-        text-decoration: none;
-      }
-
-      footer a:hover { color: #e2e8f0; }
 
       @media (max-width: 640px) {
         .landing-aurora-field {
@@ -431,28 +364,14 @@
         }
 
         main {
-          align-items: flex-end;
-          padding: 42vh 16px 20px;
-          padding: calc(var(--sway-viewport-height, 100vh) * 0.42) 16px 20px;
+          align-items: center;
+          padding: 36vh 16px 16px;
+          padding: calc(var(--sway-viewport-height, 100vh) * 0.36) 16px 16px;
         }
 
         .cta-stack {
-          width: min(100%, 390px);
+          width: min(100%, 360px);
           gap: 10px;
-        }
-
-        .entry-card {
-          gap: 12px;
-          padding: 18px 16px 14px;
-          border-radius: 24px;
-        }
-
-        .entry-title {
-          font-size: 30px;
-        }
-
-        .entry-support {
-          font-size: 13px;
         }
 
         .btn {
@@ -460,21 +379,6 @@
           border-radius: 13px;
         }
 
-        .tagline {
-          min-height: 38px;
-          font-size: 14px;
-        }
-
-        footer {
-          width: min(100% - 24px, 390px);
-          gap: 12px 16px;
-          padding: 12px 0 calc(20px + env(safe-area-inset-bottom));
-          padding: 12px 0 calc(20px + var(--sway-safe-bottom, 0px));
-        }
-
-        footer a {
-          font-size: 11px;
-        }
       }
 
       @media (max-width: 640px) and (max-height: 760px) {
@@ -486,7 +390,7 @@
         }
 
         main {
-          padding-bottom: 12px;
+          padding-bottom: 10px;
         }
 
         .cta-stack {
@@ -494,23 +398,9 @@
         }
 
         .btn {
-          min-height: 52px;
+          min-height: 50px;
         }
 
-        .tagline {
-          min-height: 34px;
-          font-size: 13px;
-        }
-
-        footer {
-          gap: 8px 14px;
-          padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
-          padding: 8px 0 calc(12px + var(--sway-safe-bottom, 0px));
-        }
-
-        footer a {
-          font-size: 10.5px;
-        }
       }
 
       @media (max-height: 480px) and (orientation: landscape) {
@@ -543,11 +433,6 @@
           font-size: 13px;
         }
 
-        footer {
-          width: min(calc(100% - 24px), 760px);
-          gap: 10px 16px;
-          padding: 6px 0 8px;
-        }
       }
 
       html.is-meta-in-app-browser body {
@@ -569,7 +454,7 @@
       }
 
       html.is-compact-viewport main {
-        padding-bottom: 12px;
+        padding-bottom: 10px;
       }
 
       html.is-compact-viewport .cta-stack {
@@ -577,22 +462,9 @@
       }
 
       html.is-compact-viewport .btn {
-        min-height: 52px;
+        min-height: 50px;
       }
 
-      html.is-compact-viewport .tagline {
-        min-height: 34px;
-        font-size: 13px;
-      }
-
-      html.is-compact-viewport footer {
-        gap: 8px 14px;
-        padding: 8px 0 calc(12px + var(--sway-safe-bottom, 0px));
-      }
-
-      html.is-compact-viewport footer a {
-        font-size: 10.5px;
-      }
 
       html.is-compact-landscape .landing-bg-art {
         width: min(86vw, 720px);
@@ -655,29 +527,12 @@
     <div class="shell">
       <main>
         <nav class="cta-stack" aria-label="Sway entry actions">
-          <div class="entry-card">
-            <div class="entry-copy">
-              <span class="entry-eyebrow">Sway entry</span>
-              <h1 class="entry-title">Join the live room.</h1>
-              <p class="entry-support">Scan the venue QR, send a request or tip, and track the queue from your phone.</p>
-            </div>
-            <a class="btn primary" href="/home">SCAN</a>
-            <a class="btn secondary" href="/talent/signup">Create account</a>
-            <a class="btn secondary" href="/talent/login">Login</a>
-            <p class="entry-note">Performer tools stay behind your private sign-in.</p>
-            <a class="tagline" href="/faq">Sway to play</a>
-          </div>
+          <a class="btn primary" href="/home">SCAN</a>
+          <a class="btn secondary" href="/talent/signup">Create account</a>
+          <a class="btn secondary" href="/talent/login">Login</a>
         </nav>
       </main>
 
-      <footer>
-        <a href="/privacy">Privacy</a>
-        <a href="/terms">Terms</a>
-        <a href="/faq">FAQ</a>
-        <a href="/support">Support</a>
-        <a href="/privacy/data-deletion">Data deletion</a>
-        <a href="/overlay/live">Open overlay</a>
-      </footer>
     </div>
   </body>
 </html>
