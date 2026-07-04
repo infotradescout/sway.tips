@@ -323,6 +323,35 @@ const supportPageHtml = renderStaticDocument(
   `
 );
 
+const faqPageHtml = renderStaticDocument(
+  'Sway FAQ',
+  'Quick answers, official links, and current support paths for Sway performers and audiences.',
+  `
+    <p>Sway lets audiences scan into a live room, send requests, and support performers while the performer keeps control of the queue.</p>
+    <h2>How do I join a live room?</h2>
+    <p>Use <a href="/home">SCAN</a> from the public landing page or scan a performer’s Sway QR code at the venue.</p>
+    <h2>How do performers get started?</h2>
+    <p>Use <a href="/talent/signup">Create account</a> to start a performer account, or <a href="/talent/login">Login</a> if you already have access.</p>
+    <h2>Are paid requests guaranteed to play?</h2>
+    <p>No. A paid request is a submission for performer review. Performers control approvals, denials, queue order, and fulfillment. Payment behavior must match backend confirmation and processor state.</p>
+    <h2>Official links</h2>
+    <ul>
+      <li><a href="/">Sway public home</a></li>
+      <li><a href="/home">Audience scan entry</a></li>
+      <li><a href="/talent/signup">Create performer account</a></li>
+      <li><a href="/talent/login">Performer login</a></li>
+      <li><a href="/support">Support</a></li>
+      <li><a href="/privacy">Privacy</a></li>
+      <li><a href="/terms">Terms</a></li>
+      <li><a href="/legal/payments">Payment terms</a></li>
+      <li><a href="/legal/payouts">Payout terms</a></li>
+      <li><a href="/privacy/data-deletion">Data deletion</a></li>
+    </ul>
+    <h2>Social links</h2>
+    <p>Approved social profile URLs are not configured in this repository yet. When the official Sway social links are approved, this page is the public place to add them.</p>
+  `
+);
+
 const privacyPageHtml = renderStaticDocument(
   'Sway Privacy Policy',
   'What Sway stores for performer accounts, live-room requests, payments, moderation, and support workflows.',
@@ -4026,6 +4055,10 @@ app.get('/support', (_req, res) => {
   res.type('html').send(supportPageHtml);
 });
 
+app.get('/faq', (_req, res) => {
+  res.type('html').send(faqPageHtml);
+});
+
 app.get('/privacy', (_req, res) => {
   res.type('html').send(privacyPageHtml);
 });
@@ -4051,6 +4084,7 @@ app.get('/api/support/contact', (_req, res) => {
     success: true,
     message: 'Support options are published on the Sway support page.',
     supportPath: '/support',
+    faqPath: '/faq',
     privacyPolicyPath: '/privacy',
     termsPath: '/terms',
     dataDeletionPath: '/privacy/data-deletion',

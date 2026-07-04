@@ -11,6 +11,13 @@ const checks = [
     mustInclude: ['Sway', 'SCAN', 'Create account', 'sway to play']
   },
   {
+    name: 'public faq',
+    path: '/faq',
+    expectedStatus: 200,
+    contentType: 'text/html',
+    mustInclude: ['Sway FAQ', 'Official links', 'Social links', 'Create performer account']
+  },
+  {
     name: 'patron shell entry',
     path: '/home',
     expectedStatus: 200,
