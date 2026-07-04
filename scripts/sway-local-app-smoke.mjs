@@ -8,7 +8,7 @@ const checks = [
     path: '/',
     expectedStatus: 200,
     contentType: 'text/html',
-    mustInclude: ['Sway', 'Audience: join a live room', 'Performer sign in']
+    mustInclude: ['Sway', 'SCAN', 'Create account', 'Login', 'sway to play']
   },
   {
     name: 'patron shell entry',
@@ -27,13 +27,13 @@ const checks = [
     path: '/sway.webmanifest',
     expectedStatus: 200,
     contentType: 'application/manifest+json',
-    mustInclude: ['"display":"standalone"', '"short_name":"Sway"']
+    mustInclude: ['"display": "standalone"', '"short_name": "Sway"']
   },
   {
     name: 'service worker',
     path: '/sw.js',
     expectedStatus: 200,
-    contentType: 'text/javascript'
+    contentType: 'javascript'
   },
   {
     name: 'offline fallback',
@@ -45,6 +45,18 @@ const checks = [
   {
     name: 'apple touch icon',
     path: '/apple-touch-icon.png',
+    expectedStatus: 200,
+    contentType: 'image/png'
+  },
+  {
+    name: 's-only landing background',
+    path: '/assets/sway-s-only-no-text-background.png',
+    expectedStatus: 200,
+    contentType: 'image/png'
+  },
+  {
+    name: 'favicon',
+    path: '/favicon.png',
     expectedStatus: 200,
     contentType: 'image/png'
   }

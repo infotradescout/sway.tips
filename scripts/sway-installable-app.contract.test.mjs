@@ -12,7 +12,14 @@ const talentHtml = readFileSync(join(root, 'shells/talent.html'), 'utf8');
 
 const failures = [];
 
-for (const file of ['public/icon-192.png', 'public/icon-512.png', 'public/apple-touch-icon.png', 'public/offline.html']) {
+for (const file of [
+  'public/icon-192.png',
+  'public/icon-512.png',
+  'public/apple-touch-icon.png',
+  'public/favicon.png',
+  'public/assets/sway-s-only-no-text-icon-source.png',
+  'public/offline.html'
+]) {
   if (!existsSync(join(root, file))) failures.push(`Missing installable app asset: ${file}`);
 }
 
@@ -29,9 +36,14 @@ for (const term of ['beforeinstallprompt', 'Install Sway', 'Install app', 'Add t
 }
 
 for (const html of [publicHtml, patronHtml, talentHtml]) {
-  for (const term of ['rel="manifest" href="/sway.webmanifest"', 'apple-touch-icon', 'theme-color']) {
+  for (const term of ['rel="manifest" href="/sway.webmanifest"', 'apple-touch-icon', 'rel="icon" type="image/png" href="/favicon.png"', 'theme-color']) {
     if (!html.includes(term)) failures.push(`Shell HTML missing install metadata: ${term}`);
   }
+}
+
+const iconGenerator = readFileSync(join(root, 'scripts/generate-app-icons.mjs'), 'utf8');
+if (!iconGenerator.includes('public/assets/sway-s-only-no-text-icon-source.png')) {
+  failures.push('Icon generator must derive app icons from the approved S-only no-text source asset.');
 }
 
 if (failures.length) {

@@ -4,7 +4,9 @@ const APP_SHELL_ASSETS = [
   '/sway.webmanifest',
   '/icon-192.png',
   '/icon-512.png',
-  '/apple-touch-icon.png'
+  '/apple-touch-icon.png',
+  '/favicon.png',
+  '/assets/sway-s-only-no-text-background.png'
 ];
 
 self.addEventListener('install', (event) => {

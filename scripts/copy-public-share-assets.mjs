@@ -9,14 +9,23 @@ if (!existsSync(sourceDir)) {
   process.exit(0);
 }
 
-mkdirSync(distDir, { recursive: true });
+function copyEntries(source, target) {
+  mkdirSync(target, { recursive: true });
 
-for (const entry of readdirSync(sourceDir)) {
-  const sourcePath = join(sourceDir, entry);
-  const targetPath = join(distDir, entry);
-  if (!statSync(sourcePath).isFile()) {
-    continue;
+  for (const entry of readdirSync(source)) {
+    const sourcePath = join(source, entry);
+    const targetPath = join(target, entry);
+    const stats = statSync(sourcePath);
+
+    if (stats.isDirectory()) {
+      copyEntries(sourcePath, targetPath);
+      continue;
+    }
+
+    if (stats.isFile()) {
+      cpSync(sourcePath, targetPath, { force: true });
+    }
   }
-
-  cpSync(sourcePath, targetPath, { force: true });
 }
+
+copyEntries(sourceDir, distDir);

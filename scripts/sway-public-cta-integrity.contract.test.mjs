@@ -7,6 +7,7 @@ const failures = [];
 
 const allowedHrefPatterns = [
   /^\/$/,
+  /^\/home$/,
   /^\/talent\/login$/,
   /^\/talent\/signup$/,
   /^\/talent\/gigs$/,
@@ -56,25 +57,39 @@ for (const anchor of anchors) {
   }
 }
 
-const audienceCtas = anchors.filter((anchor) => /^Audience:/i.test(anchor.text));
+const visibleCopy = publicHtml
+  .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
-if (!audienceCtas.length) {
-  failures.push('Expected at least one public Audience CTA in shells/public.html.');
+const requiredStack = ['SCAN', 'Create account', 'Login', 'sway to play'];
+for (const term of requiredStack) {
+  if (!visibleCopy.includes(term)) {
+    failures.push(`Public landing foreground stack missing required copy: ${term}`);
+  }
 }
 
-const immediateRequestCopyPattern = /\b(start request|request now|send request|open request)\b/i;
-const truthfulAudienceCopyPattern = /\b(explore sway|browse|discover|learn more|join a live room)\b/i;
+const stackPositions = requiredStack.map((term) => visibleCopy.indexOf(term));
+if (stackPositions.some((index) => index < 0) || stackPositions.some((index, i) => i > 0 && index <= stackPositions[i - 1])) {
+  failures.push('Public landing foreground stack must remain ordered as SCAN, Create account, Login, sway to play.');
+}
 
-for (const cta of audienceCtas) {
-  if (cta.href === 'https://app.sway.tips/' && immediateRequestCopyPattern.test(cta.text)) {
-    failures.push(
-      `Audience CTA "${cta.text}" cannot promise immediate request creation while linking to bare https://app.sway.tips/.`
-    );
+for (const forbiddenCopy of [
+  'Run the room',
+  'Move the queue',
+  'Audience: join a live room',
+  'Performer sign in'
+]) {
+  if (visibleCopy.includes(forbiddenCopy)) {
+    failures.push(`Public landing must not include old marketing/header copy: ${forbiddenCopy}`);
   }
+}
 
-  if (!truthfulAudienceCopyPattern.test(cta.text) && !immediateRequestCopyPattern.test(cta.text)) {
-    failures.push(`Audience CTA "${cta.text}" must use approved truthful audience copy.`);
-  }
+const foregroundAnchors = anchors.filter((anchor) => requiredStack.includes(anchor.text));
+if (foregroundAnchors.length !== requiredStack.length) {
+  failures.push('Public landing must expose the complete foreground CTA stack as anchors.');
 }
 
 if (failures.length) {
