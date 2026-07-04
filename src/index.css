@@ -56,21 +56,23 @@
     #02030a;
 }
 
-.landing-bg-fill,
+.landing-aurora-field,
 .landing-bg-art {
   user-select: none;
   -webkit-user-drag: none;
   will-change: transform, filter, opacity;
 }
 
-.landing-bg-fill {
-  width: 122vw;
-  height: 122vh;
-  object-fit: cover;
-  object-position: 50% 52%;
+.landing-aurora-field {
+  inset: -18%;
+  background:
+    linear-gradient(112deg, transparent 0 18%, rgba(236, 72, 153, 0.24) 34%, transparent 56%),
+    linear-gradient(248deg, transparent 0 20%, rgba(34, 211, 238, 0.22) 42%, transparent 66%),
+    linear-gradient(180deg, rgba(10, 3, 28, 0.72), rgba(2, 3, 10, 0.06) 42%, rgba(3, 12, 28, 0.7));
+  filter: blur(38px) saturate(1.18);
   opacity: 0.74;
   transform-origin: center;
-  animation: landing-bg-pan 16s ease-in-out infinite alternate;
+  animation: landing-aurora-pan 16s ease-in-out infinite alternate;
 }
 
 .landing-bg-art {
@@ -178,10 +180,9 @@
 }
 
 @media (max-width: 640px) {
-  .landing-bg-fill {
-    width: 158vw;
-    height: 118vh;
-    opacity: 0.82;
+  .landing-aurora-field {
+    inset: -22%;
+    opacity: 0.78;
   }
 
   .landing-bg-art {
@@ -226,7 +227,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-bg-fill,
+  .landing-aurora-field,
   .landing-bg-art,
   .landing-glow,
   .landing-wave-ribbon,
@@ -237,18 +238,18 @@
   }
 }
 
-@keyframes landing-bg-pan {
+@keyframes landing-aurora-pan {
   0% {
-    transform: translate(-50%, -50%) scale(1.06) translate3d(-2.4%, -1.6%, 0);
-    filter: blur(13px) saturate(1.16) brightness(0.58) contrast(1.06);
+    transform: scale(1.02) translate3d(-2.4%, -1.6%, 0);
+    filter: blur(34px) saturate(1.08) brightness(0.84) contrast(1.04);
   }
   50% {
-    transform: translate(-50%, -50%) scale(1.14) translate3d(2.2%, 1%, 0);
-    filter: blur(16px) saturate(1.36) brightness(0.72) contrast(1.12);
+    transform: scale(1.08) translate3d(2.2%, 1%, 0);
+    filter: blur(42px) saturate(1.26) brightness(1) contrast(1.08);
   }
   100% {
-    transform: translate(-50%, -50%) scale(1.08) translate3d(-1.2%, 2.2%, 0);
-    filter: blur(13px) saturate(1.2) brightness(0.62) contrast(1.08);
+    transform: scale(1.04) translate3d(-1.2%, 2.2%, 0);
+    filter: blur(36px) saturate(1.14) brightness(0.9) contrast(1.06);
   }
 }
 

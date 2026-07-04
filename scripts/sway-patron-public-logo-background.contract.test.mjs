@@ -55,6 +55,16 @@ if (!appBackdrop.includes(approvedRoute)) {
   failures.push('Patron no-session backdrop must reference the approved S-only no-text background asset.');
 }
 
+const publicApprovedImageRefs = publicHtml.match(/<img[^>]+src="\/assets\/sway-s-only-no-text-background\.png"/g) ?? [];
+if (publicApprovedImageRefs.length !== 1) {
+  failures.push(`Public landing must render exactly one approved S background image, found ${publicApprovedImageRefs.length}.`);
+}
+
+const appApprovedImageRefs = appBackdrop.match(/src=\{SWAY_S_ONLY_BACKGROUND_SRC\}/g) ?? [];
+if (appApprovedImageRefs.length !== 1) {
+  failures.push(`Patron backdrop must render exactly one approved S background image, found ${appApprovedImageRefs.length}.`);
+}
+
 for (const source of [
   { name: 'shells/public.html', text: publicHtml },
   { name: 'src/components/AppBackdrop.tsx', text: appBackdrop }
@@ -68,7 +78,8 @@ for (const source of [
     'Run the room',
     'Move the queue',
     'Audience: join a live room',
-    'Performer sign in'
+    'Performer sign in',
+    'landing-bg-fill'
   ]) {
     if (source.text.includes(forbidden)) {
       failures.push(`${source.name} must not include old grid/equalizer/marketing/logo content: ${forbidden}`);
@@ -78,6 +89,10 @@ for (const source of [
 
 if (!publicHtml.includes('object-fit: contain') || !css.includes('object-fit: contain')) {
   failures.push('Landing background art must use contain scaling to avoid ugly desktop crop.');
+}
+
+if (css.includes('landing-bg-fill') || css.includes('@keyframes landing-bg-pan')) {
+  failures.push('Landing CSS must not keep the removed duplicate S fill layer or its old pan animation.');
 }
 
 const visibleCopy = publicHtml
@@ -94,6 +109,7 @@ for (const term of ['SCAN', 'Create account', 'Login', 'sway to play']) {
 }
 
 for (const animationTerm of [
+  'landing-aurora-field',
   'landing-wave-ribbon',
   'landing-neon-breathe',
   'landing-light-sweep',
@@ -108,7 +124,7 @@ for (const animationTerm of [
 }
 
 for (const cssTerm of [
-  '@keyframes landing-bg-pan',
+  '@keyframes landing-aurora-pan',
   '@keyframes landing-art-breathe',
   '@keyframes landing-wave-drift',
   '@keyframes landing-light-sweep',
@@ -123,7 +139,7 @@ for (const cssTerm of [
 }
 
 for (const animationTerm of [
-  'landing-bg-pan 16s',
+  'landing-aurora-pan 16s',
   'landing-art-breathe 6.4s',
   'landing-wave-drift 5.6s',
   'landing-light-sweep 6.8s',

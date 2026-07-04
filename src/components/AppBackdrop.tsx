@@ -3,12 +3,7 @@ export const SWAY_S_ONLY_BACKGROUND_SRC = '/assets/sway-s-only-no-text-backgroun
 export default function AppBackdrop() {
   return (
     <div className="landing-backdrop pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-      <img
-        className="landing-bg-fill absolute left-1/2 top-1/2"
-        src={SWAY_S_ONLY_BACKGROUND_SRC}
-        alt=""
-        decoding="async"
-      />
+      <div className="landing-aurora-field absolute" />
       <img
         className="landing-bg-art absolute left-1/2 top-1/2"
         src={SWAY_S_ONLY_BACKGROUND_SRC}
