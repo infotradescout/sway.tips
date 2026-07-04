@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flame, Smartphone, Tv } from 'lucide-react';
+import { Flame, Smartphone } from 'lucide-react';
 import { motion } from 'motion/react';
 import AppBackdrop from '../components/AppBackdrop';
 import PatronView from '../components/PatronView';
@@ -190,7 +190,6 @@ export default function PatronApp() {
 
   const { session, requests } = bState;
   const performers = bState.performers || [];
-  const overlayGigId = routeGigId || '';
   const hasPatronRouteContext = route.name === 'performer' || Boolean(routeGigId);
   const hasSessionContext =
     session.status !== 'inactive' ||
@@ -273,11 +272,6 @@ export default function PatronApp() {
               </div>
             </div>
             <DemoModeBanner compact />
-            {routeGigId ? (
-              <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
-                <Tv className="h-4 w-4" />
-              </a>
-            ) : null}
           </div>
         </div>
       )}

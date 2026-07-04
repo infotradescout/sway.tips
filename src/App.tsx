@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Flame, Lock, Smartphone, Tv, Users } from 'lucide-react';
+import { CalendarDays, Flame, Lock, Smartphone, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
@@ -710,9 +710,6 @@ export default function App() {
               </p>
             </div>
           </div>
-          <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${route.name === 'patron-gig' ? route.gigId : 'local'}`} title="Open overlay">
-            <Tv className="h-4 w-4" />
-          </a>
         </div>
       </div>
 

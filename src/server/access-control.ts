@@ -25,7 +25,7 @@ export type AccessControl = {
   requireAdminOrSupportAccess: (req: Request) => Promise<GuardResult>;
   requireGigMutationAccess: (req: Request, gigId: string) => Promise<GuardResult>;
   allowPublicPatronAccess: (req: Request) => Promise<GuardResult>;
-  allowPublicOverlayAccess: (req: Request) => Promise<GuardResult>;
+  requireOverlayAccess: (req: Request) => Promise<GuardResult>;
   requireDevSandboxAccess: (req: Request) => Promise<GuardResult>;
 };
 
@@ -62,7 +62,7 @@ function escapeHtml(input: string) {
 
 function renderProtectedRouteRecovery(status: number, reason: string, shell?: string) {
   const safeReason = escapeHtml(reason);
-  const signInHref = shell === 'talent' ? '/talent/login' : null;
+  const signInHref = shell === 'talent' || shell === 'overlay' ? '/talent/login' : null;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -660,8 +660,22 @@ export function createAccessControl({
       return { allowed: true, actor: resolveActor(req), role: null };
     },
 
-    async allowPublicOverlayAccess(req) {
-      return { allowed: true, actor: resolveActor(req), role: null };
+    async requireOverlayAccess(req) {
+      await hydrateRequestActor(req);
+      const actor = resolveActor(req);
+      if (!actor.actorId) return missingActor();
+      if (!db) {
+        return resolveTalentFallbackAccess(
+          req,
+          actor,
+          fallbackPolicy ?? createFallbackAccessPolicy(),
+          fallbackVerificationConfig ?? createFallbackVerificationConfig()
+        );
+      }
+      if (await hasTalentRole(db, actor.actorId)) {
+        return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
+      }
+      return { allowed: false, status: 403, reason: 'Performer membership or gig access grant required to open overlay.' };
     },
 
     async requireDevSandboxAccess(req) {
@@ -708,7 +722,7 @@ export function routeFamilyGuard(accessControl: AccessControl) {
         : shell === 'admin'
           ? accessControl.requireAdminOrSupportAccess
           : shell === 'overlay'
-            ? accessControl.allowPublicOverlayAccess
+            ? accessControl.requireOverlayAccess
             : shell === 'dev-sandbox'
               ? accessControl.requireDevSandboxAccess
               : accessControl.allowPublicPatronAccess;

@@ -44,10 +44,15 @@ for (const demoRoute of [
 }
 
 for (const required of [
-  'href="/home">SCAN</a>',
-  '/overlay/live'
+  'href="/home">SCAN</a>'
 ]) {
   requireIncludes(publicShell, required, `Public landing missing production-safe route target: ${required}`);
+}
+
+for (const forbiddenPublicOverlayEntry of ['/overlay/live', 'Open overlay']) {
+  if (publicShell.includes(forbiddenPublicOverlayEntry)) {
+    failures.push(`Public landing must not expose overlay before performer sign-in: ${forbiddenPublicOverlayEntry}`);
+  }
 }
 
 requireIncludes(

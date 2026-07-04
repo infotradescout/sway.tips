@@ -281,9 +281,15 @@ async function main() {
     assert.equal(fallbackIgnoredForAdmin.allowed, false, 'Fallback admin IDs must not bypass DB-backed authorization.');
     assert.equal(fallbackIgnoredForAdmin.status, 401);
 
+    const anonymousOverlay = await databaseBackedAnonymousAccess.requireOverlayAccess(makeReq(null));
+    assert.equal(anonymousOverlay.allowed, false, 'Overlay HTML access must require a performer session.');
+    assert.equal(anonymousOverlay.status, 401);
+
     assert.equal(anonymousDbStub.getQueryCount(), 0, 'DB-backed browser access must not trust raw actor headers when no valid session cookie is present.');
 
     const validSessionDbStub = createQueuedDbStub([
+      [{ id: 'performer-owner-row' }],
+      [{ role: 'performer' }],
       [{ id: 'performer-owner-row' }],
       [{ role: 'performer' }]
     ]);
@@ -305,7 +311,13 @@ async function main() {
     );
     assert.equal(validSessionTalent.allowed, true, 'Valid performer session cookie must resolve actor context in DB-backed mode.');
     assert.equal(validSessionTalent.role, 'performer');
-    assert.ok(validSessionDbStub.getQueryCount() >= 2, 'DB-backed cookie access must consult the durable performer authorization tables.');
+
+    const validSessionOverlay = await databaseBackedSessionAccess.requireOverlayAccess(
+      makeReq(null, { cookie: 'sway_performer_session=session-valid' })
+    );
+    assert.equal(validSessionOverlay.allowed, true, 'Valid performer session cookie must allow overlay HTML access.');
+    assert.equal(validSessionOverlay.role, 'performer');
+    assert.ok(validSessionDbStub.getQueryCount() >= 4, 'DB-backed cookie access must consult the durable performer authorization tables.');
 
     const invalidSessionAccess = createAccessControl({
       databaseUrl: 'postgres://db-present.example/sway',
@@ -323,6 +335,12 @@ async function main() {
       assert.equal(invalidSessionResult.allowed, false, `Invalid performer session cookie must fail closed: ${cookieValue}`);
       assert.equal(invalidSessionResult.status, 401);
     }
+
+    const invalidOverlaySessionResult = await invalidSessionAccess.requireOverlayAccess(
+      makeReq(null, { cookie: 'sway_performer_session=session-expired' })
+    );
+    assert.equal(invalidOverlaySessionResult.allowed, false, 'Invalid performer session cookie must fail closed for overlay HTML access.');
+    assert.equal(invalidOverlaySessionResult.status, 401);
 
     console.log('Persisted access store readiness contract passed.');
   } finally {

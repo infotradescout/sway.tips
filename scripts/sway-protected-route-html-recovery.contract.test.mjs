@@ -79,8 +79,8 @@ for (const term of [
 
 requireIncludes(
   access,
-  "shell === 'talent' ? '/talent/login' : null",
-  'Talent recovery HTML must link to the performer sign-in page, not just the homepage.'
+  "shell === 'talent' || shell === 'overlay' ? '/talent/login' : null",
+  'Talent and overlay recovery HTML must link to the performer sign-in page, not just the homepage.'
 );
 
 for (const forbidden of [
