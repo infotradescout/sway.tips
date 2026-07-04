@@ -15,7 +15,7 @@ for (const term of [
   'Create account',
   'Login',
   'sway to play',
-  'https://sway.tips/'
+  'href="/faq"'
 ]) {
   requireIncludes(patronApp, term, `Patron recovery copy missing required term: ${term}`);
 }

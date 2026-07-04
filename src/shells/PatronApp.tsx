@@ -68,7 +68,7 @@ function PatronNoSessionRecovery({
         </a>
         <a
           className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
-          href="https://sway.tips/"
+          href="/faq"
           onClick={onReturnHomeClick}
         >
           sway to play

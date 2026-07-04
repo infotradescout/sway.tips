@@ -93,6 +93,47 @@ for (const term of ['SCAN', 'Create account', 'Login', 'sway to play']) {
   }
 }
 
+for (const animationTerm of [
+  'landing-wave-ribbon',
+  'landing-neon-breathe',
+  'landing-light-sweep',
+  'landing-particles'
+]) {
+  if (!publicHtml.includes(animationTerm)) {
+    failures.push(`Public landing missing animated background layer: ${animationTerm}`);
+  }
+  if (!appBackdrop.includes(animationTerm)) {
+    failures.push(`Patron no-session backdrop missing animated background layer: ${animationTerm}`);
+  }
+}
+
+for (const cssTerm of [
+  '@keyframes landing-bg-pan',
+  '@keyframes landing-art-breathe',
+  '@keyframes landing-wave-drift',
+  '@keyframes landing-light-sweep',
+  '@keyframes landing-particle-drift',
+  '@media (max-width: 640px)',
+  '@media (max-width: 640px) and (max-height: 760px)',
+  '@media (max-height: 480px) and (orientation: landscape)'
+]) {
+  if (!css.includes(cssTerm) && !publicHtml.includes(cssTerm)) {
+    failures.push(`Landing background animation/mobile CSS missing: ${cssTerm}`);
+  }
+}
+
+for (const animationTerm of [
+  'landing-bg-pan 16s',
+  'landing-art-breathe 6.4s',
+  'landing-wave-drift 5.6s',
+  'landing-light-sweep 6.8s',
+  'landing-particle-drift 10s'
+]) {
+  if (!css.includes(animationTerm) || !publicHtml.includes(animationTerm)) {
+    failures.push(`Landing background motion must remain visibly animated: ${animationTerm}`);
+  }
+}
+
 if (!packageJson.includes('sway-patron-public-logo-background.contract.test.mjs')) {
   failures.push('test:contracts must include the patron/public logo background contract.');
 }
