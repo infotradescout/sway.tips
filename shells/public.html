@@ -96,7 +96,11 @@
       }
 
       .landing-aurora-field,
-      .landing-bg-art {
+      .landing-bg-art,
+      .landing-orb-a,
+      .landing-orb-b,
+      .landing-orb-c,
+      .landing-grid {
         position: absolute;
         user-select: none;
         -webkit-user-drag: none;
@@ -109,7 +113,7 @@
           linear-gradient(112deg, transparent 0 18%, rgba(236, 72, 153, 0.24) 34%, transparent 56%),
           linear-gradient(248deg, transparent 0 20%, rgba(34, 211, 238, 0.22) 42%, transparent 66%),
           linear-gradient(180deg, rgba(10, 3, 28, 0.72), rgba(2, 3, 10, 0.06) 42%, rgba(3, 12, 28, 0.7));
-        filter: blur(38px) saturate(1.18);
+        filter: blur(16px) saturate(1.1);
         opacity: 0.74;
         transform-origin: center;
         animation: landing-aurora-pan 16s ease-in-out infinite alternate;
@@ -118,17 +122,73 @@
       .landing-bg-art {
         left: 50%;
         top: 50%;
-        width: min(88vw, 1040px);
-        height: min(94vh, 1380px);
-        height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 1380px);
-        object-fit: contain;
-        object-position: 50% 50%;
+        width: min(92vw, 1080px);
+        height: min(92vh, 1180px);
+        height: min(calc(var(--sway-viewport-height, 100vh) * 0.92), 1180px);
         transform: translate(-50%, -50%);
+        border-radius: 52% 48% 46% 54% / 42% 56% 44% 58%;
+        background:
+          radial-gradient(circle at 34% 34%, rgba(244, 114, 182, 0.52), transparent 44%),
+          radial-gradient(circle at 70% 64%, rgba(34, 211, 238, 0.48), transparent 46%),
+          radial-gradient(circle at 52% 56%, rgba(99, 102, 241, 0.34), transparent 52%);
+        filter: blur(2px) saturate(1.14);
         mix-blend-mode: screen;
-        opacity: 0.94;
-        -webkit-mask-image: radial-gradient(ellipse at 50% 53%, #000 0 46%, rgba(0, 0, 0, 0.78) 60%, transparent 78%);
-        mask-image: radial-gradient(ellipse at 50% 53%, #000 0 46%, rgba(0, 0, 0, 0.78) 60%, transparent 78%);
-        animation: landing-art-breathe 6.4s ease-in-out infinite;
+        opacity: 0.72;
+        animation: landing-mesh-drift 12s ease-in-out infinite alternate;
+      }
+
+      .landing-orb-a,
+      .landing-orb-b,
+      .landing-orb-c {
+        border-radius: 50%;
+        mix-blend-mode: screen;
+      }
+
+      .landing-orb-a {
+        left: 16%;
+        top: 26%;
+        width: min(42vw, 360px);
+        height: min(42vw, 360px);
+        background: radial-gradient(circle, rgba(217, 70, 239, 0.46), transparent 66%);
+        filter: blur(6px);
+        opacity: 0.62;
+        animation: landing-orb-a 14s ease-in-out infinite alternate;
+      }
+
+      .landing-orb-b {
+        right: 12%;
+        bottom: 24%;
+        width: min(46vw, 420px);
+        height: min(46vw, 420px);
+        background: radial-gradient(circle, rgba(6, 182, 212, 0.4), transparent 68%);
+        filter: blur(8px);
+        opacity: 0.6;
+        animation: landing-orb-b 16s ease-in-out infinite alternate;
+      }
+
+      .landing-orb-c {
+        left: 48%;
+        top: 58%;
+        width: min(34vw, 300px);
+        height: min(34vw, 300px);
+        background: radial-gradient(circle, rgba(129, 140, 248, 0.34), transparent 72%);
+        filter: blur(5px);
+        opacity: 0.46;
+        animation: landing-orb-c 10s ease-in-out infinite alternate;
+      }
+
+      .landing-grid {
+        inset: -8%;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        background-size: 42px 42px;
+        opacity: 0.16;
+        transform: perspective(700px) rotateX(62deg) translateY(28%);
+        transform-origin: center bottom;
+        mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 64%);
+        -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 64%);
+        animation: landing-grid-drift 10s linear infinite;
       }
 
       .landing-wave-ribbon,
@@ -145,7 +205,7 @@
         height: 36vh;
         height: calc(var(--sway-viewport-height, 100vh) * 0.36);
         background: linear-gradient(90deg, rgba(236, 72, 153, 0.28), rgba(6, 182, 212, 0.28));
-        filter: blur(50px);
+        filter: blur(18px);
         opacity: 0.58;
         animation: landing-neon-breathe 4.8s ease-in-out infinite;
       }
@@ -160,7 +220,7 @@
           linear-gradient(105deg, transparent 0%, rgba(236, 72, 153, 0.34) 18%, transparent 35%),
           linear-gradient(78deg, transparent 22%, rgba(34, 211, 238, 0.32) 54%, transparent 80%),
           radial-gradient(ellipse at 48% 82%, rgba(236, 72, 153, 0.36), transparent 60%);
-        filter: blur(14px);
+        filter: blur(6px);
         mix-blend-mode: screen;
         -webkit-mask-image: linear-gradient(to top, transparent, #000 26%, #000 74%, transparent);
         mask-image: linear-gradient(to top, transparent, #000 26%, #000 74%, transparent);
@@ -176,7 +236,7 @@
         background:
           radial-gradient(ellipse at 30% 58%, rgba(236, 72, 153, 0.28), transparent 56%),
           radial-gradient(ellipse at 70% 52%, rgba(34, 211, 238, 0.28), transparent 58%);
-        filter: blur(32px);
+        filter: blur(12px);
         mix-blend-mode: screen;
         opacity: 0.72;
         animation: landing-neon-breathe 5.2s ease-in-out infinite reverse;
@@ -197,7 +257,7 @@
           radial-gradient(circle, rgba(34, 211, 238, 0.36) 0 1px, transparent 1.8px);
         background-position: 16% 64%, 82% 58%;
         background-size: 96px 96px, 128px 128px;
-        filter: blur(0.2px);
+        filter: blur(0);
         opacity: 0.32;
         -webkit-mask-image: radial-gradient(ellipse at 50% 62%, transparent 0 24%, #000 48%, transparent 82%);
         mask-image: radial-gradient(ellipse at 50% 62%, transparent 0 24%, #000 48%, transparent 82%);
@@ -215,29 +275,49 @@
       @keyframes landing-aurora-pan {
         0% {
           transform: scale(1.02) translate3d(-2.4%, -1.6%, 0);
-          filter: blur(34px) saturate(1.08) brightness(0.84) contrast(1.04);
+          filter: blur(14px) saturate(1.04) brightness(0.9) contrast(1.03);
         }
         50% {
           transform: scale(1.08) translate3d(2.2%, 1%, 0);
-          filter: blur(42px) saturate(1.26) brightness(1) contrast(1.08);
+          filter: blur(18px) saturate(1.14) brightness(1) contrast(1.05);
         }
         100% {
           transform: scale(1.04) translate3d(-1.2%, 2.2%, 0);
-          filter: blur(36px) saturate(1.14) brightness(0.9) contrast(1.06);
+          filter: blur(15px) saturate(1.08) brightness(0.92) contrast(1.04);
         }
       }
 
-      @keyframes landing-art-breathe {
-        0%, 100% {
-          transform: translate(-50%, -50%) scale(1);
-          filter: saturate(1.08) brightness(0.92) contrast(1.04);
-          opacity: 0.88;
+      @keyframes landing-mesh-drift {
+        0% {
+          transform: translate(-50%, -50%) scale(1) rotate(0deg);
+          border-radius: 52% 48% 46% 54% / 42% 56% 44% 58%;
+          opacity: 0.64;
         }
-        50% {
-          transform: translate(-50%, -50%) scale(1.055);
-          filter: saturate(1.34) brightness(1.12) contrast(1.1);
-          opacity: 1;
+        100% {
+          transform: translate(-50%, -50%) scale(1.08) rotate(9deg);
+          border-radius: 48% 52% 58% 42% / 54% 44% 56% 46%;
+          opacity: 0.8;
         }
+      }
+
+      @keyframes landing-orb-a {
+        0% { transform: translate3d(-6%, -4%, 0) scale(0.96); }
+        100% { transform: translate3d(7%, 5%, 0) scale(1.08); }
+      }
+
+      @keyframes landing-orb-b {
+        0% { transform: translate3d(5%, 4%, 0) scale(0.94); }
+        100% { transform: translate3d(-8%, -6%, 0) scale(1.1); }
+      }
+
+      @keyframes landing-orb-c {
+        0% { transform: translate3d(-4%, 4%, 0) scale(0.9); }
+        100% { transform: translate3d(6%, -5%, 0) scale(1.12); }
+      }
+
+      @keyframes landing-grid-drift {
+        0% { background-position: 0 0, 0 0; }
+        100% { background-position: 0 42px, 42px 0; }
       }
 
       @keyframes landing-neon-breathe {
@@ -274,15 +354,21 @@
       main {
         flex: 1;
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
-        padding: clamp(72px, 12vh, 132px) 16px 32px;
+        padding: 16px 16px calc(20vh + var(--sway-safe-bottom, 0px));
       }
 
       .cta-stack {
         display: grid;
-        width: min(360px, 100%);
-        gap: 10px;
+        width: min(372px, 100%);
+        gap: 12px;
+        padding: 14px;
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(2, 6, 23, 0.34);
+        box-shadow: 0 24px 72px rgba(2, 6, 23, 0.62);
+        backdrop-filter: blur(8px);
         text-align: center;
       }
 
@@ -300,7 +386,7 @@
         line-height: 1;
         text-decoration: none;
         text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(12px);
+        backdrop-filter: blur(6px);
         transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
       }
 
@@ -321,18 +407,6 @@
         transform: translateY(-1px);
         border-color: rgba(232, 121, 249, 0.55);
         box-shadow: 0 0 34px rgba(217, 70, 239, 0.26);
-
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-      }
       }
 
 
@@ -344,18 +418,36 @@
 
         .landing-bg-art {
           top: 40%;
-          width: min(142vw, 680px);
-          height: min(80vh, 860px);
-          height: min(calc(var(--sway-viewport-height, 100vh) * 0.8), 860px);
-          opacity: 0.96;
-          -webkit-mask-image: radial-gradient(ellipse at 50% 52%, #000 0 50%, rgba(0, 0, 0, 0.76) 64%, transparent 82%);
-          mask-image: radial-gradient(ellipse at 50% 52%, #000 0 50%, rgba(0, 0, 0, 0.76) 64%, transparent 82%);
+          width: min(124vw, 700px);
+          height: min(calc(var(--sway-viewport-height, 100vh) * 0.72), 760px);
+          opacity: 0.78;
+        }
+
+        .landing-orb-a {
+          left: 4%;
+          top: 24%;
+          width: min(62vw, 300px);
+          height: min(62vw, 300px);
+        }
+
+        .landing-orb-b {
+          right: -8%;
+          bottom: 18%;
+          width: min(72vw, 360px);
+          height: min(72vw, 360px);
+        }
+
+        .landing-orb-c {
+          left: 42%;
+          top: 54%;
+          width: min(46vw, 220px);
+          height: min(46vw, 220px);
         }
 
         .landing-wave-ribbon {
           bottom: 24%;
           height: 26vh;
-          filter: blur(12px);
+          filter: blur(5px);
         }
 
         .landing-particles {
@@ -364,14 +456,15 @@
         }
 
         main {
-          align-items: center;
-          padding: 36vh 16px 16px;
-          padding: calc(var(--sway-viewport-height, 100vh) * 0.36) 16px 16px;
+          align-items: flex-end;
+          padding: 12px 16px calc(16vh + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
-          width: min(100%, 360px);
+          width: min(100%, 368px);
           gap: 10px;
+          padding: 12px;
+          border-radius: 20px;
         }
 
         .btn {
@@ -383,14 +476,13 @@
 
       @media (max-width: 640px) and (max-height: 760px) {
         .landing-bg-art {
-          top: 37%;
-          width: min(130vw, 560px);
-          height: min(72vh, 660px);
-          height: min(calc(var(--sway-viewport-height, 100vh) * 0.72), 660px);
+          top: 36%;
+          width: min(120vw, 560px);
+          height: min(calc(var(--sway-viewport-height, 100vh) * 0.64), 620px);
         }
 
         main {
-          padding-bottom: 10px;
+          padding-bottom: calc(11vh + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
@@ -405,9 +497,8 @@
 
       @media (max-height: 480px) and (orientation: landscape) {
         .landing-bg-art {
-          width: min(86vw, 720px);
-          height: min(94vh, 520px);
-          height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 520px);
+          width: min(82vw, 680px);
+          height: min(calc(var(--sway-viewport-height, 100vh) * 0.88), 500px);
         }
 
         .landing-wave-ribbon {
@@ -416,7 +507,7 @@
         }
 
         main {
-          padding: 48px 16px 10px;
+          padding: 24px 16px 16px;
         }
 
         .cta-stack {
@@ -426,11 +517,6 @@
 
         .btn {
           min-height: 46px;
-        }
-
-        .tagline {
-          min-height: 30px;
-          font-size: 13px;
         }
 
       }
@@ -448,13 +534,13 @@
       }
 
       html.is-compact-viewport .landing-bg-art {
-        top: 37%;
-        width: min(130vw, 560px);
-        height: min(calc(var(--sway-viewport-height, 100vh) * 0.72), 660px);
+        top: 36%;
+        width: min(120vw, 560px);
+        height: min(calc(var(--sway-viewport-height, 100vh) * 0.64), 620px);
       }
 
       html.is-compact-viewport main {
-        padding-bottom: 10px;
+        padding-bottom: calc(11vh + var(--sway-safe-bottom, 0px));
       }
 
       html.is-compact-viewport .cta-stack {
@@ -467,8 +553,8 @@
 
 
       html.is-compact-landscape .landing-bg-art {
-        width: min(86vw, 720px);
-        height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 520px);
+        width: min(82vw, 680px);
+        height: min(calc(var(--sway-viewport-height, 100vh) * 0.88), 500px);
       }
 
       html.is-compact-landscape .landing-wave-ribbon {
@@ -489,20 +575,13 @@
         min-height: 46px;
       }
 
-      html.is-compact-landscape .tagline {
-        min-height: 30px;
-        font-size: 13px;
-      }
-
-      html.is-compact-landscape footer {
-        width: min(calc(100% - 24px), 760px);
-        gap: 10px 16px;
-        padding: 6px 0 8px;
-      }
-
       @media (prefers-reduced-motion: reduce) {
         .landing-aurora-field,
         .landing-bg-art,
+        .landing-orb-a,
+        .landing-orb-b,
+        .landing-orb-c,
+        .landing-grid,
         .landing-glow,
         .landing-wave-ribbon,
         .landing-neon-breathe,
@@ -515,7 +594,11 @@
   <body>
     <div class="backdrop" aria-hidden="true">
       <div class="landing-aurora-field"></div>
-      <img class="landing-bg-art" src="/assets/sway-s-only-no-text-background.png" alt="" decoding="async" />
+      <div class="landing-bg-art"></div>
+      <div class="landing-orb-a"></div>
+      <div class="landing-orb-b"></div>
+      <div class="landing-orb-c"></div>
+      <div class="landing-grid"></div>
       <div class="landing-wave-ribbon"></div>
       <div class="landing-neon-breathe"></div>
       <div class="landing-light-sweep"></div>
