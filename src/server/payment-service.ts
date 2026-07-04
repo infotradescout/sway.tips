@@ -18,6 +18,10 @@ export type AuthorizeActionInput = {
   metadata?: Record<string, string>;
 };
 
+export type ConfirmAuthorizedActionInput = Omit<AuthorizeActionInput, 'idempotencyKey' | 'paymentMethod' | 'confirm'> & {
+  processorPaymentIntentId: string;
+};
+
 export type AuthorizeActionResult =
   | { status: 'disabled' }
   // 'authorized' is returned ONLY when the provider confirms the funds are held
@@ -199,6 +203,110 @@ export function createPaymentService(config: {
     }
   }
 
+  async function confirmAuthorizedAction(input: ConfirmAuthorizedActionInput): Promise<AuthorizeActionResult> {
+    if (!db || !provider) {
+      return { status: 'disabled' };
+    }
+
+    const amountTotalCents = input.amountSubtotalCents + input.platformFeeCents;
+    const [payment] = await db
+      .select({
+        id: payments.id,
+        gigId: payments.gigId,
+        paymentStatus: payments.paymentStatus,
+        processorPaymentIntentId: payments.processorPaymentIntentId,
+        processorChargeId: payments.processorChargeId,
+        amountSubtotal: payments.amountSubtotal,
+        platformFee: payments.platformFee,
+        amountTotal: payments.amountTotal,
+        currency: payments.currency
+      })
+      .from(payments)
+      .where(eq(payments.processorPaymentIntentId, input.processorPaymentIntentId))
+      .limit(1);
+
+    if (!payment || !payment.processorPaymentIntentId) {
+      return { status: 'failed', reason: 'payment_intent_not_found' };
+    }
+
+    const sameFinancialIntent =
+      payment.gigId === input.gigId
+      && payment.amountSubtotal === input.amountSubtotalCents
+      && payment.platformFee === input.platformFeeCents
+      && payment.amountTotal === amountTotalCents
+      && payment.currency.toUpperCase() === input.currency.toUpperCase();
+
+    if (!sameFinancialIntent) {
+      return { status: 'failed', reason: 'payment_intent_mismatch' };
+    }
+
+    if (payment.paymentStatus === 'authorized') {
+      return {
+        status: 'authorized',
+        paymentId: payment.id,
+        processorPaymentIntentId: payment.processorPaymentIntentId,
+        clientSecret: null
+      };
+    }
+
+    if (payment.paymentStatus !== 'payment_pending') {
+      return { status: 'failed', reason: `payment_intent_not_capturable_from_${payment.paymentStatus}` };
+    }
+
+    try {
+      const authorization = await provider.retrievePaymentAuthorization(input.processorPaymentIntentId);
+      if (
+        input.clientRequestId
+        && authorization.metadata?.sway_client_request_id
+        && authorization.metadata.sway_client_request_id !== input.clientRequestId
+      ) {
+        return { status: 'failed', reason: 'payment_intent_client_request_mismatch' };
+      }
+
+      await db
+        .update(payments)
+        .set({
+          processorChargeId: authorization.processorChargeId,
+          updatedAt: new Date()
+        })
+        .where(eq(payments.id, payment.id));
+
+      const capturable = authorization.status === 'requires_capture';
+      if (!capturable) {
+        return {
+          status: 'requires_confirmation',
+          paymentId: payment.id,
+          processorPaymentIntentId: authorization.processorPaymentIntentId,
+          clientSecret: authorization.clientSecret,
+          providerStatus: authorization.status
+        };
+      }
+
+      await lifecycle.transitionPaymentState({
+        paymentId: payment.id,
+        processor: provider.processor,
+        nextStatus: 'authorized',
+        eventType: 'payment_intent.amount_capturable_updated',
+        processorEventId: `client_confirmed:${authorization.processorPaymentIntentId}`,
+        actorType: 'system',
+        metadata: {
+          processorPaymentIntentId: authorization.processorPaymentIntentId,
+          providerStatus: authorization.status,
+          actionType: input.actionType
+        }
+      });
+
+      return {
+        status: 'authorized',
+        paymentId: payment.id,
+        processorPaymentIntentId: authorization.processorPaymentIntentId,
+        clientSecret: authorization.clientSecret
+      };
+    } catch (error) {
+      return { status: 'failed', reason: error instanceof Error ? error.message : 'unknown_provider_error' };
+    }
+  }
+
   async function loadPayment(paymentId: string) {
     if (!db) return null;
     const [row] = await db
@@ -345,6 +453,7 @@ export function createPaymentService(config: {
     hasDurableStore: Boolean(db),
     processor: provider?.processor ?? null,
     authorizeAction,
+    confirmAuthorizedAction,
     captureAuthorization,
     voidOrRefund,
     voidOrRefundMany,

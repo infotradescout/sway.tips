@@ -2,6 +2,7 @@ const CACHE_NAME = 'sway-app-shell-v1';
 const APP_SHELL_ASSETS = [
   '/offline.html',
   '/sway.webmanifest',
+  '/favicon.png',
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png'

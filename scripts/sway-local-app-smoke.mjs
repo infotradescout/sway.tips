@@ -8,7 +8,7 @@ const checks = [
     path: '/',
     expectedStatus: 200,
     contentType: 'text/html',
-    mustInclude: ['Sway', 'Audience: join a live room', 'Performer sign in']
+    mustInclude: ['Sway', 'SCAN', 'Create account', 'sway to play']
   },
   {
     name: 'patron shell entry',

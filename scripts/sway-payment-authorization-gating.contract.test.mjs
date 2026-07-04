@@ -30,6 +30,8 @@ if (/status:\s*'authorized'[\s\S]{0,160}capturable/.test(serviceSource)) {
 for (const term of [
   "payment_status: 'requires_confirmation'",
   "payment_status: 'provider_unavailable'",
+  'payment_intent_id',
+  'paymentService.confirmAuthorizedAction',
   '} else if (isProduction) {'
 ]) {
   if (!serverSource.includes(term)) {

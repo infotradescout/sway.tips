@@ -36,6 +36,7 @@ export type ProviderAuthorizeResult = {
   processorChargeId: string | null;
   status: string;
   clientSecret: string | null;
+  metadata?: Record<string, string>;
 };
 
 export type ProviderCaptureInput = {
@@ -64,6 +65,7 @@ export type PaymentProviderAdapter = {
   verifyWebhookSignature: (input: ProviderSignatureVerificationInput) => Promise<boolean>;
   parseWebhookEvent: (input: { rawBody: string; signatureHeader: string | null }) => Promise<ProviderWebhookEnvelope>;
   authorizePayment: (input: ProviderAuthorizeInput) => Promise<ProviderAuthorizeResult>;
+  retrievePaymentAuthorization: (processorPaymentIntentId: string) => Promise<ProviderAuthorizeResult>;
   capturePayment: (input: ProviderCaptureInput) => Promise<ProviderActionResult>;
   refundPayment: (input: ProviderRefundInput) => Promise<ProviderActionResult>;
   voidPayment: (input: ProviderVoidInput) => Promise<ProviderActionResult>;
@@ -142,6 +144,7 @@ export function createStripeProviderAdapter(config: {
           amount: input.amountTotalCents,
           currency: input.currency.toLowerCase(),
           capture_method: 'manual',
+          automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
           ...(input.paymentMethod ? { payment_method: input.paymentMethod } : {}),
           ...(input.confirm ? { confirm: true } : {}),
           ...(input.destinationAccountId
@@ -159,7 +162,19 @@ export function createStripeProviderAdapter(config: {
         processorPaymentIntentId: intent.id,
         processorChargeId: extractChargeId(intent),
         status: intent.status,
-        clientSecret: intent.client_secret
+        clientSecret: intent.client_secret,
+        metadata: intent.metadata
+      };
+    },
+
+    async retrievePaymentAuthorization(processorPaymentIntentId) {
+      const intent = await stripe.paymentIntents.retrieve(processorPaymentIntentId);
+      return {
+        processorPaymentIntentId: intent.id,
+        processorChargeId: extractChargeId(intent),
+        status: intent.status,
+        clientSecret: intent.client_secret,
+        metadata: intent.metadata
       };
     },
 

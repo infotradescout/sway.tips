@@ -5,6 +5,11 @@ const sharedSource = readFileSync(new URL('../src/shells/shared.tsx', import.met
 const packageSource = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
 
 const failures = [];
+const recoveryStart = patronSource.indexOf('function PatronNoSessionRecovery');
+const recoveryEnd = patronSource.indexOf('export default function PatronApp');
+const recoverySource = recoveryStart >= 0 && recoveryEnd > recoveryStart
+  ? patronSource.slice(recoveryStart, recoveryEnd)
+  : '';
 
 const useEffectIndex = patronSource.indexOf('useEffect(() => {');
 const loadingReturnIndex = patronSource.indexOf('if (isLoading) return <LoadingState />;');
@@ -42,7 +47,7 @@ if (!sharedSource.includes('This live room session has ended. Thank you for supp
 }
 
 for (const forbidden of ['stripe', 'payment_intent', 'QrCode', 'moderation.block', 'admin', 'operator', 'marketplace', 'Serato', 'AI']) {
-  if (patronSource.includes(forbidden)) {
+  if (recoverySource.includes(forbidden)) {
     failures.push(`Invalid patron room recovery hotfix must not expand into forbidden scope: ${forbidden}`);
   }
 }

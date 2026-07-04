@@ -7,6 +7,7 @@ const failures = [];
 
 const allowedHrefPatterns = [
   /^\/$/,
+  /^\/home$/,
   /^\/talent\/login$/,
   /^\/talent\/signup$/,
   /^\/talent\/gigs$/,
@@ -56,24 +57,20 @@ for (const anchor of anchors) {
   }
 }
 
-const audienceCtas = anchors.filter((anchor) => /^Audience:/i.test(anchor.text));
-
-if (!audienceCtas.length) {
-  failures.push('Expected at least one public Audience CTA in shells/public.html.');
+for (const requiredCta of [
+  { text: 'SCAN', href: '/home' },
+  { text: 'Create account', href: '/talent/signup' },
+  { text: 'Login', href: '/talent/login' },
+  { text: 'sway to play', href: '/' }
+]) {
+  if (!anchors.some((anchor) => anchor.text === requiredCta.text && anchor.href === requiredCta.href)) {
+    failures.push(`Public landing missing required CTA: ${requiredCta.text} -> ${requiredCta.href}`);
+  }
 }
 
-const immediateRequestCopyPattern = /\b(start request|request now|send request|open request)\b/i;
-const truthfulAudienceCopyPattern = /\b(explore sway|browse|discover|learn more|join a live room)\b/i;
-
-for (const cta of audienceCtas) {
-  if (cta.href === 'https://app.sway.tips/' && immediateRequestCopyPattern.test(cta.text)) {
-    failures.push(
-      `Audience CTA "${cta.text}" cannot promise immediate request creation while linking to bare https://app.sway.tips/.`
-    );
-  }
-
-  if (!truthfulAudienceCopyPattern.test(cta.text) && !immediateRequestCopyPattern.test(cta.text)) {
-    failures.push(`Audience CTA "${cta.text}" must use approved truthful audience copy.`);
+for (const forbiddenCopy of ['Audience: join a live room', 'Run the room.', 'Move the queue.', 'Performer sign in']) {
+  if (publicHtml.includes(forbiddenCopy)) {
+    failures.push(`Public landing must not restore removed marketing copy: ${forbiddenCopy}`);
   }
 }
 

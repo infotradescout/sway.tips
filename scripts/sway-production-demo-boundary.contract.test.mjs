@@ -44,7 +44,7 @@ for (const demoRoute of [
 }
 
 for (const required of [
-  'https://app.sway.tips/',
+  'href="/home">SCAN</a>',
   '/overlay/live'
 ]) {
   requireIncludes(publicShell, required, `Public landing missing production-safe route target: ${required}`);
