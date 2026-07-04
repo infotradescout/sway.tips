@@ -172,14 +172,27 @@ function normalizeHost(rawHost: string | undefined): string {
   return rawHost.split(':')[0].trim().toLowerCase();
 }
 
+const CANONICAL_APP_HOST = 'app.sway.tips';
+const CANONICAL_APP_ORIGIN = `https://${CANONICAL_APP_HOST}`;
+const SHARE_REDIRECT_HOSTS = new Set(['sway.tips', 'www.sway.tips']);
+
+function shouldRedirectToAppHost(rawHost: string | undefined) {
+  return SHARE_REDIRECT_HOSTS.has(normalizeHost(rawHost));
+}
+
+function buildAppHostRedirectUrl(originalUrl: string) {
+  const pathAndQuery = originalUrl.startsWith('/') ? originalUrl : `/${originalUrl}`;
+  return `${CANONICAL_APP_ORIGIN}${pathAndQuery}`;
+}
+
 function resolveShellForRoute(urlPath: string, rawHost?: string): SwayShell {
   const host = normalizeHost(rawHost);
-  const isAppSubdomain = host === 'app.sway.tips';
-  const isPublicHost = host === '' || host === 'sway.tips' || host === 'www.sway.tips' || host === 'localhost' || host === '127.0.0.1';
+  const isAppSubdomain = host === CANONICAL_APP_HOST;
+  const isLocalPublicHost = host === '' || host === 'localhost' || host === '127.0.0.1';
 
   if (urlPath === '/' || urlPath === '/home') {
     if (isAppSubdomain) return 'patron';
-    if (isPublicHost) return 'public';
+    if (isLocalPublicHost) return 'public';
     return 'patron';
   }
   if (urlPath.startsWith('/talent')) return 'talent';
@@ -436,7 +449,11 @@ const dataDeletionPageHtml = renderStaticDocument(
   `
 );
 
-app.use((req, _res, next) => {
+app.use((req, res, next) => {
+  if (shouldRedirectToAppHost(typeof req.headers.host === 'string' ? req.headers.host : undefined)) {
+    res.redirect(308, buildAppHostRedirectUrl(req.originalUrl));
+    return;
+  }
   req.headers['x-sway-shell'] = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
   next();
 });

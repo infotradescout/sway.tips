@@ -44,12 +44,12 @@ That starts a localhost endpoint at `http://127.0.0.1:4314/ingest` so any DJ app
 
 ## Public Trust Routes
 
-- `https://sway.tips/privacy`
-- `https://sway.tips/terms`
-- `https://sway.tips/support`
-- `https://sway.tips/privacy/data-deletion`
-- `https://sway.tips/legal/payments`
-- `https://sway.tips/legal/payouts`
+- `https://app.sway.tips/privacy`
+- `https://app.sway.tips/terms`
+- `https://app.sway.tips/support`
+- `https://app.sway.tips/privacy/data-deletion`
+- `https://app.sway.tips/legal/payments`
+- `https://app.sway.tips/legal/payouts`
 
 ## Installable App Behavior
 
@@ -66,7 +66,7 @@ Do not submit this app for public App Store review until the launch gate is comp
 
 ## Domain Routing Strategy
 
-- `sway.tips` and `www.sway.tips`: public MVP landing shell at `/` and `/home`.
+- `sway.tips` and `www.sway.tips`: canonical share hosts that 308 redirect to `https://app.sway.tips`, preserving path and query.
 - `app.sway.tips`: application shell entry at `/` and `/home`.
 - App route families remain:
 	- `/g/*` patron shell
@@ -87,8 +87,8 @@ Current live DNS status: pending cutover. Add `sway.tips`, `www.sway.tips`, and 
 
 Remove conflicting `AAAA`, parked-domain, forwarding, or duplicate apex records before Render verification.
 
-- `https://sway.tips/` serves public landing shell.
-- `https://www.sway.tips/` serves public landing shell.
+- `https://sway.tips/` redirects to `https://app.sway.tips/`.
+- `https://www.sway.tips/` redirects to `https://app.sway.tips/`.
 - `https://app.sway.tips/` serves app shell entry (patron shell).
 - `https://app.sway.tips/g/test` resolves to patron shell.
 - `https://app.sway.tips/talent/test` resolves to talent shell.
