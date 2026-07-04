@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const indexHtml = readFileSync(join(root, 'index.html'), 'utf8');
+const browserEnvironment = readFileSync(join(root, 'src/browserEnvironment.ts'), 'utf8');
 const generateAppIcons = readFileSync(join(root, 'scripts/generate-app-icons.mjs'), 'utf8');
 const mount = readFileSync(join(root, 'src/entries/mount.tsx'), 'utf8');
 const prompt = readFileSync(join(root, 'src/shells/SwayInstallPrompt.tsx'), 'utf8');
@@ -63,6 +64,22 @@ for (const forbidden of ['S_PATH', 'markSvg(', '<svg viewBox="-20 -20 120 166"']
 
 for (const term of ['beforeinstallprompt', 'Install Sway', 'Install app', 'Add to Home Screen']) {
   if (!prompt.includes(term)) failures.push(`Install prompt missing term: ${term}`);
+}
+
+for (const term of ['isMetaInAppBrowser', 'FBAN', 'FBAV', 'FB_IAB', 'MessengerForiOS']) {
+  if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing Meta in-app detection term: ${term}`);
+}
+
+for (const term of ['installViewportEnvironment', '--sway-viewport-height', 'is-meta-in-app-browser', 'is-compact-viewport', 'is-compact-landscape']) {
+  if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing viewport handling term: ${term}`);
+}
+
+if (!mount.includes('installViewportEnvironment();')) {
+  failures.push('Shell mount must install viewport environment before rendering app shells.');
+}
+
+if (!prompt.includes('metaInAppBrowser') || !prompt.includes('isMetaInAppBrowser') || !prompt.includes('standalone || dismissed || metaInAppBrowser')) {
+  failures.push('Install prompt must be suppressed inside Facebook/Messenger in-app browsers.');
 }
 
 for (const html of [publicHtml, patronHtml, talentHtml]) {

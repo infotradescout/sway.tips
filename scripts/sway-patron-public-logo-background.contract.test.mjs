@@ -129,12 +129,32 @@ for (const cssTerm of [
   '@keyframes landing-wave-drift',
   '@keyframes landing-light-sweep',
   '@keyframes landing-particle-drift',
+  '--sway-viewport-height',
+  'html.is-meta-in-app-browser',
+  'html.is-compact-viewport',
+  'html.is-compact-landscape',
   '@media (max-width: 640px)',
   '@media (max-width: 640px) and (max-height: 760px)',
   '@media (max-height: 480px) and (orientation: landscape)'
 ]) {
   if (!css.includes(cssTerm) && !publicHtml.includes(cssTerm)) {
     failures.push(`Landing background animation/mobile CSS missing: ${cssTerm}`);
+  }
+}
+
+for (const publicBrowserTerm of [
+  'window.visualViewport',
+  'is-meta-in-app-browser',
+  'is-compact-viewport',
+  'is-compact-landscape',
+  '--sway-viewport-height',
+  'FBAN',
+  'FBAV',
+  'FB_IAB',
+  'MessengerForiOS'
+]) {
+  if (!publicHtml.includes(publicBrowserTerm)) {
+    failures.push(`Public landing missing Meta in-app browser viewport handling: ${publicBrowserTerm}`);
   }
 }
 

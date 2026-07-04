@@ -38,7 +38,7 @@ function PatronNoSessionRecovery({
   const [scannerOpen, setScannerOpen] = useState(false);
 
   return (
-    <div className="relative isolate flex min-h-[80vh] items-center overflow-hidden">
+    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center overflow-hidden">
       <AppBackdrop />
 
       <motion.div
