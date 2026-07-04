@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isMetaInAppBrowser } from '../browserEnvironment';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -17,6 +18,7 @@ function isiPhoneOrIPad() {
 }
 
 export default function SwayInstallPrompt() {
+  const [metaInAppBrowser] = useState(() => isMetaInAppBrowser());
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -41,7 +43,7 @@ export default function SwayInstallPrompt() {
     };
   }, []);
 
-  if (standalone || dismissed) return null;
+  if (standalone || dismissed || metaInAppBrowser) return null;
 
   const canPromptInstall = Boolean(installEvent);
   const showIosHelp = !canPromptInstall && isiPhoneOrIPad();

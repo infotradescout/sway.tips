@@ -7,6 +7,12 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+:root {
+  --sway-viewport-width: 100vw;
+  --sway-viewport-height: 100vh;
+  --sway-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Base custom interactive effects for Vibrant Palette */
 .ladder-row {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -50,6 +56,7 @@
 
 .landing-backdrop {
   isolation: isolate;
+  min-height: var(--sway-viewport-height, 100vh);
   background:
     radial-gradient(circle at 50% 36%, rgba(217, 70, 239, 0.2), transparent 30%),
     radial-gradient(circle at 50% 78%, rgba(6, 182, 212, 0.24), transparent 30%),
@@ -78,6 +85,7 @@
 .landing-bg-art {
   width: min(88vw, 1040px);
   height: min(94vh, 1380px);
+  height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 1380px);
   object-fit: contain;
   object-position: 50% 50%;
   mix-blend-mode: screen;
@@ -100,6 +108,7 @@
   right: -10%;
   bottom: 14%;
   height: 34vh;
+  height: calc(var(--sway-viewport-height, 100vh) * 0.34);
   background:
     linear-gradient(105deg, transparent 0%, rgba(236, 72, 153, 0.34) 18%, transparent 35%),
     linear-gradient(78deg, transparent 22%, rgba(34, 211, 238, 0.32) 54%, transparent 80%),
@@ -116,6 +125,7 @@
   right: 8%;
   bottom: 0;
   height: 30vh;
+  height: calc(var(--sway-viewport-height, 100vh) * 0.3);
   background:
     radial-gradient(ellipse at 30% 58%, rgba(236, 72, 153, 0.28), transparent 56%),
     radial-gradient(ellipse at 70% 52%, rgba(34, 211, 238, 0.28), transparent 58%);
@@ -149,6 +159,7 @@
 
 .landing-glow {
   height: 36vh;
+  height: calc(var(--sway-viewport-height, 100vh) * 0.36);
   background: linear-gradient(90deg, rgba(236, 72, 153, 0.28), rgba(6, 182, 212, 0.28));
   filter: blur(50px);
   opacity: 0.58;
@@ -189,6 +200,7 @@
     top: 40%;
     width: min(142vw, 680px);
     height: min(80vh, 860px);
+    height: min(calc(var(--sway-viewport-height, 100vh) * 0.8), 860px);
     opacity: 0.96;
     -webkit-mask-image: radial-gradient(ellipse at 50% 52%, #000 0 50%, rgba(0, 0, 0, 0.76) 64%, transparent 82%);
     mask-image: radial-gradient(ellipse at 50% 52%, #000 0 50%, rgba(0, 0, 0, 0.76) 64%, transparent 82%);
@@ -211,6 +223,7 @@
     top: 37%;
     width: min(130vw, 560px);
     height: min(72vh, 660px);
+    height: min(calc(var(--sway-viewport-height, 100vh) * 0.72), 660px);
   }
 }
 
@@ -218,12 +231,34 @@
   .landing-bg-art {
     width: min(86vw, 720px);
     height: min(94vh, 520px);
+    height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 520px);
   }
 
   .landing-wave-ribbon {
     bottom: 10%;
     height: 34vh;
+    height: calc(var(--sway-viewport-height, 100vh) * 0.34);
   }
+}
+
+html.is-meta-in-app-browser {
+  overscroll-behavior-y: none;
+}
+
+html.is-compact-viewport .landing-bg-art {
+  top: 37%;
+  width: min(130vw, 560px);
+  height: min(calc(var(--sway-viewport-height, 100vh) * 0.72), 660px);
+}
+
+html.is-compact-landscape .landing-bg-art {
+  width: min(86vw, 720px);
+  height: min(calc(var(--sway-viewport-height, 100vh) * 0.94), 520px);
+}
+
+html.is-compact-landscape .landing-wave-ribbon {
+  bottom: 10%;
+  height: calc(var(--sway-viewport-height, 100vh) * 0.34);
 }
 
 @media (prefers-reduced-motion: reduce) {
