@@ -38,40 +38,48 @@ function PatronNoSessionRecovery({
   const [scannerOpen, setScannerOpen] = useState(false);
 
   return (
-    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center overflow-hidden">
+    <div className="relative isolate flex min-h-[var(--sway-viewport-height,100vh)] items-end overflow-hidden px-4 pb-[calc(var(--sway-safe-bottom,0px)+1rem)] pt-12 sm:items-center sm:pb-6">
       <AppBackdrop />
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="relative mx-auto grid w-full max-w-sm gap-3 px-4 py-14"
+        className="relative mx-auto grid w-full max-w-sm gap-4 rounded-3xl border border-fuchsia-300/25 bg-slate-950/60 px-5 py-6 shadow-[0_28px_80px_rgba(2,6,23,0.72)] backdrop-blur-xl"
       >
+        <p className="text-center text-[11px] font-semibold uppercase tracking-[0.24em] text-fuchsia-200/90">
+          Patron App
+        </p>
+        <div className="space-y-1 text-center">
+          <h1 className="text-2xl font-black leading-tight text-white">Join the live room</h1>
+          <p className="text-sm text-slate-200/90">Scan a venue QR code to request songs, tip the performer, and follow the queue.</p>
+        </div>
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
-          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
+          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-2xl border border-fuchsia-300/40 bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-[0.08em] text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
         >
           Scan
         </button>
         <a
-          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
+          className="inline-flex min-h-14 items-center justify-center rounded-2xl border border-white/20 bg-slate-900/70 px-5 py-3 text-base font-semibold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-400/50 hover:text-white"
           href="/talent/signup"
         >
           Create account
         </a>
         <a
-          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
+          className="inline-flex min-h-14 items-center justify-center rounded-2xl border border-white/20 bg-slate-900/70 px-5 py-3 text-base font-semibold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-400/50 hover:text-white"
           href="/talent/login"
         >
           Login
         </a>
+        <p className="text-center text-xs font-medium text-slate-300/80">Performer access links are private to your account.</p>
         <a
-          className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
+          className="inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
           href="/faq"
           onClick={onReturnHomeClick}
         >
-          sway to play
+          Sway to play
         </a>
       </motion.div>
 
