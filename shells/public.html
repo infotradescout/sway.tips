@@ -174,7 +174,6 @@
 
       .tagline {
         position: relative;
-        top: 3.3vh;
         isolation: isolate;
         display: inline-flex;
         align-items: center;
@@ -660,6 +659,49 @@
 
         image.addEventListener('load', revealAfterImage, { once: true });
         image.addEventListener('error', revealAfterImage, { once: true });
+      })();
+    </script>
+
+    <script>
+      (() => {
+        // Lock the tagline to the blue lower loop of the S by measuring the
+        // actual rendered background box. This tracks object-fit: cover across
+        // every device and the mobile URL-bar viewport, instead of a fixed
+        // offset that drifts when the background height differs from 100vh.
+        const tagline = document.querySelector('.tagline');
+        const bg = document.querySelector('[data-landing-background]');
+        if (!tagline || !(bg instanceof HTMLImageElement)) return;
+
+        // Vertical center of the blue lower loop within the S artwork (0..1).
+        const BLUE_LOOP_FRACTION = 0.636;
+
+        const place = () => {
+          const iw = bg.naturalWidth;
+          const ih = bg.naturalHeight;
+          if (!iw || !ih) return;
+          const box = bg.getBoundingClientRect();
+          if (box.height <= 0) return;
+          // Replicate object-fit: cover with object-position 50% 50%.
+          const cover = Math.max(box.width / iw, box.height / ih);
+          const drawnHeight = ih * cover;
+          const contentTop = box.top + (box.height - drawnHeight) / 2;
+          const blueY = contentTop + BLUE_LOOP_FRACTION * drawnHeight;
+          tagline.style.top = '0px';
+          const rect = tagline.getBoundingClientRect();
+          const naturalCenter = rect.top + rect.height / 2;
+          tagline.style.top = `${Math.round(blueY - naturalCenter)}px`;
+        };
+
+        const schedule = () => window.requestAnimationFrame(place);
+
+        if (bg.complete && bg.naturalWidth > 0) schedule();
+        if ('decode' in bg) bg.decode().then(schedule).catch(() => {});
+        bg.addEventListener('load', schedule);
+        window.addEventListener('resize', schedule, { passive: true });
+        window.addEventListener('orientationchange', schedule, { passive: true });
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', schedule, { passive: true });
+        }
       })();
     </script>
 
