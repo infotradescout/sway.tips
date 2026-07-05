@@ -565,7 +565,7 @@ export default function App() {
 
   if (route.name === 'talent-gigs') {
     if (session.status === 'closed') {
-      return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
+      return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
     }
 
     return (

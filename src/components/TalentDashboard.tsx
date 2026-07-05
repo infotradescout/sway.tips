@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, 
   Trash2, 
@@ -113,14 +113,37 @@ export default function TalentDashboard({
     syncEndpointPath: string;
   } | null>(null);
 
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const actionInFlightRef = useRef(false);
+
   const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
+    if (actionInFlightRef.current) {
+      throw new Error('An action is already in progress.');
+    }
+    actionInFlightRef.current = true;
     const payload = writableGigId ? { ...body, gig_id: writableGigId } : body;
 
-    return fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    setActionPending(true);
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setActionError(typeof data?.error === 'string' ? data.error : 'That action failed. Please try again.');
+      } else {
+        setActionError(null);
+      }
+
+      return response;
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
   };
 
   useEffect(() => {
@@ -161,10 +184,11 @@ export default function TalentDashboard({
 
   const handleToggleFeature = async (hours: number, cost: number, activate: boolean) => {
     try {
-      await postSessionJson('/api/session/feature', { hours, cost, activate });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/feature', { hours, cost, activate });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
@@ -200,46 +224,51 @@ export default function TalentDashboard({
 
   const handleToggleRequests = async (open: boolean) => {
     try {
-      await postSessionJson('/api/session/window/toggle', { open });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/window/toggle', { open });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
   const handleSetMode = async (mode: 'manual' | 'open_call') => {
     try {
-      await postSessionJson('/api/session/mode', { mode });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/mode', { mode });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
   const handleSetSearchScope = async (scope: 'library' | 'catalog' | 'setlist') => {
     try {
-      await postSessionJson('/api/session/search-scope', { scope });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/search-scope', { scope });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
   const handleSetPaymentsEnabled = async (enabled: boolean) => {
     try {
-      await postSessionJson('/api/session/payments-enabled', { enabled });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/payments-enabled', { enabled });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
   const handleActivatePreset = async (durationMinutes: number, label: string) => {
     try {
-      await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
@@ -258,15 +287,17 @@ export default function TalentDashboard({
       }
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
   const handleDeletePreset = async (presetId: string) => {
     try {
-      await postSessionJson('/api/session/window/preset/delete', { presetId });
-      window.dispatchEvent(new CustomEvent('re-fetch-state'));
+      const res = await postSessionJson('/api/session/window/preset/delete', { presetId });
+      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+      setActionError('That action failed. Please try again.');
     }
   };
 
@@ -342,28 +373,42 @@ export default function TalentDashboard({
   }) => {
     if (previewMode) return;
     try {
-      await fetch('/api/talent/setlist/add', {
+      const response = await fetch('/api/talent/setlist/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(track)
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setActionError(typeof data?.error === 'string' ? data.error : 'Unable to add that track to the setlist.');
+        return;
+      }
+      setActionError(null);
       await refreshSetlist();
     } catch (error) {
       console.warn('Unable to add setlist track:', error);
+      setActionError('Unable to add that track to the setlist.');
     }
   };
 
   const handleRemoveSetlistTrack = async (trackId: string) => {
     if (previewMode) return;
     try {
-      await fetch('/api/talent/setlist/remove', {
+      const response = await fetch('/api/talent/setlist/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackId })
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setActionError(typeof data?.error === 'string' ? data.error : 'Unable to remove that track.');
+        return;
+      }
+      setActionError(null);
       await refreshSetlist();
     } catch (error) {
       console.warn('Unable to remove setlist track:', error);
+      setActionError('Unable to remove that track.');
     }
   };
 
@@ -512,6 +557,9 @@ export default function TalentDashboard({
     .filter(r => r.status === 'approved' && !r.hidden && !r.removed)
     .sort((a, b) => b.amount - a.amount); // SORTED BY LOWER TO HIGHEST OR HIGH TO LOW (AUCTION VALUE)
   const fulfilledHistory = requests.filter(r => (r.status === 'fulfilled' || r.type === 'tip') && !r.hidden && !r.removed);
+  const poolBackersCount = requests
+    .filter(r => !r.hidden && !r.removed)
+    .reduce((sum, r) => sum + Math.max(1, r.sponsorCount), 0);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -530,7 +578,20 @@ export default function TalentDashboard({
 
   return (
     <div id="talent_dashboard_panel" className="max-w-6xl mx-auto py-6 px-4 space-y-8">
-      
+
+      {actionError && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-xs font-bold text-rose-200">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="shrink-0 text-rose-300 hover:text-rose-100 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 1. Header & Live Stand Indicators */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-white/10 p-6 rounded-2xl glass-panel glow-fuchsia">
         <div className="flex items-center gap-4">
@@ -928,7 +989,8 @@ export default function TalentDashboard({
               <button
                 type="button"
                 onClick={() => handleToggleRequests(!session.requestsOpen)}
-                className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+                disabled={actionPending}
+                className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                   session.requestsOpen
                     ? 'bg-rose-500 text-slate-950 hover:bg-rose-400 shadow-lg shadow-rose-500/20'
                     : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20'
@@ -954,7 +1016,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetMode('manual')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.operatingMode !== 'open_call'
                       ? 'bg-cyan-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
@@ -965,7 +1028,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetMode('open_call')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.operatingMode === 'open_call'
                       ? 'bg-cyan-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
@@ -988,7 +1052,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetSearchScope('library')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.searchScope !== 'catalog' && session.searchScope !== 'setlist'
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
@@ -999,7 +1064,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetSearchScope('setlist')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.searchScope === 'setlist'
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
@@ -1010,7 +1076,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetSearchScope('catalog')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.searchScope === 'catalog'
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
@@ -1108,7 +1175,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetPaymentsEnabled(true)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.paymentsEnabled !== false
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
@@ -1119,7 +1187,8 @@ export default function TalentDashboard({
                 <button
                   type="button"
                   onClick={() => handleSetPaymentsEnabled(false)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                  disabled={actionPending}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     session.paymentsEnabled === false
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
@@ -1227,7 +1296,7 @@ export default function TalentDashboard({
                           
                           <button
                             onClick={() => onTriage(req.id, 'approve')}
-                            className="bg-cyan-600 hover:bg-cyan-500 text-slate-955 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10"
+                            className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10"
                             title="Approve request"
                           >
                             <Check className="w-4 h-4" /> Approve
@@ -1648,7 +1717,7 @@ export default function TalentDashboard({
                     </div>
 
                     <div className="flex justify-between items-center text-xs p-2 bg-slate-950 rounded-xl border border-white/5 font-mono select-none">
-                      <span className="text-slate-550 text-slate-500">Total Standard Rate:</span>
+                      <span className="text-slate-500">Total Standard Rate:</span>
                       <span className="text-amber-400 font-extrabold">${selectedHours * 5}.00</span>
                     </div>
                   </div>
@@ -1714,7 +1783,7 @@ export default function TalentDashboard({
                 
                 <div className="flex justify-between items-center text-xs text-slate-400 font-sans">
                   <span>Pool backers:</span>
-                  <span className="font-mono text-sm font-bold text-white">6 Givers</span>
+                  <span className="font-mono text-sm font-bold text-white">{poolBackersCount} {poolBackersCount === 1 ? 'Giver' : 'Givers'}</span>
                 </div>
 
                 <div className="flex justify-between items-center text-xs text-slate-400">
@@ -1726,7 +1795,7 @@ export default function TalentDashboard({
               </div>
 
               <div className="pt-3 border-t border-white/5 space-y-2">
-                <div className="text-[10px] text-slate-550 text-slate-500 font-mono tracking-wide uppercase">Top Requested Target:</div>
+                <div className="text-[10px] text-slate-500 font-mono tracking-wide uppercase">Top Requested Target:</div>
                 <div className="text-sm font-bold text-white line-clamp-1">{session.totals.topRequest}</div>
               </div>
             </div>

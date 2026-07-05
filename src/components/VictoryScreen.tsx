@@ -19,20 +19,44 @@ import {
   AwardIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GigSession } from '../types';
+import { GigSession, RequestItem } from '../types';
 
 interface VictoryScreenProps {
   session: GigSession;
+  requests: RequestItem[];
   onRestart: () => void;
 }
 
-export default function VictoryScreen({ session, onRestart }: VictoryScreenProps) {
+export default function VictoryScreen({ session, requests, onRestart }: VictoryScreenProps) {
   const [copiedStory, setCopiedStory] = useState(false);
+  const [shareError, setShareError] = useState(false);
   const [selectedGradient, setSelectedGradient] = useState<'neon' | 'cyberpunk' | 'midnight'>('neon');
 
-  const handleShare = () => {
-    setCopiedStory(true);
-    setTimeout(() => setCopiedStory(false), 2500);
+  const backersCount = requests
+    .filter((request) => !request.hidden && !request.removed)
+    .reduce((sum, request) => sum + Math.max(1, request.sponsorCount), 0);
+
+  const formattedTips = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(session.totals.totalTips);
+  const shareText = `I just wrapped a Sway gig and pulled in ${formattedTips} in tips! 🎧 www.sway.tips`;
+
+  const handleShare = async () => {
+    setShareError(false);
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: shareText, url: 'https://www.sway.tips' });
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText);
+        setCopiedStory(true);
+        setTimeout(() => setCopiedStory(false), 2500);
+      } else {
+        throw new Error('Sharing is not supported in this browser.');
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      console.warn('Unable to share recap:', error);
+      setShareError(true);
+      setTimeout(() => setShareError(false), 2500);
+    }
   };
 
   const gradientStyles = {
@@ -46,8 +70,6 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
     cyberpunk: 'Vaporwave Rave',
     midnight: 'Midnight Session'
   };
-
-  const formattedTips = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(session.totals.totalTips);
 
   return (
     <div id="victory_screen_container" className="min-h-screen py-10 px-4 bg-gray-950 flex flex-col items-center justify-center grid-bg">
@@ -106,7 +128,7 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
               </div>
               <div>
                 <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Backers</div>
-                <div className="text-xl font-bold font-display text-white mt-5">6 Sponsors</div>
+                <div className="text-xl font-bold font-display text-white mt-5">{backersCount} {backersCount === 1 ? 'Sponsor' : 'Sponsors'}</div>
               </div>
             </div>
 
@@ -237,13 +259,17 @@ export default function VictoryScreen({ session, onRestart }: VictoryScreenProps
               </div>
             </div>
 
-            <button 
+            <button
               onClick={handleShare}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-900 hover:bg-gray-805 text-white border border-gray-800 rounded-xl text-xs font-bold transition-all hover:border-gray-750"
             >
               {copiedStory ? (
                 <>
-                  <Check className="w-4 h-4 text-emerald-400" /> Co-Sponsor Story Code Copied for Sharing!
+                  <Check className="w-4 h-4 text-emerald-400" /> Recap Copied — Paste it Into Your Story!
+                </>
+              ) : shareError ? (
+                <>
+                  <Instagram className="w-4 h-4 text-rose-400" /> Couldn't Share — Try Again
                 </>
               ) : (
                 <>

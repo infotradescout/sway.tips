@@ -232,7 +232,7 @@ export default function TalentApp() {
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
 
   if (session.status === 'closed') {
-    return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
+    return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
   }
 
   return (
