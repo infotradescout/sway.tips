@@ -10,10 +10,10 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash, randomBytes } from "crypto";
 import { readFileSync } from "fs";
-import { and, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -2487,6 +2487,193 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   return res.json({ success: true, revoked: true });
 });
 
+app.get('/api/talent/setlist', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer setlists require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage a setlist.' });
+  }
+
+  const tracks = await businessDb
+    .select({
+      id: performerSetlistTracks.id,
+      title: performerSetlistTracks.title,
+      artist: performerSetlistTracks.artist,
+      album: performerSetlistTracks.album,
+      artworkUrl: performerSetlistTracks.artworkUrl,
+      spotifyUri: performerSetlistTracks.spotifyUri,
+      spotifyUrl: performerSetlistTracks.spotifyUrl,
+      sourceKey: performerSetlistTracks.sourceKey,
+      addedAt: performerSetlistTracks.addedAt
+    })
+    .from(performerSetlistTracks)
+    .where(eq(performerSetlistTracks.performerId, performerOwner.performerId))
+    .orderBy(asc(performerSetlistTracks.addedAt));
+
+  return res.json({ tracks });
+});
+
+// Search candidates to add to the performer's setlist: their synced library
+// plus the open catalog (when configured), merged into one result list.
+app.get('/api/talent/setlist/search', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer setlists require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage a setlist.' });
+  }
+
+  const query = normalizeLibraryText(req.query?.query, 160);
+  const likeQuery = `%${query.toLowerCase()}%`;
+
+  const libraryRows = query
+    ? await businessDb
+        .select({
+          externalTrackId: performerLibraryTracks.externalTrackId,
+          title: performerLibraryTracks.title,
+          artist: performerLibraryTracks.artist,
+          album: performerLibraryTracks.album,
+          artworkUrl: performerLibraryTracks.artworkUrl
+        })
+        .from(performerLibraryTracks)
+        .where(and(
+          eq(performerLibraryTracks.performerId, performerOwner.performerId),
+          sql`lower(${performerLibraryTracks.searchableText}) like ${likeQuery}`
+        ))
+        .limit(15)
+    : [];
+
+  const catalog = query ? await searchCatalog({ query, env: process.env }) : { configured: false, results: [] as Awaited<ReturnType<typeof searchCatalog>>['results'] };
+
+  return res.json({
+    results: [
+      ...libraryRows.map((row) => ({
+        sourceKey: 'library',
+        externalTrackId: row.externalTrackId,
+        title: row.title,
+        artist: row.artist,
+        album: row.album,
+        artworkUrl: row.artworkUrl,
+        spotifyUri: null,
+        spotifyUrl: null
+      })),
+      ...(catalog.configured ? catalog.results.map((track) => ({
+        sourceKey: 'catalog',
+        externalTrackId: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album ?? null,
+        artworkUrl: track.albumArt ?? null,
+        spotifyUri: track.spotifyUri ?? null,
+        spotifyUrl: track.spotifyUrl ?? null
+      })) : [])
+    ]
+  });
+});
+
+app.post('/api/talent/setlist/add', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer setlists require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage a setlist.' });
+  }
+
+  const title = normalizeLibraryText(req.body?.title, 160);
+  const artist = normalizeLibraryText(req.body?.artist, 160);
+  if (!title || !artist) {
+    return res.status(422).json({ error: 'A title and artist are required to add a setlist track.' });
+  }
+  const album = normalizeLibraryText(req.body?.album, 160) || null;
+  const artworkUrl = normalizeLibraryText(req.body?.artworkUrl, 512) || null;
+  const spotifyUri = normalizeLibraryText(req.body?.spotifyUri, 256) || null;
+  const spotifyUrl = normalizeLibraryText(req.body?.spotifyUrl, 512) || null;
+  const sourceKey = normalizeLibrarySourceKey(req.body?.sourceKey) || 'manual';
+  const externalTrackId = normalizeLibraryText(req.body?.externalTrackId, 256) || null;
+
+  const [existing] = await businessDb
+    .select({ id: performerSetlistTracks.id })
+    .from(performerSetlistTracks)
+    .where(and(
+      eq(performerSetlistTracks.performerId, performerOwner.performerId),
+      sql`lower(${performerSetlistTracks.title}) = ${title.toLowerCase()}`,
+      sql`lower(${performerSetlistTracks.artist}) = ${artist.toLowerCase()}`
+    ))
+    .limit(1);
+
+  if (existing) {
+    return res.status(200).json({ success: true, alreadyAdded: true, id: existing.id });
+  }
+
+  const [inserted] = await businessDb
+    .insert(performerSetlistTracks)
+    .values({
+      performerId: performerOwner.performerId,
+      sourceKey,
+      externalTrackId,
+      title,
+      artist,
+      album,
+      artworkUrl,
+      spotifyUri,
+      spotifyUrl,
+      searchableText: `${title} ${artist}`.toLowerCase(),
+      updatedAt: new Date()
+    })
+    .returning({ id: performerSetlistTracks.id });
+
+  return res.status(201).json({ success: true, id: inserted.id });
+});
+
+app.post('/api/talent/setlist/remove', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer setlists require a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  const trackId = parseDurableGigId(req.body?.trackId);
+  if (!performerOwner || !trackId) {
+    return res.status(404).json({ error: 'Setlist track not found.' });
+  }
+
+  const [removed] = await businessDb
+    .delete(performerSetlistTracks)
+    .where(and(
+      eq(performerSetlistTracks.id, trackId),
+      eq(performerSetlistTracks.performerId, performerOwner.performerId)
+    ))
+    .returning({ id: performerSetlistTracks.id });
+
+  if (!removed) {
+    return res.status(404).json({ error: 'Setlist track not found.' });
+  }
+
+  return res.json({ success: true, removed: true });
+});
+
 // Creates (if needed) the performer's Stripe recipient connected account and
 // returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
 // existing connected account on repeat calls instead of creating duplicates.
@@ -3020,8 +3207,8 @@ app.post("/api/session/search-scope", async (req, res) => {
   const { scope } = req.body;
   const roomState = roomContext.state;
 
-  if (scope !== 'library' && scope !== 'catalog') {
-    return res.status(400).json({ error: "scope must be 'library' or 'catalog'." });
+  if (scope !== 'library' && scope !== 'catalog' && scope !== 'setlist') {
+    return res.status(400).json({ error: "scope must be 'library', 'catalog', or 'setlist'." });
   }
 
   const previousScope = roomState.session.searchScope;
@@ -4196,6 +4383,45 @@ app.post("/api/music/search", (req, res) => {
       }
       // Room is set to catalog mode but no catalog provider is configured yet --
       // fall through to the performer's own library instead of erroring.
+    }
+
+    if (searchScope === 'setlist') {
+      const lowerQuery = query.toLowerCase();
+      const likeQuery = `%${lowerQuery}%`;
+      const setlistRows = await businessDb
+        .select({
+          id: performerSetlistTracks.id,
+          title: performerSetlistTracks.title,
+          artist: performerSetlistTracks.artist,
+          album: performerSetlistTracks.album,
+          artworkUrl: performerSetlistTracks.artworkUrl,
+          spotifyUri: performerSetlistTracks.spotifyUri,
+          spotifyUrl: performerSetlistTracks.spotifyUrl
+        })
+        .from(performerSetlistTracks)
+        .where(
+          query
+            ? and(
+                eq(performerSetlistTracks.performerId, gigRow.performerId),
+                sql`lower(${performerSetlistTracks.searchableText}) like ${likeQuery}`
+              )
+            : eq(performerSetlistTracks.performerId, gigRow.performerId)
+        )
+        .limit(25);
+
+      return res.json({
+        results: setlistRows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          albumArt: row.artworkUrl || albumArt,
+          description: row.album || "Tonight's setlist",
+          spotifyUri: row.spotifyUri ?? undefined,
+          spotifyUrl: row.spotifyUrl ?? undefined,
+          targetType: 'music'
+        })),
+        integrationMode: 'gig_setlist'
+      });
     }
 
     const lowerQuery = query.toLowerCase();

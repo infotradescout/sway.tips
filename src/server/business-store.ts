@@ -94,7 +94,7 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     operatingMode: input.operatingMode === 'open_call'
       ? input.operatingMode
       : (fallback.operatingMode ?? 'manual'),
-    searchScope: input.searchScope === 'catalog'
+    searchScope: input.searchScope === 'catalog' || input.searchScope === 'setlist'
       ? input.searchScope
       : (fallback.searchScope ?? 'library'),
     paymentsEnabled: typeof input.paymentsEnabled === 'boolean'

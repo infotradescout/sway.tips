@@ -265,6 +265,24 @@ export const performerLibraryTracks = pgTable('performer_library_tracks', {
   performerSearchIdx: index('performer_library_tracks_performer_search_idx').on(table.performerId, table.lastSeenAt)
 }));
 
+export const performerSetlistTracks = pgTable('performer_setlist_tracks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull().default('manual'),
+  externalTrackId: text('external_track_id'),
+  title: text('title').notNull(),
+  artist: text('artist').notNull(),
+  album: text('album'),
+  artworkUrl: text('artwork_url'),
+  spotifyUri: text('spotify_uri'),
+  spotifyUrl: text('spotify_url'),
+  searchableText: text('searchable_text').notNull(),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps
+}, (table) => ({
+  performerSearchIdx: index('performer_setlist_tracks_performer_search_idx').on(table.performerId, table.addedAt)
+}));
+
 export const requests = pgTable('requests', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),

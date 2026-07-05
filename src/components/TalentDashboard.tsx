@@ -216,7 +216,7 @@ export default function TalentDashboard({
     }
   };
 
-  const handleSetSearchScope = async (scope: 'library' | 'catalog') => {
+  const handleSetSearchScope = async (scope: 'library' | 'catalog' | 'setlist') => {
     try {
       await postSessionJson('/api/session/search-scope', { scope });
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
@@ -267,6 +267,103 @@ export default function TalentDashboard({
       window.dispatchEvent(new CustomEvent('re-fetch-state'));
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const [setlistTracks, setSetlistTracks] = useState<Array<{
+    id: string;
+    title: string;
+    artist: string;
+    album: string | null;
+    artworkUrl: string | null;
+  }>>([]);
+  const [setlistQuery, setSetlistQuery] = useState('');
+  const [setlistResults, setSetlistResults] = useState<Array<{
+    sourceKey: string;
+    externalTrackId: string | null;
+    title: string;
+    artist: string;
+    album: string | null;
+    artworkUrl: string | null;
+    spotifyUri: string | null;
+    spotifyUrl: string | null;
+  }>>([]);
+  const [setlistSearchStatus, setSetlistSearchStatus] = useState<'idle' | 'searching'>('idle');
+
+  const refreshSetlist = async () => {
+    if (previewMode) return;
+    try {
+      const response = await fetch('/api/talent/setlist');
+      if (!response.ok) return;
+      const data = await response.json();
+      setSetlistTracks(Array.isArray(data?.tracks) ? data.tracks : []);
+    } catch (error) {
+      console.warn('Unable to load setlist:', error);
+    }
+  };
+
+  useEffect(() => {
+    void refreshSetlist();
+  }, [previewMode]);
+
+  useEffect(() => {
+    if (previewMode || !setlistQuery.trim()) {
+      setSetlistResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSetlistSearchStatus('searching');
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/talent/setlist/search?query=${encodeURIComponent(setlistQuery.trim())}`);
+        const data = await response.json().catch(() => null);
+        if (!cancelled) setSetlistResults(Array.isArray(data?.results) ? data.results : []);
+      } catch (error) {
+        console.warn('Setlist search failed:', error);
+      } finally {
+        if (!cancelled) setSetlistSearchStatus('idle');
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [setlistQuery, previewMode]);
+
+  const handleAddSetlistTrack = async (track: {
+    sourceKey: string;
+    externalTrackId: string | null;
+    title: string;
+    artist: string;
+    album: string | null;
+    artworkUrl: string | null;
+    spotifyUri: string | null;
+    spotifyUrl: string | null;
+  }) => {
+    if (previewMode) return;
+    try {
+      await fetch('/api/talent/setlist/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(track)
+      });
+      await refreshSetlist();
+    } catch (error) {
+      console.warn('Unable to add setlist track:', error);
+    }
+  };
+
+  const handleRemoveSetlistTrack = async (trackId: string) => {
+    if (previewMode) return;
+    try {
+      await fetch('/api/talent/setlist/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId })
+      });
+      await refreshSetlist();
+    } catch (error) {
+      console.warn('Unable to remove setlist track:', error);
     }
   };
 
@@ -884,7 +981,7 @@ export default function TalentDashboard({
               <div className="min-w-0">
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Song Search Scope</p>
                 <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Restrict patrons to your synced library, or open full catalog search for this room.
+                  Restrict patrons to your synced library, curate a setlist for tonight, or open full catalog search.
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -892,12 +989,23 @@ export default function TalentDashboard({
                   type="button"
                   onClick={() => handleSetSearchScope('library')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
-                    session.searchScope !== 'catalog'
+                    session.searchScope !== 'catalog' && session.searchScope !== 'setlist'
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
                   }`}
                 >
                   My Library
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetSearchScope('setlist')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    session.searchScope === 'setlist'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                  }`}
+                >
+                  This Gig's Setlist
                 </button>
                 <button
                   type="button"
@@ -912,6 +1020,79 @@ export default function TalentDashboard({
                 </button>
               </div>
             </div>
+
+            {/* 3b-i. SETLIST BUILDER (only relevant once setlist scope is selected) */}
+            {session.searchScope === 'setlist' && (
+              <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 space-y-3 select-none">
+                <div>
+                  <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Setlist Builder</p>
+                  <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
+                    Search your library and the open catalog to build tonight's curated list. Patrons will only see these tracks.
+                  </p>
+                </div>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    value={setlistQuery}
+                    onChange={(e) => setSetlistQuery(e.target.value)}
+                    placeholder="Search songs to add..."
+                    className="w-full pl-8 pr-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-xs text-slate-200 font-sans focus:outline-none focus:border-emerald-500/40"
+                  />
+                </div>
+                {setlistQuery.trim() && (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {setlistSearchStatus === 'searching' && (
+                      <p className="text-[11px] text-slate-500 font-sans">Searching…</p>
+                    )}
+                    {setlistSearchStatus === 'idle' && setlistResults.length === 0 && (
+                      <p className="text-[11px] text-slate-500 font-sans">No matches yet.</p>
+                    )}
+                    {setlistResults.map((track, idx) => (
+                      <div key={`${track.sourceKey}-${track.externalTrackId ?? idx}`} className="flex items-center justify-between gap-2 bg-slate-950 border border-white/5 rounded-lg px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-200 truncate">{track.title}</p>
+                          <p className="text-[11px] text-slate-500 truncate">{track.artist}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddSetlistTrack(track)}
+                          className="shrink-0 p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400 mb-1.5">
+                    Tonight's Setlist ({setlistTracks.length})
+                  </p>
+                  {setlistTracks.length === 0 ? (
+                    <p className="text-[11px] text-slate-500 font-sans">No tracks added yet — patrons will see an empty search until you add some.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {setlistTracks.map((track) => (
+                        <div key={track.id} className="flex items-center justify-between gap-2 bg-slate-950 border border-white/5 rounded-lg px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-200 truncate">{track.title}</p>
+                            <p className="text-[11px] text-slate-500 truncate">{track.artist}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSetlistTrack(track.id)}
+                            className="shrink-0 p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 3c. PAYMENTS TOGGLE */}
             <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
