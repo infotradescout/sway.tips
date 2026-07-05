@@ -96,6 +96,7 @@ export default function TalentDashboard({
   const [featureTimeLeft, setFeatureTimeLeft] = useState<string>('');
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
   const [libraryLinkMessage, setLibraryLinkMessage] = useState<string | null>(null);
   const [linkedSources, setLinkedSources] = useState<Array<{
     id: string;
@@ -319,17 +320,23 @@ export default function TalentDashboard({
     spotifyUri: string | null;
     spotifyUrl: string | null;
   }>>([]);
-  const [setlistSearchStatus, setSetlistSearchStatus] = useState<'idle' | 'searching'>('idle');
+  const [setlistSearchStatus, setSetlistSearchStatus] = useState<'idle' | 'searching' | 'error'>('idle');
+  const [setlistLoadError, setSetlistLoadError] = useState(false);
 
   const refreshSetlist = async () => {
     if (previewMode) return;
     try {
       const response = await fetch('/api/talent/setlist');
-      if (!response.ok) return;
+      if (!response.ok) {
+        setSetlistLoadError(true);
+        return;
+      }
       const data = await response.json();
       setSetlistTracks(Array.isArray(data?.tracks) ? data.tracks : []);
+      setSetlistLoadError(false);
     } catch (error) {
       console.warn('Unable to load setlist:', error);
+      setSetlistLoadError(true);
     }
   };
 
@@ -347,12 +354,17 @@ export default function TalentDashboard({
     const timeout = setTimeout(async () => {
       try {
         const response = await fetch(`/api/talent/setlist/search?query=${encodeURIComponent(setlistQuery.trim())}`);
+        if (!response.ok) throw new Error('Setlist search request failed.');
         const data = await response.json().catch(() => null);
-        if (!cancelled) setSetlistResults(Array.isArray(data?.results) ? data.results : []);
+        if (!cancelled) {
+          setSetlistResults(Array.isArray(data?.results) ? data.results : []);
+          setSetlistSearchStatus('idle');
+        }
+        return;
       } catch (error) {
         console.warn('Setlist search failed:', error);
-      } finally {
-        if (!cancelled) setSetlistSearchStatus('idle');
+        if (!cancelled) setSetlistSearchStatus('error');
+        return;
       }
     }, 300);
     return () => {
@@ -487,7 +499,7 @@ export default function TalentDashboard({
 
   const handleRotateLinkedSource = async (sourceId: string) => {
     if (previewMode) return;
-    setLibraryLinkStatus('submitting');
+    setPendingSourceId(sourceId);
     setLibraryLinkMessage(null);
     try {
       const response = await fetch(`/api/talent/library/sources/${sourceId}/rotate-key`, {
@@ -504,12 +516,14 @@ export default function TalentDashboard({
     } catch (error) {
       setLibraryLinkStatus('error');
       setLibraryLinkMessage(error instanceof Error ? error.message : 'Unable to rotate sync key.');
+    } finally {
+      setPendingSourceId(null);
     }
   };
 
   const handleRevokeLinkedSource = async (sourceId: string, sourceLabel: string) => {
     if (previewMode) return;
-    setLibraryLinkStatus('submitting');
+    setPendingSourceId(sourceId);
     setLibraryLinkMessage(null);
     try {
       const response = await fetch(`/api/talent/library/sources/${sourceId}/revoke`, {
@@ -526,6 +540,8 @@ export default function TalentDashboard({
     } catch (error) {
       setLibraryLinkStatus('error');
       setLibraryLinkMessage(error instanceof Error ? error.message : 'Unable to revoke linked source.');
+    } finally {
+      setPendingSourceId(null);
     }
   };
 
@@ -731,15 +747,15 @@ export default function TalentDashboard({
                       <button
                         type="button"
                         onClick={() => handleRotateLinkedSource(source.id)}
-                        disabled={previewMode || libraryLinkStatus === 'submitting'}
+                        disabled={previewMode || pendingSourceId === source.id}
                         className="inline-flex min-h-10 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        Rotate key
+                        {pendingSourceId === source.id ? 'Rotating...' : 'Rotate key'}
                       </button>
                       <button
                         type="button"
                         onClick={() => handleRevokeLinkedSource(source.id, source.sourceLabel)}
-                        disabled={previewMode || libraryLinkStatus === 'submitting' || source.connectionStatus === 'revoked'}
+                        disabled={previewMode || pendingSourceId === source.id || source.connectionStatus === 'revoked'}
                         className="inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[10px] font-bold text-rose-200 transition-all hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {source.connectionStatus === 'revoked' ? 'Revoked' : 'Revoke source'}
@@ -1112,6 +1128,9 @@ export default function TalentDashboard({
                     {setlistSearchStatus === 'searching' && (
                       <p className="text-[11px] text-slate-500 font-sans">Searching…</p>
                     )}
+                    {setlistSearchStatus === 'error' && (
+                      <p className="text-[11px] text-rose-300 font-sans">Search failed. Try again.</p>
+                    )}
                     {setlistSearchStatus === 'idle' && setlistResults.length === 0 && (
                       <p className="text-[11px] text-slate-500 font-sans">No matches yet.</p>
                     )}
@@ -1136,7 +1155,9 @@ export default function TalentDashboard({
                   <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400 mb-1.5">
                     Tonight's Setlist ({setlistTracks.length})
                   </p>
-                  {setlistTracks.length === 0 ? (
+                  {setlistLoadError ? (
+                    <p className="text-[11px] text-rose-300 font-sans">Couldn't load your setlist. Refresh the page and try again.</p>
+                  ) : setlistTracks.length === 0 ? (
                     <p className="text-[11px] text-slate-500 font-sans">No tracks added yet — patrons will see an empty search until you add some.</p>
                   ) : (
                     <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -1400,6 +1421,11 @@ export default function TalentDashboard({
                                     +{formatValue(b.amount)} by {b.patronName}
                                   </span>
                                 ))}
+                                {req.boosts.length > 2 && (
+                                  <span className="text-[8px] bg-slate-950 text-slate-500 border border-white/5 px-1 py-0.5 rounded font-mono">
+                                    +{req.boosts.length - 2} more
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
