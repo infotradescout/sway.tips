@@ -120,8 +120,8 @@ if (publicHtml.indexOf('html.landing-ui-ready .tagline') > publicHtml.indexOf('h
   failures.push('Public landing tagline reveal must be defined before the delayed button reveal.');
 }
 
-if (publicHtml.indexOf('class="tagline"') > publicHtml.indexOf('class="btn primary"')) {
-  failures.push('Public landing tagline must render before the primary CTA so it visibly leads the stack.');
+if (publicHtml.indexOf('class="tagline"') < publicHtml.lastIndexOf('class="btn secondary"')) {
+  failures.push('Public landing tagline must render after the CTA buttons so it sits at the bottom of the stack.');
 }
 
 for (const forbiddenMotion of ['translateY(', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
