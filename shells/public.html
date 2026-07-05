@@ -194,6 +194,147 @@
 
       footer a:hover { color: #e2e8f0; }
 
+      .install-prompt[hidden] {
+        display: none;
+      }
+
+      .install-prompt {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(16px + env(safe-area-inset-bottom));
+        bottom: calc(16px + var(--sway-safe-bottom, 0px));
+        z-index: 20;
+        display: flex;
+        justify-content: center;
+        padding: 0 16px;
+        pointer-events: none;
+      }
+
+      .install-card {
+        width: min(100%, 432px);
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.84));
+        box-shadow: 0 24px 90px rgba(2, 6, 23, 0.62);
+        color: #f8fafc;
+        opacity: 0;
+        pointer-events: auto;
+        transform: translateY(10px);
+        transition: opacity 0.22s ease, transform 0.22s ease;
+        backdrop-filter: blur(24px);
+      }
+
+      .install-card::before {
+        content: "";
+        display: block;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(240, 171, 252, 0.86), rgba(103, 232, 249, 0.74));
+      }
+
+      .install-prompt.is-visible .install-card {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .install-body {
+        padding: 12px;
+      }
+
+      .install-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .install-icon {
+        flex: 0 0 auto;
+        width: 40px;
+        height: 40px;
+        border: 1px solid rgba(240, 171, 252, 0.25);
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, rgba(217, 70, 239, 0.22), rgba(34, 211, 238, 0.14));
+        box-shadow: 0 0 28px rgba(217, 70, 239, 0.24);
+        font-size: 20px;
+        font-weight: 900;
+      }
+
+      .install-copy {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .install-kicker {
+        margin: 0;
+        color: #f5d0fe;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+      }
+
+      .install-title {
+        margin: 4px 0 0;
+        color: #ffffff;
+        font-size: 15px;
+        font-weight: 900;
+        line-height: 1.15;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .install-detail {
+        margin: 2px 0 0;
+        color: rgba(203, 213, 225, 0.9);
+        font-size: 11px;
+        line-height: 1.45;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .install-dismiss {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        color: rgba(226, 232, 240, 0.86);
+        cursor: pointer;
+        font: inherit;
+        font-size: 20px;
+        font-weight: 800;
+        line-height: 1;
+        padding: 0;
+      }
+
+      .install-action {
+        flex: 0 0 auto;
+        min-width: 84px;
+        min-height: 42px;
+        margin-top: 0;
+        border: 0;
+        border-radius: 12px;
+        background: linear-gradient(90deg, #d946ef, #22d3ee);
+        box-shadow: 0 0 34px rgba(217, 70, 239, 0.34);
+        color: #fff;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 0 12px;
+      }
+
+      .install-action:hover,
+      .install-dismiss:hover {
+        filter: brightness(1.08);
+      }
+
       @media (max-width: 640px) {
         .backdrop img {
           object-position: 50% 42%;
@@ -201,8 +342,8 @@
 
         main {
           align-items: flex-end;
-          padding: 0 16px calc(70px + env(safe-area-inset-bottom));
-          padding: 0 16px calc(70px + var(--sway-safe-bottom, 0px));
+          padding: 0 16px calc(148px + env(safe-area-inset-bottom));
+          padding: 0 16px calc(148px + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
@@ -230,12 +371,22 @@
         footer a {
           font-size: 11px;
         }
+
+        .install-prompt {
+          bottom: calc(10px + env(safe-area-inset-bottom));
+          bottom: calc(10px + var(--sway-safe-bottom, 0px));
+          padding: 0 12px;
+        }
+
+        .install-detail {
+          display: none;
+        }
       }
 
       @media (max-width: 640px) and (max-height: 760px) {
         main {
-          padding-bottom: calc(42px + env(safe-area-inset-bottom));
-          padding-bottom: calc(42px + var(--sway-safe-bottom, 0px));
+          padding-bottom: calc(104px + env(safe-area-inset-bottom));
+          padding-bottom: calc(104px + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
@@ -301,7 +452,7 @@
       }
 
       html.is-compact-viewport main {
-        padding-bottom: calc(42px + var(--sway-safe-bottom, 0px));
+        padding-bottom: calc(104px + var(--sway-safe-bottom, 0px));
       }
 
       html.is-compact-viewport .cta-stack {
@@ -374,5 +525,95 @@
         <a href="/privacy/data-deletion">Data deletion</a>
       </footer>
     </div>
+
+    <div class="install-prompt" id="public-install-prompt" role="dialog" aria-label="Install Sway" hidden>
+      <section class="install-card">
+        <div class="install-body">
+          <div class="install-row">
+            <div class="install-icon" aria-hidden="true">S</div>
+            <div class="install-copy">
+              <p class="install-kicker">Install Sway</p>
+              <h2 class="install-title">Download Sway</h2>
+              <p class="install-detail" data-install-copy>One tap from your home screen.</p>
+            </div>
+            <button class="install-action" type="button" data-install-action aria-label="Install app">Install</button>
+            <button class="install-dismiss" type="button" data-install-dismiss aria-label="Not now">&times;</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      (() => {
+        const prompt = document.getElementById('public-install-prompt');
+        if (!prompt) return;
+
+        const dismissKey = 'sway.installPromptDismissed.v2';
+        const isMetaInAppBrowser = /FBAN|FBAV|FB_IAB|FB4A|FBIOS|MessengerForiOS|FB_IAB\/MESSENGER/i.test(navigator.userAgent || '');
+        const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || Boolean(navigator.standalone);
+        const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const action = prompt.querySelector('[data-install-action]');
+        const dismiss = prompt.querySelector('[data-install-dismiss]');
+        const copy = prompt.querySelector('[data-install-copy]');
+        let installEvent = null;
+
+        const getDismissed = () => {
+          try {
+            return window.localStorage.getItem(dismissKey) === '1';
+          } catch {
+            return false;
+          }
+        };
+
+        const setDismissed = () => {
+          try {
+            window.localStorage.setItem(dismissKey, '1');
+          } catch {}
+        };
+
+        const hidePrompt = (remember) => {
+          if (remember) setDismissed();
+          prompt.classList.remove('is-visible');
+          window.setTimeout(() => {
+            prompt.hidden = true;
+          }, 220);
+        };
+
+        const showPrompt = () => {
+          if (isStandalone() || isMetaInAppBrowser || getDismissed()) return;
+          prompt.hidden = false;
+          window.requestAnimationFrame(() => prompt.classList.add('is-visible'));
+        };
+
+        dismiss?.addEventListener('click', () => hidePrompt(true));
+
+        action?.addEventListener('click', async () => {
+          if (!installEvent) {
+            hidePrompt(true);
+            return;
+          }
+          await installEvent.prompt();
+          const choice = await installEvent.userChoice.catch(() => null);
+          if (choice?.outcome === 'accepted' || choice?.outcome === 'dismissed') hidePrompt(true);
+          installEvent = null;
+        });
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+          event.preventDefault();
+          installEvent = event;
+          if (action) action.textContent = 'Install';
+          if (copy) copy.textContent = 'One tap from your home screen.';
+          window.setTimeout(showPrompt, 900);
+        });
+
+        window.addEventListener('appinstalled', () => hidePrompt(true));
+
+        if (isIos) {
+          if (action) action.textContent = 'Got it';
+          if (copy) copy.textContent = 'Share, then Add to Home Screen.';
+          window.setTimeout(showPrompt, 900);
+        }
+      })();
+    </script>
   </body>
 </html>

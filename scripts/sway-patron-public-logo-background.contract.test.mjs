@@ -65,7 +65,15 @@ for (const source of [
 }
 
 if (!publicHtml.includes('align-items: flex-end')) {
-  failures.push('Mobile public CTA stack must sit lower instead of centered over the S mark.');
+  failures.push('Mobile public CTA stack must stay bottom-anchored with explicit lift over the S background.');
+}
+
+if (!publicHtml.includes('calc(148px +') || !publicHtml.includes('calc(104px +')) {
+  failures.push('Mobile public CTA stack must stay lifted into the S background, not parked at the bottom edge.');
+}
+
+if (!patronApp.includes('+9rem')) {
+  failures.push('Patron recovery CTA stack must stay lifted into the S background on mobile.');
 }
 
 const visibleCopy = publicHtml

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Download, Smartphone, X } from 'lucide-react';
 import { isMetaInAppBrowser } from '../browserEnvironment';
 
 type BeforeInstallPromptEvent = Event & {
@@ -14,17 +15,25 @@ function isStandaloneMode() {
 
 function isiPhoneOrIPad() {
   if (typeof navigator === 'undefined') return false;
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
+
+const INSTALL_DISMISS_KEY = 'sway.installPromptDismissed.v2';
 
 export default function SwayInstallPrompt() {
   const [metaInAppBrowser] = useState(() => isMetaInAppBrowser());
+  const [suppressedRoute] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.location.pathname.startsWith('/overlay') || window.location.pathname.startsWith('/admin');
+  });
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem('sway.installPromptDismissed') === '1';
+    return window.localStorage.getItem(INSTALL_DISMISS_KEY) === '1';
   });
   const [standalone, setStandalone] = useState(() => isStandaloneMode());
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const updateStandalone = () => setStandalone(isStandaloneMode());
@@ -36,20 +45,23 @@ export default function SwayInstallPrompt() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', updateStandalone);
     window.addEventListener('focus', updateStandalone);
+    const settleTimer = window.setTimeout(() => setSettled(true), 900);
     return () => {
+      window.clearTimeout(settleTimer);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', updateStandalone);
       window.removeEventListener('focus', updateStandalone);
     };
   }, []);
 
-  if (standalone || dismissed || metaInAppBrowser) return null;
+  if (standalone || dismissed || metaInAppBrowser || suppressedRoute || !settled) return null;
 
   const canPromptInstall = Boolean(installEvent);
   const showIosHelp = !canPromptInstall && isiPhoneOrIPad();
+  if (!canPromptInstall && !showIosHelp) return null;
 
   const dismiss = () => {
-    window.localStorage.setItem('sway.installPromptDismissed', '1');
+    window.localStorage.setItem(INSTALL_DISMISS_KEY, '1');
     setDismissed(true);
   };
 
@@ -60,42 +72,62 @@ export default function SwayInstallPrompt() {
     if (choice?.outcome === 'accepted') {
       setInstallEvent(null);
       setStandalone(true);
+    } else if (choice?.outcome === 'dismissed') {
+      dismiss();
     }
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-4 z-[100] flex justify-center px-4">
-      <div className="w-full max-w-md rounded-2xl border border-emerald-500/20 bg-slate-950/95 p-4 shadow-2xl backdrop-blur">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.26em] text-emerald-300">Install Sway</p>
-            <p className="mt-1 text-sm font-semibold text-white">Keep Sway on your home screen like an app.</p>
-            <p className="mt-1 text-xs leading-relaxed text-slate-400">
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+1rem)] z-[100] flex justify-center px-4">
+      <section
+        role="dialog"
+        aria-label="Install Sway"
+        className="pointer-events-auto w-full max-w-[27rem] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/82 text-white shadow-[0_24px_90px_rgba(2,6,23,0.62)] ring-1 ring-fuchsia-300/10 backdrop-blur-2xl"
+      >
+        <div className="h-px bg-gradient-to-r from-transparent via-fuchsia-300/80 to-cyan-300/70" />
+        <div className="flex items-center gap-2.5 p-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-fuchsia-300/25 bg-gradient-to-br from-fuchsia-500/20 to-cyan-400/15 text-fuchsia-100 shadow-[0_0_28px_rgba(217,70,239,0.24)]">
+            <Smartphone className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-200">Install Sway</p>
+            <h2 className="mt-0.5 truncate text-[15px] font-black leading-tight text-white">Download Sway</h2>
+            <p className="mt-0.5 hidden truncate text-[11px] leading-5 text-slate-300 sm:block">
               {canPromptInstall
-                ? 'Open rooms faster, rejoin your performer flow, and launch Sway without hunting for a browser tab.'
-                : showIosHelp
-                  ? 'On iPhone or iPad, tap Share in Safari, then tap Add to Home Screen.'
-                  : "This browser doesn't support one-tap installs yet. Look for \"Install app\" or \"Add to Home Screen\" in your browser's menu."}
+                ? 'One tap from your home screen.'
+                : 'Share, then Add to Home Screen.'}
             </p>
           </div>
+
+          {canPromptInstall ? (
+            <button
+              type="button"
+              onClick={() => { void install(); }}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-cyan-400 px-3 py-2 text-xs font-black text-white shadow-[0_0_34px_rgba(217,70,239,0.34)] transition hover:brightness-110"
+              aria-label="Install app"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Install
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={dismiss}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2 text-xs font-black text-white transition hover:border-fuchsia-300/35 hover:bg-white/[0.07]"
+            >
+              Got it
+            </button>
+          )}
           <button
             type="button"
             onClick={dismiss}
-            className="rounded-lg border border-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 transition hover:border-fuchsia-300/30 hover:text-white"
+            aria-label="Dismiss install prompt"
           >
-            Dismiss
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        {canPromptInstall ? (
-          <button
-            type="button"
-            onClick={() => { void install(); }}
-            className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-emerald-300"
-          >
-            Install app
-          </button>
-        ) : null}
-      </div>
+      </section>
     </div>
   );
 }
