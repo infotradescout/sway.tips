@@ -68,12 +68,25 @@ if (!publicHtml.includes('align-items: flex-end')) {
   failures.push('Mobile public CTA stack must stay bottom-anchored with explicit lift over the S background.');
 }
 
-if (!publicHtml.includes('calc(148px +') || !publicHtml.includes('calc(104px +')) {
+if (!publicHtml.includes('calc(290px +') || !publicHtml.includes('calc(220px +')) {
   failures.push('Mobile public CTA stack must stay lifted into the S background, not parked at the bottom edge.');
 }
 
-if (!patronApp.includes('+9rem')) {
+if (!patronApp.includes('+17rem')) {
   failures.push('Patron recovery CTA stack must stay lifted into the S background on mobile.');
+}
+
+for (const term of [
+  'data-landing-background',
+  'landing-ui-ready',
+  'image.decode()',
+  'root.classList.add',
+  'opacity: 0',
+  'transition: opacity 0.46s ease'
+]) {
+  if (!publicHtml.includes(term)) {
+    failures.push(`Public landing must reveal UI after the background image is ready: ${term}`);
+  }
 }
 
 const visibleCopy = publicHtml

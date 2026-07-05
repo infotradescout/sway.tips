@@ -107,6 +107,14 @@
         min-height: var(--sway-viewport-height, 100vh);
         display: flex;
         flex-direction: column;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: opacity 0.46s ease, transform 0.46s ease;
+      }
+
+      html.landing-ui-ready .shell {
+        opacity: 1;
+        transform: translateY(0);
       }
 
       main {
@@ -342,8 +350,8 @@
 
         main {
           align-items: flex-end;
-          padding: 0 16px calc(148px + env(safe-area-inset-bottom));
-          padding: 0 16px calc(148px + var(--sway-safe-bottom, 0px));
+          padding: 0 16px calc(290px + env(safe-area-inset-bottom));
+          padding: 0 16px calc(290px + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
@@ -385,8 +393,8 @@
 
       @media (max-width: 640px) and (max-height: 760px) {
         main {
-          padding-bottom: calc(104px + env(safe-area-inset-bottom));
-          padding-bottom: calc(104px + var(--sway-safe-bottom, 0px));
+          padding-bottom: calc(220px + env(safe-area-inset-bottom));
+          padding-bottom: calc(220px + var(--sway-safe-bottom, 0px));
         }
 
         .cta-stack {
@@ -452,7 +460,7 @@
       }
 
       html.is-compact-viewport main {
-        padding-bottom: calc(104px + var(--sway-safe-bottom, 0px));
+        padding-bottom: calc(220px + var(--sway-safe-bottom, 0px));
       }
 
       html.is-compact-viewport .cta-stack {
@@ -500,11 +508,19 @@
         gap: 10px 16px;
         padding: 6px 0 8px;
       }
+
+      @media (prefers-reduced-motion: reduce) {
+        .shell {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="backdrop" aria-hidden="true">
-      <img src="/assets/sway-neon-background.png" alt="" />
+      <img src="/assets/sway-neon-background.png" alt="" data-landing-background />
     </div>
 
     <div class="shell">
@@ -542,6 +558,41 @@
         </div>
       </section>
     </div>
+
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const image = document.querySelector('[data-landing-background]');
+        let revealed = false;
+
+        const reveal = () => {
+          if (revealed) return;
+          revealed = true;
+          root.classList.add('landing-ui-ready');
+        };
+
+        window.setTimeout(reveal, 1200);
+
+        if (!(image instanceof HTMLImageElement)) {
+          window.setTimeout(reveal, 180);
+          return;
+        }
+
+        const revealAfterImage = () => window.setTimeout(reveal, 220);
+        if (image.complete && image.naturalWidth > 0) {
+          revealAfterImage();
+          return;
+        }
+
+        if ('decode' in image) {
+          image.decode().then(revealAfterImage).catch(revealAfterImage);
+          return;
+        }
+
+        image.addEventListener('load', revealAfterImage, { once: true });
+        image.addEventListener('error', revealAfterImage, { once: true });
+      })();
+    </script>
 
     <script>
       (() => {

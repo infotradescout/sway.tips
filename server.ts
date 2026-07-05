@@ -185,16 +185,9 @@ function buildAppHostRedirectUrl(originalUrl: string) {
   return `${CANONICAL_APP_ORIGIN}${pathAndQuery}`;
 }
 
-function resolveShellForRoute(urlPath: string, rawHost?: string): SwayShell {
-  const host = normalizeHost(rawHost);
-  const isAppSubdomain = host === CANONICAL_APP_HOST;
-  const isLocalPublicHost = host === '' || host === 'localhost' || host === '127.0.0.1';
-
-  if (urlPath === '/' || urlPath === '/home') {
-    if (isAppSubdomain) return 'patron';
-    if (isLocalPublicHost) return 'public';
-    return 'patron';
-  }
+function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
+  if (urlPath === '/') return 'public';
+  if (urlPath === '/home') return 'patron';
   if (urlPath.startsWith('/talent')) return 'talent';
   if (urlPath.startsWith('/overlay')) return 'overlay';
   if (urlPath.startsWith('/admin')) return 'admin';
