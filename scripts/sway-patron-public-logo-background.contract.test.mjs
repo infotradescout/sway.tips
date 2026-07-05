@@ -120,6 +120,10 @@ if (publicHtml.indexOf('html.landing-ui-ready .tagline') > publicHtml.indexOf('h
   failures.push('Public landing tagline reveal must be defined before the delayed button reveal.');
 }
 
+if (publicHtml.indexOf('class="tagline"') > publicHtml.indexOf('class="btn primary"')) {
+  failures.push('Public landing tagline must render before the primary CTA so it visibly leads the stack.');
+}
+
 for (const forbiddenMotion of ['translateY(', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
   if (publicHtml.includes(forbiddenMotion) || patronApp.includes(forbiddenMotion)) {
     failures.push(`Landing UI/background must not move during reveal or mobile viewport scroll: ${forbiddenMotion}`);
