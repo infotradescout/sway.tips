@@ -104,7 +104,7 @@ for (const term of [
   'image.decode()',
   'root.classList.add',
   'opacity: 0',
-  'transition: opacity 0.72s ease'
+  'transition: opacity 1.65s cubic-bezier(0.4, 0, 0.2, 1)'
 ]) {
   if (!publicHtml.includes(term)) {
     failures.push(`Public landing must reveal UI after the background image is ready: ${term}`);
