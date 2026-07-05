@@ -178,29 +178,31 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 42px;
+        min-height: 46px;
         margin-top: 8px;
         color: #f9c8ff;
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 800;
-        letter-spacing: 0.18em;
+        letter-spacing: 0.24em;
         text-decoration: none;
         text-shadow:
           0 0 8px rgba(244, 114, 182, 0.72),
           0 0 18px rgba(217, 70, 239, 0.46);
         opacity: 0;
+        filter: blur(6px);
         pointer-events: none;
-        transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1);
+        transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1),
+          filter 1.4s cubic-bezier(0.22, 1, 0.36, 1) 0.2s;
       }
 
       .tagline::before {
         content: "";
         position: absolute;
-        inset: 7px 24%;
+        inset: 4px 14%;
         z-index: -1;
         border-radius: 999px;
-        background: radial-gradient(ellipse at center, rgba(244, 114, 182, 0.26), rgba(34, 211, 238, 0.12) 42%, transparent 72%);
-        filter: blur(8px);
+        background: radial-gradient(ellipse at center, rgba(244, 114, 182, 0.28), rgba(34, 211, 238, 0.14) 48%, transparent 74%);
+        filter: blur(10px);
         opacity: 0;
         transition: opacity 1.35s cubic-bezier(0.22, 1, 0.36, 1);
       }
@@ -211,6 +213,7 @@
       }
 
       html.landing-ui-ready .tagline {
+        filter: blur(0);
         pointer-events: auto;
       }
 
@@ -414,8 +417,8 @@
         }
 
         .tagline {
-          min-height: 38px;
-          font-size: 14px;
+          min-height: 42px;
+          font-size: 16px;
         }
 
         footer {
@@ -456,8 +459,8 @@
         }
 
         .tagline {
-          min-height: 34px;
-          font-size: 13px;
+          min-height: 38px;
+          font-size: 15px;
         }
 
         footer {
@@ -486,8 +489,8 @@
         }
 
         .tagline {
-          min-height: 30px;
-          font-size: 13px;
+          min-height: 34px;
+          font-size: 14px;
         }
 
         footer {
@@ -523,8 +526,8 @@
       }
 
       html.is-compact-viewport .tagline {
-        min-height: 34px;
-        font-size: 13px;
+        min-height: 38px;
+        font-size: 15px;
       }
 
       html.is-compact-viewport footer {
@@ -550,8 +553,8 @@
       }
 
       html.is-compact-landscape .tagline {
-        min-height: 30px;
-        font-size: 13px;
+        min-height: 34px;
+        font-size: 14px;
       }
 
       html.is-compact-landscape footer {
