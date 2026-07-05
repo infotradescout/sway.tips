@@ -107,7 +107,7 @@ for (const term of [
   'html.landing-ui-ready .tagline',
   '.tagline::before',
   'text-shadow:',
-  '0 0 8px rgba(244, 114, 182, 0.72)',
+  '0 0 6px rgba(244, 114, 182, 1)',
   'transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1)',
   'opacity 1.15s cubic-bezier(0.4, 0, 0.2, 1) 0.52s'
 ]) {
