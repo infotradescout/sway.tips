@@ -64,16 +64,38 @@ for (const source of [
   }
 }
 
-if (!publicHtml.includes('align-items: flex-end')) {
-  failures.push('Mobile public CTA stack must stay bottom-anchored with explicit lift over the S background.');
+if (!publicHtml.includes('align-items: center') || !publicHtml.includes('justify-content: center')) {
+  failures.push('Mobile public CTA stack must stay centered over the S background.');
 }
 
-if (!publicHtml.includes('calc(290px +') || !publicHtml.includes('calc(220px +')) {
-  failures.push('Mobile public CTA stack must stay lifted into the S background, not parked at the bottom edge.');
+for (const term of ['--sway-background-height: 110%', 'top: 0', 'height: var(--sway-background-height, 110%)', 'object-position: 50% 50%']) {
+  if (!publicHtml.includes(term)) {
+    failures.push(`Public landing background S mark must stay centered in the viewport: ${term}`);
+  }
 }
 
-if (!patronApp.includes('+17rem')) {
-  failures.push('Patron recovery CTA stack must stay lifted into the S background on mobile.');
+if (!appBackdrop.includes('top-0 h-[110%]') || !appBackdrop.includes("objectPosition: '50% 50%'")) {
+  failures.push('Patron backdrop S mark must stay centered in the viewport.');
+}
+
+for (const forbiddenPlacement of ['align-items: flex-end', 'calc(290px +', 'calc(220px +', 'calc(160px +']) {
+  if (publicHtml.includes(forbiddenPlacement)) {
+    failures.push(`Public landing must not restore bottom-pushed CTA placement: ${forbiddenPlacement}`);
+  }
+}
+
+for (const forbiddenBackgroundOffset of ['--sway-background-y', 'top-[4%]', 'top: var(--sway-background-y']) {
+  if (publicHtml.includes(forbiddenBackgroundOffset) || appBackdrop.includes(forbiddenBackgroundOffset)) {
+    failures.push(`S background must stay centered, not offset with legacy framing: ${forbiddenBackgroundOffset}`);
+  }
+}
+
+if (!publicHtml.includes('height: var(--sway-background-height, 110%)') || !appBackdrop.includes('h-[110%]')) {
+  failures.push('S background must use the taller static frame that centers the mark behind the buttons.');
+}
+
+if (!patronApp.includes('items-center justify-center') || patronApp.includes('+17rem') || patronApp.includes('+13rem')) {
+  failures.push('Patron recovery CTA stack must stay centered over the S background on mobile.');
 }
 
 for (const term of [
@@ -82,10 +104,16 @@ for (const term of [
   'image.decode()',
   'root.classList.add',
   'opacity: 0',
-  'transition: opacity 0.46s ease'
+  'transition: opacity 0.72s ease'
 ]) {
   if (!publicHtml.includes(term)) {
     failures.push(`Public landing must reveal UI after the background image is ready: ${term}`);
+  }
+}
+
+for (const forbiddenMotion of ['translateY(', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
+  if (publicHtml.includes(forbiddenMotion) || patronApp.includes(forbiddenMotion)) {
+    failures.push(`Landing UI/background must not move during reveal or mobile viewport scroll: ${forbiddenMotion}`);
   }
 }
 

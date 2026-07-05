@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flame, Smartphone, Tv } from 'lucide-react';
+import { Flame, Smartphone } from 'lucide-react';
 import { motion } from 'motion/react';
 import AppBackdrop from '../components/AppBackdrop';
 import PatronView from '../components/PatronView';
@@ -38,13 +38,13 @@ function PatronNoSessionRecovery({
   const [scannerOpen, setScannerOpen] = useState(false);
 
   return (
-    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-end overflow-hidden px-4 pb-[calc(var(--sway-safe-bottom,0px)+17rem)] pt-8 sm:items-center sm:pb-6">
+    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center justify-center overflow-hidden px-4 py-16">
       <AppBackdrop />
 
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.72, delay: 0.72 }}
         className="relative mx-auto grid w-full max-w-sm gap-3"
       >
         <button
@@ -190,7 +190,6 @@ export default function PatronApp() {
 
   const { session, requests } = bState;
   const performers = bState.performers || [];
-  const overlayGigId = routeGigId || '';
   const hasPatronRouteContext = route.name === 'performer' || Boolean(routeGigId);
   const hasSessionContext =
     session.status !== 'inactive' ||
@@ -273,11 +272,6 @@ export default function PatronApp() {
               </div>
             </div>
             <DemoModeBanner compact />
-            {routeGigId ? (
-              <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
-                <Tv className="h-4 w-4" />
-              </a>
-            ) : null}
           </div>
         </div>
       )}

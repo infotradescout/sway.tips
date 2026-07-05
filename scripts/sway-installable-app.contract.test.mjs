@@ -98,6 +98,12 @@ for (const term of ['installViewportEnvironment', '--sway-viewport-height', 'is-
   if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing viewport handling term: ${term}`);
 }
 
+for (const forbidden of ["visualViewport?.addEventListener('scroll'", 'visualViewport?.addEventListener("scroll"', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
+  if (browserEnvironment.includes(forbidden) || publicHtml.includes(forbidden)) {
+    failures.push(`Viewport handling must not reframe the landing background on scroll: ${forbidden}`);
+  }
+}
+
 if (!mount.includes('installViewportEnvironment();')) {
   failures.push('Shell mount must install viewport environment before rendering app shells.');
 }
