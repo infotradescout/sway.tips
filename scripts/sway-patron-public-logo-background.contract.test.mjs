@@ -104,11 +104,20 @@ for (const term of [
   'image.decode()',
   'root.classList.add',
   'opacity: 0',
-  'transition: opacity 1.65s cubic-bezier(0.4, 0, 0.2, 1)'
+  'html.landing-ui-ready .tagline',
+  '.tagline::before',
+  'text-shadow:',
+  '0 0 8px rgba(244, 114, 182, 0.72)',
+  'transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1)',
+  'opacity 1.15s cubic-bezier(0.4, 0, 0.2, 1) 0.52s'
 ]) {
   if (!publicHtml.includes(term)) {
     failures.push(`Public landing must reveal UI after the background image is ready: ${term}`);
   }
+}
+
+if (publicHtml.indexOf('html.landing-ui-ready .tagline') > publicHtml.indexOf('html.landing-ui-ready .btn')) {
+  failures.push('Public landing tagline reveal must be defined before the delayed button reveal.');
 }
 
 for (const forbiddenMotion of ['translateY(', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {

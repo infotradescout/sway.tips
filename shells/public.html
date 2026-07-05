@@ -110,13 +110,6 @@
         min-height: var(--sway-viewport-height, 100vh);
         display: flex;
         flex-direction: column;
-        opacity: 0;
-        transition: opacity 1.65s cubic-bezier(0.4, 0, 0.2, 1);
-        will-change: opacity;
-      }
-
-      html.landing-ui-ready .shell {
-        opacity: 1;
       }
 
       main {
@@ -151,8 +144,14 @@
         line-height: 1;
         text-decoration: none;
         text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        pointer-events: none;
         backdrop-filter: blur(16px);
-        transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+        transition:
+          opacity 1.15s cubic-bezier(0.4, 0, 0.2, 1) 0.52s,
+          border-color 0.14s ease,
+          background 0.14s ease,
+          box-shadow 0.14s ease;
       }
 
       .btn.primary {
@@ -174,16 +173,49 @@
       }
 
       .tagline {
+        position: relative;
+        isolation: isolate;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         min-height: 42px;
-        color: #f0abfc;
+        color: #f9c8ff;
         font-size: 15px;
         font-weight: 800;
         letter-spacing: 0.18em;
         text-decoration: none;
-        text-shadow: 0 0 18px rgba(217, 70, 239, 0.58);
+        text-shadow:
+          0 0 8px rgba(244, 114, 182, 0.72),
+          0 0 18px rgba(217, 70, 239, 0.46);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .tagline::before {
+        content: "";
+        position: absolute;
+        inset: 7px 24%;
+        z-index: -1;
+        border-radius: 999px;
+        background: radial-gradient(ellipse at center, rgba(244, 114, 182, 0.26), rgba(34, 211, 238, 0.12) 42%, transparent 72%);
+        filter: blur(8px);
+        opacity: 0;
+        transition: opacity 1.35s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      html.landing-ui-ready .tagline,
+      html.landing-ui-ready .tagline::before {
+        opacity: 1;
+      }
+
+      html.landing-ui-ready .tagline {
+        pointer-events: auto;
+      }
+
+      html.landing-ui-ready .btn {
+        opacity: 1;
+        pointer-events: auto;
       }
 
       footer {
@@ -200,6 +232,14 @@
         gap: 16px;
         align-items: center;
         justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 1.1s cubic-bezier(0.4, 0, 0.2, 1) 0.9s;
+      }
+
+      html.landing-ui-ready footer {
+        opacity: 1;
+        pointer-events: auto;
       }
 
       footer a {
@@ -520,8 +560,12 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .shell {
+        .btn,
+        .tagline,
+        .tagline::before,
+        footer {
           opacity: 1;
+          pointer-events: auto;
           transition: none;
         }
       }
