@@ -3,6 +3,11 @@ import { useState, type FormEvent } from 'react';
 
 const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 
+// Mirrors src/server/performer-login.ts normalizePerformerHandle and
+// src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
+const HANDLE_PATTERN = /^[a-z0-9_-]+$/;
+const PASSWORD_MIN_LENGTH = 8;
+
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
 
 export default function TalentSignupCard() {
@@ -14,6 +19,22 @@ export default function TalentSignupCard() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [status, setStatus] = useState<SignupStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
+
+  const handleError = handle.length > 0 && !HANDLE_PATTERN.test(handle)
+    ? 'Lowercase letters, numbers, hyphens, and underscores only.'
+    : null;
+  const passwordError = password.length > 0 && password.length < PASSWORD_MIN_LENGTH
+    ? `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`
+    : null;
+  const confirmPasswordError = confirmPassword.length > 0 && confirmPassword !== password
+    ? 'Passwords do not match.'
+    : null;
+  const canSubmit = displayName.trim().length > 0
+    && HANDLE_PATTERN.test(handle)
+    && email.trim().length > 0
+    && password.length >= PASSWORD_MIN_LENGTH
+    && confirmPassword === password
+    && termsAccepted;
 
   const searchParams = new URLSearchParams(window.location.search);
   const signupStatus = searchParams.get('status');
@@ -130,8 +151,14 @@ export default function TalentSignupCard() {
                 onChange={(event) => setHandle(event.target.value)}
                 placeholder="dj-sunset"
                 required
-                className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                aria-invalid={handleError ? true : undefined}
+                className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                  handleError
+                    ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                    : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                }`}
               />
+              {handleError ? <p className="text-xs text-rose-300">{handleError}</p> : null}
             </div>
 
             <div className="space-y-1.5">
@@ -163,8 +190,14 @@ export default function TalentSignupCard() {
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="At least 8 characters"
                   required
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                  aria-invalid={passwordError ? true : undefined}
+                  className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                    passwordError
+                      ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                  }`}
                 />
+                {passwordError ? <p className="text-xs text-rose-300">{passwordError}</p> : null}
               </div>
 
               <div className="space-y-1.5">
@@ -179,8 +212,14 @@ export default function TalentSignupCard() {
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   placeholder="Re-enter password"
                   required
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                  aria-invalid={confirmPasswordError ? true : undefined}
+                  className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                    confirmPasswordError
+                      ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                  }`}
                 />
+                {confirmPasswordError ? <p className="text-xs text-rose-300">{confirmPasswordError}</p> : null}
               </div>
             </div>
 
@@ -199,7 +238,7 @@ export default function TalentSignupCard() {
 
             <button
               type="submit"
-              disabled={status === 'submitting'}
+              disabled={status === 'submitting' || !canSubmit}
               className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-fuchsia-600 px-5 py-3 text-sm font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {status === 'submitting' ? 'Creating your account...' : 'Create Account'}
