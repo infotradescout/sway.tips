@@ -4265,6 +4265,10 @@ async function startServer() {
       appType: "custom",
     });
     app.use(vite.middlewares);
+    // Vite's publicDir is disabled outside demo mode, so serve repo public/
+    // assets (S mark, icons, manifest, sw) directly in dev to mirror the
+    // production dist static behavior. Dev-only; no business/auth logic.
+    app.use(express.static(path.join(process.cwd(), 'public'), { index: false }));
     app.get('*', async (req, res, next) => {
       try {
         const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
