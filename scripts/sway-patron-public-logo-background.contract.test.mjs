@@ -68,13 +68,13 @@ if (!publicHtml.includes('align-items: center') || !publicHtml.includes('justify
   failures.push('Mobile public CTA stack must stay centered over the S background.');
 }
 
-for (const term of ['--sway-background-height: 110%', 'top: 0', 'height: var(--sway-background-height, 110%)', 'object-position: 50% 50%']) {
+for (const term of ['--sway-background-height: 100%', 'top: 0', 'height: var(--sway-background-height, 100%)', 'object-position: 50% 50%']) {
   if (!publicHtml.includes(term)) {
     failures.push(`Public landing background S mark must stay centered in the viewport: ${term}`);
   }
 }
 
-if (!appBackdrop.includes('top-0 h-[110%]') || !appBackdrop.includes("objectPosition: '50% 50%'")) {
+if (!appBackdrop.includes('top-0 h-full') || !appBackdrop.includes("objectPosition: '50% 50%'")) {
   failures.push('Patron backdrop S mark must stay centered in the viewport.');
 }
 
@@ -90,8 +90,8 @@ for (const forbiddenBackgroundOffset of ['--sway-background-y', 'top-[4%]', 'top
   }
 }
 
-if (!publicHtml.includes('height: var(--sway-background-height, 110%)') || !appBackdrop.includes('h-[110%]')) {
-  failures.push('S background must use the taller static frame that centers the mark behind the buttons.');
+if (!publicHtml.includes('height: var(--sway-background-height, 100%)') || !appBackdrop.includes('h-full')) {
+  failures.push('S background must use the full-height static frame that balances the mark above and below the buttons.');
 }
 
 if (!patronApp.includes('items-center justify-center') || patronApp.includes('+17rem') || patronApp.includes('+13rem')) {

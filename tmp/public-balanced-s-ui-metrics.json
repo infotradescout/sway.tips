@@ -1,0 +1,179 @@
+{
+  "url": "http://127.0.0.1:4198/",
+  "early": {
+    "label": "early",
+    "readyClass": false,
+    "shellOpacity": "0",
+    "stackRect": {
+      "x": 20,
+      "y": 348,
+      "width": 390,
+      "height": 236,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "viewport": {
+      "width": 430,
+      "height": 932
+    },
+    "imgRect": {
+      "x": 0,
+      "y": 0,
+      "width": 430,
+      "height": 932,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "imgObjectPosition": "50% 50%",
+    "imgTransform": "none",
+    "imgAnimationName": "none",
+    "hasOpenOverlay": false,
+    "hasOldCopy": false,
+    "copy": [
+      "SCAN",
+      "Create account",
+      "Login",
+      "sway to play"
+    ],
+    "hrefs": [
+      "/home",
+      "/talent/signup",
+      "/talent/login",
+      "/faq"
+    ],
+    "installHidden": true,
+    "htmlClass": ""
+  },
+  "mid": {
+    "label": "mid",
+    "readyClass": true,
+    "shellOpacity": "0.210855",
+    "stackRect": {
+      "x": 20,
+      "y": 348,
+      "width": 390,
+      "height": 236,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "viewport": {
+      "width": 430,
+      "height": 932
+    },
+    "imgRect": {
+      "x": 0,
+      "y": 0,
+      "width": 430,
+      "height": 932,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "imgObjectPosition": "50% 50%",
+    "imgTransform": "none",
+    "imgAnimationName": "none",
+    "hasOpenOverlay": false,
+    "hasOldCopy": false,
+    "copy": [
+      "SCAN",
+      "Create account",
+      "Login",
+      "sway to play"
+    ],
+    "hrefs": [
+      "/home",
+      "/talent/signup",
+      "/talent/login",
+      "/faq"
+    ],
+    "installHidden": true,
+    "htmlClass": "landing-ui-ready"
+  },
+  "late": {
+    "label": "late",
+    "readyClass": true,
+    "shellOpacity": "1",
+    "stackRect": {
+      "x": 20,
+      "y": 348,
+      "width": 390,
+      "height": 236,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "viewport": {
+      "width": 430,
+      "height": 932
+    },
+    "imgRect": {
+      "x": 0,
+      "y": 0,
+      "width": 430,
+      "height": 932,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "imgObjectPosition": "50% 50%",
+    "imgTransform": "none",
+    "imgAnimationName": "none",
+    "hasOpenOverlay": false,
+    "hasOldCopy": false,
+    "copy": [
+      "SCAN",
+      "Create account",
+      "Login",
+      "sway to play"
+    ],
+    "hrefs": [
+      "/home",
+      "/talent/signup",
+      "/talent/login",
+      "/faq"
+    ],
+    "installHidden": true,
+    "htmlClass": "landing-ui-ready"
+  },
+  "meta": {
+    "label": "meta",
+    "readyClass": true,
+    "shellOpacity": "0.972102",
+    "stackRect": {
+      "x": 20,
+      "y": 348,
+      "width": 390,
+      "height": 236,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "viewport": {
+      "width": 430,
+      "height": 932
+    },
+    "imgRect": {
+      "x": 0,
+      "y": 0,
+      "width": 430,
+      "height": 932,
+      "centerX": 215,
+      "centerY": 466
+    },
+    "imgObjectPosition": "50% 50%",
+    "imgTransform": "none",
+    "imgAnimationName": "none",
+    "hasOpenOverlay": false,
+    "hasOldCopy": false,
+    "copy": [
+      "SCAN",
+      "Create account",
+      "Login",
+      "sway to play"
+    ],
+    "hrefs": [
+      "/home",
+      "/talent/signup",
+      "/talent/login",
+      "/faq"
+    ],
+    "installHidden": true,
+    "htmlClass": "is-meta-in-app-browser landing-ui-ready"
+  }
+}
