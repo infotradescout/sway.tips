@@ -2774,34 +2774,41 @@ app.post('/api/library/sync', async (req, res) => {
     return res.status(422).json({ error: 'At least one track is required for library sync.' });
   }
 
-  const result = await businessDb.transaction(async (tx) => {
-    const imported = await upsertPerformerLibraryTrackBatch(tx, {
-      performerId: sourceRow.performerId,
-      sourceKey: sourceRow.sourceKey,
-      sourceLabel: sourceRow.sourceLabel,
-      rawTracks,
-      replaceExisting
+  try {
+    const result = await businessDb.transaction(async (tx) => {
+      const imported = await upsertPerformerLibraryTrackBatch(tx, {
+        performerId: sourceRow.performerId,
+        sourceKey: sourceRow.sourceKey,
+        sourceLabel: sourceRow.sourceLabel,
+        rawTracks,
+        replaceExisting
+      });
+
+      await tx
+        .update(performerLibrarySources)
+        .set({
+          connectionStatus: 'active',
+          lastSyncedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(performerLibrarySources.id, sourceRow.id));
+
+      return imported;
     });
 
-    await tx
-      .update(performerLibrarySources)
-      .set({
-        connectionStatus: 'active',
-        lastSyncedAt: new Date(),
-        updatedAt: new Date()
-      })
-      .where(eq(performerLibrarySources.id, sourceRow.id));
-
-    return imported;
-  });
-
-  return res.status(202).json({
-    success: true,
-    sourceKey: sourceRow.sourceKey,
-    importedCount: result.importedCount,
-    removedCount: result.removedCount,
-    replaceExisting
-  });
+    return res.status(202).json({
+      success: true,
+      sourceKey: sourceRow.sourceKey,
+      importedCount: result.importedCount,
+      removedCount: result.removedCount,
+      replaceExisting
+    });
+  } catch (error) {
+    console.error('Library sync failed:', error);
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Library sync failed. Check the track payload and try again.'
+    });
+  }
 });
 
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
@@ -2819,21 +2826,27 @@ app.post("/api/payment/webhook", async (req, res) => {
   // payment webhook path below.
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (stripeConnectService && webhookSecret && businessDb) {
-    const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
-    if (accountEvent) {
-      const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
-      const paymentAccountStatus = payoutsEnabled
-        ? 'payouts_enabled'
-        : chargesEnabled
-          ? 'charges_enabled'
-          : detailsSubmitted
-            ? 'created'
-            : 'not_started';
-      await businessDb
-        .update(performers)
-        .set({ chargesEnabled, payoutsEnabled, paymentAccountStatus })
-        .where(eq(performers.stripeConnectedAccountId, accountEvent.accountId));
-      return res.json({ received: true, result: { type: 'account.updated' } });
+    try {
+      const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
+      if (accountEvent) {
+        const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
+        const paymentAccountStatus = payoutsEnabled
+          ? 'payouts_enabled'
+          : chargesEnabled
+            ? 'charges_enabled'
+            : detailsSubmitted
+              ? 'created'
+              : 'not_started';
+        await businessDb
+          .update(performers)
+          .set({ chargesEnabled, payoutsEnabled, paymentAccountStatus })
+          .where(eq(performers.stripeConnectedAccountId, accountEvent.accountId));
+        return res.json({ received: true, result: { type: 'account.updated' } });
+      }
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Connect webhook processing failed.'
+      });
     }
   }
 

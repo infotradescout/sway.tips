@@ -21,26 +21,30 @@ async function fetchAppToken(env: CatalogEnv): Promise<string | null> {
     return cachedToken.value;
   }
 
-  const response = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: 'grant_type=client_credentials'
-  });
+  try {
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
 
-  if (!response.ok) return null;
+    if (!response.ok) return null;
 
-  const data = await response.json();
-  if (typeof data?.access_token !== 'string') return null;
+    const data = await response.json();
+    if (typeof data?.access_token !== 'string') return null;
 
-  cachedToken = {
-    value: data.access_token,
-    expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000 - 30_000
-  };
+    cachedToken = {
+      value: data.access_token,
+      expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000 - 30_000
+    };
 
-  return cachedToken.value;
+    return cachedToken.value;
+  } catch {
+    return null;
+  }
 }
 
 export function isCatalogSearchConfigured(env: CatalogEnv): boolean {

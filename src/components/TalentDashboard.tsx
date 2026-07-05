@@ -673,22 +673,23 @@ export default function TalentDashboard({
         )}
       </div>
 
-      {/* 1b. Library linking is available before, during, and after a live room. */}
-      <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg max-w-3xl mx-auto">
-        <div className="flex items-start justify-between gap-3">
+      {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
+      <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
+        <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
-            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
+            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Advanced: Developer Library Sync</h4>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-              Create a secure sync source for any DJ app, library manager, or companion tool. Patron search uses whatever that linked source syncs as available for this performer.
+              For technical users only. Requires writing or running a small script that sends your track list to Sway — there's no built-in connector for Serato, rekordbox, Traktor, or other DJ software yet.
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              Use the local bridge command `npm run library:bridge -- --sync-key ...` if your software can post JSON to localhost.
+              Most performers don't need this — once your room is live, add songs by hand in the Setlist Builder under Song Search Scope instead.
             </p>
           </div>
-          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
-            <Upload className="h-4 w-4" />
-          </div>
-        </div>
+          <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
+            <span className="group-open:hidden">Expand</span>
+            <span className="hidden group-open:inline">Collapse</span>
+          </span>
+        </summary>
 
         <form className="mt-4 space-y-3" onSubmit={handleLibraryLink}>
           <div className="space-y-1.5">
@@ -697,7 +698,7 @@ export default function TalentDashboard({
               type="text"
               value={librarySourceLabel}
               onChange={(event) => setLibrarySourceLabel(event.target.value)}
-              placeholder="Serato laptop, Rekordbox booth USB, Traktor rig, custom app"
+              placeholder="Custom script, laptop bridge, booth PC"
               className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
             />
           </div>
@@ -776,7 +777,7 @@ export default function TalentDashboard({
             {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
           </button>
         </form>
-      </div>
+      </details>
 
       {/* 1c. Stripe payout connection is available before, during, and after a live room. */}
       <div className="rounded-2xl p-4 border border-white/10 bg-slate-900 shadow-lg max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3 select-none">
