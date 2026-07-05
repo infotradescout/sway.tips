@@ -1,5 +1,6 @@
 import { Lock, Sparkles } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
 const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 
@@ -36,13 +37,10 @@ export default function TalentSignupCard() {
     && confirmPassword === password
     && termsAccepted;
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const signupStatus = searchParams.get('status');
-  const statusMessage = signupStatus === 'invalid-link'
-    ? 'That verification link is no longer valid. Log in and request a recovery link if you still need access.'
-    : signupStatus === 'unavailable'
-      ? 'Performer signup is temporarily unavailable. Please try again in a moment.'
-      : null;
+  const statusMessage = useAuthQueryStatusMessage({
+    'invalid-link': 'That verification link is no longer valid. Log in and request a recovery link if you still need access.',
+    unavailable: 'Performer signup is temporarily unavailable. Please try again in a moment.'
+  });
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -103,23 +101,9 @@ export default function TalentSignupCard() {
             Already have an account? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/talent/login">Log in</a>
           </p>
 
-          {statusMessage ? (
-            <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              {statusMessage}
-            </div>
-          ) : null}
+          {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}
 
-          {message ? (
-            <div
-              className={`mt-5 rounded-2xl px-4 py-3 text-sm ${
-                status === 'success'
-                  ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
-                  : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
-              }`}
-            >
-              {message}
-            </div>
-          ) : null}
+          {message ? <StatusBanner tone={status === 'success' ? 'emerald' : 'rose'} message={message} /> : null}
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-1.5">

@@ -1143,7 +1143,7 @@ export default function TalentDashboard({
                         <button
                           type="button"
                           onClick={() => handleAddSetlistTrack(track)}
-                          className="shrink-0 p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
+                          className="shrink-0 min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -1170,7 +1170,7 @@ export default function TalentDashboard({
                           <button
                             type="button"
                             onClick={() => handleRemoveSetlistTrack(track.id)}
-                            className="shrink-0 p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 cursor-pointer"
+                            className="shrink-0 min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

@@ -1,5 +1,6 @@
 import { KeyRound, Lock } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
 const RECOVERY_SUCCESS_COPY = 'If this email is on an approved Sway performer account, we sent a link.';
 
@@ -14,15 +15,11 @@ export default function TalentLoginCard() {
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus>('idle');
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const loginStatus = searchParams.get('status');
-  const statusMessage = loginStatus === 'invalid-link'
-    ? 'This sign-in or verification link is no longer valid. Request a fresh recovery link if you still need help.'
-    : loginStatus === 'unavailable'
-      ? 'Performer sign-in is temporarily unavailable. Please try again in a moment.'
-      : loginStatus === 'verified'
-        ? 'Your email is verified. Log in to open your Sway performer console.'
-        : null;
+  const statusMessage = useAuthQueryStatusMessage({
+    'invalid-link': 'This sign-in or verification link is no longer valid. Request a fresh recovery link if you still need help.',
+    unavailable: 'Performer sign-in is temporarily unavailable. Please try again in a moment.',
+    verified: 'Your email is verified. Log in to open your Sway performer console.'
+  });
 
   const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -102,17 +99,9 @@ export default function TalentLoginCard() {
           New to Sway? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/talent/signup">Create a performer account</a>
         </p>
 
-        {statusMessage ? (
-          <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            {statusMessage}
-          </div>
-        ) : null}
+        {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}
 
-        {message ? (
-          <div className="mt-5 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-            {message}
-          </div>
-        ) : null}
+        {message ? <StatusBanner tone="rose" message={message} /> : null}
 
         <form className="mt-6 space-y-4" onSubmit={handleLoginSubmit}>
           <div className="space-y-1.5">
