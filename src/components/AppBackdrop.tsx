@@ -7,6 +7,7 @@ export default function AppBackdrop() {
         src={SWAY_BACKGROUND_SRC}
         alt=""
         className="h-full w-full object-cover"
+        style={{ objectPosition: '50% 42%', transform: 'none' }}
       />
     </div>
   );

@@ -7,6 +7,7 @@ const failures = [];
 
 const publicHtml = read('shells/public.html');
 const appBackdrop = read('src/components/AppBackdrop.tsx');
+const patronApp = read('src/shells/PatronApp.tsx');
 const packageJson = read('package.json');
 
 const backgroundAsset = 'public/assets/sway-neon-background.png';
@@ -36,12 +37,14 @@ if (publicImageRefs.length !== 1) {
 
 for (const source of [
   { name: 'shells/public.html', text: publicHtml },
-  { name: 'src/components/AppBackdrop.tsx', text: appBackdrop }
+  { name: 'src/components/AppBackdrop.tsx', text: appBackdrop },
+  { name: 'src/shells/PatronApp.tsx', text: patronApp }
 ]) {
   for (const forbidden of [
     'grid-bg',
     'SwayMark',
     blockedTextBannerAsset,
+    'sway-s-only-no-text-background.png',
     'Run the room',
     'Move the queue',
     'Audience: join a live room',
@@ -53,6 +56,16 @@ for (const source of [
       failures.push(`${source.name} must not include old animated/marketing/logo content: ${forbidden}`);
     }
   }
+
+  for (const forbiddenZoom of ['@keyframes', 'animation:', 'scale(', 'hover:scale']) {
+    if (source.text.includes(forbiddenZoom)) {
+      failures.push(`${source.name} must not include zooming or animated background behavior: ${forbiddenZoom}`);
+    }
+  }
+}
+
+if (!publicHtml.includes('align-items: flex-end')) {
+  failures.push('Mobile public CTA stack must sit lower instead of centered over the S mark.');
 }
 
 const visibleCopy = publicHtml

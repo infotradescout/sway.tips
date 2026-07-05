@@ -38,19 +38,19 @@ function PatronNoSessionRecovery({
   const [scannerOpen, setScannerOpen] = useState(false);
 
   return (
-    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center overflow-hidden">
+    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-end overflow-hidden px-4 pb-[calc(var(--sway-safe-bottom,0px)+4.5rem)] pt-8 sm:items-center sm:pb-6">
       <AppBackdrop />
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="relative mx-auto grid w-full max-w-sm gap-3 px-4 py-14"
+        className="relative mx-auto grid w-full max-w-sm gap-3"
       >
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
-          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
+          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-colors hover:from-fuchsia-500 hover:to-fuchsia-400"
         >
           Scan
         </button>
