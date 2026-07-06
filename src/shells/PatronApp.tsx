@@ -49,43 +49,6 @@ function PatronNoSessionRecovery({
       requestCount: number;
     } | null;
   } | null>(null);
-  const [publicRooms, setPublicRooms] = useState<Array<{
-    gigId: string;
-    routePath: string;
-    performerName: string;
-    performerHandle: string | null;
-    talentRole: string;
-    requestCount: number;
-    profile: {
-      headline: string | null;
-      city: string | null;
-    } | null;
-  }>>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadPublicFeed = async () => {
-      try {
-        const response = await fetch('/api/public/feed?limit=6');
-        if (!response.ok) return;
-        const data = await response.json().catch(() => null);
-        if (!cancelled) {
-          setPublicRooms(Array.isArray(data?.rooms) ? data.rooms : []);
-        }
-      } catch {
-        if (!cancelled) {
-          setPublicRooms([]);
-        }
-      }
-    };
-
-    void loadPublicFeed();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     if (!performerHandle) {
@@ -204,36 +167,6 @@ function PatronNoSessionRecovery({
             </div>
           </div>
         ) : null}
-
-        <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4 backdrop-blur">
-          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Live public feed</p>
-          <p className="mt-1 text-xs text-slate-400">Jump straight into rooms that are live right now.</p>
-          {publicRooms.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {publicRooms.map((room) => (
-                <a
-                  key={room.gigId}
-                  href={room.routePath}
-                  className="block rounded-xl border border-white/10 bg-slate-900/70 px-3 py-3 transition-colors hover:border-cyan-400/60"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-bold text-white">{room.performerName}</p>
-                    <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">{room.requestCount} requests</p>
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    {room.profile?.headline || `${room.talentRole} live now`}
-                  </p>
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    {room.performerHandle ? `@${room.performerHandle}` : 'No handle yet'}
-                    {room.profile?.city ? ` - ${room.profile.city}` : ''}
-                  </p>
-                </a>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-[11px] text-slate-500">No public live rooms yet. Check back when performers go live.</p>
-          )}
-        </div>
       </motion.div>
 
       {scannerOpen ? <QrScanner onClose={() => setScannerOpen(false)} /> : null}

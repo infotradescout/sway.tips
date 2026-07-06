@@ -3044,77 +3044,82 @@ app.get("/api/state", async (req, res) => {
 app.get('/api/public/feed', async (_req, res) => {
   applyNoStoreHeaders(res);
 
-  const activeRooms = await listReadableActiveRooms();
-  if (!activeRooms.length) {
-    return res.json({ rooms: [] });
-  }
+  try {
+    const activeRooms = await listReadableActiveRooms();
+    if (!activeRooms.length) {
+      return res.json({ rooms: [] });
+    }
 
-  const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
-  const selectedRooms = activeRooms.slice(0, roomLimit);
+    const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
+    const selectedRooms = activeRooms.slice(0, roomLimit);
 
-  if (!businessDb) {
+    if (!businessDb) {
+      return res.json({
+        rooms: selectedRooms.map((room) => ({
+          gigId: room.gigId,
+          routePath: room.routePath,
+          performerName: room.performerName,
+          talentRole: room.talentRole,
+          requestCount: room.requestCount,
+          startedAt: room.startedAt,
+          profile: null
+        }))
+      });
+    }
+
+    const gigIds = selectedRooms.map((room) => room.gigId);
+    const details = await businessDb
+      .select({
+        gigId: gigSessions.id,
+        performerName: performers.displayName,
+        performerHandle: performers.handle,
+        headline: performerPublicProfiles.headline,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl,
+        instagramUrl: performerPublicProfiles.instagramUrl,
+        tiktokUrl: performerPublicProfiles.tiktokUrl,
+        youtubeUrl: performerPublicProfiles.youtubeUrl,
+        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+        websiteUrl: performerPublicProfiles.websiteUrl
+      })
+      .from(gigSessions)
+      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(inArray(gigSessions.id, gigIds));
+
+    const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
+
     return res.json({
-      rooms: selectedRooms.map((room) => ({
-        gigId: room.gigId,
-        routePath: room.routePath,
-        performerName: room.performerName,
-        talentRole: room.talentRole,
-        requestCount: room.requestCount,
-        startedAt: room.startedAt,
-        profile: null
-      }))
+      rooms: selectedRooms.map((room) => {
+        const detail = detailsByGigId.get(room.gigId);
+        return {
+          gigId: room.gigId,
+          routePath: room.routePath,
+          performerName: detail?.performerName || room.performerName,
+          performerHandle: detail?.performerHandle || null,
+          performerPath: detail?.performerHandle ? `/p/${detail.performerHandle}` : null,
+          talentRole: room.talentRole,
+          requestCount: room.requestCount,
+          startedAt: room.startedAt,
+          profile: detail ? {
+            headline: detail.headline,
+            city: detail.city,
+            avatarUrl: detail.avatarUrl,
+            socialLinks: toPublicSocialLinks({
+              instagramUrl: detail.instagramUrl,
+              tiktokUrl: detail.tiktokUrl,
+              youtubeUrl: detail.youtubeUrl,
+              soundcloudUrl: detail.soundcloudUrl,
+              websiteUrl: detail.websiteUrl
+            })
+          } : null
+        };
+      })
     });
+  } catch (error) {
+    console.error('Public feed lookup failed:', error);
+    return res.status(500).json({ error: 'Unable to load the public feed right now.' });
   }
-
-  const gigIds = selectedRooms.map((room) => room.gigId);
-  const details = await businessDb
-    .select({
-      gigId: gigSessions.id,
-      performerName: performers.displayName,
-      performerHandle: performers.handle,
-      headline: performerPublicProfiles.headline,
-      city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl,
-      instagramUrl: performerPublicProfiles.instagramUrl,
-      tiktokUrl: performerPublicProfiles.tiktokUrl,
-      youtubeUrl: performerPublicProfiles.youtubeUrl,
-      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-      websiteUrl: performerPublicProfiles.websiteUrl
-    })
-    .from(gigSessions)
-    .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-    .where(inArray(gigSessions.id, gigIds));
-
-  const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
-
-  return res.json({
-    rooms: selectedRooms.map((room) => {
-      const detail = detailsByGigId.get(room.gigId);
-      return {
-        gigId: room.gigId,
-        routePath: room.routePath,
-        performerName: detail?.performerName || room.performerName,
-        performerHandle: detail?.performerHandle || null,
-        performerPath: detail?.performerHandle ? `/p/${detail.performerHandle}` : null,
-        talentRole: room.talentRole,
-        requestCount: room.requestCount,
-        startedAt: room.startedAt,
-        profile: detail ? {
-          headline: detail.headline,
-          city: detail.city,
-          avatarUrl: detail.avatarUrl,
-          socialLinks: toPublicSocialLinks({
-            instagramUrl: detail.instagramUrl,
-            tiktokUrl: detail.tiktokUrl,
-            youtubeUrl: detail.youtubeUrl,
-            soundcloudUrl: detail.soundcloudUrl,
-            websiteUrl: detail.websiteUrl
-          })
-        } : null
-      };
-    })
-  });
 });
 
 app.get('/api/public/performer/:handle', async (req, res) => {
@@ -3129,77 +3134,82 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     return res.status(503).json({ error: 'Public performer profiles require a durable database connection.' });
   }
 
-  const [profile] = await businessDb
-    .select({
-      performerId: performers.id,
-      displayName: performers.displayName,
-      handle: performers.handle,
-      bio: performers.bio,
-      headline: performerPublicProfiles.headline,
-      city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl,
-      instagramUrl: performerPublicProfiles.instagramUrl,
-      tiktokUrl: performerPublicProfiles.tiktokUrl,
-      youtubeUrl: performerPublicProfiles.youtubeUrl,
-      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-      websiteUrl: performerPublicProfiles.websiteUrl
-    })
-    .from(performers)
-    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-    .where(sql`lower(${performers.handle}) = ${normalizedHandle}`)
-    .limit(1);
-
-  if (!profile) {
-    return res.status(404).json({ error: 'Performer profile not found.' });
-  }
-
-  const [activeRoom] = await businessDb
-    .select({
-      gigId: activeRoomRegistry.gigId,
-      routePath: activeRoomRegistry.routePath,
-      talentRole: activeRoomRegistry.talentRole,
-      startedAt: activeRoomRegistry.startedAt
-    })
-    .from(activeRoomRegistry)
-    .where(and(
-      eq(activeRoomRegistry.performerId, profile.performerId),
-      eq(activeRoomRegistry.registryStatus, 'active')
-    ))
-    .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
-    .limit(1);
-
-  const activeRooms = await listReadableActiveRooms();
-  const activeRoomSummary = activeRoom
-    ? activeRooms.find((room) => room.gigId === activeRoom.gigId) ?? null
-    : null;
-
-  return res.json({
-    performer: {
-      id: profile.performerId,
-      displayName: profile.displayName,
-      handle: profile.handle,
-      bio: profile.bio,
-      headline: profile.headline,
-      city: profile.city,
-      avatarUrl: profile.avatarUrl,
-      socialLinks: toPublicSocialLinks({
-        instagramUrl: profile.instagramUrl,
-        tiktokUrl: profile.tiktokUrl,
-        youtubeUrl: profile.youtubeUrl,
-        soundcloudUrl: profile.soundcloudUrl,
-        websiteUrl: profile.websiteUrl
+  try {
+    const [profile] = await businessDb
+      .select({
+        performerId: performers.id,
+        displayName: performers.displayName,
+        handle: performers.handle,
+        bio: performers.bio,
+        headline: performerPublicProfiles.headline,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl,
+        instagramUrl: performerPublicProfiles.instagramUrl,
+        tiktokUrl: performerPublicProfiles.tiktokUrl,
+        youtubeUrl: performerPublicProfiles.youtubeUrl,
+        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+        websiteUrl: performerPublicProfiles.websiteUrl
       })
-    },
-    activeRoom: activeRoom
-      ? {
-          gigId: activeRoom.gigId,
-          routePath: activeRoom.routePath,
-          talentRole: activeRoom.talentRole,
-          startedAt: activeRoom.startedAt,
-          requestCount: activeRoomSummary?.requestCount ?? 0
-        }
-      : null
-  });
+      .from(performers)
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(sql`lower(${performers.handle}) = ${normalizedHandle}`)
+      .limit(1);
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Performer profile not found.' });
+    }
+
+    const [activeRoom] = await businessDb
+      .select({
+        gigId: activeRoomRegistry.gigId,
+        routePath: activeRoomRegistry.routePath,
+        talentRole: activeRoomRegistry.talentRole,
+        startedAt: activeRoomRegistry.startedAt
+      })
+      .from(activeRoomRegistry)
+      .where(and(
+        eq(activeRoomRegistry.performerId, profile.performerId),
+        eq(activeRoomRegistry.registryStatus, 'active')
+      ))
+      .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
+      .limit(1);
+
+    const activeRooms = await listReadableActiveRooms();
+    const activeRoomSummary = activeRoom
+      ? activeRooms.find((room) => room.gigId === activeRoom.gigId) ?? null
+      : null;
+
+    return res.json({
+      performer: {
+        id: profile.performerId,
+        displayName: profile.displayName,
+        handle: profile.handle,
+        bio: profile.bio,
+        headline: profile.headline,
+        city: profile.city,
+        avatarUrl: profile.avatarUrl,
+        socialLinks: toPublicSocialLinks({
+          instagramUrl: profile.instagramUrl,
+          tiktokUrl: profile.tiktokUrl,
+          youtubeUrl: profile.youtubeUrl,
+          soundcloudUrl: profile.soundcloudUrl,
+          websiteUrl: profile.websiteUrl
+        })
+      },
+      activeRoom: activeRoom
+        ? {
+            gigId: activeRoom.gigId,
+            routePath: activeRoom.routePath,
+            talentRole: activeRoom.talentRole,
+            startedAt: activeRoom.startedAt,
+            requestCount: activeRoomSummary?.requestCount ?? 0
+          }
+        : null
+    });
+  } catch (error) {
+    console.error('Public performer profile lookup failed:', error);
+    return res.status(500).json({ error: 'Unable to load this performer profile right now.' });
+  }
 });
 
 app.get("/api/state/:gigId", async (req, res) => {
