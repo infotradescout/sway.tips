@@ -10,10 +10,10 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash, randomBytes } from "crypto";
 import { readFileSync } from "fs";
-import { and, asc, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -958,6 +958,42 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
 function normalizeLibraryText(value: unknown, maxLength = 160) {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function normalizePublicProfileText(value: unknown, maxLength = 160) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLength);
+}
+
+function normalizePublicProfileUrl(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function toPublicSocialLinks(row: {
+  instagramUrl: string | null;
+  tiktokUrl: string | null;
+  youtubeUrl: string | null;
+  soundcloudUrl: string | null;
+  websiteUrl: string | null;
+}) {
+  return {
+    instagram: row.instagramUrl,
+    tiktok: row.tiktokUrl,
+    youtube: row.youtubeUrl,
+    soundcloud: row.soundcloudUrl,
+    website: row.websiteUrl
+  };
 }
 
 function normalizeLibrarySourceKey(value: unknown) {
@@ -2266,6 +2302,129 @@ app.post("/api/analytics/shell", async (req, res) => {
   }
 });
 
+app.get('/api/talent/profile/public', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer profile requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
+  }
+
+  const [profileRow] = await businessDb
+    .select({
+      performerId: performerPublicProfiles.performerId,
+      headline: performerPublicProfiles.headline,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      instagramUrl: performerPublicProfiles.instagramUrl,
+      tiktokUrl: performerPublicProfiles.tiktokUrl,
+      youtubeUrl: performerPublicProfiles.youtubeUrl,
+      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+      websiteUrl: performerPublicProfiles.websiteUrl,
+      updatedAt: performerPublicProfiles.updatedAt
+    })
+    .from(performerPublicProfiles)
+    .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+    .limit(1);
+
+  return res.json({
+    profile: {
+      performerId: performerOwner.performerId,
+      handle: performerOwner.handle,
+      displayName: performerOwner.displayName,
+      headline: profileRow?.headline ?? null,
+      city: profileRow?.city ?? null,
+      avatarUrl: profileRow?.avatarUrl ?? null,
+      socialLinks: toPublicSocialLinks({
+        instagramUrl: profileRow?.instagramUrl ?? null,
+        tiktokUrl: profileRow?.tiktokUrl ?? null,
+        youtubeUrl: profileRow?.youtubeUrl ?? null,
+        soundcloudUrl: profileRow?.soundcloudUrl ?? null,
+        websiteUrl: profileRow?.websiteUrl ?? null
+      }),
+      updatedAt: profileRow?.updatedAt ?? null
+    }
+  });
+});
+
+app.post('/api/talent/profile/public', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer profile requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
+  }
+
+  const headline = normalizePublicProfileText(req.body?.headline, 140);
+  const city = normalizePublicProfileText(req.body?.city, 80);
+  const avatarUrl = normalizePublicProfileUrl(req.body?.avatarUrl);
+  const instagramUrl = normalizePublicProfileUrl(req.body?.socialLinks?.instagram);
+  const tiktokUrl = normalizePublicProfileUrl(req.body?.socialLinks?.tiktok);
+  const youtubeUrl = normalizePublicProfileUrl(req.body?.socialLinks?.youtube);
+  const soundcloudUrl = normalizePublicProfileUrl(req.body?.socialLinks?.soundcloud);
+  const websiteUrl = normalizePublicProfileUrl(req.body?.socialLinks?.website);
+
+  await businessDb
+    .insert(performerPublicProfiles)
+    .values({
+      performerId: performerOwner.performerId,
+      headline,
+      city,
+      avatarUrl,
+      instagramUrl,
+      tiktokUrl,
+      youtubeUrl,
+      soundcloudUrl,
+      websiteUrl,
+      updatedAt: new Date()
+    })
+    .onConflictDoUpdate({
+      target: performerPublicProfiles.performerId,
+      set: {
+        headline,
+        city,
+        avatarUrl,
+        instagramUrl,
+        tiktokUrl,
+        youtubeUrl,
+        soundcloudUrl,
+        websiteUrl,
+        updatedAt: new Date()
+      }
+    });
+
+  return res.status(202).json({
+    success: true,
+    profile: {
+      performerId: performerOwner.performerId,
+      handle: performerOwner.handle,
+      displayName: performerOwner.displayName,
+      headline,
+      city,
+      avatarUrl,
+      socialLinks: {
+        instagram: instagramUrl,
+        tiktok: tiktokUrl,
+        youtube: youtubeUrl,
+        soundcloud: soundcloudUrl,
+        website: websiteUrl
+      }
+    }
+  });
+});
+
 app.post('/api/talent/library/import', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -2879,6 +3038,82 @@ app.get("/api/state", async (req, res) => {
     performers: state.performers,
     activeGigId: talentAccess.allowed ? state.activeGigId : null,
     performerProfile
+  });
+});
+
+app.get('/api/public/feed', async (_req, res) => {
+  applyNoStoreHeaders(res);
+
+  const activeRooms = await listReadableActiveRooms();
+  if (!activeRooms.length) {
+    return res.json({ rooms: [] });
+  }
+
+  const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
+  const selectedRooms = activeRooms.slice(0, roomLimit);
+
+  if (!businessDb) {
+    return res.json({
+      rooms: selectedRooms.map((room) => ({
+        gigId: room.gigId,
+        routePath: room.routePath,
+        performerName: room.performerName,
+        talentRole: room.talentRole,
+        requestCount: room.requestCount,
+        startedAt: room.startedAt,
+        profile: null
+      }))
+    });
+  }
+
+  const gigIds = selectedRooms.map((room) => room.gigId);
+  const details = await businessDb
+    .select({
+      gigId: gigSessions.id,
+      performerName: performers.displayName,
+      performerHandle: performers.handle,
+      headline: performerPublicProfiles.headline,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      instagramUrl: performerPublicProfiles.instagramUrl,
+      tiktokUrl: performerPublicProfiles.tiktokUrl,
+      youtubeUrl: performerPublicProfiles.youtubeUrl,
+      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+      websiteUrl: performerPublicProfiles.websiteUrl
+    })
+    .from(gigSessions)
+    .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(inArray(gigSessions.id, gigIds));
+
+  const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
+
+  return res.json({
+    rooms: selectedRooms.map((room) => {
+      const detail = detailsByGigId.get(room.gigId);
+      return {
+        gigId: room.gigId,
+        routePath: room.routePath,
+        performerName: detail?.performerName || room.performerName,
+        performerHandle: detail?.performerHandle || null,
+        performerPath: detail?.performerHandle ? `/p/${detail.performerHandle}` : null,
+        talentRole: room.talentRole,
+        requestCount: room.requestCount,
+        startedAt: room.startedAt,
+        profile: detail ? {
+          headline: detail.headline,
+          city: detail.city,
+          avatarUrl: detail.avatarUrl,
+          socialLinks: toPublicSocialLinks({
+            instagramUrl: detail.instagramUrl,
+            tiktokUrl: detail.tiktokUrl,
+            youtubeUrl: detail.youtubeUrl,
+            soundcloudUrl: detail.soundcloudUrl,
+            websiteUrl: detail.websiteUrl
+          })
+        } : null
+      };
+    })
   });
 });
 

@@ -132,6 +132,22 @@ export const performers = pgTable('performers', {
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 
+export const performerPublicProfiles = pgTable('performer_public_profiles', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  headline: text('headline'),
+  city: text('city'),
+  avatarUrl: text('avatar_url'),
+  instagramUrl: text('instagram_url'),
+  tiktokUrl: text('tiktok_url'),
+  youtubeUrl: text('youtube_url'),
+  soundcloudUrl: text('soundcloud_url'),
+  websiteUrl: text('website_url'),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  updatedAtIdx: index('performer_public_profiles_updated_at_idx').on(table.updatedAt)
+}));
+
 export const performerMemberships = pgTable('performer_memberships', {
   id: uuid('id').primaryKey().defaultRandom(),
   performerId: uuid('performer_id').notNull().references(() => performers.id),
