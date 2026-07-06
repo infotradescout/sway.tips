@@ -126,6 +126,7 @@ async function main() {
     "app.post('/api/talent/login'",
     "app.post('/api/talent/login/request'",
     "app.get('/api/talent/login/consume'",
+    'if (isProduction && !hasPerformerLoginEmailConfig)',
     'performerPasswordLoginRateLimiter.check',
     'verifyPerformerPassword',
     'performerPasswordLoginRateLimiter.recordFailure',

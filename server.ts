@@ -1596,6 +1596,11 @@ app.get('/api/payment/config', (_req, res) => {
 app.post('/api/talent/signup', async (req, res) => {
   applyNoStoreHeaders(res);
 
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    res.status(503).json({ error: 'Performer verification email delivery is temporarily unavailable.' });
+    return;
+  }
+
   if (!businessStore.hasDurableStore) {
     res.status(503).json({ error: 'Performer signup requires durable persistence.' });
     return;
