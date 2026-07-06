@@ -11,6 +11,13 @@ const PASSWORD_MIN_LENGTH = 8;
 
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
 
+type SignupResponse = {
+  error?: string;
+  message?: string;
+  deliveryMode?: string;
+  verificationLink?: string;
+};
+
 export default function TalentSignupCard() {
   const [displayName, setDisplayName] = useState('');
   const [handle, setHandle] = useState('');
@@ -20,6 +27,7 @@ export default function TalentSignupCard() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [status, setStatus] = useState<SignupStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const [verificationLink, setVerificationLink] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -56,6 +64,7 @@ export default function TalentSignupCard() {
 
     setStatus('submitting');
     setMessage(null);
+    setVerificationLink(null);
 
     try {
       const response = await fetch('/api/talent/signup', {
@@ -73,13 +82,18 @@ export default function TalentSignupCard() {
         })
       });
 
-      const data = await response.json().catch(() => null);
+      const data = await response.json().catch(() => null) as SignupResponse | null;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Performer signup request failed.');
       }
 
       setStatus('success');
-      setMessage(SUCCESS_COPY);
+      if (data?.deliveryMode === 'mock' && typeof data.verificationLink === 'string') {
+        setMessage('Local email delivery is mocked. Open the verification link below to finish setup.');
+        setVerificationLink(data.verificationLink);
+      } else {
+        setMessage(data?.message || SUCCESS_COPY);
+      }
       setDisplayName('');
       setHandle('');
       setEmail('');
@@ -89,6 +103,7 @@ export default function TalentSignupCard() {
     } catch (error) {
       console.warn('Unable to create performer account:', error);
       setStatus('error');
+      setVerificationLink(null);
       setMessage(error instanceof Error ? error.message : 'We could not create your performer account right now. Please try again in a moment.');
     }
   };
@@ -112,6 +127,14 @@ export default function TalentSignupCard() {
           {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}
 
           {message ? <StatusBanner tone={status === 'success' ? 'emerald' : 'rose'} message={message} /> : null}
+          {verificationLink ? (
+            <a
+              className="mt-3 block rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-black text-emerald-100 transition hover:border-emerald-300/60 hover:bg-emerald-400/15"
+              href={verificationLink}
+            >
+              Open local verification link
+            </a>
+          ) : null}
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-1.5">

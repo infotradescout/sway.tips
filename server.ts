@@ -1324,10 +1324,16 @@ function performerPasswordLoginSuccessResponse(redirectPath: string) {
   };
 }
 
-function performerSignupSuccessResponse() {
+function performerSignupSuccessResponse(debugVerificationLink?: string) {
   return {
     success: true,
-    message: PERFORMER_SIGNUP_SUCCESS_COPY
+    message: PERFORMER_SIGNUP_SUCCESS_COPY,
+    ...(!isProduction && debugVerificationLink
+      ? {
+          deliveryMode: 'mock',
+          verificationLink: debugVerificationLink
+        }
+      : {})
   };
 }
 
@@ -1753,7 +1759,9 @@ app.post('/api/talent/signup', async (req, res) => {
       return;
     }
 
-    res.status(202).json(performerSignupSuccessResponse());
+    res.status(202).json(performerSignupSuccessResponse(
+      deliveryResult.provider === 'mock' ? verificationLink : undefined
+    ));
   } catch (error) {
     if (
       isUniqueConstraintViolation(error, 'idx_performers_handle') ||

@@ -1,9 +1,11 @@
 type MailerEnv = Record<string, string | undefined>;
 
 export function resolvePerformerLoginBaseUrl(env: MailerEnv) {
+  const localPort = env.PORT?.trim() || '3000';
+
   return env.SWAY_APP_BASE_URL?.trim()
     || env.APP_URL?.trim()
-    || (env.NODE_ENV === 'production' ? 'https://app.sway.tips' : 'http://localhost:3000');
+    || (env.NODE_ENV === 'production' ? 'https://app.sway.tips' : `http://localhost:${localPort}`);
 }
 
 export function createPerformerLoginMailer({
@@ -24,17 +26,17 @@ export function createPerformerLoginMailer({
     subject: string;
     introLine: string;
   }) {
-    if (!isProduction) {
-      console.log(`[SWAY_EMAIL_MOCK] ${subject} for ${toEmail}: ${link}`);
-      return { delivered: true as const, provider: 'mock' as const };
-    }
-
     const provider = env.SWAY_EMAIL_PROVIDER?.trim().toLowerCase() || '';
     const apiKey = env.SWAY_EMAIL_API_KEY?.trim() || '';
     const fromAddress = env.SWAY_EMAIL_FROM?.trim() || '';
     const appBaseUrl = resolvePerformerLoginBaseUrl(env).trim();
 
     if (!provider || !apiKey || !fromAddress || !appBaseUrl) {
+      if (!isProduction) {
+        console.log(`[SWAY_EMAIL_MOCK] ${subject} for ${toEmail}: ${link}`);
+        return { delivered: true as const, provider: 'mock' as const };
+      }
+
       console.error('Performer login email delivery unavailable: missing SWAY_EMAIL_PROVIDER, SWAY_EMAIL_API_KEY, SWAY_EMAIL_FROM, or SWAY_APP_BASE_URL.');
       return { delivered: false as const, provider: provider || 'missing' };
     }

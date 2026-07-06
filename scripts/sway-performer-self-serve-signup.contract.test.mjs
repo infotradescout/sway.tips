@@ -68,6 +68,7 @@ async function main() {
   assert.ok(signupCardSource.includes('Already have an account?'), 'Talent signup card must link performers back to /talent/login.');
   assert.ok(signupCardSource.includes('termsAccepted'), 'Talent signup card must capture terms acceptance.');
   assert.ok(signupCardSource.includes(PERFORMER_SIGNUP_SUCCESS_COPY), 'Talent signup card must show the approved signup success copy.');
+  assert.ok(signupCardSource.includes('Open local verification link'), 'Local mock signup must expose the verification link instead of implying real email delivery.');
 
   assert.ok(
     accessSource.includes("req.path === '/talent/login' || req.path === '/talent/signup'"),
@@ -88,6 +89,8 @@ async function main() {
     "termsAcceptedAt: new Date()",
     "challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL",
     'performerLoginMailer.sendVerificationLink',
+    "deliveryMode: 'mock'",
+    'verificationLink: debugVerificationLink',
     'This handle is already taken.',
     'idx_performers_handle_lower',
     'This email or handle is already in use.',
