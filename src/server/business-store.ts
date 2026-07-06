@@ -39,7 +39,12 @@ type PersistedSessionRow = {
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
 const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active', 'ending'] as const;
 const TRACKED_ROOM_STATUSES = ['active', 'ending'] as const;
-const READABLE_ACTIVE_ROOM_STATUSES = ['active'] as const;
+// Must include 'ending' (the 5-minute post-gig sweep) alongside 'active',
+// matching LEGACY_FALLBACK_ACTIVE_STATUSES/TRACKED_ROOM_STATUSES/
+// hasLiveRoomContext above -- otherwise a room mid-sweep silently vanishes
+// from the performer's own room selector, admin oversight roster, and the
+// public feed until it's fully closed out.
+const READABLE_ACTIVE_ROOM_STATUSES = ['active', 'ending'] as const;
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
   hold: 'held_for_review',

@@ -4414,7 +4414,7 @@ app.post("/api/moderation/block", async (req, res) => {
     return res.status(401).json({ error: 'Sway actor resolution required.' });
   }
 
-  const { scope, value, reason, actor_user_id } = req.body;
+  const { scope, value, reason } = req.body;
   const allowedScopes: BlockScope[] = ['patron_user_id', 'patron_device_id_hash', 'sender_name'];
 
   if (!allowedScopes.includes(scope) || !value || !reason) {
@@ -4424,7 +4424,9 @@ app.post("/api/moderation/block", async (req, res) => {
   }
 
   const normalizedValue = String(value).trim().toLowerCase();
-  const actorId = typeof actor_user_id === 'string' ? actor_user_id : privilegedActor.actor.actorId;
+  // Always attribute to the authenticated actor -- never trust a client-supplied
+  // actor id, or any caller could falsify who performed a moderation action.
+  const actorId = privilegedActor.actor.actorId;
 
   if (!businessDb) {
     await moderationService.addBlockRule({
@@ -4493,7 +4495,7 @@ app.post("/api/moderation/block", async (req, res) => {
 app.post("/api/moderation/hide", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
 
-  const { requestId, reason, actor_user_id } = req.body;
+  const { requestId, reason } = req.body;
   if (!requestId || !reason) {
     return res.status(400).json({ error: "requestId and reason are required." });
   }
@@ -4542,7 +4544,8 @@ app.post("/api/moderation/hide", async (req, res) => {
   await moderationService.hideRequest({
     requestId: String(requestId),
     reason: String(reason),
-    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
+    // Always the authenticated actor -- never trust a client-supplied actor id.
+    actorUserId: actor.actorId
   });
 
   return res.json({ success: true, moderation_action: 'hidden', request, state: prepareRoomState(roomState, roomContext.gigId) });
@@ -4551,7 +4554,7 @@ app.post("/api/moderation/hide", async (req, res) => {
 app.post("/api/moderation/remove", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
 
-  const { requestId, reason, actor_user_id } = req.body;
+  const { requestId, reason } = req.body;
   if (!requestId || !reason) {
     return res.status(400).json({ error: "requestId and reason are required." });
   }
@@ -4603,7 +4606,8 @@ app.post("/api/moderation/remove", async (req, res) => {
   await moderationService.removeRequest({
     requestId: String(requestId),
     reason: String(reason),
-    actorUserId: typeof actor_user_id === 'string' ? actor_user_id : actor.actorId
+    // Always the authenticated actor -- never trust a client-supplied actor id.
+    actorUserId: actor.actorId
   });
 
   return res.json({ success: true, moderation_action: 'removed', request, state: prepareRoomState(roomState, roomContext.gigId) });
