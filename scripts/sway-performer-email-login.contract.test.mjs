@@ -137,6 +137,9 @@ async function main() {
     assert.ok(serverSource.includes(term), `Server performer login flow missing required term: ${term}`);
   }
 
+  assert.ok(serverSource.includes('dotenv.config({ path: ".env.local", override: false });'), 'Server must load .env.local before .env so local email credentials are available.');
+  assert.ok(!serverSource.includes('hasPerformerLoginEmailConfig: !isProduction ||'), 'Runtime config must not claim email is configured just because the server is in development.');
+
   assert.equal(normalizePerformerLoginEmail(' Perf@Sway.Tips '), 'perf@sway.tips', 'Email normalization must trim and lowercase performer emails.');
   assert.equal(normalizePerformerLoginEmail('not-an-email'), null, 'Malformed emails must be rejected.');
   assert.equal(resolvePerformerLoginRedirectPath('https://evil.com'), '/talent', 'External redirect URLs must be ignored.');

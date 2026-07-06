@@ -48,11 +48,18 @@ import {
 import { searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 
-dotenv.config();
+dotenv.config({ path: ".env.local", override: false });
+dotenv.config({ override: false });
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
+const hasPerformerLoginEmailConfig = Boolean(
+  process.env.SWAY_EMAIL_PROVIDER?.trim()
+  && process.env.SWAY_EMAIL_API_KEY?.trim()
+  && process.env.SWAY_EMAIL_FROM?.trim()
+  && (process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim())
+);
 const IDEMPOTENCY_TTL_HOURS = 48;
 const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
 const MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION = 4;
@@ -1562,12 +1569,7 @@ app.get('/api/runtime-config-status', (_req, res) => {
   res.json({
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
     hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
-    hasPerformerLoginEmailConfig: !isProduction || Boolean(
-      process.env.SWAY_EMAIL_PROVIDER?.trim()
-      && process.env.SWAY_EMAIL_API_KEY?.trim()
-      && process.env.SWAY_EMAIL_FROM?.trim()
-      && (process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim())
-    ),
+    hasPerformerLoginEmailConfig,
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
     branch: buildMarker.branch,
