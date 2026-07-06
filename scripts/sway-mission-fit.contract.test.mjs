@@ -28,6 +28,8 @@ for (const term of [
 
 for (const term of [
   'Live Command Center',
+  "useState<'live' | 'share' | 'settings'>('live')",
+  'Performer mobile sections',
   'operatorNextAction',
   'Open crowd view',
   'Share QR',

@@ -86,6 +86,7 @@ export default function TalentDashboard({
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
   const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
   const [setupMinTip, setSetupMinTip] = useState(5);
+  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   
   // Local state for interactive settings drawer
   const [showSettings, setShowSettings] = useState(false);
@@ -834,8 +835,31 @@ export default function TalentDashboard({
         </section>
       )}
 
+      {session.status !== 'inactive' && (
+        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Performer mobile sections">
+          {[
+            { id: 'live', label: 'Live' },
+            { id: 'share', label: 'Share' },
+            { id: 'settings', label: 'Settings' }
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
+              className={`min-h-11 rounded-xl px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
+                mobilePanel === item.id
+                  ? 'bg-cyan-500 text-slate-950'
+                  : 'bg-slate-950 text-slate-400'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
-      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-4 hidden lg:block'} space-y-5`}>
+      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'} space-y-5`}>
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
@@ -1272,10 +1296,10 @@ export default function TalentDashboard({
 
       {/* 3. Live Core Session Workflows */}
       {session.status !== 'inactive' && (
-        <div className="order-3 grid lg:grid-cols-3 gap-8">
+        <div className="order-4 grid lg:grid-cols-3 gap-8">
           
           {/* Main Triage and Live Auction Columns */}
-          <div className="lg:col-span-2 space-y-8">
+          <div className={`${mobilePanel === 'live' ? 'space-y-8' : 'hidden'} lg:col-span-2 lg:block lg:space-y-8`}>
 
             {/* 3-KILL. ALWAYS-VISIBLE OPERATOR KILL SWITCH */}
             <div
@@ -1748,11 +1772,13 @@ export default function TalentDashboard({
           </div>
 
           {/* Right sidebar panel: Stats and options summary */}
-          <div className="space-y-6">
+          <div className={`${mobilePanel === 'live' ? 'hidden' : 'space-y-6'} lg:block lg:space-y-6`}>
             {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
-            <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+            <div className={`${mobilePanel === 'share' ? 'block' : 'hidden'} lg:block`}>
+              <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+            </div>
 
-            <div className="hidden rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block">
+            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>
               <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
                 Set the request scope, then keep DJ control: approve, veto, pause requests, and mark playing. Patrons can request, tip, or boost, but the DJ decides what reaches the queue.
@@ -1777,7 +1803,7 @@ export default function TalentDashboard({
               </div>
             </div>
 
-            <div className="hidden rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg lg:block">
+            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg lg:block`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
@@ -1817,7 +1843,7 @@ export default function TalentDashboard({
             </div>
 
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
-            <div className={`hidden border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 lg:block ${
+            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 lg:block ${
               session.requestsOpen 
                 ? 'bg-slate-900 border-cyan-500/30' 
                 : 'bg-slate-900 border-white/5'
