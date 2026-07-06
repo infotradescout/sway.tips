@@ -835,7 +835,7 @@ export default function TalentDashboard({
       )}
 
       {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
-      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-4'} space-y-5`}>
+      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-4 hidden lg:block'} space-y-5`}>
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
@@ -1752,7 +1752,7 @@ export default function TalentDashboard({
             {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
             <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
 
-            <div className="rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg">
+            <div className="hidden rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block">
               <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
                 Set the request scope, then keep DJ control: approve, veto, pause requests, and mark playing. Patrons can request, tip, or boost, but the DJ decides what reaches the queue.
@@ -1777,7 +1777,7 @@ export default function TalentDashboard({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
+            <div className="hidden rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg lg:block">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
@@ -1817,7 +1817,7 @@ export default function TalentDashboard({
             </div>
 
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
-            <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${
+            <div className={`hidden border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 lg:block ${
               session.requestsOpen 
                 ? 'bg-slate-900 border-cyan-500/30' 
                 : 'bg-slate-900 border-white/5'
@@ -1985,7 +1985,7 @@ export default function TalentDashboard({
             </div>
 
             {/* 🌟 FEATURED PERFORMER PREMIUM HUB */}
-            <div className="bg-slate-900 border border-amber-500/20 rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden">
+            <div className="hidden bg-slate-900 border border-amber-500/20 rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden lg:block">
               <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl -mr-6 -mt-6"></div>
               
               <div className="flex justify-between items-start select-none">
@@ -2117,7 +2117,7 @@ export default function TalentDashboard({
             </div>
 
             {/* Realtime session performance card stats */}
-            <div className="bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg">
+            <div className="hidden bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg lg:block">
               <h4 className="font-display text-xs font-mono font-bold tracking-wider text-fuchsia-400 uppercase select-none">
                 Performance Meter
               </h4>
