@@ -1845,9 +1845,10 @@ export default function PatronView({
                         <div className="flex items-center gap-3.5 min-w-0">
                           <div className="relative">
                             <img
-                              src={p.avatarUrl}
+                              src={p.avatarUrl || REQUEST_ART_PLACEHOLDER}
                               alt={p.name}
                               referrerPolicy="no-referrer"
+                              onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
                               className={`w-12 h-12 rounded-xl object-cover shrink-0 select-none ${
                                 p.isFeatured ? 'border-2 border-amber-400 shadow shadow-amber-500/10' : 'border border-white/10'
                               }`}

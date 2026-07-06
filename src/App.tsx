@@ -365,7 +365,7 @@ export default function App() {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
     }
-    const response = await fetch('/api/moderation/block', {
+    const response = await fetch('/api/moderation/patron-block', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope, value, reason })

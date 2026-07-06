@@ -48,6 +48,7 @@ for (const term of ['handleReportContent', 'handleBlockFoundation', 'handleHideR
 
 const requiredServerPlaceholderTerms = [
   '/api/moderation/placeholders',
+  '/api/moderation/patron-block',
   '/api/support/contact',
   '/api/privacy/data-deletion-placeholder',
   'getAppStoreUgcControlPlaceholders'

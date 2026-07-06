@@ -4403,6 +4403,71 @@ app.post("/api/moderation/report", async (req, res) => {
   return res.json({ success: true, moderation_action: 'report_submitted' });
 });
 
+app.post("/api/moderation/patron-block", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+  const resolvedActor = accessControl.resolveServerActor(req);
+  const { scope, value, reason, patron_device_id_hash } = req.body;
+  const allowedScopes: BlockScope[] = ['patron_device_id_hash', 'sender_name'];
+
+  if (!allowedScopes.includes(scope) || !reason) {
+    return res.status(400).json({
+      error: "scope and reason are required. scope must be patron_device_id_hash or sender_name."
+    });
+  }
+
+  const normalizedValue = typeof value === 'string' && value.trim().length > 0
+    ? value.trim().toLowerCase()
+    : resolvedActor.patronDeviceIdHash ?? (typeof patron_device_id_hash === 'string' ? patron_device_id_hash.trim().toLowerCase() : 'anonymous-device');
+  const blockReason = String(reason).trim().slice(0, 500) || 'Patron requested a safety block.';
+  const entityKey = `patron-block-request:${scope}:${normalizedValue}:${Date.now()}`;
+
+  if (businessDb) {
+    await businessDb.transaction(async (tx) => {
+      await tx.insert(moderationEvents).values({
+        actorUserId: resolvedActor.actorId,
+        entityType: 'patron_block_request',
+        entityId: toAuditEntityUuid(entityKey),
+        status: 'held_for_review',
+        reason: blockReason,
+        metadata: {
+          scope,
+          value: normalizedValue,
+          patronDeviceIdHash: resolvedActor.patronDeviceIdHash ?? null,
+          source: 'moderation.patron_block'
+        }
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: resolvedActor.actorId,
+        actorType: resolvedActor.actorId ? 'resolved_actor' : 'anonymous',
+        entityType: 'moderation_patron_block_request',
+        entityId: entityKey,
+        eventType: 'moderation.patron_block.requested',
+        previousStatus: null,
+        nextStatus: 'held_for_review',
+        metadata: {
+          scope,
+          value: normalizedValue,
+          reason: blockReason
+        }
+      });
+    });
+  } else {
+    await moderationService.recordPatronBlockRequest({
+      scope,
+      value: normalizedValue,
+      reason: blockReason,
+      actorUserId: resolvedActor.actorId,
+      patronDeviceIdHash: resolvedActor.patronDeviceIdHash ?? null
+    });
+  }
+
+  return res.status(202).json({
+    success: true,
+    moderation_action: 'patron_block_requested'
+  });
+});
+
 app.post("/api/moderation/block", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
   const privilegedActor = await accessControl.requireAdminOrSupportAccess(req);

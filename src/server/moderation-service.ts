@@ -344,6 +344,28 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     });
   }
 
+  async function recordPatronBlockRequest(input: {
+    scope: Extract<BlockScope, 'patron_device_id_hash' | 'sender_name'>;
+    value: string;
+    reason: string;
+    actorUserId?: string | null;
+    patronDeviceIdHash?: string | null;
+  }) {
+    return writeModerationEvent({
+      actorUserId: input.actorUserId ?? null,
+      entityType: 'patron_block_request',
+      entityId: `${input.scope}:${input.value}:${Date.now()}`,
+      status: 'held_for_review',
+      reason: input.reason,
+      metadata: {
+        scope: input.scope,
+        value: input.value,
+        patronDeviceIdHash: input.patronDeviceIdHash ?? null,
+        source: 'moderation.patron_block'
+      }
+    });
+  }
+
   async function hideRequest(input: {
     requestId: string;
     reason: string;
@@ -377,7 +399,8 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
   function getAppStoreUgcControlPlaceholders() {
     return {
       report: '/api/moderation/report',
-      block: '/api/moderation/block',
+      block: '/api/moderation/patron-block',
+      privilegedBlock: '/api/moderation/block',
       removeHide: ['/api/moderation/hide', '/api/moderation/remove'],
       supportContact: '/api/support/contact',
       dataDeletionPlaceholder: '/api/privacy/data-deletion-placeholder'
@@ -389,6 +412,7 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     evaluateSubmission,
     addBlockRule,
     recordPatronReport,
+    recordPatronBlockRequest,
     hideRequest,
     removeRequest,
     getAppStoreUgcControlPlaceholders

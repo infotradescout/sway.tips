@@ -254,7 +254,7 @@ export default function PatronApp() {
     reason: string
   ) => {
     if (demoMode) return rejectDemoMutation();
-    return postJson('/api/moderation/block', { scope, value, reason });
+    return postJson('/api/moderation/patron-block', { scope, value, reason });
   };
 
   const handleSupportContact = async () => {
