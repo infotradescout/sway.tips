@@ -131,6 +131,139 @@
         gap: 32px;
       }
 
+      .live-feed {
+        width: min(1120px, 100%);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 20px;
+        background: linear-gradient(180deg, rgba(2, 6, 23, 0.78), rgba(2, 6, 23, 0.56));
+        box-shadow: 0 22px 72px rgba(0, 0, 0, 0.38);
+        backdrop-filter: blur(20px);
+        padding: 18px;
+      }
+
+      .live-feed-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .live-feed-kicker {
+        margin: 0;
+        color: #67e8f9;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      .live-feed-title {
+        margin: 6px 0 0;
+        color: #ffffff;
+        font-size: clamp(20px, 2.4vw, 28px);
+        font-weight: 900;
+        line-height: 1.05;
+      }
+
+      .live-feed-subtitle {
+        margin: 6px 0 0;
+        color: rgba(203, 213, 225, 0.82);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .live-feed-refresh {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        background: rgba(2, 6, 23, 0.52);
+        color: #e2e8f0;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .live-feed-refresh:hover {
+        border-color: rgba(103, 232, 249, 0.48);
+        color: #cffafe;
+      }
+
+      .live-feed-grid {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+
+      .live-feed-card {
+        display: block;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 12px;
+        text-decoration: none;
+        background: rgba(2, 6, 23, 0.6);
+        transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+      }
+
+      .live-feed-card:hover {
+        border-color: rgba(103, 232, 249, 0.56);
+        box-shadow: 0 0 24px rgba(34, 211, 238, 0.18);
+      }
+
+      .live-feed-card h3 {
+        margin: 0;
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .live-feed-meta {
+        margin-top: 5px;
+        color: rgba(148, 163, 184, 0.92);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .live-feed-headline {
+        margin-top: 8px;
+        color: rgba(226, 232, 240, 0.88);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .live-feed-links {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .live-feed-link {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 999px;
+        padding: 5px 8px;
+        color: rgba(186, 230, 253, 0.92);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .live-feed-status {
+        margin-top: 12px;
+        color: rgba(148, 163, 184, 0.78);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .live-feed-status.is-error {
+        color: #fda4af;
+      }
+
       .desktop-copy {
         display: none;
       }
@@ -482,6 +615,11 @@
           justify-items: stretch;
         }
 
+        .live-feed {
+          grid-column: 1 / -1;
+          margin-top: 4px;
+        }
+
         .desktop-copy {
           display: block;
           max-width: 560px;
@@ -539,6 +677,15 @@
         .cta-stack {
           width: min(100%, 390px);
           gap: 10px;
+        }
+
+        .live-feed {
+          border-radius: 16px;
+          padding: 14px;
+        }
+
+        .live-feed-grid {
+          grid-template-columns: 1fr;
         }
 
         .btn {
@@ -730,6 +877,19 @@
             <a class="btn secondary" href="/talent/login">Login</a>
             <a class="tagline" href="/faq">sway to play</a>
           </nav>
+
+          <section class="live-feed" id="live-feed" aria-label="Live rooms feed">
+            <div class="live-feed-header">
+              <div>
+                <p class="live-feed-kicker">Now live on Sway</p>
+                <h2 class="live-feed-title">Discover Active Rooms</h2>
+                <p class="live-feed-subtitle">Jump straight into live requests, tips, and queue action.</p>
+              </div>
+              <button type="button" class="live-feed-refresh" data-live-feed-refresh>Refresh feed</button>
+            </div>
+            <div class="live-feed-grid" data-live-feed-grid></div>
+            <p class="live-feed-status" data-live-feed-status>Loading live rooms...</p>
+          </section>
         </div>
       </main>
 
@@ -758,6 +918,102 @@
         </div>
       </section>
     </div>
+
+    <script>
+      (() => {
+        const grid = document.querySelector('[data-live-feed-grid]');
+        const status = document.querySelector('[data-live-feed-status]');
+        const refreshButton = document.querySelector('[data-live-feed-refresh]');
+        if (!(grid instanceof HTMLElement) || !(status instanceof HTMLElement)) return;
+
+        const socialEntries = (socialLinks) => {
+          if (!socialLinks || typeof socialLinks !== 'object') return [];
+          return Object.entries(socialLinks)
+            .filter(([, url]) => typeof url === 'string' && url.length > 0)
+            .slice(0, 3);
+        };
+
+        const roomCard = (room) => {
+          const card = document.createElement('a');
+          card.className = 'live-feed-card';
+          card.href = room.routePath || '/home';
+
+          const title = document.createElement('h3');
+          title.textContent = room.performerName || 'Live performer';
+          card.appendChild(title);
+
+          const meta = document.createElement('p');
+          const handle = room.performerHandle ? `@${room.performerHandle}` : 'no handle';
+          const city = room.profile && room.profile.city ? ` • ${room.profile.city}` : '';
+          meta.className = 'live-feed-meta';
+          meta.textContent = `${handle} • ${room.requestCount || 0} requests${city}`;
+          card.appendChild(meta);
+
+          const headline = document.createElement('p');
+          headline.className = 'live-feed-headline';
+          headline.textContent = (room.profile && room.profile.headline) || `${room.talentRole || 'Performer'} live now`;
+          card.appendChild(headline);
+
+          const links = socialEntries(room.profile && room.profile.socialLinks);
+          if (links.length) {
+            const linksWrap = document.createElement('div');
+            linksWrap.className = 'live-feed-links';
+            for (const [label] of links) {
+              const chip = document.createElement('span');
+              chip.className = 'live-feed-link';
+              chip.textContent = label;
+              linksWrap.appendChild(chip);
+            }
+            card.appendChild(linksWrap);
+          }
+
+          return card;
+        };
+
+        const renderRooms = (rooms) => {
+          grid.innerHTML = '';
+          if (!Array.isArray(rooms) || rooms.length === 0) {
+            status.textContent = 'No live rooms yet. Check back when performers go live.';
+            status.classList.remove('is-error');
+            return;
+          }
+
+          rooms.forEach((room) => {
+            grid.appendChild(roomCard(room));
+          });
+          status.textContent = `${rooms.length} live room${rooms.length === 1 ? '' : 's'} available right now.`;
+          status.classList.remove('is-error');
+        };
+
+        const loadFeed = async () => {
+          status.textContent = 'Loading live rooms...';
+          status.classList.remove('is-error');
+          try {
+            const response = await fetch('/api/public/feed?limit=8', { cache: 'no-store' });
+            if (!response.ok) {
+              throw new Error('Unable to load live feed.');
+            }
+            const payload = await response.json();
+            renderRooms(payload && payload.rooms);
+          } catch {
+            grid.innerHTML = '';
+            status.textContent = 'Unable to load live rooms right now.';
+            status.classList.add('is-error');
+          }
+        };
+
+        if (refreshButton instanceof HTMLButtonElement) {
+          refreshButton.addEventListener('click', () => {
+            void loadFeed();
+          });
+        }
+
+        void loadFeed();
+        window.setInterval(() => {
+          void loadFeed();
+        }, 15000);
+      })();
+    </script>
 
     <script>
       (() => {
