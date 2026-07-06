@@ -23,6 +23,7 @@ import {
   Flame, 
   Activity,
   Award,
+  Sliders,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -960,6 +961,24 @@ export default function PatronView({
     .sort((a, b) => b.amount - a.amount);
 
   const newestModeratableRequest = requests.find((item) => !item.removed);
+  const requestScopeCopy = (() => {
+    if (session.searchScope === 'setlist') {
+      return {
+        label: 'Setlist requests',
+        body: "Pick from this room's setlist or send a manual request. The DJ decides what is approved and played."
+      };
+    }
+    if (session.searchScope === 'catalog') {
+      return {
+        label: 'Open request lane',
+        body: 'Search broadly or type a manual request. The DJ decides what is approved and played.'
+      };
+    }
+    return {
+      label: 'DJ library requests',
+      body: "Search the DJ's synced library when available, or send a manual request if the song is not listed. The DJ decides what is approved and played."
+    };
+  })();
 
   const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
     try {
@@ -1041,6 +1060,16 @@ export default function PatronView({
                   {session.paymentsEnabled === false ? 'Upvote' : 'Boost'}
                 </p>
                 <p className="mt-1 text-[10px] text-slate-400">Push an approved item up</p>
+              </div>
+            </div>
+            <div className="w-full max-w-md rounded-xl border border-cyan-500/20 bg-slate-950/70 px-4 py-3 text-left">
+              <div className="flex items-start gap-2">
+                <Sliders className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
+                <div>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">Request scope</p>
+                  <p className="mt-1 text-xs font-bold text-white">{requestScopeCopy.label}</p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{requestScopeCopy.body}</p>
+                </div>
               </div>
             </div>
           </div>

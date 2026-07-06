@@ -649,6 +649,11 @@ export default function TalentDashboard({
   const poolBackersCount = requests
     .filter(r => !r.hidden && !r.removed)
     .reduce((sum, r) => sum + Math.max(1, r.sponsorCount), 0);
+  const requestScopeLabel = session.searchScope === 'setlist'
+    ? "This Gig's Setlist"
+    : session.searchScope === 'catalog'
+      ? 'Open Catalog'
+      : 'My Library';
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -1645,6 +1650,31 @@ export default function TalentDashboard({
 
           {/* Right sidebar panel: Stats and options summary */}
           <div className="space-y-6">
+            <div className="rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg">
+              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                Set the request scope, then keep DJ control: approve, veto, pause requests, and mark playing. Patrons can request, tip, or boost, but the DJ decides what reaches the queue.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Request scope</p>
+                  <p className="mt-1 text-xs font-bold text-white">{requestScopeLabel}</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">DJ decides</p>
+                  <p className="mt-1 text-xs font-bold text-white">Approve or Veto</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room brake</p>
+                  <p className="mt-1 text-xs font-bold text-white">Pause Requests</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Live state</p>
+                  <p className="mt-1 text-xs font-bold text-white">Mark Playing</p>
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
               <div className="flex items-start justify-between gap-3">
                 <div>
