@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
+    "db:preflight:performer-handles": "node scripts/sway-performer-handle-duplicate-preflight.mjs",
     "library:bridge": "node scripts/sway-library-bridge.mjs",
     "performer:access:link": "node scripts/sway-performer-access-link.mjs",
     "smoke:local:app": "node scripts/sway-local-app-smoke.mjs",

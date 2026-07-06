@@ -33,6 +33,7 @@ Useful checks:
 - `npm run lint`
 - `npm run build`
 - `npm run smoke:local:app`
+- `npm run db:preflight:performer-handles` (requires `DATABASE_URL`; blocks migration 0013 if case-insensitive duplicate handles exist)
 
 ## Performer Library Bridge
 
