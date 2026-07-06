@@ -210,6 +210,20 @@ async function main() {
     'Non-production performer login mailer must log the generated magic link for operators.'
   );
 
+  const partiallyConfiguredMailer = createPerformerLoginMailer({
+    env: {
+      SWAY_EMAIL_PROVIDER: 'resend',
+      SWAY_EMAIL_FROM: 'Sway <performers@sway.tips>',
+      SWAY_APP_BASE_URL: 'http://localhost:4899'
+    },
+    isProduction: false
+  });
+  const partialConfigResult = await partiallyConfiguredMailer.sendMagicLink({
+    toEmail: 'perf@sway.tips',
+    magicLink: 'http://localhost:4899/api/talent/login/consume?token=abc'
+  });
+  assert.equal(partialConfigResult.delivered, false, 'A selected email provider with missing credentials must fail instead of falling back to mock.');
+
   assert.ok(emailRunbook.includes('secondary'), 'Magic-link runbook must document recovery-only positioning.');
   assert.ok(bootstrapRunbook.includes('fallback'), 'Bootstrap runbook must remain documented as the support fallback path.');
   assert.ok(

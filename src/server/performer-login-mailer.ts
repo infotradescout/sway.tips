@@ -31,14 +31,19 @@ export function createPerformerLoginMailer({
     const fromAddress = env.SWAY_EMAIL_FROM?.trim() || '';
     const appBaseUrl = resolvePerformerLoginBaseUrl(env).trim();
 
-    if (!provider || !apiKey || !fromAddress || !appBaseUrl) {
+    if (!provider) {
       if (!isProduction) {
         console.log(`[SWAY_EMAIL_MOCK] ${subject} for ${toEmail}: ${link}`);
         return { delivered: true as const, provider: 'mock' as const };
       }
 
+      console.error('Performer login email delivery unavailable: missing SWAY_EMAIL_PROVIDER.');
+      return { delivered: false as const, provider: 'missing' };
+    }
+
+    if (!apiKey || !fromAddress || !appBaseUrl) {
       console.error('Performer login email delivery unavailable: missing SWAY_EMAIL_PROVIDER, SWAY_EMAIL_API_KEY, SWAY_EMAIL_FROM, or SWAY_APP_BASE_URL.');
-      return { delivered: false as const, provider: provider || 'missing' };
+      return { delivered: false as const, provider };
     }
 
     const bodyText = [
