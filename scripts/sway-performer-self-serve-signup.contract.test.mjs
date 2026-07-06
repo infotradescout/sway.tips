@@ -29,6 +29,7 @@ async function main() {
   const accessSource = readFileSync(join(root, 'src/server/access-control.ts'), 'utf8');
   const talentAppSource = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
   const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8');
+  const schemaSource = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
   const signupCardSource = readFileSync(join(root, 'src/components/TalentSignupCard.tsx'), 'utf8');
   const envExample = readFileSync(join(root, '.env.example'), 'utf8');
   const envContract = readFileSync(join(root, 'docs/SWAY_ENVIRONMENT_CONTRACT.md'), 'utf8');
@@ -88,6 +89,7 @@ async function main() {
     "challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL",
     'performerLoginMailer.sendVerificationLink',
     'This handle is already taken.',
+    'idx_performers_handle_lower',
     'This email or handle is already in use.',
     'Password confirmation does not match.',
     'Terms acceptance is required before creating a performer account.',
@@ -100,6 +102,14 @@ async function main() {
   assert.equal(normalizePerformerHandle('DJ-Sunset'), 'DJ-Sunset', 'Performer handles must allow performer-chosen casing.');
   assert.equal(normalizePerformerHandle('bad handle'), null, 'Performer handles must reject spaces.');
   assert.equal(normalizePerformerHandle('bad*handle'), null, 'Performer handles must reject unsupported characters.');
+  assert.ok(
+    schemaSource.includes("uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`)"),
+    'Performer handle uniqueness must be case-insensitive at the schema level.'
+  );
+  assert.ok(
+    readFileSync(join(root, 'drizzle/0013_performer_handle_case_insensitive.sql'), 'utf8').includes('idx_performers_handle_lower'),
+    'Performer handle migration must add the case-insensitive uniqueness index.'
+  );
   assert.equal(normalizePerformerDisplayName(' DJ Sunset '), 'DJ Sunset', 'Performer display names must trim.');
   assert.equal(normalizePerformerDisplayName(''), null, 'Performer display names must reject empty strings.');
   assert.equal(normalizePerformerPassword('secret123'), 'secret123', 'Performer passwords must stay in request scope only as raw strings.');

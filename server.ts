@@ -1552,7 +1552,10 @@ app.post('/api/talent/signup', async (req, res) => {
 
     res.status(202).json(performerSignupSuccessResponse());
   } catch (error) {
-    if (isUniqueConstraintViolation(error, 'idx_performers_handle')) {
+    if (
+      isUniqueConstraintViolation(error, 'idx_performers_handle') ||
+      isUniqueConstraintViolation(error, 'idx_performers_handle_lower')
+    ) {
       res.status(409).json({ error: 'This handle is already taken.' });
       return;
     }

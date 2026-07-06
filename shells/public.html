@@ -464,8 +464,8 @@
           position: absolute;
           inset: 0;
           background:
-            linear-gradient(90deg, rgba(2, 3, 10, 0.74), rgba(2, 3, 10, 0.18) 46%, rgba(2, 3, 10, 0.66)),
-            radial-gradient(circle at 74% 42%, rgba(34, 211, 238, 0.18), transparent 34%);
+            linear-gradient(90deg, rgba(2, 3, 10, 0.82), rgba(2, 3, 10, 0.2) 42%, rgba(2, 3, 10, 0.8) 67%, rgba(2, 3, 10, 0.92)),
+            radial-gradient(circle at 72% 42%, rgba(34, 211, 238, 0.16), transparent 34%);
         }
 
         .backdrop img {
@@ -495,7 +495,23 @@
 
         .cta-stack {
           justify-self: end;
-          width: min(430px, 34vw);
+          width: min(460px, 36vw);
+          padding: 20px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 20px;
+          background: linear-gradient(180deg, rgba(2, 6, 23, 0.74), rgba(2, 6, 23, 0.48));
+          box-shadow: 0 24px 90px rgba(0, 0, 0, 0.38);
+          backdrop-filter: blur(22px);
+        }
+
+        .btn.primary {
+          background: linear-gradient(90deg, rgba(236, 72, 153, 0.98), rgba(168, 85, 247, 0.96) 52%, rgba(34, 211, 238, 0.92));
+          border-color: rgba(244, 114, 182, 0.62);
+        }
+
+        .btn.secondary {
+          background: rgba(2, 6, 23, 0.78);
+          border-color: rgba(148, 163, 184, 0.24);
         }
 
         footer {

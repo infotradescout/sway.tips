@@ -92,6 +92,13 @@
       "when": 1783200000000,
       "tag": "0012_performer_setlist_tracks",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783290000000,
+      "tag": "0013_performer_handle_case_insensitive",
+      "breakpoints": true
     }
   ]
 }

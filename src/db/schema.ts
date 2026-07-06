@@ -128,6 +128,7 @@ export const performers = pgTable('performers', {
   ...timestamps
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
+  handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 

@@ -86,7 +86,7 @@ export default function TalentSignupCard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+    <div className="min-h-screen bg-slate-950 px-4 pb-24 pt-8 text-slate-100 sm:pb-8">
       <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.08fr,0.92fr]">
         <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(217,70,239,0.18),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.96),_rgba(2,6,23,1))] p-7 shadow-2xl">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
