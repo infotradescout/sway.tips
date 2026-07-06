@@ -13,7 +13,7 @@ import { readFileSync } from "fs";
 import { and, asc, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -1769,10 +1769,19 @@ app.post('/api/talent/signup', async (req, res) => {
     });
 
     if (!deliveryResult.delivered) {
-      await performerLoginChallengeStore.revokeChallengeById({
-        challengeId: outcome.challengeId
+      // The account was already created in the transaction above. If we only
+      // revoke the challenge and stop here, the handle and email are
+      // permanently squatted by a dead, unverifiable account -- signup can
+      // never be retried with either one, and there's no resend-verification
+      // endpoint to recover it. Any transient email-provider failure (not
+      // just misconfiguration) would strand a real signup forever. Fully
+      // undo the account creation so the person can just try again.
+      await businessDb.transaction(async (tx) => {
+        await tx.delete(performerLoginChallenges).where(eq(performerLoginChallenges.id, outcome.challengeId));
+        await tx.delete(performers).where(eq(performers.ownerUserId, outcome.createdUserId));
+        await tx.delete(users).where(eq(users.id, outcome.createdUserId));
       });
-      res.status(503).json({ error: 'Performer verification email delivery is temporarily unavailable.' });
+      res.status(503).json({ error: 'Performer verification email delivery is temporarily unavailable. Please try signing up again.' });
       return;
     }
 
