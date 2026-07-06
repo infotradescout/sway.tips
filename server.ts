@@ -13,7 +13,7 @@ import { readFileSync } from "fs";
 import { and, asc, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -3114,6 +3114,91 @@ app.get('/api/public/feed', async (_req, res) => {
         } : null
       };
     })
+  });
+});
+
+app.get('/api/public/performer/:handle', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const normalizedHandle = normalizePerformerHandle(req.params.handle);
+  if (!normalizedHandle) {
+    return res.status(404).json({ error: 'Performer profile not found.' });
+  }
+
+  if (!businessDb) {
+    return res.status(503).json({ error: 'Public performer profiles require a durable database connection.' });
+  }
+
+  const [profile] = await businessDb
+    .select({
+      performerId: performers.id,
+      displayName: performers.displayName,
+      handle: performers.handle,
+      bio: performers.bio,
+      headline: performerPublicProfiles.headline,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      instagramUrl: performerPublicProfiles.instagramUrl,
+      tiktokUrl: performerPublicProfiles.tiktokUrl,
+      youtubeUrl: performerPublicProfiles.youtubeUrl,
+      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+      websiteUrl: performerPublicProfiles.websiteUrl
+    })
+    .from(performers)
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(sql`lower(${performers.handle}) = ${normalizedHandle}`)
+    .limit(1);
+
+  if (!profile) {
+    return res.status(404).json({ error: 'Performer profile not found.' });
+  }
+
+  const [activeRoom] = await businessDb
+    .select({
+      gigId: activeRoomRegistry.gigId,
+      routePath: activeRoomRegistry.routePath,
+      talentRole: activeRoomRegistry.talentRole,
+      startedAt: activeRoomRegistry.startedAt
+    })
+    .from(activeRoomRegistry)
+    .where(and(
+      eq(activeRoomRegistry.performerId, profile.performerId),
+      eq(activeRoomRegistry.registryStatus, 'active')
+    ))
+    .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
+    .limit(1);
+
+  const activeRooms = await listReadableActiveRooms();
+  const activeRoomSummary = activeRoom
+    ? activeRooms.find((room) => room.gigId === activeRoom.gigId) ?? null
+    : null;
+
+  return res.json({
+    performer: {
+      id: profile.performerId,
+      displayName: profile.displayName,
+      handle: profile.handle,
+      bio: profile.bio,
+      headline: profile.headline,
+      city: profile.city,
+      avatarUrl: profile.avatarUrl,
+      socialLinks: toPublicSocialLinks({
+        instagramUrl: profile.instagramUrl,
+        tiktokUrl: profile.tiktokUrl,
+        youtubeUrl: profile.youtubeUrl,
+        soundcloudUrl: profile.soundcloudUrl,
+        websiteUrl: profile.websiteUrl
+      })
+    },
+    activeRoom: activeRoom
+      ? {
+          gigId: activeRoom.gigId,
+          routePath: activeRoom.routePath,
+          talentRole: activeRoom.talentRole,
+          startedAt: activeRoom.startedAt,
+          requestCount: activeRoomSummary?.requestCount ?? 0
+        }
+      : null
   });
 });
 

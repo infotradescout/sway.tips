@@ -31,11 +31,24 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function PatronNoSessionRecovery({
-  onReturnHomeClick
+  onReturnHomeClick,
+  performerHandle
 }: {
   onReturnHomeClick: () => void;
+  performerHandle?: string;
 }) {
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [performerProfile, setPerformerProfile] = useState<{
+    displayName: string;
+    handle: string | null;
+    headline: string | null;
+    city: string | null;
+    socialLinks: Record<string, string | null>;
+    activeRoom: {
+      routePath: string;
+      requestCount: number;
+    } | null;
+  } | null>(null);
   const [publicRooms, setPublicRooms] = useState<Array<{
     gigId: string;
     routePath: string;
@@ -73,6 +86,48 @@ function PatronNoSessionRecovery({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!performerHandle) {
+      setPerformerProfile(null);
+      return;
+    }
+
+    const loadPerformerProfile = async () => {
+      try {
+        const response = await fetch(`/api/public/performer/${encodeURIComponent(performerHandle)}`);
+        if (!response.ok) {
+          if (!cancelled) setPerformerProfile(null);
+          return;
+        }
+        const data = await response.json().catch(() => null);
+        if (cancelled || !data?.performer) return;
+        setPerformerProfile({
+          displayName: data.performer.displayName || 'Performer',
+          handle: data.performer.handle || null,
+          headline: data.performer.headline || data.performer.bio || null,
+          city: data.performer.city || null,
+          socialLinks: typeof data.performer.socialLinks === 'object' && data.performer.socialLinks
+            ? data.performer.socialLinks
+            : {},
+          activeRoom: data.activeRoom
+            ? {
+                routePath: data.activeRoom.routePath,
+                requestCount: Number(data.activeRoom.requestCount) || 0
+              }
+            : null
+        });
+      } catch {
+        if (!cancelled) setPerformerProfile(null);
+      }
+    };
+
+    void loadPerformerProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [performerHandle]);
+
   return (
     <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center justify-center overflow-hidden px-4 py-16">
       <AppBackdrop />
@@ -109,6 +164,46 @@ function PatronNoSessionRecovery({
         >
           sway to play
         </a>
+
+        {performerProfile ? (
+          <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-slate-950/70 p-4 backdrop-blur">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Performer profile</p>
+            <p className="mt-2 text-sm font-bold text-white">{performerProfile.displayName}</p>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {performerProfile.handle ? `@${performerProfile.handle}` : '@performer'}
+              {performerProfile.city ? ` - ${performerProfile.city}` : ''}
+            </p>
+            <p className="mt-2 text-xs text-slate-300">
+              {performerProfile.headline || 'Follow this performer and join their live room when they open requests.'}
+            </p>
+            {performerProfile.activeRoom ? (
+              <a
+                href={performerProfile.activeRoom.routePath}
+                className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-xs font-black text-slate-950 transition-colors hover:bg-cyan-400"
+              >
+                Join live room ({performerProfile.activeRoom.requestCount} requests)
+              </a>
+            ) : (
+              <p className="mt-3 text-[11px] text-slate-500">No active room right now.</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(performerProfile.socialLinks)
+                .filter(([, url]) => typeof url === 'string' && url.length > 0)
+                .slice(0, 4)
+                .map(([label, url]) => (
+                  <a
+                    key={label}
+                    href={url as string}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border border-white/10 bg-slate-900 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-200"
+                  >
+                    {label}
+                  </a>
+                ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4 backdrop-blur">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Live public feed</p>
@@ -347,7 +442,10 @@ export default function PatronApp() {
           {shouldShowEndedRoomRecovery ? (
             <EndedLiveRoomRecovery />
           ) : shouldShowNoSessionRecovery ? (
-            <PatronNoSessionRecovery onReturnHomeClick={handleReturnHomeClick} />
+            <PatronNoSessionRecovery
+              onReturnHomeClick={handleReturnHomeClick}
+              performerHandle={route.name === 'performer' ? route.performerHandle : undefined}
+            />
           ) : (
             <SplitViewShell
               title="Patron App"
