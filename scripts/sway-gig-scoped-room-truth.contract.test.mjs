@@ -42,8 +42,19 @@ if (!overlaySource.includes("statePath: routeGigId ? `/api/state/${routeGigId}` 
   failures.push('OverlayApp.tsx must fetch room state through the exact route gigId.');
 }
 
-if (!overlaySource.includes("if (roomLookup.status !== 'active') return <JoinLiveRoomRecovery />;")) {
+// OverlayApp is an OBS/streaming browser source, so its fail-closed fallback must stay
+// transparent rather than reusing the patron-facing JoinLiveRoomRecovery card (which is
+// opaque and would cover part of a live video feed). It must still fail closed: every
+// non-active status renders a caption-only component with no access to bState.requests,
+// so no live room data can leak through before roomLookup.status === 'active' is confirmed.
+if (!overlaySource.includes("if (roomLookup.status !== 'active') return <OverlayCaption")) {
   failures.push('OverlayApp.tsx must fail closed instead of rendering another room state.');
+}
+
+const overlayActiveGateIndex = overlaySource.indexOf("roomLookup.status !== 'active'");
+const overlayRequestsUsageIndex = overlaySource.indexOf('bState.requests');
+if (overlayActiveGateIndex === -1 || overlayRequestsUsageIndex === -1 || overlayActiveGateIndex > overlayRequestsUsageIndex) {
+  failures.push('OverlayApp.tsx must resolve every non-active fail-closed branch before reading bState.requests.');
 }
 
 if (!sharedSource.includes('statePath?: string | null;')) {

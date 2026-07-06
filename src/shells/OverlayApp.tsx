@@ -1,12 +1,28 @@
 import { RequestItem } from '../types';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
-import { JoinLiveRoomRecovery, useSwayState } from './shared';
+import { useSwayState } from './shared';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function resolveOverlayGigId(pathname: string) {
   const parts = pathname.split('/').filter(Boolean);
   return parts[0] === 'overlay' && UUID_PATTERN.test(parts[1] || '') ? parts[1] : null;
+}
+
+// An OBS/streaming browser source needs a transparent background at all
+// times -- unlike the patron-facing shell, it must never cover the video
+// feed with an opaque loading spinner or a big branded CTA card.
+function OverlayCaption({ text }: { text: string }) {
+  return (
+    <div className="absolute inset-0 bg-transparent text-white p-4 overflow-hidden select-none">
+      <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 mb-3">
+        <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">SWAY LIVE ROOM</span>
+      </div>
+      <div className="text-center py-4 bg-slate-950/40 rounded border border-white/5 text-[10px] text-slate-500 font-mono">
+        {text}
+      </div>
+    </div>
+  );
 }
 
 export default function OverlayApp() {
@@ -17,8 +33,10 @@ export default function OverlayApp() {
 
   // Render nothing on first load rather than flashing a spinner over the stream.
   if (isLoading) return null;
-  if (!routeGigId) return <JoinLiveRoomRecovery />;
-  if (roomLookup.status !== 'active') return <JoinLiveRoomRecovery />;
+  if (roomLookup.status === 'ended') return <OverlayCaption text="Live room ended" />;
+  if (roomLookup.status === 'error') return <OverlayCaption text="Reconnecting to live room..." />;
+  if (!routeGigId) return <OverlayCaption text="This overlay link is missing a room ID" />;
+  if (roomLookup.status !== 'active') return <OverlayCaption text="Waiting for this room to go live..." />;
 
   const upNextQueue = bState.requests
     .filter((r: RequestItem) => r.status === 'approved' && !r.hidden && !r.removed)
