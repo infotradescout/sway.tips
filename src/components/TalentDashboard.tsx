@@ -1125,6 +1125,20 @@ export default function TalentDashboard({
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
                 Open a live room for tonight and share it with the crowd in one step. Your room-specific link and QR appear after the room goes live.
               </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">1. Start room</p>
+                  <p className="mt-1 text-xs font-bold text-white">Create the live route</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">2. Share QR</p>
+                  <p className="mt-1 text-xs font-bold text-white">Point the crowd in</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">3. DJ decides</p>
+                  <p className="mt-1 text-xs font-bold text-white">Approve or veto</p>
+                </div>
+              </div>
               <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
                 <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-semibold text-white">
                   Performer: {welcomePerformerName}
@@ -1735,6 +1749,9 @@ export default function TalentDashboard({
 
           {/* Right sidebar panel: Stats and options summary */}
           <div className="space-y-6">
+            {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
+            <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+
             <div className="rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg">
               <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
@@ -1798,9 +1815,6 @@ export default function TalentDashboard({
                 </p>
               )}
             </div>
-
-            {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
-            <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
 
             {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
             <div className={`border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 ${

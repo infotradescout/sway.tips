@@ -10,6 +10,8 @@ function read(relPath) {
 
 const patronView = read('src/components/PatronView.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
+const talentApp = read('src/shells/TalentApp.tsx');
+const performerShareKit = read('src/components/PerformerShareKit.tsx');
 
 for (const term of [
   'Request scope',
@@ -28,6 +30,8 @@ for (const term of [
   'Live Command Center',
   'operatorNextAction',
   'Open crowd view',
+  'Share QR',
+  '3. DJ decides',
   'Before You Share',
   'Set the request scope',
   'Patrons can request, tip, or boost',
@@ -38,6 +42,27 @@ for (const term of [
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Performer mission control copy missing: ${term}`);
+  }
+}
+
+for (const term of [
+  'Crowd route',
+  'Request scope',
+  'Crowd can request; performer approves what moves forward.'
+]) {
+  if (!talentApp.includes(term)) {
+    failures.push(`Talent shell room-state copy missing: ${term}`);
+  }
+}
+
+for (const term of [
+  '1. Start room',
+  '2. Confirm scope',
+  '3. Share QR',
+  'Patron entry'
+]) {
+  if (!performerShareKit.includes(term)) {
+    failures.push(`Performer share kit first-run copy missing: ${term}`);
   }
 }
 

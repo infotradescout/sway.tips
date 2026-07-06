@@ -250,6 +250,15 @@ export default function TalentApp() {
     || 'Unassigned performer';
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
+  const selectedRoomRoute = selectedGigId ?? activeGigId;
+  const selectedRoomSummary = selectedRoomRoute
+    ? activeRooms.find((room) => room.gigId === selectedRoomRoute)
+    : null;
+  const scopeLabel = session.searchScope === 'setlist'
+    ? "This Gig's Setlist"
+    : session.searchScope === 'catalog'
+      ? 'Open Catalog'
+      : 'My Library';
 
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
 
@@ -313,7 +322,7 @@ export default function TalentApp() {
             }
             secondary={
               <div className="space-y-4 text-sm">
-                <div>
+                <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
                   <p className="mt-1 font-bold text-white">{session.status === 'inactive' ? performerIdentityName : (session.talentName || performerIdentityName)}</p>
                   <p className="text-xs text-slate-400">
@@ -323,19 +332,33 @@ export default function TalentApp() {
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-slate-950 p-3">
+                  <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                     <p className="text-slate-500">Pending</p>
                     <p className="mt-1 font-mono text-lg font-black text-amber-300">{pendingCount}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-950 p-3">
+                  <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                     <p className="text-slate-500">Approved</p>
                     <p className="mt-1 font-mono text-lg font-black text-cyan-300">{approvedCount}</p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Window</p>
-                  <p className="mt-2 font-bold text-white">{session.requestsOpen ? 'Open' : 'Closed'}</p>
+                  <p className={`mt-2 font-bold ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>{session.requestsOpen ? 'Open' : 'Closed'}</p>
                   <p className="text-xs text-slate-400">{session.requestWindowLabel || 'Manual request window'}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Crowd route</p>
+                  <p className="mt-2 break-all font-mono text-xs font-bold text-white">
+                    {selectedRoomRoute ? `/g/${selectedRoomRoute}` : 'Generated after room start'}
+                  </p>
+                  {selectedRoomSummary ? (
+                    <p className="mt-2 text-xs text-slate-400">{selectedRoomSummary.requestCount} live item{selectedRoomSummary.requestCount === 1 ? '' : 's'} on this route.</p>
+                  ) : null}
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Request scope</p>
+                  <p className="mt-2 font-bold text-white">{scopeLabel}</p>
+                  <p className="text-xs text-slate-400">Crowd can request; performer approves what moves forward.</p>
                 </div>
               </div>
             }

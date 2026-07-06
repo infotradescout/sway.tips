@@ -185,15 +185,54 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
       </div>
 
       <div className="mt-4 space-y-3">
-        <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
-          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room link</p>
-          <p data-share-kit-room-link="true" className={`mt-2 break-all text-xs font-semibold ${roomLink ? 'text-white' : 'text-slate-500'}`}>
-            {roomLink ?? MISSING_CONTEXT_COPY}
-          </p>
-          <p className="mt-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-            {roomPath ? `Live path: ${roomPath}` : 'Start a live room to generate the patron route.'}
-          </p>
-        </div>
+        {roomLink ? (
+          <div className="rounded-2xl border border-fuchsia-500/30 bg-slate-950 p-4">
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="min-w-0">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Patron entry</p>
+                <p data-share-kit-room-link="true" className="mt-2 break-all text-sm font-black text-white">
+                  {roomLink}
+                </p>
+                <p className="mt-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+                  {roomPath ? `Live path: ${roomPath}` : 'Start a live room to generate the patron route.'}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white p-3 shadow-inner" data-share-kit-room-qr="true">
+                <QRCodeCanvas
+                  key={roomLink}
+                  ref={canvasRef}
+                  aria-label="Live room QR code"
+                  className="mx-auto h-auto max-w-full"
+                  value={roomLink}
+                  size={176}
+                  level="H"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  marginSize={4}
+                />
+              </div>
+            </div>
+            <p className="mt-3 text-[10px] leading-relaxed text-slate-400">{ACTIVE_HELP_COPY}</p>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950 px-4 py-5 text-left">
+            <p className="text-xs font-bold text-white">{QR_EMPTY_STATE_COPY}</p>
+            <div className="mt-4 grid gap-2 text-[10px] text-slate-400">
+              <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                <span className="font-mono uppercase tracking-widest text-slate-500">1. Start room</span>
+                <p className="mt-1">Start a live room from the setup flow.</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                <span className="font-mono uppercase tracking-widest text-slate-500">2. Confirm scope</span>
+                <p className="mt-1">Choose library, setlist, or open request lane.</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+                <span className="font-mono uppercase tracking-widest text-slate-500">3. Share QR</span>
+                <p className="mt-1">Show the room code once the live route is generated.</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
           <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Browser overlay</p>
@@ -204,30 +243,6 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
             {overlayPath ? `Use ${overlayPath} in a browser or OBS browser source manually.` : 'Overlay route appears here after the room goes live.'}
           </p>
         </div>
-
-        {roomLink ? (
-          <div className="rounded-2xl border border-white/10 bg-slate-950 p-4">
-            <div className="rounded-2xl bg-white p-4 shadow-inner" data-share-kit-room-qr="true">
-              <QRCodeCanvas
-                key={roomLink}
-                ref={canvasRef}
-                aria-label="Live room QR code"
-                className="mx-auto h-auto max-w-full"
-                value={roomLink}
-                size={208}
-                level="H"
-                bgColor="#ffffff"
-                fgColor="#000000"
-                marginSize={4}
-              />
-            </div>
-            <p className="mt-3 text-[10px] leading-relaxed text-slate-400">{ACTIVE_HELP_COPY}</p>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950 px-4 py-8 text-center text-[10px] text-slate-500">
-            {QR_EMPTY_STATE_COPY}
-          </div>
-        )}
 
         <div className="grid gap-2 sm:grid-cols-2">
           <button
