@@ -1,5 +1,5 @@
 import { Lock, Sparkles } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
 const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
@@ -20,6 +20,14 @@ export default function TalentSignupCard() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [status, setStatus] = useState<SignupStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get('email');
+    if (!emailParam) return;
+    setEmail(emailParam.trim().toLowerCase());
+  }, []);
 
   const handleError = handle.length > 0 && !HANDLE_PATTERN.test(handle)
     ? 'Letters, numbers, hyphens, and underscores only.'

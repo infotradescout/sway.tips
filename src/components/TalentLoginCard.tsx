@@ -1,5 +1,5 @@
 import { KeyRound, Lock } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
 const RECOVERY_SUCCESS_COPY = 'If this email is on an approved Sway performer account, we sent a link.';
@@ -14,6 +14,11 @@ export default function TalentLoginCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus>('idle');
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const signupHref = useMemo(() => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return '/talent/signup';
+    return `/talent/signup?email=${encodeURIComponent(normalizedEmail)}`;
+  }, [email]);
 
   const statusMessage = useAuthQueryStatusMessage({
     'invalid-link': 'This sign-in or verification link is no longer valid. Request a fresh recovery link if you still need help.',
@@ -102,6 +107,26 @@ export default function TalentLoginCard() {
         {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}
 
         {message ? <StatusBanner tone="rose" message={message} /> : null}
+        {status === 'error' ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <a
+              href={signupHref}
+              className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-500/20"
+            >
+              Use this email to create account
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                const form = document.getElementById('talent-login-recovery-form') as HTMLFormElement | null;
+                form?.requestSubmit();
+              }}
+              className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-black text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+            >
+              Send recovery link instead
+            </button>
+          </div>
+        ) : null}
 
         <form className="mt-6 space-y-4" onSubmit={handleLoginSubmit}>
           <div className="space-y-1.5">
@@ -166,7 +191,7 @@ export default function TalentLoginCard() {
             </div>
           ) : null}
 
-          <form className="mt-4" onSubmit={handleRecoverySubmit}>
+          <form id="talent-login-recovery-form" className="mt-4" onSubmit={handleRecoverySubmit}>
             <button
               type="submit"
               disabled={recoveryStatus === 'submitting' || email.trim().length === 0}
