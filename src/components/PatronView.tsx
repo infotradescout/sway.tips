@@ -682,8 +682,15 @@ export default function PatronView({
     } else {
       // Boost check
       if (!boostingItem) return;
-      if (!boostPatronName) {
-        showFormToast("Please enter your sponsor name for the boost!");
+      // boostPatronName has no input field of its own until the checkout
+      // modal opens below -- requiring it non-empty here would make the
+      // boost flow un-openable on a patron's first action. Borrow whatever
+      // name they've already entered on the Request/Tip tab; they can still
+      // edit it inside the modal before confirming.
+      if (!boostPatronName && senderName) {
+        setBoostPatronName(senderName);
+      } else if (!boostPatronName && !senderName) {
+        showFormToast("Enter your name on the Request or Tip tab first, then come back to boost!");
         return;
       }
       if (paymentsEnabledForRoom && boostAmount < 1) {
