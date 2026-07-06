@@ -650,13 +650,13 @@ function buildActiveRoomSummary(roomState: BackendState, gigId: string, startedA
   };
 }
 
-async function listReadableActiveRooms(): Promise<ActiveRoomSummary[]> {
+async function listReadableActiveRooms(performerId?: string): Promise<ActiveRoomSummary[]> {
   if (!businessStore.hasDurableStore) {
     await refreshBusinessState();
     return activeGigId ? [buildActiveRoomSummary(state, activeGigId)] : [];
   }
 
-  return businessStore.listActiveRoomSummaries();
+  return businessStore.listActiveRoomSummaries(performerId);
 }
 
 function requirePersistentBusinessStore(res: express.Response): boolean {
@@ -3277,7 +3277,18 @@ app.get("/api/talent/active-rooms", async (req, res) => {
   }
 
   applyNoStoreHeaders(res);
-  return res.json({ rooms: await listReadableActiveRooms() });
+
+  // Scope to this performer's own rooms -- listReadableActiveRooms has no
+  // built-in tenant boundary, and without a performerId it returns every
+  // performer's active rooms system-wide.
+  const performerOwner = talentAccess.actor.actorId
+    ? await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId)
+    : null;
+  if (!performerOwner) {
+    return res.json({ rooms: [] });
+  }
+
+  return res.json({ rooms: await listReadableActiveRooms(performerOwner.performerId) });
 });
 
 app.get("/api/admin/active-rooms", async (req, res) => {

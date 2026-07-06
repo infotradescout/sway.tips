@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
@@ -429,9 +429,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     return rows.map((row) => row.gigId);
   }
 
-  async function listActiveRoomSummaries(): Promise<ActiveRoomSummary[]> {
+  async function listActiveRoomSummaries(performerId?: string): Promise<ActiveRoomSummary[]> {
     if (!db) return [];
 
+    const statusFilter = inArray(activeRoomRegistry.registryStatus, [...READABLE_ACTIVE_ROOM_STATUSES]);
     const rows = await db
       .select({
         gigId: activeRoomRegistry.gigId,
@@ -441,7 +442,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         startedAt: activeRoomRegistry.startedAt
       })
       .from(activeRoomRegistry)
-      .where(inArray(activeRoomRegistry.registryStatus, [...READABLE_ACTIVE_ROOM_STATUSES]))
+      .where(performerId ? and(statusFilter, eq(activeRoomRegistry.performerId, performerId)) : statusFilter)
       .orderBy(desc(activeRoomRegistry.lastActivityAt), desc(activeRoomRegistry.updatedAt));
 
     const summaries = await Promise.all(rows.map(async (row) => {
