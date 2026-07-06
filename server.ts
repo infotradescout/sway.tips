@@ -57,7 +57,11 @@ const isProduction = process.env.NODE_ENV === "production";
 const hasSwayEmailProvider = Boolean(process.env.SWAY_EMAIL_PROVIDER?.trim());
 const hasSwayEmailApiKey = Boolean(process.env.SWAY_EMAIL_API_KEY?.trim());
 const hasSwayEmailFrom = Boolean(process.env.SWAY_EMAIL_FROM?.trim());
-const hasSwayEmailBaseUrl = Boolean(process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim());
+// resolvePerformerLoginBaseUrl (performer-login-mailer.ts) already falls back
+// to the hardcoded 'https://app.sway.tips' in production when neither env var
+// is set -- so an explicit override isn't actually required there, only in
+// non-production where there's no safe default to assume.
+const hasSwayEmailBaseUrl = Boolean(process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim() || isProduction);
 const hasPerformerLoginEmailConfig = Boolean(
   hasSwayEmailProvider
   && hasSwayEmailApiKey
