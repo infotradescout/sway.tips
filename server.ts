@@ -204,6 +204,173 @@ function isShellAllowed(shell: SwayShell): boolean {
   return !(isProduction && shell === 'dev-sandbox');
 }
 
+type ShareMetadata = {
+  title: string;
+  description: string;
+  url: string;
+  image: string;
+  imageAlt: string;
+};
+
+const DEFAULT_SHARE_TITLE = 'Sway | Live Crowd Requests';
+const DEFAULT_SHARE_DESCRIPTION = 'Scan into a live Sway room to request, tip, boost, and follow the queue in real time.';
+const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=1';
+const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
+const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
+
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function resolveRequestOrigin(req: express.Request) {
+  const configuredBaseUrl = (process.env.SWAY_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (configuredBaseUrl) return configuredBaseUrl;
+
+  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
+    ? req.headers['x-forwarded-proto'].split(',')[0]?.trim()
+    : '';
+  const proto = forwardedProto || req.protocol || 'https';
+  const host = typeof req.headers.host === 'string' && req.headers.host.trim()
+    ? req.headers.host.trim()
+    : CANONICAL_APP_HOST;
+  return `${proto}://${host}`;
+}
+
+function absoluteShareUrl(req: express.Request, pathOrUrl: string) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const pathAndQuery = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+  return `${resolveRequestOrigin(req)}${pathAndQuery}`;
+}
+
+function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<ShareMetadata, 'url' | 'image'>> & { url?: string; image?: string } = {}): ShareMetadata {
+  return {
+    title: overrides.title || DEFAULT_SHARE_TITLE,
+    description: overrides.description || DEFAULT_SHARE_DESCRIPTION,
+    url: absoluteShareUrl(req, overrides.url || req.originalUrl || '/'),
+    image: absoluteShareUrl(req, overrides.image || DEFAULT_SHARE_IMAGE_PATH),
+    imageAlt: overrides.imageAlt || 'Sway neon live request preview'
+  };
+}
+
+function renderShareMetaTags(metadata: ShareMetadata) {
+  const title = escapeHtmlAttribute(metadata.title);
+  const description = escapeHtmlAttribute(metadata.description);
+  const url = escapeHtmlAttribute(metadata.url);
+  const image = escapeHtmlAttribute(metadata.image);
+  const imageAlt = escapeHtmlAttribute(metadata.imageAlt);
+
+  return [
+    '<meta name="sway-share-meta" content="server-rendered" />',
+    `<title>${title}</title>`,
+    `<meta name="description" content="${description}" />`,
+    '<meta property="og:type" content="website" />',
+    '<meta property="og:site_name" content="Sway" />',
+    `<meta property="og:title" content="${title}" />`,
+    `<meta property="og:description" content="${description}" />`,
+    `<meta property="og:url" content="${url}" />`,
+    `<meta property="og:image" content="${image}" />`,
+    `<meta property="og:image:secure_url" content="${image}" />`,
+    '<meta property="og:image:type" content="image/png" />',
+    `<meta property="og:image:width" content="${DEFAULT_SHARE_IMAGE_WIDTH}" />`,
+    `<meta property="og:image:height" content="${DEFAULT_SHARE_IMAGE_HEIGHT}" />`,
+    `<meta property="og:image:alt" content="${imageAlt}" />`,
+    '<meta name="twitter:card" content="summary_large_image" />',
+    `<meta name="twitter:title" content="${title}" />`,
+    `<meta name="twitter:description" content="${description}" />`,
+    `<meta name="twitter:image" content="${image}" />`
+  ].join('\n    ');
+}
+
+function injectShareMetadata(html: string, metadata: ShareMetadata) {
+  const metaTags = renderShareMetaTags(metadata);
+  const withoutExisting = html
+    .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
+    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
+
+  return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
+}
+
+async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata> {
+  const pathParts = req.path.split('/').filter(Boolean);
+  const defaultMetadata = defaultShareMetadata(req);
+
+  if (!businessDb) return defaultMetadata;
+
+  if (pathParts[0] === 'p' && pathParts[1]) {
+    const normalizedHandle = normalizePerformerHandle(pathParts[1]);
+    if (!normalizedHandle) return defaultMetadata;
+
+    const [profile] = await businessDb
+      .select({
+        displayName: performers.displayName,
+        handle: performers.handle,
+        bio: performers.bio,
+        headline: performerPublicProfiles.headline,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl
+      })
+      .from(performers)
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+      .limit(1);
+
+    if (!profile) return defaultMetadata;
+
+    const title = `${profile.displayName} on Sway`;
+    const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
+    const locationCopy = profile.city ? ` in ${profile.city}` : '';
+    const description = profile.headline || profile.bio || `Join ${handleCopy}${locationCopy} on Sway for live requests, tips, boosts, and queue updates.`;
+
+    return defaultShareMetadata(req, {
+      title,
+      description,
+      image: profile.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      imageAlt: `${profile.displayName} Sway performer profile`
+    });
+  }
+
+  if (pathParts[0] === 'g' && pathParts[1] && UUID_PATTERN.test(pathParts[1])) {
+    const [room] = await businessDb
+      .select({
+        talentName: activeRoomRegistry.talentName,
+        talentRole: activeRoomRegistry.talentRole,
+        routePath: activeRoomRegistry.routePath,
+        registryStatus: activeRoomRegistry.registryStatus,
+        performerName: performers.displayName,
+        headline: performerPublicProfiles.headline,
+        avatarUrl: performerPublicProfiles.avatarUrl
+      })
+      .from(activeRoomRegistry)
+      .innerJoin(performers, eq(performers.id, activeRoomRegistry.performerId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(eq(activeRoomRegistry.gigId, pathParts[1]))
+      .limit(1);
+
+    if (!room) return defaultMetadata;
+
+    const performerName = room.talentName || room.performerName || 'this performer';
+    const title = `Join ${performerName}'s Sway room`;
+    const statusCopy = room.registryStatus === 'ending'
+      ? 'The live room is wrapping up.'
+      : 'The live room is open.';
+    const description = room.headline || `${statusCopy} Send requests, tips, boosts, and follow the queue in real time.`;
+
+    return defaultShareMetadata(req, {
+      title,
+      description,
+      url: room.routePath || req.originalUrl,
+      image: room.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      imageAlt: `${performerName} Sway live room`
+    });
+  }
+
+  return defaultMetadata;
+}
+
 function renderStaticDocument(title: string, description: string, bodyHtml: string) {
   return `<!doctype html>
 <html lang="en">
@@ -3163,7 +3330,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       })
       .from(performers)
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(sql`lower(${performers.handle}) = ${normalizedHandle}`)
+      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
       .limit(1);
 
     if (!profile) {
@@ -4930,7 +5097,8 @@ async function startServer() {
         const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
         const template = readFileSync(templatePath, 'utf8');
-        const html = await vite.transformIndexHtml(req.originalUrl, template);
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
+        const html = injectShareMetadata(transformedHtml, await resolveShareMetadata(req));
         applyNoStoreHeaders(res);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
@@ -4946,14 +5114,21 @@ async function startServer() {
       res.status(404).send('Not found');
     });
     app.use(express.static(distPath, { index: false }));
-    app.get('*', (req, res) => {
+    app.get('*', async (req, res, next) => {
       const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
       if (!isShellAllowed(shell)) {
         res.status(404).send('Not found');
         return;
       }
-      applyNoStoreHeaders(res);
-      res.sendFile(path.join(distPath, shellHtmlRelativePath(shell)));
+      try {
+        const htmlPath = path.join(distPath, shellHtmlRelativePath(shell));
+        const template = readFileSync(htmlPath, 'utf8');
+        const html = injectShareMetadata(template, await resolveShareMetadata(req));
+        applyNoStoreHeaders(res);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (error) {
+        next(error);
+      }
     });
   }
 
