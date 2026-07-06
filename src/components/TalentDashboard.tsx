@@ -890,7 +890,7 @@ export default function TalentDashboard({
         )}
       </div>
 
-      <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg" open>
+      <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
             <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-300">Public profile, socials, and feed card</h4>

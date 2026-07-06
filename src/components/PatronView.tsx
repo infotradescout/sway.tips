@@ -315,31 +315,19 @@ export default function PatronView({
     .filter((item) => !item.hidden && !item.removed)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
-  const activePatronStatus: 'Syncing' | 'Pending' | 'Approved' | 'Paused' | 'Ended' =
-    session.status === 'closed'
-      ? 'Ended'
-      : (!session.requestsOpen || session.status === 'ending')
-        ? 'Paused'
-        : (degraded || !!pendingAction)
-          ? 'Syncing'
-          : latestRequest?.status === 'approved' || latestRequest?.status === 'fulfilled'
-            ? 'Approved'
-            : 'Pending';
-
-  const moderationStatusLabel: 'pending_review' | 'approved' | 'declined' | 'hidden' | 'blocked' | 'played/completed' =
-    latestRequest?.hidden || latestRequest?.removed
-      ? 'hidden'
-      : latestRequest?.shadowBanned
-        ? 'pending_review'
-        : latestRequest?.status === 'approved'
-          ? 'approved'
-          : latestRequest?.status === 'denied'
-            ? 'declined'
-            : latestRequest?.status === 'fulfilled'
-              ? 'played/completed'
-              : latestRequest?.status === 'hold'
-                ? 'pending_review'
-                : 'pending_review';
+  // A plain-language status for the patron's most recent request, if any.
+  // Only surfaced when there's something to report -- a brand-new patron
+  // with no requests yet has nothing to show here.
+  const latestRequestStatusMessage: { text: string; tone: 'fuchsia' | 'cyan' | 'slate' | 'rose' } | null = (() => {
+    if (session.status === 'closed') return { text: 'Ended: this room is no longer accepting requests.', tone: 'slate' };
+    if (!session.requestsOpen || session.status === 'ending') return { text: 'Requests are paused right now.', tone: 'slate' };
+    if (degraded || pendingAction) return { text: 'Syncing your last action...', tone: 'cyan' };
+    if (!latestRequest || latestRequest.hidden || latestRequest.removed) return null;
+    if (latestRequest.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
+    if (latestRequest.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
+    if (latestRequest.status === 'denied') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
+    return { text: 'Your last request is pending review.', tone: 'fuchsia' };
+  })();
 
   const funnelTelemetryPayload = {
     shell: 'patron' as const,
@@ -627,6 +615,7 @@ export default function PatronView({
 
   const handleSelectTrack = (track: any) => {
     setSelectedTrack(track);
+    setSearchQuery('');
     // Auto populate minimum or baseline price
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
@@ -1246,39 +1235,21 @@ export default function PatronView({
         </div>
       )}
 
-      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Request status</h3>
-          <span className="text-[10px] font-mono text-fuchsia-300 uppercase tracking-widest">Current: {activePatronStatus}</span>
+      {latestRequestStatusMessage && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-xs font-bold ${
+            latestRequestStatusMessage.tone === 'fuchsia'
+              ? 'border-fuchsia-500/30 bg-fuchsia-950/20 text-fuchsia-200'
+              : latestRequestStatusMessage.tone === 'cyan'
+                ? 'border-cyan-500/30 bg-cyan-950/20 text-cyan-100'
+                : latestRequestStatusMessage.tone === 'rose'
+                  ? 'border-rose-500/30 bg-rose-950/20 text-rose-200'
+                  : 'border-white/10 bg-slate-900/70 text-slate-300'
+          }`}
+        >
+          {latestRequestStatusMessage.text}
         </div>
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
-          {['Syncing', 'Pending', 'Approved', 'Paused', 'Ended'].map((status) => (
-            <div
-              key={status}
-              className={`rounded-lg border px-2 py-2 text-center font-bold ${activePatronStatus === status ? 'border-fuchsia-400 bg-fuchsia-500/15 text-fuchsia-200' : 'border-white/10 bg-slate-950 text-slate-400'}`}
-            >
-              {status}
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 border-t border-white/10 pt-3">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Moderation state</h4>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-300">{moderationStatusLabel}</span>
-          </div>
-          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px]">
-            {['pending_review', 'approved', 'declined', 'hidden', 'blocked', 'played/completed'].map((state) => (
-              <div
-                key={state}
-                className={`rounded-lg border px-2 py-2 text-center font-bold ${moderationStatusLabel === state ? 'border-cyan-400 bg-cyan-500/15 text-cyan-100' : 'border-white/10 bg-slate-950 text-slate-500'}`}
-              >
-                {state}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div id="patron_action_panel">
         
@@ -1398,7 +1369,7 @@ export default function PatronView({
                 </form>
 
                 {/* Query Results */}
-                {selectedTrack && (
+                {selectedTrack && !searchQuery.trim() && (
                   <motion.div 
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1427,7 +1398,7 @@ export default function PatronView({
                     </button>
                   </motion.div>
                 )}
-                {!selectedTrack && (
+                {(!selectedTrack || searchQuery.trim()) && (
                   <div className="space-y-2 max-h-56 overflow-y-auto">
                     {searchError && (
                       <p className="text-xs text-rose-300 font-sans px-1">Search is temporarily unavailable. Try again.</p>
