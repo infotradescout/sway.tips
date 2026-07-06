@@ -17,6 +17,7 @@ export default function AdminApp() {
   const [rooms, setRooms] = useState<ActiveRoomSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const demoMode = isDemoModeEnabled();
   const adminActiveRoomsPath = ['', 'api', 'admin', 'active-rooms'].join('/');
   const legacyDemoSections = ADMIN_OPS_DEMO_SECTION_LABELS.map((label) => (
@@ -62,9 +63,13 @@ export default function AdminApp() {
         if (!cancelled) {
           setRooms(Array.isArray(data.rooms) ? data.rooms : []);
           setIsLocked(false);
+          setLoadError(null);
         }
       } catch (error) {
         console.warn(error);
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : 'Unable to load the active-room roster.');
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -85,6 +90,13 @@ export default function AdminApp() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <DemoModeBanner />
+      {loadError && (
+        <div className="mx-auto mt-4 max-w-6xl px-4">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 px-4 py-3 text-xs font-bold text-rose-200">
+            {loadError} Retrying automatically every 5 seconds.
+          </div>
+        </div>
+      )}
       <SplitViewShell
         title="Operator App"
         eyebrow="Read-Only"
