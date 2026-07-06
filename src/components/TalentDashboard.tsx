@@ -654,6 +654,18 @@ export default function TalentDashboard({
     : session.searchScope === 'catalog'
       ? 'Open Catalog'
       : 'My Library';
+  const leadingApprovedRequest = liveLadderQueue[0] ?? null;
+  const operatorNextAction = triageQueue.length > 0
+    ? 'Review pending'
+    : leadingApprovedRequest
+      ? 'Mark playing'
+      : 'Share room';
+  const operatorNextDetail = triageQueue.length > 0
+    ? `${triageQueue.length} request${triageQueue.length === 1 ? '' : 's'} waiting for approve or veto.`
+    : leadingApprovedRequest
+      ? `${leadingApprovedRequest.title} is leading the approved queue.`
+      : 'Copy the room link or show the QR so the crowd can start sending requests.';
+  const selectedRoomLink = selectedGigId ?? activeGigId;
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -671,7 +683,7 @@ export default function TalentDashboard({
   };
 
   return (
-    <div id="talent_dashboard_panel" className="max-w-6xl mx-auto py-6 px-4 space-y-8">
+    <div id="talent_dashboard_panel" className="max-w-6xl mx-auto py-6 px-4 flex flex-col gap-8">
 
       {actionError && (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 flex items-center justify-between gap-3">
@@ -687,7 +699,7 @@ export default function TalentDashboard({
       )}
 
       {/* 1. Header & Live Stand Indicators */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-white/10 p-6 rounded-2xl glass-panel glow-fuchsia">
+      <div className="order-1 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-white/10 p-6 rounded-2xl glass-panel glow-fuchsia">
         <div className="flex items-center gap-4">
           <div className="relative">
             <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 font-sans">
@@ -751,7 +763,79 @@ export default function TalentDashboard({
         )}
       </div>
 
+      {session.status !== 'inactive' && (
+        <section className="order-2 rounded-3xl border border-cyan-500/20 bg-slate-900/80 p-5 shadow-2xl">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Live Command Center</p>
+              <h3 className="mt-2 font-display text-2xl font-black text-white">
+                {operatorNextAction}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-slate-400">{operatorNextDetail}</p>
+            </div>
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[520px]">
+              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room</p>
+                <p className={`mt-1 text-sm font-black ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {session.requestsOpen ? 'Open' : 'Paused'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Pending</p>
+                <p className="mt-1 font-mono text-xl font-black text-amber-300">{triageQueue.length}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Approved</p>
+                <p className="mt-1 font-mono text-xl font-black text-cyan-300">{liveLadderQueue.length}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Scope</p>
+                <p className="mt-1 text-sm font-black text-white">{requestScopeLabel}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => handleToggleRequests(!session.requestsOpen)}
+              disabled={actionPending}
+              className={`min-h-11 flex-1 rounded-2xl px-4 py-3 text-xs font-black uppercase tracking-wide transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${
+                session.requestsOpen
+                  ? 'bg-rose-500 text-slate-950 hover:bg-rose-400'
+                  : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+              }`}
+            >
+              {session.requestsOpen ? 'Pause requests' : 'Resume requests'}
+            </button>
+            {selectedRoomLink ? (
+              <a
+                href={`/g/${selectedRoomLink}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase tracking-wide text-cyan-200 transition-all hover:border-cyan-300 hover:text-white"
+              >
+                Open crowd view
+              </a>
+            ) : (
+              <div className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500">
+                Crowd link after start
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={previewMode ? undefined : onEndSession}
+              disabled={previewMode || session.status !== 'active'}
+              className="min-h-11 flex-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-300 transition-all hover:border-fuchsia-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              End room
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
+      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-4'} space-y-5`}>
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
@@ -1012,13 +1096,14 @@ export default function TalentDashboard({
           </button>
         </form>
       </details>
+      </div>
 
       {/* 2. Inactive Session Configuration Form */}
       {session.status === 'inactive' && (
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-3xl mx-auto space-y-6 glow-fuchsia"
+          className="order-2 bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-3xl mx-auto space-y-6 glow-fuchsia"
         >
           <div className="space-y-4 text-center">
             <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-fuchsia-300">
@@ -1173,7 +1258,7 @@ export default function TalentDashboard({
 
       {/* 3. Live Core Session Workflows */}
       {session.status !== 'inactive' && (
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="order-3 grid lg:grid-cols-3 gap-8">
           
           {/* Main Triage and Live Auction Columns */}
           <div className="lg:col-span-2 space-y-8">

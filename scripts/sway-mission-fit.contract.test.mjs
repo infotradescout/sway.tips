@@ -25,6 +25,9 @@ for (const term of [
 }
 
 for (const term of [
+  'Live Command Center',
+  'operatorNextAction',
+  'Open crowd view',
   'Before You Share',
   'Set the request scope',
   'Patrons can request, tip, or boost',
