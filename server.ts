@@ -54,11 +54,15 @@ dotenv.config({ override: false });
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
+const hasSwayEmailProvider = Boolean(process.env.SWAY_EMAIL_PROVIDER?.trim());
+const hasSwayEmailApiKey = Boolean(process.env.SWAY_EMAIL_API_KEY?.trim());
+const hasSwayEmailFrom = Boolean(process.env.SWAY_EMAIL_FROM?.trim());
+const hasSwayEmailBaseUrl = Boolean(process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim());
 const hasPerformerLoginEmailConfig = Boolean(
-  process.env.SWAY_EMAIL_PROVIDER?.trim()
-  && process.env.SWAY_EMAIL_API_KEY?.trim()
-  && process.env.SWAY_EMAIL_FROM?.trim()
-  && (process.env.SWAY_APP_BASE_URL?.trim() || process.env.APP_URL?.trim())
+  hasSwayEmailProvider
+  && hasSwayEmailApiKey
+  && hasSwayEmailFrom
+  && hasSwayEmailBaseUrl
 );
 const IDEMPOTENCY_TTL_HOURS = 48;
 const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
@@ -1570,6 +1574,12 @@ app.get('/api/runtime-config-status', (_req, res) => {
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
     hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
     hasPerformerLoginEmailConfig,
+    performerLoginEmailConfig: {
+      hasSwayEmailProvider,
+      hasSwayEmailApiKey,
+      hasSwayEmailFrom,
+      hasSwayEmailBaseUrl
+    },
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
     branch: buildMarker.branch,
