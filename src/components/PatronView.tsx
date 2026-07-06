@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { 
@@ -22,7 +22,8 @@ import {
   Layers, 
   Flame, 
   Activity,
-  Award
+  Award,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
@@ -156,6 +157,13 @@ function StripeAuthorizationForm({
         return;
       }
 
+      if (result.paymentIntent?.status === 'processing') {
+        // Some payment methods (e.g. bank debits) confirm asynchronously. This
+        // isn't a failure -- don't surface it as a top-level error banner.
+        setLocalMessage('Your payment is still confirming with your bank. This can take a moment; please wait before trying again.');
+        return;
+      }
+
       if (result.paymentIntent?.status !== 'requires_capture') {
         const message = `Payment authorization did not reach capturable status (${result.paymentIntent?.status ?? 'unknown'}).`;
         setLocalMessage(message);
@@ -286,6 +294,13 @@ export default function PatronView({
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
+  const [formToast, setFormToast] = useState<string | null>(null);
+  const formToastTimeoutRef = useRef<number | null>(null);
+  const showFormToast = (message: string) => {
+    setFormToast(message);
+    if (formToastTimeoutRef.current) window.clearTimeout(formToastTimeoutRef.current);
+    formToastTimeoutRef.current = window.setTimeout(() => setFormToast(null), 4000);
+  };
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isSubmitLocked = isPaying || isPaymentConfirmationPending;
   const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
@@ -631,15 +646,14 @@ export default function PatronView({
       const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
-      alert(routeCopy);
       return;
     }
 
     if (type === 'request' && activeTab === 'request' && !session.requestsOpen) {
-      alert("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
+      showFormToast("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
       return;
     }
-    
+
     let title = '';
     let artist = '';
     let trackArt = '';
@@ -649,17 +663,17 @@ export default function PatronView({
 
     if (type === 'request') {
       if (!senderName) {
-        alert("Please enter a Patron Name so the Performer knows who tipped!");
+        showFormToast("Please enter a Patron Name so the Performer knows who tipped!");
         return;
       }
       if (paymentsEnabledForRoom && tipAmount < session.minimumTip) {
-        alert(`Minimum tip required is $${session.minimumTip}`);
+        showFormToast(`Minimum tip required is $${session.minimumTip}`);
         return;
       }
 
       if (session.talentRole === 'DJ') {
         if (!selectedTrack) {
-          alert("Please search and select a song request first!");
+          showFormToast("Please search and select a song request first!");
           return;
         }
         title = selectedTrack.title;
@@ -668,7 +682,7 @@ export default function PatronView({
       } else {
         // Custom menus
         if (!selectedTrack) {
-          alert("Please select an item from the menu!");
+          showFormToast("Please select an item from the menu!");
           return;
         }
         title = selectedTrack.title;
@@ -680,11 +694,11 @@ export default function PatronView({
       // Boost check
       if (!boostingItem) return;
       if (!boostPatronName) {
-        alert("Please enter your sponsor name for the boost!");
+        showFormToast("Please enter your sponsor name for the boost!");
         return;
       }
       if (paymentsEnabledForRoom && boostAmount < 1) {
-        alert("Minimum boost is $1");
+        showFormToast("Minimum boost is $1");
         return;
       }
       title = boostingItem.title;
@@ -863,7 +877,6 @@ export default function PatronView({
       setPendingAction(null);
       setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
       localStorage.removeItem('sway.pendingAction');
-      alert(PENDING_ACTION_EXPIRED_COPY);
       return;
     }
 
@@ -913,16 +926,15 @@ export default function PatronView({
       const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
-      alert(routeCopy);
       return;
     }
 
     if (!senderName) {
-      alert("Please enter a Patron Name!");
+      showFormToast("Please enter a Patron Name!");
       return;
     }
     if (tipAmount < session.minimumTip) {
-      alert(`Minimum tip is $${session.minimumTip}`);
+      showFormToast(`Minimum tip is $${session.minimumTip}`);
       return;
     }
 
@@ -956,17 +968,39 @@ export default function PatronView({
   const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
     try {
       await action();
-      alert(successCopy);
+      showFormToast(successCopy);
       window.dispatchEvent(new Event('re-fetch-state'));
     } catch (error) {
       console.error(error);
-      alert('Safety action failed. Try again in a few moments.');
+      showFormToast('Safety action failed. Try again in a few moments.');
     }
   };
 
   return (
     <div id="patron_crowd_screen" className="max-w-xl mx-auto py-4 px-4 pb-20 space-y-6">
-      
+
+      <AnimatePresence>
+        {formToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className="fixed left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2"
+          >
+            <div className="flex items-start justify-between gap-3 rounded-2xl border border-fuchsia-500/30 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur">
+              <p className="text-xs font-bold text-white">{formToast}</p>
+              <button
+                type="button"
+                onClick={() => setFormToast(null)}
+                className="shrink-0 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 1. Performer branding hero banner */}
       <div className="bg-gradient-to-br from-fuchsia-950/40 via-slate-904 via-slate-900 to-slate-950 border border-white/10 rounded-2xl p-6 relative overflow-hidden select-none glow-fuchsia">
         <div className="absolute top-0 right-0 p-3">
@@ -1104,7 +1138,7 @@ export default function PatronView({
             type="button"
             onClick={() => {
               if (!newestModeratableRequest) {
-                alert('No request is available to report yet.');
+                showFormToast('No request is available to report yet.');
                 return;
               }
               runSafetyAction(
@@ -1961,18 +1995,17 @@ export default function PatronView({
                             onClick={() => {
                               if (isSubmitLocked) return;
                               if (!senderName) {
-                                alert("Please enter your name!");
+                                showFormToast("Please enter your name!");
                                 return;
                               }
                               if (tipAmount < p.minimumTip) {
-                                alert(`Minimum tip is $${p.minimumTip}`);
+                                showFormToast(`Minimum tip is $${p.minimumTip}`);
                                 return;
                               }
                               if (!gigId) {
                                 const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
                                 setDegraded(true);
                                 setPendingActionMessage(routeCopy);
-                                alert(routeCopy);
                                 return;
                               }
                               // Open confirmation

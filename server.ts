@@ -1936,7 +1936,13 @@ app.get('/api/talent/login/consume', async (req, res) => {
 app.get('/api/talent/verify-email/consume', async (req, res) => {
   applyNoStoreHeaders(res);
 
-  const redirectPath = resolvePerformerLoginRedirectPath(req.query.redirect);
+  // Unlike password/magic-link login, consuming a verify-email token never
+  // establishes a session -- redirecting to /talent would just bounce back
+  // to a bare /talent/login, silently dropping the "email verified" banner.
+  // Only honor an explicit ?redirect= the caller actually supplied.
+  const redirectPath = typeof req.query.redirect === 'string'
+    ? resolvePerformerLoginRedirectPath(req.query.redirect)
+    : null;
 
   if (!businessStore.hasDurableStore) {
     return res.redirect(performerVerifyEmailFailureRedirect('unavailable'));
@@ -2284,6 +2290,11 @@ app.post("/api/analytics/shell", async (req, res) => {
   }
 
   const { payload } = validation;
+  // The client can't know its own deployed commit at build time (no build-time
+  // injection wired up), so it always reports a placeholder. The server knows
+  // its actual deployed commit -- record that instead so funnel analysis by
+  // build/commit is actually meaningful.
+  const auditPayload = { ...payload, build_commit: buildMarker.commit };
 
   try {
     await businessDb.transaction(async (tx) => {
@@ -2293,7 +2304,7 @@ app.post("/api/analytics/shell", async (req, res) => {
         entityType: 'shell_friction',
         entityId: `${payload.shell}:${payload.surface}:${payload.event}:${payload.route_family}`,
         eventType: payload.event,
-        metadata: payload
+        metadata: auditPayload
       });
     });
     return res.status(202).json({ accepted: true });
