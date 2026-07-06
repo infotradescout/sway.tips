@@ -240,7 +240,8 @@ export default function PatronView({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  
+  const [searchError, setSearchError] = useState(false);
+
   // Selected search target
   const [selectedTrack, setSelectedTrack] = useState<SearchTrack | null>(null);
 
@@ -492,6 +493,7 @@ export default function PatronView({
   useEffect(() => {
     if (activeTab !== 'request') return;
     if (selectedTrack || requestPresets.length === 0) return;
+    if (searchQuery.trim()) return;
 
     const firstPreset = requestPresets[0];
     setSelectedPresetId(firstPreset.id);
@@ -505,7 +507,7 @@ export default function PatronView({
         source: PRESET_REQUEST_SOURCE
       });
     setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
-  }, [activeTab, selectedTrack, requestPresets, session.minimumTip]);
+  }, [activeTab, selectedTrack, requestPresets, searchQuery, session.minimumTip]);
 
   // Live request window countdown for patron
   const [patronsWindowTimeLeft, setPatronsWindowTimeLeft] = useState<string>('');
@@ -538,6 +540,10 @@ export default function PatronView({
   const handleSearch = async (val: string) => {
     setSearchQuery(val);
     setIsSearching(true);
+    if (val.trim()) {
+      setSelectedTrack(null);
+      setSelectedPresetId(null);
+    }
 
     if (previewMode && session.talentRole === 'DJ') {
       const query = val.trim().toLowerCase();
@@ -583,12 +589,17 @@ export default function PatronView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: val, gig_id: gigId })
       });
+      if (!response.ok) {
+        throw new Error(`Search request failed with status ${response.status}`);
+      }
       const data = await response.json();
       const results: SearchTrack[] = Array.isArray(data.results) ? data.results : [];
       setSearchResults(openSongOption ? [openSongOption, ...results] : results);
+      setSearchError(false);
     } catch (e) {
       console.warn("Search endpoint errored out:", e);
       setSearchResults(openSongOption ? [openSongOption] : []);
+      setSearchError(true);
     } finally {
       setIsSearching(false);
     }
@@ -819,6 +830,15 @@ export default function PatronView({
       setDegraded(true);
       setPaymentConfirmationState(null);
       setPendingActionMessage(backendMessage || 'This action is not available right now.');
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
+    } else if (typeof status === 'number') {
+      // A real backend/payment failure (e.g. a 5xx), not a network drop -- don't
+      // claim the action was "saved locally", tell the patron it actually failed.
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(backendMessage || 'Something went wrong processing that. Please try again.');
       setPendingAction(null);
       setCheckoutPayload(null);
       localStorage.removeItem('sway.pendingAction');
@@ -1351,11 +1371,12 @@ export default function PatronView({
                     className="p-4 bg-fuchsia-500/5 border border-fuchsia-500/25 rounded-xl flex items-center justify-between gap-3 glow-fuchsia animate-fade-in"
                   >
                     <div className="flex items-center gap-3">
-                      <img 
-                        src={selectedTrack.albumArt} 
-                        alt="track_art" 
+                      <img
+                        src={selectedTrack.albumArt}
+                        alt={`${selectedTrack.title} album art`}
                         referrerPolicy="no-referrer"
-                        className="w-12 h-12 rounded bg-slate-800 object-cover border border-white/10" 
+                        onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                        className="w-12 h-12 rounded bg-slate-800 object-cover border border-white/10"
                       />
                       <div>
                         <div className="text-sm font-bold text-white">{selectedTrack.title}</div>
@@ -1374,6 +1395,12 @@ export default function PatronView({
                 )}
                 {!selectedTrack && (
                   <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {searchError && (
+                      <p className="text-xs text-rose-300 font-sans px-1">Search is temporarily unavailable. Try again.</p>
+                    )}
+                    {!searchError && !isSearching && searchQuery.trim() && searchResults.length === 0 && (
+                      <p className="text-xs text-slate-400 font-sans px-1">No matches found.</p>
+                    )}
                     {searchResults.map((song) => (
                       <button
                         key={song.id}
@@ -1381,11 +1408,12 @@ export default function PatronView({
                         onClick={() => handleSelectTrack(song)}
                         className="w-full p-2.5 bg-slate-900/40 hover:bg-slate-900 border border-white/5 hover:border-white/10 rounded-lg flex items-center gap-3 text-left transition-colors cursor-pointer"
                       >
-                        <img 
-                          src={song.albumArt} 
-                          alt="art" 
+                        <img
+                          src={song.albumArt}
+                          alt={`${song.title} album art`}
                           referrerPolicy="no-referrer"
-                          className="w-10 h-10 rounded shrink-0 object-cover border border-white/5" 
+                          onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                          className="w-10 h-10 rounded shrink-0 object-cover border border-white/5"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-white truncate">{song.title}</div>
@@ -1674,11 +1702,12 @@ export default function PatronView({
                           </div>
 
                           {req.albumArt ? (
-                            <img 
-                              src={req.albumArt} 
-                              alt="art" 
+                            <img
+                              src={req.albumArt}
+                              alt={`${req.title} album art`}
                               referrerPolicy="no-referrer"
-                              className="w-10 h-10 rounded shrink-0 object-cover border border-white/15 shadow-sm" 
+                              onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                              className="w-10 h-10 rounded shrink-0 object-cover border border-white/15 shadow-sm"
                             />
                           ) : (
                             <div className="w-10 h-10 rounded bg-slate-800 flex items-center justify-center font-bold text-xs shrink-0 select-none text-fuchsia-400">
@@ -1725,7 +1754,7 @@ export default function PatronView({
                                     : 'bg-slate-800 border border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                                 } disabled:cursor-not-allowed disabled:opacity-60`}
                               >
-                                Boost +$10
+                                Boost
                               </button>
                             )
                           )}

@@ -42,7 +42,7 @@ export default function SplitViewShell({
         <div className="min-w-0">{isEmpty && emptyState ? emptyState : primary}</div>
       </div>
 
-      <aside className="min-w-0 lg:sticky lg:top-4">
+      <aside className="hidden min-w-0 lg:sticky lg:top-4 lg:block">
         <div className="rounded-xl border border-white/10 bg-slate-900/75 p-4 shadow-xl">
           <div className="sr-only mb-3 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 lg:not-sr-only">
             {secondaryLabel}

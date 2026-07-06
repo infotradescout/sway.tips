@@ -25,7 +25,11 @@ export default function SwayInstallPrompt() {
   const [metaInAppBrowser] = useState(() => isMetaInAppBrowser());
   const [suppressedRoute] = useState(() => {
     if (typeof window === 'undefined') return true;
-    return window.location.pathname.startsWith('/overlay') || window.location.pathname.startsWith('/admin');
+    const pathname = window.location.pathname;
+    return pathname.startsWith('/overlay')
+      || pathname.startsWith('/admin')
+      || pathname === '/talent/login'
+      || pathname === '/talent/signup';
   });
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {

@@ -6,7 +6,7 @@ const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 
 // Mirrors src/server/performer-login.ts normalizePerformerHandle and
 // src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
-const HANDLE_PATTERN = /^[a-z0-9_-]+$/;
+const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
 const PASSWORD_MIN_LENGTH = 8;
 
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
@@ -22,7 +22,7 @@ export default function TalentSignupCard() {
   const [message, setMessage] = useState<string | null>(null);
 
   const handleError = handle.length > 0 && !HANDLE_PATTERN.test(handle)
-    ? 'Lowercase letters, numbers, hyphens, and underscores only.'
+    ? 'Letters, numbers, hyphens, and underscores only.'
     : null;
   const passwordError = password.length > 0 && password.length < PASSWORD_MIN_LENGTH
     ? `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`

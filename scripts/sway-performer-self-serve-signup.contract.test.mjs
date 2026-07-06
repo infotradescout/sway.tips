@@ -97,7 +97,7 @@ async function main() {
   }
 
   assert.equal(normalizePerformerHandle('dj-sunset'), 'dj-sunset');
-  assert.equal(normalizePerformerHandle('DJ-Sunset'), null, 'Performer handles must reject capital letters.');
+  assert.equal(normalizePerformerHandle('DJ-Sunset'), 'DJ-Sunset', 'Performer handles must allow performer-chosen casing.');
   assert.equal(normalizePerformerHandle('bad handle'), null, 'Performer handles must reject spaces.');
   assert.equal(normalizePerformerHandle('bad*handle'), null, 'Performer handles must reject unsupported characters.');
   assert.equal(normalizePerformerDisplayName(' DJ Sunset '), 'DJ Sunset', 'Performer display names must trim.');

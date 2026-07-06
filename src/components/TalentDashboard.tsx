@@ -677,7 +677,7 @@ export default function TalentDashboard({
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
-            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Advanced: Developer Library Sync</h4>
+            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
               For technical users only. Requires writing or running a small script that sends your track list to Sway — there's no built-in connector for Serato, rekordbox, Traktor, or other DJ software yet.
             </p>

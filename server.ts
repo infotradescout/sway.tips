@@ -916,7 +916,7 @@ async function performerHandleExists(executor: any, handle: string) {
   const [row] = await executor
     .select({ id: performers.id })
     .from(performers)
-    .where(eq(performers.handle, handle))
+    .where(sql`lower(${performers.handle}) = ${handle.toLowerCase()}`)
     .limit(1);
 
   return Boolean(row);

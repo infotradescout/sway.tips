@@ -30,14 +30,21 @@ type TalentPerformerProfile = {
 } | null;
 
 export default function TalentApp() {
+  const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
+  const isAuthEntryRoute = isTalentLogin(pathname) || isTalentSignup(pathname);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
-  const statePath = selectedGigId ? `/api/state/${selectedGigId}` : '/api/state';
+  const statePath = isAuthEntryRoute ? null : (selectedGigId ? `/api/state/${selectedGigId}` : '/api/state');
   const { bState, isLoading, setBState } = useSwayState({ statePath });
 
   const refreshPerformerProfile = async () => {
+    if (isAuthEntryRoute) {
+      setPerformerProfile(null);
+      return;
+    }
+
     if (demoMode) {
       setPerformerProfile(null);
       return;
@@ -58,6 +65,11 @@ export default function TalentApp() {
   };
 
   const refreshActiveRooms = async () => {
+    if (isAuthEntryRoute) {
+      setActiveRooms([]);
+      return;
+    }
+
     if (demoMode) {
       const demoRooms = bState.activeGigId && bState.session.status === 'active'
         ? [{
@@ -85,11 +97,11 @@ export default function TalentApp() {
 
   useEffect(() => {
     void refreshActiveRooms();
-  }, [demoMode, bState.activeGigId, bState.requests.length, bState.session.status]);
+  }, [demoMode, isAuthEntryRoute, bState.activeGigId, bState.requests.length, bState.session.status]);
 
   useEffect(() => {
     void refreshPerformerProfile();
-  }, [demoMode]);
+  }, [demoMode, isAuthEntryRoute]);
 
   useEffect(() => {
     if (selectedGigId && activeRooms.some((room) => room.gigId === selectedGigId)) return;
@@ -209,11 +221,11 @@ export default function TalentApp() {
     });
   };
 
-  if (isTalentLogin(window.location.pathname)) {
+  if (isTalentLogin(pathname)) {
     return <TalentLoginCard />;
   }
 
-  if (isTalentSignup(window.location.pathname)) {
+  if (isTalentSignup(pathname)) {
     return <TalentSignupCard />;
   }
 

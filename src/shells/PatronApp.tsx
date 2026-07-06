@@ -312,7 +312,7 @@ export default function PatronApp() {
                 />
               }
               secondary={
-                <div className="space-y-4 text-sm">
+                <div className="hidden space-y-4 text-sm lg:block">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
                     <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>
