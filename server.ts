@@ -541,7 +541,7 @@ async function loadRoomState(gigId: string) {
         activeGigId: fallbackState.activeGigId,
         roomStatus: fallbackState.session.status === 'closed'
           ? 'ended' as const
-          : fallbackState.session.status === 'active'
+          : (fallbackState.session.status === 'active' || fallbackState.session.status === 'ending')
             ? 'active' as const
             : 'inactive' as const
       };

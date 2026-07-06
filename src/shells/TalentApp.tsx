@@ -104,8 +104,18 @@ export default function TalentApp() {
   }, [demoMode, isAuthEntryRoute]);
 
   useEffect(() => {
-    if (selectedGigId && activeRooms.some((room) => room.gigId === selectedGigId)) return;
-    if (bState.activeGigId && activeRooms.some((room) => room.gigId === bState.activeGigId)) {
+    // Only auto-pick a gig when nothing is selected yet. Once selected, it
+    // must stay sticky: activeRooms only lists 'active' registry rooms, and
+    // the global /api/state's activeGigId is an unrelated legacy singleton,
+    // so either one can transiently disagree with the gig actually being
+    // worked on -- e.g. a session that just ended moves to 'ending' for its
+    // 5-minute post-gig sweep and drops out of activeRooms entirely. Auto-
+    // clearing selectedGigId in that window makes statePath fall back to the
+    // global endpoint, which then loses activeGigId and 409s the closeout
+    // request. The user (or handleStartSession) is the only thing that
+    // should change an existing selection.
+    if (selectedGigId) return;
+    if (bState.activeGigId) {
       setSelectedGigId(bState.activeGigId);
       return;
     }

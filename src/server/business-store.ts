@@ -318,10 +318,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       .filter((request): request is RequestItem => Boolean(request));
 
     const restoredSession = coerceGigSession(sessionRow.runtimeSessionState, createInactiveSession());
+    // 'ending' (the 5-minute post-gig sweep) must still resolve as a live,
+    // readable room -- both the performer's own dashboard and the patron
+    // view keep polling this gig-scoped state throughout the sweep window.
+    // Falling through to 'inactive' here made every /api/state/:gigId call
+    // 404 as soon as a session ended, breaking closeout and the sweep UI.
     const roomStatus: BusinessStoreRoomStatus =
       restoredSession.status === 'closed'
         ? 'ended'
-        : restoredSession.status === 'active'
+        : hasLiveRoomContext(restoredSession.status)
           ? 'active'
           : 'inactive';
 
@@ -346,7 +351,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         activeGigId: hasLiveRoomContext(fallbackState.session.status) ? (fallbackState.activeGigId ?? null) : null,
         roomStatus: fallbackState.session.status === 'closed'
           ? 'ended'
-          : fallbackState.session.status === 'active'
+          : hasLiveRoomContext(fallbackState.session.status)
             ? 'active'
             : 'inactive'
       };
@@ -377,7 +382,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           activeGigId: hasLiveRoomContext(fallbackState.session.status) ? gigId : null,
           roomStatus: fallbackState.session.status === 'closed'
             ? 'ended'
-            : fallbackState.session.status === 'active'
+            : hasLiveRoomContext(fallbackState.session.status)
               ? 'active'
               : 'inactive'
         };
