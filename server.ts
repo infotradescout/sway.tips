@@ -47,6 +47,7 @@ import {
 } from "./src/server/performer-password-auth";
 import { searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
+import { lookupLyrics } from "./src/server/lyrics-provider";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -4085,6 +4086,19 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     console.error('Public performer profile lookup failed:', error);
     return res.status(500).json({ error: 'Unable to load this performer profile right now.' });
   }
+});
+
+app.get("/api/lyrics", async (req, res) => {
+  applyNoStoreHeaders(res);
+  const title = typeof req.query.title === 'string' ? req.query.title.trim() : '';
+  const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+
+  if (!title) {
+    return res.status(422).json({ error: 'A song title is required to look up lyrics.' });
+  }
+
+  const result = await lookupLyrics({ title, artist });
+  return res.json(result);
 });
 
 app.get("/api/state/:gigId", async (req, res) => {
