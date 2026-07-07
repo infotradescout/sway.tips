@@ -27,7 +27,8 @@ import {
   ToggleRight,
   Hourglass,
   Upload,
-  CreditCard
+  CreditCard,
+  QrCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
@@ -114,6 +115,164 @@ function CompactRequestPanel({
   );
 }
 
+function resolveLiveRoomLink(activeGigId: string | null) {
+  if (!activeGigId) return null;
+  if (typeof window === 'undefined') return `/g/${activeGigId}`;
+  return new URL(`/g/${activeGigId}`, window.location.origin).toString();
+}
+
+function resolveLiveOverlayLink(activeGigId: string | null) {
+  if (!activeGigId) return null;
+  if (typeof window === 'undefined') return `/overlay/${activeGigId}`;
+  return new URL(`/overlay/${activeGigId}`, window.location.origin).toString();
+}
+
+async function copyCompactLink(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textArea = document.createElement('textarea');
+  textArea.value = value;
+  textArea.setAttribute('readonly', 'true');
+  textArea.style.position = 'absolute';
+  textArea.style.left = '-9999px';
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textArea);
+}
+
+function CompactSharePanel({ activeGigId }: { activeGigId: string | null }) {
+  const roomLink = resolveLiveRoomLink(activeGigId);
+  const overlayLink = resolveLiveOverlayLink(activeGigId);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(null), 1400);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const handleCopy = async (kind: 'room' | 'overlay', value: string | null) => {
+    if (!value) return;
+    await copyCompactLink(value);
+    setCopied(kind);
+  };
+
+  return (
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900/90 p-3">
+      <div className="min-w-0">
+        <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Share Room</h3>
+        <p className="mt-1 truncate text-[11px] text-slate-400">
+          {roomLink ? 'Show the code, copy the link, or open the room.' : 'Start a room to generate links.'}
+        </p>
+      </div>
+
+      <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 overflow-hidden rounded-xl border border-white/10 bg-slate-950 p-3">
+        <div className="rounded-xl bg-white p-2">
+          <div className="flex h-28 w-28 items-center justify-center bg-white text-slate-900">
+            <QrCode className="h-8 w-8" />
+          </div>
+        </div>
+        <div className="min-w-0 space-y-2">
+          <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
+            <p className="text-[9px] font-black uppercase tracking-widest text-cyan-300">Patron room</p>
+            <p className="mt-1 truncate font-mono text-xs font-bold text-white">{roomLink ?? 'No live room yet'}</p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
+            <p className="text-[9px] font-black uppercase tracking-widest text-fuchsia-300">Overlay</p>
+            <p className="mt-1 truncate font-mono text-xs font-bold text-white">{overlayLink ?? 'No overlay yet'}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 landscape:grid-cols-4">
+        <button
+          type="button"
+          onClick={() => handleCopy('room', roomLink)}
+          disabled={!roomLink}
+          className="min-h-10 rounded-xl bg-fuchsia-600 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+        >
+          {copied === 'room' ? 'Copied' : 'Copy room'}
+        </button>
+        <a
+          href={roomLink ?? undefined}
+          target="_blank"
+          rel="noreferrer"
+          className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${roomLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}
+        >
+          Open room
+        </a>
+        <button
+          type="button"
+          onClick={() => handleCopy('overlay', overlayLink)}
+          disabled={!overlayLink}
+          className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black text-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500"
+        >
+          {copied === 'overlay' ? 'Copied' : 'Copy overlay'}
+        </button>
+        <a
+          href={overlayLink ?? undefined}
+          target="_blank"
+          rel="noreferrer"
+          className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${overlayLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}
+        >
+          Open overlay
+        </a>
+      </div>
+    </section>
+  );
+}
+
+function CompactAudienceScreenPanel({
+  activeGigId,
+  session,
+  approvedQueue
+}: {
+  activeGigId: string | null;
+  session: GigSession;
+  approvedQueue: RequestItem[];
+}) {
+  const nowPlaying = approvedQueue[0] ?? null;
+  const nextAfter = approvedQueue[1] ?? null;
+
+  return (
+    <section
+      data-sway-performer-audience-screen="true"
+      className="grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-2xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(8,13,28,0.96),rgba(30,8,43,0.82))] p-3 landscape:grid-cols-1 landscape:grid-rows-[auto_minmax(0,1fr)_auto] landscape:p-4"
+    >
+      <div className="rounded-xl bg-white p-2 text-slate-950 landscape:mx-auto landscape:w-full landscape:max-w-56">
+        <div className="flex aspect-square items-center justify-center">
+          <QrCode className="h-8 w-8" />
+        </div>
+      </div>
+      <div className="min-w-0 self-center landscape:text-center">
+        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Audience Screen</p>
+        <p className="mt-1 font-display text-2xl font-black uppercase tracking-wide text-white landscape:text-4xl">Scan to Request</p>
+        <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">Tip / Boost / Move the Queue</p>
+        <p className="mt-2 truncate font-mono text-[10px] font-bold text-slate-400">{activeGigId ? `/g/${activeGigId}` : 'Room link after start'}</p>
+        <div className="mt-3 grid gap-1.5 text-left landscape:mt-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2">
+            <p className="text-[8px] font-black uppercase tracking-widest text-cyan-300">Now</p>
+            <p className="truncate text-sm font-black text-white">{nowPlaying?.title ?? (session.requestsOpen ? 'Requests open' : 'Requests paused')}</p>
+          </div>
+          <div className="hidden rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 landscape:block">
+            <p className="text-[8px] font-black uppercase tracking-widest text-fuchsia-300">Up next</p>
+            <p className="truncate text-sm font-black text-white">{nextAfter?.title ?? 'Waiting for the crowd'}</p>
+          </div>
+        </div>
+      </div>
+      <div className="hidden rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-center landscape:block">
+        <p className={`text-xs font-black uppercase tracking-widest ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
+          {session.requestsOpen ? 'Live requests open' : 'Requests paused'}
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function CompactControlPanel({
   session,
   requestScopeLabel,
@@ -138,7 +297,7 @@ function CompactControlPanel({
   onEndSession: () => void;
 }) {
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
+    <section className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_auto] content-start gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3 landscape:p-2">
       <div>
         <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Room Control</h3>
         <p className="mt-1 truncate text-[11px] text-slate-400">{operatorNextAction}: {operatorNextDetail}</p>
@@ -149,7 +308,7 @@ function CompactControlPanel({
           type="button"
           onClick={() => onToggleRequests(false)}
           disabled={actionPending || !session.requestsOpen}
-          className="min-h-11 rounded-xl bg-rose-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-10 rounded-xl bg-rose-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Pause
         </button>
@@ -157,7 +316,7 @@ function CompactControlPanel({
           type="button"
           onClick={() => onToggleRequests(true)}
           disabled={actionPending || session.requestsOpen}
-          className="min-h-11 rounded-xl bg-emerald-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-10 rounded-xl bg-emerald-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Resume
         </button>
@@ -168,7 +327,7 @@ function CompactControlPanel({
           type="button"
           onClick={() => onSetMode('manual')}
           disabled={actionPending}
-          className={`min-h-10 rounded-xl px-3 text-xs font-black ${session.operatingMode !== 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+          className={`min-h-9 rounded-xl px-3 text-xs font-black ${session.operatingMode !== 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
         >
           Manual
         </button>
@@ -176,40 +335,44 @@ function CompactControlPanel({
           type="button"
           onClick={() => onSetMode('open_call')}
           disabled={actionPending}
-          className={`min-h-10 rounded-xl px-3 text-xs font-black ${session.operatingMode === 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+          className={`min-h-9 rounded-xl px-3 text-xs font-black ${session.operatingMode === 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
         >
           Open Call
         </button>
       </div>
 
-      <div className="grid content-start gap-2 overflow-hidden rounded-xl border border-white/10 bg-slate-950 p-2">
-        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Request scope</p>
-        <p className="truncate text-xs font-bold text-white">{requestScopeLabel}</p>
+      <div className="grid gap-2 rounded-xl border border-white/10 bg-slate-950 p-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Request scope</p>
+          <p className="truncate text-[10px] font-bold text-white">{requestScopeLabel}</p>
+        </div>
+        <div className="grid grid-cols-3 gap-1">
         {[
-          ['library', 'Library'],
-          ['setlist', 'Setlist'],
-          ['catalog', 'Catalog']
+          ['library', 'Lib'],
+          ['setlist', 'Set'],
+          ['catalog', 'Cat']
         ].map(([scope, label]) => (
           <button
             key={scope}
             type="button"
             onClick={() => onSetSearchScope(scope as 'library' | 'catalog' | 'setlist')}
             disabled={actionPending}
-            className={`min-h-9 rounded-lg px-3 text-xs font-bold ${
+            className={`min-h-7 rounded-lg px-2 text-[10px] font-black ${
               session.searchScope === scope ? 'bg-emerald-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
             }`}
           >
             {label}
           </button>
         ))}
+        </div>
       </div>
 
-      <div className="grid gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <a
           href={selectedRoomLink ? `/g/${selectedRoomLink}` : '/talent/gigs'}
           className="flex min-h-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-center text-xs font-black uppercase text-cyan-200"
         >
-          Share Room
+          Share
         </a>
         <button
           type="button"
@@ -217,7 +380,7 @@ function CompactControlPanel({
           disabled={session.status !== 'active'}
           className="min-h-10 rounded-xl border border-white/10 bg-slate-950 px-3 text-xs font-black uppercase text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          End Room
+          End
         </button>
       </div>
     </section>
@@ -861,7 +1024,7 @@ export default function TalentDashboard({
         data-sway-performer-live-cockpit="true"
         className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
       >
-        <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_minmax(0,1fr)_auto]">
+        <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_minmax(0,1fr)_auto]">
           {actionError ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
               <div className="flex items-center justify-between gap-2">
@@ -903,6 +1066,14 @@ export default function TalentDashboard({
             </div>
           </header>
 
+          <div className="h-32 min-h-0 landscape:hidden">
+            <CompactAudienceScreenPanel
+              activeGigId={selectedGigId ?? activeGigId}
+              session={session}
+              approvedQueue={liveLadderQueue}
+            />
+          </div>
+
           <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Performer mobile sections">
             {[
               { id: 'live', label: 'Live' },
@@ -923,50 +1094,45 @@ export default function TalentDashboard({
           </section>
 
           <main className="min-h-0 overflow-hidden">
-            <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_18rem]">
-              <CompactRequestPanel
-                title="Pending"
-                empty="No pending requests."
-                overflowCount={overflowPending}
-                requests={visiblePending}
-                renderActions={(request) => (
-                  <>
-                    <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
-                      <Check className="h-4 w-4" />
-                    </button>
-                    <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
-                      <X className="h-4 w-4" />
-                    </button>
-                  </>
-                )}
-              />
-              <CompactRequestPanel
-                title="Approved"
-                empty="No approved queue yet."
-                overflowCount={overflowApproved}
-                requests={visibleApproved}
-                renderActions={(request) => (
-                  <>
-                    <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
-                      <Play className="h-4 w-4" />
-                    </button>
-                    <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
-                      <X className="h-4 w-4" />
-                    </button>
-                  </>
-                )}
-              />
-              <CompactControlPanel
+            <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]">
+              <div className="grid min-h-0 grid-cols-2 gap-2">
+                <CompactRequestPanel
+                  title="Pending"
+                  empty="No pending requests."
+                  overflowCount={overflowPending}
+                  requests={visiblePending}
+                  renderActions={(request) => (
+                    <>
+                      <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                />
+                <CompactRequestPanel
+                  title="Approved"
+                  empty="No approved queue yet."
+                  overflowCount={overflowApproved}
+                  requests={visibleApproved}
+                  renderActions={(request) => (
+                    <>
+                      <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
+                        <Play className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                />
+              </div>
+              <CompactAudienceScreenPanel
+                activeGigId={selectedGigId ?? activeGigId}
                 session={session}
-                requestScopeLabel={requestScopeLabel}
-                selectedRoomLink={selectedRoomLink}
-                operatorNextAction={operatorNextAction}
-                operatorNextDetail={operatorNextDetail}
-                actionPending={actionPending}
-                onToggleRequests={handleToggleRequests}
-                onSetMode={handleSetMode}
-                onSetSearchScope={handleSetSearchScope}
-                onEndSession={onEndSession}
+                approvedQueue={liveLadderQueue}
               />
             </div>
 
@@ -1007,9 +1173,7 @@ export default function TalentDashboard({
                   />
                 </div>
               ) : mobilePanel === 'share' ? (
-                <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900 p-3">
-                  <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
-                </div>
+                <CompactSharePanel activeGigId={selectedGigId ?? activeGigId} />
               ) : (
                 <CompactControlPanel
                   session={session}

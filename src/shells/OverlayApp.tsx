@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Flame, Music, RotateCw, Rocket } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { BackendState } from '../types';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import { useSwayState } from './shared';
@@ -14,6 +15,11 @@ function resolveOverlayGigId(pathname: string) {
 
 function isOverlayTransparent() {
   return new URLSearchParams(window.location.search).get('transparent') === '1';
+}
+
+function resolveRoomLink(gigId: string) {
+  if (typeof window === 'undefined') return `/g/${gigId}`;
+  return new URL(`/g/${gigId}`, window.location.origin).toString();
 }
 
 // An OBS/streaming browser source needs a transparent background at all
@@ -100,15 +106,20 @@ export default function OverlayApp() {
     .flatMap((r) => r.boosts.map((boost) => ({ ...boost, requestTitle: r.title })))
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 5);
+  const roomLink = resolveRoomLink(routeGigId);
+  const roomPath = `/g/${routeGigId}`;
 
   return (
     <>
       <RotatePrompt />
       <OverlayShell transparent={transparent}>
-        <div className="flex h-full flex-col gap-3 p-4 lg:flex-row lg:gap-5">
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className={transparent
+          ? 'flex h-full flex-col gap-3 p-4 lg:flex-row lg:gap-5'
+          : 'grid h-full grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)] gap-5 overflow-hidden bg-[linear-gradient(135deg,#020617_0%,#090716_48%,#111827_100%)] p-6'}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden">
             <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2">
-              <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">SWAY LIVE ROOM</span>
+              <span className="font-display text-xs font-black tracking-[0.28em] text-fuchsia-300">SWAY LIVE ROOM</span>
               {isDemoModeEnabled() ? (
                 <div aria-label="Demo data">
                   <DemoModeBanner compact />
@@ -119,29 +130,31 @@ export default function OverlayApp() {
             </div>
 
             {nowPlaying ? (
-              <div className="rounded-xl border border-cyan-500/40 bg-slate-950/90 p-3">
+              <div className={`rounded-2xl border border-cyan-500/40 bg-slate-950/90 ${transparent ? 'p-3' : 'p-5 shadow-[0_0_42px_rgba(34,211,238,0.14)]'}`}>
                 <div className="flex items-center gap-3">
                   {nowPlaying.albumArt ? (
-                    <img src={nowPlaying.albumArt} alt="" className="h-14 w-14 shrink-0 rounded-lg border border-white/10 object-cover" />
+                    <img src={nowPlaying.albumArt} alt="" className={`${transparent ? 'h-14 w-14' : 'h-24 w-24'} shrink-0 rounded-xl border border-white/10 object-cover`} />
                   ) : (
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10">
-                      <Music className="h-6 w-6 text-cyan-300" />
+                    <div className={`${transparent ? 'h-14 w-14' : 'h-24 w-24'} flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30`}>
+                      <Music className={`${transparent ? 'h-6 w-6' : 'h-10 w-10'} text-cyan-300`} />
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="text-[9px] font-mono tracking-widest text-cyan-400 uppercase">Now Playing</div>
-                    <div className="truncate text-base font-black text-white">{nowPlaying.title}</div>
-                    {nowPlaying.subtitle && <div className="truncate text-xs text-slate-400">{nowPlaying.subtitle}</div>}
+                    <div className="text-[10px] font-mono tracking-widest text-cyan-300 uppercase">Now Playing</div>
+                    <div className={`truncate font-black text-white ${transparent ? 'text-base' : 'text-5xl leading-tight'}`}>{nowPlaying.title}</div>
+                    {nowPlaying.subtitle && <div className={`truncate text-slate-300 ${transparent ? 'text-xs' : 'text-xl font-bold'}`}>{nowPlaying.subtitle}</div>}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setLyricsOpen((open) => !open)}
-                    className="shrink-0 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300"
-                  >
-                    {lyricsOpen ? 'Hide lyrics' : 'Lyrics'}
-                  </button>
+                  {transparent ? (
+                    <button
+                      type="button"
+                      onClick={() => setLyricsOpen((open) => !open)}
+                      className="shrink-0 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300"
+                    >
+                      {lyricsOpen ? 'Hide lyrics' : 'Lyrics'}
+                    </button>
+                  ) : null}
                 </div>
-                {lyricsOpen && (
+                {transparent && lyricsOpen && (
                   <div className="mt-2 max-h-32 overflow-y-auto whitespace-pre-line rounded-lg border border-white/10 bg-slate-950/70 p-2.5 text-xs leading-relaxed text-slate-300">
                     {lyricsStatus === 'loading' && 'Looking up lyrics...'}
                     {lyricsStatus === 'not-found' && 'No lyrics found for this song.'}
@@ -150,24 +163,24 @@ export default function OverlayApp() {
                 )}
               </div>
             ) : (
-              <div className="rounded-xl border border-white/5 bg-slate-950/40 p-4 text-center text-[10px] font-mono text-slate-500">
+              <div className={`rounded-2xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'p-4 text-[10px]' : 'p-10 text-xl'}`}>
                 Waiting for the next song...
               </div>
             )}
 
             <div className="min-w-0 flex-1 space-y-2 overflow-hidden">
               {upNextQueue.length > 0 && (
-                <div className="text-[9px] font-mono tracking-widest text-fuchsia-400/80 uppercase">Up Next</div>
+                <div className={`${transparent ? 'text-[9px]' : 'text-sm'} font-mono tracking-widest text-fuchsia-300 uppercase`}>Up Next</div>
               )}
-              {upNextQueue.slice(0, 5).map((req, idx) => (
+              {upNextQueue.slice(0, transparent ? 5 : 4).map((req, idx) => (
                 <div
                   key={req.id}
-                  className={`flex items-center justify-between rounded-lg border p-2 text-xs transition-transform ${
+                  className={`flex items-center justify-between rounded-xl border transition-transform ${transparent ? 'p-2 text-xs' : 'p-4 text-2xl'} ${
                     idx === 0 ? 'bg-slate-950/90 border-fuchsia-500/50 glow-fuchsia text-white' : 'bg-slate-900/80 border-white/5'
                   }`}
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className={`rounded px-1 py-0.5 font-mono text-[10px] font-bold ${idx === 0 ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-slate-800 text-slate-400'}`}>
+                    <span className={`rounded px-2 py-1 font-mono font-bold ${transparent ? 'text-[10px]' : 'text-base'} ${idx === 0 ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-slate-800 text-slate-400'}`}>
                       #{idx + 1}
                     </span>
                     <span className="truncate font-bold">{req.title}</span>
@@ -176,14 +189,37 @@ export default function OverlayApp() {
                 </div>
               ))}
               {upNextQueue.length === 0 && (
-                <div className="rounded border border-white/5 bg-slate-950/40 py-4 text-center text-[10px] font-mono text-slate-500">
-                  Waiting for gig requests...
+                <div className={`rounded-xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'py-4 text-[10px]' : 'py-10 text-xl'}`}>
+                  Waiting for requests...
                 </div>
               )}
             </div>
           </div>
 
-          <div className="flex w-full flex-col gap-3 lg:w-64 lg:shrink-0">
+          <div className={transparent ? 'flex w-full flex-col gap-3 lg:w-64 lg:shrink-0' : 'grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4'}>
+            {!transparent ? (
+              <div className="rounded-3xl border border-white/15 bg-white p-4 text-slate-950 shadow-[0_0_60px_rgba(217,70,239,0.28)]">
+                <div className="rounded-2xl border-4 border-slate-950 p-3">
+                  <QRCodeCanvas
+                    value={roomLink}
+                    size={300}
+                    level="H"
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    marginSize={4}
+                    className="h-auto w-full"
+                    aria-label="Scan to open this Sway live room"
+                  />
+                </div>
+                <div className="mt-4 text-center">
+                  <p className="font-display text-4xl font-black uppercase tracking-wide">Scan</p>
+                  <p className="text-xl font-black uppercase tracking-wide text-fuchsia-700">Request / Tip / Boost</p>
+                  <p className="mt-2 break-all font-mono text-sm font-black text-slate-700">{roomPath}</p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className={transparent ? 'contents' : 'grid min-h-0 grid-rows-2 gap-3 overflow-hidden'}>
             <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
               <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-emerald-400">
                 <Flame className="h-3 w-3" /> Tips flowing in
@@ -235,6 +271,7 @@ export default function OverlayApp() {
                   <div className="py-2 text-center text-[10px] font-mono text-slate-500">No boosts yet</div>
                 )}
               </div>
+            </div>
             </div>
           </div>
         </div>
