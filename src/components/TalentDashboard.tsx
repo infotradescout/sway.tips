@@ -60,6 +60,170 @@ interface TalentDashboardProps {
   performerEmailVerified?: boolean;
 }
 
+function CompactRequestPanel({
+  title,
+  empty,
+  overflowCount,
+  requests,
+  renderActions
+}: {
+  title: string;
+  empty: string;
+  overflowCount: number;
+  requests: RequestItem[];
+  renderActions: (request: RequestItem) => React.ReactNode;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">{title}</h3>
+        <span className="rounded-full border border-white/10 bg-slate-950 px-2 py-1 text-[10px] font-black text-slate-300">
+          {requests.length + overflowCount}
+        </span>
+      </div>
+      <div className="grid min-h-0 flex-1 content-start gap-2 overflow-hidden">
+        {requests.length === 0 ? (
+          <div className="flex h-full min-h-24 items-center justify-center rounded-xl border border-dashed border-white/10 bg-slate-950/60 px-3 text-center text-xs font-bold text-slate-500">
+            {empty}
+          </div>
+        ) : (
+          requests.map((request) => (
+            <article key={request.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-white">{request.title}</p>
+                <p className="truncate text-[11px] font-semibold text-slate-400">{request.subtitle || request.senderName}</p>
+                <div className="mt-1 flex items-center gap-2 text-[10px] font-mono font-black text-cyan-300">
+                  <span>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(request.amount)}</span>
+                  <span className="text-slate-600">/</span>
+                  <span className="truncate text-slate-400">{request.senderName}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 [&>button]:flex [&>button]:h-10 [&>button]:w-10 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-lg [&>button]:font-black">
+                {renderActions(request)}
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+      {overflowCount > 0 ? (
+        <p className="mt-2 truncate text-center text-[10px] font-bold text-slate-500">
+          {overflowCount} more visible after clearing the top items.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function CompactControlPanel({
+  session,
+  requestScopeLabel,
+  selectedRoomLink,
+  operatorNextAction,
+  operatorNextDetail,
+  actionPending,
+  onToggleRequests,
+  onSetMode,
+  onSetSearchScope,
+  onEndSession
+}: {
+  session: GigSession;
+  requestScopeLabel: string;
+  selectedRoomLink: string | null;
+  operatorNextAction: string;
+  operatorNextDetail: string;
+  actionPending: boolean;
+  onToggleRequests: (open: boolean) => void;
+  onSetMode: (mode: 'manual' | 'open_call') => void;
+  onSetSearchScope: (scope: 'library' | 'catalog' | 'setlist') => void;
+  onEndSession: () => void;
+}) {
+  return (
+    <section className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
+      <div>
+        <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Room Control</h3>
+        <p className="mt-1 truncate text-[11px] text-slate-400">{operatorNextAction}: {operatorNextDetail}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onToggleRequests(false)}
+          disabled={actionPending || !session.requestsOpen}
+          className="min-h-11 rounded-xl bg-rose-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Pause
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggleRequests(true)}
+          disabled={actionPending || session.requestsOpen}
+          className="min-h-11 rounded-xl bg-emerald-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Resume
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onSetMode('manual')}
+          disabled={actionPending}
+          className={`min-h-10 rounded-xl px-3 text-xs font-black ${session.operatingMode !== 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+        >
+          Manual
+        </button>
+        <button
+          type="button"
+          onClick={() => onSetMode('open_call')}
+          disabled={actionPending}
+          className={`min-h-10 rounded-xl px-3 text-xs font-black ${session.operatingMode === 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+        >
+          Open Call
+        </button>
+      </div>
+
+      <div className="grid content-start gap-2 overflow-hidden rounded-xl border border-white/10 bg-slate-950 p-2">
+        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Request scope</p>
+        <p className="truncate text-xs font-bold text-white">{requestScopeLabel}</p>
+        {[
+          ['library', 'Library'],
+          ['setlist', 'Setlist'],
+          ['catalog', 'Catalog']
+        ].map(([scope, label]) => (
+          <button
+            key={scope}
+            type="button"
+            onClick={() => onSetSearchScope(scope as 'library' | 'catalog' | 'setlist')}
+            disabled={actionPending}
+            className={`min-h-9 rounded-lg px-3 text-xs font-bold ${
+              session.searchScope === scope ? 'bg-emerald-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-2">
+        <a
+          href={selectedRoomLink ? `/g/${selectedRoomLink}` : '/talent/gigs'}
+          className="flex min-h-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-center text-xs font-black uppercase text-cyan-200"
+        >
+          Share Room
+        </a>
+        <button
+          type="button"
+          onClick={onEndSession}
+          disabled={session.status !== 'active'}
+          className="min-h-10 rounded-xl border border-white/10 bg-slate-950 px-3 text-xs font-black uppercase text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          End Room
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export default function TalentDashboard({
   session,
   requests,
@@ -683,6 +847,207 @@ export default function TalentDashboard({
     });
   };
 
+  if (session.status !== 'inactive') {
+    const visiblePending = triageQueue.slice(0, 4);
+    const visibleApproved = liveLadderQueue.slice(0, 5);
+    const overflowPending = Math.max(0, triageQueue.length - visiblePending.length);
+    const overflowApproved = Math.max(0, liveLadderQueue.length - visibleApproved.length);
+    const roomOpenLabel = session.requestsOpen ? 'Open' : 'Paused';
+    const roomStatusTone = session.requestsOpen ? 'text-emerald-300' : 'text-rose-300';
+
+    return (
+      <div
+        id="talent_dashboard_panel"
+        data-sway-performer-live-cockpit="true"
+        className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
+      >
+        <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_minmax(0,1fr)_auto]">
+          {actionError ? (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">{actionError}</span>
+                <button type="button" onClick={() => setActionError(null)} className="shrink-0 text-rose-200">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <header className="grid gap-2 rounded-2xl border border-white/10 bg-slate-900/90 p-3 shadow-xl landscape:grid-cols-[minmax(0,1fr)_auto] landscape:items-center">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-slate-950 text-cyan-300">
+                <span className={`absolute -right-1 -top-1 h-3 w-3 rounded-full ${session.requestsOpen ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                <Radio className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-display text-base font-black uppercase tracking-wide text-white">
+                  {session.talentName || welcomePerformerName}
+                </p>
+                <p className="truncate text-[11px] font-bold text-slate-400">
+                  {session.status === 'ending' ? `Ending room - closeout ${timeLeft}` : `${session.talentRole} live room`}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 text-center landscape:w-[23rem]">
+              {[
+                ['Pending', triageQueue.length, 'text-amber-300'],
+                ['Approved', liveLadderQueue.length, 'text-cyan-300'],
+                ['Backers', poolBackersCount, 'text-fuchsia-300'],
+                ['Room', roomOpenLabel, roomStatusTone]
+              ].map(([label, value, tone]) => (
+                <div key={label} className="rounded-xl border border-white/10 bg-slate-950 px-2 py-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">{label}</p>
+                  <p className={`mt-0.5 truncate font-mono text-sm font-black ${tone}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+          </header>
+
+          <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Performer mobile sections">
+            {[
+              { id: 'live', label: 'Live' },
+              { id: 'share', label: 'Share' },
+              { id: 'settings', label: 'Control' }
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
+                className={`min-h-10 rounded-xl px-2 text-xs font-black uppercase tracking-wide ${
+                  mobilePanel === item.id ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </section>
+
+          <main className="min-h-0 overflow-hidden">
+            <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_18rem]">
+              <CompactRequestPanel
+                title="Pending"
+                empty="No pending requests."
+                overflowCount={overflowPending}
+                requests={visiblePending}
+                renderActions={(request) => (
+                  <>
+                    <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+              />
+              <CompactRequestPanel
+                title="Approved"
+                empty="No approved queue yet."
+                overflowCount={overflowApproved}
+                requests={visibleApproved}
+                renderActions={(request) => (
+                  <>
+                    <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
+                      <Play className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+              />
+              <CompactControlPanel
+                session={session}
+                requestScopeLabel={requestScopeLabel}
+                selectedRoomLink={selectedRoomLink}
+                operatorNextAction={operatorNextAction}
+                operatorNextDetail={operatorNextDetail}
+                actionPending={actionPending}
+                onToggleRequests={handleToggleRequests}
+                onSetMode={handleSetMode}
+                onSetSearchScope={handleSetSearchScope}
+                onEndSession={onEndSession}
+              />
+            </div>
+
+            <div className="h-full min-h-0 landscape:hidden">
+              {mobilePanel === 'live' ? (
+                <div className="grid h-full min-h-0 grid-rows-2 gap-2">
+                  <CompactRequestPanel
+                    title="Pending"
+                    empty="No pending requests."
+                    overflowCount={overflowPending}
+                    requests={visiblePending.slice(0, 3)}
+                    renderActions={(request) => (
+                      <>
+                        <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  />
+                  <CompactRequestPanel
+                    title="Approved"
+                    empty="No approved queue yet."
+                    overflowCount={overflowApproved}
+                    requests={visibleApproved.slice(0, 3)}
+                    renderActions={(request) => (
+                      <>
+                        <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
+                          <Play className="h-4 w-4" />
+                        </button>
+                        <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  />
+                </div>
+              ) : mobilePanel === 'share' ? (
+                <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900 p-3">
+                  <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+                </div>
+              ) : (
+                <CompactControlPanel
+                  session={session}
+                  requestScopeLabel={requestScopeLabel}
+                  selectedRoomLink={selectedRoomLink}
+                  operatorNextAction={operatorNextAction}
+                  operatorNextDetail={operatorNextDetail}
+                  actionPending={actionPending}
+                  onToggleRequests={handleToggleRequests}
+                  onSetMode={handleSetMode}
+                  onSetSearchScope={handleSetSearchScope}
+                  onEndSession={onEndSession}
+                />
+              )}
+            </div>
+          </main>
+
+          <footer className="grid grid-cols-[1fr_auto] gap-2">
+            <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+              <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
+              <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleRequests(!session.requestsOpen)}
+              disabled={actionPending}
+              className={`min-h-12 rounded-xl px-4 text-xs font-black uppercase tracking-wide text-slate-950 disabled:opacity-60 ${
+                session.requestsOpen ? 'bg-rose-500' : 'bg-emerald-500'
+              }`}
+            >
+              {session.requestsOpen ? 'Pause' : 'Resume'}
+            </button>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div id="talent_dashboard_panel" className="max-w-6xl mx-auto py-6 px-4 flex flex-col gap-8">
 
@@ -704,28 +1069,21 @@ export default function TalentDashboard({
         <div className="flex items-center gap-4">
           <div className="relative">
             <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 font-sans">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${session.status === 'active' ? 'bg-cyan-400' : 'bg-fuchsia-400'}`}></span>
-              <span className={`relative inline-flex rounded-full h-3 w-3 ${session.status === 'active' ? 'bg-cyan-500' : 'bg-fuchsia-500'}`}></span>
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-400 opacity-75"></span>
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-fuchsia-500"></span>
             </span>
             <div className="w-12 h-12 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center text-fuchsia-400">
-              <Radio className={`w-6 h-6 ${session.status === 'active' && 'animate-pulse'}`} />
+              <Radio className="w-6 h-6" />
             </div>
           </div>
           <div className="font-sans">
             <div className="flex items-center gap-2">
               <h2 className="font-display text-lg font-bold text-white tracking-wide uppercase">
-                {session.status === 'inactive' ? 'Set Up Session' : session.talentName}
+                Set Up Session
               </h2>
-              {session.status !== 'inactive' && (
-                <span className="text-[10px] font-mono font-black uppercase tracking-wider bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 px-2 py-0.5 rounded-full select-none">
-                  {session.talentRole}
-                </span>
-              )}
             </div>
             <p className="text-xs text-slate-400 font-sans mt-0.5">
-              {session.status === 'active' && '🎙️ Live taking crowd tips'}
-              {session.status === 'ending' && '⏳ Post-Gig 5-Minute Sweep timer ticking'}
-              {session.status === 'inactive' && 'Select your performance rules to prepare a print-ready room link and QR sign'}
+              Select your performance rules to prepare a print-ready room link and QR sign.
             </p>
             {previewMode && (
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
@@ -734,34 +1092,6 @@ export default function TalentDashboard({
             )}
           </div>
         </div>
-
-        {/* Header CTA Tools */}
-          {session.status !== 'inactive' && (
-            <div className="flex items-center gap-3 font-sans">
-              {session.status === 'active' ? (
-                <button
-                onClick={previewMode ? undefined : onEndSession}
-                disabled={previewMode}
-                className="flex items-center gap-1.5 px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-600 shadow rounded-xl text-xs font-bold transition-all cursor-pointer glow-fuchsia font-sans"
-              >
-                <X className="w-4 h-4" /> {previewMode ? 'Demo only' : 'End Session'}
-              </button>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1 bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 font-mono font-bold text-xs px-2.5 py-1 rounded select-none">
-                  <Clock className="w-3.5 h-3.5 animate-spin" /> Sweep: {timeLeft}
-                </div>
-                <button 
-                  onClick={previewMode ? undefined : onCloseout}
-                  disabled={previewMode}
-                  className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold border border-fuchsia-600 rounded-xl text-xs transition-transform transform active:scale-95 cursor-pointer glow-fuchsia"
-                >
-                  {previewMode ? 'Demo only' : 'Close Out Session'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {session.status !== 'inactive' && (

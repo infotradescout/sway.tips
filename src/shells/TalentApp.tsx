@@ -266,6 +266,31 @@ export default function TalentApp() {
     return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
   }
 
+  if (session.status !== 'inactive') {
+    return (
+      <div className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
+        <TalentDashboard
+          session={session}
+          requests={requests}
+          onStartSession={handleStartSession}
+          onEndSession={handleEndSession}
+          onCloseout={handleCloseout}
+          onTriage={handleTriageRequest}
+          onFulfill={handleFulfillRequest}
+          onHide={handleHideRequest}
+          onRemove={handleRemoveRequest}
+          activeGigId={activeGigId}
+          activeRooms={activeRooms}
+          selectedGigId={selectedGigId}
+          onSelectGigId={setSelectedGigId}
+          previewMode={demoMode}
+          performerProfile={performerProfile}
+          performerEmailVerified={performerEmailVerified}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
       <DemoModeBanner />

@@ -547,8 +547,18 @@ export default function App() {
     return (
       <ShellMessage
         icon={<CalendarDays className="h-5 w-5" />}
-        title="Route Not Found"
-        body={`Use ${routeSpine.join(', ')} or their documented parameterized variants.`}
+        title="Room not found"
+        body="Scan a Sway room code again, return home, or sign in as a performer to manage your live rooms."
+        actions={
+          <>
+            <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/home">
+              Return home
+            </a>
+            <a className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-center text-sm font-bold text-slate-100 hover:border-fuchsia-500/40" href="/talent/login">
+              Performer login
+            </a>
+          </>
+        }
       />
     );
   }
@@ -557,8 +567,13 @@ export default function App() {
     return (
       <ShellMessage
         icon={<Lock className="h-5 w-5" />}
-        title="Admin"
-        body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
+        title="Admin access"
+        body="This area is for internal Sway operations. Sign in with an authorized admin account to continue."
+        actions={
+          <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/admin/login">
+            Admin login
+          </a>
+        }
       />
     );
   }
