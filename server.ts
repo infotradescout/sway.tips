@@ -10,10 +10,10 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
-import { and, asc, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -2588,6 +2588,440 @@ app.post('/api/admin/login', async (req, res) => {
     expires: outcome.issuedSession.expiresAt
   });
   res.json(performerPasswordLoginSuccessResponse('/admin'));
+});
+
+const VALID_USER_ROLES = new Set<string>(userRoleEnum.enumValues);
+const VALID_ONBOARDING_STATUSES = new Set<string>(performerOnboardingStatusEnum.enumValues);
+
+const adminAccountSelectColumns = {
+  id: users.id,
+  email: users.email,
+  displayName: users.displayName,
+  role: users.role,
+  emailVerifiedAt: users.emailVerifiedAt,
+  createdAt: users.createdAt,
+  performerId: performers.id,
+  handle: performers.handle,
+  performerDisplayName: performers.displayName,
+  isActive: performers.isActive,
+  onboardingStatus: performers.onboardingStatus,
+  paymentAccountStatus: performers.paymentAccountStatus,
+  payoutsEnabled: performers.payoutsEnabled,
+  chargesEnabled: performers.chargesEnabled,
+  payoutHoldReason: performers.payoutHoldReason
+};
+
+function loadAdminAccountsBaseQuery(db: NonNullable<typeof businessDb>) {
+  return db
+    .select(adminAccountSelectColumns)
+    .from(users)
+    .leftJoin(performers, eq(performers.ownerUserId, users.id));
+}
+
+app.get('/api/admin/accounts', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminOrSupportAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const roleFilter = typeof req.query.role === 'string' && VALID_USER_ROLES.has(req.query.role) ? req.query.role : null;
+  const rawLimit = typeof req.query.limit === 'string' ? req.query.limit : undefined;
+  const limit = Math.min(parsePositiveInteger(rawLimit, 50), 200);
+
+  const conditions = [];
+  if (rawQuery) {
+    const likeTerm = `%${rawQuery}%`;
+    conditions.push(or(
+      ilike(users.email, likeTerm),
+      ilike(users.displayName, likeTerm),
+      ilike(performers.handle, likeTerm)
+    ));
+  }
+  if (roleFilter) {
+    conditions.push(eq(users.role, roleFilter as typeof users.role.enumValues[number]));
+  }
+
+  const rows = await loadAdminAccountsBaseQuery(businessDb)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(users.createdAt))
+    .limit(limit);
+
+  res.json({ accounts: rows });
+});
+
+app.get('/api/admin/accounts/:userId', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminOrSupportAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  if (!UUID_PATTERN.test(req.params.userId)) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  const [account] = await loadAdminAccountsBaseQuery(businessDb)
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  if (!account) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  res.json({ account });
+});
+
+app.post('/api/admin/accounts/onboard', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const normalizedHandle = normalizePerformerHandle(req.body?.handle);
+  const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const isActive = req.body?.isActive !== false;
+  const onboardingStatus = typeof req.body?.onboardingStatus === 'string' && VALID_ONBOARDING_STATUSES.has(req.body.onboardingStatus)
+    ? req.body.onboardingStatus
+    : 'gig_ready';
+
+  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+    res.status(422).json({ error: 'Performer name, handle, and email are required.' });
+    return;
+  }
+
+  if (!password) {
+    res.status(422).json({ error: 'Password is required.' });
+    return;
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    res.status(422).json({ error: passwordValidation.error });
+    return;
+  }
+
+  if (!confirmPassword || password !== confirmPassword) {
+    res.status(422).json({ error: 'Password confirmation does not match.' });
+    return;
+  }
+
+  if (await performerHandleExists(businessDb, normalizedHandle)) {
+    res.status(409).json({ error: 'This handle is already taken.' });
+    return;
+  }
+
+  if (await performerSignupEmailExists(businessDb, normalizedEmail)) {
+    res.status(409).json({ error: 'This email or handle is already in use.' });
+    return;
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+
+  const outcome = await businessDb.transaction(async (tx) => {
+    const [createdUser] = await tx
+      .insert(users)
+      .values({
+        email: normalizedEmail,
+        displayName: normalizedDisplayName,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+        termsAcceptedAt: new Date(),
+        role: 'performer'
+      })
+      .returning({ id: users.id });
+
+    const [createdPerformer] = await tx
+      .insert(performers)
+      .values({
+        ownerUserId: createdUser.id,
+        handle: normalizedHandle,
+        displayName: normalizedDisplayName,
+        isActive,
+        onboardingStatus
+      })
+      .returning({ id: performers.id });
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'user',
+      entityId: createdUser.id,
+      eventType: 'admin_account.onboard',
+      previousStatus: null,
+      nextStatus: 'created',
+      metadata: {
+        targetEmail: normalizedEmail,
+        targetHandle: normalizedHandle,
+        performerId: createdPerformer.id
+      }
+    });
+
+    return { userId: createdUser.id, performerId: createdPerformer.id };
+  });
+
+  res.status(201).json({ success: true, userId: outcome.userId, performerId: outcome.performerId });
+});
+
+app.patch('/api/admin/accounts/:userId', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  if (!UUID_PATTERN.test(req.params.userId)) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  const [existingAccount] = await loadAdminAccountsBaseQuery(businessDb)
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  if (!existingAccount) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  const userUpdates: Record<string, unknown> = {};
+  const performerUpdates: Record<string, unknown> = {};
+  const changedFields: string[] = [];
+
+  if (req.body?.email !== undefined) {
+    const normalizedEmail = normalizePerformerLoginEmail(req.body.email);
+    if (!normalizedEmail) {
+      res.status(422).json({ error: 'A valid email is required.' });
+      return;
+    }
+    if (normalizedEmail !== existingAccount.email) {
+      const [conflict] = await businessDb
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`lower(${users.email}) = ${normalizedEmail} and ${users.id} != ${req.params.userId}`)
+        .limit(1);
+      if (conflict) {
+        res.status(409).json({ error: 'This email is already in use.' });
+        return;
+      }
+      userUpdates.email = normalizedEmail;
+      changedFields.push('email');
+    }
+  }
+
+  if (req.body?.displayName !== undefined) {
+    const normalizedDisplayName = normalizePerformerDisplayName(req.body.displayName);
+    if (!normalizedDisplayName) {
+      res.status(422).json({ error: 'A valid display name is required.' });
+      return;
+    }
+    userUpdates.displayName = normalizedDisplayName;
+    performerUpdates.displayName = normalizedDisplayName;
+    changedFields.push('displayName');
+  }
+
+  if (req.body?.role !== undefined) {
+    if (typeof req.body.role !== 'string' || !VALID_USER_ROLES.has(req.body.role)) {
+      res.status(422).json({ error: 'Invalid role.' });
+      return;
+    }
+    userUpdates.role = req.body.role;
+    changedFields.push('role');
+  }
+
+  if (req.body?.emailVerified !== undefined) {
+    userUpdates.emailVerifiedAt = req.body.emailVerified ? new Date() : null;
+    changedFields.push('emailVerified');
+  }
+
+  if (existingAccount.performerId) {
+    if (req.body?.handle !== undefined) {
+      const normalizedHandle = normalizePerformerHandle(req.body.handle);
+      if (!normalizedHandle) {
+        res.status(422).json({ error: 'A valid handle is required.' });
+        return;
+      }
+      if (normalizedHandle.toLowerCase() !== (existingAccount.handle ?? '').toLowerCase()) {
+        const [conflict] = await businessDb
+          .select({ id: performers.id })
+          .from(performers)
+          .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()} and ${performers.id} != ${existingAccount.performerId}`)
+          .limit(1);
+        if (conflict) {
+          res.status(409).json({ error: 'This handle is already taken.' });
+          return;
+        }
+        performerUpdates.handle = normalizedHandle;
+        changedFields.push('handle');
+      }
+    }
+
+    if (req.body?.isActive !== undefined) {
+      performerUpdates.isActive = Boolean(req.body.isActive);
+      changedFields.push('isActive');
+    }
+
+    if (req.body?.onboardingStatus !== undefined) {
+      if (typeof req.body.onboardingStatus !== 'string' || !VALID_ONBOARDING_STATUSES.has(req.body.onboardingStatus)) {
+        res.status(422).json({ error: 'Invalid onboarding status.' });
+        return;
+      }
+      performerUpdates.onboardingStatus = req.body.onboardingStatus;
+      changedFields.push('onboardingStatus');
+    }
+
+    if (req.body?.payoutHoldReason !== undefined) {
+      performerUpdates.payoutHoldReason = typeof req.body.payoutHoldReason === 'string' && req.body.payoutHoldReason.trim()
+        ? req.body.payoutHoldReason.trim()
+        : null;
+      changedFields.push('payoutHoldReason');
+    }
+  }
+
+  if (changedFields.length === 0) {
+    res.status(422).json({ error: 'No valid fields to update.' });
+    return;
+  }
+
+  await businessDb.transaction(async (tx) => {
+    if (Object.keys(userUpdates).length > 0) {
+      await tx.update(users).set(userUpdates).where(eq(users.id, req.params.userId));
+    }
+    if (existingAccount.performerId && Object.keys(performerUpdates).length > 0) {
+      await tx.update(performers).set(performerUpdates).where(eq(performers.id, existingAccount.performerId));
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'user',
+      entityId: req.params.userId,
+      eventType: 'admin_account.update',
+      previousStatus: null,
+      nextStatus: null,
+      metadata: {
+        targetEmail: existingAccount.email,
+        changedFields
+      }
+    });
+  });
+
+  const [updatedAccount] = await loadAdminAccountsBaseQuery(businessDb)
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  res.json({ account: updatedAccount });
+});
+
+app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  if (!UUID_PATTERN.test(req.params.userId)) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  const [existingUser] = await businessDb
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  if (!existingUser) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+
+  if (!password) {
+    res.status(422).json({ error: 'Password is required.' });
+    return;
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    res.status(422).json({ error: passwordValidation.error });
+    return;
+  }
+
+  if (!confirmPassword || password !== confirmPassword) {
+    res.status(422).json({ error: 'Password confirmation does not match.' });
+    return;
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+
+  await businessDb.transaction(async (tx) => {
+    await tx.update(users).set({ passwordHash }).where(eq(users.id, req.params.userId));
+
+    const revokedSessions = performerSessionStore.hasDurableStore
+      ? await performerSessionStore.revokeActiveSessionsForActorUser({ actorUserId: req.params.userId, executor: tx })
+      : [];
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'user',
+      entityId: req.params.userId,
+      eventType: 'admin_account.password_reset',
+      previousStatus: null,
+      nextStatus: null,
+      metadata: {
+        targetEmail: existingUser.email,
+        revokedSessionCount: revokedSessions.length
+      }
+    });
+  });
+
+  res.json({ success: true });
 });
 
 const shellTelemetryAllowedEvents = new Set([

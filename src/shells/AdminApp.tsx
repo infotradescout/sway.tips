@@ -89,6 +89,11 @@ export default function AdminApp() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto max-w-6xl px-4 pt-4 text-right">
+        <a href="/admin/accounts" className="text-xs font-bold text-fuchsia-300 hover:text-fuchsia-200">
+          Manage accounts
+        </a>
+      </div>
       <DemoModeBanner />
       {loadError && (
         <div className="mx-auto mt-4 max-w-6xl px-4">
