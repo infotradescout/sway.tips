@@ -37,6 +37,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
   const overlayPath = activeGigId ? `/overlay/${activeGigId}` : null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
+  const [overlayCopied, setOverlayCopied] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,28 +47,39 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
   }, [copied]);
 
   useEffect(() => {
+    if (!overlayCopied) return;
+    const timeout = window.setTimeout(() => setOverlayCopied(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [overlayCopied]);
+
+  useEffect(() => {
     setCopied(false);
+    setOverlayCopied(false);
     setShareFeedback(null);
   }, [activeGigId]);
+
+  const copyToClipboard = async (value: string) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = value;
+    textArea.setAttribute('readonly', 'true');
+    textArea.style.position = 'absolute';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+  };
 
   const handleCopy = async () => {
     if (!roomLink) return;
 
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(roomLink);
-      } else {
-        const textArea = document.createElement('textarea');
-        textArea.value = roomLink;
-        textArea.setAttribute('readonly', 'true');
-        textArea.style.position = 'absolute';
-        textArea.style.left = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-      }
-
+      await copyToClipboard(roomLink);
       setCopied(true);
       setShareFeedback(null);
       sendShareLinkCopied({
@@ -81,6 +93,19 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
     } catch {
       setCopied(false);
       setShareFeedback('Copy failed. Select the room link and copy it manually.');
+    }
+  };
+
+  const handleCopyOverlay = async () => {
+    if (!overlayLink) return;
+
+    try {
+      await copyToClipboard(overlayLink);
+      setOverlayCopied(true);
+      setShareFeedback(null);
+    } catch {
+      setOverlayCopied(false);
+      setShareFeedback('Copy failed. Select the overlay link and copy it manually.');
     }
   };
 
@@ -235,13 +260,24 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
         )}
 
         <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
-          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Browser overlay</p>
+          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Stream / OBS overlay</p>
           <p className={`mt-2 break-all text-xs font-semibold ${overlayLink ? 'text-white' : 'text-slate-500'}`}>
-            {overlayLink ?? 'Start a live room to generate the browser overlay route.'}
+            {overlayLink ?? 'Start a live room to generate the stream overlay route.'}
           </p>
           <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-            {overlayPath ? `Use ${overlayPath} in a browser or OBS browser source manually.` : 'Overlay route appears here after the room goes live.'}
+            {overlayPath
+              ? 'Add this as an OBS/Streamlabs Browser Source, or open it directly on a phone or tablet (landscape) to use that device’s screen as your stream source.'
+              : 'Overlay route appears here after the room goes live.'}
           </p>
+          <button
+            type="button"
+            onClick={handleCopyOverlay}
+            disabled={!overlayLink}
+            className="mt-3 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500"
+          >
+            {overlayCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {overlayCopied ? 'Copied' : 'Copy overlay link'}
+          </button>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
