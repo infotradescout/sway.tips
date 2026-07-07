@@ -45,7 +45,8 @@ import {
   validatePerformerPasswordStrength,
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
-import { searchCatalog } from "./src/server/spotify-catalog";
+import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
+import { isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { lookupLyrics } from "./src/server/lyrics-provider";
 
@@ -3463,6 +3464,19 @@ app.get('/api/talent/library/sources', async (req, res) => {
     .where(eq(performerLibrarySources.performerId, performerOwner.performerId));
 
   return res.json({ sources });
+});
+
+app.get('/api/talent/music/source-capabilities', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+
+  return res.json({
+    providers: getMusicSourceCapabilityCatalog({
+      spotifyCatalogConfigured: isCatalogSearchConfigured(process.env)
+    })
+  });
 });
 
 app.post('/api/talent/library/sources', async (req, res) => {
