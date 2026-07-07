@@ -165,6 +165,12 @@ function EditAccountPanel({
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState(false);
+  const deleteConfirmTarget = account.email ?? account.handle ?? account.id;
+
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
@@ -228,6 +234,26 @@ function EditAccountPanel({
       setResetError(resetErr instanceof Error ? resetErr.message : 'Could not reset password.');
     } finally {
       setResettingPassword(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (deleting || deleteConfirmText !== deleteConfirmTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const response = await fetch(`/api/admin/accounts/${account.id}`, { method: 'DELETE' });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not delete account.');
+      }
+      setDeleted(true);
+      onSaved();
+    } catch (deleteErr) {
+      setDeleteError(deleteErr instanceof Error ? deleteErr.message : 'Could not delete account.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -335,6 +361,41 @@ function EditAccountPanel({
             </button>
           </div>
         </form>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-rose-500/30 bg-rose-950/20 p-4">
+        <div className="flex items-center gap-2 text-sm font-bold text-rose-200">
+          <ShieldAlert className="h-4 w-4" />
+          Delete account
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-rose-100/80">
+          This scrubs email, name, and password and deactivates the profile — it does not erase payment, gig, or audit history
+          (Sway&apos;s privacy policy commits to retaining those). The account can no longer log in and is removed from normal search.
+        </p>
+        {deleteError ? <StatusBanner tone="rose" message={deleteError} /> : null}
+        {deleted ? (
+          <StatusBanner tone="emerald" message="Account deleted." />
+        ) : (
+          <div className="mt-3 space-y-2">
+            <label className={labelClass()}>
+              Type <span className="font-mono text-rose-200">{deleteConfirmTarget}</span> to confirm
+            </label>
+            <input
+              className={inputClass()}
+              value={deleteConfirmText}
+              onChange={(event) => setDeleteConfirmText(event.target.value)}
+              placeholder={deleteConfirmTarget}
+            />
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || deleteConfirmText !== deleteConfirmTarget}
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-rose-600 px-5 py-2 text-sm font-black text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deleting ? 'Deleting...' : 'Delete this account'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

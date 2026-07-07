@@ -3025,6 +3025,84 @@ app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete('/api/admin/accounts/:userId', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
+    return;
+  }
+
+  applyNoStoreHeaders(res);
+
+  if (!UUID_PATTERN.test(req.params.userId)) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  if (req.params.userId === adminAccess.actor.actorId) {
+    res.status(422).json({ error: 'You cannot delete your own account while signed in as it.' });
+    return;
+  }
+
+  const [existingAccount] = await loadAdminAccountsBaseQuery(businessDb)
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  if (!existingAccount) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  // Sway's own privacy policy commits to retaining payment, fraud, dispute,
+  // moderation, and audit records -- so this scrubs personally identifying
+  // fields and locks the account out rather than deleting the row, keeping
+  // every audit_events/gig_sessions/requests row it's referenced by intact.
+  await businessDb.transaction(async (tx) => {
+    await tx.update(users).set({
+      email: null,
+      displayName: 'Deleted account',
+      passwordHash: null,
+      emailVerifiedAt: null
+    }).where(eq(users.id, req.params.userId));
+
+    if (existingAccount.performerId) {
+      await tx.update(performers).set({
+        isActive: false,
+        onboardingStatus: 'suspended',
+        bio: null
+      }).where(eq(performers.id, existingAccount.performerId));
+    }
+
+    if (performerSessionStore.hasDurableStore) {
+      await performerSessionStore.revokeActiveSessionsForActorUser({
+        actorUserId: req.params.userId,
+        executor: tx
+      });
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'user',
+      entityId: req.params.userId,
+      eventType: 'admin_account.delete',
+      previousStatus: null,
+      nextStatus: 'deleted',
+      metadata: {
+        targetEmail: existingAccount.email,
+        targetHandle: existingAccount.handle
+      }
+    });
+  });
+
+  res.json({ success: true });
+});
+
 const shellTelemetryAllowedEvents = new Set([
   'telemetry_friction_patron_no_session_recovery_viewed',
   'telemetry_friction_patron_no_session_return_home_clicked',
