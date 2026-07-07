@@ -79,8 +79,8 @@ for (const term of [
 
 requireIncludes(
   access,
-  "shell === 'talent' ? '/talent/login' : null",
-  'Talent recovery HTML must link to the performer sign-in page, not just the homepage.'
+  "shell === 'talent' ? '/talent/login' : shell === 'admin' ? '/admin/login' : null",
+  'Talent and admin recovery HTML must link to their respective sign-in pages, not just the homepage.'
 );
 
 for (const forbidden of [

@@ -8,7 +8,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
 import { and, asc, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
@@ -94,6 +94,15 @@ const performerSignupRateLimiter = createPerformerLoginRateLimiter({
   windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
 });
 const performerPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter();
+const hasAdminBootstrapSecret = Boolean(process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim());
+const adminBootstrapRateLimiter = createPerformerLoginRateLimiter({
+  maxRequests: parsePositiveInteger(process.env.SWAY_ADMIN_BOOTSTRAP_RATE_LIMIT_MAX, 3),
+  windowMs: parsePositiveInteger(process.env.SWAY_ADMIN_BOOTSTRAP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
+});
+const adminPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter({
+  maxFailures: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_MAX, 5),
+  windowMs: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
+});
 const performerLoginMailer = createPerformerLoginMailer({
   env: process.env,
   isProduction
@@ -1577,6 +1586,7 @@ app.get('/api/runtime-config-status', (_req, res) => {
   res.json({
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
     hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
+    hasAdminBootstrapSecret,
     hasPerformerLoginEmailConfig,
     performerLoginEmailConfig: {
       hasSwayEmailProvider,
@@ -2363,6 +2373,221 @@ app.post('/api/talent/session/logout', async (req, res) => {
   }
 
   res.json({ success: true });
+});
+
+app.post('/api/admin/bootstrap', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessStore.hasDurableStore || !businessDb) {
+    res.status(503).json({ error: 'Admin bootstrap requires durable persistence.' });
+    return;
+  }
+
+  const bootstrapSecret = process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim() || '';
+  if (!bootstrapSecret) {
+    res.status(503).json({ error: 'Admin bootstrap is not configured.' });
+    return;
+  }
+
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = adminBootstrapRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__admin_bootstrap__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    res.status(429).json({ error: 'Too many admin bootstrap attempts. Please try again later.' });
+    return;
+  }
+
+  const providedSecretBuffer = Buffer.from(typeof req.body?.secret === 'string' ? req.body.secret : '');
+  const expectedSecretBuffer = Buffer.from(bootstrapSecret);
+  const secretMatches =
+    providedSecretBuffer.length === expectedSecretBuffer.length &&
+    timingSafeEqual(providedSecretBuffer, expectedSecretBuffer);
+
+  if (!secretMatches) {
+    console.warn('Admin bootstrap secret rejected.', { path: req.path, ip: req.ip || null });
+    res.status(401).json({ error: 'Invalid admin bootstrap secret.' });
+    return;
+  }
+
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+
+  if (!normalizedEmail || !normalizedDisplayName) {
+    res.status(422).json({ error: 'Admin name and email are required.' });
+    return;
+  }
+
+  if (!password) {
+    res.status(422).json({ error: 'Password is required.' });
+    return;
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    res.status(422).json({ error: passwordValidation.error });
+    return;
+  }
+
+  if (!confirmPassword || password !== confirmPassword) {
+    res.status(422).json({ error: 'Password confirmation does not match.' });
+    return;
+  }
+
+  const [existingUser] = await businessDb
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${normalizedEmail}`)
+    .limit(1);
+
+  if (existingUser) {
+    res.status(409).json({ error: 'This email is already in use.' });
+    return;
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+  const [createdAdmin] = await businessDb
+    .insert(users)
+    .values({
+      email: normalizedEmail,
+      displayName: normalizedDisplayName,
+      passwordHash,
+      emailVerifiedAt: new Date(),
+      termsAcceptedAt: new Date(),
+      role: 'admin'
+    })
+    .returning({ id: users.id });
+
+  await writeAuditEvent(businessDb, {
+    actorId: createdAdmin.id,
+    actorType: 'admin',
+    entityType: 'user',
+    entityId: createdAdmin.id,
+    eventType: 'admin_bootstrap.user_create',
+    previousStatus: null,
+    nextStatus: 'created',
+    metadata: {
+      targetEmail: normalizedEmail
+    }
+  });
+
+  res.status(201).json({ success: true, message: 'Admin account created. Log in at /admin/login.' });
+});
+
+app.post('/api/admin/login', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessStore.hasDurableStore) {
+    res.status(503).json({ error: 'Admin login requires durable persistence.' });
+    return;
+  }
+
+  if (!businessDb || !performerSessionStore.hasDurableStore) {
+    res.status(503).json({ error: 'Admin login is temporarily unavailable.' });
+    return;
+  }
+
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const password = normalizePerformerPassword(req.body?.password);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const accountKey = normalizedEmail ?? '__invalid__';
+  const rateLimitState = adminPasswordLoginRateLimiter.check({
+    requesterIpHash,
+    accountKey
+  });
+
+  if (!rateLimitState.allowed) {
+    res.status(429).json({ error: 'Too many failed sign-in attempts. Please try again later.' });
+    return;
+  }
+
+  if (!normalizedEmail || !password) {
+    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const [adminAccount] = await businessDb
+    .select({
+      actorUserId: users.id,
+      passwordHash: users.passwordHash,
+      role: users.role
+    })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${normalizedEmail}`)
+    .limit(1);
+
+  if (!adminAccount?.passwordHash || (adminAccount.role !== 'admin' && adminAccount.role !== 'support')) {
+    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const passwordMatches = await verifyPerformerPassword(password, adminAccount.passwordHash);
+  if (!passwordMatches) {
+    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+
+  const outcome = await businessDb.transaction(async (tx) => {
+    const revokedSessions = await performerSessionStore.revokeActiveSessionsForActorUser({
+      actorUserId: adminAccount.actorUserId,
+      executor: tx
+    });
+    const issuedSession = await performerSessionStore.issueSession({
+      actorUserId: adminAccount.actorUserId,
+      issuedBy: adminAccount.actorUserId,
+      executor: tx
+    });
+
+    for (const revokedSession of revokedSessions) {
+      await writeAuditEvent(tx, {
+        actorId: adminAccount.actorUserId,
+        actorType: 'admin',
+        entityType: 'performer_session',
+        entityId: revokedSession.id,
+        eventType: 'performer_session.revoke',
+        previousStatus: 'active',
+        nextStatus: 'revoked',
+        metadata: {
+          revokedActorUserId: revokedSession.actorUserId,
+          revokedBy: 'admin_login.password'
+        }
+      });
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccount.actorUserId,
+      actorType: 'admin',
+      entityType: 'performer_session',
+      entityId: issuedSession.sessionId,
+      eventType: 'performer_session.issue',
+      previousStatus: null,
+      nextStatus: 'active',
+      metadata: {
+        expiresAt: issuedSession.expiresAt.toISOString(),
+        source: 'admin_login.password'
+      }
+    });
+
+    return { issuedSession };
+  });
+
+  adminPasswordLoginRateLimiter.reset({ requesterIpHash, accountKey });
+
+  res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    expires: outcome.issuedSession.expiresAt
+  });
+  res.json(performerPasswordLoginSuccessResponse('/admin'));
 });
 
 const shellTelemetryAllowedEvents = new Set([
