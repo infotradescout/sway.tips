@@ -31,7 +31,8 @@ import {
   QrCode,
   Link as LinkIcon,
   Music2,
-  ShieldCheck
+  ShieldCheck,
+  Keyboard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
@@ -152,6 +153,96 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
     riskNote: 'Sway playback needs provenance, license records, and playback audit before this can be enabled.'
   }
 ];
+
+type HardwareActionId =
+  | 'toggle_requests'
+  | 'fulfill_top'
+  | 'hide_top'
+  | 'approve_pending'
+  | 'veto_pending'
+  | 'open_top_source';
+
+type HardwareBinding = {
+  keyboard: string | null;
+  midi: string | null;
+};
+
+type HardwareBindingMap = Record<HardwareActionId, HardwareBinding>;
+
+const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1';
+
+const HARDWARE_ACTIONS: Array<{ id: HardwareActionId; label: string }> = [
+  { id: 'toggle_requests', label: 'Pause / Resume' },
+  { id: 'fulfill_top', label: 'Play / Clear Top' },
+  { id: 'hide_top', label: 'Hide Top' },
+  { id: 'approve_pending', label: 'Approve Pending' },
+  { id: 'veto_pending', label: 'Veto Pending' },
+  { id: 'open_top_source', label: 'Open Source' }
+];
+
+const DEFAULT_HARDWARE_BINDINGS: HardwareBindingMap = {
+  toggle_requests: { keyboard: 'Space', midi: null },
+  fulfill_top: { keyboard: 'Enter', midi: null },
+  hide_top: { keyboard: 'Backspace', midi: null },
+  approve_pending: { keyboard: 'KeyA', midi: null },
+  veto_pending: { keyboard: 'KeyV', midi: null },
+  open_top_source: { keyboard: 'KeyO', midi: null }
+};
+
+function createDefaultHardwareBindings(): HardwareBindingMap {
+  return Object.fromEntries(
+    HARDWARE_ACTIONS.map((action) => [action.id, { ...DEFAULT_HARDWARE_BINDINGS[action.id] }])
+  ) as HardwareBindingMap;
+}
+
+function normalizeHardwareBindings(input: unknown): HardwareBindingMap {
+  const fallback = createDefaultHardwareBindings();
+  if (!input || typeof input !== 'object') return fallback;
+  const raw = input as Partial<Record<HardwareActionId, Partial<HardwareBinding>>>;
+
+  for (const action of HARDWARE_ACTIONS) {
+    const item = raw[action.id];
+    fallback[action.id] = {
+      keyboard: typeof item?.keyboard === 'string' && item.keyboard ? item.keyboard : null,
+      midi: typeof item?.midi === 'string' && item.midi ? item.midi : null
+    };
+  }
+
+  return fallback;
+}
+
+function loadHardwareBindings(): HardwareBindingMap {
+  if (typeof window === 'undefined') return createDefaultHardwareBindings();
+  try {
+    return normalizeHardwareBindings(JSON.parse(window.localStorage.getItem(HARDWARE_BINDING_STORAGE_KEY) || 'null'));
+  } catch {
+    return createDefaultHardwareBindings();
+  }
+}
+
+function hardwareInputLabel(value: string | null) {
+  if (!value) return 'Unassigned';
+  if (value.startsWith('midi:')) {
+    const [, status, channel, note] = value.split(':');
+    return `MIDI ${status} ch ${Number(channel) + 1} #${note}`;
+  }
+  return value
+    .replace(/^Key/, '')
+    .replace(/^Digit/, '')
+    .replace('Space', 'Space')
+    .replace('Backspace', 'Backspace')
+    .replace('Enter', 'Enter');
+}
+
+function resolveMidiBinding(data: Uint8Array) {
+  const [statusByte, note, velocity] = data;
+  if (typeof statusByte !== 'number' || typeof note !== 'number') return null;
+  const status = statusByte & 0xf0;
+  const channel = statusByte & 0x0f;
+  if (status === 0x90 && velocity > 0) return `midi:note_on:${channel}:${note}`;
+  if (status === 0xb0) return `midi:control_change:${channel}:${note}`;
+  return null;
+}
 
 function CompactRequestPanel({
   title,
@@ -665,6 +756,81 @@ function SpotifyOpenLink({ request }: { request: RequestItem }) {
   );
 }
 
+function HardwareMappingPanel({
+  bindings,
+  learnTarget,
+  midiStatus,
+  onLearn,
+  onClear
+}: {
+  bindings: HardwareBindingMap;
+  learnTarget: HardwareActionId | null;
+  midiStatus: 'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied';
+  onLearn: (actionId: HardwareActionId) => void;
+  onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
+}) {
+  const midiLabel = midiStatus === 'midi-ready'
+    ? 'MIDI ready'
+    : midiStatus === 'midi-denied'
+      ? 'MIDI blocked'
+      : midiStatus === 'midi-unavailable'
+        ? 'Keys only'
+        : 'Listening';
+
+  return (
+    <section
+      data-sway-hardware-mapping-panel="true"
+      className="rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-lg"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Hardware Controls</h4>
+          <p className="mt-1 truncate text-[10px] text-slate-500">{midiLabel}</p>
+        </div>
+        <Keyboard className="h-5 w-5 shrink-0 text-cyan-300" />
+      </div>
+      <div className="mt-3 grid gap-2">
+        {HARDWARE_ACTIONS.map((action) => (
+          <div
+            key={action.id}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-white">{action.label}</p>
+              <p className="mt-1 truncate font-mono text-[10px] text-slate-500">
+                {hardwareInputLabel(bindings[action.id].keyboard)} / {hardwareInputLabel(bindings[action.id].midi)}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onLearn(action.id)}
+                className={`rounded-lg px-2.5 py-1.5 text-[10px] font-black uppercase ${
+                  learnTarget === action.id
+                    ? 'bg-fuchsia-500 text-white'
+                    : 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+                }`}
+              >
+                {learnTarget === action.id ? 'Hit input' : 'Learn'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClear(action.id, 'keyboard');
+                  onClear(action.id, 'midi');
+                }}
+                className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[10px] font-black uppercase text-slate-400"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function TalentDashboard({
   session,
   requests,
@@ -691,7 +857,7 @@ export default function TalentDashboard({
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
   const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
   const [setupMinTip, setSetupMinTip] = useState(5);
-  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
+  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings' | 'hardware'>('live');
   
   // Local state for interactive settings drawer
   const [showSettings, setShowSettings] = useState(false);
@@ -741,6 +907,11 @@ export default function TalentDashboard({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const actionInFlightRef = useRef(false);
+  const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
+  const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
+  const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
+  const hardwareBindingsRef = useRef(hardwareBindings);
+  const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
 
   const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
     if (actionInFlightRef.current) {
@@ -856,6 +1027,17 @@ export default function TalentDashboard({
       setActionError('That action failed. Please try again.');
     }
   };
+
+  useEffect(() => {
+    hardwareBindingsRef.current = hardwareBindings;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY, JSON.stringify(hardwareBindings));
+    }
+  }, [hardwareBindings]);
+
+  useEffect(() => {
+    hardwareLearnTargetRef.current = hardwareLearnTarget;
+  }, [hardwareLearnTarget]);
 
   const handleSetMode = async (mode: 'manual' | 'open_call' | 'crowd_autopilot') => {
     try {
@@ -1347,6 +1529,132 @@ export default function TalentDashboard({
       ? `${leadingApprovedRequest.title} is leading the approved queue.`
       : 'Copy the room link or show the QR so the crowd can start sending requests.';
   const selectedRoomLink = selectedGigId ?? activeGigId;
+  const runHardwareAction = (actionId: HardwareActionId) => {
+    if (previewMode || actionInFlightRef.current) return;
+    const topApproved = liveLadderQueue[0] ?? null;
+    const topPending = triageQueue[0] ?? null;
+
+    if (actionId === 'toggle_requests') {
+      void handleToggleRequests(!session.requestsOpen);
+      return;
+    }
+    if (actionId === 'fulfill_top' && topApproved) {
+      onFulfill(topApproved.id);
+      return;
+    }
+    if (actionId === 'hide_top' && topApproved) {
+      onHide(topApproved.id);
+      return;
+    }
+    if (actionId === 'approve_pending' && topPending) {
+      onTriage(topPending.id, 'approve');
+      return;
+    }
+    if (actionId === 'veto_pending' && topPending) {
+      onTriage(topPending.id, 'deny');
+      return;
+    }
+    if (actionId === 'open_top_source' && topApproved?.spotifyUrl) {
+      window.open(topApproved.spotifyUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const learnHardwareInput = (actionId: HardwareActionId, kind: keyof HardwareBinding, value: string) => {
+    setHardwareBindings((current) => ({
+      ...current,
+      [actionId]: {
+        ...current[actionId],
+        [kind]: value
+      }
+    }));
+    setHardwareLearnTarget(null);
+  };
+
+  const clearHardwareInput = (actionId: HardwareActionId, kind: keyof HardwareBinding) => {
+    setHardwareBindings((current) => ({
+      ...current,
+      [actionId]: {
+        ...current[actionId],
+        [kind]: null
+      }
+    }));
+  };
+
+  useEffect(() => {
+    if (session.status === 'inactive') return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const targetTag = target?.tagName?.toLowerCase();
+      if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || target?.isContentEditable) return;
+
+      const learnTarget = hardwareLearnTargetRef.current;
+      if (learnTarget) {
+        event.preventDefault();
+        learnHardwareInput(learnTarget, 'keyboard', event.code);
+        return;
+      }
+
+      const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].keyboard === event.code);
+      if (!match) return;
+      event.preventDefault();
+      runHardwareAction(match.id);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue]);
+
+  useEffect(() => {
+    if (session.status === 'inactive') return;
+    let cancelled = false;
+    let midiAccess: any = null;
+
+    const onMidiMessage = (event: { data?: Uint8Array }) => {
+      if (!event.data) return;
+      const binding = resolveMidiBinding(event.data);
+      if (!binding) return;
+
+      const learnTarget = hardwareLearnTargetRef.current;
+      if (learnTarget) {
+        learnHardwareInput(learnTarget, 'midi', binding);
+        return;
+      }
+
+      const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].midi === binding);
+      if (match) runHardwareAction(match.id);
+    };
+
+    const connectMidi = async () => {
+      const requestMIDIAccess = (navigator as any).requestMIDIAccess;
+      if (typeof requestMIDIAccess !== 'function') {
+        setHardwareInputStatus('midi-unavailable');
+        return;
+      }
+
+      try {
+        midiAccess = await requestMIDIAccess.call(navigator);
+        if (cancelled) return;
+        setHardwareInputStatus('midi-ready');
+        midiAccess.inputs.forEach((input: { onmidimessage: ((event: { data?: Uint8Array }) => void) | null }) => {
+          input.onmidimessage = onMidiMessage;
+        });
+      } catch {
+        if (!cancelled) setHardwareInputStatus('midi-denied');
+      }
+    };
+
+    void connectMidi();
+
+    return () => {
+      cancelled = true;
+      if (midiAccess?.inputs) {
+        midiAccess.inputs.forEach((input: { onmidimessage: null }) => {
+          input.onmidimessage = null;
+        });
+      }
+    };
+  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue]);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -1427,16 +1735,17 @@ export default function TalentDashboard({
             />
           </div>
 
-          <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Performer mobile sections">
+          <section className="grid grid-cols-4 gap-2 landscape:hidden" aria-label="Performer mobile sections">
             {[
               { id: 'live', label: 'Live' },
               { id: 'share', label: 'Share' },
-              { id: 'settings', label: 'Control' }
+              { id: 'settings', label: 'Control' },
+              { id: 'hardware', label: 'Keys' }
             ].map((item) => (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
+                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings' | 'hardware')}
                 className={`min-h-10 rounded-xl px-2 text-xs font-black uppercase tracking-wide ${
                   mobilePanel === item.id ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
                 }`}
@@ -1527,6 +1836,16 @@ export default function TalentDashboard({
                 </div>
               ) : mobilePanel === 'share' ? (
                 <CompactSharePanel activeGigId={selectedGigId ?? activeGigId} />
+              ) : mobilePanel === 'hardware' ? (
+                <div className="h-full min-h-0 overflow-hidden">
+                  <HardwareMappingPanel
+                    bindings={hardwareBindings}
+                    learnTarget={hardwareLearnTarget}
+                    midiStatus={hardwareInputStatus}
+                    onLearn={setHardwareLearnTarget}
+                    onClear={clearHardwareInput}
+                  />
+                </div>
               ) : (
                 <CompactControlPanel
                   session={session}
@@ -2652,6 +2971,16 @@ export default function TalentDashboard({
             {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
             <div className={`${mobilePanel === 'share' ? 'block' : 'hidden'} lg:block`}>
               <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
+            </div>
+
+            <div className={`${mobilePanel === 'hardware' ? 'block' : 'hidden'} lg:block`}>
+              <HardwareMappingPanel
+                bindings={hardwareBindings}
+                learnTarget={hardwareLearnTarget}
+                midiStatus={hardwareInputStatus}
+                onLearn={setHardwareLearnTarget}
+                onClear={clearHardwareInput}
+              />
             </div>
 
             <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>

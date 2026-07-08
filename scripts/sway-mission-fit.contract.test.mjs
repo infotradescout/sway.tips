@@ -28,7 +28,8 @@ for (const term of [
 
 for (const term of [
   'Live Command Center',
-  "useState<'live' | 'share' | 'settings'>('live')",
+  "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
+  'Hardware Controls',
   'Performer mobile sections',
   'operatorNextAction',
   'Open crowd view',
