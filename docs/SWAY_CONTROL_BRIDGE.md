@@ -12,7 +12,7 @@ track source URL when Sway has one.
 ## Start
 
 ```bash
-npm run control:bridge -- --gig-id YOUR_GIG_ID --auth-cookie "YOUR_PERFORMER_COOKIE"
+npm run control:bridge -- --gig-id YOUR_GIG_ID --auth-token YOUR_DASHBOARD_BRIDGE_TOKEN
 ```
 
 Defaults:
@@ -24,8 +24,11 @@ Defaults:
 For a local Sway dev server:
 
 ```bash
-npm run control:bridge -- --gig-id YOUR_GIG_ID --auth-cookie "YOUR_PERFORMER_COOKIE" --sway-url http://localhost:5173
+npm run control:bridge -- --gig-id YOUR_GIG_ID --auth-token YOUR_DASHBOARD_BRIDGE_TOKEN --sway-url http://localhost:5173
 ```
+
+The performer dashboard can issue a short-lived bridge token from Hardware
+Controls. That token is preferred over copying a browser cookie.
 
 ## Endpoints
 
@@ -85,5 +88,5 @@ Song Title - Artist
 ## Security
 
 The bridge binds to `127.0.0.1` by default. Do not expose it on public networks.
-The `--auth-cookie` value acts like the signed-in performer browser session for
-protected Sway actions.
+The `--auth-token` value acts like a short-lived signed-in performer session for
+protected Sway actions. Treat it like a password until it expires.

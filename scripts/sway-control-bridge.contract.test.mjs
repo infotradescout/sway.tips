@@ -11,7 +11,11 @@ for (const term of [
   'Sway Control Bridge',
   '127.0.0.1',
   '--gig-id <id>',
+  '--auth-token <text>',
   '--auth-cookie <text>',
+  'resolveAuthCookie',
+  'SWAY_CONTROL_AUTH_TOKEN',
+  'sway_performer_session=',
   "bridge: 'sway-control-bridge'",
   "GET' && req.url === '/health'",
   "GET' && req.url === '/state'",
@@ -60,7 +64,8 @@ for (const term of [
   'Sway removes the typing',
   'Song Title - Artist',
   'Do not expose it on public networks.',
-  'The `--auth-cookie` value acts like the signed-in performer browser session'
+  'The `--auth-token` value acts like a short-lived signed-in performer session',
+  'preferred over copying a browser cookie'
 ]) {
   if (!docs.includes(term)) {
     failures.push(`Control bridge docs missing truth/security term: ${term}`);

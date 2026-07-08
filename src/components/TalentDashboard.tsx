@@ -760,14 +760,22 @@ function HardwareMappingPanel({
   bindings,
   learnTarget,
   midiStatus,
+  bridgeCommand,
+  bridgeTokenStatus,
+  bridgeTokenMessage,
   onLearn,
-  onClear
+  onClear,
+  onIssueBridgeToken
 }: {
   bindings: HardwareBindingMap;
   learnTarget: HardwareActionId | null;
   midiStatus: 'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied';
+  bridgeCommand: string | null;
+  bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
+  bridgeTokenMessage: string | null;
   onLearn: (actionId: HardwareActionId) => void;
   onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
+  onIssueBridgeToken: () => void;
 }) {
   const midiLabel = midiStatus === 'midi-ready'
     ? 'MIDI ready'
@@ -788,6 +796,29 @@ function HardwareMappingPanel({
           <p className="mt-1 truncate text-[10px] text-slate-500">{midiLabel}</p>
         </div>
         <Keyboard className="h-5 w-5 shrink-0 text-cyan-300" />
+      </div>
+      <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Local bridge token</p>
+            <p className="mt-1 truncate text-[10px] text-slate-400">
+              {bridgeTokenMessage ?? 'Create a short-lived token for Stream Deck, Companion, or scripts.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onIssueBridgeToken}
+            disabled={bridgeTokenStatus === 'submitting'}
+            className="shrink-0 rounded-lg bg-cyan-500 px-3 py-2 text-[10px] font-black uppercase text-slate-950 disabled:opacity-50"
+          >
+            {bridgeTokenStatus === 'submitting' ? 'Creating' : 'Create'}
+          </button>
+        </div>
+        {bridgeCommand ? (
+          <pre className="mt-3 max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-slate-950 p-2 font-mono text-[10px] leading-relaxed text-cyan-100">
+            {bridgeCommand}
+          </pre>
+        ) : null}
       </div>
       <div className="mt-3 grid gap-2">
         {HARDWARE_ACTIONS.map((action) => (
@@ -910,6 +941,9 @@ export default function TalentDashboard({
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
   const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
+  const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [bridgeTokenMessage, setBridgeTokenMessage] = useState<string | null>(null);
+  const [bridgeCommand, setBridgeCommand] = useState<string | null>(null);
   const hardwareBindingsRef = useRef(hardwareBindings);
   const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
 
@@ -1580,6 +1614,28 @@ export default function TalentDashboard({
     }));
   };
 
+  const issueBridgeToken = async () => {
+    if (!writableGigId || bridgeTokenStatus === 'submitting') return;
+    setBridgeTokenStatus('submitting');
+    setBridgeTokenMessage(null);
+    setBridgeCommand(null);
+
+    try {
+      const response = await postSessionJson('/api/talent/control-bridge/token');
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to create bridge token.');
+      }
+
+      setBridgeTokenStatus('success');
+      setBridgeTokenMessage(`Token expires ${data?.expiresAt ? new Date(data.expiresAt).toLocaleTimeString() : 'after issue'}.`);
+      setBridgeCommand(typeof data?.command === 'string' ? data.command : null);
+    } catch (error) {
+      setBridgeTokenStatus('error');
+      setBridgeTokenMessage(error instanceof Error ? error.message : 'Unable to create bridge token.');
+    }
+  };
+
   useEffect(() => {
     if (session.status === 'inactive') return;
 
@@ -1842,8 +1898,12 @@ export default function TalentDashboard({
                     bindings={hardwareBindings}
                     learnTarget={hardwareLearnTarget}
                     midiStatus={hardwareInputStatus}
+                    bridgeCommand={bridgeCommand}
+                    bridgeTokenStatus={bridgeTokenStatus}
+                    bridgeTokenMessage={bridgeTokenMessage}
                     onLearn={setHardwareLearnTarget}
                     onClear={clearHardwareInput}
+                    onIssueBridgeToken={issueBridgeToken}
                   />
                 </div>
               ) : (
@@ -2978,8 +3038,12 @@ export default function TalentDashboard({
                 bindings={hardwareBindings}
                 learnTarget={hardwareLearnTarget}
                 midiStatus={hardwareInputStatus}
+                bridgeCommand={bridgeCommand}
+                bridgeTokenStatus={bridgeTokenStatus}
+                bridgeTokenMessage={bridgeTokenMessage}
                 onLearn={setHardwareLearnTarget}
                 onClear={clearHardwareInput}
+                onIssueBridgeToken={issueBridgeToken}
               />
             </div>
 

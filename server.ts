@@ -2377,6 +2377,63 @@ app.post('/api/talent/session/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/talent/control-bridge/token', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const actor = await resolveProtectedMutationActor(req, res, parseDurableGigId(req.body?.gig_id));
+  if (!actor) return;
+
+  if (!performerSessionStore.hasDurableStore) {
+    res.status(503).json({ error: 'Control bridge token issuance requires durable session persistence.' });
+    return;
+  }
+
+  const bridgeSession = await performerSessionStore.issueSession({
+    actorUserId: actor.actorId,
+    issuedBy: actor.actorId,
+    ttlHours: 2
+  });
+
+  const requestOrigin = typeof req.headers.origin === 'string' && req.headers.origin.trim()
+    ? req.headers.origin.trim().replace(/\/+$/, '')
+    : null;
+  const configuredBaseUrl = process.env.SWAY_APP_BASE_URL?.trim().replace(/\/+$/, '') || null;
+  const fallbackBaseUrl = `${req.protocol}://${req.get('host')}`;
+  const swayUrl = configuredBaseUrl || requestOrigin || fallbackBaseUrl;
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const bridgeCommand = gigId
+    ? `npm run control:bridge -- --gig-id ${gigId} --auth-token ${bridgeSession.token} --sway-url ${swayUrl}`
+    : null;
+
+  if (businessDb) {
+    await writeAuditEvent(businessDb, {
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      entityType: 'performer_session',
+      entityId: bridgeSession.sessionId,
+      eventType: 'performer_control_bridge.token.issue',
+      previousStatus: null,
+      nextStatus: 'active',
+      metadata: {
+        gigId,
+        expiresAt: bridgeSession.expiresAt.toISOString(),
+        ttlHours: 2,
+        tokenTransport: 'bridge_auth_token'
+      }
+    });
+  }
+
+  res.json({
+    success: true,
+    bridgeToken: bridgeSession.token,
+    expiresAt: bridgeSession.expiresAt.toISOString(),
+    gigId,
+    swayUrl,
+    command: bridgeCommand,
+    tokenTransport: 'auth-token'
+  });
+});
+
 app.post('/api/admin/bootstrap', async (req, res) => {
   applyNoStoreHeaders(res);
 

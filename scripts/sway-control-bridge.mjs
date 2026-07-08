@@ -8,11 +8,12 @@ Starts a local HTTP bridge so Stream Deck, Companion, MIDI routers, foot pedals,
 or small scripts can trigger performer cockpit actions without screen tapping.
 
 Usage:
-  npm run control:bridge -- --gig-id <gig-id> --auth-cookie "<performer-session-cookie>"
+  npm run control:bridge -- --gig-id <gig-id> --auth-token <dashboard-issued-token>
 
 Options:
   --gig-id <id>          Required live room/gig id
-  --auth-cookie <text>   Required Cookie header copied from the signed-in performer browser
+  --auth-token <text>    Preferred short-lived bridge token from the performer dashboard
+  --auth-cookie <text>   Legacy Cookie header fallback for local development
   --sway-url <url>       Defaults to https://app.sway.tips
   --host <host>          Defaults to 127.0.0.1
   --port <port>          Defaults to 4315
@@ -157,6 +158,11 @@ function topRequestPayload(request) {
   };
 }
 
+function resolveAuthCookie({ authToken, authCookie }) {
+  if (authToken) return `sway_performer_session=${encodeURIComponent(authToken)}`;
+  return authCookie;
+}
+
 async function postSwayAction({ swayUrl, authCookie, path, body }) {
   const response = await fetch(`${swayUrl}${path}`, {
     method: 'POST',
@@ -272,13 +278,15 @@ if (args.help || args.h) {
 }
 
 const gigId = typeof args['gig-id'] === 'string' ? args['gig-id'] : process.env.SWAY_CONTROL_GIG_ID;
-const authCookie = typeof args['auth-cookie'] === 'string' ? args['auth-cookie'] : process.env.SWAY_CONTROL_AUTH_COOKIE;
+const authToken = typeof args['auth-token'] === 'string' ? args['auth-token'] : process.env.SWAY_CONTROL_AUTH_TOKEN;
+const legacyAuthCookie = typeof args['auth-cookie'] === 'string' ? args['auth-cookie'] : process.env.SWAY_CONTROL_AUTH_COOKIE;
+const authCookie = resolveAuthCookie({ authToken, authCookie: legacyAuthCookie });
 const swayUrl = normalizeBaseUrl(typeof args['sway-url'] === 'string' ? args['sway-url'] : process.env.SWAY_CONTROL_SWAY_URL);
 const listenHost = typeof args.host === 'string' ? args.host : process.env.SWAY_CONTROL_BRIDGE_HOST || '127.0.0.1';
 const listenPort = Number(typeof args.port === 'string' ? args.port : process.env.SWAY_CONTROL_BRIDGE_PORT || '4315');
 
 if (!gigId || !authCookie) {
-  console.error('Missing required gig id or auth cookie. Pass --gig-id and --auth-cookie, or set SWAY_CONTROL_GIG_ID and SWAY_CONTROL_AUTH_COOKIE.');
+  console.error('Missing required gig id or auth token. Pass --gig-id and --auth-token, or set SWAY_CONTROL_GIG_ID and SWAY_CONTROL_AUTH_TOKEN.');
   console.error('');
   console.error(HELP_TEXT.trim());
   process.exit(1);

@@ -26,7 +26,9 @@ for (const term of [
   "onTriage(topPending.id, 'deny')",
   'onHide(topApproved.id)',
   "window.open(topApproved.spotifyUrl, '_blank', 'noopener,noreferrer')",
-  'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY'
+  'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY',
+  'Local bridge token',
+  'onIssueBridgeToken'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent hardware mapping missing term: ${term}`);
