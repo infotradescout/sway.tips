@@ -199,7 +199,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
     <div className="rounded-2xl border border-fuchsia-500/20 bg-slate-900 p-5 shadow-lg shadow-fuchsia-950/20">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-fuchsia-400">Live Room Share</h4>
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-fuchsia-400">Show QR</h4>
           <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
             {roomLink ? ACTIVE_BODY_COPY : MISSING_CONTEXT_COPY}
           </p>
@@ -249,7 +249,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
                 <span className="font-mono uppercase tracking-widest text-slate-500">2. Confirm scope</span>
-                <p className="mt-1">Choose library, setlist, or open request lane.</p>
+                <p className="mt-1">Confirm the money settings for tonight.</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
                 <span className="font-mono uppercase tracking-widest text-slate-500">3. Share QR</span>

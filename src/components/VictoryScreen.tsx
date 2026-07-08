@@ -37,7 +37,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
     .reduce((sum, request) => sum + Math.max(1, request.sponsorCount), 0);
 
   const formattedTips = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(session.totals.totalTips);
-  const shareText = `I just wrapped a Sway gig and pulled in ${formattedTips} in tips! 🎧 www.sway.tips`;
+  const shareText = `I just wrapped a Sway night and pulled in ${formattedTips} in tips. www.sway.tips`;
 
   const handleShare = async () => {
     setShareError(false);
@@ -89,11 +89,11 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
           </div>
           
           <h1 className="font-display text-4xl font-extrabold text-white tracking-tight leading-tight">
-            The Victory Lap is Real!
+            Night recap
           </h1>
           
           <p className="text-gray-300 text-sm leading-relaxed">
-            You ended your gig and cleared the remaining request queue. Totals below reflect the requests you fulfilled — no card was charged.
+            You ended the room. Totals below reflect requests, tips, boosts, and fees recorded for tonight.
           </p>
 
           {/* Gamified Stat Grid */}
@@ -116,8 +116,8 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                 <Award className="w-5 h-5" id="victory_icon_fulfilled" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Fulfilled</div>
-                <div className="text-xl font-bold font-display text-white mt-0.5">{session.totals.totalCount} Gigs</div>
+                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Fulfilled requests</div>
+                <div className="text-xl font-bold font-display text-white mt-0.5">{session.totals.totalCount} Requests</div>
               </div>
             </div>
 

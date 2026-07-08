@@ -35,7 +35,7 @@ for (const term of [
   'landscape:grid-rows-[auto_minmax(0,1fr)_auto]',
   'landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]',
   'landscape:hidden',
-  "aria-label=\"Performer mobile sections\""
+  "aria-label=\"Live-night sections\""
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing no-scroll cockpit term: ${term}`);
 }

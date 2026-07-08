@@ -476,7 +476,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400 font-mono">Synchronizing Sway live ledger...</p>
+          <p className="text-xs text-slate-400 font-mono">Opening live room...</p>
         </div>
       </div>
     );
@@ -496,7 +496,7 @@ export default function App() {
           <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">
             SWAY LIVE ROOM
           </span>
-          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
+          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE ROOM</span>
         </div>
 
         {nowPlaying && (
@@ -527,7 +527,7 @@ export default function App() {
           ))}
           {upNextQueue.length === 0 && (
             <div className="text-center py-4 bg-slate-950/40 rounded border border-white/5 text-[10px] text-slate-500 font-mono">
-              Waiting for gig requests...
+              Waiting for requests...
             </div>
           )}
         </div>
@@ -593,9 +593,9 @@ export default function App() {
               </div>
               <div>
                 <span className="font-display text-xs font-black uppercase tracking-widest text-white">
-                  Sway Talent
+                  Tonight's Room
                 </span>
-                <p className="text-[9px] text-slate-400">Now Playing, Pending Requests, Approved Queue, Controls, and Room State</p>
+                <p className="text-[9px] text-slate-400">Queue, QR, earnings, and room controls</p>
               </div>
             </div>
           </div>
@@ -718,7 +718,7 @@ export default function App() {
             </div>
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">
-                Sway Patron
+                Live Room
               </span>
               <p className="text-[9px] text-slate-400">
                 {route.name === 'performer' ? `Performer link: ${route.performerHandle}` : `Gig route: ${route.gigId}`}

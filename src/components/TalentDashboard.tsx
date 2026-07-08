@@ -878,7 +878,7 @@ function HardwareMappingPanel({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Hardware Controls</h4>
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Advanced key controls</h4>
           <p className="mt-1 truncate text-[10px] text-slate-500">{midiLabel}</p>
         </div>
         <Keyboard className="h-5 w-5 shrink-0 text-cyan-300" />
@@ -984,10 +984,10 @@ export default function TalentDashboard({
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
   const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
   const [setupMinTip, setSetupMinTip] = useState(5);
-  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings' | 'hardware'>('live');
+  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   
   // Local state for interactive settings drawer
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
 
   // Featured Status Management States
@@ -1899,17 +1899,16 @@ export default function TalentDashboard({
             />
           </div>
 
-          <section className="grid grid-cols-4 gap-2 landscape:hidden" aria-label="Performer mobile sections">
+          <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Live-night sections">
             {[
               { id: 'live', label: 'Live' },
-              { id: 'share', label: 'Share' },
-              { id: 'settings', label: 'Control' },
-              { id: 'hardware', label: 'Keys' }
+              { id: 'share', label: 'Show QR' },
+              { id: 'settings', label: 'End' }
             ].map((item) => (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings' | 'hardware')}
+                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
                 className={`min-h-10 rounded-xl px-2 text-xs font-black uppercase tracking-wide ${
                   mobilePanel === item.id ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
                 }`}
@@ -2000,21 +1999,6 @@ export default function TalentDashboard({
                 </div>
               ) : mobilePanel === 'share' ? (
                 <CompactSharePanel activeGigId={selectedGigId ?? activeGigId} />
-              ) : mobilePanel === 'hardware' ? (
-                <div className="h-full min-h-0 overflow-hidden">
-                  <HardwareMappingPanel
-                    bindings={hardwareBindings}
-                    learnTarget={hardwareLearnTarget}
-                    midiStatus={hardwareInputStatus}
-                    bridgeCommand={bridgeCommand}
-                    bridgeTokenStatus={bridgeTokenStatus}
-                    bridgeTokenMessage={bridgeTokenMessage}
-                    onLearn={setHardwareLearnTarget}
-                    onClear={clearHardwareInput}
-                    onIssueBridgeToken={issueBridgeToken}
-                    onDownloadBridgePreset={downloadBridgePreset}
-                  />
-                </div>
               ) : (
                 <CompactControlPanel
                   session={session}
@@ -2171,10 +2155,10 @@ export default function TalentDashboard({
       )}
 
       {session.status !== 'inactive' && (
-        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Performer mobile sections">
+        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Live-night sections">
           {[
             { id: 'live', label: 'Live' },
-            { id: 'share', label: 'Share' },
+            { id: 'share', label: 'Show QR' },
             { id: 'settings', label: 'Settings' }
           ].map((item) => (
             <button
@@ -2483,9 +2467,9 @@ export default function TalentDashboard({
               Sway to Play
             </div>
             <div className="space-y-2">
-              <h3 className="font-display text-3xl font-black tracking-tight text-white">Welcome, {welcomePerformerName}</h3>
+              <h3 className="font-display text-3xl font-black tracking-tight text-white">Start tonight's room</h3>
               <p className="mx-auto max-w-xl text-sm leading-6 text-slate-300">
-                Start a live room and let the crowd send Requests, Tips, and Boosts.
+                Set the money rules, show the QR, then run Requests, Tips, and Boosts from one queue.
               </p>
             </div>
           </div>
@@ -2507,8 +2491,8 @@ export default function TalentDashboard({
                   <p className="mt-1 text-xs font-bold text-white">Point the crowd in</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">3. DJ decides</p>
-                  <p className="mt-1 text-xs font-bold text-white">Approve or veto</p>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">3. Run queue</p>
+                  <p className="mt-1 text-xs font-bold text-white">Approve, deny, complete</p>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
@@ -2531,7 +2515,7 @@ export default function TalentDashboard({
                 disabled={!performerEmailVerified}
                 className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
               >
-                <Play className="h-4 w-4" /> Start Live Room
+                <Play className="h-4 w-4" /> Start room
               </button>
             </div>
 
@@ -2542,9 +2526,9 @@ export default function TalentDashboard({
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Advanced room settings</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Tonight's money settings</p>
                   <p className="mt-1 text-sm text-slate-400">
-                    Adjust performer name, role, fee handling, and minimum tip if tonight needs custom rules.
+                    Confirm name, role, fee handling, and minimum tip before the QR goes up.
                   </p>
                 </div>
                 <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
@@ -3142,25 +3126,10 @@ export default function TalentDashboard({
               <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
             </div>
 
-            <div className={`${mobilePanel === 'hardware' ? 'block' : 'hidden'} lg:block`}>
-              <HardwareMappingPanel
-                bindings={hardwareBindings}
-                learnTarget={hardwareLearnTarget}
-                midiStatus={hardwareInputStatus}
-                bridgeCommand={bridgeCommand}
-                bridgeTokenStatus={bridgeTokenStatus}
-                bridgeTokenMessage={bridgeTokenMessage}
-                onLearn={setHardwareLearnTarget}
-                onClear={clearHardwareInput}
-                onIssueBridgeToken={issueBridgeToken}
-                onDownloadBridgePreset={downloadBridgePreset}
-              />
-            </div>
-
             <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>
-              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
+              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Tonight's controls</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                Set the request scope, then let crowd autopilot rank clean requests into up next. Pause, hide, or veto stays available as the safety brake.
+                Keep requests open while the room is working. Pause intake, deny bad requests, complete played items, and end the night from here.
               </p>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
@@ -3168,16 +3137,16 @@ export default function TalentDashboard({
                   <p className="mt-1 text-xs font-bold text-white">{requestScopeLabel}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Flow</p>
-                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Autopilot' : 'Manual'}</p>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Review</p>
+                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Crowd-ranked' : 'Manual'}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room brake</p>
-                  <p className="mt-1 text-xs font-bold text-white">Pause Requests</p>
+                  <p className="mt-1 text-xs font-bold text-white">Pause intake</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Live state</p>
-                  <p className="mt-1 text-xs font-bold text-white">Crowd Ranked</p>
+                  <p className="mt-1 text-xs font-bold text-white">Queue live</p>
                 </div>
               </div>
             </div>
@@ -3524,7 +3493,7 @@ export default function TalentDashboard({
             {/* Realtime session performance card stats */}
             <div className="hidden bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg lg:block">
               <h4 className="font-display text-xs font-mono font-bold tracking-wider text-fuchsia-400 uppercase select-none">
-                Performance Meter
+                Earnings tonight
               </h4>
 
               <div className="space-y-3 select-none font-sans">

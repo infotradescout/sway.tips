@@ -27,24 +27,18 @@ for (const term of [
 }
 
 for (const term of [
-  'Live Command Center',
-  "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
-  'Hardware Controls',
-  'Performer mobile sections',
-  'operatorNextAction',
-  'Open crowd view',
-  'Share QR',
-  '3. DJ decides',
-  'Before You Share',
-  'Set the request scope',
-  'crowd autopilot rank clean requests into up next',
-  'Pause, hide, or veto stays available as the safety brake',
-  'Autopilot',
-  'Pause Requests',
-  'Crowd Ranked'
+  "useState<'live' | 'share' | 'settings'>('live')",
+  "Tonight's money settings",
+  'Start room',
+  'Show QR',
+  'Approve, deny, complete',
+  "Tonight's controls",
+  'Pause intake',
+  'Queue live',
+  'Earnings tonight'
 ]) {
   if (!talentDashboard.includes(term)) {
-    failures.push(`Performer mission control copy missing: ${term}`);
+    failures.push(`Performer live-night spine copy missing: ${term}`);
   }
 }
 
@@ -73,7 +67,11 @@ for (const forbidden of [
   'only pick the songs you have',
   'only choose songs you have',
   'guaranteed library match',
-  'automatically plays'
+  'automatically plays',
+  'Hardware Controls',
+  "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
+  'Before You Share',
+  'crowd autopilot rank clean requests into up next'
 ]) {
   if (patronView.includes(forbidden) || talentDashboard.includes(forbidden)) {
     failures.push(`Mission copy overpromises DJ library/control behavior: ${forbidden}`);

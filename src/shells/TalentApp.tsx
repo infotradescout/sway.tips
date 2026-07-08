@@ -301,8 +301,8 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Talent</span>
-              <p className="text-[9px] text-slate-400">Manage Pending, Approved, and Playing requests</p>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Tonight's Room</span>
+              <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
           <DemoModeBanner compact />
@@ -312,12 +312,12 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? 'Sway to Play' : 'Performer Console'}
+            title={session.status === 'inactive' ? 'Start room' : "Tonight's room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
             primaryLabel={session.status === 'inactive'
               ? 'Start a live room and let the crowd send Requests, Tips, and Boosts'
-              : 'Now Playing, Pending Requests, Approved Queue, and Controls'}
-            secondaryLabel={session.status === 'inactive' ? 'Performer profile' : 'Room State'}
+              : 'Queue, QR, earnings, and room controls'}
+            secondaryLabel={session.status === 'inactive' ? 'Money settings' : 'Room status'}
             isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">

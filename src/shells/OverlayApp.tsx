@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Flame, Music, RotateCw, Rocket } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -81,10 +81,10 @@ export default function OverlayApp() {
     statePath: routeGigId ? `/api/state/${routeGigId}` : null
   });
   // Hooks must run on every render regardless of the fail-closed status
-  // checked below, so the now-playing lookup lives inside useLyrics
+  // checked below, so the now-playing lookup lives inside useNowPlaying
   // (defined after this component, past the fail-closed guards) instead
   // of being derived from the raw room state up here.
-  const { lyricsOpen, setLyricsOpen, lyricsStatus, lyricsText, nowPlaying } = useLyrics(bState);
+  const nowPlaying = useNowPlaying(bState);
 
   if (isLoading) return null;
   if (roomLookup.status === 'ended') return <OverlayCaption text="Live room ended" transparent={transparent} />;
@@ -147,23 +147,7 @@ export default function OverlayApp() {
                     <div className={`truncate font-black text-white ${transparent ? 'text-base' : 'text-5xl leading-tight'}`}>{nowPlaying.title}</div>
                     {nowPlaying.subtitle && <div className={`truncate text-slate-300 ${transparent ? 'text-xs' : 'text-xl font-bold'}`}>{nowPlaying.subtitle}</div>}
                   </div>
-                  {transparent ? (
-                    <button
-                      type="button"
-                      onClick={() => setLyricsOpen((open) => !open)}
-                      className="shrink-0 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300"
-                    >
-                      {lyricsOpen ? 'Hide lyrics' : 'Lyrics'}
-                    </button>
-                  ) : null}
                 </div>
-                {transparent && lyricsOpen && (
-                  <div className="mt-2 max-h-32 overflow-y-auto whitespace-pre-line rounded-lg border border-white/10 bg-slate-950/70 p-2.5 text-xs leading-relaxed text-slate-300">
-                    {lyricsStatus === 'loading' && 'Looking up lyrics...'}
-                    {lyricsStatus === 'not-found' && 'No lyrics found for this song.'}
-                    {lyricsStatus === 'found' && lyricsText}
-                  </div>
-                )}
               </div>
             ) : (
               <div className={`rounded-2xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'p-4 text-[10px]' : 'p-10 text-xl'}`}>
@@ -301,46 +285,10 @@ export default function OverlayApp() {
   );
 }
 
-function useLyrics(bState: BackendState) {
-  const nowPlaying = bState.requests
+function useNowPlaying(bState: BackendState) {
+  return bState.requests
     .filter((r) => !r.hidden && !r.removed && !r.shadowBanned)
     .filter((r) => r.status === 'fulfilled' && r.type !== 'tip')
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
-
-  const [lyricsOpen, setLyricsOpen] = useState(false);
-  const [lyricsStatus, setLyricsStatus] = useState<'idle' | 'loading' | 'found' | 'not-found'>('idle');
-  const [lyricsText, setLyricsText] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLyricsOpen(false);
-    setLyricsStatus('idle');
-    setLyricsText(null);
-  }, [nowPlaying?.id]);
-
-  useEffect(() => {
-    if (!lyricsOpen || !nowPlaying) return;
-    let cancelled = false;
-    setLyricsStatus('loading');
-    const params = new URLSearchParams({ title: nowPlaying.title, artist: nowPlaying.subtitle || '' });
-    fetch(`/api/lyrics?${params}`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.found && (data.plainLyrics || data.instrumental)) {
-          setLyricsText(data.instrumental ? 'Instrumental — no lyrics.' : data.plainLyrics);
-          setLyricsStatus('found');
-        } else {
-          setLyricsStatus('not-found');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLyricsStatus('not-found');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lyricsOpen, nowPlaying]);
-
-  return { lyricsOpen, setLyricsOpen, lyricsStatus, lyricsText, nowPlaying };
 }
