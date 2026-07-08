@@ -359,7 +359,7 @@ export default function PatronApp() {
                 {route.name === 'performer' ? <Smartphone className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
               </div>
               <div>
-                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Live Room</span>
                 <p className="text-[9px] text-slate-400">
                   {patronTopbarSubtitle}
                 </p>
@@ -381,10 +381,10 @@ export default function PatronApp() {
             />
           ) : (
             <SplitViewShell
-              title="Patron App"
+              title="Live room"
               eyebrow="Live Room"
-              primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
-              secondaryLabel="Selected gig inspector"
+              primaryLabel="Request, Tip, Boost, and see status"
+              secondaryLabel="Room status"
               isEmpty={requests.length === 0 && performers.length === 0}
               emptyState={
                 <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">

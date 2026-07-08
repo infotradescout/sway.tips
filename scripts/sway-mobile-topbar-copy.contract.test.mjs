@@ -21,8 +21,8 @@ if (talentSource.includes('Now Playing, Pending Requests, Approved Queue, Contro
   failures.push('Performer mobile top bar must not use the dense feature-list descriptor.');
 }
 
-if (!talentSource.includes('Manage Pending, Approved, and Playing requests')) {
-  failures.push('Performer mobile top bar must orient operators with Pending, Approved, and Playing request language.');
+if (!talentSource.includes('Start, share, earn, and run the queue')) {
+  failures.push('Performer mobile top bar must orient performers with start, share, earn, and queue language.');
 }
 
 if (failures.length > 0) {

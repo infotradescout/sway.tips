@@ -35,9 +35,9 @@ const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
 const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired before confirmation was completed.';
 const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-in or switch to cellular before sending a request.';
-const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Payment authorization required. Confirm payment to finalize your request.';
-const PAYMENT_CONFIRMATION_WAITING_COPY = 'This request is waiting for payment confirmation. Do not close this page until payment confirmation is complete.';
-const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Your payment method may be authorized now and charged when the action is finalized.';
+const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this request.';
+const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
+const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
 
 interface PatronViewProps {
   session: GigSession;
@@ -308,9 +308,6 @@ export default function PatronView({
     if (formToastTimeoutRef.current) window.clearTimeout(formToastTimeoutRef.current);
     formToastTimeoutRef.current = window.setTimeout(() => setFormToast(null), 4000);
   };
-  const [lyricsOpen, setLyricsOpen] = useState(false);
-  const [lyricsStatus, setLyricsStatus] = useState<'idle' | 'loading' | 'found' | 'not-found'>('idle');
-  const [lyricsText, setLyricsText] = useState<string | null>(null);
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isSubmitLocked = isPaying || isPaymentConfirmationPending;
   const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
@@ -344,37 +341,6 @@ export default function PatronView({
     .filter((item) => item.status === 'fulfilled' && item.type !== 'tip')
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
-
-  useEffect(() => {
-    setLyricsOpen(false);
-    setLyricsStatus('idle');
-    setLyricsText(null);
-  }, [nowPlayingRequest?.id]);
-
-  useEffect(() => {
-    if (!lyricsOpen || !nowPlayingRequest) return;
-    let cancelled = false;
-    setLyricsStatus('loading');
-    const params = new URLSearchParams({
-      title: nowPlayingRequest.title,
-      artist: nowPlayingRequest.subtitle || ''
-    });
-    fetch(`/api/lyrics?${params}`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.found && (data.plainLyrics || data.instrumental)) {
-          setLyricsText(data.instrumental ? 'Instrumental — no lyrics.' : data.plainLyrics);
-          setLyricsStatus('found');
-        } else {
-          setLyricsStatus('not-found');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLyricsStatus('not-found');
-      });
-    return () => { cancelled = true; };
-  }, [lyricsOpen, nowPlayingRequest]);
 
   const funnelTelemetryPayload = {
     shell: 'patron' as const,
@@ -1184,22 +1150,7 @@ export default function PatronView({
                       <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setLyricsOpen((open) => !open)}
-                    className="shrink-0 rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:border-cyan-500/40 hover:text-white"
-                  >
-                    {lyricsOpen ? 'Hide lyrics' : 'Lyrics'}
-                  </button>
                 </div>
-
-                {lyricsOpen && (
-                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3 text-xs leading-relaxed text-slate-300 max-h-48 overflow-y-auto whitespace-pre-line">
-                    {lyricsStatus === 'loading' && 'Looking up lyrics...'}
-                    {lyricsStatus === 'not-found' && 'No lyrics found for this song.'}
-                    {lyricsStatus === 'found' && lyricsText}
-                  </div>
-                )}
               </div>
             ) : (
               <p className="text-[11px] text-slate-400">{modeHint}.</p>
@@ -1235,13 +1186,13 @@ export default function PatronView({
         </div>
       )}
 
-      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
-        <div>
+      <details className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
+        <summary className="cursor-pointer list-none">
           <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Safety Controls</h3>
           <p className="text-[11px] text-slate-400 mt-1">Use these controls to report a request, block future interactions, contact support, or start a data deletion request.</p>
-        </div>
+        </summary>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => {
@@ -1286,7 +1237,7 @@ export default function PatronView({
             Data Deletion Request
           </button>
         </div>
-      </div>
+      </details>
 
       {/* 2. Primary Tabs Selector */}
       {session.status === 'active' && (
@@ -1325,16 +1276,6 @@ export default function PatronView({
             <Activity className="w-4 h-4" /> Boost Queue
           </button>
 
-          <button
-            onClick={() => { setActiveTab('discover'); setSelectedDirectoryPerformer(null); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'discover'
-                ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-4 h-4" /> Browse Performers
-          </button>
         </div>
       )}
 
@@ -1399,7 +1340,7 @@ export default function PatronView({
                   <div className="text-slate-400 space-y-1 font-sans text-xs">
                     <p>• Send a <strong className="text-emerald-400">Direct Cash Tip</strong> to show love</p>
                     <p>• <strong className="text-cyan-400">Boost existing requests</strong> in the live queue to push them up</p>
-                    <p>• Discover other live performers near you</p>
+                    <p>• Watch the live queue and try again when requests reopen</p>
                   </div>
                 </div>
 
@@ -2148,7 +2089,7 @@ export default function PatronView({
                   </div>
                   <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    Your ${checkoutPayload.amount}.00 action is Pending with the performer. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                    Sent. Status: Pending. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                   </p>
                 </div>
               ) : (

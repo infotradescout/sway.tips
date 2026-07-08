@@ -23,8 +23,8 @@ if (!overlayApp.includes("if (roomLookup.status !== 'active')")) {
   failures.push('OverlayApp must keep the active-room gate before rendering the live projector view.');
 }
 
-if (!overlayApp.includes('{transparent ? (') || !overlayApp.includes('{transparent && lyricsOpen && (')) {
-  failures.push('Projector audience mode must not render operator-only lyrics controls.');
+if (overlayApp.includes('lyricsOpen') || overlayApp.includes('fetch(`/api/lyrics?${params}`)')) {
+  failures.push('Projector audience mode must not render or fetch lyrics controls.');
 }
 
 for (const forbidden of ['postJson(', "method: 'POST'", 'method: "POST"', "method: 'DELETE'", 'method: "DELETE"', "method: 'PATCH'", 'method: "PATCH"']) {
