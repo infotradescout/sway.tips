@@ -178,9 +178,10 @@ export default function OverlayApp() {
                 </div>
               )}
               {upNextQueue.slice(0, transparent ? 5 : 4).map((req, idx) => (
-                <div
+                <motion.div
                   key={req.id}
-                  className={`flex items-center justify-between rounded-xl border transition-transform ${transparent ? 'p-2 text-xs' : 'p-4 text-2xl'} ${
+                  layoutId={`overlay-queue-${req.id}`}
+                  className={`flex items-center justify-between rounded-xl border ${transparent ? 'p-2 text-xs' : 'p-4 text-2xl'} ${
                     idx === 0 ? 'bg-slate-950/90 border-fuchsia-500/50 glow-fuchsia text-white' : 'bg-slate-900/80 border-white/5'
                   }`}
                 >
@@ -188,10 +189,23 @@ export default function OverlayApp() {
                     <span className={`rounded px-2 py-1 font-mono font-bold ${transparent ? 'text-[10px]' : 'text-base'} ${idx === 0 ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-slate-800 text-slate-400'}`}>
                       #{idx + 1}
                     </span>
+                    {req.albumArt ? (
+                      <img
+                        src={req.albumArt}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        className={`shrink-0 rounded-lg border border-white/10 object-cover ${transparent ? 'h-6 w-6' : 'h-10 w-10'}`}
+                      />
+                    ) : (
+                      <div className={`flex shrink-0 items-center justify-center rounded-lg border border-white/10 bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 ${transparent ? 'h-6 w-6' : 'h-10 w-10'}`}>
+                        <Music className={`text-cyan-300 ${transparent ? 'h-3 w-3' : 'h-5 w-5'}`} />
+                      </div>
+                    )}
                     <span className="truncate font-bold">{req.title}</span>
                   </div>
                   <span className="ml-2 font-mono font-bold text-cyan-400">${req.amount}</span>
-                </div>
+                </motion.div>
               ))}
               {upNextQueue.length === 0 && (
                 <div className={`rounded-xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'py-4 text-[10px]' : 'py-10 text-xl'}`}>
