@@ -38,7 +38,13 @@ for (const term of [
   '/api/talent/control-bridge/token',
   'setBridgeCommand',
   'bridgeTokenStatus',
-  'Create a short-lived token for Stream Deck, Companion, or scripts.'
+  'Create a short-lived token for Stream Deck, Companion, or scripts.',
+  'buildDashboardBridgePreset',
+  'downloadJsonFile',
+  'data-sway-control-bridge-preset-download="true"',
+  'Download button preset',
+  'sway-dashboard-control-bridge-preset.v1',
+  'sway-control-bridge-${safeGigId}.json'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent dashboard missing bridge token UX term: ${term}`);

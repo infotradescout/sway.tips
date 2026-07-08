@@ -189,6 +189,18 @@ const DEFAULT_HARDWARE_BINDINGS: HardwareBindingMap = {
   open_top_source: { keyboard: 'KeyO', midi: null }
 };
 
+const BRIDGE_PRESET_ACTIONS = [
+  ['toggle-requests', 'Pause / Resume', '/action/toggle-requests', '#22c55e'],
+  ['fulfill-top', 'Clear Top', '/action/fulfill-top', '#06b6d4'],
+  ['hide-top', 'Hide Top', '/action/hide-top', '#f59e0b'],
+  ['open-top-source', 'Open Source', '/action/open-top-source', '#10b981'],
+  ['search-top-spotify', 'Spotify Search', '/action/search-top-spotify', '#1db954'],
+  ['search-top-soundcloud', 'SoundCloud Search', '/action/search-top-soundcloud', '#ff5500'],
+  ['search-top-youtube', 'YouTube Search', '/action/search-top-youtube', '#ef4444'],
+  ['approve-pending', 'Approve Pending', '/action/approve-pending', '#84cc16'],
+  ['veto-pending', 'Veto Pending', '/action/veto-pending', '#f43f5e']
+] as const;
+
 function createDefaultHardwareBindings(): HardwareBindingMap {
   return Object.fromEntries(
     HARDWARE_ACTIONS.map((action) => [action.id, { ...DEFAULT_HARDWARE_BINDINGS[action.id] }])
@@ -242,6 +254,78 @@ function resolveMidiBinding(data: Uint8Array) {
   if (status === 0x90 && velocity > 0) return `midi:note_on:${channel}:${note}`;
   if (status === 0xb0) return `midi:control_change:${channel}:${note}`;
   return null;
+}
+
+function buildDashboardBridgePreset({
+  gigId,
+  bridgeCommand,
+  bridgeBaseUrl = 'http://127.0.0.1:4315'
+}: {
+  gigId: string | null;
+  bridgeCommand: string;
+  bridgeBaseUrl?: string;
+}) {
+  const actions = BRIDGE_PRESET_ACTIONS.map(([id, label, path, color], index) => ({
+    id,
+    label,
+    slot: index + 1,
+    method: 'POST',
+    path,
+    url: `${bridgeBaseUrl}${path}`,
+    color
+  }));
+
+  return {
+    schema: 'sway-dashboard-control-bridge-preset.v1',
+    generatedAt: new Date().toISOString(),
+    gigId,
+    bridge: {
+      launchCommand: bridgeCommand,
+      baseUrl: bridgeBaseUrl,
+      healthUrl: `${bridgeBaseUrl}/health`,
+      stateUrl: `${bridgeBaseUrl}/state`,
+      topTextUrl: `${bridgeBaseUrl}/top/text`,
+      topSearchUrl: `${bridgeBaseUrl}/top/search`
+    },
+    actions,
+    companion: {
+      module: 'Generic HTTP Request',
+      importMode: 'create one POST button per action URL',
+      buttons: actions.map((action) => ({
+        page: 1,
+        row: Math.floor((action.slot - 1) / 4) + 1,
+        column: ((action.slot - 1) % 4) + 1,
+        text: action.label,
+        request: {
+          method: action.method,
+          url: action.url
+        },
+        color: action.color
+      }))
+    },
+    streamDeck: {
+      importMode: 'map each item to a Website/Open URL or HTTP Request action',
+      buttons: actions.map((action) => ({
+        slot: action.slot,
+        title: action.label,
+        method: action.method,
+        url: action.url,
+        color: action.color
+      }))
+    }
+  };
+}
+
+function downloadJsonFile(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(objectUrl);
 }
 
 function CompactRequestPanel({
@@ -765,7 +849,8 @@ function HardwareMappingPanel({
   bridgeTokenMessage,
   onLearn,
   onClear,
-  onIssueBridgeToken
+  onIssueBridgeToken,
+  onDownloadBridgePreset
 }: {
   bindings: HardwareBindingMap;
   learnTarget: HardwareActionId | null;
@@ -776,6 +861,7 @@ function HardwareMappingPanel({
   onLearn: (actionId: HardwareActionId) => void;
   onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
   onIssueBridgeToken: () => void;
+  onDownloadBridgePreset: () => void;
 }) {
   const midiLabel = midiStatus === 'midi-ready'
     ? 'MIDI ready'
@@ -815,9 +901,19 @@ function HardwareMappingPanel({
           </button>
         </div>
         {bridgeCommand ? (
-          <pre className="mt-3 max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-slate-950 p-2 font-mono text-[10px] leading-relaxed text-cyan-100">
-            {bridgeCommand}
-          </pre>
+          <div className="mt-3 space-y-2">
+            <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-slate-950 p-2 font-mono text-[10px] leading-relaxed text-cyan-100">
+              {bridgeCommand}
+            </pre>
+            <button
+              type="button"
+              onClick={onDownloadBridgePreset}
+              data-sway-control-bridge-preset-download="true"
+              className="w-full rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-fuchsia-100"
+            >
+              Download button preset
+            </button>
+          </div>
         ) : null}
       </div>
       <div className="mt-3 grid gap-2">
@@ -1636,6 +1732,18 @@ export default function TalentDashboard({
     }
   };
 
+  const downloadBridgePreset = () => {
+    if (!bridgeCommand) return;
+    const safeGigId = (writableGigId ?? 'live-room').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'live-room';
+    downloadJsonFile(
+      `sway-control-bridge-${safeGigId}.json`,
+      buildDashboardBridgePreset({
+        gigId: writableGigId,
+        bridgeCommand
+      })
+    );
+  };
+
   useEffect(() => {
     if (session.status === 'inactive') return;
 
@@ -1904,6 +2012,7 @@ export default function TalentDashboard({
                     onLearn={setHardwareLearnTarget}
                     onClear={clearHardwareInput}
                     onIssueBridgeToken={issueBridgeToken}
+                    onDownloadBridgePreset={downloadBridgePreset}
                   />
                 </div>
               ) : (
@@ -3044,6 +3153,7 @@ export default function TalentDashboard({
                 onLearn={setHardwareLearnTarget}
                 onClear={clearHardwareInput}
                 onIssueBridgeToken={issueBridgeToken}
+                onDownloadBridgePreset={downloadBridgePreset}
               />
             </div>
 
