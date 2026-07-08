@@ -28,7 +28,10 @@ import {
   Hourglass,
   Upload,
   CreditCard,
-  QrCode
+  QrCode,
+  Link as LinkIcon,
+  Music2,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
@@ -60,6 +63,95 @@ interface TalentDashboardProps {
   } | null;
   performerEmailVerified?: boolean;
 }
+
+type MusicSourceCapability = {
+  providerKey: 'local_library' | 'spotify' | 'soundcloud' | 'sway_upload';
+  displayName: string;
+  sourceMode: 'sync_key' | 'app_catalog' | 'oauth_provider' | 'sway_owned_audio';
+  authRequirement: 'none' | 'sync_key' | 'app_credentials' | 'oauth';
+  connectionStatus: 'available' | 'configured' | 'not_configured' | 'not_connected';
+  capabilities: {
+    searchMetadata: boolean;
+    importLibrary: boolean;
+    openExternal: boolean;
+    playInSway: boolean;
+    requiresTrackAvailabilityCheck: boolean;
+  };
+  performerActionLabel: string;
+  audienceClaim: string;
+  riskNote: string;
+};
+
+const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
+  {
+    providerKey: 'local_library',
+    displayName: 'Synced Library',
+    sourceMode: 'sync_key',
+    authRequirement: 'sync_key',
+    connectionStatus: 'available',
+    capabilities: {
+      searchMetadata: true,
+      importLibrary: true,
+      openExternal: true,
+      playInSway: false,
+      requiresTrackAvailabilityCheck: false
+    },
+    performerActionLabel: 'Matched in library',
+    audienceClaim: 'Request from the performer library',
+    riskNote: 'Metadata availability only. The performer still plays audio from their existing setup.'
+  },
+  {
+    providerKey: 'spotify',
+    displayName: 'Spotify',
+    sourceMode: 'app_catalog',
+    authRequirement: 'app_credentials',
+    connectionStatus: 'not_configured',
+    capabilities: {
+      searchMetadata: false,
+      importLibrary: false,
+      openExternal: true,
+      playInSway: false,
+      requiresTrackAvailabilityCheck: true
+    },
+    performerActionLabel: 'Open in Spotify',
+    audienceClaim: 'Spotify metadata match',
+    riskNote: 'Spotify is metadata/search only for Sway. Sway must not claim venue playback from Spotify.'
+  },
+  {
+    providerKey: 'soundcloud',
+    displayName: 'SoundCloud',
+    sourceMode: 'oauth_provider',
+    authRequirement: 'oauth',
+    connectionStatus: 'not_connected',
+    capabilities: {
+      searchMetadata: false,
+      importLibrary: false,
+      openExternal: true,
+      playInSway: false,
+      requiresTrackAvailabilityCheck: true
+    },
+    performerActionLabel: 'Connect SoundCloud',
+    audienceClaim: 'SoundCloud account link required',
+    riskNote: 'SoundCloud access depends on OAuth, track permissions, attribution, and per-track availability.'
+  },
+  {
+    providerKey: 'sway_upload',
+    displayName: 'Sway Audio',
+    sourceMode: 'sway_owned_audio',
+    authRequirement: 'none',
+    connectionStatus: 'not_connected',
+    capabilities: {
+      searchMetadata: false,
+      importLibrary: false,
+      openExternal: false,
+      playInSway: false,
+      requiresTrackAvailabilityCheck: true
+    },
+    performerActionLabel: 'Playable in Sway when licensed',
+    audienceClaim: 'Sway playback requires licensed audio',
+    riskNote: 'Sway playback needs provenance, license records, and playback audit before this can be enabled.'
+  }
+];
 
 function CompactRequestPanel({
   title,
@@ -387,6 +479,111 @@ function CompactControlPanel({
   );
 }
 
+function MusicSourcesPanel({
+  providers,
+  linkedSourceCount,
+  syncedTrackCount,
+  loading,
+  loadError
+}: {
+  providers: MusicSourceCapability[];
+  linkedSourceCount: number;
+  syncedTrackCount: number;
+  loading: boolean;
+  loadError: string | null;
+}) {
+  const connectionTone = (status: MusicSourceCapability['connectionStatus']) => {
+    if (status === 'available' || status === 'configured') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
+    if (status === 'not_configured') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+    return 'border-white/10 bg-slate-950 text-slate-300';
+  };
+
+  const sourceIcon = (providerKey: MusicSourceCapability['providerKey']) => {
+    if (providerKey === 'local_library') return <ShieldCheck className="h-4 w-4" />;
+    if (providerKey === 'sway_upload') return <Music2 className="h-4 w-4" />;
+    return <LinkIcon className="h-4 w-4" />;
+  };
+
+  return (
+    <section
+      data-sway-music-sources-panel="true"
+      className="max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-300">Music Sources</h4>
+          <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-slate-400">
+            Connect the performer music world to Sway without pretending every provider can play audio here.
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-right">
+          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Synced tracks</p>
+          <p className="mt-0.5 font-mono text-sm font-black text-white">{syncedTrackCount}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {providers.map((provider) => {
+          const isLocal = provider.providerKey === 'local_library';
+          const liveStatus = isLocal && linkedSourceCount > 0 ? 'available' : provider.connectionStatus;
+          const statusCopy = isLocal && linkedSourceCount > 0
+            ? `${linkedSourceCount} linked source${linkedSourceCount === 1 ? '' : 's'}`
+            : liveStatus.replace(/_/g, ' ');
+
+          return (
+            <div key={provider.providerKey} className="rounded-xl border border-white/10 bg-slate-950 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex items-center gap-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 text-cyan-200">
+                    {sourceIcon(provider.providerKey)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">{provider.displayName}</p>
+                    <p className="mt-0.5 truncate text-[10px] font-mono uppercase tracking-widest text-slate-500">
+                      {provider.sourceMode.replace(/_/g, ' ')}
+                    </p>
+                  </div>
+                </div>
+                <span className={`shrink-0 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-wider ${connectionTone(liveStatus)}`}>
+                  {statusCopy}
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {provider.capabilities.searchMetadata && (
+                  <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[9px] font-bold text-cyan-200">Metadata</span>
+                )}
+                {provider.capabilities.importLibrary && (
+                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-200">Library sync</span>
+                )}
+                {provider.capabilities.openExternal && (
+                  <span className="rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-1 text-[9px] font-bold text-fuchsia-200">Open source</span>
+                )}
+                <span className={`rounded-full border px-2 py-1 text-[9px] font-bold ${
+                  provider.capabilities.playInSway
+                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                    : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                }`}>
+                  {provider.capabilities.playInSway ? 'Playable in Sway' : 'No Sway playback'}
+                </span>
+              </div>
+
+              <p className="mt-3 text-xs font-bold text-white">{provider.performerActionLabel}</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-slate-500">{provider.riskNote}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {loading ? (
+        <p className="mt-3 text-[10px] font-mono uppercase tracking-widest text-slate-500">Refreshing source capabilities...</p>
+      ) : loadError ? (
+        <p className="mt-3 text-[10px] text-amber-300">{loadError}</p>
+      ) : null}
+    </section>
+  );
+}
+
 export default function TalentDashboard({
   session,
   requests,
@@ -435,6 +632,9 @@ export default function TalentDashboard({
     lastSyncedAt: string | null;
     trackCount: number;
   }>>([]);
+  const [musicSourceCapabilities, setMusicSourceCapabilities] = useState<MusicSourceCapability[]>(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+  const [musicSourceCapabilityStatus, setMusicSourceCapabilityStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [musicSourceCapabilityError, setMusicSourceCapabilityError] = useState<string | null>(null);
   const [issuedSyncKey, setIssuedSyncKey] = useState<{
     sourceKey: string;
     sourceLabel: string;
@@ -779,6 +979,39 @@ export default function TalentDashboard({
   useEffect(() => {
     void refreshLinkedSources();
   }, [previewMode]);
+
+  const refreshMusicSourceCapabilities = async () => {
+    if (previewMode) {
+      setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+      setMusicSourceCapabilityStatus('idle');
+      setMusicSourceCapabilityError(null);
+      return;
+    }
+
+    setMusicSourceCapabilityStatus('loading');
+    try {
+      const response = await fetch('/api/talent/music/source-capabilities');
+      if (!response.ok) throw new Error('Unable to load music source capabilities.');
+      const data = await response.json().catch(() => null);
+      setMusicSourceCapabilities(Array.isArray(data?.providers) ? data.providers : DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+      setMusicSourceCapabilityStatus('idle');
+      setMusicSourceCapabilityError(null);
+    } catch (error) {
+      console.warn('Unable to load music source capabilities:', error);
+      setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+      setMusicSourceCapabilityStatus('error');
+      setMusicSourceCapabilityError('Using local source capability defaults until Sway can refresh provider status.');
+    }
+  };
+
+  useEffect(() => {
+    void refreshMusicSourceCapabilities();
+  }, [previewMode]);
+
+  const linkedSourceCount = linkedSources.filter((source) => source.connectionStatus !== 'revoked').length;
+  const linkedTrackCount = linkedSources
+    .filter((source) => source.connectionStatus !== 'revoked')
+    .reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
 
   const refreshPublicProfile = async () => {
     if (previewMode) return;
@@ -1354,6 +1587,14 @@ export default function TalentDashboard({
 
       {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
       <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'} space-y-5`}>
+      <MusicSourcesPanel
+        providers={musicSourceCapabilities}
+        linkedSourceCount={linkedSourceCount}
+        syncedTrackCount={linkedTrackCount}
+        loading={musicSourceCapabilityStatus === 'loading'}
+        loadError={musicSourceCapabilityError}
+      />
+
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
