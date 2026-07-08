@@ -108,6 +108,7 @@ export default function OverlayApp() {
     .slice(0, 5);
   const roomLink = resolveRoomLink(routeGigId);
   const roomPath = `/g/${routeGigId}`;
+  const isCrowdAutopilot = bState.session.operatingMode === 'crowd_autopilot';
 
   return (
     <>
@@ -140,7 +141,9 @@ export default function OverlayApp() {
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-mono tracking-widest text-cyan-300 uppercase">Now Playing</div>
+                    <div className="text-[10px] font-mono tracking-widest text-cyan-300 uppercase">
+                      {isCrowdAutopilot ? 'Crowd Pick Leading' : 'Now Playing'}
+                    </div>
                     <div className={`truncate font-black text-white ${transparent ? 'text-base' : 'text-5xl leading-tight'}`}>{nowPlaying.title}</div>
                     {nowPlaying.subtitle && <div className={`truncate text-slate-300 ${transparent ? 'text-xs' : 'text-xl font-bold'}`}>{nowPlaying.subtitle}</div>}
                   </div>
@@ -164,13 +167,15 @@ export default function OverlayApp() {
               </div>
             ) : (
               <div className={`rounded-2xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'p-4 text-[10px]' : 'p-10 text-xl'}`}>
-                Waiting for the next song...
+                  {isCrowdAutopilot ? 'Waiting for the crowd to pick next...' : 'Waiting for the next song...'}
               </div>
             )}
 
             <div className="min-w-0 flex-1 space-y-2 overflow-hidden">
               {upNextQueue.length > 0 && (
-                <div className={`${transparent ? 'text-[9px]' : 'text-sm'} font-mono tracking-widest text-fuchsia-300 uppercase`}>Up Next</div>
+                <div className={`${transparent ? 'text-[9px]' : 'text-sm'} font-mono tracking-widest text-fuchsia-300 uppercase`}>
+                  {isCrowdAutopilot ? 'Crowd Ranked Up Next' : 'Up Next'}
+                </div>
               )}
               {upNextQueue.slice(0, transparent ? 5 : 4).map((req, idx) => (
                 <div
@@ -190,7 +195,7 @@ export default function OverlayApp() {
               ))}
               {upNextQueue.length === 0 && (
                 <div className={`rounded-xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'py-4 text-[10px]' : 'py-10 text-xl'}`}>
-                  Waiting for requests...
+                  {isCrowdAutopilot ? 'Scan to control what comes next' : 'Waiting for requests...'}
                 </div>
               )}
             </div>
@@ -213,7 +218,9 @@ export default function OverlayApp() {
                 </div>
                 <div className="mt-4 text-center">
                   <p className="font-display text-4xl font-black uppercase tracking-wide">Scan</p>
-                  <p className="text-xl font-black uppercase tracking-wide text-fuchsia-700">Request / Tip / Boost</p>
+                  <p className="text-xl font-black uppercase tracking-wide text-fuchsia-700">
+                    {isCrowdAutopilot ? 'Crowd Controls Next' : 'Request / Tip / Boost'}
+                  </p>
                   <p className="mt-2 break-all font-mono text-sm font-black text-slate-700">{roomPath}</p>
                 </div>
               </div>

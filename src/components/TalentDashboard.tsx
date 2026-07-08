@@ -343,7 +343,9 @@ function CompactAudienceScreenPanel({
       <div className="min-w-0 self-center landscape:text-center">
         <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Audience Screen</p>
         <p className="mt-1 font-display text-2xl font-black uppercase tracking-wide text-white landscape:text-4xl">Scan to Request</p>
-        <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">Tip / Boost / Move the Queue</p>
+        <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">
+          {session.operatingMode === 'crowd_autopilot' ? 'Crowd Picks What Is Next' : 'Tip / Boost / Move the Queue'}
+        </p>
         <p className="mt-2 truncate font-mono text-[10px] font-bold text-slate-400">{activeGigId ? `/g/${activeGigId}` : 'Room link after start'}</p>
         <div className="mt-3 grid gap-1.5 text-left landscape:mt-4">
           <div className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2">
@@ -358,7 +360,9 @@ function CompactAudienceScreenPanel({
       </div>
       <div className="hidden rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-center landscape:block">
         <p className={`text-xs font-black uppercase tracking-widest ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {session.requestsOpen ? 'Live requests open' : 'Requests paused'}
+          {session.operatingMode === 'crowd_autopilot'
+            ? 'Crowd autopilot live'
+            : session.requestsOpen ? 'Live requests open' : 'Requests paused'}
         </p>
       </div>
     </section>
@@ -384,7 +388,7 @@ function CompactControlPanel({
   operatorNextDetail: string;
   actionPending: boolean;
   onToggleRequests: (open: boolean) => void;
-  onSetMode: (mode: 'manual' | 'open_call') => void;
+  onSetMode: (mode: 'manual' | 'open_call' | 'crowd_autopilot') => void;
   onSetSearchScope: (scope: 'library' | 'catalog' | 'setlist') => void;
   onEndSession: () => void;
 }) {
@@ -414,12 +418,15 @@ function CompactControlPanel({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div
+        data-sway-crowd-autopilot-control="true"
+        className="grid grid-cols-3 gap-2"
+      >
         <button
           type="button"
           onClick={() => onSetMode('manual')}
           disabled={actionPending}
-          className={`min-h-9 rounded-xl px-3 text-xs font-black ${session.operatingMode !== 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+          className={`min-h-9 rounded-xl px-2 text-[11px] font-black ${session.operatingMode === 'manual' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
         >
           Manual
         </button>
@@ -427,9 +434,17 @@ function CompactControlPanel({
           type="button"
           onClick={() => onSetMode('open_call')}
           disabled={actionPending}
-          className={`min-h-9 rounded-xl px-3 text-xs font-black ${session.operatingMode === 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+          className={`min-h-9 rounded-xl px-2 text-[11px] font-black ${session.operatingMode === 'open_call' ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
         >
-          Open Call
+          Open
+        </button>
+        <button
+          type="button"
+          onClick={() => onSetMode('crowd_autopilot')}
+          disabled={actionPending}
+          className={`min-h-9 rounded-xl px-2 text-[11px] font-black ${session.operatingMode === 'crowd_autopilot' ? 'bg-fuchsia-500 text-white' : 'border border-white/10 bg-slate-950 text-slate-300'}`}
+        >
+          Auto
         </button>
       </div>
 
@@ -842,7 +857,7 @@ export default function TalentDashboard({
     }
   };
 
-  const handleSetMode = async (mode: 'manual' | 'open_call') => {
+  const handleSetMode = async (mode: 'manual' | 'open_call' | 'crowd_autopilot') => {
     try {
       const res = await postSessionJson('/api/session/mode', { mode });
       if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
@@ -1313,13 +1328,20 @@ export default function TalentDashboard({
     : session.searchScope === 'catalog'
       ? 'Open Catalog'
       : 'My Library';
+  const isCrowdAutopilot = session.operatingMode === 'crowd_autopilot';
   const leadingApprovedRequest = liveLadderQueue[0] ?? null;
-  const operatorNextAction = triageQueue.length > 0
+  const operatorNextAction = isCrowdAutopilot
+    ? 'Autopilot live'
+    : triageQueue.length > 0
     ? 'Review pending'
     : leadingApprovedRequest
       ? 'Mark playing'
       : 'Share room';
-  const operatorNextDetail = triageQueue.length > 0
+  const operatorNextDetail = isCrowdAutopilot
+    ? (leadingApprovedRequest
+      ? `${leadingApprovedRequest.title} is leading the crowd-ranked queue.`
+      : 'Clean requests jump straight to up next; use pause or veto only when needed.')
+    : triageQueue.length > 0
     ? `${triageQueue.length} request${triageQueue.length === 1 ? '' : 's'} waiting for approve or veto.`
     : leadingApprovedRequest
       ? `${leadingApprovedRequest.title} is leading the approved queue.`
@@ -1384,10 +1406,10 @@ export default function TalentDashboard({
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center landscape:w-[23rem]">
               {[
-                ['Pending', triageQueue.length, 'text-amber-300'],
-                ['Approved', liveLadderQueue.length, 'text-cyan-300'],
+                [isCrowdAutopilot ? 'Review' : 'Pending', triageQueue.length, 'text-amber-300'],
+                [isCrowdAutopilot ? 'Crowd' : 'Approved', liveLadderQueue.length, 'text-cyan-300'],
                 ['Backers', poolBackersCount, 'text-fuchsia-300'],
-                ['Room', roomOpenLabel, roomStatusTone]
+                ['Mode', isCrowdAutopilot ? 'Auto' : roomOpenLabel, isCrowdAutopilot ? 'text-fuchsia-300' : roomStatusTone]
               ].map(([label, value, tone]) => (
                 <div key={label} className="rounded-xl border border-white/10 bg-slate-950 px-2 py-2">
                   <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">{label}</p>
@@ -1429,7 +1451,7 @@ export default function TalentDashboard({
               <div className="grid min-h-0 grid-cols-2 gap-2">
                 <CompactRequestPanel
                   title="Pending"
-                  empty="No pending requests."
+                  empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                   overflowCount={overflowPending}
                   requests={visiblePending}
                   renderActions={(request) => (
@@ -1445,7 +1467,7 @@ export default function TalentDashboard({
                 />
                 <CompactRequestPanel
                   title="Approved"
-                  empty="No approved queue yet."
+                  empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                   overflowCount={overflowApproved}
                   requests={visibleApproved}
                   renderActions={(request) => (
@@ -1472,7 +1494,7 @@ export default function TalentDashboard({
                 <div className="grid h-full min-h-0 grid-rows-2 gap-2">
                   <CompactRequestPanel
                     title="Pending"
-                    empty="No pending requests."
+                    empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                     overflowCount={overflowPending}
                     requests={visiblePending.slice(0, 3)}
                     renderActions={(request) => (
@@ -1488,7 +1510,7 @@ export default function TalentDashboard({
                   />
                   <CompactRequestPanel
                     title="Approved"
-                    empty="No approved queue yet."
+                    empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                     overflowCount={overflowApproved}
                     requests={visibleApproved.slice(0, 3)}
                     renderActions={(request) => (
@@ -2183,7 +2205,7 @@ export default function TalentDashboard({
               <div className="min-w-0">
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Operating Mode</p>
                 <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Drive the room manually or open the floor for open-call requests.
+                  Manual review is optional. Crowd autopilot moves clean requests straight into the ranked queue.
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -2192,7 +2214,7 @@ export default function TalentDashboard({
                   onClick={() => handleSetMode('manual')}
                   disabled={actionPending}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.operatingMode !== 'open_call'
+                    session.operatingMode === 'manual'
                       ? 'bg-cyan-500 text-slate-950'
                       : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
                   }`}
@@ -2210,6 +2232,19 @@ export default function TalentDashboard({
                   }`}
                 >
                   Open Call
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetMode('crowd_autopilot')}
+                  disabled={actionPending}
+                  data-sway-crowd-autopilot-control="true"
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    session.operatingMode === 'crowd_autopilot'
+                      ? 'bg-fuchsia-500 text-white'
+                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-fuchsia-500/40'
+                  }`}
+                >
+                  Autopilot
                 </button>
               </div>
             </div>
@@ -2622,7 +2657,7 @@ export default function TalentDashboard({
             <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>
               <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                Set the request scope, then keep DJ control: approve, veto, pause requests, and mark playing. Patrons can request, tip, or boost, but the DJ decides what reaches the queue.
+                Set the request scope, then let crowd autopilot rank clean requests into up next. Pause, hide, or veto stays available as the safety brake.
               </p>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
@@ -2630,8 +2665,8 @@ export default function TalentDashboard({
                   <p className="mt-1 text-xs font-bold text-white">{requestScopeLabel}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">DJ decides</p>
-                  <p className="mt-1 text-xs font-bold text-white">Approve or Veto</p>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Flow</p>
+                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Autopilot' : 'Manual'}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room brake</p>
@@ -2639,7 +2674,7 @@ export default function TalentDashboard({
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Live state</p>
-                  <p className="mt-1 text-xs font-bold text-white">Mark Playing</p>
+                  <p className="mt-1 text-xs font-bold text-white">Crowd Ranked</p>
                 </div>
               </div>
             </div>

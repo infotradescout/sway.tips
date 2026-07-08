@@ -96,7 +96,7 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     requestWindowDuration: input.requestWindowDuration ?? fallback.requestWindowDuration,
     requestWindowLabel: input.requestWindowLabel ?? fallback.requestWindowLabel,
     requestPresets: Array.isArray(input.requestPresets) ? input.requestPresets : fallback.requestPresets,
-    operatingMode: input.operatingMode === 'open_call'
+    operatingMode: input.operatingMode === 'open_call' || input.operatingMode === 'crowd_autopilot'
       ? input.operatingMode
       : (fallback.operatingMode ?? 'manual'),
     searchScope: input.searchScope === 'catalog' || input.searchScope === 'setlist'

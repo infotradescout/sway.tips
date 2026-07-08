@@ -36,11 +36,11 @@ for (const term of [
   '3. DJ decides',
   'Before You Share',
   'Set the request scope',
-  'Patrons can request, tip, or boost',
-  'DJ decides',
-  'Approve or Veto',
+  'crowd autopilot rank clean requests into up next',
+  'Pause, hide, or veto stays available as the safety brake',
+  'Autopilot',
   'Pause Requests',
-  'Mark Playing'
+  'Crowd Ranked'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Performer mission control copy missing: ${term}`);

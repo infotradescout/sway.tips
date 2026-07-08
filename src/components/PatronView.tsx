@@ -1010,22 +1010,29 @@ export default function PatronView({
     .sort((a, b) => b.amount - a.amount);
 
   const newestModeratableRequest = requests.find((item) => !item.removed);
+  const isCrowdAutopilot = session.operatingMode === 'crowd_autopilot';
   const requestScopeCopy = (() => {
     if (session.searchScope === 'setlist') {
       return {
         label: 'Setlist requests',
-        body: "Pick from this room's setlist or send a manual request. The DJ decides what is approved and played."
+        body: isCrowdAutopilot
+          ? "Pick from this room's setlist. Clean requests can move straight into the crowd-ranked queue."
+          : "Pick from this room's setlist or send a manual request. The DJ decides what is approved and played."
       };
     }
     if (session.searchScope === 'catalog') {
       return {
         label: 'Open request lane',
-        body: 'Search broadly or type a manual request. The DJ decides what is approved and played.'
+        body: isCrowdAutopilot
+          ? 'Search broadly or type a manual request. Clean requests can move straight into the crowd-ranked queue.'
+          : 'Search broadly or type a manual request. The DJ decides what is approved and played.'
       };
     }
     return {
       label: 'DJ library requests',
-      body: "Search the DJ's synced library when available, or send a manual request if the song is not listed. The DJ decides what is approved and played."
+      body: isCrowdAutopilot
+        ? "Search the DJ's synced library when available. Clean requests can move straight into the crowd-ranked queue."
+        : "Search the DJ's synced library when available, or send a manual request if the song is not listed. The DJ decides what is approved and played."
     };
   })();
 
@@ -1091,7 +1098,9 @@ export default function PatronView({
                 ? 'Demo data only. No payment or moderation action will be sent.'
                 : session.paymentsEnabled === false
                   ? `Send a free request, upvote an approved queue item, or send a direct tip for ${session.talentName || 'this performer'}. Song requests and boosts are free for this event; tips always go through payment.`
-                  : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
+                  : isCrowdAutopilot
+                    ? `Request songs or actions, send a direct tip, or boost the crowd-ranked queue for ${session.talentName || 'this performer'}. Clean requests can move into up next automatically.`
+                    : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
             <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
               <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
@@ -1134,10 +1143,13 @@ export default function PatronView({
           .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0))
           .slice(0, 3);
         const isOpenCall = session.operatingMode === 'open_call';
-        const modeLabel = isOpenCall ? 'Open Call' : 'Manual';
-        const modeHint = isOpenCall
-          ? 'No catalog — send an open request'
-          : 'Host is driving the room live';
+        const isAutopilot = session.operatingMode === 'crowd_autopilot';
+        const modeLabel = isAutopilot ? 'Crowd Autopilot' : isOpenCall ? 'Open Call' : 'Manual';
+        const modeHint = isAutopilot
+          ? 'Crowd-ranked requests can move straight to up next'
+          : isOpenCall
+            ? 'No catalog - send an open request'
+            : 'Host is driving the room live';
         return (
           <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">

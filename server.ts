@@ -4609,8 +4609,9 @@ app.post("/api/session/window/toggle", async (req, res) => {
   res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
 
-// Operator selects the room-layer operating posture. Only the two usable runtime
-// postures are accepted; any other value is rejected as defensive validation.
+// Operator selects the room-layer operating posture. Crowd autopilot lets clean
+// requests move straight to the public queue so the performer is not forced to
+// tap approvals between songs.
 app.post("/api/session/mode", async (req, res) => {
   const roomContext = await resolveLegacyWritableRoom(req, res);
   if (!roomContext) return;
@@ -4619,8 +4620,8 @@ app.post("/api/session/mode", async (req, res) => {
   const { mode } = req.body;
   const roomState = roomContext.state;
 
-  if (mode !== 'manual' && mode !== 'open_call') {
-    return res.status(400).json({ error: "mode must be 'manual' or 'open_call'." });
+  if (mode !== 'manual' && mode !== 'open_call' && mode !== 'crowd_autopilot') {
+    return res.status(400).json({ error: "mode must be 'manual', 'open_call', or 'crowd_autopilot'." });
   }
 
   const previousMode = roomState.session.operatingMode;
@@ -4636,7 +4637,12 @@ app.post("/api/session/mode", async (req, res) => {
     eventType: 'session.mode',
     previousStatus: previousMode,
     nextStatus: mode,
-    metadata: { operatingMode: mode }
+    metadata: {
+      operatingMode: mode,
+      autopilotBehavior: mode === 'crowd_autopilot'
+        ? 'clean_requests_auto_approved_after_moderation_and_payment_authorization'
+        : 'performer_controls_request_queue'
+    }
   });
   res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
 });
@@ -4971,6 +4977,10 @@ app.post("/api/request/create", async (req, res) => {
   }
 
   const shadowBanned = moderationOutcome.decision === 'hold_for_review';
+  const shouldAutopilotApprove =
+    roomState.session.operatingMode === 'crowd_autopilot'
+    && !isStraightTip
+    && !shadowBanned;
 
   const newItem: RequestItem = {
     id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
@@ -4988,7 +4998,7 @@ app.post("/api/request/create", async (req, res) => {
     holdAmount: holdAmount,
     platformFee: platformFee,
     sponsorCount: 1,
-    status: shadowBanned ? 'hold' : (isStraightTip ? 'fulfilled' : 'hold'),
+    status: shadowBanned ? 'hold' : (isStraightTip ? 'fulfilled' : (shouldAutopilotApprove ? 'approved' : 'hold')),
     shadowBanned: shadowBanned,
     actorUserId: resolvedActor.actorId,
     lastMutationActorUserId: resolvedActor.actorId,
@@ -5061,8 +5071,9 @@ app.post("/api/request/create", async (req, res) => {
       newItem.paymentIntentId = authorization.processorPaymentIntentId;
       newItem.paymentStatus = 'authorized';
       // A straight tip is not gated by Private Triage, so capture its authorized
-      // hold immediately.
-      if (isStraightTip) {
+      // hold immediately. Crowd autopilot also captures once the clean request
+      // clears moderation and moves directly into the public queue.
+      if (isStraightTip || shouldAutopilotApprove) {
         const capture = await paymentService.captureAuthorization(authorization.paymentId);
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
@@ -5089,7 +5100,8 @@ app.post("/api/request/create", async (req, res) => {
     state: roomState,
     moderation: {
       outage_behavior: moderationOutcome.decision,
-      ai_assistive_only: true
+      ai_assistive_only: true,
+      crowd_autopilot_auto_approved: shouldAutopilotApprove
     },
     shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
   };

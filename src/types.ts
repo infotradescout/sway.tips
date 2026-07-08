@@ -111,7 +111,7 @@ export interface GigSession {
   requestWindowLabel: string | null; // Active preset label
   requestPresets: RequestPreset[]; // Buildable custom/system presets list
   // Operating posture for the room layer.
-  operatingMode: 'manual' | 'open_call';
+  operatingMode: 'manual' | 'open_call' | 'crowd_autopilot';
   // Song search scope for this room: performer's own synced library, the full
   // open catalog, or a performer-curated setlist for this occasion.
   searchScope: 'library' | 'catalog' | 'setlist';
