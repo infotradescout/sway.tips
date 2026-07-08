@@ -21,6 +21,9 @@ Options:
 HTTP actions:
   GET  /health
   GET  /state
+  GET  /preset/actions
+  GET  /preset/companion
+  GET  /preset/stream-deck
   GET  /top/text
   GET  /top/search
   POST /action/toggle-requests
@@ -61,6 +64,73 @@ const SEARCH_PROVIDERS = {
   }
 };
 
+const PRESET_ACTIONS = [
+  {
+    id: 'toggle-requests',
+    label: 'Pause / Resume',
+    method: 'POST',
+    path: '/action/toggle-requests',
+    color: '#22c55e',
+    description: 'Toggle inbound audience requests for the live room.'
+  },
+  {
+    id: 'fulfill-top',
+    label: 'Clear Top',
+    method: 'POST',
+    path: '/action/fulfill-top',
+    color: '#06b6d4',
+    description: 'Mark the current top approved/crowd-ranked request fulfilled.'
+  },
+  {
+    id: 'hide-top',
+    label: 'Hide Top',
+    method: 'POST',
+    path: '/action/hide-top',
+    color: '#f59e0b',
+    description: 'Hide the current top approved/crowd-ranked request.'
+  },
+  {
+    id: 'search-top-spotify',
+    label: 'Spotify Search',
+    method: 'POST',
+    path: '/action/search-top-spotify',
+    color: '#1db954',
+    description: 'Return a Spotify search deep link for the top crowd pick.'
+  },
+  {
+    id: 'search-top-soundcloud',
+    label: 'SoundCloud Search',
+    method: 'POST',
+    path: '/action/search-top-soundcloud',
+    color: '#ff5500',
+    description: 'Return a SoundCloud search URL for the top crowd pick.'
+  },
+  {
+    id: 'search-top-youtube',
+    label: 'YouTube Search',
+    method: 'POST',
+    path: '/action/search-top-youtube',
+    color: '#ef4444',
+    description: 'Return a YouTube search URL for the top crowd pick.'
+  },
+  {
+    id: 'approve-pending',
+    label: 'Approve Pending',
+    method: 'POST',
+    path: '/action/approve-pending',
+    color: '#84cc16',
+    description: 'Approve the oldest visible pending request.'
+  },
+  {
+    id: 'veto-pending',
+    label: 'Veto Pending',
+    method: 'POST',
+    path: '/action/veto-pending',
+    color: '#f43f5e',
+    description: 'Deny the oldest visible pending request.'
+  }
+];
+
 function parseArgs(argv) {
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -91,6 +161,57 @@ function sendJson(res, statusCode, payload) {
 function normalizeBaseUrl(value) {
   const raw = typeof value === 'string' && value.trim() ? value.trim() : 'https://app.sway.tips';
   return raw.replace(/\/+$/, '');
+}
+
+function localBridgeUrl(path) {
+  return `http://${listenHost}:${listenPort}${path}`;
+}
+
+function buildActionPreset(format) {
+  const actions = PRESET_ACTIONS.map((action, index) => ({
+    ...action,
+    slot: index + 1,
+    url: localBridgeUrl(action.path)
+  }));
+
+  return {
+    schema: 'sway-control-bridge-preset.v1',
+    format,
+    bridge: {
+      host: listenHost,
+      port: listenPort,
+      healthUrl: localBridgeUrl('/health'),
+      stateUrl: localBridgeUrl('/state'),
+      topTextUrl: localBridgeUrl('/top/text'),
+      topSearchUrl: localBridgeUrl('/top/search')
+    },
+    actions,
+    companion: {
+      module: 'Generic HTTP Request',
+      importMode: 'create one POST button per action URL',
+      buttons: actions.map((action) => ({
+        page: 1,
+        row: Math.floor((action.slot - 1) / 4) + 1,
+        column: ((action.slot - 1) % 4) + 1,
+        text: action.label,
+        request: {
+          method: action.method,
+          url: action.url
+        },
+        color: action.color
+      }))
+    },
+    streamDeck: {
+      importMode: 'map each item to a Website/Open URL or HTTP Request action',
+      buttons: actions.map((action) => ({
+        slot: action.slot,
+        title: action.label,
+        url: action.url,
+        method: action.method,
+        color: action.color
+      }))
+    }
+  };
 }
 
 async function readUpstreamJson(response) {
@@ -321,6 +442,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'GET' && req.url === '/preset/actions') {
+    return sendJson(res, 200, buildActionPreset('generic-http-actions'));
+  }
+
+  if (req.method === 'GET' && req.url === '/preset/companion') {
+    return sendJson(res, 200, buildActionPreset('bitfocus-companion-generic-http'));
+  }
+
+  if (req.method === 'GET' && req.url === '/preset/stream-deck') {
+    return sendJson(res, 200, buildActionPreset('stream-deck-url-actions'));
+  }
+
   if (req.method === 'GET' && req.url === '/top/text') {
     try {
       const state = await fetchRoomState({ swayUrl, gigId });
@@ -378,4 +511,5 @@ server.listen(listenPort, listenHost, () => {
   console.log(`Forwarding performer controls to ${swayUrl} for gig ${gigId}`);
   console.log('POST button triggers to /action/toggle-requests, /action/fulfill-top, /action/hide-top, /action/approve-pending, /action/veto-pending, /action/open-top-source, or /action/search-top-spotify|soundcloud|youtube');
   console.log('Read the current crowd pick at GET /top/text or GET /top/search');
+  console.log('Download button presets at GET /preset/actions, /preset/companion, or /preset/stream-deck');
 });

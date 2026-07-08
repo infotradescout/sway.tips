@@ -48,6 +48,9 @@ Read-only helpers:
 ```text
 http://127.0.0.1:4315/health
 http://127.0.0.1:4315/state
+http://127.0.0.1:4315/preset/actions
+http://127.0.0.1:4315/preset/companion
+http://127.0.0.1:4315/preset/stream-deck
 http://127.0.0.1:4315/top/text
 http://127.0.0.1:4315/top/search
 ```
@@ -84,6 +87,21 @@ Returns:
 ```text
 Song Title - Artist
 ```
+
+## Preset Exports
+
+The bridge exposes JSON preset manifests for tools that can import or copy HTTP
+button definitions:
+
+```text
+GET http://127.0.0.1:4315/preset/actions
+GET http://127.0.0.1:4315/preset/companion
+GET http://127.0.0.1:4315/preset/stream-deck
+```
+
+These are vendor-neutral button recipes. They do not install into Stream Deck
+or Companion automatically. Use them to create HTTP Request / Open URL buttons
+that call the local bridge action URLs.
 
 ## Security
 
