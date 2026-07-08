@@ -20,12 +20,17 @@ Options:
 HTTP actions:
   GET  /health
   GET  /state
+  GET  /top/text
+  GET  /top/search
   POST /action/toggle-requests
   POST /action/fulfill-top
   POST /action/hide-top
   POST /action/approve-pending
   POST /action/veto-pending
   POST /action/open-top-source
+  POST /action/search-top-spotify
+  POST /action/search-top-soundcloud
+  POST /action/search-top-youtube
 `;
 
 const ACTIONS = new Set([
@@ -34,8 +39,26 @@ const ACTIONS = new Set([
   'hide-top',
   'approve-pending',
   'veto-pending',
-  'open-top-source'
+  'open-top-source',
+  'search-top-spotify',
+  'search-top-soundcloud',
+  'search-top-youtube'
 ]);
+
+const SEARCH_PROVIDERS = {
+  spotify: {
+    label: 'Spotify search',
+    url: (query) => `spotify:search:${encodeURIComponent(query)}`
+  },
+  soundcloud: {
+    label: 'SoundCloud search',
+    url: (query) => `https://soundcloud.com/search/sounds?q=${encodeURIComponent(query)}`
+  },
+  youtube: {
+    label: 'YouTube search',
+    url: (query) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+  }
+};
 
 function parseArgs(argv) {
   const result = {};
@@ -106,6 +129,32 @@ function topPendingRequest(state) {
   return visibleRequests(state)
     .filter((request) => request.status === 'hold')
     .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())[0] || null;
+}
+
+function topRequestText(request) {
+  if (!request) return null;
+  const title = typeof request.title === 'string' ? request.title.trim() : '';
+  const subtitle = typeof request.subtitle === 'string' ? request.subtitle.trim() : '';
+  return [title, subtitle].filter(Boolean).join(' - ');
+}
+
+function topRequestPayload(request) {
+  const text = topRequestText(request);
+  if (!request || !text) return null;
+  const searches = Object.fromEntries(
+    Object.entries(SEARCH_PROVIDERS).map(([key, provider]) => [key, {
+      label: provider.label,
+      url: provider.url(text)
+    }])
+  );
+  return {
+    id: request.id,
+    title: request.title,
+    subtitle: request.subtitle,
+    text,
+    spotifyUrl: request.spotifyUrl || null,
+    searches
+  };
 }
 
 async function postSwayAction({ swayUrl, authCookie, path, body }) {
@@ -194,6 +243,25 @@ async function runAction({ action, swayUrl, authCookie, gigId }) {
     };
   }
 
+  const searchAction = action.match(/^search-top-(spotify|soundcloud|youtube)$/);
+  if (searchAction) {
+    const providerKey = searchAction[1];
+    const payload = topRequestPayload(approved);
+    if (!payload) return { ok: false, status: 409, upstream: { error: 'No approved request is available.' } };
+    return {
+      ok: true,
+      status: 200,
+      upstream: {
+        action: 'open_url',
+        provider: providerKey,
+        title: payload.title,
+        subtitle: payload.subtitle,
+        text: payload.text,
+        url: payload.searches[providerKey].url
+      }
+    };
+  }
+
   return { ok: false, status: 404, upstream: { error: 'Unknown action.' } };
 }
 
@@ -237,11 +305,39 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         session: state.session,
-        topApproved: approved ? { id: approved.id, title: approved.title, subtitle: approved.subtitle, amount: approved.amount, spotifyUrl: approved.spotifyUrl || null } : null,
+        topApproved: approved ? { ...topRequestPayload(approved), amount: approved.amount } : null,
         topPending: pending ? { id: pending.id, title: pending.title, subtitle: pending.subtitle, amount: pending.amount } : null
       });
     } catch (error) {
       return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read room state.' });
+    }
+  }
+
+  if (req.method === 'GET' && req.url === '/top/text') {
+    try {
+      const state = await fetchRoomState({ swayUrl, gigId });
+      const approved = topApprovedRequest(state);
+      const text = topRequestText(approved);
+      if (!text) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
+      res.writeHead(200, {
+        'access-control-allow-origin': '*',
+        'content-type': 'text/plain; charset=utf-8'
+      });
+      return res.end(text);
+    } catch (error) {
+      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read top request.' });
+    }
+  }
+
+  if (req.method === 'GET' && req.url === '/top/search') {
+    try {
+      const state = await fetchRoomState({ swayUrl, gigId });
+      const approved = topApprovedRequest(state);
+      const payload = topRequestPayload(approved);
+      if (!payload) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
+      return sendJson(res, 200, { ok: true, top: payload });
+    } catch (error) {
+      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read top request.' });
     }
   }
 
@@ -272,5 +368,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(listenPort, listenHost, () => {
   console.log(`Sway Control Bridge listening at http://${listenHost}:${listenPort}`);
   console.log(`Forwarding performer controls to ${swayUrl} for gig ${gigId}`);
-  console.log('POST button triggers to /action/toggle-requests, /action/fulfill-top, /action/hide-top, /action/approve-pending, /action/veto-pending, or /action/open-top-source');
+  console.log('POST button triggers to /action/toggle-requests, /action/fulfill-top, /action/hide-top, /action/approve-pending, /action/veto-pending, /action/open-top-source, or /action/search-top-spotify|soundcloud|youtube');
+  console.log('Read the current crowd pick at GET /top/text or GET /top/search');
 });

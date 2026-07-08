@@ -15,6 +15,8 @@ for (const term of [
   "bridge: 'sway-control-bridge'",
   "GET' && req.url === '/health'",
   "GET' && req.url === '/state'",
+  "GET' && req.url === '/top/text'",
+  "GET' && req.url === '/top/search'",
   "POST' && typeof req.url === 'string'",
   '/action/toggle-requests',
   '/action/fulfill-top',
@@ -22,6 +24,15 @@ for (const term of [
   '/action/approve-pending',
   '/action/veto-pending',
   '/action/open-top-source',
+  '/action/search-top-spotify',
+  '/action/search-top-soundcloud',
+  '/action/search-top-youtube',
+  'SEARCH_PROVIDERS',
+  'spotify:search:',
+  'https://soundcloud.com/search/sounds?q=',
+  'https://www.youtube.com/results?search_query=',
+  'topRequestText',
+  'topRequestPayload',
   '/api/session/window/toggle',
   '/api/request/fulfill',
   '/api/moderation/hide',
@@ -46,6 +57,8 @@ for (const term of [
 
 for (const term of [
   'It does not control Spotify, SoundCloud, Serato, rekordbox, or any other music',
+  'Sway removes the typing',
+  'Song Title - Artist',
   'Do not expose it on public networks.',
   'The `--auth-cookie` value acts like the signed-in performer browser session'
 ]) {

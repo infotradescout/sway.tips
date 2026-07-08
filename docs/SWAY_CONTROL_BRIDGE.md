@@ -45,6 +45,8 @@ Read-only helpers:
 ```text
 http://127.0.0.1:4315/health
 http://127.0.0.1:4315/state
+http://127.0.0.1:4315/top/text
+http://127.0.0.1:4315/top/search
 ```
 
 ## Action Semantics
@@ -55,6 +57,30 @@ http://127.0.0.1:4315/state
 - `approve-pending`: approves the oldest visible pending request
 - `veto-pending`: denies the oldest visible pending request
 - `open-top-source`: returns `{ action: "open_url", url }` for tools that can open a URL
+
+Provider/search helper buttons:
+
+```text
+http://127.0.0.1:4315/action/search-top-spotify
+http://127.0.0.1:4315/action/search-top-soundcloud
+http://127.0.0.1:4315/action/search-top-youtube
+```
+
+These return `{ action: "open_url", url }` with a search URL for the current
+top crowd pick. This matches the way many performers already work: they still
+choose when and how to load/play the track, but Sway removes the typing.
+
+Plain text helper:
+
+```text
+GET http://127.0.0.1:4315/top/text
+```
+
+Returns:
+
+```text
+Song Title - Artist
+```
 
 ## Security
 
