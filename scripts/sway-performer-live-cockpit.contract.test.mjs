@@ -31,8 +31,8 @@ for (const term of [
   'data-sway-performer-audience-screen="true"',
   'Scan to Request',
   'h-[var(--sway-viewport-height,100vh)] overflow-hidden',
-  'grid-rows-[auto_auto_auto_minmax(0,1fr)_auto]',
-  'landscape:grid-rows-[auto_minmax(0,1fr)_auto]',
+  'grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto]',
+  'landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]',
   'landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]',
   'landscape:hidden',
   "aria-label=\"Live-night sections\""

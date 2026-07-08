@@ -29,8 +29,12 @@ for (const term of [
 for (const term of [
   "useState<'live' | 'share' | 'settings'>('live')",
   "Tonight's money settings",
+  'Minimum request',
+  'Boost minimum',
+  'Tip path',
   'Start room',
   'Show QR',
+  'Copy link',
   'Approve, deny, complete',
   "Tonight's controls",
   'Pause intake',
@@ -69,6 +73,7 @@ for (const forbidden of [
   'guaranteed library match',
   'automatically plays',
   'Hardware Controls',
+  'Live Command Center',
   "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
   'Before You Share',
   'crowd autopilot rank clean requests into up next'

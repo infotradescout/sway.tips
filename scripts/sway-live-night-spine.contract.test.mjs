@@ -34,7 +34,11 @@ requireIncludes('TalentDashboard', talentDashboard, [
   "useState(true)",
   'Start room',
   'Show QR',
+  'Copy link',
   "Tonight's money settings",
+  'Minimum request',
+  'Boost minimum',
+  'Tip path',
   'Earnings tonight',
   'Approve, deny, complete'
 ]);
@@ -44,6 +48,7 @@ requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
   "{ id: 'hardware'",
   "mobilePanel === 'hardware'",
   'Hardware Controls',
+  'Live Command Center',
   'Before You Share',
   'crowd autopilot rank clean requests into up next',
   'Pause, hide, or veto stays available as the safety brake',
@@ -89,7 +94,9 @@ requireIncludes('VictoryScreen', victoryScreen, [
 
 requireExcludes('VictoryScreen', victoryScreen, [
   'no card was charged',
-  '{session.totals.totalCount} Gigs'
+  '{session.totals.totalCount} Gigs',
+  'Start New Gig Session',
+  'GIG CLEARED SUCCESSFULLY'
 ]);
 
 for (const [label, source] of [

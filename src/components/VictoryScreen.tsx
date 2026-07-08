@@ -163,7 +163,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
               onClick={onRestart}
               className="flex-1 py-3 px-5 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-rose-500/20 flex items-center justify-center gap-2 group"
             >
-              Start New Gig Session <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              Start New Room <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
         </motion.div>
@@ -204,7 +204,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                     {formattedTips}
                   </div>
                   <div className="text-xs text-rose-400 font-mono font-medium tracking-wide mt-2">
-                    🔥 GIG CLEARED SUCCESSFULLY!
+                    ROOM CLOSED SUCCESSFULLY
                   </div>
                 </div>
 
