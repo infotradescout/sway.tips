@@ -484,13 +484,23 @@ function MusicSourcesPanel({
   linkedSourceCount,
   syncedTrackCount,
   loading,
-  loadError
+  loadError,
+  spotifyPlaylistUrl,
+  spotifyImportStatus,
+  spotifyImportMessage,
+  onSpotifyPlaylistUrlChange,
+  onSpotifyPlaylistImport
 }: {
   providers: MusicSourceCapability[];
   linkedSourceCount: number;
   syncedTrackCount: number;
   loading: boolean;
   loadError: string | null;
+  spotifyPlaylistUrl: string;
+  spotifyImportStatus: 'idle' | 'submitting' | 'success' | 'error';
+  spotifyImportMessage: string | null;
+  onSpotifyPlaylistUrlChange: (value: string) => void;
+  onSpotifyPlaylistImport: (event: React.FormEvent) => void;
 }) {
   const connectionTone = (status: MusicSourceCapability['connectionStatus']) => {
     if (status === 'available' || status === 'configured') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
@@ -580,7 +590,63 @@ function MusicSourcesPanel({
       ) : loadError ? (
         <p className="mt-3 text-[10px] text-amber-300">{loadError}</p>
       ) : null}
+
+      <form
+        data-sway-spotify-playlist-import="true"
+        className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3"
+        onSubmit={onSpotifyPlaylistImport}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Spotify playlist import</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+              Import track metadata into My Library. Sway stores requestable songs and opens Spotify externally.
+            </p>
+          </div>
+          <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-amber-200">
+            Metadata only
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <input
+            type="text"
+            value={spotifyPlaylistUrl}
+            onChange={(event) => onSpotifyPlaylistUrlChange(event.target.value)}
+            placeholder="https://open.spotify.com/playlist/..."
+            className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
+          />
+          <button
+            type="submit"
+            disabled={spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()}
+            className="min-h-11 rounded-xl bg-emerald-500 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {spotifyImportStatus === 'submitting' ? 'Importing...' : 'Import'}
+          </button>
+        </div>
+        {spotifyImportMessage ? (
+          <p className={`mt-2 text-[10px] ${spotifyImportStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>
+            {spotifyImportMessage}
+          </p>
+        ) : null}
+      </form>
     </section>
+  );
+}
+
+function SpotifyOpenLink({ request }: { request: RequestItem }) {
+  if (!request.spotifyUrl) return null;
+
+  return (
+    <a
+      href={request.spotifyUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-xs font-mono font-bold text-emerald-200 transition-all hover:border-emerald-400 hover:text-white"
+      title="Open this track in Spotify"
+    >
+      <LinkIcon className="h-3.5 w-3.5" />
+      Spotify
+    </a>
   );
 }
 
@@ -635,6 +701,9 @@ export default function TalentDashboard({
   const [musicSourceCapabilities, setMusicSourceCapabilities] = useState<MusicSourceCapability[]>(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
   const [musicSourceCapabilityStatus, setMusicSourceCapabilityStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [musicSourceCapabilityError, setMusicSourceCapabilityError] = useState<string | null>(null);
+  const [spotifyPlaylistUrl, setSpotifyPlaylistUrl] = useState('');
+  const [spotifyImportStatus, setSpotifyImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [spotifyImportMessage, setSpotifyImportMessage] = useState<string | null>(null);
   const [issuedSyncKey, setIssuedSyncKey] = useState<{
     sourceKey: string;
     sourceLabel: string;
@@ -1012,6 +1081,35 @@ export default function TalentDashboard({
   const linkedTrackCount = linkedSources
     .filter((source) => source.connectionStatus !== 'revoked')
     .reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
+
+  const handleSpotifyPlaylistImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()) return;
+
+    setSpotifyImportStatus('submitting');
+    setSpotifyImportMessage(null);
+    try {
+      const response = await fetch('/api/talent/music/spotify/import-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playlistUrl: spotifyPlaylistUrl.trim() })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Spotify playlist import failed.');
+      }
+
+      setSpotifyImportStatus('success');
+      setSpotifyImportMessage(`Imported ${data?.importedCount ?? 0} Spotify metadata tracks into My Library.`);
+      setSpotifyPlaylistUrl('');
+      await refreshLinkedSources();
+      await refreshMusicSourceCapabilities();
+    } catch (error) {
+      console.warn('Spotify playlist import failed:', error);
+      setSpotifyImportStatus('error');
+      setSpotifyImportMessage(error instanceof Error ? error.message : 'Spotify playlist import failed.');
+    }
+  };
 
   const refreshPublicProfile = async () => {
     if (previewMode) return;
@@ -1593,6 +1691,11 @@ export default function TalentDashboard({
         syncedTrackCount={linkedTrackCount}
         loading={musicSourceCapabilityStatus === 'loading'}
         loadError={musicSourceCapabilityError}
+        spotifyPlaylistUrl={spotifyPlaylistUrl}
+        spotifyImportStatus={spotifyImportStatus}
+        spotifyImportMessage={spotifyImportMessage}
+        onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
+        onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
       />
 
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
@@ -2354,6 +2457,8 @@ export default function TalentDashboard({
 
                         {/* Triage Accept (Move to Ladder) or Reject (Instant Void Hold) */}
                         <div className="flex items-center gap-2 font-sans">
+                          <SpotifyOpenLink request={req} />
+
                           <button
                             onClick={() => onHide(req.id)}
                             className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
@@ -2486,7 +2591,8 @@ export default function TalentDashboard({
                           </div>
 
                           {/* Fulfillment actions */}
-                          <div>
+                          <div className="flex items-center gap-2">
+                            <SpotifyOpenLink request={req} />
                             <button
                               type="button"
                               onClick={previewMode ? undefined : () => onFulfill(req.id)}

@@ -41,6 +41,9 @@ export interface RequestItem {
   title: string;          // Song title, menu item, or "Classic Tip"
   subtitle: string;       // Artist, description, or empty
   albumArt?: string;      // Optional URL
+  sourceProvider?: string | null;
+  spotifyUri?: string | null;
+  spotifyUrl?: string | null;
   senderName: string;
   message?: string;
   amount: number;         // Total pool (original + boosts)

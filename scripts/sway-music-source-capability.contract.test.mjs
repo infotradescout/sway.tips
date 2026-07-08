@@ -14,6 +14,9 @@ const migration = existsSync(join(root, migrationPath)) ? read(migrationPath) : 
 const server = read('server.ts');
 const capabilities = read('src/server/music-source-capabilities.ts');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
+const patronView = read('src/components/PatronView.tsx');
+const spotifyCatalog = read('src/server/spotify-catalog.ts');
+const types = read('src/types.ts');
 const packageJson = read('package.json');
 
 for (const term of [
@@ -56,26 +59,64 @@ for (const term of [
 
 for (const term of [
   "app.get('/api/talent/music/source-capabilities'",
+  "app.post('/api/talent/music/spotify/import-playlist'",
   'accessControl.requireTalentAccess(req)',
   'getMusicSourceCapabilityCatalog({',
-  'spotifyCatalogConfigured: isCatalogSearchConfigured(process.env)'
+  'spotifyCatalogConfigured: isCatalogSearchConfigured(process.env)',
+  'importSpotifyPlaylist({',
+  "playbackMode: 'open_in_spotify'",
+  "sourceProvider: 'spotify'",
+  'spotifyUrl: typeof (row.metadata as any)?.spotifyUrl'
 ]) {
   if (!server.includes(term)) failures.push(`Server missing music source capability route behavior: ${term}`);
 }
 
 for (const term of [
+  'export async function importSpotifyPlaylist',
+  'resolveSpotifyPlaylistId',
+  "https://api.spotify.com/v1/playlists/${playlistId}",
+  'SpotifyPlaylistImportTrack',
+  'externalTrackId: `spotify:${track.id}`'
+]) {
+  if (!spotifyCatalog.includes(term)) failures.push(`Spotify catalog missing playlist import behavior: ${term}`);
+}
+
+for (const term of [
   'data-sway-music-sources-panel="true"',
+  'data-sway-spotify-playlist-import="true"',
   "fetch('/api/talent/music/source-capabilities')",
+  "fetch('/api/talent/music/spotify/import-playlist'",
   'Music Sources',
   'Synced tracks',
+  'Spotify playlist import',
   'Open in Spotify',
   'Connect SoundCloud',
   'No Sway playback',
+  'Metadata only',
   'Metadata',
   'Library sync',
-  'Open source'
+  'Open source',
+  '<SpotifyOpenLink request={req} />'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing music sources panel term: ${term}`);
+}
+
+for (const term of [
+  'sourceProvider?: string',
+  'spotifyUri?: string',
+  'spotifyUrl?: string',
+  'sourceProvider: selectedTrack?.sourceProvider',
+  'spotifyUrl: selectedTrack?.spotifyUrl'
+]) {
+  if (!patronView.includes(term)) failures.push(`PatronView missing provider metadata propagation term: ${term}`);
+}
+
+for (const term of [
+  'sourceProvider?: string | null;',
+  'spotifyUri?: string | null;',
+  'spotifyUrl?: string | null;'
+]) {
+  if (!types.includes(term)) failures.push(`RequestItem missing provider metadata term: ${term}`);
 }
 
 for (const forbidden of [
@@ -84,9 +125,10 @@ for (const forbidden of [
   "providerToken: text('provider_token')",
   'playInSway: true',
   'Spotify plays from Sway',
-  'SoundCloud plays from Sway'
+  'SoundCloud plays from Sway',
+  'Spotify playback'
 ]) {
-  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden)) {
+  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden)) {
     failures.push(`Music source capability slice must not add raw token storage or playback enablement: ${forbidden}`);
   }
 }

@@ -53,6 +53,9 @@ interface PatronViewProps {
     message?: string;
     amount: number;
     albumArt?: string;
+    sourceProvider?: string;
+    spotifyUri?: string;
+    spotifyUrl?: string;
     client_request_id?: string;
     idempotency_key?: string;
     expires_at?: string;
@@ -76,6 +79,9 @@ type SearchTrack = {
   basePrice?: number;
   description?: string;
   source?: string;
+  sourceProvider?: string;
+  spotifyUri?: string;
+  spotifyUrl?: string;
   targetType?: 'music' | 'custom';
 };
 
@@ -782,6 +788,9 @@ export default function PatronView({
         message: commentMessage,
         amount: checkoutPayload.amount,
         albumArt: checkoutPayload.trackArt,
+        sourceProvider: selectedTrack?.sourceProvider,
+        spotifyUri: selectedTrack?.spotifyUri,
+        spotifyUrl: selectedTrack?.spotifyUrl,
         client_request_id: checkoutPayload.clientRequestId,
         idempotency_key: checkoutPayload.idempotencyKey,
         expires_at: checkoutPayload.expires_at,

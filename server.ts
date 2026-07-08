@@ -46,7 +46,7 @@ import {
   verifyPerformerPassword
 } from "./src/server/performer-password-auth";
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
-import { isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
+import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { lookupLyrics } from "./src/server/lyrics-provider";
 
@@ -3479,6 +3479,111 @@ app.get('/api/talent/music/source-capabilities', async (req, res) => {
   });
 });
 
+app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Spotify playlist import requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can import Spotify playlist metadata.' });
+  }
+
+  const playlistUrl = normalizeLibraryText(req.body?.playlistUrl, 512);
+  if (!playlistUrl) {
+    return res.status(422).json({ error: 'A Spotify playlist URL, URI, or ID is required.' });
+  }
+
+  const imported = await importSpotifyPlaylist({
+    playlistUrl,
+    env: process.env,
+    limit: 100
+  });
+
+  if (!imported.configured) {
+    return res.status(503).json({ error: 'Spotify metadata import is not configured for this Sway environment.' });
+  }
+  if (!imported.playlistId) {
+    return res.status(422).json({ error: 'Enter a valid Spotify playlist URL, URI, or ID.' });
+  }
+  if (!imported.tracks.length) {
+    return res.status(422).json({ error: 'Sway could not import tracks from that Spotify playlist. Confirm the playlist is accessible to the configured Spotify app.' });
+  }
+
+  const sourceKey = `spotify-${imported.playlistId}`;
+  const sourceLabel = imported.playlistName ? `Spotify: ${imported.playlistName}` : 'Spotify playlist';
+  const result = await businessDb.transaction(async (tx) => {
+    const upserted = await upsertPerformerLibraryTrackBatch(tx, {
+      performerId: performerOwner.performerId,
+      sourceKey,
+      sourceLabel,
+      rawTracks: imported.tracks.map((track) => ({
+        title: track.title,
+        artist: track.artist,
+        album: track.album ?? '',
+        artworkUrl: track.albumArt ?? '',
+        externalTrackId: track.externalTrackId,
+        metadata: {
+          sourceProvider: 'spotify',
+          spotifyUri: track.spotifyUri,
+          spotifyUrl: track.spotifyUrl,
+          playlistId: imported.playlistId
+        }
+      })),
+      replaceExisting: true
+    });
+
+    await tx
+      .insert(performerLibrarySources)
+      .values({
+        performerId: performerOwner.performerId,
+        sourceKey,
+        sourceLabel,
+        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
+        syncKeyPreview: 'spotify-import',
+        connectionStatus: 'active',
+        lastSyncedAt: new Date(),
+        metadata: {
+          sourceProvider: 'spotify',
+          playlistId: imported.playlistId,
+          importMode: 'metadata_only'
+        },
+        updatedAt: new Date()
+      })
+      .onConflictDoUpdate({
+        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
+        set: {
+          sourceLabel,
+          connectionStatus: 'active',
+          lastSyncedAt: new Date(),
+          metadata: {
+            sourceProvider: 'spotify',
+            playlistId: imported.playlistId,
+            importMode: 'metadata_only'
+          },
+          updatedAt: new Date()
+        }
+      });
+
+    return upserted;
+  });
+
+  return res.status(202).json({
+    success: true,
+    sourceKey,
+    sourceLabel,
+    playlistId: imported.playlistId,
+    playlistName: imported.playlistName,
+    importedCount: result.importedCount,
+    removedCount: result.removedCount,
+    playbackMode: 'open_in_spotify'
+  });
+});
+
 app.post('/api/talent/library/sources', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -3676,7 +3781,8 @@ app.get('/api/talent/setlist/search', async (req, res) => {
           title: performerLibraryTracks.title,
           artist: performerLibraryTracks.artist,
           album: performerLibraryTracks.album,
-          artworkUrl: performerLibraryTracks.artworkUrl
+          artworkUrl: performerLibraryTracks.artworkUrl,
+          metadata: performerLibraryTracks.metadata
         })
         .from(performerLibraryTracks)
         .where(and(
@@ -3697,8 +3803,8 @@ app.get('/api/talent/setlist/search', async (req, res) => {
         artist: row.artist,
         album: row.album,
         artworkUrl: row.artworkUrl,
-        spotifyUri: null,
-        spotifyUrl: null
+        spotifyUri: typeof (row.metadata as any)?.spotifyUri === 'string' ? (row.metadata as any).spotifyUri : null,
+        spotifyUrl: typeof (row.metadata as any)?.spotifyUrl === 'string' ? (row.metadata as any).spotifyUrl : null
       })),
       ...(catalog.configured ? catalog.results.map((track) => ({
         sourceKey: 'catalog',
@@ -4720,6 +4826,9 @@ app.post("/api/request/create", async (req, res) => {
     message,
     amount,
     albumArt,
+    sourceProvider,
+    spotifyUri,
+    spotifyUrl,
     client_request_id,
     idempotency_key,
     patron_device_id_hash = "anonymous-device",
@@ -4755,7 +4864,10 @@ app.post("/api/request/create", async (req, res) => {
   const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
     : 0;
-  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt });
+  const normalizedSourceProvider = normalizeLibraryText(sourceProvider, 80) || null;
+  const normalizedSpotifyUri = normalizeLibraryText(spotifyUri, 256) || null;
+  const normalizedSpotifyUrl = normalizeLibraryText(spotifyUrl, 512) || null;
+  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash,
@@ -4867,6 +4979,9 @@ app.post("/api/request/create", async (req, res) => {
     title: isStraightTip ? 'Straight Tip' : (title || 'Request'),
     subtitle: isStraightTip ? 'Supported the talent directly!' : (subtitle || ''),
     albumArt: albumArt || (targetType === 'music' ? "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop" : undefined),
+    sourceProvider: isStraightTip ? null : normalizedSourceProvider,
+    spotifyUri: isStraightTip ? null : normalizedSpotifyUri,
+    spotifyUrl: isStraightTip ? null : normalizedSpotifyUrl,
     senderName: senderName || "Anonymous Patron",
     message: message || "",
     amount: tipAmount,
@@ -5840,7 +5955,8 @@ app.post("/api/music/search", (req, res) => {
         artist: performerLibraryTracks.artist,
         album: performerLibraryTracks.album,
         artworkUrl: performerLibraryTracks.artworkUrl,
-        sourceLabel: performerLibraryTracks.sourceLabel
+        sourceLabel: performerLibraryTracks.sourceLabel,
+        metadata: performerLibraryTracks.metadata
       })
       .from(performerLibraryTracks)
       .where(
@@ -5861,6 +5977,9 @@ app.post("/api/music/search", (req, res) => {
         albumArt: row.artworkUrl || albumArt,
         description: row.album || 'Available in performer library',
         source: row.sourceLabel,
+        sourceProvider: typeof (row.metadata as any)?.sourceProvider === 'string' ? (row.metadata as any).sourceProvider : undefined,
+        spotifyUri: typeof (row.metadata as any)?.spotifyUri === 'string' ? (row.metadata as any).spotifyUri : undefined,
+        spotifyUrl: typeof (row.metadata as any)?.spotifyUrl === 'string' ? (row.metadata as any).spotifyUrl : undefined,
         targetType: 'music'
       })),
       integrationMode: 'performer_library'
