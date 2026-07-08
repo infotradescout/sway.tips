@@ -55,10 +55,19 @@ for (const route of persistenceProtectedRoutes) {
     failures.push(`Route ${route} must refresh state through business-store boundary.`);
   }
 
+  // Routes may persist either directly, or via a shared helper (e.g.
+  // applyWindowToggle/applyRequestTriage/applyRequestFulfill/applyRequestHide)
+  // that itself calls persistStateWithAudit -- extracted so mutation/payment
+  // logic isn't duplicated across the legacy route and the control-bridge
+  // smart-action route.
   if (
     !routeBlock.includes('await persistBusinessState()') &&
     !routeBlock.includes('await persistBusinessStateForRoom(') &&
     !routeBlock.includes('await persistStateWithAudit(') &&
+    !routeBlock.includes('await applyWindowToggle(') &&
+    !routeBlock.includes('await applyRequestTriage(') &&
+    !routeBlock.includes('await applyRequestFulfill(') &&
+    !routeBlock.includes('await applyRequestHide(') &&
     !route.includes('/api/moderation/report') &&
     !route.includes('/api/moderation/block')
   ) {

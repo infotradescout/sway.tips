@@ -13,9 +13,9 @@ for (const term of [
   '--gig-id <id>',
   '--auth-token <text>',
   '--auth-cookie <text>',
-  'resolveAuthCookie',
+  'resolveAuthHeaders',
   'SWAY_CONTROL_AUTH_TOKEN',
-  'sway_performer_session=',
+  'authorization: `Bearer',
   "bridge: 'sway-control-bridge'",
   "GET' && req.url === '/health'",
   "GET' && req.url === '/state'",
@@ -45,11 +45,8 @@ for (const term of [
   'sway-control-bridge-preset.v1',
   'bitfocus-companion-generic-http',
   'stream-deck-url-actions',
-  '/api/session/window/toggle',
-  '/api/request/fulfill',
-  '/api/moderation/hide',
-  '/api/request/triage',
-  "cookie: authCookie",
+  '/api/talent/control-bridge/action/',
+  '...authHeaders',
   'topApprovedRequest',
   'topPendingRequest'
 ]) {
@@ -75,8 +72,10 @@ for (const term of [
   'vendor-neutral button recipes',
   'do not install into Stream Deck',
   'Do not expose it on public networks.',
-  'The `--auth-token` value acts like a short-lived signed-in performer session',
-  'preferred over copying a browser cookie'
+  'acts like a short-lived signed-in performer session',
+  'preferred over copying a browser cookie',
+  'Direct (no local software)',
+  '/api/talent/control-bridge/action/<action>'
 ]) {
   if (!docs.includes(term)) {
     failures.push(`Control bridge docs missing truth/security term: ${term}`);
