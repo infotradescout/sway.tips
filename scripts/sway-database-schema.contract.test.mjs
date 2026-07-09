@@ -22,6 +22,9 @@ const config = existsSync(join(root, 'drizzle.config.ts'))
   ? readFileSync(join(root, 'drizzle.config.ts'), 'utf8')
   : '';
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const migrationJournal = existsSync(join(root, 'drizzle/meta/_journal.json'))
+  ? JSON.parse(readFileSync(join(root, 'drizzle/meta/_journal.json'), 'utf8'))
+  : { entries: [] };
 const migrationFiles = existsSync(join(root, 'drizzle'))
   ? readdirSync(join(root, 'drizzle')).filter((name) => name.endsWith('.sql'))
   : [];
@@ -47,6 +50,26 @@ for (const term of [
 }
 
 if (!migrationFiles.length) failures.push('Drizzle migration SQL file is required.');
+
+const journalEntries = Array.isArray(migrationJournal.entries) ? migrationJournal.entries : [];
+const journalTags = new Set(journalEntries.map((entry) => entry?.tag).filter(Boolean));
+for (const migrationFile of migrationFiles) {
+  const tag = migrationFile.replace(/\.sql$/, '');
+  if (!journalTags.has(tag)) {
+    failures.push(`Drizzle migration journal missing SQL file tag: ${tag}`);
+  }
+}
+
+for (const entry of journalEntries) {
+  if (typeof entry?.idx !== 'number' || typeof entry?.tag !== 'string') {
+    failures.push('Drizzle migration journal entries must include numeric idx and string tag.');
+    continue;
+  }
+  const numericPrefix = Number(entry.tag.slice(0, 4));
+  if (!Number.isInteger(numericPrefix) || numericPrefix !== entry.idx) {
+    failures.push(`Drizzle migration journal idx must match tag prefix: idx ${entry.idx}, tag ${entry.tag}`);
+  }
+}
 
 const requiredTables = [
   'users',
