@@ -14,7 +14,7 @@ The required evidence package for a real pilot or manual QA run is `docs/SWAY_LI
 
 The pilot proves the live room money loop, not future platform expansion.
 
-Before this checklist passes, PR #44 remains parked. Hardware controls, control bridge work, lyrics, marketplace/browse expansion, operator/admin expansion, DJ software integrations, and new infrastructure must not resume unless the owner explicitly reorders the lane.
+PR #44 was resumed and merged by owner override after the readiness guardrails landed. That override does not complete the live-pilot proof. New hardware/control expansion, lyrics, marketplace/browse expansion, operator/admin expansion, DJ software integrations, and new infrastructure still must not resume unless the owner explicitly reorders the lane.
 
 ## 1. Performer Can Create A Room Before Going Live
 
@@ -156,11 +156,11 @@ The operator records:
 - Known limitations.
 - Completed QA packet with hold/go decision.
 
-## 10. Hold Criteria Before PR #44 Resumes
+## 10. Hold Criteria Before New Expansion Resumes
 
-PR #44 remains parked until this checklist lands and the live pilot readiness review passes.
+PR #44 is no longer parked; it merged as a control-bridge baseline by owner override. Do not treat that merge as live hardware/control proof.
 
-Hold PR #44 and all new feature work if any of these remain unresolved:
+Hold new feature expansion if any of these remain unresolved:
 
 - Performer cannot set room settings and create a room.
 - Performer cannot share QR/link.
@@ -172,6 +172,7 @@ Hold PR #44 and all new feature work if any of these remain unresolved:
 - No-session recovery creates venue confusion.
 - Money-loop smoke would require changing money behavior.
 - Pilot evidence is missing environment, room/gig ID, URLs, and pass/fail results.
+- Live hardware/control proof is claimed without a real room/token smoke.
 
 ## Explicit Non-Claims
 
@@ -188,6 +189,12 @@ For the patron entry plus room money-mode correction, the explicit runtime claim
 - Existing `/api/request/boost` behavior floors paid boosts at the room minimum.
 - Free request rooms keep boost actions as free upvotes with fixed weight 1.
 - Stripe/payment provider integration is not changed.
+
+For the merged control-bridge baseline, the explicit runtime claims are:
+- PR #44 is merged and deployed as a control-bridge baseline.
+- Overlay access is performer/talent-gated; unauthenticated browser overlay requests recover to `/talent/login`.
+- Build-marker verification proves deployment only.
+- Real room/token control-bridge hardware proof is not claimed unless attached to the QA packet.
 - No schema changes.
 - No role/access changes.
 - No AI/moderation changes.

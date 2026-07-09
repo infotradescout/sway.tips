@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-`main @ 4a35ce9743b14b712cb9049ec7334ef6a4a35923`
+`main @ 7d6fbf735d4794383323a43ac67f447680ecb390`
 
 This baseline shipped the Live-Night Spine V1 repair. Future work must protect the live-night money loop before it expands the system.
 
@@ -49,7 +49,7 @@ Sway lets a performer set room settings, create a room, show a QR/link, collect 
 
 ## Do Not Prioritize Before Adoption Proof
 
-- Hardware controls.
+- New hardware/control expansion beyond the merged control-bridge baseline.
 - Lyrics.
 - Marketplace, browse, or discovery expansion.
 - Operator/admin expansion.
@@ -72,4 +72,4 @@ The shipped baseline centers the performer and patron live-night loop: room sett
 
 DB-backed local QA proved the deeper live-night flow. Production smoke verified the deployed build marker and non-mutating recovery surfaces. Do not describe that smoke as a real production room mutation or a Stripe retest.
 
-PR #44 control bridge remains parked until the live-night loop proves adoption or an owner explicitly reorders the lane.
+PR #44 control bridge is merged and deployed as a baseline by owner override. Do not claim live hardware/control proof without a real room/token smoke, and do not prioritize new hardware/control expansion before adoption proof unless the owner explicitly reorders the lane.
