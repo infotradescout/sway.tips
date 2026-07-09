@@ -1044,6 +1044,8 @@ export default function TalentDashboard({
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [queueActionPendingKey, setQueueActionPendingKey] = useState<string | null>(null);
+  const queueActionPendingRef = useRef<string | null>(null);
   const actionInFlightRef = useRef(false);
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
@@ -1082,6 +1084,31 @@ export default function TalentDashboard({
     } finally {
       actionInFlightRef.current = false;
       setActionPending(false);
+    }
+  };
+
+  const queueActionKey = (requestId: string, action: 'approve' | 'veto' | 'hide' | 'remove' | 'fulfill') => `${requestId}:${action}`;
+  const isQueueActionPending = (requestId: string, action: 'approve' | 'veto' | 'hide' | 'remove' | 'fulfill') =>
+    queueActionPendingKey === queueActionKey(requestId, action);
+  const isRequestQueueActionPending = (requestId: string) => queueActionPendingKey?.startsWith(`${requestId}:`) ?? false;
+  const runQueueAction = async (
+    requestId: string,
+    action: 'approve' | 'veto' | 'hide' | 'remove' | 'fulfill',
+    run: () => void | Promise<void>
+  ) => {
+    const key = queueActionKey(requestId, action);
+    if (queueActionPendingRef.current) return;
+    queueActionPendingRef.current = key;
+    setQueueActionPendingKey(key);
+    setActionError(null);
+    try {
+      await Promise.resolve(run());
+    } catch (error) {
+      console.error(error);
+      setActionError('That queue action failed. Please try again.');
+    } finally {
+      queueActionPendingRef.current = null;
+      setQueueActionPendingKey(null);
     }
   };
 
@@ -3086,35 +3113,47 @@ export default function TalentDashboard({
                           <SpotifyOpenLink request={req} />
 
                           <button
-                            onClick={() => onHide(req.id)}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
+                            type="button"
+                            onClick={() => runQueueAction(req.id, 'hide', () => onHide(req.id))}
+                            disabled={isRequestQueueActionPending(req.id)}
+                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'hide') ? 'true' : undefined}
+                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                             title="Hide from the live queue"
                           >
-                            <AlertTriangle className="w-4 h-4" /> Hide
+                            <AlertTriangle className="w-4 h-4" /> {isQueueActionPending(req.id, 'hide') ? 'Hiding' : 'Hide'}
                           </button>
 
                           <button
-                            onClick={() => onTriage(req.id, 'deny')}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-fuchsia-400 hover:bg-fuchsia-500/10 hover:border-fuchsia-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
+                            type="button"
+                            onClick={() => runQueueAction(req.id, 'veto', () => onTriage(req.id, 'deny'))}
+                            disabled={isRequestQueueActionPending(req.id)}
+                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'veto') ? 'true' : undefined}
+                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-fuchsia-400 hover:bg-fuchsia-500/10 hover:border-fuchsia-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                             title="Reject &amp; Void Hold"
                           >
-                            <Trash2 className="w-4 h-4" /> Veto
+                            <Trash2 className="w-4 h-4" /> {isQueueActionPending(req.id, 'veto') ? 'Vetoing' : 'Veto'}
                           </button>
                           
                           <button
-                            onClick={() => onTriage(req.id, 'approve')}
-                            className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10"
+                            type="button"
+                            onClick={() => runQueueAction(req.id, 'approve', () => onTriage(req.id, 'approve'))}
+                            disabled={isRequestQueueActionPending(req.id)}
+                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'approve') ? 'true' : undefined}
+                            className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                             title="Approve request"
                           >
-                            <Check className="w-4 h-4" /> Approve
+                            <Check className="w-4 h-4" /> {isQueueActionPending(req.id, 'approve') ? 'Approving' : 'Approve'}
                           </button>
 
                           <button
-                            onClick={() => onRemove(req.id)}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer"
+                            type="button"
+                            onClick={() => runQueueAction(req.id, 'remove', () => onRemove(req.id))}
+                            disabled={isRequestQueueActionPending(req.id)}
+                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'remove') ? 'true' : undefined}
+                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                             title="Remove from queue"
                           >
-                            <Trash2 className="w-4 h-4" /> Remove
+                            <Trash2 className="w-4 h-4" /> {isQueueActionPending(req.id, 'remove') ? 'Removing' : 'Remove'}
                           </button>
                         </div>
                       </motion.div>
@@ -3221,11 +3260,12 @@ export default function TalentDashboard({
                             <SpotifyOpenLink request={req} />
                             <button
                               type="button"
-                              onClick={previewMode ? undefined : () => onFulfill(req.id)}
-                              disabled={previewMode}
-                              className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia"
+                              onClick={previewMode ? undefined : () => runQueueAction(req.id, 'fulfill', () => onFulfill(req.id))}
+                              disabled={previewMode || isRequestQueueActionPending(req.id)}
+                              data-sway-queue-action-pending={isQueueActionPending(req.id, 'fulfill') ? 'true' : undefined}
+                              className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              <Award className="w-4 h-4" /> {previewMode ? 'Demo only' : 'Mark Playing'}
+                              <Award className="w-4 h-4" /> {previewMode ? 'Demo only' : isQueueActionPending(req.id, 'fulfill') ? 'Marking' : 'Mark Playing'}
                             </button>
                           </div>
                         </motion.div>
