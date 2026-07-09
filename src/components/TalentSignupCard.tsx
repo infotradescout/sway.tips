@@ -1,9 +1,22 @@
 import { Lock, Sparkles } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
 const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 
+// Mirrors src/server/performer-login.ts normalizePerformerHandle and
+// src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
+const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
+const PASSWORD_MIN_LENGTH = 8;
+
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
+
+type SignupResponse = {
+  error?: string;
+  message?: string;
+  deliveryMode?: string;
+  verificationLink?: string;
+};
 
 export default function TalentSignupCard() {
   const [displayName, setDisplayName] = useState('');
@@ -14,14 +27,36 @@ export default function TalentSignupCard() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [status, setStatus] = useState<SignupStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const [verificationLink, setVerificationLink] = useState<string | null>(null);
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const signupStatus = searchParams.get('status');
-  const statusMessage = signupStatus === 'invalid-link'
-    ? 'That verification link is no longer valid. Log in and request a recovery link if you still need access.'
-    : signupStatus === 'unavailable'
-      ? 'Performer signup is temporarily unavailable. Please try again in a moment.'
-      : null;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get('email');
+    if (!emailParam) return;
+    setEmail(emailParam.trim().toLowerCase());
+  }, []);
+
+  const handleError = handle.length > 0 && !HANDLE_PATTERN.test(handle)
+    ? 'Letters, numbers, hyphens, and underscores only.'
+    : null;
+  const passwordError = password.length > 0 && password.length < PASSWORD_MIN_LENGTH
+    ? `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`
+    : null;
+  const confirmPasswordError = confirmPassword.length > 0 && confirmPassword !== password
+    ? 'Passwords do not match.'
+    : null;
+  const canSubmit = displayName.trim().length > 0
+    && HANDLE_PATTERN.test(handle)
+    && email.trim().length > 0
+    && password.length >= PASSWORD_MIN_LENGTH
+    && confirmPassword === password
+    && termsAccepted;
+
+  const statusMessage = useAuthQueryStatusMessage({
+    'invalid-link': 'That verification link is no longer valid. Log in and request a recovery link if you still need access.',
+    unavailable: 'Performer signup is temporarily unavailable. Please try again in a moment.'
+  });
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,6 +64,7 @@ export default function TalentSignupCard() {
 
     setStatus('submitting');
     setMessage(null);
+    setVerificationLink(null);
 
     try {
       const response = await fetch('/api/talent/signup', {
@@ -46,13 +82,18 @@ export default function TalentSignupCard() {
         })
       });
 
-      const data = await response.json().catch(() => null);
+      const data = await response.json().catch(() => null) as SignupResponse | null;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Performer signup request failed.');
       }
 
       setStatus('success');
-      setMessage(SUCCESS_COPY);
+      if (data?.deliveryMode === 'mock' && typeof data.verificationLink === 'string') {
+        setMessage('Local email delivery is mocked. Open the verification link below to finish setup.');
+        setVerificationLink(data.verificationLink);
+      } else {
+        setMessage(data?.message || SUCCESS_COPY);
+      }
       setDisplayName('');
       setHandle('');
       setEmail('');
@@ -62,12 +103,13 @@ export default function TalentSignupCard() {
     } catch (error) {
       console.warn('Unable to create performer account:', error);
       setStatus('error');
+      setVerificationLink(null);
       setMessage(error instanceof Error ? error.message : 'We could not create your performer account right now. Please try again in a moment.');
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+    <div className="min-h-screen bg-slate-950 px-4 pb-24 pt-8 text-slate-100 sm:pb-8">
       <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.08fr,0.92fr]">
         <div className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(217,70,239,0.18),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.96),_rgba(2,6,23,1))] p-7 shadow-2xl">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300">
@@ -82,22 +124,16 @@ export default function TalentSignupCard() {
             Already have an account? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/talent/login">Log in</a>
           </p>
 
-          {statusMessage ? (
-            <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              {statusMessage}
-            </div>
-          ) : null}
+          {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}
 
-          {message ? (
-            <div
-              className={`mt-5 rounded-2xl px-4 py-3 text-sm ${
-                status === 'success'
-                  ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
-                  : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
-              }`}
+          {message ? <StatusBanner tone={status === 'success' ? 'emerald' : 'rose'} message={message} /> : null}
+          {verificationLink ? (
+            <a
+              className="mt-3 block rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-black text-emerald-100 transition hover:border-emerald-300/60 hover:bg-emerald-400/15"
+              href={verificationLink}
             >
-              {message}
-            </div>
+              Open local verification link
+            </a>
           ) : null}
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
@@ -130,8 +166,14 @@ export default function TalentSignupCard() {
                 onChange={(event) => setHandle(event.target.value)}
                 placeholder="dj-sunset"
                 required
-                className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                aria-invalid={handleError ? true : undefined}
+                className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                  handleError
+                    ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                    : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                }`}
               />
+              {handleError ? <p className="text-xs text-rose-300">{handleError}</p> : null}
             </div>
 
             <div className="space-y-1.5">
@@ -163,8 +205,14 @@ export default function TalentSignupCard() {
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="At least 8 characters"
                   required
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                  aria-invalid={passwordError ? true : undefined}
+                  className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                    passwordError
+                      ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                  }`}
                 />
+                {passwordError ? <p className="text-xs text-rose-300">{passwordError}</p> : null}
               </div>
 
               <div className="space-y-1.5">
@@ -179,8 +227,14 @@ export default function TalentSignupCard() {
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   placeholder="Re-enter password"
                   required
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
+                  aria-invalid={confirmPasswordError ? true : undefined}
+                  className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
+                    confirmPasswordError
+                      ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
+                  }`}
                 />
+                {confirmPasswordError ? <p className="text-xs text-rose-300">{confirmPasswordError}</p> : null}
               </div>
             </div>
 
@@ -199,7 +253,7 @@ export default function TalentSignupCard() {
 
             <button
               type="submit"
-              disabled={status === 'submitting'}
+              disabled={status === 'submitting' || !canSubmit}
               className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-fuchsia-600 px-5 py-3 text-sm font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {status === 'submitting' ? 'Creating your account...' : 'Create Account'}

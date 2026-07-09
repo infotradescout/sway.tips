@@ -15,7 +15,7 @@ The performer surface is currently:
 
 It is not yet:
 
-- a connected music-library workflow
+- a built-in third-party audio playback engine
 - an OBS-integrated streaming workflow
 - a DJ software companion
 - a real-time broadcast/control hub
@@ -119,41 +119,44 @@ Verdict:
 
 Current truth:
 
-- patron search uses preview catalog entries in the client
-- server `POST /api/music/search` is now a manual-request helper, not a real catalog lookup
-- no production environment has a licensed or verified music-platform search integration
+- patron search can use manual entry, synced performer library rows, curated setlists, and a configured Spotify metadata catalog search
+- Spotify catalog search is metadata/search only; it is not proof that Sway can play the track
+- no production environment has a licensed full-track playback integration for Spotify, Apple Music, YouTube Music, TIDAL, Beatport, or SoundCloud
 
 Repo evidence:
 
 - `src/components/PatronView.tsx`
 - `server.ts` route `POST /api/music/search`
+- `src/server/spotify-catalog.ts`
+- `docs/SWAY_AUDIO_SOURCE_STRATEGY.md`
 
 Verdict:
 
-- fake for production
+- useful for request matching, not production audio playback
 
 Impact:
 
-- no real Spotify
-- no real Apple Music
-- no real YouTube Music
-- no real TIDAL
-- no real SoundCloud
-- no real Beatport
+- no Spotify playback from Sway
+- no Apple Music playback from Sway
+- no YouTube Music playback from Sway
+- no TIDAL playback from Sway
+- no SoundCloud playback from Sway
+- no Beatport playback from Sway
 - no verified local library match flow
 
 ### 2. Performer-side library matching
 
 Current truth:
 
-- no performer library import
-- no local collection sync
-- no “already in crate/library” matching
+- performer library sources and track sync exist
+- a local bridge can forward a normalized library snapshot to Sway
+- request search can include performer library rows
+- this is metadata/availability sync, not audio playback or deck loading
 - no deck-ready availability indicator
 
 Verdict:
 
-- missing entirely
+- real first layer, still missing playback and deck integration
 
 ### 3. OBS integration
 
@@ -219,6 +222,7 @@ Verdict:
 - licensed or verifiable song search/catalog
 - performer-side request-to-library workflow
 - stream/display workflow stronger than a bare browser overlay
+- lawful audio playback strategy for owned/licensed/provider-approved tracks
 
 ### Can stay manual temporarily
 
@@ -226,6 +230,7 @@ Verdict:
 - print QR sign
 - browser-based overlay opened manually in OBS browser source
 - manual “now playing” management through queue actions
+- opening matched tracks in the performer's existing music app
 
 ### Not present and should not be implied
 
@@ -235,6 +240,7 @@ Verdict:
 - automatic library match
 - automatic song loading to deck
 - native push-to-stream scene triggers
+- Spotify/SoundCloud/third-party catalog playback from Sway
 
 ## Blunt Gap Summary
 
@@ -245,10 +251,12 @@ The repo is currently strongest at:
 - room routing
 - QR entry
 - queue management
+- synced library metadata
 
 The repo is currently weakest at:
 
 - music ecosystem integration
+- lawful audio playback
 - performer workflow integration
 - stream/broadcast integration
 - “this fits into a real DJ set” tooling
@@ -258,22 +266,24 @@ The repo is currently weakest at:
 1. Lock the performer MVP story in product copy:
    audience joins room, pays request/tip, performer manages queue, overlay can be opened in browser or OBS browser source manually
 2. Decide the first real music source:
-   one production catalog integration or explicit manual-entry-only mode
+   one production connector with a clear capability matrix, or explicit manual-entry-only mode
 3. Add performer-side “can I actually play this?” workflow:
    available, not available, manual fallback
 4. Strengthen overlay workflow for broadcast use:
    browser-source guidance, cleaner now-playing/up-next states, display-safe controls
-5. Only then consider deeper integrations:
+5. Define the lawful audio source strategy:
+   owned uploads, local files, approved provider playback, and prohibited provider claims
+6. Only then consider deeper integrations:
    OBS automation, DJ software sync, library import
 
 ## Immediate Repo Truth
 
 Do not claim the current app has:
 
-- real music-platform integrations
+- third-party music playback integrations
 - OBS integration
 - DJ software integrations
-- performer library sync
+- built-in audio console playback
 
 Do claim the current app has:
 
@@ -282,3 +292,4 @@ Do claim the current app has:
 - performer queue management
 - room QR/link sharing
 - browser overlay route
+- performer library metadata sync

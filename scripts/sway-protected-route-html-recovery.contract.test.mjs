@@ -79,8 +79,14 @@ for (const term of [
 
 requireIncludes(
   access,
-  "shell === 'talent' || shell === 'overlay' ? '/talent/login' : null",
-  'Talent and overlay recovery HTML must link to the performer sign-in page, not just the homepage.'
+  "shell === 'talent' || shell === 'overlay'",
+  'Talent and overlay recovery HTML must link to the performer sign-in page.'
+);
+
+requireIncludes(
+  access,
+  "shell === 'admin'",
+  'Admin recovery HTML must link to the admin sign-in page.'
 );
 
 for (const forbidden of [

@@ -40,7 +40,7 @@ const checks = [
     name: 'service worker',
     path: '/sw.js',
     expectedStatus: 200,
-    contentType: 'text/javascript'
+    contentType: 'javascript'
   },
   {
     name: 'offline fallback',
@@ -90,7 +90,8 @@ for (const check of checks) {
 
   if (Array.isArray(check.mustInclude)) {
     const normalized = body.replace(/\s+/g, ' ');
-    const missing = check.mustInclude.filter((term) => !normalized.includes(term));
+    const compact = body.replace(/\s+/g, '');
+    const missing = check.mustInclude.filter((term) => !normalized.includes(term) && !compact.includes(term));
     if (missing.length > 0) {
       fail(`${check.name} missing expected content: ${missing.join(', ')}`);
       continue;

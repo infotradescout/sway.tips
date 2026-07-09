@@ -13,44 +13,44 @@ function requireTerm(term, label = term) {
 
 for (const term of [
   'normalizeHost',
-  "host === 'app.sway.tips'",
-  "host === 'sway.tips'",
-  "host === 'www.sway.tips'",
-  "urlPath === '/' || urlPath === '/home'",
-  "if (isAppSubdomain) return 'patron';",
-  "if (isPublicHost) return 'public';"
+  "CANONICAL_APP_HOST = 'app.sway.tips'",
+  "CANONICAL_APP_ORIGIN = `https://${CANONICAL_APP_HOST}`",
+  "new Set(['sway.tips', 'www.sway.tips'])",
+  'shouldRedirectToAppHost',
+  'buildAppHostRedirectUrl',
+  'req.originalUrl',
+  'redirect(308, buildAppHostRedirectUrl(req.originalUrl))',
+  "if (urlPath === '/') return 'public';",
+  "if (urlPath === '/home') return 'patron';"
 ]) {
   requireTerm(term);
 }
 
-const rootBranchStart = server.indexOf("urlPath === '/' || urlPath === '/home'");
-const appBranch = server.indexOf("if (isAppSubdomain) return 'patron';", Math.max(rootBranchStart, 0));
-const publicBranch = server.indexOf("if (isPublicHost) return 'public';", Math.max(rootBranchStart, 0));
-if (rootBranchStart === -1 || appBranch === -1 || publicBranch === -1 || appBranch > publicBranch) {
-  failures.push('Root/home host branch must resolve app.sway.tips to patron and apex hosts to public.');
+const rootBranch = server.indexOf("if (urlPath === '/') return 'public';");
+const homeBranch = server.indexOf("if (urlPath === '/home') return 'patron';");
+if (rootBranch === -1 || homeBranch === -1 || rootBranch > homeBranch) {
+  failures.push('Root route must resolve to the public landing before /home resolves to the patron app.');
 }
 
-const publicHostBranchPattern = /const isPublicHost = host === '' \|\| host === 'sway\.tips' \|\| host === 'www\.sway\.tips' \|\| host === 'localhost' \|\| host === '127\.0\.0\.1';/;
-if (!publicHostBranchPattern.test(server)) {
-  failures.push('Public host branch must explicitly include sway.tips and www.sway.tips.');
+const legacyHostSplitPattern = /if \(isAppSubdomain\) return 'patron';|if \(isLocalPublicHost\) return 'public';|const isLocalPublicHost =/;
+if (legacyHostSplitPattern.test(server)) {
+  failures.push('Root public landing must not split app/local hosts into different shells.');
 }
 
-const rootHomeBranchPattern = /if \(urlPath === '\/' \|\| urlPath === '\/home'\) \{\s*if \(isAppSubdomain\) return 'patron';\s*if \(isPublicHost\) return 'public';\s*return 'patron';\s*\}/;
+const rootHomeBranchPattern = /if \(urlPath === '\/'\) return 'public';\s*if \(urlPath === '\/home'\) return 'patron';/;
 if (!rootHomeBranchPattern.test(server)) {
-  failures.push('Root/home branch must keep app.sway.tips on patron shell, public hosts on public shell, and unknown hosts on patron.');
+  failures.push('Root/home branch must keep / on the public landing and /home on the patron app.');
 }
 
-for (const requiredCase of [
-  { host: 'sway.tips', paths: ['/', '/home'], shell: 'public' },
-  { host: 'www.sway.tips', paths: ['/', '/home'], shell: 'public' },
-  { host: 'app.sway.tips', paths: ['/', '/home'], shell: 'patron' }
-]) {
-  requireTerm(`host === '${requiredCase.host}'`, `${requiredCase.host} host detection`);
-  for (const routePath of requiredCase.paths) {
-    requireTerm(`urlPath === '${routePath}'`, `${requiredCase.host} ${routePath} route branch`);
-  }
-  requireTerm(`return '${requiredCase.shell}'`, `${requiredCase.host} root/home ${requiredCase.shell} shell`);
+for (const host of ['sway.tips', 'www.sway.tips']) {
+  requireTerm(host, `${host} share host detection`);
 }
+
+for (const routePath of ['/', '/home']) {
+  requireTerm(`urlPath === '${routePath}'`, `root/home route branch: ${routePath}`);
+}
+requireTerm("return 'public'", 'app/local/root public landing shell');
+requireTerm("return 'patron'", '/home patron shell');
 
 for (const routeToShell of [
   { route: '/g/', shell: "return 'patron'" },

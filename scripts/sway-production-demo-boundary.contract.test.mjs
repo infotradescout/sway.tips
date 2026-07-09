@@ -8,6 +8,8 @@ const demoMode = read('src/demo-mode.tsx');
 const viteConfig = read('vite.config.ts');
 const accessControl = read('src/server/access-control.ts');
 const publicShell = read('shells/public.html');
+const legacyAppShell = read('src/App.tsx');
+const patronShell = read('src/shells/PatronApp.tsx');
 const packageJson = read('package.json');
 
 const failures = [];
@@ -52,6 +54,15 @@ for (const required of [
 for (const forbiddenPublicOverlayEntry of ['/overlay/live', 'Open overlay']) {
   if (publicShell.includes(forbiddenPublicOverlayEntry)) {
     failures.push(`Public landing must not expose overlay before performer sign-in: ${forbiddenPublicOverlayEntry}`);
+  }
+}
+
+for (const source of [
+  { name: 'src/App.tsx', text: legacyAppShell },
+  { name: 'src/shells/PatronApp.tsx', text: patronShell }
+]) {
+  if (source.text.includes('Open overlay')) {
+    failures.push(`${source.name} must not expose overlay entry to unauthenticated patrons.`);
   }
 }
 

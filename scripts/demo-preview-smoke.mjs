@@ -32,7 +32,7 @@ const scenarios = [
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-off-app-home.png',
-        expectedText: ['Patron App', 'No live records yet'],
+        expectedText: ['Live room', 'No live records yet'],
         absentText: [...demoOffForbiddenText, 'Aria Neon']
       },
       {
@@ -40,7 +40,7 @@ const scenarios = [
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-off-patron.png',
-        expectedText: ['Patron App', 'No live records yet', 'Selected gig inspector'],
+        expectedText: ['Live room', 'No live records yet', 'Room status'],
         absentText: [...demoOffForbiddenText, 'Midnight City']
       },
       {
@@ -86,7 +86,7 @@ const scenarios = [
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-on-app-home.png',
-        expectedText: ['Patron App', 'Demo data', 'Aria Neon', 'Midnight City'],
+        expectedText: ['Live room', 'Demo data', 'Aria Neon', 'Midnight City'],
         absentText: ['No live records yet']
       },
       {
@@ -94,7 +94,7 @@ const scenarios = [
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-on-patron.png',
-        expectedText: ['Patron App', 'Demo data', 'Demo data only. No payment or moderation action will be sent.', 'Midnight City'],
+        expectedText: ['Live room', 'Demo data', 'Demo data only. No payment or moderation action will be sent.', 'Midnight City'],
         absentText: ['No live records yet']
       },
       {

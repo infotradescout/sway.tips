@@ -128,7 +128,24 @@ export const performers = pgTable('performers', {
   ...timestamps
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
+  handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
+}));
+
+export const performerPublicProfiles = pgTable('performer_public_profiles', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  headline: text('headline'),
+  city: text('city'),
+  avatarUrl: text('avatar_url'),
+  instagramUrl: text('instagram_url'),
+  tiktokUrl: text('tiktok_url'),
+  youtubeUrl: text('youtube_url'),
+  soundcloudUrl: text('soundcloud_url'),
+  websiteUrl: text('website_url'),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  updatedAtIdx: index('performer_public_profiles_updated_at_idx').on(table.updatedAt)
 }));
 
 export const performerMemberships = pgTable('performer_memberships', {
@@ -263,6 +280,54 @@ export const performerLibraryTracks = pgTable('performer_library_tracks', {
     table.externalTrackId
   ),
   performerSearchIdx: index('performer_library_tracks_performer_search_idx').on(table.performerId, table.lastSeenAt)
+}));
+
+export const performerMusicSourceConnections = pgTable('performer_music_source_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  providerKey: text('provider_key').notNull(),
+  providerDisplayName: text('provider_display_name').notNull(),
+  sourceMode: text('source_mode').notNull(),
+  connectionStatus: text('connection_status').notNull().default('not_connected'),
+  authStatus: text('auth_status').notNull().default('not_connected'),
+  capabilitySnapshot: jsonb('capability_snapshot').notNull(),
+  externalAccountId: text('external_account_id'),
+  externalAccountLabel: text('external_account_label'),
+  tokenVaultRef: text('token_vault_ref'),
+  connectedAt: timestamp('connected_at', { withTimezone: true }),
+  disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+  lastCapabilityCheckedAt: timestamp('last_capability_checked_at', { withTimezone: true }),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  performerProviderAccountIdx: uniqueIndex('performer_music_source_connections_provider_account_idx').on(
+    table.performerId,
+    table.providerKey,
+    table.externalAccountId
+  ),
+  performerProviderStatusIdx: index('performer_music_source_connections_provider_status_idx').on(
+    table.performerId,
+    table.providerKey,
+    table.connectionStatus
+  )
+}));
+
+export const performerSetlistTracks = pgTable('performer_setlist_tracks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull().default('manual'),
+  externalTrackId: text('external_track_id'),
+  title: text('title').notNull(),
+  artist: text('artist').notNull(),
+  album: text('album'),
+  artworkUrl: text('artwork_url'),
+  spotifyUri: text('spotify_uri'),
+  spotifyUrl: text('spotify_url'),
+  searchableText: text('searchable_text').notNull(),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps
+}, (table) => ({
+  performerSearchIdx: index('performer_setlist_tracks_performer_search_idx').on(table.performerId, table.addedAt)
 }));
 
 export const requests = pgTable('requests', {

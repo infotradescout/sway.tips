@@ -52,6 +52,10 @@ function isPublicTalentLoginEntryRoute(req: Request) {
   return req.method === 'GET' && (req.path === '/talent/login' || req.path === '/talent/signup');
 }
 
+function isPublicAdminLoginEntryRoute(req: Request) {
+  return req.method === 'GET' && req.path === '/admin/login';
+}
+
 function escapeHtml(input: string) {
   return input
     .replace(/&/g, '&amp;')
@@ -62,7 +66,11 @@ function escapeHtml(input: string) {
 
 function renderProtectedRouteRecovery(status: number, reason: string, shell?: string) {
   const safeReason = escapeHtml(reason);
-  const signInHref = shell === 'talent' || shell === 'overlay' ? '/talent/login' : null;
+  const signInHref = shell === 'talent' || shell === 'overlay'
+    ? '/talent/login'
+    : shell === 'admin'
+      ? '/admin/login'
+      : null;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -707,6 +715,16 @@ export function routeFamilyGuard(accessControl: AccessControl) {
     }
 
     if (shell === 'talent' && isPublicTalentLoginEntryRoute(req)) {
+      writeResolvedActor(req, {
+        actorId: null,
+        sessionId: null,
+        patronDeviceIdHash: null
+      });
+      next();
+      return;
+    }
+
+    if (shell === 'admin' && isPublicAdminLoginEntryRoute(req)) {
       writeResolvedActor(req, {
         actorId: null,
         sessionId: null,

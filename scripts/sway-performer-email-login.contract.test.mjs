@@ -126,6 +126,7 @@ async function main() {
     "app.post('/api/talent/login'",
     "app.post('/api/talent/login/request'",
     "app.get('/api/talent/login/consume'",
+    'if (isProduction && !hasPerformerLoginEmailConfig)',
     'performerPasswordLoginRateLimiter.check',
     'verifyPerformerPassword',
     'performerPasswordLoginRateLimiter.recordFailure',
@@ -137,12 +138,16 @@ async function main() {
     assert.ok(serverSource.includes(term), `Server performer login flow missing required term: ${term}`);
   }
 
+  assert.ok(serverSource.includes('dotenv.config({ path: ".env.local", override: false });'), 'Server must load .env.local before .env so local email credentials are available.');
+  assert.ok(!serverSource.includes('hasPerformerLoginEmailConfig: !isProduction ||'), 'Runtime config must not claim email is configured just because the server is in development.');
+
   assert.equal(normalizePerformerLoginEmail(' Perf@Sway.Tips '), 'perf@sway.tips', 'Email normalization must trim and lowercase performer emails.');
   assert.equal(normalizePerformerLoginEmail('not-an-email'), null, 'Malformed emails must be rejected.');
   assert.equal(resolvePerformerLoginRedirectPath('https://evil.com'), '/talent', 'External redirect URLs must be ignored.');
   assert.equal(resolvePerformerLoginRedirectPath('/talent/gigs?room=1'), '/talent/gigs?room=1', 'Allowlisted internal talent redirects may pass through.');
   assert.equal(resolvePerformerLoginRedirectPath('/talent/login'), '/talent/login', 'Talent login redirect path must remain local.');
   assert.equal(resolvePerformerLoginBaseUrl({ SWAY_APP_BASE_URL: 'https://app.sway.tips', APP_URL: 'https://fallback.sway.tips' }), 'https://app.sway.tips');
+  assert.equal(resolvePerformerLoginBaseUrl({ PORT: '4899' }), 'http://localhost:4899', 'Local performer email links must follow the active server port.');
 
   const insertSpy = createInsertSpyDb();
   const challengeStore = createPerformerLoginChallengeStore({
@@ -205,6 +210,20 @@ async function main() {
     capturedLogs.some((entry) => entry.includes('[SWAY_EMAIL_MOCK]') && entry.includes('/api/talent/login/consume?token=')),
     'Non-production performer login mailer must log the generated magic link for operators.'
   );
+
+  const partiallyConfiguredMailer = createPerformerLoginMailer({
+    env: {
+      SWAY_EMAIL_PROVIDER: 'resend',
+      SWAY_EMAIL_FROM: 'Sway <performers@sway.tips>',
+      SWAY_APP_BASE_URL: 'http://localhost:4899'
+    },
+    isProduction: false
+  });
+  const partialConfigResult = await partiallyConfiguredMailer.sendMagicLink({
+    toEmail: 'perf@sway.tips',
+    magicLink: 'http://localhost:4899/api/talent/login/consume?token=abc'
+  });
+  assert.equal(partialConfigResult.delivered, false, 'A selected email provider with missing credentials must fail instead of falling back to mock.');
 
   assert.ok(emailRunbook.includes('secondary'), 'Magic-link runbook must document recovery-only positioning.');
   assert.ok(bootstrapRunbook.includes('fallback'), 'Bootstrap runbook must remain documented as the support fallback path.');

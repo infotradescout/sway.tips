@@ -41,6 +41,9 @@ export interface RequestItem {
   title: string;          // Song title, menu item, or "Classic Tip"
   subtitle: string;       // Artist, description, or empty
   albumArt?: string;      // Optional URL
+  sourceProvider?: string | null;
+  spotifyUri?: string | null;
+  spotifyUrl?: string | null;
   senderName: string;
   message?: string;
   amount: number;         // Total pool (original + boosts)
@@ -67,6 +70,18 @@ export interface RequestItem {
   paymentIntentId?: string | null;
   paymentStatus?: string | null;
   boosts: BoostContribution[];
+}
+
+export interface SetlistTrack {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string | null;
+  albumArt?: string | null;
+  spotifyUri?: string | null;
+  spotifyUrl?: string | null;
+  sourceKey: string;
+  addedAt: string;
 }
 
 export interface RequestPreset {
@@ -96,10 +111,10 @@ export interface GigSession {
   requestWindowLabel: string | null; // Active preset label
   requestPresets: RequestPreset[]; // Buildable custom/system presets list
   // Operating posture for the room layer.
-  operatingMode: 'manual' | 'open_call';
-  // Song search scope for this room: performer's own synced library only, or the
-  // full open catalog when the performer explicitly opts in.
-  searchScope: 'library' | 'catalog';
+  operatingMode: 'manual' | 'open_call' | 'crowd_autopilot';
+  // Song search scope for this room: performer's own synced library, the full
+  // open catalog, or a performer-curated setlist for this occasion.
+  searchScope: 'library' | 'catalog' | 'setlist';
   // When false, this room is a free event: tips are rejected, boosts become
   // free upvotes, and requests are created with no payment step at all.
   paymentsEnabled: boolean;

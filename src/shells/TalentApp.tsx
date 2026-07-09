@@ -30,14 +30,21 @@ type TalentPerformerProfile = {
 } | null;
 
 export default function TalentApp() {
+  const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
+  const isAuthEntryRoute = isTalentLogin(pathname) || isTalentSignup(pathname);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
-  const statePath = selectedGigId ? `/api/state/${selectedGigId}` : '/api/state';
+  const statePath = isAuthEntryRoute ? null : (selectedGigId ? `/api/state/${selectedGigId}` : '/api/state');
   const { bState, isLoading, setBState } = useSwayState({ statePath });
 
   const refreshPerformerProfile = async () => {
+    if (isAuthEntryRoute) {
+      setPerformerProfile(null);
+      return;
+    }
+
     if (demoMode) {
       setPerformerProfile(null);
       return;
@@ -58,6 +65,11 @@ export default function TalentApp() {
   };
 
   const refreshActiveRooms = async () => {
+    if (isAuthEntryRoute) {
+      setActiveRooms([]);
+      return;
+    }
+
     if (demoMode) {
       const demoRooms = bState.activeGigId && bState.session.status === 'active'
         ? [{
@@ -85,15 +97,25 @@ export default function TalentApp() {
 
   useEffect(() => {
     void refreshActiveRooms();
-  }, [demoMode, bState.activeGigId, bState.requests.length, bState.session.status]);
+  }, [demoMode, isAuthEntryRoute, bState.activeGigId, bState.requests.length, bState.session.status]);
 
   useEffect(() => {
     void refreshPerformerProfile();
-  }, [demoMode]);
+  }, [demoMode, isAuthEntryRoute]);
 
   useEffect(() => {
-    if (selectedGigId && activeRooms.some((room) => room.gigId === selectedGigId)) return;
-    if (bState.activeGigId && activeRooms.some((room) => room.gigId === bState.activeGigId)) {
+    // Only auto-pick a gig when nothing is selected yet. Once selected, it
+    // must stay sticky: activeRooms only lists 'active' registry rooms, and
+    // the global /api/state's activeGigId is an unrelated legacy singleton,
+    // so either one can transiently disagree with the gig actually being
+    // worked on -- e.g. a session that just ended moves to 'ending' for its
+    // 5-minute post-gig sweep and drops out of activeRooms entirely. Auto-
+    // clearing selectedGigId in that window makes statePath fall back to the
+    // global endpoint, which then loses activeGigId and 409s the closeout
+    // request. The user (or handleStartSession) is the only thing that
+    // should change an existing selection.
+    if (selectedGigId) return;
+    if (bState.activeGigId) {
       setSelectedGigId(bState.activeGigId);
       return;
     }
@@ -109,6 +131,7 @@ export default function TalentApp() {
     talentRole: 'DJ' | 'Bartender' | 'Performer';
     feeType: 'talent' | 'patron';
     minimumTip: number;
+    paymentsEnabled: boolean;
   }) => {
     if (demoMode) return rejectDemoMutation();
     try {
@@ -205,15 +228,16 @@ export default function TalentApp() {
       talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',
-      minimumTip: 5
+      minimumTip: 5,
+      paymentsEnabled: true
     });
   };
 
-  if (isTalentLogin(window.location.pathname)) {
+  if (isTalentLogin(pathname)) {
     return <TalentLoginCard />;
   }
 
-  if (isTalentSignup(window.location.pathname)) {
+  if (isTalentSignup(pathname)) {
     return <TalentSignupCard />;
   }
 
@@ -228,11 +252,45 @@ export default function TalentApp() {
     || 'Unassigned performer';
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
+  const selectedRoomRoute = selectedGigId ?? activeGigId;
+  const selectedRoomSummary = selectedRoomRoute
+    ? activeRooms.find((room) => room.gigId === selectedRoomRoute)
+    : null;
+  const scopeLabel = session.searchScope === 'setlist'
+    ? 'Setlist source'
+    : session.searchScope === 'catalog'
+      ? 'Open Catalog'
+      : 'My Library';
 
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
 
   if (session.status === 'closed') {
-    return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
+    return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
+  }
+
+  if (session.status !== 'inactive') {
+    return (
+      <div className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
+        <TalentDashboard
+          session={session}
+          requests={requests}
+          onStartSession={handleStartSession}
+          onEndSession={handleEndSession}
+          onCloseout={handleCloseout}
+          onTriage={handleTriageRequest}
+          onFulfill={handleFulfillRequest}
+          onHide={handleHideRequest}
+          onRemove={handleRemoveRequest}
+          activeGigId={activeGigId}
+          activeRooms={activeRooms}
+          selectedGigId={selectedGigId}
+          onSelectGigId={setSelectedGigId}
+          previewMode={demoMode}
+          performerProfile={performerProfile}
+          performerEmailVerified={performerEmailVerified}
+        />
+      </div>
+    );
   }
 
   return (
@@ -245,8 +303,8 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Talent</span>
-              <p className="text-[9px] text-slate-400">Manage Pending, Approved, and Playing requests</p>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Tonight's Room</span>
+              <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
           <DemoModeBanner compact />
@@ -256,17 +314,18 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? 'Sway to Play' : 'Performer Console'}
+            title={session.status === 'inactive' ? 'Create room' : "Tonight's room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
             primaryLabel={session.status === 'inactive'
-              ? 'Start a live room and let the crowd send Requests, Tips, and Boosts'
-              : 'Now Playing, Pending Requests, Approved Queue, and Controls'}
-            secondaryLabel={session.status === 'inactive' ? 'Performer profile' : 'Room State'}
+              ? 'Set room settings, then create the room link and QR'
+              : 'Queue, QR, earnings, and room controls'}
+            secondaryLabel={session.status === 'inactive' ? 'Money settings' : 'Room status'}
+            showHeader={session.status !== 'inactive'}
             isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
-                <p className="text-sm font-bold text-white">Sway to Play</p>
-                <p className="mt-2 text-xs text-slate-400">Start a live room and let the crowd send Requests, Tips, and Boosts.</p>
+                <p className="text-sm font-bold text-white">Live room setup</p>
+                <p className="mt-2 text-xs text-slate-400">Set room settings, then create the room link and QR.</p>
               </div>
             }
             primary={
@@ -291,7 +350,7 @@ export default function TalentApp() {
             }
             secondary={
               <div className="space-y-4 text-sm">
-                <div>
+                <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
                   <p className="mt-1 font-bold text-white">{session.status === 'inactive' ? performerIdentityName : (session.talentName || performerIdentityName)}</p>
                   <p className="text-xs text-slate-400">
@@ -301,19 +360,33 @@ export default function TalentApp() {
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-slate-950 p-3">
+                  <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                     <p className="text-slate-500">Pending</p>
                     <p className="mt-1 font-mono text-lg font-black text-amber-300">{pendingCount}</p>
                   </div>
-                  <div className="rounded-lg bg-slate-950 p-3">
+                  <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                     <p className="text-slate-500">Approved</p>
                     <p className="mt-1 font-mono text-lg font-black text-cyan-300">{approvedCount}</p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Window</p>
-                  <p className="mt-2 font-bold text-white">{session.requestsOpen ? 'Open' : 'Closed'}</p>
+                  <p className={`mt-2 font-bold ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>{session.requestsOpen ? 'Open' : 'Closed'}</p>
                   <p className="text-xs text-slate-400">{session.requestWindowLabel || 'Manual request window'}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Crowd route</p>
+                  <p className="mt-2 break-all font-mono text-xs font-bold text-white">
+                    {selectedRoomRoute ? `/g/${selectedRoomRoute}` : 'Generated after room start'}
+                  </p>
+                  {selectedRoomSummary ? (
+                    <p className="mt-2 text-xs text-slate-400">{selectedRoomSummary.requestCount} live item{selectedRoomSummary.requestCount === 1 ? '' : 's'} on this route.</p>
+                  ) : null}
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Request scope</p>
+                  <p className="mt-2 font-bold text-white">{scopeLabel}</p>
+                  <p className="text-xs text-slate-400">Crowd can request; performer approves what moves forward.</p>
                 </div>
               </div>
             }
