@@ -4,7 +4,7 @@
 
 This checklist verifies whether Sway is ready for a real live-night pilot around the shipped product baseline:
 
-Performer starts live room -> shares QR/link -> patron sends Request, Tip, or Boost -> performer manages queue/status -> night closes with clear operational proof.
+Performer sets room settings -> creates room -> shares QR/link -> patron sends Request, Tip, or Boost -> performer manages queue/status -> night closes with clear operational proof.
 
 This lane is docs and contract governance only. It does not change routes, schema, payment behavior, request/tip/boost runtime behavior, persistence, role/access behavior, overlay behavior, AI/moderation behavior, or App Store readiness.
 
@@ -16,21 +16,21 @@ The pilot proves the live room money loop, not future platform expansion.
 
 Before this checklist passes, PR #44 remains parked. Hardware controls, control bridge work, lyrics, marketplace/browse expansion, operator/admin expansion, DJ software integrations, and new infrastructure must not resume unless the owner explicitly reorders the lane.
 
-## 1. Performer Can Start A Live Room
+## 1. Performer Can Create A Room Before Going Live
 
 - Performer can reach the authenticated performer surface.
-- Performer can see the primary Start room action.
-- Performer can set or confirm money settings before the room goes live.
-- Performer can start a live room without needing manual setup beyond normal login.
+- Performer can see the primary Create room action after the room settings.
+- Performer can set or confirm money settings before the room link and QR are generated.
+- Performer can create a room without needing manual setup beyond normal login.
 - Pilot evidence records the test environment, performer account, room URL, and room/gig ID.
 
 Hold if:
-- Start room is missing, disabled, unclear, or requires internal setup.
-- The room starts without a clear performer identity or money settings.
+- Create room is missing, disabled, unclear, or requires internal setup.
+- The room can go live without a clear performer identity or money settings.
 
 ## 2. Performer Can Share QR/Link
 
-- QR appears immediately after the live room starts.
+- QR appears immediately after the room is created.
 - Copy link is visible and works.
 - The copied link opens the same live room on another browser/device.
 - The performer can understand what to show the crowd in under five seconds.
@@ -155,7 +155,7 @@ PR #44 remains parked until this checklist lands and the live pilot readiness re
 
 Hold PR #44 and all new feature work if any of these remain unresolved:
 
-- Performer cannot start a live room.
+- Performer cannot set room settings and create a room.
 - Performer cannot share QR/link.
 - Patron cannot enter the correct live room.
 - Patron cannot find Request, Tip, or Boost.

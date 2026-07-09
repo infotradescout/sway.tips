@@ -182,6 +182,7 @@ export default function App() {
     talentRole: 'DJ' | 'Bartender' | 'Performer';
     feeType: 'talent' | 'patron';
     minimumTip: number;
+    paymentsEnabled: boolean;
   }) => {
     if (isDemoMode) return;
     try {
@@ -465,7 +466,8 @@ export default function App() {
       talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',
-      minimumTip: 5
+      minimumTip: 5,
+      paymentsEnabled: true
     });
   };
 

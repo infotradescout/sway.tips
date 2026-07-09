@@ -32,12 +32,16 @@ const app = read('src/App.tsx');
 requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
   "useState(true)",
-  'Start room',
+  'Create room',
   'Show QR',
   'Copy link',
   "Tonight's money settings",
+  'before creating the room link and QR',
   'Minimum request',
   'Boost minimum',
+  'Free requests',
+  'Paid requests and boosts use the $5 minimum',
+  'Free upvotes',
   'Tip path',
   'Earnings tonight',
   'Approve, deny, complete'
@@ -56,6 +60,9 @@ requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
 ]);
 
 requireIncludes('PatronView', patronView, [
+  "useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home')",
+  'Live show snapshot',
+  '<Sparkles className="h-4 w-4" /> Sway',
   "setActiveTab('request')",
   "setActiveTab('tip')",
   "setActiveTab('queue')",

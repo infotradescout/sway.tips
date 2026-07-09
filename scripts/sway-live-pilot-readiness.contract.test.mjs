@@ -22,7 +22,7 @@ for (const term of [
   'PR #44 remains parked',
   'No runtime behavior changed',
   'No App Store readiness claim',
-  'Performer Can Start A Live Room',
+  'Performer Can Create A Room Before Going Live',
   'Performer Can Share QR/Link',
   'Patron Can Enter The Correct Room',
   'Money-Loop Smoke Expectations',

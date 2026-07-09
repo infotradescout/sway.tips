@@ -244,7 +244,7 @@ export default function PatronView({
       ];
 
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'queue' | 'discover'>('request');
+  const [activeTab, setActiveTab] = useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
   // Search Venue Directory States
@@ -706,8 +706,8 @@ export default function PatronView({
         showFormToast("Enter your name on the Request or Tip tab first, then come back to boost!");
         return;
       }
-      if (paymentsEnabledForRoom && boostAmount < 1) {
-        showFormToast("Minimum boost is $1");
+      if (paymentsEnabledForRoom && boostAmount < session.minimumTip) {
+        showFormToast(`Minimum boost is $${session.minimumTip}`);
         return;
       }
       title = boostingItem.title;
@@ -980,10 +980,10 @@ export default function PatronView({
   const requestScopeCopy = (() => {
     if (session.searchScope === 'setlist') {
       return {
-        label: 'Setlist requests',
+        label: 'Setlist song requests',
         body: isCrowdAutopilot
-          ? "Pick from this room's setlist. Clean requests can move straight into the crowd-ranked queue."
-          : "Pick from this room's setlist or send a manual request. The DJ decides what is approved and played."
+          ? "Pick from this room's setlist. Clean requests can move into the separate crowd-ranked request queue."
+          : "Pick from this room's setlist or send a manual request. The DJ decides what enters the separate request queue."
       };
     }
     if (session.searchScope === 'catalog') {
@@ -1038,7 +1038,7 @@ export default function PatronView({
         )}
       </AnimatePresence>
 
-      {/* 1. Performer branding hero banner */}
+      {/* 1. Performer live show snapshot */}
       <div className="bg-gradient-to-br from-fuchsia-950/40 via-slate-904 via-slate-900 to-slate-950 border border-white/10 rounded-2xl p-6 relative overflow-hidden select-none glow-fuchsia">
         <div className="absolute top-0 right-0 p-3">
           <span className="flex h-2.5 w-2.5">
@@ -1050,9 +1050,8 @@ export default function PatronView({
           <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-fuchsia-600 to-blue-600 border border-white/10 flex items-center justify-center font-display text-white font-extrabold text-lg animate-pulse shadow-md">
             {session.talentName.charAt(0)}
           </div>
-          <h1 className="font-display text-lg font-black text-white tracking-wider uppercase">
-            SWAY ME: {session.talentName}
-          </h1>
+          <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300">Live show snapshot</p>
+          <h1 className="font-display text-lg font-black text-white tracking-wider uppercase">{session.talentName}</h1>
           {patronsWindowTimeLeft && (
             <div className="bg-cyan-950/40 border border-cyan-500/30 px-3 py-1 rounded-full flex items-center gap-1.5 text-[10px] font-mono text-cyan-400 select-none shadow shadow-cyan-500/15 animate-pulse-subtle">
               <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
@@ -1068,23 +1067,27 @@ export default function PatronView({
                     ? `Request songs or actions, send a direct tip, or boost the crowd-ranked queue for ${session.talentName || 'this performer'}. Clean requests can move into up next automatically.`
                     : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
-            <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
-              <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Request</p>
-                <p className="mt-1 text-[10px] text-slate-400">
-                  {session.paymentsEnabled === false ? 'Send a free live request' : 'Start a paid live request'}
-                </p>
-              </div>
-              <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
-                <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
-              </div>
-              <div className="rounded-xl border border-cyan-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">
-                  {session.paymentsEnabled === false ? 'Upvote' : 'Boost'}
-                </p>
-                <p className="mt-1 text-[10px] text-slate-400">Push an approved item up</p>
-              </div>
+            <div className="grid w-full max-w-md grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('tip');
+                  setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip });
+                }}
+                className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99]"
+              >
+                <span className="inline-flex items-center justify-center gap-2"><Coins className="h-4 w-4" /> Tip</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('request');
+                  setSelectedTrack(null);
+                }}
+                className="min-h-14 rounded-xl border border-fuchsia-500/40 bg-fuchsia-600 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-white shadow-lg transition-all active:scale-[0.99]"
+              >
+                <span className="inline-flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" /> Sway</span>
+              </button>
             </div>
             <div className="w-full max-w-md rounded-xl border border-cyan-500/20 bg-slate-950/70 px-4 py-3 text-left">
               <div className="flex items-start gap-2">
@@ -1186,6 +1189,7 @@ export default function PatronView({
         </div>
       )}
 
+      {activeTab !== 'home' && (
       <details className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
         <summary className="cursor-pointer list-none">
           <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Safety Controls</h3>
@@ -1238,9 +1242,10 @@ export default function PatronView({
           </button>
         </div>
       </details>
+      )}
 
       {/* 2. Primary Tabs Selector */}
-      {session.status === 'active' && (
+      {session.status === 'active' && activeTab !== 'home' && (
         <div className="flex bg-slate-900 border border-white/10 p-1.5 rounded-xl">
           <button
             onClick={() => { setActiveTab('request'); setSelectedTrack(null); }}
@@ -1809,7 +1814,7 @@ export default function PatronView({
                                 onClick={() => {
                                   if (isSubmitLocked) return;
                                   setBoostingItem(req);
-                                  setBoostAmount(10);
+                                  setBoostAmount(Math.max(session.minimumTip, 10));
                                   initiateCheckout('boost');
                                 }}
                                 disabled={isSubmitLocked}
@@ -2177,7 +2182,7 @@ export default function PatronView({
                           <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">BOOST STACK AMOUNT</label>
                           <input
                             type="number"
-                            min={1}
+                            min={session.minimumTip}
                             max={50}
                             value={boostAmount}
                             onChange={(e) => setBoostAmount(Number(e.target.value))}

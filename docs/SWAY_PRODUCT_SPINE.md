@@ -14,11 +14,11 @@ If a change does not help a performer use Sway tonight to make more money with l
 
 ## Core Loop
 
-Start room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.
+Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.
 
 ## One-Sentence Product Lock
 
-Sway lets a performer start a live room, show a QR/link, collect paid requests, tips, and boosts, run the queue, and close the night with clear earnings.
+Sway lets a performer set room settings, create a room, show a QR/link, collect paid requests, tips, and boosts, run the queue, and close the night with clear earnings.
 
 ## Core Users
 

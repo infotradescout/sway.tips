@@ -8,7 +8,7 @@ const spine = readFileSync(join(root, 'docs/SWAY_PRODUCT_SPINE.md'), 'utf8');
 for (const term of [
   'main @ 4a35ce9743b14b712cb9049ec7334ef6a4a35923',
   'Sway work must protect the live-night money loop first.',
-  'Start room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
+  'Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
   'make more money with less request chaos',
   'Do Not Prioritize Before Adoption Proof',
   'Hardware controls.',
