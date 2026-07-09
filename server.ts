@@ -1434,6 +1434,36 @@ async function persistStateWithAudit(input: {
   }
 }
 
+async function writeMutationNoopAudit(input: {
+  gigId: string;
+  actor: ProtectedMutationActor;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  previousStatus?: string | null;
+  nextStatus?: string | null;
+  reason: string;
+  metadata?: Record<string, unknown>;
+}) {
+  if (!businessDb) return;
+
+  await writeAuditEvent(businessDb, {
+    actorId: input.actor.actorId,
+    actorType: input.actor.actorType,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    eventType: `${input.eventType}.noop`,
+    previousStatus: input.previousStatus,
+    nextStatus: input.nextStatus ?? input.previousStatus,
+    metadata: {
+      ...(input.metadata ?? {}),
+      duplicate_noop: true,
+      noop_reason: input.reason,
+      gigId: input.gigId
+    }
+  });
+}
+
 type RoomMutationContext = { gigId: string; state: BackendState };
 type RequestMutationContext = RoomMutationContext & { request: RequestItem };
 
@@ -1485,8 +1515,71 @@ async function applyRequestTriage({
   const roomState = roomContext.state;
   const request = roomContext.request;
   const previousStatus = request.status;
+  const nextStatus = action === 'approve' ? 'approved' : 'denied';
 
-  request.status = action === 'approve' ? 'approved' : 'denied';
+  if (request.hidden || request.removed) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+      previousStatus,
+      reason: request.removed ? 'request_removed' : 'request_hidden',
+      metadata: { requestId: request.id, requestedAction: action }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: request.removed ? 'request_removed' : 'request_hidden'
+    };
+  }
+
+  if (previousStatus === nextStatus) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+      previousStatus,
+      nextStatus,
+      reason: 'already_in_target_state',
+      metadata: { requestId: request.id, requestedAction: action }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'already_in_target_state'
+    };
+  }
+
+  if (
+    previousStatus === 'fulfilled' ||
+    (action === 'approve' && previousStatus === 'denied')
+  ) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+      previousStatus,
+      nextStatus,
+      reason: 'incompatible_terminal_state',
+      metadata: { requestId: request.id, requestedAction: action }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'incompatible_terminal_state'
+    };
+  }
+
+  request.status = nextStatus;
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
 
@@ -1539,6 +1632,65 @@ async function applyRequestFulfill({
   const request = roomContext.request;
   const previousStatus = request.status;
 
+  if (request.hidden || request.removed) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: 'request.fulfill',
+      previousStatus,
+      reason: request.removed ? 'request_removed' : 'request_hidden',
+      metadata: { requestId: request.id }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: request.removed ? 'request_removed' : 'request_hidden'
+    };
+  }
+
+  if (previousStatus === 'fulfilled') {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: 'request.fulfill',
+      previousStatus,
+      nextStatus: 'fulfilled',
+      reason: 'already_in_target_state',
+      metadata: { requestId: request.id }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'already_in_target_state'
+    };
+  }
+
+  if (previousStatus !== 'approved') {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: 'request.fulfill',
+      previousStatus,
+      nextStatus: 'fulfilled',
+      reason: 'incompatible_terminal_state',
+      metadata: { requestId: request.id }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'incompatible_terminal_state'
+    };
+  }
+
   request.status = 'fulfilled';
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
@@ -1587,6 +1739,46 @@ async function applyRequestHide({
   const roomState = roomContext.state;
   const request = roomContext.request;
   const previousStatus = request.hidden ? 'hidden' : 'visible';
+
+  if (request.hidden) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: 'moderation.hide',
+      previousStatus,
+      nextStatus: 'hidden',
+      reason: 'already_in_target_state',
+      metadata: { requestId: request.id, reason }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'already_in_target_state'
+    };
+  }
+
+  if (request.removed) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'request',
+      entityId: request.id,
+      eventType: 'moderation.hide',
+      previousStatus: 'removed',
+      nextStatus: 'hidden',
+      reason: 'request_removed',
+      metadata: { requestId: request.id, reason }
+    });
+    return {
+      request,
+      state: prepareRoomState(roomState, roomContext.gigId),
+      noop: true,
+      noopReason: 'request_removed'
+    };
+  }
 
   request.hidden = true;
   request.lastMutationActorUserId = actor.actorId;
@@ -2678,6 +2870,35 @@ const CONTROL_BRIDGE_ACTIONS = new Set([
   'search-top-soundcloud',
   'search-top-youtube'
 ]);
+const CONTROL_BRIDGE_MUTATING_ACTIONS = new Set([
+  'toggle-requests',
+  'fulfill-top',
+  'hide-top',
+  'approve-pending',
+  'veto-pending'
+]);
+const CONTROL_BRIDGE_REPLAY_WINDOW_MS = 2500;
+const controlBridgeReplayCache = new Map<string, number>();
+
+function reserveControlBridgeMutation(input: { actorId: string; gigId: string; action: string }) {
+  if (!CONTROL_BRIDGE_MUTATING_ACTIONS.has(input.action)) {
+    return { replay: false };
+  }
+
+  const now = Date.now();
+  for (const [key, expiresAt] of controlBridgeReplayCache.entries()) {
+    if (expiresAt <= now) controlBridgeReplayCache.delete(key);
+  }
+
+  const replayKey = `${input.actorId}:${input.gigId}:${input.action}`;
+  const existingExpiresAt = controlBridgeReplayCache.get(replayKey);
+  if (existingExpiresAt && existingExpiresAt > now) {
+    return { replay: true, replayKey };
+  }
+
+  controlBridgeReplayCache.set(replayKey, now + CONTROL_BRIDGE_REPLAY_WINDOW_MS);
+  return { replay: false, replayKey };
+}
 
 app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
   applyNoStoreHeaders(res);
@@ -2693,6 +2914,35 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
 
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
+
+  const replayGuard = reserveControlBridgeMutation({
+    actorId: actor.actorId,
+    gigId: roomContext.gigId,
+    action
+  });
+  if (replayGuard.replay) {
+    await writeMutationNoopAudit({
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'control_bridge_action',
+      entityId: replayGuard.replayKey ?? `${actor.actorId}:${roomContext.gigId}:${action}`,
+      eventType: `control_bridge.${action}`,
+      previousStatus: 'recently_applied',
+      nextStatus: 'replay_noop',
+      reason: 'control_bridge_replay_window',
+      metadata: {
+        action,
+        replayWindowMs: CONTROL_BRIDGE_REPLAY_WINDOW_MS
+      }
+    });
+    res.json({
+      success: true,
+      action,
+      noop: true,
+      noopReason: 'control_bridge_replay_window'
+    });
+    return;
+  }
 
   const roomState = roomContext.state;
 
