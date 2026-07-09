@@ -33,6 +33,13 @@ export function hashPerformerSessionToken(token: string) {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
+function readBearerTokenHeader(req: Request) {
+  const header = req.headers.authorization;
+  if (typeof header !== 'string') return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() || null : null;
+}
+
 function readCookieHeaderValue(req: Request, cookieName: string) {
   const cookieHeader = req.headers.cookie;
   if (typeof cookieHeader !== 'string' || !cookieHeader.trim()) {
@@ -82,7 +89,7 @@ export function createPerformerSessionStore({
     hasDurableStore: Boolean(db),
 
     readSessionTokenFromRequest(req: Request) {
-      return readCookieHeaderValue(req, cookieName);
+      return readCookieHeaderValue(req, cookieName) ?? readBearerTokenHeader(req);
     },
 
     async issueSession({

@@ -258,39 +258,46 @@ function resolveMidiBinding(data: Uint8Array) {
 
 function buildDashboardBridgePreset({
   gigId,
-  bridgeCommand,
-  bridgeBaseUrl = 'http://127.0.0.1:4315'
+  bridgeToken,
+  swayUrl,
+  bridgeCommand
 }: {
   gigId: string | null;
+  bridgeToken: string;
+  swayUrl: string;
   bridgeCommand: string;
-  bridgeBaseUrl?: string;
 }) {
-  const actions = BRIDGE_PRESET_ACTIONS.map(([id, label, path, color], index) => ({
-    id,
-    label,
-    slot: index + 1,
-    method: 'POST',
-    path,
-    url: `${bridgeBaseUrl}${path}`,
-    color
-  }));
+  const actionsBaseUrl = `${swayUrl.replace(/\/+$/, '')}/api/talent/control-bridge/action`;
+  const actions = BRIDGE_PRESET_ACTIONS.map(([id, label, path, color], index) => {
+    const action = path.replace(/^\/action\//, '');
+    return {
+      id,
+      label,
+      slot: index + 1,
+      method: 'POST',
+      url: `${actionsBaseUrl}/${action}`,
+      color
+    };
+  });
 
   return {
     schema: 'sway-dashboard-control-bridge-preset.v1',
     generatedAt: new Date().toISOString(),
     gigId,
-    bridge: {
+    transport: 'direct-cloud',
+    auth: {
+      header: 'Authorization',
+      value: `Bearer ${bridgeToken}`,
+      note: 'This token is short-lived (2 hours). Reissue and re-download the preset once it expires.'
+    },
+    localBridgeFallback: {
       launchCommand: bridgeCommand,
-      baseUrl: bridgeBaseUrl,
-      healthUrl: `${bridgeBaseUrl}/health`,
-      stateUrl: `${bridgeBaseUrl}/state`,
-      topTextUrl: `${bridgeBaseUrl}/top/text`,
-      topSearchUrl: `${bridgeBaseUrl}/top/search`
+      note: 'Only needed for MIDI/foot-pedal hardware, or tools (like raw Stream Deck without Companion) that cannot send a custom Authorization header.'
     },
     actions,
     companion: {
       module: 'Generic HTTP Request',
-      importMode: 'create one POST button per action URL',
+      importMode: 'create one POST button per action, using the url/headers/body below',
       buttons: actions.map((action) => ({
         page: 1,
         row: Math.floor((action.slot - 1) / 4) + 1,
@@ -298,13 +305,15 @@ function buildDashboardBridgePreset({
         text: action.label,
         request: {
           method: action.method,
-          url: action.url
+          url: action.url,
+          headers: { Authorization: `Bearer ${bridgeToken}` },
+          body: { gig_id: gigId }
         },
         color: action.color
       }))
     },
     streamDeck: {
-      importMode: 'map each item to a Website/Open URL or HTTP Request action',
+      importMode: 'Native Stream Deck actions cannot send custom headers -- put Companion in front of Stream Deck, or use localBridgeFallback.launchCommand instead.',
       buttons: actions.map((action) => ({
         slot: action.slot,
         title: action.label,
@@ -1042,6 +1051,8 @@ export default function TalentDashboard({
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [bridgeTokenMessage, setBridgeTokenMessage] = useState<string | null>(null);
   const [bridgeCommand, setBridgeCommand] = useState<string | null>(null);
+  const [bridgeToken, setBridgeToken] = useState<string | null>(null);
+  const [bridgeSwayUrl, setBridgeSwayUrl] = useState<string | null>(null);
   const hardwareBindingsRef = useRef(hardwareBindings);
   const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
 
@@ -1729,6 +1740,8 @@ export default function TalentDashboard({
     setBridgeTokenStatus('submitting');
     setBridgeTokenMessage(null);
     setBridgeCommand(null);
+    setBridgeToken(null);
+    setBridgeSwayUrl(null);
 
     try {
       const response = await postSessionJson('/api/talent/control-bridge/token');
@@ -1740,6 +1753,8 @@ export default function TalentDashboard({
       setBridgeTokenStatus('success');
       setBridgeTokenMessage(`Token expires ${data?.expiresAt ? new Date(data.expiresAt).toLocaleTimeString() : 'after issue'}.`);
       setBridgeCommand(typeof data?.command === 'string' ? data.command : null);
+      setBridgeToken(typeof data?.bridgeToken === 'string' ? data.bridgeToken : null);
+      setBridgeSwayUrl(typeof data?.swayUrl === 'string' ? data.swayUrl : null);
     } catch (error) {
       setBridgeTokenStatus('error');
       setBridgeTokenMessage(error instanceof Error ? error.message : 'Unable to create bridge token.');
@@ -1747,12 +1762,14 @@ export default function TalentDashboard({
   };
 
   const downloadBridgePreset = () => {
-    if (!bridgeCommand) return;
+    if (!bridgeCommand || !bridgeToken || !bridgeSwayUrl) return;
     const safeGigId = (writableGigId ?? 'live-room').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'live-room';
     downloadJsonFile(
       `sway-control-bridge-${safeGigId}.json`,
       buildDashboardBridgePreset({
         gigId: writableGigId,
+        bridgeToken,
+        swayUrl: bridgeSwayUrl,
         bridgeCommand
       })
     );

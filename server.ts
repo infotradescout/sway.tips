@@ -1434,6 +1434,239 @@ async function persistStateWithAudit(input: {
   }
 }
 
+type RoomMutationContext = { gigId: string; state: BackendState };
+type RequestMutationContext = RoomMutationContext & { request: RequestItem };
+
+async function applyWindowToggle({
+  roomContext,
+  actor,
+  nextOpen
+}: {
+  roomContext: RoomMutationContext;
+  actor: ProtectedMutationActor;
+  nextOpen: boolean;
+}) {
+  const roomState = roomContext.state;
+  const previousStatus = roomState.session.requestsOpen ? 'open' : 'closed';
+
+  roomState.session.requestsOpen = nextOpen;
+  roomState.session.requestWindowMode = 'manual';
+  roomState.session.requestWindowExpiresAt = null;
+  roomState.session.requestWindowDuration = null;
+  roomState.session.requestWindowLabel = null;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'gig_session',
+    entityId: roomContext.gigId,
+    eventType: 'session.window.toggle',
+    previousStatus,
+    nextStatus: roomState.session.requestsOpen ? 'open' : 'closed',
+    metadata: {
+      requestWindowMode: roomState.session.requestWindowMode
+    }
+  });
+
+  return { state: prepareRoomState(roomState, roomContext.gigId) };
+}
+
+async function applyRequestTriage({
+  roomContext,
+  actor,
+  action
+}: {
+  roomContext: RequestMutationContext;
+  actor: ProtectedMutationActor;
+  action: 'approve' | 'deny';
+}) {
+  const roomState = roomContext.state;
+  const request = roomContext.request;
+  const previousStatus = request.status;
+
+  request.status = action === 'approve' ? 'approved' : 'denied';
+  request.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+
+    if (action === 'approve') {
+      for (const paymentId of paymentIds) {
+        const capture = await paymentService.captureAuthorization(paymentId);
+        if (capture.status === 'captured' && paymentId === request.paymentId) {
+          request.paymentStatus = 'captured';
+        }
+      }
+    } else {
+      await paymentService.voidOrRefundMany(paymentIds);
+      request.paymentStatus = 'voided_or_refunded';
+    }
+  }
+
+  recalculateTotals(roomState);
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      gigId: roomContext.gigId
+    }
+  });
+
+  return { request, state: prepareRoomState(roomState, roomContext.gigId) };
+}
+
+async function applyRequestFulfill({
+  roomContext,
+  actor
+}: {
+  roomContext: RequestMutationContext;
+  actor: ProtectedMutationActor;
+}) {
+  const roomState = roomContext.state;
+  const request = roomContext.request;
+  const previousStatus = request.status;
+
+  request.status = 'fulfilled';
+  request.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+    for (const paymentId of paymentIds) {
+      const capture = await paymentService.captureAuthorization(paymentId);
+      if (capture.status === 'captured' && paymentId === request.paymentId) {
+        request.paymentStatus = 'captured';
+      }
+    }
+  }
+
+  recalculateTotals(roomState);
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'request.fulfill',
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      gigId: roomContext.gigId
+    }
+  });
+
+  return { request, state: prepareRoomState(roomState, roomContext.gigId) };
+}
+
+async function applyRequestHide({
+  roomContext,
+  actor,
+  reason
+}: {
+  roomContext: RequestMutationContext;
+  actor: ProtectedMutationActor;
+  reason: string;
+}) {
+  const roomState = roomContext.state;
+  const request = roomContext.request;
+  const previousStatus = request.hidden ? 'hidden' : 'visible';
+
+  request.hidden = true;
+  request.lastMutationActorUserId = actor.actorId;
+  roomState.session.lastMutationActorUserId = actor.actorId;
+
+  if (paymentService.isEnabled()) {
+    const paymentIds = [
+      request.paymentId,
+      ...request.boosts.map((boost) => boost.paymentId)
+    ].filter((id): id is string => Boolean(id));
+    if (paymentIds.length) {
+      await paymentService.voidOrRefundMany(paymentIds);
+      request.paymentStatus = 'voided_or_refunded';
+    }
+  }
+
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'moderation.hide',
+    previousStatus,
+    nextStatus: request.hidden ? 'hidden' : 'visible',
+    metadata: {
+      requestId: request.id,
+      reason
+    }
+  });
+
+  await moderationService.hideRequest({
+    requestId: request.id,
+    reason,
+    // Always the authenticated actor -- never trust a client-supplied actor id.
+    actorUserId: actor.actorId
+  });
+
+  return { request, state: prepareRoomState(roomState, roomContext.gigId) };
+}
+
+function visibleRoomRequests(roomState: BackendState): RequestItem[] {
+  return roomState.requests.filter((request) => !request.hidden && !request.removed && !request.shadowBanned);
+}
+
+function topApprovedRoomRequest(roomState: BackendState): RequestItem | null {
+  return visibleRoomRequests(roomState)
+    .filter((request) => request.status === 'approved')
+    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))[0] ?? null;
+}
+
+function topPendingRoomRequest(roomState: BackendState): RequestItem | null {
+  return visibleRoomRequests(roomState)
+    .filter((request) => request.status === 'hold')
+    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())[0] ?? null;
+}
+
+const CONTROL_BRIDGE_SEARCH_PROVIDERS: Record<string, { label: string; url: (query: string) => string }> = {
+  spotify: {
+    label: 'Spotify search',
+    url: (query) => `spotify:search:${encodeURIComponent(query)}`
+  },
+  soundcloud: {
+    label: 'SoundCloud search',
+    url: (query) => `https://soundcloud.com/search/sounds?q=${encodeURIComponent(query)}`
+  },
+  youtube: {
+    label: 'YouTube search',
+    url: (query) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+  }
+};
+
+function controlBridgeRequestText(request: RequestItem | null): string | null {
+  if (!request) return null;
+  const title = typeof request.title === 'string' ? request.title.trim() : '';
+  const subtitle = typeof request.subtitle === 'string' ? request.subtitle.trim() : '';
+  const text = [title, subtitle].filter(Boolean).join(' - ');
+  return text || null;
+}
+
 // 5-Minute Timer Closeout Routine Worker
 setInterval(async () => {
   if (!businessStore.hasDurableStore) {
@@ -2431,6 +2664,105 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
     swayUrl,
     command: bridgeCommand,
     tokenTransport: 'auth-token'
+  });
+});
+
+const CONTROL_BRIDGE_ACTIONS = new Set([
+  'toggle-requests',
+  'fulfill-top',
+  'hide-top',
+  'approve-pending',
+  'veto-pending',
+  'open-top-source',
+  'search-top-spotify',
+  'search-top-soundcloud',
+  'search-top-youtube'
+]);
+
+app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const action = req.params.action;
+  if (!CONTROL_BRIDGE_ACTIONS.has(action)) {
+    res.status(404).json({ error: 'Unknown control bridge action.' });
+    return;
+  }
+
+  const roomContext = await resolveLegacyWritableRoom(req, res);
+  if (!roomContext) return;
+
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
+  if (!actor) return;
+
+  const roomState = roomContext.state;
+
+  if (action === 'toggle-requests') {
+    const result = await applyWindowToggle({ roomContext, actor, nextOpen: !roomState.session.requestsOpen });
+    res.json({ success: true, action, ...result });
+    return;
+  }
+
+  if (action === 'fulfill-top' || action === 'hide-top') {
+    const request = topApprovedRoomRequest(roomState);
+    if (!request) {
+      res.status(409).json({ error: 'No approved request is available.' });
+      return;
+    }
+    const requestContext = { gigId: roomContext.gigId, state: roomState, request };
+    const result = action === 'fulfill-top'
+      ? await applyRequestFulfill({ roomContext: requestContext, actor })
+      : await applyRequestHide({ roomContext: requestContext, actor, reason: 'control_bridge' });
+    res.json({ success: true, action, ...result });
+    return;
+  }
+
+  if (action === 'approve-pending' || action === 'veto-pending') {
+    const request = topPendingRoomRequest(roomState);
+    if (!request) {
+      res.status(409).json({ error: 'No pending request is available.' });
+      return;
+    }
+    const requestContext = { gigId: roomContext.gigId, state: roomState, request };
+    const result = await applyRequestTriage({
+      roomContext: requestContext,
+      actor,
+      action: action === 'approve-pending' ? 'approve' : 'deny'
+    });
+    res.json({ success: true, action, ...result });
+    return;
+  }
+
+  const approved = topApprovedRoomRequest(roomState);
+  if (!approved) {
+    res.status(409).json({ error: 'No approved request is available.' });
+    return;
+  }
+
+  if (action === 'open-top-source') {
+    if (!approved.spotifyUrl) {
+      res.status(409).json({ error: 'Top request has no source URL.' });
+      return;
+    }
+    res.json({
+      success: true,
+      action,
+      result: { openUrl: approved.spotifyUrl, title: approved.title, subtitle: approved.subtitle }
+    });
+    return;
+  }
+
+  const providerKey = action.replace(/^search-top-/, '');
+  const provider = CONTROL_BRIDGE_SEARCH_PROVIDERS[providerKey];
+  const text = controlBridgeRequestText(approved);
+  if (!provider || !text) {
+    res.status(409).json({ error: 'No approved request is available.' });
+    return;
+  }
+
+  res.json({
+    success: true,
+    action,
+    result: { openUrl: provider.url(text), title: approved.title, subtitle: approved.subtitle }
   });
 });
 
@@ -4641,30 +4973,8 @@ app.post("/api/session/window/toggle", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const { open } = req.body;
-  const roomState = roomContext.state;
-  const previousStatus = roomState.session.requestsOpen ? 'open' : 'closed';
-  
-  roomState.session.requestsOpen = !!open;
-  roomState.session.requestWindowMode = 'manual';
-  roomState.session.requestWindowExpiresAt = null;
-  roomState.session.requestWindowDuration = null;
-  roomState.session.requestWindowLabel = null;
-  roomState.session.lastMutationActorUserId = actor.actorId;
-  
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomContext.gigId,
-    actor,
-    entityType: 'gig_session',
-    entityId: roomContext.gigId,
-    eventType: 'session.window.toggle',
-    previousStatus,
-    nextStatus: roomState.session.requestsOpen ? 'open' : 'closed',
-    metadata: {
-      requestWindowMode: roomState.session.requestWindowMode
-    }
-  });
-  res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
+  const result = await applyWindowToggle({ roomContext, actor, nextOpen: !!open });
+  res.json({ success: true, ...result });
 });
 
 // Operator selects the room-layer operating posture. Crowd autopilot lets clean
@@ -5437,52 +5747,13 @@ app.post("/api/request/triage", async (req, res) => {
 
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
-  const previousStatus = request.status;
 
-  if (action === 'approve') {
-    request.status = 'approved';
-  } else {
-    request.status = 'denied';
-  }
-  request.lastMutationActorUserId = actor.actorId;
-  roomState.session.lastMutationActorUserId = actor.actorId;
-
-  // Settle the provider-backed hold according to the triage decision.
-  if (paymentService.isEnabled()) {
-    const paymentIds = [
-      request.paymentId,
-      ...request.boosts.map((boost) => boost.paymentId)
-    ].filter((id): id is string => Boolean(id));
-
-    if (action === 'approve') {
-      for (const paymentId of paymentIds) {
-        const capture = await paymentService.captureAuthorization(paymentId);
-        if (capture.status === 'captured' && paymentId === request.paymentId) {
-          request.paymentStatus = 'captured';
-        }
-      }
-    } else {
-      await paymentService.voidOrRefundMany(paymentIds);
-      request.paymentStatus = 'voided_or_refunded';
-    }
-  }
-
-  recalculateTotals(roomState);
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomContext.gigId,
+  const result = await applyRequestTriage({
+    roomContext: { gigId: roomContext.gigId, state: roomState, request },
     actor,
-    entityType: 'request',
-    entityId: request.id,
-    eventType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
-    previousStatus,
-    nextStatus: request.status,
-    metadata: {
-      requestId: request.id,
-      gigId: roomContext.gigId
-    }
+    action: action === 'approve' ? 'approve' : 'deny'
   });
-  res.json({ success: true, request, state: prepareRoomState(roomState, roomContext.gigId) });
+  res.json({ success: true, ...result });
 });
 
 // Fulfillment Queue Action (Fulfill)
@@ -5498,44 +5769,13 @@ app.post("/api/request/fulfill", async (req, res) => {
 
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
-  const previousStatus = request.status;
 
-  request.status = 'fulfilled';
-  request.lastMutationActorUserId = actor.actorId;
-  roomState.session.lastMutationActorUserId = actor.actorId;
-
-  // Capture any still-authorized holds for the fulfilled request (idempotent:
-  // already-captured holds are a no-op).
-  if (paymentService.isEnabled()) {
-    const paymentIds = [
-      request.paymentId,
-      ...request.boosts.map((boost) => boost.paymentId)
-    ].filter((id): id is string => Boolean(id));
-    for (const paymentId of paymentIds) {
-      const capture = await paymentService.captureAuthorization(paymentId);
-      if (capture.status === 'captured' && paymentId === request.paymentId) {
-        request.paymentStatus = 'captured';
-      }
-    }
-  }
-
-  recalculateTotals(roomState);
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomContext.gigId,
-    actor,
-    entityType: 'request',
-    entityId: request.id,
-    eventType: 'request.fulfill',
-    previousStatus,
-    nextStatus: request.status,
-    metadata: {
-      requestId: request.id,
-      gigId: roomContext.gigId
-    }
+  const result = await applyRequestFulfill({
+    roomContext: { gigId: roomContext.gigId, state: roomState, request },
+    actor
   });
 
-  res.json({ success: true, request, state: prepareRoomState(roomState, roomContext.gigId) });
+  res.json({ success: true, ...result });
 });
 
 app.post("/api/moderation/report", async (req, res) => {
@@ -5730,45 +5970,13 @@ app.post("/api/moderation/hide", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
-  const previousStatus = request.hidden ? 'hidden' : 'visible';
-  request.hidden = true;
-  request.lastMutationActorUserId = actor.actorId;
-  roomState.session.lastMutationActorUserId = actor.actorId;
-
-  // A hidden request is never publicly eligible, so release its funds.
-  if (paymentService.isEnabled()) {
-    const paymentIds = [
-      request.paymentId,
-      ...request.boosts.map((boost) => boost.paymentId)
-    ].filter((id): id is string => Boolean(id));
-    if (paymentIds.length) {
-      await paymentService.voidOrRefundMany(paymentIds);
-      request.paymentStatus = 'voided_or_refunded';
-    }
-  }
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomContext.gigId,
+  const result = await applyRequestHide({
+    roomContext: { gigId: roomContext.gigId, state: roomState, request },
     actor,
-    entityType: 'request',
-    entityId: request.id,
-    eventType: 'moderation.hide',
-    previousStatus,
-    nextStatus: request.hidden ? 'hidden' : 'visible',
-    metadata: {
-      requestId: request.id,
-      reason: String(reason)
-    }
+    reason: String(reason)
   });
 
-  await moderationService.hideRequest({
-    requestId: String(requestId),
-    reason: String(reason),
-    // Always the authenticated actor -- never trust a client-supplied actor id.
-    actorUserId: actor.actorId
-  });
-
-  return res.json({ success: true, moderation_action: 'hidden', request, state: prepareRoomState(roomState, roomContext.gigId) });
+  return res.json({ success: true, moderation_action: 'hidden', ...result });
 });
 
 app.post("/api/moderation/remove", async (req, res) => {

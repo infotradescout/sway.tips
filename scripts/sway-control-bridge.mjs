@@ -279,19 +279,22 @@ function topRequestPayload(request) {
   };
 }
 
-function resolveAuthCookie({ authToken, authCookie }) {
-  if (authToken) return `sway_performer_session=${encodeURIComponent(authToken)}`;
-  return authCookie;
+function resolveAuthHeaders({ authToken, authCookie }) {
+  if (authToken) return { authorization: `Bearer ${authToken}` };
+  if (authCookie) return { cookie: authCookie };
+  return {};
 }
 
-async function postSwayAction({ swayUrl, authCookie, path, body }) {
-  const response = await fetch(`${swayUrl}${path}`, {
+// The cloud endpoint resolves the target request (top approved / oldest
+// pending) itself, so this is a thin forwarder rather than a translator.
+async function runAction({ action, swayUrl, authHeaders, gigId }) {
+  const response = await fetch(`${swayUrl}/api/talent/control-bridge/action/${action}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      cookie: authCookie
+      ...authHeaders
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ gig_id: gigId })
   });
   const data = await readUpstreamJson(response);
   return {
@@ -299,97 +302,6 @@ async function postSwayAction({ swayUrl, authCookie, path, body }) {
     status: response.status,
     upstream: data
   };
-}
-
-async function runAction({ action, swayUrl, authCookie, gigId }) {
-  const state = await fetchRoomState({ swayUrl, gigId });
-  const session = state?.session || {};
-  const approved = topApprovedRequest(state);
-  const pending = topPendingRequest(state);
-
-  if (action === 'toggle-requests') {
-    return postSwayAction({
-      swayUrl,
-      authCookie,
-      path: '/api/session/window/toggle',
-      body: { gig_id: gigId, open: !session.requestsOpen }
-    });
-  }
-
-  if (action === 'fulfill-top') {
-    if (!approved?.id) return { ok: false, status: 409, upstream: { error: 'No approved request is available.' } };
-    return postSwayAction({
-      swayUrl,
-      authCookie,
-      path: '/api/request/fulfill',
-      body: { gig_id: gigId, requestId: approved.id }
-    });
-  }
-
-  if (action === 'hide-top') {
-    if (!approved?.id) return { ok: false, status: 409, upstream: { error: 'No approved request is available.' } };
-    return postSwayAction({
-      swayUrl,
-      authCookie,
-      path: '/api/moderation/hide',
-      body: { gig_id: gigId, requestId: approved.id, reason: 'local_control_bridge' }
-    });
-  }
-
-  if (action === 'approve-pending') {
-    if (!pending?.id) return { ok: false, status: 409, upstream: { error: 'No pending request is available.' } };
-    return postSwayAction({
-      swayUrl,
-      authCookie,
-      path: '/api/request/triage',
-      body: { gig_id: gigId, requestId: pending.id, action: 'approve' }
-    });
-  }
-
-  if (action === 'veto-pending') {
-    if (!pending?.id) return { ok: false, status: 409, upstream: { error: 'No pending request is available.' } };
-    return postSwayAction({
-      swayUrl,
-      authCookie,
-      path: '/api/request/triage',
-      body: { gig_id: gigId, requestId: pending.id, action: 'deny' }
-    });
-  }
-
-  if (action === 'open-top-source') {
-    if (!approved?.spotifyUrl) return { ok: false, status: 409, upstream: { error: 'Top request has no source URL.' } };
-    return {
-      ok: true,
-      status: 200,
-      upstream: {
-        action: 'open_url',
-        url: approved.spotifyUrl,
-        title: approved.title,
-        subtitle: approved.subtitle
-      }
-    };
-  }
-
-  const searchAction = action.match(/^search-top-(spotify|soundcloud|youtube)$/);
-  if (searchAction) {
-    const providerKey = searchAction[1];
-    const payload = topRequestPayload(approved);
-    if (!payload) return { ok: false, status: 409, upstream: { error: 'No approved request is available.' } };
-    return {
-      ok: true,
-      status: 200,
-      upstream: {
-        action: 'open_url',
-        provider: providerKey,
-        title: payload.title,
-        subtitle: payload.subtitle,
-        text: payload.text,
-        url: payload.searches[providerKey].url
-      }
-    };
-  }
-
-  return { ok: false, status: 404, upstream: { error: 'Unknown action.' } };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -401,12 +313,12 @@ if (args.help || args.h) {
 const gigId = typeof args['gig-id'] === 'string' ? args['gig-id'] : process.env.SWAY_CONTROL_GIG_ID;
 const authToken = typeof args['auth-token'] === 'string' ? args['auth-token'] : process.env.SWAY_CONTROL_AUTH_TOKEN;
 const legacyAuthCookie = typeof args['auth-cookie'] === 'string' ? args['auth-cookie'] : process.env.SWAY_CONTROL_AUTH_COOKIE;
-const authCookie = resolveAuthCookie({ authToken, authCookie: legacyAuthCookie });
+const authHeaders = resolveAuthHeaders({ authToken, authCookie: legacyAuthCookie });
 const swayUrl = normalizeBaseUrl(typeof args['sway-url'] === 'string' ? args['sway-url'] : process.env.SWAY_CONTROL_SWAY_URL);
 const listenHost = typeof args.host === 'string' ? args.host : process.env.SWAY_CONTROL_BRIDGE_HOST || '127.0.0.1';
 const listenPort = Number(typeof args.port === 'string' ? args.port : process.env.SWAY_CONTROL_BRIDGE_PORT || '4315');
 
-if (!gigId || !authCookie) {
+if (!gigId || (!authToken && !legacyAuthCookie)) {
   console.error('Missing required gig id or auth token. Pass --gig-id and --auth-token, or set SWAY_CONTROL_GIG_ID and SWAY_CONTROL_AUTH_TOKEN.');
   console.error('');
   console.error(HELP_TEXT.trim());
@@ -489,7 +401,7 @@ const server = http.createServer(async (req, res) => {
     const action = actionMatch[1];
     if (!ACTIONS.has(action)) return sendJson(res, 404, { ok: false, error: 'Unknown action.' });
     try {
-      const result = await runAction({ action, swayUrl, authCookie, gigId });
+      const result = await runAction({ action, swayUrl, authHeaders, gigId });
       return sendJson(res, result.status, {
         ok: result.ok,
         action,
