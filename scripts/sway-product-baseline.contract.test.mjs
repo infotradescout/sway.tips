@@ -8,7 +8,11 @@ const spine = readFileSync(join(root, 'docs/SWAY_PRODUCT_SPINE.md'), 'utf8');
 for (const term of [
   'main @ 4a35ce9743b14b712cb9049ec7334ef6a4a35923',
   'Sway work must protect the live-night money loop first.',
-  'Start room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
+  'Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
+  'Room Money Mode',
+  'Paid request rooms use the room minimum for paid requests and paid boosts; the current floor is $5.',
+  'Free request rooms make requests free and convert boosts into free upvotes with fixed weight 1.',
+  'Room creation captures the selected `paymentsEnabled` mode.',
   'make more money with less request chaos',
   'Do Not Prioritize Before Adoption Proof',
   'Hardware controls.',

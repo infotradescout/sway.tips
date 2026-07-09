@@ -22,6 +22,7 @@ function requireExcludes(label, source, terms) {
 
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const patronView = read('src/components/PatronView.tsx');
+const server = read('server.ts');
 const overlayApp = read('src/shells/OverlayApp.tsx');
 const victoryScreen = read('src/components/VictoryScreen.tsx');
 const talentApp = read('src/shells/TalentApp.tsx');
@@ -32,12 +33,16 @@ const app = read('src/App.tsx');
 requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
   "useState(true)",
-  'Start room',
+  'Create room',
   'Show QR',
   'Copy link',
   "Tonight's money settings",
+  'before creating the room link and QR',
   'Minimum request',
   'Boost minimum',
+  'Free requests',
+  'Paid requests and boosts use the $5 minimum',
+  'Free upvotes',
   'Tip path',
   'Earnings tonight',
   'Approve, deny, complete'
@@ -56,11 +61,24 @@ requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
 ]);
 
 requireIncludes('PatronView', patronView, [
+  "useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home')",
+  'Live show snapshot',
+  '<Sparkles className="h-4 w-4" /> Sway',
   "setActiveTab('request')",
   "setActiveTab('tip')",
   "setActiveTab('queue')",
+  "summaryLabel: 'BOOST SUMMARY'",
+  "amountLabel: session.paymentsEnabled === false ? 'Upvote weight:' : 'Boost amount:'",
+  "totalLabel: session.paymentsEnabled === false ? 'Upvote total:' : 'Total boost charge:'",
   'Sent. Status: Pending.',
   'Sway will show Pending until the performer and payment outcome are confirmed.'
+]);
+
+requireIncludes('Runtime money mode', server, [
+  'paymentsEnabled: typeof paymentsEnabled ===',
+  'minimumTip: Math.max(5, Number(minimumTip) || 5)',
+  'let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip)',
+  'amt = 1'
 ]);
 
 requireExcludes('PatronView primary path', patronView, [

@@ -4,7 +4,7 @@
 
 This packet records evidence from a real live-night pilot or manual QA run. It defines the proof required before Sway can claim live-pilot readiness around the core money loop:
 
-Start room -> Show QR/link -> Request/Tip/Boost -> Queue action -> Patron status -> Earnings -> End room -> Recap.
+Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Queue action -> Patron status -> Earnings -> End room -> Recap.
 
 This template does not claim that a pilot has passed. It does not automate payments, fake payment proof, mutate production, change runtime behavior, or create an App Store readiness claim.
 
@@ -21,13 +21,22 @@ This template does not claim that a pilot has passed. It does not automate payme
 - Room URL:
 - Room/gig ID:
 - Performer account:
+- Request mode: Paid / Free requests
+- Room minimum:
+- Boost mode observed: Paid room minimum / Free upvote weight 1
 - Device/browser notes:
 
 ## Required Evidence
 
 Each item must include pass/fail, evidence link or screenshot/video reference, and operator notes.
 
-### Performer Start-Room Proof
+### Performer Room-Settings Proof
+
+- Evidence:
+- Pass/fail:
+- Notes:
+
+### Performer Create-Room Proof
 
 - Evidence:
 - Pass/fail:
@@ -63,6 +72,8 @@ Each item must include pass/fail, evidence link or screenshot/video reference, a
 
 - Evidence:
 - Payment/provider mode:
+- Paid boost amount respects room minimum:
+- Free request mode boost is free upvote weight 1:
 - Pass/fail:
 - Notes:
 

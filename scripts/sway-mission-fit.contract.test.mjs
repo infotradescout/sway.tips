@@ -14,9 +14,11 @@ const talentApp = read('src/shells/TalentApp.tsx');
 const performerShareKit = read('src/components/PerformerShareKit.tsx');
 
 for (const term of [
+  'Live show snapshot',
+  '<Sparkles className="h-4 w-4" /> Sway',
   'Request scope',
   'DJ library requests',
-  'Setlist requests',
+  'Setlist song requests',
   'Open request lane',
   'manual request',
   'The DJ decides what is approved and played.'
@@ -32,10 +34,15 @@ for (const term of [
   'Minimum request',
   'Boost minimum',
   'Tip path',
-  'Start room',
+  'Create room',
   'Show QR',
   'Copy link',
   'Approve, deny, complete',
+  'before creating the room link and QR',
+  'Free requests',
+  'Paid requests and boosts use the $5 minimum',
+  'Free upvotes',
+  'separate from the incoming request queue',
   "Tonight's controls",
   'Pause intake',
   'Queue live',
@@ -57,8 +64,8 @@ for (const term of [
 }
 
 for (const term of [
-  '1. Start room',
-  '2. Confirm scope',
+  '1. Set room settings',
+  '2. Create room',
   '3. Share QR',
   'Patron entry'
 ]) {
