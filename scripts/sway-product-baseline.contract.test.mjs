@@ -6,7 +6,7 @@ const failures = [];
 const spine = readFileSync(join(root, 'docs/SWAY_PRODUCT_SPINE.md'), 'utf8');
 
 for (const term of [
-  'main @ 4a35ce9743b14b712cb9049ec7334ef6a4a35923',
+  'main @ 7d6fbf735d4794383323a43ac67f447680ecb390',
   'Sway work must protect the live-night money loop first.',
   'Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
   'Room Money Mode',
@@ -15,12 +15,13 @@ for (const term of [
   'Room creation captures the selected `paymentsEnabled` mode.',
   'make more money with less request chaos',
   'Do Not Prioritize Before Adoption Proof',
-  'Hardware controls.',
+  'New hardware/control expansion beyond the merged control-bridge baseline.',
   'Lyrics.',
   'Marketplace, browse, or discovery expansion.',
   'Operator/admin expansion.',
   'DJ software integrations.',
-  'PR #44 control bridge remains parked'
+  'PR #44 control bridge is merged and deployed as a baseline by owner override',
+  'Do not claim live hardware/control proof without a real room/token smoke'
 ]) {
   if (!spine.includes(term)) {
     failures.push(`Product baseline missing required term: ${term}`);

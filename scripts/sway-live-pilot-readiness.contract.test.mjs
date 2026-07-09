@@ -23,14 +23,16 @@ for (const term of [
   'Free request mode makes boosts free upvotes with fixed weight 1',
   'Room creation captures the selected `paymentsEnabled` mode',
   'Stripe/payment provider integration is not changed',
-  'PR #44 remains parked',
+  'PR #44 was resumed and merged by owner override',
+  'PR #44 is no longer parked',
+  'Real room/token control-bridge hardware proof is not claimed',
   'runtime claims',
   'No App Store readiness claim',
   'Performer Can Create A Room Before Going Live',
   'Performer Can Share QR/Link',
   'Patron Can Enter The Correct Room',
   'Money-Loop Smoke Expectations',
-  'Hold Criteria Before PR #44 Resumes'
+  'Hold Criteria Before New Expansion Resumes'
 ]) {
   if (!checklist.includes(term)) {
     failures.push(`Live pilot readiness checklist missing required term: ${term}`);
@@ -40,6 +42,7 @@ for (const term of [
 for (const forbidden of [
   'Merge PR #44 before pilot',
   'resume PR #44 immediately',
+  'PR #44 remains parked',
   'Runtime behavior changed.',
   'Payment behavior changed.',
   'App Store ready',

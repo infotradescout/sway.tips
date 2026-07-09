@@ -122,5 +122,5 @@ Capture patron-visible status using Pending, Approved, Playing, Up Next, Paused,
 - This packet does not claim App Store readiness.
 - This packet does not claim payment behavior changed.
 - This packet does not claim real-provider payment proof unless Stripe, staging, or provider-backed validation evidence is attached.
-- This packet does not change routes, schema, persistence, role/access behavior, AI behavior, moderation behavior, overlay runtime, or PR #44 status.
-- PR #44 remains parked until the hold/go decision explicitly allows it.
+- This packet does not change routes, schema, persistence, role/access behavior, AI behavior, moderation behavior, overlay runtime, or control-bridge status.
+- PR #44 was merged by owner override; this packet does not claim live hardware/control proof unless a real room/token smoke is attached.

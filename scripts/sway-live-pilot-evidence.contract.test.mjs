@@ -58,7 +58,8 @@ requireIncludes('Live pilot QA packet template', packet, [
   'does not automate payments',
   'does not claim that a pilot has passed',
   'does not claim App Store readiness',
-  'PR #44 remains parked'
+  'PR #44 was merged by owner override',
+  'does not claim live hardware/control proof'
 ]);
 
 requireExcludes('Live pilot QA packet template', packet, [
@@ -67,7 +68,8 @@ requireExcludes('Live pilot QA packet template', packet, [
   'App Store ready',
   'App Store readiness achieved',
   'Merge PR #44 before pilot',
-  'resume PR #44 immediately'
+  'resume PR #44 immediately',
+  'PR #44 remains parked'
 ]);
 
 requireIncludes('Live pilot readiness checklist', checklist, [
