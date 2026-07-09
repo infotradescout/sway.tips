@@ -26,13 +26,29 @@ if (!publicHtml.includes(backgroundRoute)) {
   failures.push('Public landing must render the background image.');
 }
 
+const publicImageRefs = publicHtml.match(/<img[^>]+src="\/assets\/sway-neon-background\.png"/g) ?? [];
+if (publicImageRefs.length !== 1) {
+  failures.push(`Public landing must render exactly one background image, found ${publicImageRefs.length}.`);
+}
+
 if (!appBackdrop.includes(backgroundRoute)) {
   failures.push('Patron backdrop must render the background image.');
 }
 
-const publicImageRefs = publicHtml.match(/<img[^>]+src="\/assets\/sway-neon-background\.png"/g) ?? [];
-if (publicImageRefs.length !== 1) {
-  failures.push(`Public landing must render exactly one background image, found ${publicImageRefs.length}.`);
+if (!publicHtml.includes(`rel="preload" as="image" href="${backgroundRoute}"`) || !publicHtml.includes('fetchpriority="high"')) {
+  failures.push('Public landing must preload the approved background for cold mobile first paint.');
+}
+
+for (const publicImageTerm of ['width="1080"', 'height="1620"', 'loading="eager"', 'decoding="async"', 'fetchpriority="high"']) {
+  if (!publicHtml.includes(publicImageTerm)) {
+    failures.push(`Public landing S background image missing first-load stability hint: ${publicImageTerm}`);
+  }
+}
+
+for (const appImageTerm of ['width={1080}', 'height={1620}', 'loading="eager"', 'decoding="async"', 'fetchPriority="high"']) {
+  if (!appBackdrop.includes(appImageTerm)) {
+    failures.push(`Patron backdrop S background image missing first-load stability hint: ${appImageTerm}`);
+  }
 }
 
 for (const source of [
