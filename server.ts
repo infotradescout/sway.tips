@@ -15,7 +15,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
-import { createIdempotencyStore, type DurableActionInput } from "./src/server/idempotency-store";
+import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
@@ -1464,6 +1464,99 @@ async function writeMutationNoopAudit(input: {
   });
 }
 
+function durableActorActionExpiresAt() {
+  return new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString();
+}
+
+function buildDurableActorActionInput(input: {
+  actor: ProtectedMutationActor;
+  gigId: string;
+  actionType: string;
+  targetEntityType: string;
+  targetEntityId: string;
+  payload?: Record<string, unknown>;
+  idempotencyKeySeed?: string;
+  expiresAt?: string | null;
+}): DurableActorActionInput {
+  const actorScope = `actor:${input.actor.actorId}`;
+  const payloadHash = hashPayload({
+    actorId: input.actor.actorId,
+    gigId: input.gigId,
+    actionType: input.actionType,
+    targetEntityType: input.targetEntityType,
+    targetEntityId: input.targetEntityId,
+    ...(input.payload ?? {})
+  });
+  const idempotencyKey = `performer:${hashPayload({
+    actorId: input.actor.actorId,
+    gigId: input.gigId,
+    actionType: input.actionType,
+    targetEntityType: input.targetEntityType,
+    targetEntityId: input.targetEntityId,
+    seed: input.idempotencyKeySeed ?? 'stable'
+  })}`;
+
+  return {
+    idempotencyKey,
+    actorId: input.actor.actorId,
+    actorScope,
+    gigId: input.gigId,
+    actionType: input.actionType,
+    amountCents: 0,
+    currency: 'USD',
+    targetEntityType: input.targetEntityType,
+    targetEntityId: input.targetEntityId,
+    payloadHash,
+    intentFingerprint: createIdempotencyFingerprint({
+      idempotency_key: idempotencyKey,
+      patron_device_id_hash: actorScope,
+      gig_id: input.gigId,
+      action_type: input.actionType,
+      target_entity_id: input.targetEntityId,
+      amount_cents: 0,
+      currency: 'USD',
+      payload_hash: payloadHash
+    }),
+    expiresAt: input.expiresAt ?? durableActorActionExpiresAt()
+  };
+}
+
+async function reserveDurableActorMutation(input: DurableActorActionInput) {
+  return idempotencyStore.reserveDurableActorAction(input);
+}
+
+async function completeDurableActorMutation(input: {
+  reservation: DurableActorActionInput | null;
+  status: number;
+  body: unknown;
+}) {
+  if (!input.reservation) return;
+  await idempotencyStore.completeDurableActorAction({
+    idempotencyKey: input.reservation.idempotencyKey,
+    status: input.status,
+    body: input.body
+  });
+}
+
+function sendDurableMutationReplay(
+  res: express.Response,
+  replay: Awaited<ReturnType<typeof reserveDurableActorMutation>>
+) {
+  if (replay.kind === 'expired') {
+    res.status(410).json({ error: 'Durable action window expired before mutation.' });
+    return true;
+  }
+  if (replay.kind === 'misuse') {
+    res.status(409).json({ error: 'idempotency misuse: same performer action key submitted with a different fingerprint.' });
+    return true;
+  }
+  if (replay.kind === 'replay') {
+    res.status(replay.status).json(replay.body);
+    return true;
+  }
+  return false;
+}
+
 type RoomMutationContext = { gigId: string; state: BackendState };
 type RequestMutationContext = RoomMutationContext & { request: RequestItem };
 
@@ -2880,24 +2973,47 @@ const CONTROL_BRIDGE_MUTATING_ACTIONS = new Set([
 const CONTROL_BRIDGE_REPLAY_WINDOW_MS = 2500;
 const controlBridgeReplayCache = new Map<string, number>();
 
-function reserveControlBridgeMutation(input: { actorId: string; gigId: string; action: string }) {
+async function reserveControlBridgeMutation(input: { actor: ProtectedMutationActor; gigId: string; action: string }) {
   if (!CONTROL_BRIDGE_MUTATING_ACTIONS.has(input.action)) {
-    return { replay: false };
+    return { replay: false, reservation: null };
   }
 
   const now = Date.now();
+  const replayBucket = Math.floor(now / CONTROL_BRIDGE_REPLAY_WINDOW_MS);
+  const replayKey = `${input.actor.actorId}:${input.gigId}:${input.action}:${replayBucket}`;
+  const durableMutation = buildDurableActorActionInput({
+    actor: input.actor,
+    gigId: input.gigId,
+    actionType: `control_bridge.${input.action}`,
+    targetEntityType: 'control_bridge_action',
+    targetEntityId: replayKey,
+    idempotencyKeySeed: String(replayBucket),
+    payload: {
+      action: input.action,
+      replayBucket,
+      replayWindowMs: CONTROL_BRIDGE_REPLAY_WINDOW_MS
+    }
+  });
+  const durableReplay = await reserveDurableActorMutation(durableMutation);
+  if (durableReplay.kind === 'replay') {
+    return { replay: true, replayKey, reservation: durableMutation, durableReplay };
+  }
+  if (durableReplay.kind === 'expired' || durableReplay.kind === 'misuse') {
+    return { replay: true, replayKey, reservation: durableMutation, durableReplay };
+  }
+
   for (const [key, expiresAt] of controlBridgeReplayCache.entries()) {
     if (expiresAt <= now) controlBridgeReplayCache.delete(key);
   }
 
-  const replayKey = `${input.actorId}:${input.gigId}:${input.action}`;
-  const existingExpiresAt = controlBridgeReplayCache.get(replayKey);
+  const processReplayKey = `${input.actor.actorId}:${input.gigId}:${input.action}`;
+  const existingExpiresAt = controlBridgeReplayCache.get(processReplayKey);
   if (existingExpiresAt && existingExpiresAt > now) {
-    return { replay: true, replayKey };
+    return { replay: true, replayKey: processReplayKey, reservation: durableMutation };
   }
 
-  controlBridgeReplayCache.set(replayKey, now + CONTROL_BRIDGE_REPLAY_WINDOW_MS);
-  return { replay: false, replayKey };
+  controlBridgeReplayCache.set(processReplayKey, now + CONTROL_BRIDGE_REPLAY_WINDOW_MS);
+  return { replay: false, replayKey: processReplayKey, reservation: durableMutation };
 }
 
 app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
@@ -2915,12 +3031,16 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
-  const replayGuard = reserveControlBridgeMutation({
-    actorId: actor.actorId,
+  const replayGuard = await reserveControlBridgeMutation({
+    actor,
     gigId: roomContext.gigId,
     action
   });
   if (replayGuard.replay) {
+    if (replayGuard.durableReplay?.kind === 'expired' || replayGuard.durableReplay?.kind === 'misuse') {
+      sendDurableMutationReplay(res, replayGuard.durableReplay);
+      return;
+    }
     await writeMutationNoopAudit({
       gigId: roomContext.gigId,
       actor,
@@ -2948,7 +3068,9 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
 
   if (action === 'toggle-requests') {
     const result = await applyWindowToggle({ roomContext, actor, nextOpen: !roomState.session.requestsOpen });
-    res.json({ success: true, action, ...result });
+    const responseBody = { success: true, action, ...result };
+    await completeDurableActorMutation({ reservation: replayGuard.reservation, status: 200, body: responseBody });
+    res.json(responseBody);
     return;
   }
 
@@ -2962,7 +3084,9 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
     const result = action === 'fulfill-top'
       ? await applyRequestFulfill({ roomContext: requestContext, actor })
       : await applyRequestHide({ roomContext: requestContext, actor, reason: 'control_bridge' });
-    res.json({ success: true, action, ...result });
+    const responseBody = { success: true, action, ...result };
+    await completeDurableActorMutation({ reservation: replayGuard.reservation, status: 200, body: responseBody });
+    res.json(responseBody);
     return;
   }
 
@@ -2978,7 +3102,9 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
       actor,
       action: action === 'approve-pending' ? 'approve' : 'deny'
     });
-    res.json({ success: true, action, ...result });
+    const responseBody = { success: true, action, ...result };
+    await completeDurableActorMutation({ reservation: replayGuard.reservation, status: 200, body: responseBody });
+    res.json(responseBody);
     return;
   }
 
@@ -5998,12 +6124,25 @@ app.post("/api/request/triage", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
+  const durableMutation = buildDurableActorActionInput({
+    actor,
+    gigId: roomContext.gigId,
+    actionType: `request.triage.${action === 'approve' ? 'approve' : 'deny'}`,
+    targetEntityType: 'request',
+    targetEntityId: request.id,
+    payload: { requestId: request.id, requestedAction: action === 'approve' ? 'approve' : 'deny' }
+  });
+  const durableReplay = await reserveDurableActorMutation(durableMutation);
+  if (sendDurableMutationReplay(res, durableReplay)) return;
+
   const result = await applyRequestTriage({
     roomContext: { gigId: roomContext.gigId, state: roomState, request },
     actor,
     action: action === 'approve' ? 'approve' : 'deny'
   });
-  res.json({ success: true, ...result });
+  const responseBody = { success: true, ...result };
+  await completeDurableActorMutation({ reservation: durableMutation, status: 200, body: responseBody });
+  res.json(responseBody);
 });
 
 // Fulfillment Queue Action (Fulfill)
@@ -6020,12 +6159,25 @@ app.post("/api/request/fulfill", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
+  const durableMutation = buildDurableActorActionInput({
+    actor,
+    gigId: roomContext.gigId,
+    actionType: 'request.fulfill',
+    targetEntityType: 'request',
+    targetEntityId: request.id,
+    payload: { requestId: request.id }
+  });
+  const durableReplay = await reserveDurableActorMutation(durableMutation);
+  if (sendDurableMutationReplay(res, durableReplay)) return;
+
   const result = await applyRequestFulfill({
     roomContext: { gigId: roomContext.gigId, state: roomState, request },
     actor
   });
 
-  res.json({ success: true, ...result });
+  const responseBody = { success: true, ...result };
+  await completeDurableActorMutation({ reservation: durableMutation, status: 200, body: responseBody });
+  res.json(responseBody);
 });
 
 app.post("/api/moderation/report", async (req, res) => {
@@ -6220,13 +6372,26 @@ app.post("/api/moderation/hide", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
 
+  const durableMutation = buildDurableActorActionInput({
+    actor,
+    gigId: roomContext.gigId,
+    actionType: 'moderation.hide',
+    targetEntityType: 'request',
+    targetEntityId: request.id,
+    payload: { requestId: request.id }
+  });
+  const durableReplay = await reserveDurableActorMutation(durableMutation);
+  if (sendDurableMutationReplay(res, durableReplay)) return;
+
   const result = await applyRequestHide({
     roomContext: { gigId: roomContext.gigId, state: roomState, request },
     actor,
     reason: String(reason)
   });
 
-  return res.json({ success: true, moderation_action: 'hidden', ...result });
+  const responseBody = { success: true, moderation_action: 'hidden', ...result };
+  await completeDurableActorMutation({ reservation: durableMutation, status: 200, body: responseBody });
+  return res.json(responseBody);
 });
 
 app.post("/api/moderation/remove", async (req, res) => {

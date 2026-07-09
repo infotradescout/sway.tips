@@ -97,7 +97,7 @@ for (const term of [
 }
 
 const bridgeRouteStart = server.indexOf("app.post('/api/talent/control-bridge/action/:action'");
-const bridgeReplayIndex = server.indexOf('const replayGuard = reserveControlBridgeMutation', bridgeRouteStart);
+const bridgeReplayIndex = server.indexOf('const replayGuard = await reserveControlBridgeMutation', bridgeRouteStart);
 const bridgeTopApprovedIndex = server.indexOf('topApprovedRoomRequest(roomState)', bridgeRouteStart);
 const bridgeTopPendingIndex = server.indexOf('topPendingRoomRequest(roomState)', bridgeRouteStart);
 if (
