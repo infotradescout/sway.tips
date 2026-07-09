@@ -29,6 +29,10 @@ const BANNED_EVERYWHERE = [
   /coming soon/i,
   /\bplanned\b/i,
   /\bsoon\b/i,
+  /Sway Talent/i,
+  /Patron App/i,
+  /Selected gig inspector/i,
+  /Synchronizing Sway live ledger/i,
 ];
 
 // Standalone visible "checkout" / "check out" / "check-out". The word-boundary
@@ -90,6 +94,10 @@ const reactSurfaces = [
   'src/components/TalentDashboard.tsx',
   'src/components/VictoryScreen.tsx',
   'src/shells/OverlayApp.tsx',
+  'src/shells/TalentApp.tsx',
+  'src/shells/PatronApp.tsx',
+  'src/shells/PatronAppShell.tsx',
+  'src/shells/shared.tsx',
   'src/App.tsx',
 ];
 

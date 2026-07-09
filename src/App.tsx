@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Flame, Lock, Smartphone, Tv, Users } from 'lucide-react';
+import { CalendarDays, Flame, Lock, Smartphone, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import TalentDashboard from './components/TalentDashboard';
@@ -182,6 +182,7 @@ export default function App() {
     talentRole: 'DJ' | 'Bartender' | 'Performer';
     feeType: 'talent' | 'patron';
     minimumTip: number;
+    paymentsEnabled: boolean;
   }) => {
     if (isDemoMode) return;
     try {
@@ -365,7 +366,7 @@ export default function App() {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
     }
-    const response = await fetch('/api/moderation/block', {
+    const response = await fetch('/api/moderation/patron-block', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope, value, reason })
@@ -465,7 +466,8 @@ export default function App() {
       talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',
-      minimumTip: 5
+      minimumTip: 5,
+      paymentsEnabled: true
     });
   };
 
@@ -476,7 +478,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400 font-mono">Synchronizing Sway live ledger...</p>
+          <p className="text-xs text-slate-400 font-mono">Opening live room...</p>
         </div>
       </div>
     );
@@ -496,7 +498,7 @@ export default function App() {
           <span className="font-display text-xs font-black tracking-widest text-fuchsia-400">
             SWAY LIVE ROOM
           </span>
-          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE GIG FEED</span>
+          <span className="text-[9px] font-mono text-cyan-400 mr-1 animate-pulse">LIVE ROOM</span>
         </div>
 
         {nowPlaying && (
@@ -527,7 +529,7 @@ export default function App() {
           ))}
           {upNextQueue.length === 0 && (
             <div className="text-center py-4 bg-slate-950/40 rounded border border-white/5 text-[10px] text-slate-500 font-mono">
-              Waiting for gig requests...
+              Waiting for requests...
             </div>
           )}
         </div>
@@ -547,8 +549,18 @@ export default function App() {
     return (
       <ShellMessage
         icon={<CalendarDays className="h-5 w-5" />}
-        title="Route Not Found"
-        body={`Use ${routeSpine.join(', ')} or their documented parameterized variants.`}
+        title="Room not found"
+        body="Scan a Sway room code again, return home, or sign in as a performer to manage your live rooms."
+        actions={
+          <>
+            <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/home">
+              Return home
+            </a>
+            <a className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-center text-sm font-bold text-slate-100 hover:border-fuchsia-500/40" href="/talent/login">
+              Performer login
+            </a>
+          </>
+        }
       />
     );
   }
@@ -557,15 +569,20 @@ export default function App() {
     return (
       <ShellMessage
         icon={<Lock className="h-5 w-5" />}
-        title="Admin"
-        body="Operator tools are intentionally separated from patron and performer routes. Operator features remain unavailable until authentication, audit logs, and persistent ledgers are implemented."
+        title="Admin access"
+        body="This area is for internal Sway operations. Sign in with an authorized admin account to continue."
+        actions={
+          <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/admin/login">
+            Admin login
+          </a>
+        }
       />
     );
   }
 
   if (route.name === 'talent-gigs') {
     if (session.status === 'closed') {
-      return <VictoryScreen session={session} onRestart={resetInactiveSession} />;
+      return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
     }
 
     return (
@@ -578,9 +595,9 @@ export default function App() {
               </div>
               <div>
                 <span className="font-display text-xs font-black uppercase tracking-widest text-white">
-                  Sway Talent
+                  Tonight's Room
                 </span>
-                <p className="text-[9px] text-slate-400">Now Playing, Pending Requests, Approved Queue, Controls, and Room State</p>
+                <p className="text-[9px] text-slate-400">Queue, QR, earnings, and room controls</p>
               </div>
             </div>
           </div>
@@ -703,16 +720,13 @@ export default function App() {
             </div>
             <div>
               <span className="font-display text-xs font-black uppercase tracking-widest text-white">
-                Sway Patron
+                Live Room
               </span>
               <p className="text-[9px] text-slate-400">
                 {route.name === 'performer' ? `Performer link: ${route.performerHandle}` : `Gig route: ${route.gigId}`}
               </p>
             </div>
           </div>
-          <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${route.name === 'patron-gig' ? route.gigId : 'local'}`} title="Open overlay">
-            <Tv className="h-4 w-4" />
-          </a>
         </div>
       </div>
 

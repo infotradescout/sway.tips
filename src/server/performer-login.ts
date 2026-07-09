@@ -36,8 +36,7 @@ export function normalizePerformerHandle(rawValue: unknown) {
 
   const trimmed = rawValue.trim();
   if (!trimmed) return null;
-  if (trimmed !== trimmed.toLowerCase()) return null;
-  if (!/^[a-z0-9_-]+$/.test(trimmed)) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) return null;
 
   return trimmed;
 }

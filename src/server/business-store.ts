@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
@@ -39,7 +39,12 @@ type PersistedSessionRow = {
 const RUNTIME_USER_ID = '00000000-0000-4000-8000-000000000111';
 const LEGACY_FALLBACK_ACTIVE_STATUSES = ['active', 'ending'] as const;
 const TRACKED_ROOM_STATUSES = ['active', 'ending'] as const;
-const READABLE_ACTIVE_ROOM_STATUSES = ['active'] as const;
+// Must include 'ending' (the 5-minute post-gig sweep) alongside 'active',
+// matching LEGACY_FALLBACK_ACTIVE_STATUSES/TRACKED_ROOM_STATUSES/
+// hasLiveRoomContext above -- otherwise a room mid-sweep silently vanishes
+// from the performer's own room selector, admin oversight roster, and the
+// public feed until it's fully closed out.
+const READABLE_ACTIVE_ROOM_STATUSES = ['active', 'ending'] as const;
 
 const STATUS_MAP: Record<RequestItem['status'], (typeof requestStatusEnum.enumValues)[number]> = {
   hold: 'held_for_review',
@@ -91,10 +96,10 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     requestWindowDuration: input.requestWindowDuration ?? fallback.requestWindowDuration,
     requestWindowLabel: input.requestWindowLabel ?? fallback.requestWindowLabel,
     requestPresets: Array.isArray(input.requestPresets) ? input.requestPresets : fallback.requestPresets,
-    operatingMode: input.operatingMode === 'open_call'
+    operatingMode: input.operatingMode === 'open_call' || input.operatingMode === 'crowd_autopilot'
       ? input.operatingMode
       : (fallback.operatingMode ?? 'manual'),
-    searchScope: input.searchScope === 'catalog'
+    searchScope: input.searchScope === 'catalog' || input.searchScope === 'setlist'
       ? input.searchScope
       : (fallback.searchScope ?? 'library'),
     paymentsEnabled: typeof input.paymentsEnabled === 'boolean'
@@ -318,10 +323,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       .filter((request): request is RequestItem => Boolean(request));
 
     const restoredSession = coerceGigSession(sessionRow.runtimeSessionState, createInactiveSession());
+    // 'ending' (the 5-minute post-gig sweep) must still resolve as a live,
+    // readable room -- both the performer's own dashboard and the patron
+    // view keep polling this gig-scoped state throughout the sweep window.
+    // Falling through to 'inactive' here made every /api/state/:gigId call
+    // 404 as soon as a session ended, breaking closeout and the sweep UI.
     const roomStatus: BusinessStoreRoomStatus =
       restoredSession.status === 'closed'
         ? 'ended'
-        : restoredSession.status === 'active'
+        : hasLiveRoomContext(restoredSession.status)
           ? 'active'
           : 'inactive';
 
@@ -346,7 +356,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         activeGigId: hasLiveRoomContext(fallbackState.session.status) ? (fallbackState.activeGigId ?? null) : null,
         roomStatus: fallbackState.session.status === 'closed'
           ? 'ended'
-          : fallbackState.session.status === 'active'
+          : hasLiveRoomContext(fallbackState.session.status)
             ? 'active'
             : 'inactive'
       };
@@ -377,7 +387,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           activeGigId: hasLiveRoomContext(fallbackState.session.status) ? gigId : null,
           roomStatus: fallbackState.session.status === 'closed'
             ? 'ended'
-            : fallbackState.session.status === 'active'
+            : hasLiveRoomContext(fallbackState.session.status)
               ? 'active'
               : 'inactive'
         };
@@ -424,9 +434,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     return rows.map((row) => row.gigId);
   }
 
-  async function listActiveRoomSummaries(): Promise<ActiveRoomSummary[]> {
+  async function listActiveRoomSummaries(performerId?: string): Promise<ActiveRoomSummary[]> {
     if (!db) return [];
 
+    const statusFilter = inArray(activeRoomRegistry.registryStatus, [...READABLE_ACTIVE_ROOM_STATUSES]);
     const rows = await db
       .select({
         gigId: activeRoomRegistry.gigId,
@@ -436,7 +447,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         startedAt: activeRoomRegistry.startedAt
       })
       .from(activeRoomRegistry)
-      .where(inArray(activeRoomRegistry.registryStatus, [...READABLE_ACTIVE_ROOM_STATUSES]))
+      .where(performerId ? and(statusFilter, eq(activeRoomRegistry.performerId, performerId)) : statusFilter)
       .orderBy(desc(activeRoomRegistry.lastActivityAt), desc(activeRoomRegistry.updatedAt));
 
     const summaries = await Promise.all(rows.map(async (row) => {

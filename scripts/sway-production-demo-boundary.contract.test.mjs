@@ -8,6 +8,8 @@ const demoMode = read('src/demo-mode.tsx');
 const viteConfig = read('vite.config.ts');
 const accessControl = read('src/server/access-control.ts');
 const publicShell = read('shells/public.html');
+const legacyAppShell = read('src/App.tsx');
+const patronShell = read('src/shells/PatronApp.tsx');
 const packageJson = read('package.json');
 
 const failures = [];
@@ -44,10 +46,24 @@ for (const demoRoute of [
 }
 
 for (const required of [
-  'href="/home">SCAN</a>',
-  '/overlay/live'
+  'href="/home">SCAN</a>'
 ]) {
   requireIncludes(publicShell, required, `Public landing missing production-safe route target: ${required}`);
+}
+
+for (const forbiddenPublicOverlay of ['Open overlay', '/overlay/live']) {
+  if (publicShell.includes(forbiddenPublicOverlay)) {
+    failures.push(`Public landing must not expose overlay entry to unauthenticated patrons: ${forbiddenPublicOverlay}`);
+  }
+}
+
+for (const source of [
+  { name: 'src/App.tsx', text: legacyAppShell },
+  { name: 'src/shells/PatronApp.tsx', text: patronShell }
+]) {
+  if (source.text.includes('Open overlay')) {
+    failures.push(`${source.name} must not expose overlay entry to unauthenticated patrons.`);
+  }
 }
 
 requireIncludes(

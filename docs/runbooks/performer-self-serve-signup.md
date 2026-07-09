@@ -7,7 +7,7 @@ This runbook describes the self-serve performer account creation path for new Sw
 ## Flow
 
 1. Performer opens `/talent/signup`.
-2. Performer enters performer name, unique lowercase handle, email, password, password confirmation, and accepts Terms.
+2. Performer enters performer name, unique handle, email, password, password confirmation, and accepts Terms.
 3. Server creates the `users` row immediately with `password_hash`, `terms_accepted_at`, and `email_verified_at = null`.
 4. Server creates the owned `performers` row immediately in a restricted inactive state.
 5. Server creates a short-lived durable email verification challenge.

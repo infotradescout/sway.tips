@@ -66,12 +66,42 @@ for (const term of ['beforeinstallprompt', 'Install Sway', 'Install app', 'Add t
   if (!prompt.includes(term)) failures.push(`Install prompt missing term: ${term}`);
 }
 
+for (const term of [
+  'public-install-prompt',
+  'beforeinstallprompt',
+  'Install Sway',
+  'Download Sway',
+  'Install app',
+  'Add to Home Screen',
+  'sway.installPromptDismissed.v2',
+  'isMetaInAppBrowser'
+]) {
+  if (!publicHtml.includes(term)) failures.push(`Public landing install prompt missing term: ${term}`);
+}
+
+for (const term of [
+  'Download Sway',
+  'sway.installPromptDismissed.v2',
+  'suppressedRoute',
+  'Download',
+  'Smartphone',
+  'X'
+]) {
+  if (!prompt.includes(term)) failures.push(`Install prompt missing premium tray term: ${term}`);
+}
+
 for (const term of ['isMetaInAppBrowser', 'FBAN', 'FBAV', 'FB_IAB', 'MessengerForiOS']) {
   if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing Meta in-app detection term: ${term}`);
 }
 
 for (const term of ['installViewportEnvironment', '--sway-viewport-height', 'is-meta-in-app-browser', 'is-compact-viewport', 'is-compact-landscape']) {
   if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing viewport handling term: ${term}`);
+}
+
+for (const forbidden of ["visualViewport?.addEventListener('scroll'", 'visualViewport?.addEventListener("scroll"', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
+  if (browserEnvironment.includes(forbidden) || publicHtml.includes(forbidden)) {
+    failures.push(`Viewport handling must not reframe the landing background on scroll: ${forbidden}`);
+  }
 }
 
 if (!mount.includes('installViewportEnvironment();')) {

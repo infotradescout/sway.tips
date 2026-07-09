@@ -25,5 +25,4 @@ export function installViewportEnvironment() {
   window.addEventListener('resize', updateViewport, { passive: true });
   window.addEventListener('orientationchange', updateViewport, { passive: true });
   window.visualViewport?.addEventListener('resize', updateViewport, { passive: true });
-  window.visualViewport?.addEventListener('scroll', updateViewport, { passive: true });
 }

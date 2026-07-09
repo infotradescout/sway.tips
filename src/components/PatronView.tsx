@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { 
@@ -22,7 +22,9 @@ import {
   Layers, 
   Flame, 
   Activity,
-  Award
+  Award,
+  Sliders,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
@@ -33,9 +35,9 @@ const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
 const PENDING_ACTION_EXPIRED_COPY = 'Network dropped. Your request expired before confirmation was completed.';
 const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-in or switch to cellular before sending a request.';
-const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Payment authorization required. Confirm payment to finalize your request.';
-const PAYMENT_CONFIRMATION_WAITING_COPY = 'This request is waiting for payment confirmation. Do not close this page until payment confirmation is complete.';
-const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Your payment method may be authorized now and charged when the action is finalized.';
+const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this request.';
+const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
+const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
 
 interface PatronViewProps {
   session: GigSession;
@@ -51,6 +53,9 @@ interface PatronViewProps {
     message?: string;
     amount: number;
     albumArt?: string;
+    sourceProvider?: string;
+    spotifyUri?: string;
+    spotifyUrl?: string;
     client_request_id?: string;
     idempotency_key?: string;
     expires_at?: string;
@@ -74,6 +79,9 @@ type SearchTrack = {
   basePrice?: number;
   description?: string;
   source?: string;
+  sourceProvider?: string;
+  spotifyUri?: string;
+  spotifyUrl?: string;
   targetType?: 'music' | 'custom';
 };
 
@@ -156,6 +164,13 @@ function StripeAuthorizationForm({
         return;
       }
 
+      if (result.paymentIntent?.status === 'processing') {
+        // Some payment methods (e.g. bank debits) confirm asynchronously. This
+        // isn't a failure -- don't surface it as a top-level error banner.
+        setLocalMessage('Your payment is still confirming with your bank. This can take a moment; please wait before trying again.');
+        return;
+      }
+
       if (result.paymentIntent?.status !== 'requires_capture') {
         const message = `Payment authorization did not reach capturable status (${result.paymentIntent?.status ?? 'unknown'}).`;
         setLocalMessage(message);
@@ -229,7 +244,7 @@ export default function PatronView({
       ];
 
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'request' | 'tip' | 'queue' | 'discover'>('request');
+  const [activeTab, setActiveTab] = useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
   // Search Venue Directory States
@@ -240,7 +255,8 @@ export default function PatronView({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  
+  const [searchError, setSearchError] = useState(false);
+
   // Selected search target
   const [selectedTrack, setSelectedTrack] = useState<SearchTrack | null>(null);
 
@@ -285,6 +301,13 @@ export default function PatronView({
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
+  const [formToast, setFormToast] = useState<string | null>(null);
+  const formToastTimeoutRef = useRef<number | null>(null);
+  const showFormToast = (message: string) => {
+    setFormToast(message);
+    if (formToastTimeoutRef.current) window.clearTimeout(formToastTimeoutRef.current);
+    formToastTimeoutRef.current = window.setTimeout(() => setFormToast(null), 4000);
+  };
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isSubmitLocked = isPaying || isPaymentConfirmationPending;
   const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
@@ -299,31 +322,25 @@ export default function PatronView({
     .filter((item) => !item.hidden && !item.removed)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
-  const activePatronStatus: 'Syncing' | 'Pending' | 'Approved' | 'Paused' | 'Ended' =
-    session.status === 'closed'
-      ? 'Ended'
-      : (!session.requestsOpen || session.status === 'ending')
-        ? 'Paused'
-        : (degraded || !!pendingAction)
-          ? 'Syncing'
-          : latestRequest?.status === 'approved' || latestRequest?.status === 'fulfilled'
-            ? 'Approved'
-            : 'Pending';
+  // A plain-language status for the patron's most recent request, if any.
+  // Only surfaced when there's something to report -- a brand-new patron
+  // with no requests yet has nothing to show here.
+  const latestRequestStatusMessage: { text: string; tone: 'fuchsia' | 'cyan' | 'slate' | 'rose' } | null = (() => {
+    if (session.status === 'closed') return { text: 'Ended: this room is no longer accepting requests.', tone: 'slate' };
+    if (!session.requestsOpen || session.status === 'ending') return { text: 'Requests are paused right now.', tone: 'slate' };
+    if (degraded || pendingAction) return { text: 'Syncing your last action...', tone: 'cyan' };
+    if (!latestRequest || latestRequest.hidden || latestRequest.removed) return null;
+    if (latestRequest.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
+    if (latestRequest.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
+    if (latestRequest.status === 'denied') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
+    return { text: 'Your last request is pending review.', tone: 'fuchsia' };
+  })();
 
-  const moderationStatusLabel: 'pending_review' | 'approved' | 'declined' | 'hidden' | 'blocked' | 'played/completed' =
-    latestRequest?.hidden || latestRequest?.removed
-      ? 'hidden'
-      : latestRequest?.shadowBanned
-        ? 'pending_review'
-        : latestRequest?.status === 'approved'
-          ? 'approved'
-          : latestRequest?.status === 'denied'
-            ? 'declined'
-            : latestRequest?.status === 'fulfilled'
-              ? 'played/completed'
-              : latestRequest?.status === 'hold'
-                ? 'pending_review'
-                : 'pending_review';
+  const nowPlayingRequest = requests
+    .filter((item) => !item.hidden && !item.removed && !item.shadowBanned)
+    .filter((item) => item.status === 'fulfilled' && item.type !== 'tip')
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
 
   const funnelTelemetryPayload = {
     shell: 'patron' as const,
@@ -492,6 +509,7 @@ export default function PatronView({
   useEffect(() => {
     if (activeTab !== 'request') return;
     if (selectedTrack || requestPresets.length === 0) return;
+    if (searchQuery.trim()) return;
 
     const firstPreset = requestPresets[0];
     setSelectedPresetId(firstPreset.id);
@@ -505,7 +523,7 @@ export default function PatronView({
         source: PRESET_REQUEST_SOURCE
       });
     setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
-  }, [activeTab, selectedTrack, requestPresets, session.minimumTip]);
+  }, [activeTab, selectedTrack, requestPresets, searchQuery, session.minimumTip]);
 
   // Live request window countdown for patron
   const [patronsWindowTimeLeft, setPatronsWindowTimeLeft] = useState<string>('');
@@ -538,6 +556,10 @@ export default function PatronView({
   const handleSearch = async (val: string) => {
     setSearchQuery(val);
     setIsSearching(true);
+    if (val.trim()) {
+      setSelectedTrack(null);
+      setSelectedPresetId(null);
+    }
 
     if (previewMode && session.talentRole === 'DJ') {
       const query = val.trim().toLowerCase();
@@ -583,12 +605,17 @@ export default function PatronView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: val, gig_id: gigId })
       });
+      if (!response.ok) {
+        throw new Error(`Search request failed with status ${response.status}`);
+      }
       const data = await response.json();
       const results: SearchTrack[] = Array.isArray(data.results) ? data.results : [];
       setSearchResults(openSongOption ? [openSongOption, ...results] : results);
+      setSearchError(false);
     } catch (e) {
       console.warn("Search endpoint errored out:", e);
       setSearchResults(openSongOption ? [openSongOption] : []);
+      setSearchError(true);
     } finally {
       setIsSearching(false);
     }
@@ -601,6 +628,7 @@ export default function PatronView({
 
   const handleSelectTrack = (track: any) => {
     setSelectedTrack(track);
+    setSearchQuery('');
     // Auto populate minimum or baseline price
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
@@ -620,15 +648,14 @@ export default function PatronView({
       const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
-      alert(routeCopy);
       return;
     }
 
     if (type === 'request' && activeTab === 'request' && !session.requestsOpen) {
-      alert("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
+      showFormToast("Request submissions are temporarily closed or locked by the host. Feel free to support via 'Direct cash tip' instead!");
       return;
     }
-    
+
     let title = '';
     let artist = '';
     let trackArt = '';
@@ -638,17 +665,17 @@ export default function PatronView({
 
     if (type === 'request') {
       if (!senderName) {
-        alert("Please enter a Patron Name so the Performer knows who tipped!");
+        showFormToast("Please enter a Patron Name so the Performer knows who tipped!");
         return;
       }
       if (paymentsEnabledForRoom && tipAmount < session.minimumTip) {
-        alert(`Minimum tip required is $${session.minimumTip}`);
+        showFormToast(`Minimum tip required is $${session.minimumTip}`);
         return;
       }
 
       if (session.talentRole === 'DJ') {
         if (!selectedTrack) {
-          alert("Please search and select a song request first!");
+          showFormToast("Please search and select a song request first!");
           return;
         }
         title = selectedTrack.title;
@@ -657,7 +684,7 @@ export default function PatronView({
       } else {
         // Custom menus
         if (!selectedTrack) {
-          alert("Please select an item from the menu!");
+          showFormToast("Please select an item from the menu!");
           return;
         }
         title = selectedTrack.title;
@@ -668,12 +695,19 @@ export default function PatronView({
     } else {
       // Boost check
       if (!boostingItem) return;
-      if (!boostPatronName) {
-        alert("Please enter your sponsor name for the boost!");
+      // boostPatronName has no input field of its own until the checkout
+      // modal opens below -- requiring it non-empty here would make the
+      // boost flow un-openable on a patron's first action. Borrow whatever
+      // name they've already entered on the Request/Tip tab; they can still
+      // edit it inside the modal before confirming.
+      if (!boostPatronName && senderName) {
+        setBoostPatronName(senderName);
+      } else if (!boostPatronName && !senderName) {
+        showFormToast("Enter your name on the Request or Tip tab first, then come back to boost!");
         return;
       }
-      if (paymentsEnabledForRoom && boostAmount < 1) {
-        alert("Minimum boost is $1");
+      if (paymentsEnabledForRoom && boostAmount < session.minimumTip) {
+        showFormToast(`Minimum boost is $${session.minimumTip}`);
         return;
       }
       title = boostingItem.title;
@@ -720,6 +754,9 @@ export default function PatronView({
         message: commentMessage,
         amount: checkoutPayload.amount,
         albumArt: checkoutPayload.trackArt,
+        sourceProvider: selectedTrack?.sourceProvider,
+        spotifyUri: selectedTrack?.spotifyUri,
+        spotifyUrl: selectedTrack?.spotifyUrl,
         client_request_id: checkoutPayload.clientRequestId,
         idempotency_key: checkoutPayload.idempotencyKey,
         expires_at: checkoutPayload.expires_at,
@@ -822,6 +859,15 @@ export default function PatronView({
       setPendingAction(null);
       setCheckoutPayload(null);
       localStorage.removeItem('sway.pendingAction');
+    } else if (typeof status === 'number') {
+      // A real backend/payment failure (e.g. a 5xx), not a network drop -- don't
+      // claim the action was "saved locally", tell the patron it actually failed.
+      setDegraded(true);
+      setPaymentConfirmationState(null);
+      setPendingActionMessage(backendMessage || 'Something went wrong processing that. Please try again.');
+      setPendingAction(null);
+      setCheckoutPayload(null);
+      localStorage.removeItem('sway.pendingAction');
     } else {
       setDegraded(true);
     }
@@ -843,7 +889,6 @@ export default function PatronView({
       setPendingAction(null);
       setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
       localStorage.removeItem('sway.pendingAction');
-      alert(PENDING_ACTION_EXPIRED_COPY);
       return;
     }
 
@@ -893,16 +938,15 @@ export default function PatronView({
       const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
       setDegraded(true);
       setPendingActionMessage(routeCopy);
-      alert(routeCopy);
       return;
     }
 
     if (!senderName) {
-      alert("Please enter a Patron Name!");
+      showFormToast("Please enter a Patron Name!");
       return;
     }
     if (tipAmount < session.minimumTip) {
-      alert(`Minimum tip is $${session.minimumTip}`);
+      showFormToast(`Minimum tip is $${session.minimumTip}`);
       return;
     }
 
@@ -932,22 +976,92 @@ export default function PatronView({
     .sort((a, b) => b.amount - a.amount);
 
   const newestModeratableRequest = requests.find((item) => !item.removed);
+  const isCrowdAutopilot = session.operatingMode === 'crowd_autopilot';
+  const requestScopeCopy = (() => {
+    if (session.searchScope === 'setlist') {
+      return {
+        label: 'Setlist song requests',
+        body: isCrowdAutopilot
+          ? "Pick from this room's setlist. Clean requests can move into the separate crowd-ranked request queue."
+          : "Pick from this room's setlist or send a manual request. The DJ decides what enters the separate request queue."
+      };
+    }
+    if (session.searchScope === 'catalog') {
+      return {
+        label: 'Open request lane',
+        body: isCrowdAutopilot
+          ? 'Search broadly or type a manual request. Clean requests can move straight into the crowd-ranked queue.'
+          : 'Search broadly or type a manual request. The DJ decides what is approved and played.'
+      };
+    }
+    return {
+      label: 'DJ library requests',
+      body: isCrowdAutopilot
+        ? "Search the DJ's synced library when available. Clean requests can move straight into the crowd-ranked queue."
+        : "Search the DJ's synced library when available, or send a manual request if the song is not listed. The DJ decides what is approved and played."
+    };
+  })();
+
+  const checkoutCopy = checkoutPayload
+    ? checkoutPayload.type === 'boost'
+      ? {
+          summaryLabel: 'BOOST SUMMARY',
+          itemLabel: session.paymentsEnabled === false ? 'Upvote:' : 'Boost:',
+          amountLabel: session.paymentsEnabled === false ? 'Upvote weight:' : 'Boost amount:',
+          totalLabel: session.paymentsEnabled === false ? 'Upvote total:' : 'Total boost charge:'
+        }
+      : checkoutPayload.isTip
+        ? {
+            summaryLabel: 'TIP SUMMARY',
+            itemLabel: 'Tip:',
+            amountLabel: 'Tip amount:',
+            totalLabel: 'Total tip charge:'
+          }
+        : {
+            summaryLabel: 'REQUEST SUMMARY',
+            itemLabel: 'Request:',
+            amountLabel: 'Request amount:',
+            totalLabel: 'Request total:'
+          }
+    : null;
 
   const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
     try {
       await action();
-      alert(successCopy);
+      showFormToast(successCopy);
       window.dispatchEvent(new Event('re-fetch-state'));
     } catch (error) {
       console.error(error);
-      alert('Safety action failed. Try again in a few moments.');
+      showFormToast('Safety action failed. Try again in a few moments.');
     }
   };
 
   return (
     <div id="patron_crowd_screen" className="max-w-xl mx-auto py-4 px-4 pb-20 space-y-6">
-      
-      {/* 1. Performer branding hero banner */}
+
+      <AnimatePresence>
+        {formToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className="fixed left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2"
+          >
+            <div className="flex items-start justify-between gap-3 rounded-2xl border border-fuchsia-500/30 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur">
+              <p className="text-xs font-bold text-white">{formToast}</p>
+              <button
+                type="button"
+                onClick={() => setFormToast(null)}
+                className="shrink-0 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 1. Performer live show snapshot */}
       <div className="bg-gradient-to-br from-fuchsia-950/40 via-slate-904 via-slate-900 to-slate-950 border border-white/10 rounded-2xl p-6 relative overflow-hidden select-none glow-fuchsia">
         <div className="absolute top-0 right-0 p-3">
           <span className="flex h-2.5 w-2.5">
@@ -959,9 +1073,8 @@ export default function PatronView({
           <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-fuchsia-600 to-blue-600 border border-white/10 flex items-center justify-center font-display text-white font-extrabold text-lg animate-pulse shadow-md">
             {session.talentName.charAt(0)}
           </div>
-          <h1 className="font-display text-lg font-black text-white tracking-wider uppercase">
-            SWAY ME: {session.talentName}
-          </h1>
+          <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300">Live show snapshot</p>
+          <h1 className="font-display text-lg font-black text-white tracking-wider uppercase">{session.talentName}</h1>
           {patronsWindowTimeLeft && (
             <div className="bg-cyan-950/40 border border-cyan-500/30 px-3 py-1 rounded-full flex items-center gap-1.5 text-[10px] font-mono text-cyan-400 select-none shadow shadow-cyan-500/15 animate-pulse-subtle">
               <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
@@ -973,24 +1086,40 @@ export default function PatronView({
                 ? 'Demo data only. No payment or moderation action will be sent.'
                 : session.paymentsEnabled === false
                   ? `Send a free request, upvote an approved queue item, or send a direct tip for ${session.talentName || 'this performer'}. Song requests and boosts are free for this event; tips always go through payment.`
-                  : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
+                  : isCrowdAutopilot
+                    ? `Request songs or actions, send a direct tip, or boost the crowd-ranked queue for ${session.talentName || 'this performer'}. Clean requests can move into up next automatically.`
+                    : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
-            <div className="grid w-full max-w-md grid-cols-3 gap-2 pt-2">
-              <div className="rounded-xl border border-fuchsia-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-fuchsia-300">Request</p>
-                <p className="mt-1 text-[10px] text-slate-400">
-                  {session.paymentsEnabled === false ? 'Send a free live request' : 'Start a paid live request'}
-                </p>
-              </div>
-              <div className="rounded-xl border border-emerald-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Tip</p>
-                <p className="mt-1 text-[10px] text-slate-400">Send direct support</p>
-              </div>
-              <div className="rounded-xl border border-cyan-500/20 bg-slate-950/70 px-3 py-2 text-center">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">
-                  {session.paymentsEnabled === false ? 'Upvote' : 'Boost'}
-                </p>
-                <p className="mt-1 text-[10px] text-slate-400">Push an approved item up</p>
+            <div className="grid w-full max-w-md grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('tip');
+                  setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip });
+                }}
+                className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99]"
+              >
+                <span className="inline-flex items-center justify-center gap-2"><Coins className="h-4 w-4" /> Tip</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('request');
+                  setSelectedTrack(null);
+                }}
+                className="min-h-14 rounded-xl border border-fuchsia-500/40 bg-fuchsia-600 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-white shadow-lg transition-all active:scale-[0.99]"
+              >
+                <span className="inline-flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" /> Sway</span>
+              </button>
+            </div>
+            <div className="w-full max-w-md rounded-xl border border-cyan-500/20 bg-slate-950/70 px-4 py-3 text-left">
+              <div className="flex items-start gap-2">
+                <Sliders className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
+                <div>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">Request scope</p>
+                  <p className="mt-1 text-xs font-bold text-white">{requestScopeCopy.label}</p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{requestScopeCopy.body}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -999,20 +1128,20 @@ export default function PatronView({
       {/* Room Layer: Now Playing / Up Next + honest operating mode */}
       {(() => {
         const visible = requests.filter(r => !r.hidden && !r.removed && !r.shadowBanned);
-        const nowPlaying = visible
-          .filter(r => r.status === 'fulfilled' && r.type !== 'tip')
-          .slice()
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+        const nowPlaying = nowPlayingRequest;
         const upNext = visible
           .filter(r => r.status === 'approved')
           .slice()
           .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0))
           .slice(0, 3);
         const isOpenCall = session.operatingMode === 'open_call';
-        const modeLabel = isOpenCall ? 'Open Call' : 'Manual';
-        const modeHint = isOpenCall
-          ? 'No catalog — send an open request'
-          : 'Host is driving the room live';
+        const isAutopilot = session.operatingMode === 'crowd_autopilot';
+        const modeLabel = isAutopilot ? 'Crowd Autopilot' : isOpenCall ? 'Open Call' : 'Manual';
+        const modeHint = isAutopilot
+          ? 'Crowd-ranked requests can move straight to up next'
+          : isOpenCall
+            ? 'No catalog - send an open request'
+            : 'Host is driving the room live';
         return (
           <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
@@ -1028,15 +1157,25 @@ export default function PatronView({
             </div>
 
             {nowPlaying ? (
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
-                  <Music className="w-5 h-5 text-cyan-300" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-white truncate">{nowPlaying.title}</div>
-                  {nowPlaying.subtitle && (
-                    <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  {nowPlaying.albumArt ? (
+                    <img
+                      src={nowPlaying.albumArt}
+                      alt=""
+                      className="w-11 h-11 rounded-xl border border-white/10 object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
+                      <Music className="w-5 h-5 text-cyan-300" />
+                    </div>
                   )}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-white truncate">{nowPlaying.title}</div>
+                    {nowPlaying.subtitle && (
+                      <div className="text-[11px] text-slate-400 truncate">{nowPlaying.subtitle}</div>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1073,18 +1212,19 @@ export default function PatronView({
         </div>
       )}
 
-      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
-        <div>
+      {activeTab !== 'home' && (
+      <details className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3">
+        <summary className="cursor-pointer list-none">
           <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Safety Controls</h3>
           <p className="text-[11px] text-slate-400 mt-1">Use these controls to report a request, block future interactions, contact support, or start a data deletion request.</p>
-        </div>
+        </summary>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => {
               if (!newestModeratableRequest) {
-                alert('No request is available to report yet.');
+                showFormToast('No request is available to report yet.');
                 return;
               }
               runSafetyAction(
@@ -1124,10 +1264,11 @@ export default function PatronView({
             Data Deletion Request
           </button>
         </div>
-      </div>
+      </details>
+      )}
 
       {/* 2. Primary Tabs Selector */}
-      {session.status === 'active' && (
+      {session.status === 'active' && activeTab !== 'home' && (
         <div className="flex bg-slate-900 border border-white/10 p-1.5 rounded-xl">
           <button
             onClick={() => { setActiveTab('request'); setSelectedTrack(null); }}
@@ -1163,16 +1304,6 @@ export default function PatronView({
             <Activity className="w-4 h-4" /> Boost Queue
           </button>
 
-          <button
-            onClick={() => { setActiveTab('discover'); setSelectedDirectoryPerformer(null); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'discover'
-                ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-4 h-4" /> Browse Performers
-          </button>
         </div>
       )}
 
@@ -1192,39 +1323,21 @@ export default function PatronView({
         </div>
       )}
 
-      <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-xs font-bold tracking-wider uppercase text-slate-200">Request status</h3>
-          <span className="text-[10px] font-mono text-fuchsia-300 uppercase tracking-widest">Current: {activePatronStatus}</span>
+      {latestRequestStatusMessage && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-xs font-bold ${
+            latestRequestStatusMessage.tone === 'fuchsia'
+              ? 'border-fuchsia-500/30 bg-fuchsia-950/20 text-fuchsia-200'
+              : latestRequestStatusMessage.tone === 'cyan'
+                ? 'border-cyan-500/30 bg-cyan-950/20 text-cyan-100'
+                : latestRequestStatusMessage.tone === 'rose'
+                  ? 'border-rose-500/30 bg-rose-950/20 text-rose-200'
+                  : 'border-white/10 bg-slate-900/70 text-slate-300'
+          }`}
+        >
+          {latestRequestStatusMessage.text}
         </div>
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
-          {['Syncing', 'Pending', 'Approved', 'Paused', 'Ended'].map((status) => (
-            <div
-              key={status}
-              className={`rounded-lg border px-2 py-2 text-center font-bold ${activePatronStatus === status ? 'border-fuchsia-400 bg-fuchsia-500/15 text-fuchsia-200' : 'border-white/10 bg-slate-950 text-slate-400'}`}
-            >
-              {status}
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 border-t border-white/10 pt-3">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Moderation state</h4>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-300">{moderationStatusLabel}</span>
-          </div>
-          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px]">
-            {['pending_review', 'approved', 'declined', 'hidden', 'blocked', 'played/completed'].map((state) => (
-              <div
-                key={state}
-                className={`rounded-lg border px-2 py-2 text-center font-bold ${moderationStatusLabel === state ? 'border-cyan-400 bg-cyan-500/15 text-cyan-100' : 'border-white/10 bg-slate-950 text-slate-500'}`}
-              >
-                {state}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div id="patron_action_panel">
         
@@ -1255,7 +1368,7 @@ export default function PatronView({
                   <div className="text-slate-400 space-y-1 font-sans text-xs">
                     <p>• Send a <strong className="text-emerald-400">Direct Cash Tip</strong> to show love</p>
                     <p>• <strong className="text-cyan-400">Boost existing requests</strong> in the live queue to push them up</p>
-                    <p>• Discover other live performers near you</p>
+                    <p>• Watch the live queue and try again when requests reopen</p>
                   </div>
                 </div>
 
@@ -1344,18 +1457,19 @@ export default function PatronView({
                 </form>
 
                 {/* Query Results */}
-                {selectedTrack && (
+                {selectedTrack && !searchQuery.trim() && (
                   <motion.div 
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="p-4 bg-fuchsia-500/5 border border-fuchsia-500/25 rounded-xl flex items-center justify-between gap-3 glow-fuchsia animate-fade-in"
                   >
                     <div className="flex items-center gap-3">
-                      <img 
-                        src={selectedTrack.albumArt} 
-                        alt="track_art" 
+                      <img
+                        src={selectedTrack.albumArt}
+                        alt={`${selectedTrack.title} album art`}
                         referrerPolicy="no-referrer"
-                        className="w-12 h-12 rounded bg-slate-800 object-cover border border-white/10" 
+                        onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                        className="w-12 h-12 rounded bg-slate-800 object-cover border border-white/10"
                       />
                       <div>
                         <div className="text-sm font-bold text-white">{selectedTrack.title}</div>
@@ -1372,8 +1486,14 @@ export default function PatronView({
                     </button>
                   </motion.div>
                 )}
-                {!selectedTrack && (
+                {(!selectedTrack || searchQuery.trim()) && (
                   <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {searchError && (
+                      <p className="text-xs text-rose-300 font-sans px-1">Search is temporarily unavailable. Try again.</p>
+                    )}
+                    {!searchError && !isSearching && searchQuery.trim() && searchResults.length === 0 && (
+                      <p className="text-xs text-slate-400 font-sans px-1">No matches found.</p>
+                    )}
                     {searchResults.map((song) => (
                       <button
                         key={song.id}
@@ -1381,11 +1501,12 @@ export default function PatronView({
                         onClick={() => handleSelectTrack(song)}
                         className="w-full p-2.5 bg-slate-900/40 hover:bg-slate-900 border border-white/5 hover:border-white/10 rounded-lg flex items-center gap-3 text-left transition-colors cursor-pointer"
                       >
-                        <img 
-                          src={song.albumArt} 
-                          alt="art" 
+                        <img
+                          src={song.albumArt}
+                          alt={`${song.title} album art`}
                           referrerPolicy="no-referrer"
-                          className="w-10 h-10 rounded shrink-0 object-cover border border-white/5" 
+                          onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                          className="w-10 h-10 rounded shrink-0 object-cover border border-white/5"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-white truncate">{song.title}</div>
@@ -1674,11 +1795,12 @@ export default function PatronView({
                           </div>
 
                           {req.albumArt ? (
-                            <img 
-                              src={req.albumArt} 
-                              alt="art" 
+                            <img
+                              src={req.albumArt}
+                              alt={`${req.title} album art`}
                               referrerPolicy="no-referrer"
-                              className="w-10 h-10 rounded shrink-0 object-cover border border-white/15 shadow-sm" 
+                              onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
+                              className="w-10 h-10 rounded shrink-0 object-cover border border-white/15 shadow-sm"
                             />
                           ) : (
                             <div className="w-10 h-10 rounded bg-slate-800 flex items-center justify-center font-bold text-xs shrink-0 select-none text-fuchsia-400">
@@ -1715,7 +1837,7 @@ export default function PatronView({
                                 onClick={() => {
                                   if (isSubmitLocked) return;
                                   setBoostingItem(req);
-                                  setBoostAmount(10);
+                                  setBoostAmount(Math.max(session.minimumTip, 10));
                                   initiateCheckout('boost');
                                 }}
                                 disabled={isSubmitLocked}
@@ -1725,7 +1847,7 @@ export default function PatronView({
                                     : 'bg-slate-800 border border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                                 } disabled:cursor-not-allowed disabled:opacity-60`}
                               >
-                                Boost +$10
+                                Boost
                               </button>
                             )
                           )}
@@ -1804,9 +1926,10 @@ export default function PatronView({
                         <div className="flex items-center gap-3.5 min-w-0">
                           <div className="relative">
                             <img
-                              src={p.avatarUrl}
+                              src={p.avatarUrl || REQUEST_ART_PLACEHOLDER}
                               alt={p.name}
                               referrerPolicy="no-referrer"
+                              onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
                               className={`w-12 h-12 rounded-xl object-cover shrink-0 select-none ${
                                 p.isFeatured ? 'border-2 border-amber-400 shadow shadow-amber-500/10' : 'border border-white/10'
                               }`}
@@ -1932,18 +2055,17 @@ export default function PatronView({
                             onClick={() => {
                               if (isSubmitLocked) return;
                               if (!senderName) {
-                                alert("Please enter your name!");
+                                showFormToast("Please enter your name!");
                                 return;
                               }
                               if (tipAmount < p.minimumTip) {
-                                alert(`Minimum tip is $${p.minimumTip}`);
+                                showFormToast(`Minimum tip is $${p.minimumTip}`);
                                 return;
                               }
                               if (!gigId) {
                                 const routeCopy = 'This QR route is missing a valid gig ID. Ask the performer for the latest room link.';
                                 setDegraded(true);
                                 setPendingActionMessage(routeCopy);
-                                alert(routeCopy);
                                 return;
                               }
                               // Open confirmation
@@ -1995,7 +2117,7 @@ export default function PatronView({
                   </div>
                   <h3 className="font-sans text-lg font-bold text-white">Request Submitted</h3>
                   <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    Your ${checkoutPayload.amount}.00 action is Pending with the performer. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                    Sent. Status: Pending. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                   </p>
                 </div>
               ) : (
@@ -2004,7 +2126,7 @@ export default function PatronView({
                   
                   {/* Title and meta */}
                   <div className="space-y-1">
-                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
+                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">{checkoutCopy?.summaryLabel ?? 'REQUEST SUMMARY'}</span>
                     <h3 className="font-sans text-base font-bold text-white">
                       {previewMode
                         ? 'Demo Only'
@@ -2030,12 +2152,12 @@ export default function PatronView({
                   {checkoutPayload.isTip || session.paymentsEnabled !== false ? (
                     <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
                       <div className="flex justify-between text-xs font-semibold">
-                        <span className="text-slate-550 text-slate-500">Request:</span>
+                        <span className="text-slate-550 text-slate-500">{checkoutCopy?.itemLabel ?? 'Request:'}</span>
                         <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
                       </div>
 
                       <div className="flex justify-between text-xs">
-                        <span className="text-slate-500 mt-0.5">Tip:</span>
+                        <span className="text-slate-500 mt-0.5">{checkoutCopy?.amountLabel ?? 'Request amount:'}</span>
                         <span className="text-white">${checkoutPayload.amount}.00</span>
                       </div>
 
@@ -2047,7 +2169,7 @@ export default function PatronView({
                       </div>
 
                       <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                        <span className="text-slate-400">Request Total:</span>
+                        <span className="text-slate-400">{checkoutCopy?.totalLabel ?? 'Request total:'}</span>
                         <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                       </div>
                     </div>
@@ -2083,7 +2205,7 @@ export default function PatronView({
                           <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">BOOST STACK AMOUNT</label>
                           <input
                             type="number"
-                            min={1}
+                            min={session.minimumTip}
                             max={50}
                             value={boostAmount}
                             onChange={(e) => setBoostAmount(Number(e.target.value))}

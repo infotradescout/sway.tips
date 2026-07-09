@@ -27,6 +27,15 @@ if (!publicHtml.includes('href="/faq"')) {
   failures.push('Public landing must include a visible /faq link.');
 }
 
+// Scope the forbidden-link scan to the FAQ page template itself, not the
+// whole server.ts file -- unrelated features (like control-bridge search
+// deep links) may legitimately reference these hosts elsewhere.
+const faqTemplateStart = server.indexOf("const faqPageHtml = renderStaticDocument(");
+const faqTemplateEnd = faqTemplateStart === -1 ? -1 : server.indexOf('\n);', faqTemplateStart);
+const faqTemplate = faqTemplateStart === -1 || faqTemplateEnd === -1
+  ? server
+  : server.slice(faqTemplateStart, faqTemplateEnd);
+
 for (const forbidden of [
   'instagram.com/',
   'tiktok.com/',
@@ -36,7 +45,7 @@ for (const forbidden of [
   'youtube.com/',
   'discord.gg/'
 ]) {
-  if (server.includes(forbidden) || publicHtml.includes(forbidden)) {
+  if (faqTemplate.includes(forbidden) || publicHtml.includes(forbidden)) {
     failures.push(`FAQ/public surface must not invent unapproved social link: ${forbidden}`);
   }
 }

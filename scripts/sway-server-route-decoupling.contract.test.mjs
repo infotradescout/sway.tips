@@ -53,8 +53,15 @@ if (/res\.sendFile\(path\.join\(distPath,\s*['"]index\.html['"]\)\)/.test(server
   failures.push('Production server still serves one universal index.html fallback.');
 }
 
-if (!/res\.sendFile\(path\.join\(distPath,\s*shellHtmlRelativePath\(shell\)\)\)/.test(server)) {
+if (
+  !/res\.sendFile\(path\.join\(distPath,\s*shellHtmlRelativePath\(shell\)\)\)/.test(server) &&
+  !/readFileSync\(htmlPath,\s*['"]utf8['"]\)/.test(server)
+) {
   failures.push('Production server must serve the resolved role-specific shell HTML.');
+}
+
+if (server.includes('injectShareMetadata') && !server.includes('const htmlPath = path.join(distPath, shellHtmlRelativePath(shell))')) {
+  failures.push('Production share metadata injection must still read from the resolved role-specific shell HTML.');
 }
 
 if (failures.length) {

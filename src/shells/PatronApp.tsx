@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flame, Smartphone, Tv } from 'lucide-react';
+import { Flame, Smartphone } from 'lucide-react';
 import { motion } from 'motion/react';
 import AppBackdrop from '../components/AppBackdrop';
 import PatronView from '../components/PatronView';
@@ -31,26 +31,80 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function PatronNoSessionRecovery({
-  onReturnHomeClick
+  onReturnHomeClick,
+  performerHandle
 }: {
   onReturnHomeClick: () => void;
+  performerHandle?: string;
 }) {
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [performerProfile, setPerformerProfile] = useState<{
+    displayName: string;
+    handle: string | null;
+    headline: string | null;
+    city: string | null;
+    socialLinks: Record<string, string | null>;
+    activeRoom: {
+      routePath: string;
+      requestCount: number;
+    } | null;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!performerHandle) {
+      setPerformerProfile(null);
+      return;
+    }
+
+    const loadPerformerProfile = async () => {
+      try {
+        const response = await fetch(`/api/public/performer/${encodeURIComponent(performerHandle)}`);
+        if (!response.ok) {
+          if (!cancelled) setPerformerProfile(null);
+          return;
+        }
+        const data = await response.json().catch(() => null);
+        if (cancelled || !data?.performer) return;
+        setPerformerProfile({
+          displayName: data.performer.displayName || 'Performer',
+          handle: data.performer.handle || null,
+          headline: data.performer.headline || data.performer.bio || null,
+          city: data.performer.city || null,
+          socialLinks: typeof data.performer.socialLinks === 'object' && data.performer.socialLinks
+            ? data.performer.socialLinks
+            : {},
+          activeRoom: data.activeRoom
+            ? {
+                routePath: data.activeRoom.routePath,
+                requestCount: Number(data.activeRoom.requestCount) || 0
+              }
+            : null
+        });
+      } catch {
+        if (!cancelled) setPerformerProfile(null);
+      }
+    };
+
+    void loadPerformerProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [performerHandle]);
 
   return (
-    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center overflow-hidden">
+    <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center justify-center overflow-hidden px-4 py-16">
       <AppBackdrop />
 
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="relative mx-auto grid w-full max-w-sm gap-3 px-4 py-14"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.72, delay: 0.72 }}
+        className="relative mx-auto grid w-full max-w-xl gap-3"
       >
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
-          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-transform hover:scale-[1.02] hover:from-fuchsia-500 hover:to-fuchsia-400"
+          className="glow-fuchsia inline-flex min-h-14 items-center justify-center rounded-xl bg-gradient-to-r from-fuchsia-600 to-fuchsia-500 px-5 py-3 text-base font-black uppercase tracking-wide text-white transition-colors hover:from-fuchsia-500 hover:to-fuchsia-400"
         >
           Scan
         </button>
@@ -73,6 +127,46 @@ function PatronNoSessionRecovery({
         >
           sway to play
         </a>
+
+        {performerProfile ? (
+          <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-slate-950/70 p-4 backdrop-blur">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Performer profile</p>
+            <p className="mt-2 text-sm font-bold text-white">{performerProfile.displayName}</p>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {performerProfile.handle ? `@${performerProfile.handle}` : '@performer'}
+              {performerProfile.city ? ` - ${performerProfile.city}` : ''}
+            </p>
+            <p className="mt-2 text-xs text-slate-300">
+              {performerProfile.headline || 'Follow this performer and join their live room when they open requests.'}
+            </p>
+            {performerProfile.activeRoom ? (
+              <a
+                href={performerProfile.activeRoom.routePath}
+                className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-xs font-black text-slate-950 transition-colors hover:bg-cyan-400"
+              >
+                Join live room ({performerProfile.activeRoom.requestCount} requests)
+              </a>
+            ) : (
+              <p className="mt-3 text-[11px] text-slate-500">No active room right now.</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(performerProfile.socialLinks)
+                .filter(([, url]) => typeof url === 'string' && url.length > 0)
+                .slice(0, 4)
+                .map(([label, url]) => (
+                  <a
+                    key={label}
+                    href={url as string}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border border-white/10 bg-slate-900 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-200"
+                  >
+                    {label}
+                  </a>
+                ))}
+            </div>
+          </div>
+        ) : null}
       </motion.div>
 
       {scannerOpen ? <QrScanner onClose={() => setScannerOpen(false)} /> : null}
@@ -160,7 +254,7 @@ export default function PatronApp() {
     reason: string
   ) => {
     if (demoMode) return rejectDemoMutation();
-    return postJson('/api/moderation/block', { scope, value, reason });
+    return postJson('/api/moderation/patron-block', { scope, value, reason });
   };
 
   const handleSupportContact = async () => {
@@ -190,7 +284,6 @@ export default function PatronApp() {
 
   const { session, requests } = bState;
   const performers = bState.performers || [];
-  const overlayGigId = routeGigId || '';
   const hasPatronRouteContext = route.name === 'performer' || Boolean(routeGigId);
   const hasSessionContext =
     session.status !== 'inactive' ||
@@ -266,18 +359,13 @@ export default function PatronApp() {
                 {route.name === 'performer' ? <Smartphone className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
               </div>
               <div>
-                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Patron</span>
+                <span className="font-display text-xs font-black uppercase tracking-widest text-white">Live Room</span>
                 <p className="text-[9px] text-slate-400">
                   {patronTopbarSubtitle}
                 </p>
               </div>
             </div>
             <DemoModeBanner compact />
-            {routeGigId ? (
-              <a className="rounded-lg border border-white/10 p-2 text-slate-300 hover:text-white" href={`/overlay/${overlayGigId}`} title="Open overlay">
-                <Tv className="h-4 w-4" />
-              </a>
-            ) : null}
           </div>
         </div>
       )}
@@ -287,13 +375,16 @@ export default function PatronApp() {
           {shouldShowEndedRoomRecovery ? (
             <EndedLiveRoomRecovery />
           ) : shouldShowNoSessionRecovery ? (
-            <PatronNoSessionRecovery onReturnHomeClick={handleReturnHomeClick} />
+            <PatronNoSessionRecovery
+              onReturnHomeClick={handleReturnHomeClick}
+              performerHandle={route.name === 'performer' ? route.performerHandle : undefined}
+            />
           ) : (
             <SplitViewShell
-              title="Patron App"
+              title="Live room"
               eyebrow="Live Room"
-              primaryLabel="Now Playing, Search, Fast Actions, Queue, and History"
-              secondaryLabel="Selected gig inspector"
+              primaryLabel="Request, Tip, Boost, and see status"
+              secondaryLabel="Room status"
               isEmpty={requests.length === 0 && performers.length === 0}
               emptyState={
                 <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
@@ -318,7 +409,7 @@ export default function PatronApp() {
                 />
               }
               secondary={
-                <div className="space-y-4 text-sm">
+                <div className="hidden space-y-4 text-sm lg:block">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
                     <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>

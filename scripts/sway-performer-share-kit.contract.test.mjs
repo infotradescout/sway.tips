@@ -25,14 +25,14 @@ if (performerShareKit.includes('/room/')) {
 }
 
 for (const term of [
-  'No active live session. Start a session to generate your room link and QR code.',
+  'No active live session. Create a room to generate your room link and QR code.',
   'Patrons can scan this QR code or open this room link to land directly in your live Request, Tip, and Boost room.',
   'This print-ready room link and QR sign stay tied to the selected live room.',
   'Copy room link',
   'Copied',
   'Download QR sign',
   'Print QR sign',
-  'QR code appears here after you start a live room.',
+  'QR code appears here after you create a room.',
   'data-share-kit-room-qr="true"',
   'bgColor="#ffffff"',
   'fgColor="#000000"',

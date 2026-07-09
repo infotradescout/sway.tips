@@ -33,6 +33,13 @@ export function hashPerformerSessionToken(token: string) {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
+function readBearerTokenHeader(req: Request) {
+  const header = req.headers.authorization;
+  if (typeof header !== 'string') return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() || null : null;
+}
+
 function readCookieHeaderValue(req: Request, cookieName: string) {
   const cookieHeader = req.headers.cookie;
   if (typeof cookieHeader !== 'string' || !cookieHeader.trim()) {
@@ -82,16 +89,18 @@ export function createPerformerSessionStore({
     hasDurableStore: Boolean(db),
 
     readSessionTokenFromRequest(req: Request) {
-      return readCookieHeaderValue(req, cookieName);
+      return readCookieHeaderValue(req, cookieName) ?? readBearerTokenHeader(req);
     },
 
     async issueSession({
       actorUserId,
       issuedBy,
+      ttlHours,
       executor
     }: {
       actorUserId: string;
       issuedBy?: string | null;
+      ttlHours?: number | null;
       executor?: DbExecutor | null;
     }): Promise<IssuedPerformerSession> {
       const writer = executorOrDb(executor);
@@ -102,7 +111,10 @@ export function createPerformerSessionStore({
       const token = randomBytes(32).toString('base64url');
       const tokenHash = hashPerformerSessionToken(token);
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + sessionTtlHours * 60 * 60 * 1000);
+      const effectiveTtlHours = typeof ttlHours === 'number' && Number.isFinite(ttlHours) && ttlHours > 0
+        ? Math.min(Math.floor(ttlHours), sessionTtlHours)
+        : sessionTtlHours;
+      const expiresAt = new Date(now.getTime() + effectiveTtlHours * 60 * 60 * 1000);
 
       const [inserted] = await writer
         .insert(performerSessions)
