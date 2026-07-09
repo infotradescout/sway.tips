@@ -8,6 +8,8 @@ Performer starts live room -> shares QR/link -> patron sends Request, Tip, or Bo
 
 This lane is docs and contract governance only. It does not change routes, schema, payment behavior, request/tip/boost runtime behavior, persistence, role/access behavior, overlay behavior, AI/moderation behavior, or App Store readiness.
 
+The required evidence package for a real pilot or manual QA run is `docs/SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md`. The readiness checklist defines the hold criteria; the QA packet records proof, known failures, and the hold/go decision after the operator actually runs the pilot path.
+
 ## Pilot Scope
 
 The pilot proves the live room money loop, not future platform expansion.
@@ -145,6 +147,7 @@ The operator records:
 - Pass/fail per checklist section.
 - Screenshots or short video when possible.
 - Known limitations.
+- Completed QA packet with hold/go decision.
 
 ## 10. Hold Criteria Before PR #44 Resumes
 
