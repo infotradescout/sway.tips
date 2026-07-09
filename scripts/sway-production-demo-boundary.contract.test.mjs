@@ -51,9 +51,9 @@ for (const required of [
   requireIncludes(publicShell, required, `Public landing missing production-safe route target: ${required}`);
 }
 
-for (const forbiddenPublicOverlay of ['Open overlay', '/overlay/live']) {
-  if (publicShell.includes(forbiddenPublicOverlay)) {
-    failures.push(`Public landing must not expose overlay entry to unauthenticated patrons: ${forbiddenPublicOverlay}`);
+for (const forbiddenPublicOverlayEntry of ['/overlay/live', 'Open overlay']) {
+  if (publicShell.includes(forbiddenPublicOverlayEntry)) {
+    failures.push(`Public landing must not expose overlay before performer sign-in: ${forbiddenPublicOverlayEntry}`);
   }
 }
 

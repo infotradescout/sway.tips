@@ -24,7 +24,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-off-public.png',
-        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools', 'Open overlay'],
+        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools'],
         absentText: demoOffForbiddenText
       },
       {
@@ -64,7 +64,7 @@ const scenarios = [
         path: overlayPath,
         host: 'app.sway.tips',
         screenshot: 'demo-off-overlay.png',
-        expectedText: ['SWAY LIVE ROOM', 'Waiting for gig requests'],
+        expectedText: ['Session needed', 'Sign in to continue'],
         absentText: [...demoOffForbiddenText, 'Midnight City']
       }
     ]
@@ -78,7 +78,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-on-public.png',
-        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools', 'Open overlay'],
+        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools'],
         absentText: []
       },
       {
@@ -118,8 +118,8 @@ const scenarios = [
         path: overlayPath,
         host: 'app.sway.tips',
         screenshot: 'demo-on-overlay.png',
-        expectedText: ['SWAY LIVE ROOM', 'Demo data', 'Midnight City'],
-        absentText: ['Waiting for gig requests']
+        expectedText: ['Session needed', 'Sign in to continue'],
+        absentText: ['Waiting for gig requests', 'Midnight City']
       }
     ]
   }

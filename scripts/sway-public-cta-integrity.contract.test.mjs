@@ -12,7 +12,6 @@ const allowedHrefPatterns = [
   /^\/talent\/signup$/,
   /^\/talent\/gigs$/,
   /^\/admin$/,
-  /^\/overlay\/live$/,
   /^\/privacy$/,
   /^\/terms$/,
   /^\/support$/,
@@ -72,6 +71,12 @@ for (const requiredCta of [
 for (const forbiddenCopy of ['Audience: join a live room', 'Run the room.', 'Move the queue.', 'Performer sign in']) {
   if (publicHtml.includes(forbiddenCopy)) {
     failures.push(`Public landing must not restore removed marketing copy: ${forbiddenCopy}`);
+  }
+}
+
+for (const forbiddenPublicOverlayEntry of ['href="/overlay/live"', 'Open overlay']) {
+  if (publicHtml.includes(forbiddenPublicOverlayEntry)) {
+    failures.push(`Public landing must not expose overlay before performer sign-in: ${forbiddenPublicOverlayEntry}`);
   }
 }
 

@@ -18,7 +18,7 @@ for (const term of [
   'requireAdminAccess',
   'requireAdminOrSupportAccess',
   'allowPublicPatronAccess',
-  'allowPublicOverlayAccess',
+  'requireOverlayAccess',
   'requireDevSandboxAccess'
 ]) {
   if (!access.includes(term)) failures.push(`Access guard missing required function: ${term}`);
@@ -41,7 +41,7 @@ for (const term of [
   "shell === 'admin'",
   'accessControl.requireAdminOrSupportAccess',
   "shell === 'overlay'",
-  'accessControl.allowPublicOverlayAccess',
+  'accessControl.requireOverlayAccess',
   "shell === 'dev-sandbox'",
   'accessControl.requireDevSandboxAccess',
   'accessControl.allowPublicPatronAccess'
@@ -67,8 +67,12 @@ if (!/async\s+allowPublicPatronAccess[\s\S]{0,160}allowed:\s*true/.test(access))
   failures.push('Patron QR route guard must remain explicitly public.');
 }
 
-if (!/async\s+allowPublicOverlayAccess[\s\S]{0,160}allowed:\s*true/.test(access)) {
-  failures.push('Overlay route guard must be explicitly public or token-gated by rule.');
+if (access.includes('allowPublicOverlayAccess')) {
+  failures.push('Overlay route guard must not be public.');
+}
+
+if (!/async\s+requireOverlayAccess[\s\S]{0,520}if \(await hasTalentRole\(db, actor\.actorId\)\)[\s\S]{0,180}allowed:\s*true/.test(access)) {
+  failures.push('Overlay route guard must require a persisted performer session before serving overlay HTML.');
 }
 
 const forbiddenAccessPatterns = [
