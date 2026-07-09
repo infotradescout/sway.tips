@@ -21,6 +21,9 @@ This template does not claim that a pilot has passed. It does not automate payme
 - Room URL:
 - Room/gig ID:
 - Performer account:
+- Request mode: Paid / Free requests
+- Room minimum:
+- Boost mode observed: Paid room minimum / Free upvote weight 1
 - Device/browser notes:
 
 ## Required Evidence
@@ -69,6 +72,8 @@ Each item must include pass/fail, evidence link or screenshot/video reference, a
 
 - Evidence:
 - Payment/provider mode:
+- Paid boost amount respects room minimum:
+- Free request mode boost is free upvote weight 1:
 - Pass/fail:
 - Notes:
 

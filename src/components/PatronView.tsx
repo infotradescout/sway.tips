@@ -1002,6 +1002,29 @@ export default function PatronView({
     };
   })();
 
+  const checkoutCopy = checkoutPayload
+    ? checkoutPayload.type === 'boost'
+      ? {
+          summaryLabel: 'BOOST SUMMARY',
+          itemLabel: session.paymentsEnabled === false ? 'Upvote:' : 'Boost:',
+          amountLabel: session.paymentsEnabled === false ? 'Upvote weight:' : 'Boost amount:',
+          totalLabel: session.paymentsEnabled === false ? 'Upvote total:' : 'Total boost charge:'
+        }
+      : checkoutPayload.isTip
+        ? {
+            summaryLabel: 'TIP SUMMARY',
+            itemLabel: 'Tip:',
+            amountLabel: 'Tip amount:',
+            totalLabel: 'Total tip charge:'
+          }
+        : {
+            summaryLabel: 'REQUEST SUMMARY',
+            itemLabel: 'Request:',
+            amountLabel: 'Request amount:',
+            totalLabel: 'Request total:'
+          }
+    : null;
+
   const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
     try {
       await action();
@@ -2103,7 +2126,7 @@ export default function PatronView({
                   
                   {/* Title and meta */}
                   <div className="space-y-1">
-                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">REQUEST SUMMARY</span>
+                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">{checkoutCopy?.summaryLabel ?? 'REQUEST SUMMARY'}</span>
                     <h3 className="font-sans text-base font-bold text-white">
                       {previewMode
                         ? 'Demo Only'
@@ -2129,12 +2152,12 @@ export default function PatronView({
                   {checkoutPayload.isTip || session.paymentsEnabled !== false ? (
                     <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-2.5 text-left font-mono">
                       <div className="flex justify-between text-xs font-semibold">
-                        <span className="text-slate-550 text-slate-500">Request:</span>
+                        <span className="text-slate-550 text-slate-500">{checkoutCopy?.itemLabel ?? 'Request:'}</span>
                         <span className="text-white font-sans max-w-[150px] truncate">{checkoutPayload.title}</span>
                       </div>
 
                       <div className="flex justify-between text-xs">
-                        <span className="text-slate-500 mt-0.5">Tip:</span>
+                        <span className="text-slate-500 mt-0.5">{checkoutCopy?.amountLabel ?? 'Request amount:'}</span>
                         <span className="text-white">${checkoutPayload.amount}.00</span>
                       </div>
 
@@ -2146,7 +2169,7 @@ export default function PatronView({
                       </div>
 
                       <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                        <span className="text-slate-400">Request Total:</span>
+                        <span className="text-slate-400">{checkoutCopy?.totalLabel ?? 'Request total:'}</span>
                         <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                       </div>
                     </div>

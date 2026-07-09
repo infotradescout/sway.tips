@@ -20,6 +20,14 @@ Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Den
 
 Sway lets a performer set room settings, create a room, show a QR/link, collect paid requests, tips, and boosts, run the queue, and close the night with clear earnings.
 
+## Room Money Mode
+
+- Paid request rooms use the room minimum for paid requests and paid boosts; the current floor is $5.
+- Free request rooms make requests free and convert boosts into free upvotes with fixed weight 1.
+- Direct tips remain paid even when request mode is free.
+- Room creation captures the selected `paymentsEnabled` mode.
+- Stripe/payment provider integration remains separate from room-entry UX and money-mode copy changes unless explicitly scoped.
+
 ## Core Users
 
 - Patrons scan a QR code, submit a request or tip, and boost live ladder items.
@@ -60,7 +68,7 @@ Sway lets a performer set room settings, create a room, show a QR/link, collect 
 
 ## Current Product State
 
-The shipped baseline centers the performer and patron live-night loop: start room, show QR/link, request/tip/boost, performer queue action, patron status, earnings, end room, and recap.
+The shipped baseline centers the performer and patron live-night loop: room settings, create room, show QR/link, request/tip/boost, performer queue action, patron status, earnings, end room, and recap.
 
 DB-backed local QA proved the deeper live-night flow. Production smoke verified the deployed build marker and non-mutating recovery surfaces. Do not describe that smoke as a real production room mutation or a Stripe retest.
 

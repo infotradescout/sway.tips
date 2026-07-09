@@ -6,7 +6,7 @@ This checklist verifies whether Sway is ready for a real live-night pilot around
 
 Performer sets room settings -> creates room -> shares QR/link -> patron sends Request, Tip, or Boost -> performer manages queue/status -> night closes with clear operational proof.
 
-This lane is docs and contract governance only. It does not change routes, schema, payment behavior, request/tip/boost runtime behavior, persistence, role/access behavior, overlay behavior, AI/moderation behavior, or App Store readiness.
+This checklist is the governance target for live-pilot readiness. A docs-only readiness lane must not change routes, schema, payment behavior, request/tip/boost runtime behavior, persistence, role/access behavior, overlay behavior, AI/moderation behavior, or App Store readiness. A product-correction lane that changes those behaviors must say so explicitly and must keep this checklist truthful.
 
 The required evidence package for a real pilot or manual QA run is `docs/SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md`. The readiness checklist defines the hold criteria; the QA packet records proof, known failures, and the hold/go decision after the operator actually runs the pilot path.
 
@@ -56,11 +56,15 @@ Hold if:
 - Tip is visible as a primary action.
 - Boost is visible when a boostable queue item exists.
 - Patron can submit without account friction unless the payment provider requires confirmation.
-- Payment behavior unchanged: pilot smoke may verify UI and status expectations, but must not claim new payment behavior or bypass existing processor rules.
+- Paid requests and paid boosts follow the room minimum.
+- Free request rooms create no-charge requests and convert boosts into free upvotes with fixed weight 1.
+- Direct tips remain paid even when request mode is free.
+- Payment provider integration must not be changed by first-screen UX work unless that provider work is explicitly scoped.
 
 Hold if:
 - Request, Tip, or Boost is hidden behind browse, lyrics, marketplace, or internal surfaces.
 - Payment copy claims behavior that the backend/provider state does not prove.
+- Paid boost checkout copy labels the action as a tip or request total.
 
 ## 5. Patron Sees Clear Status
 
@@ -101,6 +105,9 @@ Money-loop smoke must verify the product path without changing money behavior:
 - Request submission path reaches the existing request/payment state.
 - Tip submission path reaches the existing tip/payment state.
 - Boost submission path reaches the existing boost/payment state.
+- Paid boost floor follows the room minimum configured at room creation.
+- Free request mode makes boosts free upvotes with fixed weight 1.
+- Room creation captures the selected `paymentsEnabled` mode.
 - Approve, deny, complete, and recap use existing backend behavior.
 - Smoke notes the payment provider mode: local provider unavailable, Stripe test, staging, or production.
 
@@ -127,7 +134,7 @@ Before first live night, the pilot operator verifies:
 
 - Environment and build marker.
 - Performer account can log in.
-- Performer can start live room.
+- Performer can set room settings and create a room.
 - QR/link opens correct room on a second device.
 - Patron Request, Tip, and Boost UI loads.
 - Performer queue, QR, and Earnings UI loads.
@@ -168,12 +175,20 @@ Hold PR #44 and all new feature work if any of these remain unresolved:
 
 ## Explicit Non-Claims
 
-- No runtime behavior changed.
-- Payment behavior unchanged.
-- No route changes.
 - No schema changes.
-- No persistence changes.
 - No role/access changes.
 - No overlay behavior changes.
+- No AI/moderation changes.
+- No App Store readiness claim.
+
+For PRs that only update this checklist, the expected non-claims remain: no runtime behavior changed, payment behavior unchanged, no route changes, and no persistence changes.
+
+For the patron entry plus room money-mode correction, the explicit runtime claims are:
+- Existing `/api/session/start` behavior carries `paymentsEnabled` at room creation.
+- Existing `/api/request/boost` behavior floors paid boosts at the room minimum.
+- Free request rooms keep boost actions as free upvotes with fixed weight 1.
+- Stripe/payment provider integration is not changed.
+- No schema changes.
+- No role/access changes.
 - No AI/moderation changes.
 - No App Store readiness claim.
