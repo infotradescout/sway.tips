@@ -4799,7 +4799,7 @@ app.post("/api/session/start", async (req, res) => {
   }
 
   await refreshBusinessState();
-  const { talentName, talentRole, feeType, minimumTip, gig_id } = req.body;
+  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, gig_id } = req.body;
 
   const requestedGigId = parseDurableGigId(gig_id);
   const roomGigId = requestedGigId ?? businessStore.createGigId();
@@ -4812,7 +4812,7 @@ app.post("/api/session/start", async (req, res) => {
     talentName: talentName || "DJ Pro",
     talentRole: talentRole || 'DJ',
     feeType: feeType || 'patron',
-    minimumTip: Number(minimumTip) || 5,
+    minimumTip: Math.max(5, Number(minimumTip) || 5),
     endGigTimerStartedAt: null,
     isFeatured: false,
     featuredExpiresAt: null,
@@ -4826,7 +4826,7 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: 'library',
-    paymentsEnabled: true,
+    paymentsEnabled: typeof paymentsEnabled === 'boolean' ? paymentsEnabled : true,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -4850,7 +4850,8 @@ app.post("/api/session/start", async (req, res) => {
       talentName: roomState.session.talentName,
       talentRole: roomState.session.talentRole,
       feeType: roomState.session.feeType,
-      minimumTip: roomState.session.minimumTip
+      minimumTip: roomState.session.minimumTip,
+      paymentsEnabled: roomState.session.paymentsEnabled
     }
   });
   res.json({ success: true, state: prepareRoomState(roomState, roomGigId) });
@@ -5498,7 +5499,6 @@ app.post("/api/request/boost", async (req, res) => {
     payment_method,
     payment_intent_id
   } = req.body;
-  let amt = Math.max(Number(boostAmount) || 0, 1); // Minimum boost of $1
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
@@ -5517,6 +5517,7 @@ app.post("/api/request/boost", async (req, res) => {
   }
   const roomState = roomSnapshot.state;
   const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
+  let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip); // Paid boosts follow the room minimum.
   if (!paymentsEnabledForRoom) {
     // Free room: boosts become free upvotes -- fixed 1-unit weight, no money.
     amt = 1;

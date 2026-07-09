@@ -41,7 +41,7 @@ import PerformerShareKit from './PerformerShareKit';
 interface TalentDashboardProps {
   session: GigSession;
   requests: RequestItem[];
-  onStartSession: (data: { talentName: string; talentRole: 'DJ' | 'Bartender' | 'Performer'; feeType: 'talent' | 'patron'; minimumTip: number }) => void;
+  onStartSession: (data: { talentName: string; talentRole: 'DJ' | 'Bartender' | 'Performer'; feeType: 'talent' | 'patron'; minimumTip: number; paymentsEnabled: boolean }) => void;
   onEndSession: () => void;
   onCloseout: () => void;
   onTriage: (requestId: string, action: 'approve' | 'deny') => void;
@@ -887,7 +887,7 @@ function HardwareMappingPanel({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Hardware Controls</h4>
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Advanced key controls</h4>
           <p className="mt-1 truncate text-[10px] text-slate-500">{midiLabel}</p>
         </div>
         <Keyboard className="h-5 w-5 shrink-0 text-cyan-300" />
@@ -993,11 +993,13 @@ export default function TalentDashboard({
   const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
   const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
   const [setupMinTip, setSetupMinTip] = useState(5);
-  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings' | 'hardware'>('live');
+  const [setupPaymentsEnabled, setSetupPaymentsEnabled] = useState(true);
+  const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   
   // Local state for interactive settings drawer
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
+  const [liveLinkCopied, setLiveLinkCopied] = useState(false);
 
   // Featured Status Management States
   const [selectedHours, setSelectedHours] = useState<number>(3);
@@ -1647,7 +1649,7 @@ export default function TalentDashboard({
     .filter(r => !r.hidden && !r.removed)
     .reduce((sum, r) => sum + Math.max(1, r.sponsorCount), 0);
   const requestScopeLabel = session.searchScope === 'setlist'
-    ? "This Gig's Setlist"
+    ? 'Setlist source'
     : session.searchScope === 'catalog'
       ? 'Open Catalog'
       : 'My Library';
@@ -1670,6 +1672,18 @@ export default function TalentDashboard({
       ? `${leadingApprovedRequest.title} is leading the approved queue.`
       : 'Copy the room link or show the QR so the crowd can start sending requests.';
   const selectedRoomLink = selectedGigId ?? activeGigId;
+  const selectedRoomUrl = resolveLiveRoomLink(selectedRoomLink);
+  const handleCopyLiveRoomLink = async () => {
+    if (!selectedRoomUrl) return;
+    await copyCompactLink(selectedRoomUrl);
+    setLiveLinkCopied(true);
+  };
+
+  useEffect(() => {
+    if (!liveLinkCopied) return;
+    const timeout = window.setTimeout(() => setLiveLinkCopied(false), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [liveLinkCopied]);
   const runHardwareAction = (actionId: HardwareActionId) => {
     if (previewMode || actionInFlightRef.current) return;
     const topApproved = liveLadderQueue[0] ?? null;
@@ -1848,7 +1862,8 @@ export default function TalentDashboard({
       talentName: setupName,
       talentRole: setupRole,
       feeType: setupFeeType,
-      minimumTip: setupMinTip
+      minimumTip: Math.max(5, setupMinTip),
+      paymentsEnabled: setupPaymentsEnabled
     });
   };
 
@@ -1866,7 +1881,7 @@ export default function TalentDashboard({
         data-sway-performer-live-cockpit="true"
         className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
       >
-        <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_minmax(0,1fr)_auto]">
+        <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]">
           {actionError ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
               <div className="flex items-center justify-between gap-2">
@@ -1908,6 +1923,21 @@ export default function TalentDashboard({
             </div>
           </header>
 
+          <section className="grid grid-cols-3 gap-2 text-center" aria-label="Tonight's money rules">
+            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Minimum request</p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">{formatValue(session.minimumTip)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Boost minimum</p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">{formatValue(session.minimumTip)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Tip path</p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">Direct tips</p>
+            </div>
+          </section>
+
           <div className="h-32 min-h-0 landscape:hidden">
             <CompactAudienceScreenPanel
               activeGigId={selectedGigId ?? activeGigId}
@@ -1916,17 +1946,16 @@ export default function TalentDashboard({
             />
           </div>
 
-          <section className="grid grid-cols-4 gap-2 landscape:hidden" aria-label="Performer mobile sections">
+          <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Live-night sections">
             {[
               { id: 'live', label: 'Live' },
-              { id: 'share', label: 'Share' },
-              { id: 'settings', label: 'Control' },
-              { id: 'hardware', label: 'Keys' }
+              { id: 'share', label: 'Show QR' },
+              { id: 'settings', label: 'End' }
             ].map((item) => (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings' | 'hardware')}
+                onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
                 className={`min-h-10 rounded-xl px-2 text-xs font-black uppercase tracking-wide ${
                   mobilePanel === item.id ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
                 }`}
@@ -2017,21 +2046,6 @@ export default function TalentDashboard({
                 </div>
               ) : mobilePanel === 'share' ? (
                 <CompactSharePanel activeGigId={selectedGigId ?? activeGigId} />
-              ) : mobilePanel === 'hardware' ? (
-                <div className="h-full min-h-0 overflow-hidden">
-                  <HardwareMappingPanel
-                    bindings={hardwareBindings}
-                    learnTarget={hardwareLearnTarget}
-                    midiStatus={hardwareInputStatus}
-                    bridgeCommand={bridgeCommand}
-                    bridgeTokenStatus={bridgeTokenStatus}
-                    bridgeTokenMessage={bridgeTokenMessage}
-                    onLearn={setHardwareLearnTarget}
-                    onClear={clearHardwareInput}
-                    onIssueBridgeToken={issueBridgeToken}
-                    onDownloadBridgePreset={downloadBridgePreset}
-                  />
-                </div>
               ) : (
                 <CompactControlPanel
                   session={session}
@@ -2049,11 +2063,19 @@ export default function TalentDashboard({
             </div>
           </main>
 
-          <footer className="grid grid-cols-[1fr_auto] gap-2">
+          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-2">
             <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
             </div>
+            <button
+              type="button"
+              onClick={handleCopyLiveRoomLink}
+              disabled={!selectedRoomUrl}
+              className="min-h-12 rounded-xl bg-fuchsia-600 px-3 text-xs font-black uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+            >
+              {liveLinkCopied ? 'Copied' : 'Copy link'}
+            </button>
             <button
               type="button"
               onClick={() => handleToggleRequests(!session.requestsOpen)}
@@ -2063,6 +2085,14 @@ export default function TalentDashboard({
               }`}
             >
               {session.requestsOpen ? 'Pause' : 'Resume'}
+            </button>
+            <button
+              type="button"
+              onClick={previewMode ? undefined : session.status === 'ending' ? onCloseout : onEndSession}
+              disabled={previewMode || (session.status !== 'active' && session.status !== 'ending')}
+              className="min-h-12 rounded-xl border border-white/10 bg-slate-900 px-3 text-xs font-black uppercase tracking-wide text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {session.status === 'ending' ? 'Recap' : 'End'}
             </button>
           </footer>
         </div>
@@ -2120,7 +2150,7 @@ export default function TalentDashboard({
         <section className="order-2 rounded-3xl border border-cyan-500/20 bg-slate-900/80 p-5 shadow-2xl">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Live Command Center</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Tonight's live room</p>
               <h3 className="mt-2 font-display text-2xl font-black text-white">
                 {operatorNextAction}
               </h3>
@@ -2148,6 +2178,27 @@ export default function TalentDashboard({
             </div>
           </div>
 
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
+                {session.paymentsEnabled === false ? 'Request price' : 'Request minimum'}
+              </p>
+              <p className="mt-1 text-xs font-black text-white">
+                {session.paymentsEnabled === false ? 'Free' : formatValue(session.minimumTip)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Boost minimum</p>
+              <p className="mt-1 text-xs font-black text-white">
+                {session.paymentsEnabled === false ? 'Free upvotes' : `${formatValue(session.minimumTip)} approved queue only`}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
+              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Tip path</p>
+              <p className="mt-1 text-xs font-black text-white">Direct tips available</p>
+            </div>
+          </div>
+
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
@@ -2162,14 +2213,23 @@ export default function TalentDashboard({
               {session.requestsOpen ? 'Pause requests' : 'Resume requests'}
             </button>
             {selectedRoomLink ? (
-              <a
-                href={`/g/${selectedRoomLink}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase tracking-wide text-cyan-200 transition-all hover:border-cyan-300 hover:text-white"
-              >
-                Open crowd view
-              </a>
+              <>
+                <button
+                  type="button"
+                  onClick={handleCopyLiveRoomLink}
+                  className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-fuchsia-600 px-4 py-3 text-xs font-black uppercase tracking-wide text-white transition-all hover:bg-fuchsia-500"
+                >
+                  {liveLinkCopied ? 'Copied' : 'Copy link'}
+                </button>
+                <a
+                  href={`/g/${selectedRoomLink}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase tracking-wide text-cyan-200 transition-all hover:border-cyan-300 hover:text-white"
+                >
+                  Open crowd view
+                </a>
+              </>
             ) : (
               <div className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500">
                 Crowd link after start
@@ -2188,10 +2248,10 @@ export default function TalentDashboard({
       )}
 
       {session.status !== 'inactive' && (
-        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Performer mobile sections">
+        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Live-night sections">
           {[
             { id: 'live', label: 'Live' },
-            { id: 'share', label: 'Share' },
+            { id: 'share', label: 'Show QR' },
             { id: 'settings', label: 'Settings' }
           ].map((item) => (
             <button
@@ -2492,66 +2552,9 @@ export default function TalentDashboard({
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="order-2 bg-slate-900 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl max-w-3xl mx-auto space-y-6 glow-fuchsia"
+          className="order-2 max-w-3xl mx-auto space-y-5"
         >
-          <div className="space-y-4 text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-fuchsia-300">
-              <Radio className="h-3.5 w-3.5" />
-              Sway to Play
-            </div>
-            <div className="space-y-2">
-              <h3 className="font-display text-3xl font-black tracking-tight text-white">Welcome, {welcomePerformerName}</h3>
-              <p className="mx-auto max-w-xl text-sm leading-6 text-slate-300">
-                Start a live room and let the crowd send Requests, Tips, and Boosts.
-              </p>
-            </div>
-          </div>
-
           <form onSubmit={handleStart} className="space-y-5">
-            <div className="rounded-2xl border border-fuchsia-500/20 bg-slate-950/70 p-5 text-left">
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">First Run</p>
-              <h4 className="mt-2 font-display text-2xl font-black text-white">Start your live room</h4>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                Open a live room for tonight and share it with the crowd in one step. Your room-specific link and QR appear after the room goes live.
-              </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">1. Start room</p>
-                  <p className="mt-1 text-xs font-bold text-white">Create the live route</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">2. Share QR</p>
-                  <p className="mt-1 text-xs font-bold text-white">Point the crowd in</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">3. DJ decides</p>
-                  <p className="mt-1 text-xs font-bold text-white">Approve or veto</p>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-semibold text-white">
-                  Performer: {welcomePerformerName}
-                </span>
-                {performerProfile?.handle ? (
-                  <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-mono text-cyan-300">
-                    @{performerProfile.handle}
-                  </span>
-                ) : null}
-              </div>
-              {!performerEmailVerified ? (
-                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                  Verify your email before starting a live room.
-                </div>
-              ) : null}
-              <button
-                type="submit"
-                disabled={!performerEmailVerified}
-                className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
-              >
-                <Play className="h-4 w-4" /> Start Live Room
-              </button>
-            </div>
-
             <details
               className="group rounded-2xl border border-white/10 bg-slate-950/60 p-4"
               open={showSettings}
@@ -2559,9 +2562,9 @@ export default function TalentDashboard({
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Advanced room settings</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Tonight's money settings</p>
                   <p className="mt-1 text-sm text-slate-400">
-                    Adjust performer name, role, fee handling, and minimum tip if tonight needs custom rules.
+                    Set paid or free requests, fee handling, and minimums before creating the room link and QR. Approve, deny, complete once the room is live.
                   </p>
                 </div>
                 <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
@@ -2593,6 +2596,43 @@ export default function TalentDashboard({
                       <option value="DJ">DJ</option>
                       <option value="Performer">Performer</option>
                     </select>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">REQUEST MODE</p>
+                      <p className="mt-1 text-[11px] text-slate-500 font-sans leading-relaxed">
+                        {setupPaymentsEnabled
+                          ? 'Paid requests and boosts use the $5 minimum. Direct tips stay paid.'
+                          : 'Requests are free, boosts become free upvotes, and direct tips stay paid.'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSetupPaymentsEnabled(true)}
+                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${
+                          setupPaymentsEnabled
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-slate-900 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        Paid
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSetupPaymentsEnabled(false)}
+                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${
+                          !setupPaymentsEnabled
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-slate-900 border border-white/10 text-slate-300 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        Free requests
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -2637,24 +2677,70 @@ export default function TalentDashboard({
 
                 <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
                   <div className="flex justify-between items-center text-sm font-mono text-slate-400">
-                    <span>Minimum Tip</span>
+                    <span>Minimum Request</span>
                     <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
                   </div>
                   <input
                     type="range"
-                    min="1"
+                    min="5"
                     max="25"
                     step="1"
                     value={setupMinTip}
-                    onChange={(e) => setSetupMinTip(Number(e.target.value))}
+                    onChange={(e) => setSetupMinTip(Math.max(5, Number(e.target.value)))}
                     className="w-full accent-fuchsia-500 cursor-pointer"
                   />
                   <p className="text-[11px] text-slate-500 font-sans font-medium">
-                    Every request requires this baseline to prevent micro-transaction spam and system clutter.
+                    Paid requests and boosts require this baseline to prevent micro-transaction spam and system clutter.
                   </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Boost minimum</p>
+                    <p className="mt-2 text-sm font-black text-white">
+                      {setupPaymentsEnabled ? `$${setupMinTip}.00 per boost` : 'Free upvotes'}
+                    </p>
+                    <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                      {setupPaymentsEnabled
+                        ? 'Paid boosts only apply to approved queue items and increase queue rank; they do not approve a request.'
+                        : 'Free boosts become upvotes on approved queue items; they do not approve a request.'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Tip path</p>
+                    <p className="mt-2 text-sm font-black text-white">Direct support stays available</p>
+                    <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                      Patrons can send a straight tip even when new requests are paused.
+                    </p>
+                  </div>
                 </div>
               </div>
             </details>
+
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-semibold text-white">
+                  Performer: {welcomePerformerName}
+                </span>
+                {performerProfile?.handle ? (
+                  <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-mono text-cyan-300">
+                    @{performerProfile.handle}
+                  </span>
+                ) : null}
+              </div>
+              {!performerEmailVerified ? (
+                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  Verify your email before creating a room.
+                </div>
+              ) : null}
+              <button
+                type="submit"
+                disabled={!performerEmailVerified}
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
+              >
+                <Play className="h-4 w-4" /> Create room
+              </button>
+            </div>
           </form>
         </motion.div>
       )}
@@ -2759,7 +2845,7 @@ export default function TalentDashboard({
               <div className="min-w-0">
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Song Search Scope</p>
                 <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Restrict patrons to your synced library, curate a setlist for tonight, or open full catalog search.
+                  Choose the song source patrons can request from. The setlist stays separate from the incoming request queue.
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -2808,7 +2894,7 @@ export default function TalentDashboard({
                 <div>
                   <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Setlist Builder</p>
                   <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                    Search your library and the open catalog to build tonight's curated list. Patrons will only see these tracks.
+                    Build the curated setlist for tonight. Patrons can request from it while the performer request queue remains separate.
                   </p>
                 </div>
                 <div className="relative">
@@ -2886,7 +2972,7 @@ export default function TalentDashboard({
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Payments</p>
                 <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
                   {session.paymentsEnabled === false
-                    ? 'Free event: tips are off, boosts are free upvotes, requests carry no charge.'
+                    ? 'Free event: requests carry no charge, boosts are free upvotes, and direct tips stay paid.'
                     : 'Paid room: tips, boosts, and paid requests are all active.'}
                 </p>
               </div>
@@ -3159,25 +3245,10 @@ export default function TalentDashboard({
               <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
             </div>
 
-            <div className={`${mobilePanel === 'hardware' ? 'block' : 'hidden'} lg:block`}>
-              <HardwareMappingPanel
-                bindings={hardwareBindings}
-                learnTarget={hardwareLearnTarget}
-                midiStatus={hardwareInputStatus}
-                bridgeCommand={bridgeCommand}
-                bridgeTokenStatus={bridgeTokenStatus}
-                bridgeTokenMessage={bridgeTokenMessage}
-                onLearn={setHardwareLearnTarget}
-                onClear={clearHardwareInput}
-                onIssueBridgeToken={issueBridgeToken}
-                onDownloadBridgePreset={downloadBridgePreset}
-              />
-            </div>
-
             <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>
-              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Before You Share</h4>
+              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Tonight's controls</h4>
               <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                Set the request scope, then let crowd autopilot rank clean requests into up next. Pause, hide, or veto stays available as the safety brake.
+                Keep requests open while the room is working. Pause intake, deny bad requests, complete played items, and end the night from here.
               </p>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
@@ -3185,16 +3256,16 @@ export default function TalentDashboard({
                   <p className="mt-1 text-xs font-bold text-white">{requestScopeLabel}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Flow</p>
-                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Autopilot' : 'Manual'}</p>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Review</p>
+                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Crowd-ranked' : 'Manual'}</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room brake</p>
-                  <p className="mt-1 text-xs font-bold text-white">Pause Requests</p>
+                  <p className="mt-1 text-xs font-bold text-white">Pause intake</p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
                   <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Live state</p>
-                  <p className="mt-1 text-xs font-bold text-white">Crowd Ranked</p>
+                  <p className="mt-1 text-xs font-bold text-white">Queue live</p>
                 </div>
               </div>
             </div>
@@ -3541,7 +3612,7 @@ export default function TalentDashboard({
             {/* Realtime session performance card stats */}
             <div className="hidden bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg lg:block">
               <h4 className="font-display text-xs font-mono font-bold tracking-wider text-fuchsia-400 uppercase select-none">
-                Performance Meter
+                Earnings tonight
               </h4>
 
               <div className="space-y-3 select-none font-sans">

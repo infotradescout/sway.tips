@@ -131,6 +131,7 @@ export default function TalentApp() {
     talentRole: 'DJ' | 'Bartender' | 'Performer';
     feeType: 'talent' | 'patron';
     minimumTip: number;
+    paymentsEnabled: boolean;
   }) => {
     if (demoMode) return rejectDemoMutation();
     try {
@@ -227,7 +228,8 @@ export default function TalentApp() {
       talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',
-      minimumTip: 5
+      minimumTip: 5,
+      paymentsEnabled: true
     });
   };
 
@@ -255,7 +257,7 @@ export default function TalentApp() {
     ? activeRooms.find((room) => room.gigId === selectedRoomRoute)
     : null;
   const scopeLabel = session.searchScope === 'setlist'
-    ? "This Gig's Setlist"
+    ? 'Setlist source'
     : session.searchScope === 'catalog'
       ? 'Open Catalog'
       : 'My Library';
@@ -301,8 +303,8 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Talent</span>
-              <p className="text-[9px] text-slate-400">Manage Pending, Approved, and Playing requests</p>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Tonight's Room</span>
+              <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
           <DemoModeBanner compact />
@@ -312,17 +314,18 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? 'Sway to Play' : 'Performer Console'}
+            title={session.status === 'inactive' ? 'Create room' : "Tonight's room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
             primaryLabel={session.status === 'inactive'
-              ? 'Start a live room and let the crowd send Requests, Tips, and Boosts'
-              : 'Now Playing, Pending Requests, Approved Queue, and Controls'}
-            secondaryLabel={session.status === 'inactive' ? 'Performer profile' : 'Room State'}
+              ? 'Set room settings, then create the room link and QR'
+              : 'Queue, QR, earnings, and room controls'}
+            secondaryLabel={session.status === 'inactive' ? 'Money settings' : 'Room status'}
+            showHeader={session.status !== 'inactive'}
             isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
-                <p className="text-sm font-bold text-white">Sway to Play</p>
-                <p className="mt-2 text-xs text-slate-400">Start a live room and let the crowd send Requests, Tips, and Boosts.</p>
+                <p className="text-sm font-bold text-white">Live room setup</p>
+                <p className="mt-2 text-xs text-slate-400">Set room settings, then create the room link and QR.</p>
               </div>
             }
             primary={

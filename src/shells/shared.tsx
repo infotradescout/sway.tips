@@ -61,7 +61,7 @@ export function LoadingState() {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="text-center space-y-3">
         <div className="w-10 h-10 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-xs text-slate-400 font-mono">Synchronizing Sway live ledger...</p>
+        <p className="text-xs text-slate-400 font-mono">Opening live room...</p>
       </div>
     </div>
   );

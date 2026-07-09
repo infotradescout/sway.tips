@@ -3,12 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { sendShareLinkCopied } from '../shells/frictionClient';
 
-const MISSING_CONTEXT_COPY = 'No active live session. Start a session to generate your room link and QR code.';
+const MISSING_CONTEXT_COPY = 'No active live session. Create a room to generate your room link and QR code.';
 const ACTIVE_BODY_COPY = 'Patrons can scan this QR code or open this room link to land directly in your live Request, Tip, and Boost room.';
 const ACTIVE_HELP_COPY = 'This print-ready room link and QR sign stay tied to the selected live room. For streams, open the matching overlay route in a browser source manually.';
 const DOWNLOAD_SUCCESS_COPY = 'QR sign downloaded. Print it on white paper for the clearest room scan.';
 const PRINT_HINT_COPY = 'Print the QR sign or place it near the room so patrons land in the correct live queue.';
-const QR_EMPTY_STATE_COPY = 'QR code appears here after you start a live room.';
+const QR_EMPTY_STATE_COPY = 'QR code appears here after you create a room.';
 
 function resolveRoomLink(activeGigId: string | null) {
   if (!activeGigId) return null;
@@ -199,7 +199,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
     <div className="rounded-2xl border border-fuchsia-500/20 bg-slate-900 p-5 shadow-lg shadow-fuchsia-950/20">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-fuchsia-400">Live Room Share</h4>
+          <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-fuchsia-400">Show QR</h4>
           <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
             {roomLink ? ACTIVE_BODY_COPY : MISSING_CONTEXT_COPY}
           </p>
@@ -219,7 +219,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
                   {roomLink}
                 </p>
                 <p className="mt-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-                  {roomPath ? `Live path: ${roomPath}` : 'Start a live room to generate the patron route.'}
+                  {roomPath ? `Live path: ${roomPath}` : 'Create a room to generate the patron route.'}
                 </p>
               </div>
               <div className="rounded-2xl bg-white p-3 shadow-inner" data-share-kit-room-qr="true">
@@ -244,12 +244,12 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
             <p className="text-xs font-bold text-white">{QR_EMPTY_STATE_COPY}</p>
             <div className="mt-4 grid gap-2 text-[10px] text-slate-400">
               <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                <span className="font-mono uppercase tracking-widest text-slate-500">1. Start room</span>
-                <p className="mt-1">Start a live room from the setup flow.</p>
+                <span className="font-mono uppercase tracking-widest text-slate-500">1. Set room settings</span>
+                <p className="mt-1">Confirm the money settings before creating the room.</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
-                <span className="font-mono uppercase tracking-widest text-slate-500">2. Confirm scope</span>
-                <p className="mt-1">Choose library, setlist, or open request lane.</p>
+                <span className="font-mono uppercase tracking-widest text-slate-500">2. Create room</span>
+                <p className="mt-1">Generate the patron link and QR for tonight.</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
                 <span className="font-mono uppercase tracking-widest text-slate-500">3. Share QR</span>
@@ -262,7 +262,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
         <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
           <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Stream / OBS overlay</p>
           <p className={`mt-2 break-all text-xs font-semibold ${overlayLink ? 'text-white' : 'text-slate-500'}`}>
-            {overlayLink ?? 'Start a live room to generate the stream overlay route.'}
+            {overlayLink ?? 'Create a room to generate the stream overlay route.'}
           </p>
           <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
             {overlayPath

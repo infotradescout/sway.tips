@@ -37,9 +37,14 @@ for (const term of [
   }
 }
 
-// This lane explicitly excludes synced/karaoke lyrics and any playback-clock
-// anchoring -- confirm none of that scope crept in.
+// This lane explicitly excludes lyrics and any playback-clock anchoring --
+// the overlay default must stay QR, queue, tips, and boosts.
 for (const forbidden of [
+  'Lyrics',
+  'Hide lyrics',
+  'Looking up lyrics',
+  "fetch(`/api/lyrics?${params}`)",
+  'useLyrics',
   'syncedLyrics',
   'now starting',
   'nowStartingAt',
@@ -48,17 +53,6 @@ for (const forbidden of [
 ]) {
   if (overlayApp.includes(forbidden)) {
     failures.push(`OverlayApp must not introduce synced-lyrics/clock-anchor scope in this lane: found ${forbidden}`);
-  }
-}
-
-// Existing static lyrics behavior must remain unchanged.
-for (const term of [
-  "fetch(`/api/lyrics?${params}`)",
-  "setLyricsText(data.instrumental ? 'Instrumental — no lyrics.' : data.plainLyrics)",
-  "setLyricsStatus('found')"
-]) {
-  if (!overlayApp.includes(term)) {
-    failures.push(`OverlayApp must preserve existing static lyrics behavior: missing ${term}`);
   }
 }
 

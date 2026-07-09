@@ -5,7 +5,7 @@ export const SHELL_SURFACE_ID = 'PatronAppShell' as const;
 
 const PatronAppShellScaffold = createPhase1ShellScaffold({
   surfaceId: SHELL_SURFACE_ID,
-  title: 'Patron App',
+  title: 'Live room',
   body: 'Phase 1 scaffold is fail-closed. Patron request and boost mutation behavior remains disabled here.'
 });
 

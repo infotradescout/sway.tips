@@ -14,9 +14,11 @@ const talentApp = read('src/shells/TalentApp.tsx');
 const performerShareKit = read('src/components/PerformerShareKit.tsx');
 
 for (const term of [
+  'Live show snapshot',
+  '<Sparkles className="h-4 w-4" /> Sway',
   'Request scope',
   'DJ library requests',
-  'Setlist requests',
+  'Setlist song requests',
   'Open request lane',
   'manual request',
   'The DJ decides what is approved and played.'
@@ -27,24 +29,27 @@ for (const term of [
 }
 
 for (const term of [
-  'Live Command Center',
-  "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
-  'Hardware Controls',
-  'Performer mobile sections',
-  'operatorNextAction',
-  'Open crowd view',
-  'Share QR',
-  '3. DJ decides',
-  'Before You Share',
-  'Set the request scope',
-  'crowd autopilot rank clean requests into up next',
-  'Pause, hide, or veto stays available as the safety brake',
-  'Autopilot',
-  'Pause Requests',
-  'Crowd Ranked'
+  "useState<'live' | 'share' | 'settings'>('live')",
+  "Tonight's money settings",
+  'Minimum request',
+  'Boost minimum',
+  'Tip path',
+  'Create room',
+  'Show QR',
+  'Copy link',
+  'Approve, deny, complete',
+  'before creating the room link and QR',
+  'Free requests',
+  'Paid requests and boosts use the $5 minimum',
+  'Free upvotes',
+  'separate from the incoming request queue',
+  "Tonight's controls",
+  'Pause intake',
+  'Queue live',
+  'Earnings tonight'
 ]) {
   if (!talentDashboard.includes(term)) {
-    failures.push(`Performer mission control copy missing: ${term}`);
+    failures.push(`Performer live-night spine copy missing: ${term}`);
   }
 }
 
@@ -59,8 +64,8 @@ for (const term of [
 }
 
 for (const term of [
-  '1. Start room',
-  '2. Confirm scope',
+  '1. Set room settings',
+  '2. Create room',
   '3. Share QR',
   'Patron entry'
 ]) {
@@ -73,7 +78,12 @@ for (const forbidden of [
   'only pick the songs you have',
   'only choose songs you have',
   'guaranteed library match',
-  'automatically plays'
+  'automatically plays',
+  'Hardware Controls',
+  'Live Command Center',
+  "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
+  'Before You Share',
+  'crowd autopilot rank clean requests into up next'
 ]) {
   if (patronView.includes(forbidden) || talentDashboard.includes(forbidden)) {
     failures.push(`Mission copy overpromises DJ library/control behavior: ${forbidden}`);
