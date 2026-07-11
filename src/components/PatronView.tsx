@@ -633,8 +633,12 @@ export default function PatronView({
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
 
-  // Open confirmation
-  const initiateCheckout = (type: 'request' | 'boost') => {
+  // Open confirmation. boostTarget/boostAmountOverride are passed explicitly
+  // for boosts rather than relying on boostingItem/boostAmount state set
+  // moments earlier in the same click handler -- React state updates are not
+  // visible until the next render, so reading that state here would silently
+  // see the previous (often null/stale) value on a patron's first boost tap.
+  const initiateCheckout = (type: 'request' | 'boost', boostTarget?: RequestItem, boostAmountOverride?: number) => {
     if (session.status === 'closed' || isSubmitLocked) return;
 
     if (networkPreflightStatus !== 'ready') {
@@ -694,25 +698,24 @@ export default function PatronView({
       amt = paymentsEnabledForRoom ? tipAmount : 0;
     } else {
       // Boost check
-      if (!boostingItem) return;
-      // boostPatronName has no input field of its own until the checkout
-      // modal opens below -- requiring it non-empty here would make the
-      // boost flow un-openable on a patron's first action. Borrow whatever
-      // name they've already entered on the Request/Tip tab; they can still
-      // edit it inside the modal before confirming.
+      const targetItem = boostTarget ?? boostingItem;
+      if (!targetItem) return;
+      const targetBoostAmount = boostAmountOverride ?? boostAmount;
+      // The boost modal has its own "Booster / Sponsor Name" field, so the name
+      // doesn't need to exist before the modal opens -- prefill it from
+      // Request/Tip if the patron already entered one there, but otherwise let
+      // them type it directly in the modal. completePayment() requires it
+      // non-empty before actually submitting.
       if (!boostPatronName && senderName) {
         setBoostPatronName(senderName);
-      } else if (!boostPatronName && !senderName) {
-        showFormToast("Enter your name on the Request or Tip tab first, then come back to boost!");
-        return;
       }
-      if (paymentsEnabledForRoom && boostAmount < session.minimumTip) {
+      if (paymentsEnabledForRoom && targetBoostAmount < session.minimumTip) {
         showFormToast(`Minimum boost is $${session.minimumTip}`);
         return;
       }
-      title = boostingItem.title;
-      artist = boostingItem.subtitle;
-      amt = paymentsEnabledForRoom ? boostAmount : 1;
+      title = targetItem.title;
+      artist = targetItem.subtitle;
+      amt = paymentsEnabledForRoom ? targetBoostAmount : 1;
     }
 
     const platformFee = paymentsEnabledForRoom && session.feeType === 'patron' ? 1.0 : 0;
@@ -733,7 +736,7 @@ export default function PatronView({
       amount: amt,
       fee: platformFee,
       total,
-      targetId: boostingItem?.id,
+      targetId: type === 'boost' ? (boostTarget ?? boostingItem)?.id : undefined,
       trackArt,
       gigId,
       ...createClientActionIds()
@@ -883,6 +886,11 @@ export default function PatronView({
   // Create the pending PaymentIntent or complete a no-payment action.
   const completePayment = async () => {
     if (!checkoutPayload || isSubmitLocked) return;
+
+    if (checkoutPayload.type === 'boost' && !boostPatronName.trim()) {
+      showFormToast('Enter your name above to send this boost.');
+      return;
+    }
 
     if (Date.now() > new Date(checkoutPayload.expires_at).getTime()) {
       setCheckoutPayload(null);
@@ -1836,9 +1844,10 @@ export default function PatronView({
                                 type="button"
                                 onClick={() => {
                                   if (isSubmitLocked) return;
+                                  const presetAmount = Math.max(session.minimumTip, 10);
                                   setBoostingItem(req);
-                                  setBoostAmount(Math.max(session.minimumTip, 10));
-                                  initiateCheckout('boost');
+                                  setBoostAmount(presetAmount);
+                                  initiateCheckout('boost', req, presetAmount);
                                 }}
                                 disabled={isSubmitLocked}
                                 className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
@@ -2208,7 +2217,17 @@ export default function PatronView({
                             min={session.minimumTip}
                             max={50}
                             value={boostAmount}
-                            onChange={(e) => setBoostAmount(Number(e.target.value))}
+                            onChange={(e) => {
+                              const nextAmount = Number(e.target.value);
+                              setBoostAmount(nextAmount);
+                              // The summary above and the actual submitted charge both read
+                              // from checkoutPayload, not live boostAmount -- keep them in
+                              // sync as the patron edits, or their edit here would be
+                              // silently ignored at submit time.
+                              setCheckoutPayload((prev) => (prev
+                                ? { ...prev, amount: nextAmount, total: nextAmount + prev.fee }
+                                : prev));
+                            }}
                             className="w-full bg-slate-950 border border-white/10 px-4 py-2 text-xs rounded-xl text-white focus:border-fuchsia-500 outline-none"
                           />
                         </div>

@@ -57,7 +57,7 @@ Not a claim of live-pilot readiness. Recorded to surface end-user clarity gaps i
 
 ### Boost Proof
 - Not exercised this run.
-- Pass/fail: **Not tested**
+- Pass/fail: **Fail, then fixed** — see the 2026-07-11 Boost follow-up below. As shipped at the time of this run, boosting an approved queue item silently did nothing on a patron's first tap (stale React state), and even after a second tap, editing the boost amount before confirming was silently ignored at submit time — the originally-set (also stale) amount was charged instead.
 
 ### Queue Action Proof
 - Evidence: Performer cockpit — pending "Shoutout" request from "Pilot Patron" ($5.00) appeared with one-tap green check (approve) / red X (deny) controls. Approved item moved to "Approved" column with a one-tap play button ("Mark playing") that called `POST /api/request/fulfill` → 200.
@@ -114,7 +114,21 @@ All four Known Failures above were fixed and re-verified by re-running the affec
 
 Two contract tests (`scripts/sway-mission-fit.contract.test.mjs`, `scripts/sway-live-night-spine.contract.test.mjs`) asserted the literal old `"Sway"` button text and were updated to match the new "Request" label. Full `npm run lint` (tsc) and `npm run test:contracts` (90+ scripts) pass after these changes.
 
-Hold/go decision updated: the four clarity gaps that justified **HOLD** are resolved. This local-dev smoke still does not replace a real human-operator pilot run per `SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md`, and Boost was still not exercised.
+Hold/go decision updated: the four clarity gaps that justified **HOLD** are resolved. This local-dev smoke still does not replace a real human-operator pilot run per `SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md`, and Boost was still not exercised as of this point.
+
+## Follow-Up: Boost Flow Exercised, Two Real Bugs Found and Fixed (2026-07-11)
+
+Boost was the one checklist item never actually driven in a browser during the original run. Doing so surfaced two genuine functional bugs in `src/components/PatronView.tsx`, both stemming from the same anti-pattern: `initiateCheckout('boost')` was called synchronously right after `setBoostingItem(req)` / `setBoostAmount(...)` in the same click handler, but React state updates are not visible until the next render — so the function was reading the *previous* render's stale values, not the ones just set.
+
+1. **First tap on "Boost" did nothing, with zero user-visible feedback.** `initiateCheckout` read `boostingItem` as `null` (the value from before the click), hit `if (!boostingItem) return;`, and silently exited — no modal, no toast, no console error. A patron tapping "Boost" for the first time in a session would see nothing happen at all. Confirmed via direct instrumentation: `boostingItemId` was `null` on the first click and only correctly populated on a second click (once a render had actually occurred in between).
+   - Fix: `initiateCheckout` now accepts the target request as an explicit parameter (`initiateCheckout('boost', req)`) instead of relying on state set moments earlier in the same handler.
+
+2. **Even after the modal opened, editing the "Boost Stack Amount" field before confirming was silently ignored.** The confirmation summary (`Boost amount` / `Total boost charge`) and the amount actually submitted to the server were both frozen into `checkoutPayload` at the moment the modal opened (from the same stale-state bug affecting the default $10 preset — the modal would initially show a stale amount that didn't match the input field either). If the patron then changed the amount input, neither the on-screen total nor the real charge reflected their edit.
+   - Fix: the target boost amount is now also passed explicitly into `initiateCheckout`, and the amount input's `onChange` now keeps `checkoutPayload.amount/total` in sync live, so the displayed summary and the actual submitted charge always match what's in the field.
+
+Both fixes were verified end-to-end in a browser against a real request: single first-click now reliably opens "Confirm Boost"; editing the amount to $25 updated the summary to "$25.00 / $26.00 total" live, and the server recorded the correct stacked total ($5 original request + $25 boost = $30). `npm run lint` and the full `npm run test:contracts` suite (90+ scripts) pass.
+
+Boost Proof (checklist §Required Evidence) is now **Pass** rather than untested.
 
 ## Explicit Non-Claims
 
