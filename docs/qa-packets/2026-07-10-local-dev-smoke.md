@@ -130,6 +130,17 @@ Both fixes were verified end-to-end in a browser against a real request: single 
 
 Boost Proof (checklist §Required Evidence) is now **Pass** rather than untested.
 
+## Follow-Up: Free-Request Mode Exercised, Real Payment-Copy Bug Found and Fixed (2026-07-11)
+
+The original run only exercised Paid rooms. Setting up and driving a **Free requests** room (`setupPaymentsEnabled = false`) surfaced a real bug in `src/components/PatronView.tsx`: the patron's Request tab was completely unconditional — it always showed a "Tip Amount" price selector (defaulting to $5.00, with $5/$10/$20 presets) and a "Send Request • $5.00" button with a credit-card icon, even when the performer had explicitly configured free requests. The room's own intro banner correctly said "Song requests and boosts are free for this event," directly contradicting the form below it.
+
+The actual submitted amount was already correctly forced to `$0` server-side (`amt = paymentsEnabledForRoom ? tipAmount : 0` in `initiateCheckout`), so patrons were never at risk of being charged — but the UI made it look like they were about to pay, which could cause real hesitation or abandoned requests at a free event.
+
+- Fix: the amount selector is now hidden in free mode, replaced with a clear "Free request — no payment required" panel; the submit button reads "Send Free Request" (no card icon, no fake price); and the Boost Queue item's price tag now shows "Free" instead of a misleading "$0.00".
+- Also fixed related setup-screen copy in `src/components/TalentDashboard.tsx`: when a performer selects "Free requests," the "Minimum Request" slider and platform-fee handling controls remain visible (correctly — they still govern direct tips, which always stay paid per `server.ts`), but the labels didn't say so. They now read "Minimum Direct Tip" / "Direct Tip Platform Fee" with an explanatory note when free mode is selected, instead of implying they're dead controls or, worse, that "free requests" isn't actually free.
+
+Verified end-to-end in a browser: created a Free-requests room, submitted a request through the corrected UI, and confirmed the server recorded `amount: 0`, `paymentStatus: 'not_applicable'`. Confirmed the Tip tab correctly remains fully paid in free mode (tips always stay paid, per the checklist's own requirement). `npm run lint` and the full `npm run test:contracts` suite (90+ scripts) pass.
+
 ## Explicit Non-Claims
 
 - This packet does not claim App Store readiness.

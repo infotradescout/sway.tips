@@ -342,13 +342,15 @@ function CompactRequestPanel({
   empty,
   overflowCount,
   requests,
-  renderActions
+  renderActions,
+  paymentsEnabled = true
 }: {
   title: string;
   empty: string;
   overflowCount: number;
   requests: RequestItem[];
   renderActions: (request: RequestItem) => React.ReactNode;
+  paymentsEnabled?: boolean;
 }) {
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
@@ -370,8 +372,12 @@ function CompactRequestPanel({
                 <p className="truncate text-sm font-black text-white">{request.title}</p>
                 <p className="truncate text-[11px] font-semibold text-slate-400">{request.subtitle || request.senderName}</p>
                 <div className="mt-1 flex items-center gap-2 text-[10px] font-mono font-black text-cyan-300">
-                  <span>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(request.amount)}</span>
-                  <span className="text-slate-600">/</span>
+                  {paymentsEnabled && (
+                    <>
+                      <span>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(request.amount)}</span>
+                      <span className="text-slate-600">/</span>
+                    </>
+                  )}
                   <span className="truncate text-slate-400">{request.senderName}</span>
                 </div>
               </div>
@@ -1952,12 +1958,18 @@ export default function TalentDashboard({
 
           <section className="grid grid-cols-3 gap-2 text-center" aria-label="Tonight's money rules">
             <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
-              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Minimum request</p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">{formatValue(session.minimumTip)}</p>
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">
+                {session.paymentsEnabled === false ? 'Requests' : 'Minimum request'}
+              </p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
+                {session.paymentsEnabled === false ? 'Free' : formatValue(session.minimumTip)}
+              </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
               <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Boost minimum</p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">{formatValue(session.minimumTip)}</p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
+                {session.paymentsEnabled === false ? 'Free upvotes' : formatValue(session.minimumTip)}
+              </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
               <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Tip path</p>
@@ -2000,6 +2012,7 @@ export default function TalentDashboard({
                   empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                   overflowCount={overflowPending}
                   requests={visiblePending}
+                  paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
                       <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
@@ -2016,6 +2029,7 @@ export default function TalentDashboard({
                   empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                   overflowCount={overflowApproved}
                   requests={visibleApproved}
+                  paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
                       <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
@@ -2043,6 +2057,7 @@ export default function TalentDashboard({
                     empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                     overflowCount={overflowPending}
                     requests={visiblePending.slice(0, 3)}
+                    paymentsEnabled={session.paymentsEnabled !== false}
                     renderActions={(request) => (
                       <>
                         <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
@@ -2059,6 +2074,7 @@ export default function TalentDashboard({
                     empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                     overflowCount={overflowApproved}
                     requests={visibleApproved.slice(0, 3)}
+                    paymentsEnabled={session.paymentsEnabled !== false}
                     renderActions={(request) => (
                       <>
                         <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
@@ -2665,9 +2681,16 @@ export default function TalentDashboard({
 
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
-                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">EAT PLATFORM TRANSACTION FEE ($1.00)</label>
+                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">
+                      {setupPaymentsEnabled ? 'EAT PLATFORM TRANSACTION FEE ($1.00)' : 'DIRECT TIP PLATFORM FEE ($1.00)'}
+                    </label>
                     <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PLATFORM FEE</span>
                   </div>
+                  {!setupPaymentsEnabled && (
+                    <p className="text-[11px] text-amber-200/90 font-sans">
+                      Requests are free in this mode, so this only applies to direct tips — tips always stay paid.
+                    </p>
+                  )}
 
                   <div className="grid sm:grid-cols-2 gap-4">
                     <button
@@ -2681,7 +2704,9 @@ export default function TalentDashboard({
                     >
                       <span className="text-xs font-bold text-white mb-1">Pass as Convenience Fee</span>
                       <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                        Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.
+                        {setupPaymentsEnabled
+                          ? 'Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.'
+                          : 'Audience pays the $1.00 platform fee on each direct tip. Performer collects 100% of the tip.'}
                       </p>
                     </button>
 
@@ -2696,7 +2721,9 @@ export default function TalentDashboard({
                     >
                       <span className="text-xs font-bold text-white mb-1">Absorb Processing Cost</span>
                       <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                        Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.
+                        {setupPaymentsEnabled
+                          ? 'Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.'
+                          : 'Performer absorbs the flat $1.00 fee on direct tips to keep patron pricing clean.'}
                       </p>
                     </button>
                   </div>
@@ -2704,7 +2731,7 @@ export default function TalentDashboard({
 
                 <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
                   <div className="flex justify-between items-center text-sm font-mono text-slate-400">
-                    <span>Minimum Request</span>
+                    <span>{setupPaymentsEnabled ? 'Minimum Request' : 'Minimum Direct Tip'}</span>
                     <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
                   </div>
                   <input
@@ -2717,7 +2744,9 @@ export default function TalentDashboard({
                     className="w-full accent-fuchsia-500 cursor-pointer"
                   />
                   <p className="text-[11px] text-slate-500 font-sans font-medium">
-                    Paid requests and boosts require this baseline to prevent micro-transaction spam and system clutter.
+                    {setupPaymentsEnabled
+                      ? 'Paid requests and boosts require this baseline to prevent micro-transaction spam and system clutter.'
+                      : 'Requests and boosts are free in this mode. This baseline only applies to direct tips, which always stay paid.'}
                   </p>
                 </div>
 
@@ -3093,7 +3122,9 @@ export default function TalentDashboard({
                           <div className="min-w-0">
                             <div className="flex items-baseline gap-1.5 font-sans text-sm font-bold text-white truncate">
                               <span>{req.title}</span>
-                              <span className="font-mono text-xs text-fuchsia-400 font-black mt-1">{formatValue(req.amount)}</span>
+                              {session.paymentsEnabled !== false && (
+                                <span className="font-mono text-xs text-fuchsia-400 font-black mt-1">{formatValue(req.amount)}</span>
+                              )}
                             </div>
                             <p className="text-xs text-slate-400 truncate mt-0.5 font-medium">{req.subtitle}</p>
                             
@@ -3232,7 +3263,9 @@ export default function TalentDashboard({
                             <div className="min-w-0 font-sans">
                               <div className="flex items-baseline gap-1.5 font-sans text-sm font-bold text-white truncate font-sans">
                                 <span>{req.title}</span>
-                                <span className="font-mono text-cyan-400 text-xs font-bold">{formatValue(req.amount)}</span>
+                                {session.paymentsEnabled !== false && (
+                                  <span className="font-mono text-cyan-400 text-xs font-bold">{formatValue(req.amount)}</span>
+                                )}
                               </div>
                               <p className="text-xs text-slate-400 truncate mt-0.5 leading-none font-medium font-sans">{req.subtitle}</p>
 
@@ -3243,7 +3276,7 @@ export default function TalentDashboard({
                                 </span>
                                 {req.boosts.slice(-2).map((b, bIdx) => (
                                   <span key={b.id} className="text-[8px] bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/10 px-1 py-0.5 rounded font-mono">
-                                    +{formatValue(b.amount)} by {b.patronName}
+                                    {session.paymentsEnabled !== false ? `+${formatValue(b.amount)} by ${b.patronName}` : `Boosted by ${b.patronName}`}
                                   </span>
                                 ))}
                                 {req.boosts.length > 2 && (
