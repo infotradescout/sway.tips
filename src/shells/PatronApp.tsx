@@ -32,10 +32,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 function PatronNoSessionRecovery({
   onReturnHomeClick,
-  performerHandle
+  performerHandle,
+  attemptedGigId
 }: {
   onReturnHomeClick: () => void;
   performerHandle?: string;
+  attemptedGigId?: string;
 }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [performerProfile, setPerformerProfile] = useState<{
@@ -101,6 +103,15 @@ function PatronNoSessionRecovery({
         transition={{ duration: 0.72, delay: 0.72 }}
         className="relative mx-auto grid w-full max-w-xl gap-3"
       >
+        {attemptedGigId ? (
+          <div className="mb-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-center">
+            <p className="text-sm font-black uppercase tracking-wide text-rose-200">Room not found</p>
+            <p className="mt-2 text-xs leading-5 text-rose-100/90">
+              This link doesn&apos;t match a live room right now. Ask the performer for a fresh QR code or link,
+              or scan again below.
+            </p>
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
@@ -177,6 +188,7 @@ function PatronNoSessionRecovery({
 export default function PatronApp() {
   const route = resolvePatronRoute(window.location.pathname);
   const routeGigId = route.name === 'patron-gig' && UUID_PATTERN.test(route.gigId) ? route.gigId : undefined;
+  const attemptedGigId = route.name === 'patron-gig' && route.gigId ? route.gigId : undefined;
   const statePath = routeGigId ? `/api/state/${routeGigId}` : null;
   const { bState, isLoading, setBState, roomLookup } = useSwayState({ statePath });
   const demoMode = isDemoModeEnabled();
@@ -378,6 +390,7 @@ export default function PatronApp() {
             <PatronNoSessionRecovery
               onReturnHomeClick={handleReturnHomeClick}
               performerHandle={route.name === 'performer' ? route.performerHandle : undefined}
+              attemptedGigId={attemptedGigId}
             />
           ) : (
             <SplitViewShell

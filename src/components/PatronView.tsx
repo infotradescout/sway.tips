@@ -1109,7 +1109,7 @@ export default function PatronView({
                 }}
                 className="min-h-14 rounded-xl border border-fuchsia-500/40 bg-fuchsia-600 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-white shadow-lg transition-all active:scale-[0.99]"
               >
-                <span className="inline-flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" /> Sway</span>
+                <span className="inline-flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" /> Request</span>
               </button>
             </div>
             <div className="w-full max-w-md rounded-xl border border-cyan-500/20 bg-slate-950/70 px-4 py-3 text-left">
