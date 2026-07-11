@@ -15,7 +15,7 @@ const performerShareKit = read('src/components/PerformerShareKit.tsx');
 
 for (const term of [
   'Live show snapshot',
-  '<Sparkles className="h-4 w-4" /> Sway',
+  '<Sparkles className="h-4 w-4" /> Request',
   'Request scope',
   'DJ library requests',
   'Setlist song requests',

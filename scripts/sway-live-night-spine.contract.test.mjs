@@ -63,7 +63,7 @@ requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
 requireIncludes('PatronView', patronView, [
   "useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home')",
   'Live show snapshot',
-  '<Sparkles className="h-4 w-4" /> Sway',
+  '<Sparkles className="h-4 w-4" /> Request',
   "setActiveTab('request')",
   "setActiveTab('tip')",
   "setActiveTab('queue')",

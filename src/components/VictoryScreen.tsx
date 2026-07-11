@@ -36,6 +36,17 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
     .filter((request) => !request.hidden && !request.removed)
     .reduce((sum, request) => sum + Math.max(1, request.sponsorCount), 0);
 
+  // paymentStatus only reaches 'authorized'/'captured' when a payment provider is
+  // actually configured. In local/no-provider dev, fulfilled paid activity still
+  // happens but paymentStatus stays unset, so compare fulfilled paid volume against
+  // the captured totals instead of relying on paymentStatus alone.
+  const hasUncapturedPayments = requests.some(
+    (request) =>
+      request.paymentStatus === 'authorized' ||
+      (request.status === 'fulfilled' && request.amount > 0 && request.paymentStatus !== 'captured')
+  );
+  const showPaymentsNotConnectedNotice = hasUncapturedPayments && session.totals.totalTips === 0;
+
   const formattedTips = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(session.totals.totalTips);
   const shareText = `I just wrapped a Sway night and pulled in ${formattedTips} in tips. www.sway.tips`;
 
@@ -95,6 +106,16 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
           <p className="text-gray-300 text-sm leading-relaxed">
             You ended the room. Totals below reflect requests, tips, boosts, and fees recorded for tonight.
           </p>
+
+          {showPaymentsNotConnectedNotice && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+              <p className="text-xs font-bold text-amber-200">Payments weren&apos;t connected this session</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
+                Requests came in, but no payment provider was connected to capture them, so totals below show
+                $0. Connect Stripe before a real night to collect real earnings.
+              </p>
+            </div>
+          )}
 
           {/* Gamified Stat Grid */}
           <div className="grid grid-cols-2 gap-4">

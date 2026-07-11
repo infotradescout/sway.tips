@@ -524,7 +524,7 @@ function CompactAudienceScreenPanel({
           <QrCode className="h-8 w-8" />
         </div>
       </div>
-      <div className="min-w-0 self-center landscape:text-center">
+      <div className="min-w-0 self-center overflow-hidden landscape:text-center">
         <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Audience Screen</p>
         <p className="mt-1 font-display text-2xl font-black uppercase tracking-wide text-white landscape:text-4xl">Scan to Request</p>
         <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">
