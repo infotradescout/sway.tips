@@ -441,7 +441,11 @@ export default function PatronApp() {
                   <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Top approved request</p>
                     <p className="mt-2 font-bold text-white">{topRequest?.title || 'Nothing approved yet'}</p>
-                    <p className="text-xs text-slate-400">{topRequest ? `$${topRequest.amount} request value` : 'Empty-state inspector remains visible.'}</p>
+                    <p className="text-xs text-slate-400">
+                      {topRequest
+                        ? (session.paymentsEnabled !== false ? `$${topRequest.amount} request value` : '')
+                        : 'Empty-state inspector remains visible.'}
+                    </p>
                   </div>
                 </div>
               }

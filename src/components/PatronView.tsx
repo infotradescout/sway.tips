@@ -1198,7 +1198,9 @@ export default function PatronView({
                     <span className="truncate text-slate-200">
                       <span className="text-slate-500 mr-1.5">{i + 1}.</span>{r.title}
                     </span>
-                    <span className="font-mono text-cyan-300 shrink-0">${r.amount}</span>
+                    {session.paymentsEnabled !== false && (
+                      <span className="font-mono text-cyan-300 shrink-0">${r.amount}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1606,43 +1608,45 @@ export default function PatronView({
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-slate-900 border border-white/10 rounded-xl p-5 space-y-4 shadow-lg"
               >
-                {/* Visual slider or pricing */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs font-semibold font-sans">
-                    <span className="text-slate-400 font-sans">Tip Amount</span>
-                    <span className="text-fuchsia-400 font-mono font-bold">${tipAmount}.00</span>
-                  </div>
-                  
-                  <div className="flex gap-2 p-1.5 bg-slate-950 rounded-lg border border-white/5">
-                    {[session.minimumTip, session.minimumTip + 5, session.minimumTip + 15].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setTipAmount(preset)}
-                        className={`flex-1 py-1 text-xs font-mono font-bold rounded cursor-pointer ${
-                          tipAmount === preset 
-                            ? 'bg-fuchsia-600 text-white shadow' 
-                            : 'text-slate-400 hover:text-white hover:bg-slate-805'
-                        }`}
-                      >
-                        ${preset}
-                      </button>
-                    ))}
-                  </div>
+                {/* Visual slider or pricing -- not shown at all when requests are free in this room */}
+                {session.paymentsEnabled !== false && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-semibold font-sans">
+                      <span className="text-slate-400 font-sans">Tip Amount</span>
+                      <span className="text-fuchsia-400 font-mono font-bold">${tipAmount}.00</span>
+                    </div>
 
-                  <input
-                    type="range"
-                    min={session.minimumTip}
-                    max={100}
-                    step={5}
-                    value={tipAmount}
-                    onChange={(e) => setTipAmount(Number(e.target.value))}
-                    className="w-full accent-fuchsia-500 mt-2 cursor-pointer"
-                  />
-                  <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
-                    Tip higher to boost your request toward Up Next.
-                  </p>
-                </div>
+                    <div className="flex gap-2 p-1.5 bg-slate-950 rounded-lg border border-white/5">
+                      {[session.minimumTip, session.minimumTip + 5, session.minimumTip + 15].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setTipAmount(preset)}
+                          className={`flex-1 py-1 text-xs font-mono font-bold rounded cursor-pointer ${
+                            tipAmount === preset
+                              ? 'bg-fuchsia-600 text-white shadow'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-805'
+                          }`}
+                        >
+                          ${preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="range"
+                      min={session.minimumTip}
+                      max={100}
+                      step={5}
+                      value={tipAmount}
+                      onChange={(e) => setTipAmount(Number(e.target.value))}
+                      className="w-full accent-fuchsia-500 mt-2 cursor-pointer"
+                    />
+                    <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
+                      Tip higher to boost your request toward Up Next.
+                    </p>
+                  </div>
+                )}
 
                 {/* Senders vital name */}
                 <div className="space-y-1.5">
@@ -1679,10 +1683,17 @@ export default function PatronView({
                     disabled={isSubmitLocked}
                     className="w-full flex items-center justify-center gap-1.5 py-3 auction-gradient rounded-xl text-xs font-bold text-white transition-all transform active:scale-95 glow-fuchsia cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <CreditCard className="w-4 h-4" /> {isSubmitLocked ? 'Payment confirmation pending' : `Send Request • ${getFormat(tipAmount)}`}
+                    {session.paymentsEnabled !== false && <CreditCard className="w-4 h-4" />}
+                    {isSubmitLocked
+                      ? 'Payment confirmation pending'
+                      : session.paymentsEnabled !== false
+                        ? `Send Request • ${getFormat(tipAmount)}`
+                        : 'Send Free Request'}
                   </button>
                   <p className="text-[9px] text-slate-500 text-center mt-2.5 leading-relaxed font-sans">
-                    Confirm payment to send this request. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                    {session.paymentsEnabled !== false
+                      ? `Confirm payment to send this request. ${PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}`
+                      : `No payment needed for this request. ${PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}`}
                   </p>
                 </div>
 
@@ -1830,10 +1841,12 @@ export default function PatronView({
 
                         {/* Boost Action */}
                         <div className="text-right flex flex-col items-end gap-1.5">
-                          <div className={`text-sm font-mono font-black ${isTopOne ? 'text-fuchsia-400 text-lg' : 'text-slate-300'}`}>
-                            {getFormat(req.amount)}
-                          </div>
-                          
+                          {session.paymentsEnabled !== false && (
+                            <div className={`text-sm font-mono font-black ${isTopOne ? 'text-fuchsia-400 text-lg' : 'text-slate-300'}`}>
+                              {getFormat(req.amount)}
+                            </div>
+                          )}
+
                           {isFulfilled ? (
                             <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950/40 border border-cyan-500/25 px-2 py-1 rounded inline-flex items-center gap-1">
                               <Check className="w-3 h-3 text-cyan-300" /> FULFILLED

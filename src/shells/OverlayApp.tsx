@@ -109,6 +109,7 @@ export default function OverlayApp() {
   const roomLink = resolveRoomLink(routeGigId);
   const roomPath = `/g/${routeGigId}`;
   const isCrowdAutopilot = bState.session.operatingMode === 'crowd_autopilot';
+  const paymentsEnabled = bState.session.paymentsEnabled !== false;
 
   return (
     <>
@@ -188,7 +189,9 @@ export default function OverlayApp() {
                     )}
                     <span className="truncate font-bold">{req.title}</span>
                   </div>
-                  <span className="ml-2 font-mono font-bold text-cyan-400">${req.amount}</span>
+                  {paymentsEnabled && (
+                    <span className="ml-2 font-mono font-bold text-cyan-400">${req.amount}</span>
+                  )}
                 </motion.div>
               ))}
               {upNextQueue.length === 0 && (
@@ -266,7 +269,9 @@ export default function OverlayApp() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="truncate text-slate-300">{boost.patronName || 'A fan'}</span>
-                        <span className="font-mono font-bold text-fuchsia-300">+${boost.amount}</span>
+                        {paymentsEnabled && (
+                          <span className="font-mono font-bold text-fuchsia-300">+${boost.amount}</span>
+                        )}
                       </div>
                       <div className="truncate text-[10px] text-slate-500">boosted {boost.requestTitle}</div>
                     </motion.div>
