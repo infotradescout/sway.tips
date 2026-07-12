@@ -26,10 +26,13 @@ export default function SwayInstallPrompt() {
   const [suppressedRoute] = useState(() => {
     if (typeof window === 'undefined') return true;
     const pathname = window.location.pathname;
+    // The entire performer surface (setup, live cockpit) is suppressed, not just
+    // login/signup: a fixed-position install nag interrupts and visually overlaps
+    // the room-setup form before a performer has created a single room, i.e.
+    // before they've gotten any value from the app yet.
     return pathname.startsWith('/overlay')
       || pathname.startsWith('/admin')
-      || pathname === '/talent/login'
-      || pathname === '/talent/signup';
+      || pathname.startsWith('/talent');
   });
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {

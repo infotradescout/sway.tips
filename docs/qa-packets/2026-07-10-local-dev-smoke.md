@@ -136,10 +136,50 @@ The original run only exercised Paid rooms. Setting up and driving a **Free requ
 
 The actual submitted amount was already correctly forced to `$0` server-side (`amt = paymentsEnabledForRoom ? tipAmount : 0` in `initiateCheckout`), so patrons were never at risk of being charged — but the UI made it look like they were about to pay, which could cause real hesitation or abandoned requests at a free event.
 
-- Fix: the amount selector is now hidden in free mode, replaced with a clear "Free request — no payment required" panel; the submit button reads "Send Free Request" (no card icon, no fake price); and the Boost Queue item's price tag now shows "Free" instead of a misleading "$0.00".
+- Fix: the amount selector is hidden entirely in free mode (no replacement price/payment text — see the follow-up below, this was revised further after owner feedback); the submit button reads "Send Free Request" (no card icon, no fake price); and per-item price tags across the app (Boost Queue, overlay, performer cockpit, sidebar) were revised to omit the price entirely rather than show "$0.00" or "Free."
 - Also fixed related setup-screen copy in `src/components/TalentDashboard.tsx`: when a performer selects "Free requests," the "Minimum Request" slider and platform-fee handling controls remain visible (correctly — they still govern direct tips, which always stay paid per `server.ts`), but the labels didn't say so. They now read "Minimum Direct Tip" / "Direct Tip Platform Fee" with an explanatory note when free mode is selected, instead of implying they're dead controls or, worse, that "free requests" isn't actually free.
 
 Verified end-to-end in a browser: created a Free-requests room, submitted a request through the corrected UI, and confirmed the server recorded `amount: 0`, `paymentStatus: 'not_applicable'`. Confirmed the Tip tab correctly remains fully paid in free mode (tips always stay paid, per the checklist's own requirement). `npm run lint` and the full `npm run test:contracts` suite (90+ scripts) pass.
+
+## Follow-Up: Owner Feedback — Omit Price Entirely Rather Than Say "Free" (2026-07-11)
+
+Owner feedback on the prior fix: per-item price tags in free mode should not say "Free" or "$0.00" — they should simply not be shown at all. Revised across the app (PR #56, merged): the price element is now omitted entirely (not replaced with any text) on the patron Request tab, the Boost Queue item card, the Up Next list, the overlay/projector queue (request and boost tags; tip amounts untouched, tips always stay paid), the performer cockpit's Pending/Approved cards (mobile and desktop, via a new `paymentsEnabled` prop on `CompactRequestPanel`), the boost-credit line ("Boosted by X" instead of "+$X by X"), and the sidebar "Top approved request" panel. The setup-screen "Minimum Direct Tip" / "Direct Tip Platform Fee" relabel and the cockpit header's "Free" / "Free upvotes" money-rules summary were kept as-is — those are performer-facing settings displays explicitly about money rules, not per-item patron-facing tags, so showing the room's actual configured state there remains correct and expected.
+
+## Follow-Up: Free-Mode Boost (Upvote Weight 1) Verified End-to-End (2026-07-11)
+
+The QA packet's Boost Proof section had only been verified in Paid mode. Free-mode boost was driven end-to-end for the first time: created a Free-requests room, submitted and approved a free request, then boosted it as a second patron. Confirmed:
+
+- The Boost Queue item shows no price tag (per the fix above).
+- The "Confirm Boost" modal correctly relabels to "Upvote: [title] — Free event, no payment required" with no dollar amount, and the submit button reads "Confirm Upvote" instead of "Confirm Payment."
+- The server-recorded boost `amount` is `1` (fixed weight-1 upvote, matching `server.ts`'s `amt = 1` free-room branch) and `sponsorCount` incremented correctly.
+
+This closes the "Free-mode boost not yet exercised" gap noted in the prior handoff. No new issues found — the confirm-modal's existing free/paid branching (not touched by any of this session's fixes) was already correct.
+
+Also ran `npm run build` this session (not run in earlier follow-ups) — passes cleanly.
+
+## Follow-Up: Admin Surface Exercised for the First Time (2026-07-11)
+
+The admin shell (`/admin`, `/admin/login`, `/admin/accounts`) had never been driven at all in this QA cycle. Bootstrapped a first admin account via `POST /api/admin/bootstrap` (API-only by design — there is intentionally no self-serve admin-creation UI) and drove the full flow in a browser:
+
+- `/admin` with no session correctly shows the same "Session needed" recovery pattern already verified for the overlay shell — consistent, no internal-console language leaking through.
+- Login and the accounts table work cleanly; searched/onboarded a new performer account through "Onboard performer" (display name, handle, email, temp password, activate-immediately checkbox) — submission returned 201 and the new account appeared in the table immediately.
+- The account Edit form is a standout: it explicitly explains why payment/Stripe status fields are read-only ("driven by Stripe and is intentionally not editable here to avoid drifting from the real account state"), and the delete-account flow requires typing the account's full email to confirm, with a clear explanation of what is and isn't erased (payment/gig/audit history is retained per privacy policy, matching `sway-admin-account-deletion.contract.test.mjs`).
+
+No bugs or clarity issues found. No code changes this round.
+
+## Follow-Up: Mobile-Viewport Audit — Real Friction Found on the Performer Setup Screen (2026-07-12)
+
+Every prior round of this QA cycle drove the app on a desktop-width viewport (1280–1600px). Owner feedback pushed back hard on the "no bugs found" conclusion, correctly pointing out that a real DJ uses this on a phone, not a desktop browser, and that passing functional checks is not the same as a usable experience. Re-ran the performer setup flow on an emulated iPhone 13 viewport (390x844) and found real problems a desktop pass could not surface:
+
+1. **The room-setup screen is 5.2 full phone-screens of scrolling** before a performer can reach "Create room" — performer name, performance type, a Paid/Free toggle, a two-option fee-handling choice with paragraph explanations each, and a minimum-request slider are all on the critical path, for someone who realistically has seconds between songs to get a room live. Not fixed this round — this is a product-scope decision (how much of this can be defaulted/collapsed) rather than a bug, and needs an owner call before reshaping the flow.
+2. **Confirmed and fixed a real rendering bug**: the "Install Sway" prompt (`src/shells/SwayInstallPrompt.tsx`) is a `fixed`-position bottom banner that was not suppressed on any `/talent/*` route except the literal `/talent/login` and `/talent/signup` paths — meaning it appeared, unprompted, in the middle of a performer's very first room-setup session (before they'd gotten any value from the app), and visually overlapped the "Request Mode" and "Boost Minimum" text underneath it. Fixed by broadening the suppression to all of `/talent/*` (the entire performer surface, both setup and live cockpit), matching the existing suppression already applied to `/overlay` and `/admin`. Re-verified on the same iPhone 13 viewport: banner no longer appears on the setup screen, no more text overlap.
+3. **Structural product concern, not a bug**: scrolling past "Create room" reveals a "Music Sources" section where Spotify is "metadata/search only," SoundCloud is "not connected," and native Sway playback "needs provenance, license records, and playback audit before this can be enabled" — i.e. the app does not and cannot currently play music. A performer still runs their actual DJ software (Serato/rekordbox/Traktor) entirely separately; Sway is an additional screen to babysit, not a replacement for or integration with their existing workflow. This is a real product-differentiation question, not something fixable with a UI change, and is flagged here rather than acted on.
+
+`npm run lint` and the full `npm run test:contracts` suite (90+ scripts) pass after the fix.
+
+## Coverage Summary (as of 2026-07-12)
+
+Every item in `SWAY_LIVE_PILOT_READINESS_CHECKLIST.md`'s Required Evidence section has been driven end-to-end in a real browser against a real local Postgres, in both Paid and Free-request modes where applicable, on both desktop and mobile viewports for the performer setup flow: performer room setup (Paid + Free), QR/link, patron room entry, Request, Tip, Boost, queue actions (approve/deny/fulfill), patron status language, earnings/recap (including the payments-not-connected disclosure), no-session/invalid-room recovery, and the admin account-management surface. Functional correctness across this checklist is not in question. What remains genuinely open, and unresolved by this QA cycle, is whether the overall setup-flow length and the absence of any real DJ-software/music-playback integration make this product something a working DJ would actually choose to use — those are product-scope and roadmap questions, not bugs, and are called out above rather than decided unilaterally. No real Stripe provider was exercised (local/no-key mode throughout, by design); this is still not a substitute for a human-operator run of `SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md` at a real venue.
 
 ## Explicit Non-Claims
 
