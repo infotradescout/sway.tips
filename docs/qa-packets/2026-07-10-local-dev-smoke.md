@@ -189,3 +189,15 @@ Every item in `SWAY_LIVE_PILOT_READINESS_CHECKLIST.md`'s Required Evidence secti
 - This packet does not change routes, schema, persistence, role/access behavior, AI behavior, moderation behavior, overlay runtime, or control-bridge status.
 - This packet does not claim live hardware/control-bridge proof.
 - This is a local-dev smoke run by an agent, not a real venue pilot with a real audience — it does not replace a human-operator run of `SWAY_LIVE_PILOT_QA_PACKET_TEMPLATE.md` before a real pilot night.
+
+## Follow-Up: Collapsed the Room-Settings Form by Default (2026-07-12)
+
+Acted on the first of the two open items from the mobile-viewport audit above: the room-setup form's length. "Tonight's money settings" (performer name, performance type, Paid/Free toggle, fee handling, minimum-request slider, boost minimum, tip path) is a `<details>` element that already had a working collapse/expand toggle -- it just defaulted to open. The "Create room" button lives outside that `<details>`, so collapsing it by default doesn't hide anything performers need.
+
+Changed `showSettings` to default to `false`, and replaced the static summary paragraph with one that reflects the live settings when collapsed (e.g. "Paid • $5 minimum • fee passed to patron — tap to change"), so a performer can confirm the defaults are acceptable without expanding.
+
+Measured effect on the iPhone 13 viewport: total setup-screen scroll height dropped from 5.2 screens to 3.5 screens, and the "Create room" button is now visible within the first screen (Y=507px in a 664px viewport) with **zero scrolling required** -- down from needing to scroll past the entire money-settings block. Expand-to-customize still works, and creating a room using the collapsed defaults was verified end-to-end (`paymentsEnabled: true, minimumTip: 5, feeType: 'patron', talentName` correctly pulled from the account profile).
+
+The remaining 3.5 screens are the "Music Sources" section (Spotify/SoundCloud/Sway Audio connection status, playlist import, Stripe connect, public profile) below the fold -- left untouched, since that's the structural "no real DJ-software integration" issue flagged in the prior follow-up, not a scroll-length problem.
+
+`npm run lint` and the full `npm run test:contracts` suite (90+ scripts) pass.

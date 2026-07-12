@@ -1002,8 +1002,14 @@ export default function TalentDashboard({
   const [setupPaymentsEnabled, setSetupPaymentsEnabled] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   
-  // Local state for interactive settings drawer
-  const [showSettings, setShowSettings] = useState(true);
+  // Local state for interactive settings drawer. Collapsed by default: the
+  // room-settings form (money rules, fee handling, minimums) is the bulk of
+  // the pre-"Create room" scroll on a phone -- five-plus screens of it -- for
+  // a performer who has seconds between songs to get a room live. The
+  // defaults underneath (Paid, $5 minimum, pass-fee-to-patron, account name)
+  // are sane, so most performers can hit Create room immediately and only
+  // expand this to customize.
+  const [showSettings, setShowSettings] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
 
@@ -2606,9 +2612,18 @@ export default function TalentDashboard({
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Tonight's money settings</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Set paid or free requests, fee handling, and minimums before creating the room link and QR. Approve, deny, complete once the room is live.
-                  </p>
+                  {showSettings ? (
+                    <p className="mt-1 text-sm text-slate-400">
+                      Set paid or free requests, fee handling, and minimums before creating the room link and QR. Approve, deny, complete once the room is live.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-400">
+                      {setupPaymentsEnabled
+                        ? `Paid • $${setupMinTip} minimum • ${setupFeeType === 'patron' ? 'fee passed to patron' : 'you absorb the fee'}`
+                        : 'Free requests • direct tips stay paid'}
+                      {' — tap to change.'}
+                    </p>
+                  )}
                 </div>
                 <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
                   {showSettings ? 'Collapse' : 'Expand'}
