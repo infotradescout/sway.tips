@@ -7,7 +7,8 @@ const businessStore = readFileSync(join(root, 'src/server/business-store.ts'), '
 const types = readFileSync(join(root, 'src/types.ts'), 'utf8');
 const talentDashboard = [
   readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8'),
-  readFileSync(join(root, 'src/components/PerformerRoomControls.tsx'), 'utf8')
+  readFileSync(join(root, 'src/components/PerformerRoomControls.tsx'), 'utf8'),
+  readFileSync(join(root, 'src/components/PerformerAudienceScreen.tsx'), 'utf8')
 ].join('\n');
 const patronView = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const overlayApp = readFileSync(join(root, 'src/shells/OverlayApp.tsx'), 'utf8');

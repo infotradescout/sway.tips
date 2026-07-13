@@ -5,7 +5,8 @@ const root = process.cwd();
 const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 const performerRoomShare = readFileSync(join(root, 'src/components/PerformerRoomShare.tsx'), 'utf8');
-const performerCockpit = `${talentDashboard}\n${performerRoomShare}`;
+const performerAudienceScreen = readFileSync(join(root, 'src/components/PerformerAudienceScreen.tsx'), 'utf8');
+const performerCockpit = `${talentDashboard}\n${performerRoomShare}\n${performerAudienceScreen}`;
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -57,7 +58,7 @@ if (!compactQrSource.includes('if (!roomLink)')) {
 }
 
 if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} size={112} />')
-  || !talentDashboard.includes('<PerformerRoomQr activeGigId={activeGigId} size={224} />')) {
+  || !performerAudienceScreen.includes('<PerformerRoomQr activeGigId={activeGigId} size={224} />')) {
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 

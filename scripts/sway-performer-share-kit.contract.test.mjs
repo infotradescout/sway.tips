@@ -7,11 +7,13 @@ const failures = [];
 const performerShareKitPath = join(root, 'src/components/PerformerShareKit.tsx');
 const talentDashboardPath = join(root, 'src/components/TalentDashboard.tsx');
 const performerRoomSharePath = join(root, 'src/components/PerformerRoomShare.tsx');
+const performerAudienceScreenPath = join(root, 'src/components/PerformerAudienceScreen.tsx');
 const packageJsonPath = join(root, 'package.json');
 
 const performerShareKit = readFileSync(performerShareKitPath, 'utf8');
 const talentDashboard = readFileSync(talentDashboardPath, 'utf8');
 const performerRoomShare = readFileSync(performerRoomSharePath, 'utf8');
+const performerAudienceScreen = readFileSync(performerAudienceScreenPath, 'utf8');
 const packageJson = readFileSync(packageJsonPath, 'utf8');
 
 if (!performerShareKit.includes('activeGigId')) {
@@ -69,7 +71,7 @@ for (const forbidden of [
 }
 
 if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} size={112} />')
-  || !talentDashboard.includes('<PerformerRoomQr activeGigId={activeGigId} size={224} />')) {
+  || !performerAudienceScreen.includes('<PerformerRoomQr activeGigId={activeGigId} size={224} />')) {
   failures.push('Canonical performer cockpit must render the selected room QR in its share and audience panels.');
 }
 
