@@ -1490,7 +1490,7 @@ export default function PatronView({
                     <button 
                       type="button"
                       onClick={() => setSelectedTrack(null)}
-                      className="text-xs text-fuchsia-400 font-semibold hover:underline cursor-pointer"
+                      className="min-h-8 rounded-lg px-2 text-xs font-semibold text-fuchsia-400 hover:bg-fuchsia-500/10 hover:underline cursor-pointer"
                     >
                       Change
                     </button>
@@ -1640,7 +1640,7 @@ export default function PatronView({
                       step={5}
                       value={tipAmount}
                       onChange={(e) => setTipAmount(Number(e.target.value))}
-                      className="w-full accent-fuchsia-500 mt-2 cursor-pointer"
+                      className="mt-2 min-h-6 w-full cursor-pointer accent-fuchsia-500"
                     />
                     <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
                       Tip higher to boost your request toward Up Next.

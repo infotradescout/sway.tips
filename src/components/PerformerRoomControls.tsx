@@ -29,7 +29,7 @@ export default function PerformerRoomControls({
   return (
     <section
       data-sway-performer-room-controls="true"
-      className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_auto] content-start gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3 landscape:p-2"
+      className="grid h-full min-h-0 min-w-0 w-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_auto_auto] content-start gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3 landscape:p-2"
     >
       <div>
         <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Room Control</h3>
