@@ -30,7 +30,7 @@ for (const term of [
 
 for (const term of [
   "useState<'live' | 'share' | 'settings'>('live')",
-  "Tonight's money settings",
+  'Room details & pricing',
   'Minimum request',
   'Boost minimum',
   'Tip path',
@@ -38,7 +38,7 @@ for (const term of [
   'Show QR',
   'Copy link',
   'Approve, deny, complete',
-  'before creating the room link and QR',
+  'Confirm the performer, then choose paid or free requests',
   'Free requests',
   'Paid requests and boosts use the $5 minimum',
   'Free upvotes',
