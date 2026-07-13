@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
+const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 
 const failures = [];
 
@@ -33,12 +34,35 @@ for (const pattern of sandboxPatterns) {
   if (pattern.test(app)) failures.push(`App route shell contains sandbox role-switching pattern: ${pattern}`);
 }
 
-const talentBlockStart = app.indexOf("route.name === 'talent-gigs'");
 const patronBlockStart = app.indexOf('<PatronView');
-if (talentBlockStart === -1) failures.push('Talent route branch missing.');
 if (patronBlockStart === -1) failures.push('Patron route branch missing.');
-if (talentBlockStart !== -1 && patronBlockStart !== -1 && talentBlockStart > patronBlockStart) {
-  failures.push('Talent and patron route branches are not cleanly separated.');
+
+for (const forbidden of [
+  "import TalentDashboard from './components/TalentDashboard'",
+  "import TalentLoginCard from './components/TalentLoginCard'",
+  "import TalentSignupCard from './components/TalentSignupCard'",
+  "route.name === 'talent-gigs'",
+  'handleStartSession',
+  'handleEndSession',
+  'handleCloseout',
+  'handleTriageRequest',
+  'handleFulfillRequest'
+]) {
+  if (app.includes(forbidden)) failures.push(`Legacy/dev App must not own performer runtime behavior: ${forbidden}`);
+}
+
+for (const required of [
+  "import TalentDashboard from '../components/TalentDashboard'",
+  "pathname === '/talent/login'",
+  "pathname === '/talent/signup'",
+  'handleStartSession',
+  'handleEndSession',
+  'handleCloseout',
+  'handleTriageRequest',
+  'handleFulfillRequest',
+  '<VictoryScreen'
+]) {
+  if (!talentApp.includes(required)) failures.push(`Canonical TalentApp missing performer runtime behavior: ${required}`);
 }
 
 if (failures.length) {

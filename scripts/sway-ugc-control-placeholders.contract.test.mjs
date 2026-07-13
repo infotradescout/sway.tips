@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
+const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 const patronView = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
@@ -40,9 +41,15 @@ for (const term of requiredTalentUiTerms) {
   }
 }
 
-for (const term of ['handleReportContent', 'handleBlockFoundation', 'handleHideRequest', 'handleRemoveRequest']) {
+for (const term of ['handleReportContent', 'handleBlockFoundation']) {
   if (!app.includes(term)) {
-    failures.push(`App moderation wiring missing handler: ${term}`);
+    failures.push(`Patron dev app moderation wiring missing handler: ${term}`);
+  }
+}
+
+for (const term of ['handleHideRequest', 'handleRemoveRequest']) {
+  if (!talentApp.includes(term)) {
+    failures.push(`Canonical TalentApp moderation wiring missing handler: ${term}`);
   }
 }
 
