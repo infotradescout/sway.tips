@@ -62,7 +62,7 @@ if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} siz
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
-if (talentDashboard.match(/session\.status !== 'inactive'/g)?.length !== 2) {
+if (talentDashboard.match(/session\.status !== 'inactive'/g)?.length !== 1) {
   failures.push('TalentDashboard must have one active-room branch and no second live-session renderer below it.');
 }
 

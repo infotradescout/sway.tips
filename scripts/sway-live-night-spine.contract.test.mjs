@@ -21,6 +21,7 @@ function requireExcludes(label, source, terms) {
 }
 
 const talentDashboard = read('src/components/TalentDashboard.tsx');
+const performerRoomSetup = read('src/components/PerformerRoomSetup.tsx');
 const performerRoomControls = read('src/components/PerformerRoomControls.tsx');
 const patronView = read('src/components/PatronView.tsx');
 const server = read('server.ts');
@@ -33,8 +34,6 @@ const app = read('src/App.tsx');
 
 requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
-  "useState(true)",
-  'Create room',
   'Start a Room',
   'Show QR',
   "{ id: 'settings', label: 'Control' }",
@@ -42,17 +41,28 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Account & integrations',
   'data-sway-account-integrations="true"',
   'Music sources, payouts, and your public performer profile.',
-  'Room details & pricing',
-  'data-sway-performer-name-required="true"',
-  'disabled={!performerEmailVerified || !setupName.trim()}',
-  'Minimum request',
-  'Boost minimum',
-  'Free requests',
-  'Paid requests and boosts use the $5 minimum',
-  'Free upvotes',
-  'Tip path',
   'Backers',
-  'Approve, deny, complete'
+  '<PerformerRoomSetup'
+]);
+
+requireIncludes('PerformerRoomSetup', performerRoomSetup, [
+  'data-sway-performer-room-setup="true"',
+  "const steps = ['Performer', 'Pricing', 'Requests', 'Review', 'Start']",
+  'Step {step + 1} of 5',
+  'Create room',
+  'Performer name',
+  'Paid requests',
+  'Free requests',
+  'My synced library',
+  'Open requests',
+  'Ready to go live',
+  'disabled={!performerEmailVerified || !name.trim()}'
+]);
+
+requireIncludes('Session start request scope', server, [
+  'const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
+  "searchScope: searchScope === 'catalog' ? 'catalog' : 'library'",
+  'searchScope: roomState.session.searchScope'
 ]);
 
 requireExcludes('TalentDashboard selectable request scopes', talentDashboard, [

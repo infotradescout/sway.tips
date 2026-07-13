@@ -5175,7 +5175,7 @@ app.post("/api/session/start", async (req, res) => {
   }
 
   await refreshBusinessState();
-  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, gig_id } = req.body;
+  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
 
   const requestedGigId = parseDurableGigId(gig_id);
   const roomGigId = requestedGigId ?? businessStore.createGigId();
@@ -5201,7 +5201,7 @@ app.post("/api/session/start", async (req, res) => {
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
-    searchScope: 'library',
+    searchScope: searchScope === 'catalog' ? 'catalog' : 'library',
     paymentsEnabled: typeof paymentsEnabled === 'boolean' ? paymentsEnabled : true,
     totals: {
       totalTips: 0,
@@ -5227,7 +5227,8 @@ app.post("/api/session/start", async (req, res) => {
       talentRole: roomState.session.talentRole,
       feeType: roomState.session.feeType,
       minimumTip: roomState.session.minimumTip,
-      paymentsEnabled: roomState.session.paymentsEnabled
+      paymentsEnabled: roomState.session.paymentsEnabled,
+      searchScope: roomState.session.searchScope
     }
   });
   res.json({ success: true, state: prepareRoomState(roomState, roomGigId) });
