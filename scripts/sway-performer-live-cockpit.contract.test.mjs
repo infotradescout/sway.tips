@@ -4,6 +4,8 @@ import { join } from 'node:path';
 const root = process.cwd();
 const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const performerRoomShare = readFileSync(join(root, 'src/components/PerformerRoomShare.tsx'), 'utf8');
+const performerCockpit = `${talentDashboard}\n${performerRoomShare}`;
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -41,21 +43,21 @@ for (const term of [
   'landscape:hidden',
   "aria-label=\"Live-night sections\""
 ]) {
-  if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing no-scroll cockpit term: ${term}`);
+  if (!performerCockpit.includes(term)) failures.push(`Performer cockpit missing no-scroll cockpit term: ${term}`);
 }
 
-const compactQrStart = talentDashboard.indexOf('function CompactRoomQr');
-const compactShareStart = talentDashboard.indexOf('function CompactSharePanel');
+const compactQrStart = performerRoomShare.indexOf('function PerformerRoomQr');
+const compactShareStart = performerRoomShare.indexOf('export default function PerformerRoomShare');
 const compactQrSource = compactQrStart === -1 || compactShareStart === -1
   ? ''
-  : talentDashboard.slice(compactQrStart, compactShareStart);
+  : performerRoomShare.slice(compactQrStart, compactShareStart);
 
 if (!compactQrSource.includes('if (!roomLink)')) {
   failures.push('Compact room QR must fail closed when there is no active room link.');
 }
 
-if (!talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={112} />')
-  || !talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={224} />')) {
+if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} size={112} />')
+  || !talentDashboard.includes('<PerformerRoomQr activeGigId={activeGigId} size={224} />')) {
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
