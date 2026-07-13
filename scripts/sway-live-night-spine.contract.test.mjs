@@ -54,6 +54,10 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Approve, deny, complete'
 ]);
 
+requireExcludes('TalentDashboard selectable request scopes', talentDashboard, [
+  "['setlist', 'Set']"
+]);
+
 requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
   "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
   "{ id: 'hardware'",
