@@ -44,7 +44,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Paid requests and boosts use the $5 minimum',
   'Free upvotes',
   'Tip path',
-  'Earnings tonight',
+  'Backers',
   'Approve, deny, complete'
 ]);
 

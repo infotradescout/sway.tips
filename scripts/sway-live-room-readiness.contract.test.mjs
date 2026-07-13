@@ -37,8 +37,8 @@ requireIncludes(
 );
 requireIncludes(
   talentDashboard,
-  'Share-kit target:',
-  'TalentDashboard must show which live room the share kit targets.'
+  'aria-label="Active room"',
+  'TalentDashboard must identify the active room selector.'
 );
 requireIncludes(
   talentDashboard,

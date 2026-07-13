@@ -66,12 +66,9 @@ for (const forbidden of [
   }
 }
 
-if (!talentDashboard.includes("import PerformerShareKit from './PerformerShareKit';")) {
-  failures.push('TalentDashboard must import PerformerShareKit.');
-}
-
-if (!talentDashboard.includes('<PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />')) {
-  failures.push('TalentDashboard must render PerformerShareKit with the selected active room context.');
+if (!talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={112} />')
+  || !talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={224} />')) {
+  failures.push('Canonical performer cockpit must render the selected room QR in its share and audience panels.');
 }
 
 if (!packageJson.includes('qrcode.react')) {

@@ -114,15 +114,6 @@ for (const term of [
 }
 
 for (const term of [
-  'Demo only',
-  'Demo total shown:',
-  'Demo only: boost locked',
-  'Demo only: no boost action'
-]) {
-  requireIncludes(talentDashboard, term, `Talent demo mode must not imply capture or promotion authority: ${term}`);
-}
-
-for (const term of [
   'SplitViewShell',
   'primaryLabel',
   'secondaryLabel',

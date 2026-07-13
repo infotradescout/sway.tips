@@ -37,7 +37,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
-import PerformerShareKit from './PerformerShareKit';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -1975,6 +1974,24 @@ export default function TalentDashboard({
                 <p className="truncate text-[11px] font-bold text-slate-400">
                   {session.status === 'ending' ? `Ending room - closeout ${timeLeft}` : `${session.talentRole} live room`}
                 </p>
+                {activeRooms.length > 0 ? (
+                  <label className="mt-1 flex min-w-0 items-center gap-1 text-[9px] font-bold text-slate-500">
+                    <span className="shrink-0 uppercase tracking-wider">Room</span>
+                    <select
+                      data-sway-room-selector="true"
+                      value={selectedGigId ?? activeGigId ?? ''}
+                      onChange={(event) => onSelectGigId(event.target.value || null)}
+                      className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 font-mono text-[9px] text-cyan-300 outline-none"
+                      aria-label="Active room"
+                    >
+                      {activeRooms.map((room) => (
+                        <option key={room.gigId} value={room.gigId} className="bg-slate-950 text-white">
+                          {room.performerName} · {room.gigId.slice(0, 8)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
               </div>
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center landscape:w-[23rem]">
@@ -2051,10 +2068,22 @@ export default function TalentDashboard({
                   paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
-                      <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
+                        disabled={previewMode || isRequestQueueActionPending(request.id)}
+                        data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
+                        className="bg-emerald-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         <Check className="h-4 w-4" />
                       </button>
-                      <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
+                        disabled={previewMode || isRequestQueueActionPending(request.id)}
+                        data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
+                        className="bg-rose-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         <X className="h-4 w-4" />
                       </button>
                     </>
@@ -2068,12 +2097,25 @@ export default function TalentDashboard({
                   paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
-                      <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
+                        disabled={previewMode || isRequestQueueActionPending(request.id)}
+                        data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
+                        className="bg-cyan-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         <Play className="h-4 w-4" />
                       </button>
-                      <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
+                        disabled={previewMode || isRequestQueueActionPending(request.id)}
+                        data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
+                        className="border border-white/10 bg-slate-950 text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         <X className="h-4 w-4" />
                       </button>
+                      <SpotifyOpenLink request={request} />
                     </>
                   )}
                 />
@@ -2096,10 +2138,22 @@ export default function TalentDashboard({
                     paymentsEnabled={session.paymentsEnabled !== false}
                     renderActions={(request) => (
                       <>
-                        <button type="button" onClick={() => onTriage(request.id, 'approve')} className="bg-emerald-500 text-slate-950">
+                        <button
+                          type="button"
+                          onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
+                          disabled={previewMode || isRequestQueueActionPending(request.id)}
+                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
+                          className="bg-emerald-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <Check className="h-4 w-4" />
                         </button>
-                        <button type="button" onClick={() => onTriage(request.id, 'deny')} className="bg-rose-500 text-slate-950">
+                        <button
+                          type="button"
+                          onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
+                          disabled={previewMode || isRequestQueueActionPending(request.id)}
+                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
+                          className="bg-rose-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <X className="h-4 w-4" />
                         </button>
                       </>
@@ -2113,12 +2167,25 @@ export default function TalentDashboard({
                     paymentsEnabled={session.paymentsEnabled !== false}
                     renderActions={(request) => (
                       <>
-                        <button type="button" onClick={() => onFulfill(request.id)} className="bg-cyan-500 text-slate-950">
+                        <button
+                          type="button"
+                          onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
+                          disabled={previewMode || isRequestQueueActionPending(request.id)}
+                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
+                          className="bg-cyan-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <Play className="h-4 w-4" />
                         </button>
-                        <button type="button" onClick={() => onHide(request.id)} className="border border-white/10 bg-slate-950 text-slate-300">
+                        <button
+                          type="button"
+                          onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
+                          disabled={previewMode || isRequestQueueActionPending(request.id)}
+                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
+                          className="border border-white/10 bg-slate-950 text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                           <X className="h-4 w-4" />
                         </button>
+                        <SpotifyOpenLink request={request} />
                       </>
                     )}
                   />
@@ -2225,130 +2292,6 @@ export default function TalentDashboard({
         </div>
       </div>
 
-      {session.status !== 'inactive' && (
-        <section className="order-2 rounded-3xl border border-cyan-500/20 bg-slate-900/80 p-5 shadow-2xl">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Tonight's live room</p>
-              <h3 className="mt-2 font-display text-2xl font-black text-white">
-                {operatorNextAction}
-              </h3>
-              <p className="mt-1 text-sm leading-6 text-slate-400">{operatorNextDetail}</p>
-            </div>
-            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[520px]">
-              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room</p>
-                <p className={`mt-1 text-sm font-black ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {session.requestsOpen ? 'Open' : 'Paused'}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Pending</p>
-                <p className="mt-1 font-mono text-xl font-black text-amber-300">{triageQueue.length}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Approved</p>
-                <p className="mt-1 font-mono text-xl font-black text-cyan-300">{liveLadderQueue.length}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Scope</p>
-                <p className="mt-1 text-sm font-black text-white">{requestScopeLabel}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
-                {session.paymentsEnabled === false ? 'Request price' : 'Request minimum'}
-              </p>
-              <p className="mt-1 text-xs font-black text-white">
-                {session.paymentsEnabled === false ? 'Free' : formatValue(session.minimumTip)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Boost minimum</p>
-              <p className="mt-1 text-xs font-black text-white">
-                {session.paymentsEnabled === false ? 'Free upvotes' : `${formatValue(session.minimumTip)} approved queue only`}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Tip path</p>
-              <p className="mt-1 text-xs font-black text-white">Direct tips available</p>
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
-              onClick={() => handleToggleRequests(!session.requestsOpen)}
-              disabled={actionPending}
-              className={`min-h-11 flex-1 rounded-2xl px-4 py-3 text-xs font-black uppercase tracking-wide transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${
-                session.requestsOpen
-                  ? 'bg-rose-500 text-slate-950 hover:bg-rose-400'
-                  : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
-              }`}
-            >
-              {session.requestsOpen ? 'Pause requests' : 'Resume requests'}
-            </button>
-            {selectedRoomLink ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleCopyLiveRoomLink}
-                  className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-fuchsia-600 px-4 py-3 text-xs font-black uppercase tracking-wide text-white transition-all hover:bg-fuchsia-500"
-                >
-                  {liveLinkCopied ? 'Copied' : 'Copy link'}
-                </button>
-                <a
-                  href={`/g/${selectedRoomLink}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs font-black uppercase tracking-wide text-cyan-200 transition-all hover:border-cyan-300 hover:text-white"
-                >
-                  Open crowd view
-                </a>
-              </>
-            ) : (
-              <div className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500">
-                Crowd link after start
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={previewMode ? undefined : onEndSession}
-              disabled={previewMode || session.status !== 'active'}
-              className="min-h-11 flex-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-300 transition-all hover:border-fuchsia-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              End room
-            </button>
-          </div>
-        </section>
-      )}
-
-      {session.status !== 'inactive' && (
-        <nav className="order-3 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900 p-1 lg:hidden" aria-label="Live-night sections">
-          {[
-            { id: 'live', label: 'Live' },
-            { id: 'share', label: 'Show QR' },
-            { id: 'settings', label: 'Settings' }
-          ].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
-              className={`min-h-11 rounded-xl px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
-                mobilePanel === item.id
-                  ? 'bg-cyan-500 text-slate-950'
-                  : 'bg-slate-950 text-slate-400'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      )}
-
       {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
       <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'} space-y-5`}>
       <MusicSourcesPanel
@@ -2372,7 +2315,7 @@ export default function TalentDashboard({
               For technical users only. Requires writing or running a small script that sends your track list to Sway — there's no built-in connector for Serato, rekordbox, Traktor, or other DJ software yet.
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              Most performers don't need this — once your room is live, add songs by hand in the Setlist Builder under Song Search Scope instead.
+              Most performers don't need this. Use it only when you already have a library bridge workflow.
             </p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
@@ -2844,923 +2787,6 @@ export default function TalentDashboard({
             </div>
           </form>
         </motion.div>
-      )}
-
-      {/* 3. Live Core Session Workflows */}
-      {session.status !== 'inactive' && (
-        <div className="order-4 grid lg:grid-cols-3 gap-8">
-          
-          {/* Main Triage and Live Auction Columns */}
-          <div className={`${mobilePanel === 'live' ? 'space-y-8' : 'hidden'} lg:col-span-2 lg:block lg:space-y-8`}>
-
-            {/* 3-KILL. ALWAYS-VISIBLE OPERATOR KILL SWITCH */}
-            <div
-              className={`rounded-2xl p-4 border flex items-center justify-between gap-4 shadow-lg select-none ${
-                session.requestsOpen
-                  ? 'bg-emerald-950/30 border-emerald-500/30'
-                  : 'bg-rose-950/40 border-rose-500/40'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className={`w-3 h-3 rounded-full shrink-0 ${session.requestsOpen ? 'bg-emerald-400 shadow-md shadow-emerald-500/50 animate-pulse' : 'bg-rose-400'}`} />
-                <div className="min-w-0">
-                  <p className={`text-sm font-black uppercase tracking-wide font-display ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
-                    {session.requestsOpen ? 'Requests Live' : 'All Requests Paused'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 font-sans leading-snug">
-                    {session.requestsOpen
-                      ? 'Patrons can submit. Tap pause to immediately halt all inbound requests.'
-                      : 'New patron submissions are halted. Tap resume to reopen the queue.'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleToggleRequests(!session.requestsOpen)}
-                disabled={actionPending}
-                className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                  session.requestsOpen
-                    ? 'bg-rose-500 text-slate-950 hover:bg-rose-400 shadow-lg shadow-rose-500/20'
-                    : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20'
-                }`}
-              >
-                {session.requestsOpen ? (
-                  <><ToggleLeft className="w-4 h-4 shrink-0" /> Pause All Requests</>
-                ) : (
-                  <><ToggleRight className="w-4 h-4 shrink-0" /> Resume Requests</>
-                )}
-              </button>
-            </div>
-
-            {/* 3-MODE. OPERATING POSTURE */}
-            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Operating Mode</p>
-                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Manual review is optional. Crowd autopilot moves clean requests straight into the ranked queue.
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleSetMode('manual')}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.operatingMode === 'manual'
-                      ? 'bg-cyan-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
-                  }`}
-                >
-                  Manual
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetMode('open_call')}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.operatingMode === 'open_call'
-                      ? 'bg-cyan-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-cyan-500/40'
-                  }`}
-                >
-                  Open Call
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetMode('crowd_autopilot')}
-                  disabled={actionPending}
-                  data-sway-crowd-autopilot-control="true"
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.operatingMode === 'crowd_autopilot'
-                      ? 'bg-fuchsia-500 text-white'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-fuchsia-500/40'
-                  }`}
-                >
-                  Autopilot
-                </button>
-              </div>
-            </div>
-
-            {/* 3b. SONG SEARCH SCOPE */}
-            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Song Search Scope</p>
-                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  Choose the song source patrons can request from. The setlist stays separate from the incoming request queue.
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleSetSearchScope('library')}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.searchScope !== 'catalog' && session.searchScope !== 'setlist'
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                  }`}
-                >
-                  My Library
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetSearchScope('setlist')}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.searchScope === 'setlist'
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                  }`}
-                >
-                  This Gig's Setlist
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetSearchScope('catalog')}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.searchScope === 'catalog'
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                  }`}
-                >
-                  Open Catalog
-                </button>
-              </div>
-            </div>
-
-            {/* 3b-i. SETLIST BUILDER (only relevant once setlist scope is selected) */}
-            {session.searchScope === 'setlist' && (
-              <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 space-y-3 select-none">
-                <div>
-                  <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Setlist Builder</p>
-                  <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                    Build the curated setlist for tonight. Patrons can request from it while the performer request queue remains separate.
-                  </p>
-                </div>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="text"
-                    value={setlistQuery}
-                    onChange={(e) => setSetlistQuery(e.target.value)}
-                    placeholder="Search songs to add..."
-                    className="w-full pl-8 pr-3 py-2 rounded-lg bg-slate-950 border border-white/10 text-xs text-slate-200 font-sans focus:outline-none focus:border-emerald-500/40"
-                  />
-                </div>
-                {setlistQuery.trim() && (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {setlistSearchStatus === 'searching' && (
-                      <p className="text-[11px] text-slate-500 font-sans">Searching…</p>
-                    )}
-                    {setlistSearchStatus === 'error' && (
-                      <p className="text-[11px] text-rose-300 font-sans">Search failed. Try again.</p>
-                    )}
-                    {setlistSearchStatus === 'idle' && setlistResults.length === 0 && (
-                      <p className="text-[11px] text-slate-500 font-sans">No matches yet.</p>
-                    )}
-                    {setlistResults.map((track, idx) => (
-                      <div key={`${track.sourceKey}-${track.externalTrackId ?? idx}`} className="flex items-center justify-between gap-2 bg-slate-950 border border-white/5 rounded-lg px-3 py-2">
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-slate-200 truncate">{track.title}</p>
-                          <p className="text-[11px] text-slate-500 truncate">{track.artist}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleAddSetlistTrack(track)}
-                          className="shrink-0 min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div>
-                  <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400 mb-1.5">
-                    Tonight's Setlist ({setlistTracks.length})
-                  </p>
-                  {setlistLoadError ? (
-                    <p className="text-[11px] text-rose-300 font-sans">Couldn't load your setlist. Refresh the page and try again.</p>
-                  ) : setlistTracks.length === 0 ? (
-                    <p className="text-[11px] text-slate-500 font-sans">No tracks added yet — patrons will see an empty search until you add some.</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                      {setlistTracks.map((track) => (
-                        <div key={track.id} className="flex items-center justify-between gap-2 bg-slate-950 border border-white/5 rounded-lg px-3 py-2">
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-200 truncate">{track.title}</p>
-                            <p className="text-[11px] text-slate-500 truncate">{track.artist}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSetlistTrack(track.id)}
-                            className="shrink-0 min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 3c. PAYMENTS TOGGLE */}
-            <div className="rounded-2xl p-4 border border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 select-none">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Payments</p>
-                <p className="text-[11px] text-slate-500 font-sans leading-snug mt-0.5">
-                  {session.paymentsEnabled === false
-                    ? 'Free event: requests carry no charge, boosts are free upvotes, and direct tips stay paid.'
-                    : 'Paid room: tips, boosts, and paid requests are all active.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleSetPaymentsEnabled(true)}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.paymentsEnabled !== false
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                  }`}
-                >
-                  Paid
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetPaymentsEnabled(false)}
-                  disabled={actionPending}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    session.paymentsEnabled === false
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-950 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                  }`}
-                >
-                  Free Event
-                </button>
-              </div>
-            </div>
-
-            {/* 3a. POST-GIG FINAL SWEEP INDICATOR */}
-            {session.status === 'ending' && (
-              <div className="bg-amber-950/40 p-5 rounded-2xl border border-amber-900/30 flex items-start gap-4">
-                <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1 select-none">
-                  <h4 className="text-sm font-bold text-amber-200">5-Minute Final Check is ticking</h4>
-                  <p className="text-xs text-amber-300 leading-relaxed">
-                    Review your pending queue below. Tap approval on anything you actually fulfilled but forgot to log. No card is charged — approvals record the request for the performer's queue.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* 3b. PRIVATE TRIAGE QUEUE (AUTHORIZE ESCROW) */}
-            <div className="space-y-4">
-              <div className="flex justify-between items-center select-none font-sans">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-display text-base font-bold text-white tracking-wide uppercase">
-                    Pending Triage
-                  </h3>
-                  <span className="text-xs bg-slate-900 border border-white/5 text-slate-400 font-mono px-2 py-0.5 rounded-full select-none">
-                    {triageQueue.length} Pending
-                  </span>
-                </div>
-                <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest flex items-center gap-1">
-                  REVIEW BEFORE UP NEXT
-                </span>
-              </div>
-
-              <div id="triage_requests_list" className="space-y-3 font-sans">
-                <AnimatePresence mode="popLayout">
-                  {triageQueue.length === 0 ? (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-center p-8 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl space-y-2 select-none"
-                    >
-                      <Check className="w-6 h-6 text-slate-600 mx-auto" />
-                      <div className="text-xs font-semibold text-slate-400">Queue cleared!</div>
-                      <p className="text-[10px] text-slate-500">Pending crowd requests land here before they move into the live queue.</p>
-                    </motion.div>
-                  ) : (
-                    triageQueue.map((req) => (
-                      <motion.div
-                        key={req.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: 10 }}
-                        className="p-4 bg-slate-900/60 border border-white/5 rounded-xl flex items-center justify-between gap-4 hover:border-white/10 transition-colors"
-                      >
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          {req.albumArt && (
-                            <img 
-                              src={req.albumArt} 
-                              alt="track" 
-                              referrerPolicy="no-referrer"
-                              className="w-12 h-12 rounded-lg bg-slate-850 shrink-0 object-cover border border-white/15 shadow-sm" 
-                            />
-                          )}
-                          <div className="min-w-0">
-                            <div className="flex items-baseline gap-1.5 font-sans text-sm font-bold text-white truncate">
-                              <span>{req.title}</span>
-                              {session.paymentsEnabled !== false && (
-                                <span className="font-mono text-xs text-fuchsia-400 font-black mt-1">{formatValue(req.amount)}</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-slate-400 truncate mt-0.5 font-medium">{req.subtitle}</p>
-                            
-                            <div className="flex items-center gap-2 mt-2 text-[10px]">
-                              <span className="font-mono font-bold text-cyan-400 bg-cyan-950/40 border border-cyan-500/10 px-1.5 py-0.5 rounded">
-                                {req.senderName}
-                              </span>
-                              {req.message && (
-                                <span className="text-slate-400 truncate italic">"{req.message}"</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Triage Accept (Move to Ladder) or Reject (Instant Void Hold) */}
-                        <div className="flex items-center gap-2 font-sans">
-                          <SpotifyOpenLink request={req} />
-
-                          <button
-                            type="button"
-                            onClick={() => runQueueAction(req.id, 'hide', () => onHide(req.id))}
-                            disabled={isRequestQueueActionPending(req.id)}
-                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'hide') ? 'true' : undefined}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            title="Hide from the live queue"
-                          >
-                            <AlertTriangle className="w-4 h-4" /> {isQueueActionPending(req.id, 'hide') ? 'Hiding' : 'Hide'}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => runQueueAction(req.id, 'veto', () => onTriage(req.id, 'deny'))}
-                            disabled={isRequestQueueActionPending(req.id)}
-                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'veto') ? 'true' : undefined}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-fuchsia-400 hover:bg-fuchsia-500/10 hover:border-fuchsia-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            title="Reject &amp; Void Hold"
-                          >
-                            <Trash2 className="w-4 h-4" /> {isQueueActionPending(req.id, 'veto') ? 'Vetoing' : 'Veto'}
-                          </button>
-                          
-                          <button
-                            type="button"
-                            onClick={() => runQueueAction(req.id, 'approve', () => onTriage(req.id, 'approve'))}
-                            disabled={isRequestQueueActionPending(req.id)}
-                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'approve') ? 'true' : undefined}
-                            className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 p-2.5 px-3.5 rounded-lg font-black text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            title="Approve request"
-                          >
-                            <Check className="w-4 h-4" /> {isQueueActionPending(req.id, 'approve') ? 'Approving' : 'Approve'}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => runQueueAction(req.id, 'remove', () => onRemove(req.id))}
-                            disabled={isRequestQueueActionPending(req.id)}
-                            data-sway-queue-action-pending={isQueueActionPending(req.id, 'remove') ? 'true' : undefined}
-                            className="p-2.5 rounded-lg bg-slate-950 border border-white/5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30 transition-all flex items-center gap-1 text-xs font-mono font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            title="Remove from queue"
-                          >
-                            <Trash2 className="w-4 h-4" /> {isQueueActionPending(req.id, 'remove') ? 'Removing' : 'Remove'}
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            {/* 3c. THE LIVE REQUEST LADDER (APPROVED AUCTION STATE) */}
-            <div className="space-y-4">
-              <div className="flex justify-between items-center select-none font-sans">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-display text-base font-bold text-white tracking-wide uppercase">
-                    Approved Queue
-                  </h3>
-                  <span className="text-[10px] bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 font-mono px-2.5 py-0.5 rounded-full select-none font-black tracking-wider uppercase animate-pulse">
-                    LIVE
-                  </span>
-                </div>
-                <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest flex items-center gap-1">
-                  📶 SHOWN ON OVERLAY
-                </span>
-              </div>
-
-              <div id="ladder_active_queue" className="space-y-3 font-sans">
-                <AnimatePresence mode="popLayout">
-                  {liveLadderQueue.length === 0 ? (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-center p-8 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none"
-                    >
-                      <Sparkles className="w-6 h-6 text-slate-600 mx-auto" />
-                      <div className="text-xs font-semibold text-slate-400">No approved requests yet</div>
-                      <p className="text-[10px] text-slate-500 font-medium font-sans mt-0.5">Approved requests appear here, ranked by total boosts.</p>
-                    </motion.div>
-                  ) : (
-                    liveLadderQueue.map((req, index) => {
-                      return (
-                        <motion.div
-                          key={req.id}
-                          layoutId={req.id}
-                          initial={{ opacity: 0, scale: 0.98 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.98 }}
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                          className={`p-4 rounded-xl flex items-center justify-between gap-4 transition-all ${
-                            index === 0 
-                              ? 'bg-gradient-to-r from-fuchsia-950/20 via-slate-900/60 to-slate-900/60 border border-fuchsia-500/30 glow-fuchsia' 
-                              : 'bg-slate-900/60 border border-white/5'
-                          }`}
-                        >
-                          <div className="flex items-center gap-4 min-w-0">
-                            {/* Ranking position */}
-                            <div className="flex flex-col items-center justify-center font-display font-black text-center pr-1 shrink-0">
-                              <span className={`text-base ${index === 0 ? 'text-fuchsia-400 font-black italic' : 'text-slate-500 font-bold'}`}>
-                                #{index + 1}
-                              </span>
-                              {index === 0 && (
-                                <span className="text-[7px] bg-fuchsia-500 text-white font-sans uppercase font-black tracking-widest block px-1 py-0.5 rounded scale-90 mt-0.5 select-none animate-pulse">
-                                  GOLD
-                                </span>
-                              )}
-                            </div>
-
-                            {req.albumArt && (
-                              <img 
-                                src={req.albumArt} 
-                                alt="track" 
-                                referrerPolicy="no-referrer"
-                                className="w-12 h-12 rounded-lg bg-slate-850 shrink-0 object-cover border border-white/10 shadow-sm" 
-                              />
-                            )}
-                            
-                            <div className="min-w-0 font-sans">
-                              <div className="flex items-baseline gap-1.5 font-sans text-sm font-bold text-white truncate font-sans">
-                                <span>{req.title}</span>
-                                {session.paymentsEnabled !== false && (
-                                  <span className="font-mono text-cyan-400 text-xs font-bold">{formatValue(req.amount)}</span>
-                                )}
-                              </div>
-                              <p className="text-xs text-slate-400 truncate mt-0.5 leading-none font-medium font-sans">{req.subtitle}</p>
-
-                              {/* Sponsor & co-giver tags */}
-                              <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                                <span className="text-[8px] bg-slate-950 text-slate-400 px-1.5 py-0.5 border border-white/5 rounded font-mono">
-                                  Pool Backers: {req.sponsorCount}
-                                </span>
-                                {req.boosts.slice(-2).map((b, bIdx) => (
-                                  <span key={b.id} className="text-[8px] bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/10 px-1 py-0.5 rounded font-mono">
-                                    {session.paymentsEnabled !== false ? `+${formatValue(b.amount)} by ${b.patronName}` : `Boosted by ${b.patronName}`}
-                                  </span>
-                                ))}
-                                {req.boosts.length > 2 && (
-                                  <span className="text-[8px] bg-slate-950 text-slate-500 border border-white/5 px-1 py-0.5 rounded font-mono">
-                                    +{req.boosts.length - 2} more
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Fulfillment actions */}
-                          <div className="flex items-center gap-2">
-                            <SpotifyOpenLink request={req} />
-                            <button
-                              type="button"
-                              onClick={previewMode ? undefined : () => runQueueAction(req.id, 'fulfill', () => onFulfill(req.id))}
-                              disabled={previewMode || isRequestQueueActionPending(req.id)}
-                              data-sway-queue-action-pending={isQueueActionPending(req.id, 'fulfill') ? 'true' : undefined}
-                              className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold p-2.5 px-4 rounded-xl flex items-center gap-1.5 shadow transition-all transform active:scale-95 cursor-pointer glow-fuchsia disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Award className="w-4 h-4" /> {previewMode ? 'Demo only' : isQueueActionPending(req.id, 'fulfill') ? 'Marking' : 'Mark Playing'}
-                            </button>
-                          </div>
-                        </motion.div>
-                      );
-                    })
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Right sidebar panel: Stats and options summary */}
-          <div className={`${mobilePanel === 'live' ? 'hidden' : 'space-y-6'} lg:block lg:space-y-6`}>
-            {/* Contract anchor: <PerformerShareKit activeGigId={activeGigId} /> */}
-            <div className={`${mobilePanel === 'share' ? 'block' : 'hidden'} lg:block`}>
-              <PerformerShareKit activeGigId={selectedGigId ?? activeGigId} />
-            </div>
-
-            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-cyan-500/20 bg-slate-900 p-5 shadow-lg lg:block`}>
-              <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Tonight's controls</h4>
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                Keep requests open while the room is working. Pause intake, deny bad requests, complete played items, and end the night from here.
-              </p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Request scope</p>
-                  <p className="mt-1 text-xs font-bold text-white">{requestScopeLabel}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Review</p>
-                  <p className="mt-1 text-xs font-bold text-white">{isCrowdAutopilot ? 'Crowd-ranked' : 'Manual'}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Room brake</p>
-                  <p className="mt-1 text-xs font-bold text-white">Pause intake</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
-                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Live state</p>
-                  <p className="mt-1 text-xs font-bold text-white">Queue live</p>
-                </div>
-              </div>
-            </div>
-
-            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg lg:block`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">Active Room Selector</h4>
-                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                    Share-kit context follows the selected live room. Copy the room link, show the QR sign in the room, or open the separate overlay route in a browser or OBS browser source manually.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-mono font-bold text-cyan-300">
-                  {activeRooms.length} room{activeRooms.length === 1 ? '' : 's'}
-                </div>
-              </div>
-
-              <label className="mt-4 block text-[9px] font-mono uppercase tracking-widest text-slate-500">Selected room</label>
-              <select
-                data-sway-room-selector="true"
-                value={selectedGigId ?? ''}
-                onChange={(event) => onSelectGigId(event.target.value || null)}
-                disabled={activeRooms.length <= 1}
-                className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500 disabled:cursor-not-allowed disabled:text-slate-500"
-              >
-                {activeRooms.length === 0 ? (
-                  <option value="">No active rooms yet</option>
-                ) : (
-                  activeRooms.map((room) => (
-                    <option key={room.gigId} value={room.gigId}>
-                      {room.performerName} · {room.gigId.slice(0, 8)} · {room.requestCount} live items
-                    </option>
-                  ))
-                )}
-              </select>
-
-              {selectedGigId && (
-                <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                  Share-kit target: <span className="font-mono text-slate-300">/g/{selectedGigId}</span>
-                </p>
-              )}
-            </div>
-
-            {/* ⏱️ REQUEST TIME WINDOW COORDINATOR */}
-            <div className={`${mobilePanel === 'settings' ? 'block' : 'hidden'} border rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden transition-all duration-300 lg:block ${
-              session.requestsOpen 
-                ? 'bg-slate-900 border-cyan-500/30' 
-                : 'bg-slate-900 border-white/5'
-            }`}>
-              <div className="flex justify-between items-start select-none">
-                <div>
-                  <h4 className="font-display text-xs font-mono font-bold tracking-wider text-cyan-400 uppercase flex items-center gap-1.5 leading-none">
-                    <Clock className="w-4 h-4 text-cyan-400" /> REQUEST TIME WINDOW
-                  </h4>
-                    <p className="text-[10px] text-slate-500 font-sans mt-0.5">Pause all requests instantly, then resume when ready.</p>
-                </div>
-                
-                <div className="flex items-center gap-1.5 animate-pulse-subtle">
-                  <span className={`w-2.5 h-2.5 rounded-full ${session.requestsOpen ? 'bg-emerald-500 shadow-md shadow-emerald-500/50' : 'bg-rose-500'}`} />
-                  <span className={`text-[9px] font-black tracking-widest font-mono uppercase ${
-                    session.requestsOpen ? 'text-emerald-400' : 'text-rose-400'
-                  }`}>
-                    {session.requestsOpen ? 'LIVE OPEN' : 'CLOSED'}
-                  </span>
-                </div>
-              </div>
-
-              {/* ACTIVE TIMER BANNER WITH COUNTDOWN */}
-              {session.requestsOpen && session.requestWindowMode === 'preset' && windowTimeLeft && (
-                <div className="p-3 bg-cyan-950/20 border border-cyan-500/30 rounded-xl text-center select-none shadow relative">
-                  <span className="absolute top-1 right-1 bg-cyan-500 text-slate-950 text-[6px] font-black uppercase px-1 rounded font-mono animate-pulse">
-                    TEMPORARY WINDOW
-                  </span>
-                  <p className="text-[9px] text-cyan-300 font-mono font-bold uppercase tracking-wider flex items-center justify-center gap-1">
-                    <Hourglass className="w-3 h-3 text-cyan-400 animate-spin" style={{ animationDuration: '3s' }} /> SUBMISSIONS EXPIRE IN
-                  </p>
-                  <p className="text-xl font-black font-mono text-cyan-400 mt-0.5">{windowTimeLeft}</p>
-                  <p className="text-[8px] text-slate-400 mt-1 leading-normal font-sans">
-                    Preset: <strong className="text-slate-300">{session.requestWindowLabel}</strong> ({session.requestWindowDuration}m limit)
-                  </p>
-                </div>
-              )}
-
-              {/* OVERALL MANUAL TOGGLES */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleRequests(true)}
-                  className={`py-2 px-3 text-2xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 select-none ${
-                    session.requestsOpen && session.requestWindowMode === 'manual'
-                      ? 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/10'
-                      : 'bg-slate-950 border border-white/5 text-emerald-400 hover:bg-emerald-950/15'
-                  }`}
-                >
-                    <ToggleRight className="w-4 h-4 shrink-0" /> Resume Requests
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleRequests(false)}
-                  className={`py-2 px-3 text-2xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 select-none ${
-                    !session.requestsOpen
-                      ? 'bg-rose-500 text-slate-950 font-black shadow-lg shadow-rose-500/10'
-                      : 'bg-slate-950 border border-white/5 text-rose-400 hover:bg-rose-950/15'
-                  }`}
-                >
-                    <ToggleLeft className="w-4 h-4 shrink-0" /> Pause All Requests
-                </button>
-              </div>
-
-              <div className="border-t border-white/5 my-2"></div>
-
-              {/* PRESETS LIST & GRID */}
-              <div className="space-y-2">
-                <span className="text-[9px] font-mono font-bold uppercase text-slate-500 flex items-center gap-1 mt-1">
-                  <Sliders className="w-3 h-3 text-indigo-400" /> Active Presets Trigger
-                </span>
-
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                  {(session.requestPresets && session.requestPresets.length > 0
-                    ? session.requestPresets
-                    : [
-                        { id: "p-sys-15", label: "🔥 Speed Round", duration: 15, isSystem: true },
-                        { id: "p-sys-30", label: "🌟 Mid-Gig Rush", duration: 30, isSystem: true },
-                        { id: "p-sys-45", label: "🥁 Main Stage Vibe", duration: 45, isSystem: true }
-                      ]
-                  ).map((preset: RequestPreset) => {
-                    const isCurrentActive = session.requestsOpen && 
-                      session.requestWindowMode === 'preset' && 
-                      session.requestWindowLabel === preset.label;
-                    
-                    return (
-                      <div
-                        key={preset.id}
-                        onClick={() => handleActivatePreset(preset.duration, preset.label)}
-                        className={`p-2.5 rounded-xl text-left transition-all border relative flex flex-col justify-between cursor-pointer group ${
-                          isCurrentActive
-                            ? 'bg-cyan-950/30 border-cyan-500/60 shadow shadow-cyan-400/10'
-                            : 'bg-slate-950 border-white/5 hover:border-slate-800'
-                        }`}
-                      >
-                        <div className="w-full">
-                          <div className="flex justify-between items-start gap-1 w-full">
-                            <span className={`text-[10px] font-bold truncate ${isCurrentActive ? 'text-cyan-300 font-extrabold' : 'text-slate-200'}`}>
-                              {preset.label}
-                            </span>
-                            {!preset.isSystem && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeletePreset(preset.id);
-                                }}
-                                className="text-slate-500 hover:text-rose-400 p-0.5 transition-colors rounded hover:bg-white/5"
-                                title="Delete preset"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                          <span className={`text-[9px] font-mono mt-1 block font-semibold ${isCurrentActive ? 'text-cyan-400 font-bold' : 'text-slate-400'}`}>
-                            ⏱️ {preset.duration} mins
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* BUILD A PRESET FORM */}
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-white/5 space-y-2">
-                <span className="text-[9px] font-mono font-bold uppercase text-slate-500 block">
-                  🛠️ Build Custom Time Preset
-                </span>
-
-                <form onSubmit={handleCreatePreset} className="space-y-2 font-sans">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Heavy Rush"
-                      value={presetFormLabel}
-                      onChange={(e) => setPresetFormLabel(e.target.value)}
-                      className="flex-1 min-w-0 bg-slate-950 border border-white/15 focus:border-cyan-500/50 rounded-lg text-xs px-2.5 py-1.5 text-white outline-none font-semibold"
-                    />
-                    
-                    <div className="flex items-center gap-1 bg-slate-950 border border-white/15 rounded-lg px-2 text-white">
-                      <input
-                        type="number"
-                        min="1"
-                        max="240"
-                        required
-                        value={presetFormDuration}
-                        onChange={(e) => setPresetFormDuration(Math.max(1, Number(e.target.value) || 1))}
-                        className="w-10 bg-transparent text-center border-none text-xs outline-none font-bold text-cyan-400"
-                        title="Duration in minutes"
-                      />
-                      <span className="text-[9px] font-mono text-slate-500">m</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full py-1.5 flex items-center justify-center gap-1 bg-slate-900 border border-dashed border-cyan-500/30 hover:border-cyan-500/75 text-cyan-300 hover:text-cyan-200 rounded-lg text-[10px] font-black transition-all cursor-pointer font-sans"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> BUILD TIME PRESET
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            {/* 🌟 FEATURED PERFORMER PREMIUM HUB */}
-            <div className="hidden bg-slate-900 border border-amber-500/20 rounded-2xl p-5 space-y-4 shadow-lg relative overflow-hidden lg:block">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl -mr-6 -mt-6"></div>
-              
-              <div className="flex justify-between items-start select-none">
-                <h4 className="font-display text-xs font-mono font-bold tracking-wider text-amber-400 uppercase flex items-center gap-1.5 leading-none">
-                  <Award className="w-4 h-4 text-amber-400" /> BOOST ACTIVITY
-                </h4>
-                {session.isFeatured ? (
-                  <span className="text-[8px] font-black tracking-widest bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full animate-bounce font-mono">
-                    ACTIVE 🌟
-                  </span>
-                ) : (
-                  <span className="text-[8px] font-black tracking-widest bg-slate-950 text-slate-400 px-2 py-0.5 rounded-full font-mono">
-                    STANDARD
-                  </span>
-                )}
-              </div>
-
-              {session.isFeatured ? (
-                // ACTIVE STATE
-                <div className="space-y-3 font-sans">
-                  <div className="p-3 bg-amber-950/15 border border-amber-500/35 rounded-xl text-center select-none shadow shadow-amber-500/5">
-                    <p className="text-[10px] text-amber-300 font-mono font-bold uppercase tracking-wider">BOOST TIMER</p>
-                    <p className="text-lg font-black font-mono text-amber-400 mt-1">{featureTimeLeft || 'Computing...'}</p>
-                    <p className="text-[9px] text-slate-400 mt-1 leading-normal font-sans">Your performer page is highlighted for faster crowd entry.</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-center text-[10px] bg-slate-950 p-2.5 rounded-xl border border-white/5 font-mono select-none">
-                    <div>
-                      <span className="text-slate-500 block">COST REF</span>
-                      <span className="text-amber-300 font-bold">${session.featuredCost}.00</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block">DURATION</span>
-                      <span className="text-amber-300 font-bold">{session.featuredDurationHours} hours</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={previewMode ? undefined : () => handleToggleFeature(0, 0, false)}
-                    disabled={previewMode}
-                    className="w-full text-center py-2 bg-slate-950 border border-white/5 text-xs font-bold text-slate-400 hover:text-red-400 hover:bg-red-950/10 hover:border-red-500/35 rounded-xl transition-all cursor-pointer"
-                  >
-                    {previewMode ? 'Demo only: boost locked' : 'Pause Boost'}
-                  </button>
-                </div>
-              ) : (
-                // CONFIGURATION / EARN STATE
-                <div className="space-y-4 font-sans">
-                  <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                    Highlight this performer so people can reach the live request page quickly.
-                  </p>
-
-                  {/* Hours Selector */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-semibold font-sans">
-                      <span className="text-slate-400">Selected Duration</span>
-                      <span className="text-amber-400 font-mono font-bold">{selectedHours} {selectedHours === 1 ? 'Hour' : 'Hours'}</span>
-                    </div>
-
-                    <div className="flex bg-slate-950 p-1 rounded-lg border border-white/5 gap-1 select-none">
-                      {[1, 3, 6, 12, 24].map((hours) => (
-                        <button
-                          key={hours}
-                          type="button"
-                          onClick={() => setSelectedHours(hours)}
-                          className={`flex-1 py-1 text-[10px] font-mono font-bold rounded transition-all cursor-pointer ${
-                            selectedHours === hours 
-                              ? 'bg-amber-500 text-slate-950 font-black shadow' 
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {hours}h
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs p-2 bg-slate-950 rounded-xl border border-white/5 font-mono select-none">
-                      <span className="text-slate-500">Total Standard Rate:</span>
-                      <span className="text-amber-400 font-extrabold">${selectedHours * 5}.00</span>
-                    </div>
-                  </div>
-
-                  {/* Achievement Tracker to 'Earn' Status */}
-                  <div className="bg-slate-950 p-3 rounded-xl border border-white/5 space-y-2">
-                    <div className="flex justify-between items-center text-[9px] font-mono font-bold uppercase select-none">
-                      <span className="text-slate-400">🏆 Earn Shift Achievement</span>
-                      <span className="text-cyan-400">
-                        {session.totals.totalTips >= 50 ? 'UNLOCKS BOOST' : `${Math.floor((session.totals.totalTips / 50) * 100)}%`}
-                      </span>
-                    </div>
-                    
-                    <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-cyan-500 h-full transition-all duration-300" 
-                        style={{ width: `${Math.min(100, (session.totals.totalTips / 50) * 100)}%` }}
-                      ></div>
-                    </div>
-                    
-                    <p className="text-[9px] text-slate-500 leading-normal font-sans">
-                      {session.totals.totalTips >= 50 
-                        ? 'Goal reached. Unlock your shift earnings to claim 2 hours of boosted visibility.' 
-                        : 'Collect $50.00 total completed tips in your shifts to unlock a 2-hour visibility boost.'}
-                    </p>
-                  </div>
-
-                  {/* Actions Trigger */}
-                  {session.totals.totalTips >= 50 ? (
-                    <button
-                      type="button"
-                      onClick={previewMode ? undefined : () => handleToggleFeature(2, 0, true)}
-                      disabled={previewMode}
-                      className="w-full py-2.5 flex items-center justify-center gap-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-cyan-500/10 cursor-pointer text-center font-sans"
-                    >
-                      {previewMode ? 'Demo only: no boost action' : 'Redeem Shift Achievement'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={previewMode ? undefined : () => handleToggleFeature(selectedHours, selectedHours * 5, true)}
-                      disabled={previewMode}
-                      className="w-full py-2.5 flex items-center justify-center gap-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs font-semibold shadow-lg shadow-amber-500/10 cursor-pointer text-center font-sans"
-                    >
-                      {previewMode ? 'Demo only: boost locked' : `Boost Visibility ($${selectedHours * 5}.00)`}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Realtime session performance card stats */}
-            <div className="hidden bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg lg:block">
-              <h4 className="font-display text-xs font-mono font-bold tracking-wider text-fuchsia-400 uppercase select-none">
-                Earnings tonight
-              </h4>
-
-              <div className="space-y-3 select-none font-sans">
-                <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>{previewMode ? 'Demo total shown:' : 'Fulfilled requests total:'}</span>
-                  <span className="font-mono text-sm font-bold text-white">{formatValue(session.totals.totalTips)}</span>
-                </div>
-                
-                <div className="flex justify-between items-center text-xs text-slate-400 font-sans">
-                  <span>Pool backers:</span>
-                  <span className="font-mono text-sm font-bold text-white">{poolBackersCount} {poolBackersCount === 1 ? 'Giver' : 'Givers'}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>Accumulated fees:</span>
-                  <span className="font-mono text-xs text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded font-bold">
-                    ${session.totals.accumulatedFees}.00 Fee
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-white/5 space-y-2">
-                <div className="text-[10px] text-slate-500 font-mono tracking-wide uppercase">Top Requested Target:</div>
-                <div className="text-sm font-bold text-white line-clamp-1">{session.totals.topRequest}</div>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
       )}
 
     </div>

@@ -121,14 +121,12 @@ for (const term of [
   'if (queueActionPendingRef.current) return',
   'queueActionPendingRef.current = key',
   'queueActionPendingRef.current = null',
-  "runQueueAction(req.id, 'approve'",
-  "runQueueAction(req.id, 'veto'",
-  "runQueueAction(req.id, 'hide'",
-  "runQueueAction(req.id, 'remove'",
-  "runQueueAction(req.id, 'fulfill'",
+  "runQueueAction(request.id, 'approve'",
+  "runQueueAction(request.id, 'veto'",
+  "runQueueAction(request.id, 'hide'",
+  "runQueueAction(request.id, 'fulfill'",
   'data-sway-queue-action-pending',
-  'disabled={isRequestQueueActionPending(req.id)}',
-  'disabled={previewMode || isRequestQueueActionPending(req.id)}'
+  'disabled={previewMode || isRequestQueueActionPending(request.id)}'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent queue UI pending lock missing term: ${term}`);

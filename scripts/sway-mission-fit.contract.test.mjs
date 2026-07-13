@@ -42,11 +42,11 @@ for (const term of [
   'Free requests',
   'Paid requests and boosts use the $5 minimum',
   'Free upvotes',
-  'separate from the incoming request queue',
-  "Tonight's controls",
-  'Pause intake',
-  'Queue live',
-  'Earnings tonight'
+  'Share Room',
+  'Scan to Request',
+  'Pending',
+  'Approved',
+  'Backers'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Performer live-night spine copy missing: ${term}`);
