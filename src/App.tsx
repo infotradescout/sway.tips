@@ -1,12 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Flame, Lock, Smartphone, Users } from 'lucide-react';
+import { CalendarDays, Flame, Lock, Smartphone } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
-import TalentDashboard from './components/TalentDashboard';
-import TalentLoginCard from './components/TalentLoginCard';
-import TalentSignupCard from './components/TalentSignupCard';
 import PatronView from './components/PatronView';
-import VictoryScreen from './components/VictoryScreen';
 
 const emptySession: GigSession = {
   status: 'inactive',
@@ -53,9 +49,6 @@ type DemoFixturePayload = {
 };
 
 type AppRoute =
-  | { name: 'talent-login' }
-  | { name: 'talent-signup' }
-  | { name: 'talent-gigs'; gigId?: string }
   | { name: 'patron-gig'; gigId: string }
   | { name: 'performer'; performerHandle: string }
   | { name: 'overlay'; gigId: string }
@@ -67,9 +60,6 @@ function resolveRoute(pathname: string): AppRoute {
   const parts = pathname.split('/').filter(Boolean);
 
   if (parts.length === 0) return { name: 'home' };
-  if (parts[0] === 'talent' && parts[1] === 'login' && parts.length === 2) return { name: 'talent-login' };
-  if (parts[0] === 'talent' && parts[1] === 'signup' && parts.length === 2) return { name: 'talent-signup' };
-  if (parts[0] === 'talent' && parts[1] === 'gigs') return { name: 'talent-gigs', gigId: parts[2] };
   if (parts[0] === 'g' && parts[1]) return { name: 'patron-gig', gigId: parts[1] };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
   if (parts[0] === 'overlay' && parts[1]) return { name: 'overlay', gigId: parts[1] };
@@ -111,7 +101,6 @@ export default function App() {
     const saved = window.localStorage.getItem(DATA_MODE_STORAGE_KEY);
     return saved === 'live' ? 'live' : 'demo';
   });
-  const [homeView, setHomeView] = useState<'guest' | 'dj'>('guest');
   const [bState, setBState] = useState<BackendState>({
     session: emptySession,
     requests: [],
@@ -176,49 +165,6 @@ export default function App() {
       window.removeEventListener('re-fetch-state', handleForceSync);
     };
   }, [dataMode]);
-
-  const handleStartSession = async (setupData: {
-    talentName: string;
-    talentRole: 'DJ' | 'Bartender' | 'Performer';
-    feeType: 'talent' | 'patron';
-    minimumTip: number;
-    paymentsEnabled: boolean;
-  }) => {
-    if (isDemoMode) return;
-    try {
-      const response = await fetch('/api/session/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(setupData)
-      });
-      const data = await response.json();
-      setBState(data.state);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleEndSession = async () => {
-    if (isDemoMode) return;
-    try {
-      const response = await fetch('/api/session/end', { method: 'POST' });
-      const data = await response.json();
-      setBState(data.state);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleCloseout = async () => {
-    if (isDemoMode) return;
-    try {
-      const response = await fetch('/api/session/closeout', { method: 'POST' });
-      const data = await response.json();
-      setBState(data.state);
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   const handleCreateRequest = async (requestData: any) => {
     if (isDemoMode) {
@@ -309,36 +255,6 @@ export default function App() {
     return data;
   };
 
-  const handleTriageRequest = async (requestId: string, action: 'approve' | 'deny') => {
-    if (isDemoMode) return;
-    try {
-      const response = await fetch('/api/request/triage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, action })
-      });
-      const data = await response.json();
-      setBState(data.state);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleFulfillRequest = async (requestId: string) => {
-    if (isDemoMode) return;
-    try {
-      const response = await fetch('/api/request/fulfill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId })
-      });
-      const data = await response.json();
-      setBState(data.state);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
@@ -381,46 +297,6 @@ export default function App() {
     return data;
   };
 
-  const handleHideRequest = async (requestId: string) => {
-    if (isDemoMode) {
-      throw new Error('Demo mode is read-only right now.');
-    }
-    const response = await fetch('/api/moderation/hide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, reason: 'Performer hid this request from the live queue.' })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw Object.assign(new Error(data?.error || 'Moderation hide failed.'), {
-        status: response.status,
-        body: data
-      });
-    }
-    setBState(data.state);
-    return data;
-  };
-
-  const handleRemoveRequest = async (requestId: string) => {
-    if (isDemoMode) {
-      throw new Error('Demo mode is read-only right now.');
-    }
-    const response = await fetch('/api/moderation/remove', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, reason: 'Performer removed this request from the live queue.' })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw Object.assign(new Error(data?.error || 'Moderation remove failed.'), {
-        status: response.status,
-        body: data
-      });
-    }
-    setBState(data.state);
-    return data;
-  };
-
   const handleSupportContact = async () => {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
@@ -459,16 +335,6 @@ export default function App() {
       window.open(data.dataDeletionInfoPath, '_blank', 'noopener,noreferrer');
     }
     return data;
-  };
-
-  const resetInactiveSession = () => {
-    handleStartSession({
-      talentName: 'Sway Performer',
-      talentRole: 'DJ',
-      feeType: 'patron',
-      minimumTip: 5,
-      paymentsEnabled: true
-    });
   };
 
   const { session, requests } = bState;
@@ -537,14 +403,6 @@ export default function App() {
     );
   }
 
-  if (route.name === 'talent-login') {
-    return <TalentLoginCard />;
-  }
-
-  if (route.name === 'talent-signup') {
-    return <TalentSignupCard />;
-  }
-
   if (route.name === 'not-found') {
     return (
       <ShellMessage
@@ -580,50 +438,6 @@ export default function App() {
     );
   }
 
-  if (route.name === 'talent-gigs') {
-    if (session.status === 'closed') {
-      return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
-    }
-
-    return (
-      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-        <div className="border-b border-white/10 bg-slate-900 px-4 py-3">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="rounded bg-fuchsia-500/10 p-1 text-fuchsia-400">
-                <Users className="h-4 w-4" />
-              </div>
-              <div>
-                <span className="font-display text-xs font-black uppercase tracking-widest text-white">
-                  Tonight's Room
-                </span>
-                <p className="text-[9px] text-slate-400">Queue, QR, earnings, and room controls</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <main className="flex-1">
-          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-            <TalentDashboard
-              session={session}
-              requests={requests}
-              onStartSession={handleStartSession}
-              onEndSession={handleEndSession}
-              onCloseout={handleCloseout}
-              onTriage={handleTriageRequest}
-              onFulfill={handleFulfillRequest}
-              onHide={handleHideRequest}
-              onRemove={handleRemoveRequest}
-              activeGigId={bState.activeGigId}
-              previewMode={isDemoMode}
-            />
-          </motion.div>
-        </main>
-      </div>
-    );
-  }
-
   if (route.name === 'home') {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -635,63 +449,29 @@ export default function App() {
               </div>
               <div>
                 <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Live Room</span>
-                <p className="text-[10px] text-slate-400">Choose the perspective: DJ booth or guest phone.</p>
+                <p className="text-[10px] text-slate-400">Customer room</p>
               </div>
-            </div>
-            <div className="flex rounded-xl border border-white/10 bg-slate-950 p-1">
-              <button
-                type="button"
-                onClick={() => setHomeView('guest')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${homeView === 'guest' ? 'bg-fuchsia-600 text-white' : 'text-slate-300 hover:text-white'}`}
-              >
-                Guest
-              </button>
-              <button
-                type="button"
-                onClick={() => setHomeView('dj')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${homeView === 'dj' ? 'bg-fuchsia-600 text-white' : 'text-slate-300 hover:text-white'}`}
-              >
-                DJ
-              </button>
             </div>
           </div>
         </div>
 
         <main className="flex-1">
-          {homeView === 'dj' ? (
-            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-              <TalentDashboard
-                session={session}
-                requests={requests}
-                onStartSession={handleStartSession}
-                onEndSession={handleEndSession}
-                onCloseout={handleCloseout}
-                onTriage={handleTriageRequest}
-                onFulfill={handleFulfillRequest}
-                onHide={handleHideRequest}
-                onRemove={handleRemoveRequest}
-                activeGigId={bState.activeGigId}
-                previewMode={isDemoMode}
-              />
-            </motion.div>
-          ) : (
-            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-              <PatronView
-                session={session}
-                requests={requests}
-                performers={bState.performers || []}
-                gigId={routeGigId || 'local-demo'}
-                onCreateRequest={handleCreateRequest}
-                onBoostRequest={handleBoostRequest}
-                onReconcilePendingAction={handleReconcilePendingAction}
-                onReportContent={handleReportContent}
-                onBlockFoundation={handleBlockFoundation}
-                onSupportContact={handleSupportContact}
-                onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
-                previewMode={isDemoMode}
-              />
-            </motion.div>
-          )}
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+            <PatronView
+              session={session}
+              requests={requests}
+              performers={bState.performers || []}
+              gigId={routeGigId || 'local-demo'}
+              onCreateRequest={handleCreateRequest}
+              onBoostRequest={handleBoostRequest}
+              onReconcilePendingAction={handleReconcilePendingAction}
+              onReportContent={handleReportContent}
+              onBlockFoundation={handleBlockFoundation}
+              onSupportContact={handleSupportContact}
+              onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
+              previewMode={isDemoMode}
+            />
+          </motion.div>
         </main>
 
         {operatorControlsEnabled && (
