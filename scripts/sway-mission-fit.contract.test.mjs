@@ -11,7 +11,8 @@ function read(relPath) {
 const patronView = read('src/components/PatronView.tsx');
 const talentDashboard = [
   read('src/components/TalentDashboard.tsx'),
-  read('src/components/PerformerRoomShare.tsx')
+  read('src/components/PerformerRoomShare.tsx'),
+  read('src/components/PerformerAudienceScreen.tsx')
 ].join('\n');
 const talentApp = read('src/shells/TalentApp.tsx');
 const performerShareKit = read('src/components/PerformerShareKit.tsx');
