@@ -92,7 +92,7 @@ async function main() {
   } = performerPasswordModule;
 
   assert.ok(talentAppSource.includes('TalentLoginCard'), 'TalentApp must render the dedicated performer login card.');
-  assert.ok(appSource.includes('TalentLoginCard'), 'App talent-login route must share the performer login card.');
+  assert.ok(!appSource.includes('TalentLoginCard'), 'Legacy/dev App must not duplicate the canonical performer login route.');
   assert.ok(
     talentLoginCardSource.includes('Log in'),
     'Talent login card must expose the email+password login CTA.'
