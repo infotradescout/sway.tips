@@ -1552,7 +1552,7 @@ export default function TalentDashboard({
             ))}
           </section>
 
-          <main className="min-h-0 overflow-hidden">
+          <main className="min-h-0 min-w-0 overflow-hidden">
             <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]">
               <div className="grid min-h-0 grid-cols-2 gap-2">
                 <CompactRequestPanel
@@ -1622,7 +1622,7 @@ export default function TalentDashboard({
               />
             </div>
 
-            <div className="h-full min-h-0 landscape:hidden">
+            <div className="h-full min-h-0 min-w-0 landscape:hidden">
               {mobilePanel === 'live' ? (
                 <div className="grid h-full min-h-0 grid-rows-2 gap-2">
                   <CompactRequestPanel
