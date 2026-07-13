@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
+import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -1042,9 +1042,6 @@ export default function TalentDashboard({
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
 
-  // Featured Status Management States
-  const [selectedHours, setSelectedHours] = useState<number>(3);
-  const [featureTimeLeft, setFeatureTimeLeft] = useState<string>('');
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
@@ -1159,49 +1156,7 @@ export default function TalentDashboard({
     setSetupName(defaultPerformerName);
   }, [defaultPerformerName, session.status, setupName]);
 
-  useEffect(() => {
-    if (!session.isFeatured || !session.featuredExpiresAt) {
-      setFeatureTimeLeft('');
-      return;
-    }
-
-    const updateTimer = () => {
-      const expireMs = new Date(session.featuredExpiresAt!).getTime();
-      const diff = expireMs - Date.now();
-
-      if (diff <= 0) {
-        setFeatureTimeLeft('Expired');
-      } else {
-        const hours = Math.floor(diff / 3600000);
-        const mins = Math.floor((diff % 3600000) / 60000);
-        const secs = Math.floor((diff % 60000) / 1000);
-
-        const hString = hours > 0 ? `${hours}h ` : '';
-        const mString = mins < 10 ? `0${mins}` : mins;
-        const sString = secs < 10 ? `0${secs}` : secs;
-
-        setFeatureTimeLeft(`${hString}${mString}m ${sString}s`);
-      }
-    };
-
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
-  }, [session.isFeatured, session.featuredExpiresAt]);
-
-  const handleToggleFeature = async (hours: number, cost: number, activate: boolean) => {
-    try {
-      const res = await postSessionJson('/api/session/feature', { hours, cost, activate });
-      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
-    } catch (e) {
-      console.error(e);
-      setActionError('That action failed. Please try again.');
-    }
-  };
-
-  // Live request window and buildable custom presets states
-  const [presetFormLabel, setPresetFormLabel] = useState('');
-  const [presetFormDuration, setPresetFormDuration] = useState<number>(20); 
+  // Live request window countdown.
   const [windowTimeLeft, setWindowTimeLeft] = useState<string>('');
 
   useEffect(() => {
@@ -1277,167 +1232,6 @@ export default function TalentDashboard({
     } catch (e) {
       console.error(e);
       setActionError('That action failed. Please try again.');
-    }
-  };
-
-  const handleActivatePreset = async (durationMinutes: number, label: string) => {
-    try {
-      const res = await postSessionJson('/api/session/window/preset/activate', { durationMinutes, label });
-      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
-    } catch (e) {
-      console.error(e);
-      setActionError('That action failed. Please try again.');
-    }
-  };
-
-  const handleCreatePreset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!presetFormLabel.trim() || presetFormDuration <= 0) return;
-    try {
-      const res = await postSessionJson('/api/session/window/preset/create', {
-        label: presetFormLabel,
-        durationMinutes: presetFormDuration
-      });
-      if (res.ok) {
-        setPresetFormLabel('');
-        setPresetFormDuration(20);
-        window.dispatchEvent(new CustomEvent('re-fetch-state'));
-      }
-    } catch (e) {
-      console.error(e);
-      setActionError('That action failed. Please try again.');
-    }
-  };
-
-  const handleDeletePreset = async (presetId: string) => {
-    try {
-      const res = await postSessionJson('/api/session/window/preset/delete', { presetId });
-      if (res.ok) window.dispatchEvent(new CustomEvent('re-fetch-state'));
-    } catch (e) {
-      console.error(e);
-      setActionError('That action failed. Please try again.');
-    }
-  };
-
-  const [setlistTracks, setSetlistTracks] = useState<Array<{
-    id: string;
-    title: string;
-    artist: string;
-    album: string | null;
-    artworkUrl: string | null;
-  }>>([]);
-  const [setlistQuery, setSetlistQuery] = useState('');
-  const [setlistResults, setSetlistResults] = useState<Array<{
-    sourceKey: string;
-    externalTrackId: string | null;
-    title: string;
-    artist: string;
-    album: string | null;
-    artworkUrl: string | null;
-    spotifyUri: string | null;
-    spotifyUrl: string | null;
-  }>>([]);
-  const [setlistSearchStatus, setSetlistSearchStatus] = useState<'idle' | 'searching' | 'error'>('idle');
-  const [setlistLoadError, setSetlistLoadError] = useState(false);
-
-  const refreshSetlist = async () => {
-    if (previewMode) return;
-    try {
-      const response = await fetch('/api/talent/setlist');
-      if (!response.ok) {
-        setSetlistLoadError(true);
-        return;
-      }
-      const data = await response.json();
-      setSetlistTracks(Array.isArray(data?.tracks) ? data.tracks : []);
-      setSetlistLoadError(false);
-    } catch (error) {
-      console.warn('Unable to load setlist:', error);
-      setSetlistLoadError(true);
-    }
-  };
-
-  useEffect(() => {
-    void refreshSetlist();
-  }, [previewMode]);
-
-  useEffect(() => {
-    if (previewMode || !setlistQuery.trim()) {
-      setSetlistResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSetlistSearchStatus('searching');
-    const timeout = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/talent/setlist/search?query=${encodeURIComponent(setlistQuery.trim())}`);
-        if (!response.ok) throw new Error('Setlist search request failed.');
-        const data = await response.json().catch(() => null);
-        if (!cancelled) {
-          setSetlistResults(Array.isArray(data?.results) ? data.results : []);
-          setSetlistSearchStatus('idle');
-        }
-        return;
-      } catch (error) {
-        console.warn('Setlist search failed:', error);
-        if (!cancelled) setSetlistSearchStatus('error');
-        return;
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [setlistQuery, previewMode]);
-
-  const handleAddSetlistTrack = async (track: {
-    sourceKey: string;
-    externalTrackId: string | null;
-    title: string;
-    artist: string;
-    album: string | null;
-    artworkUrl: string | null;
-    spotifyUri: string | null;
-    spotifyUrl: string | null;
-  }) => {
-    if (previewMode) return;
-    try {
-      const response = await fetch('/api/talent/setlist/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(track)
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        setActionError(typeof data?.error === 'string' ? data.error : 'Unable to add that track to the setlist.');
-        return;
-      }
-      setActionError(null);
-      await refreshSetlist();
-    } catch (error) {
-      console.warn('Unable to add setlist track:', error);
-      setActionError('Unable to add that track to the setlist.');
-    }
-  };
-
-  const handleRemoveSetlistTrack = async (trackId: string) => {
-    if (previewMode) return;
-    try {
-      const response = await fetch('/api/talent/setlist/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId })
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        setActionError(typeof data?.error === 'string' ? data.error : 'Unable to remove that track.');
-        return;
-      }
-      setActionError(null);
-      await refreshSetlist();
-    } catch (error) {
-      console.warn('Unable to remove setlist track:', error);
-      setActionError('Unable to remove that track.');
     }
   };
 
