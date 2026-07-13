@@ -12,7 +12,8 @@ const patronView = read('src/components/PatronView.tsx');
 const talentDashboard = [
   read('src/components/TalentDashboard.tsx'),
   read('src/components/PerformerRoomShare.tsx'),
-  read('src/components/PerformerAudienceScreen.tsx')
+  read('src/components/PerformerAudienceScreen.tsx'),
+  read('src/components/PerformerRoomSetup.tsx')
 ].join('\n');
 const talentApp = read('src/shells/TalentApp.tsx');
 const performerShareKit = read('src/components/PerformerShareKit.tsx');
@@ -34,18 +35,16 @@ for (const term of [
 
 for (const term of [
   "useState<'live' | 'share' | 'settings'>('live')",
-  'Room details & pricing',
+  'Step {step + 1} of 5',
   'Minimum request',
-  'Boost minimum',
-  'Tip path',
+  'Direct tips remain available',
   'Create room',
   'Show QR',
   'Copy link',
-  'Approve, deny, complete',
-  'Confirm the performer, then choose paid or free requests',
+  'Nothing enters the approved queue until you allow it',
+  'Should song requests cost money tonight?',
   'Free requests',
-  'Paid requests and boosts use the $5 minimum',
-  'Free upvotes',
+  'Paid requests',
   'Share Room',
   'Scan to Request',
   'Pending',
