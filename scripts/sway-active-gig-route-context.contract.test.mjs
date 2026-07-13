@@ -81,17 +81,10 @@ if (!talentDashboard.includes('activeGigId: string | null;')) {
   failures.push('TalentDashboard must accept activeGigId route context.');
 }
 
-for (const forbidden of [
-  'Copy Room Link',
-  'Download QR',
-  'Download QR Sign',
-  'Share Your Room',
-  'Connect Your Audience',
-  '/room/',
-  'QRCode',
-  'qr-code',
-  'qrcode'
-]) {
+// Share-kit delivery is complete, so route-context consumers may render the
+// room-specific QR. The route contract still rejects the obsolete /room/
+// family everywhere it previously guarded.
+for (const forbidden of ['/room/']) {
   if (server.includes(forbidden) || talentApp.includes(forbidden) || talentDashboard.includes(forbidden) || types.includes(forbidden)) {
     failures.push(`Route-context lane must not introduce forbidden share-kit artifact: ${forbidden}`);
   }
