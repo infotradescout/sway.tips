@@ -2139,11 +2139,21 @@ export default function TalentDashboard({
       </div>
 
       {/* Account and music tools stay separate from the one-decision room start. */}
-      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'} space-y-5`}>
-      <div className="mx-auto max-w-3xl px-1">
-        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
-        <p className="mt-1 text-xs text-slate-500">Music sources, payouts, and your public performer profile.</p>
-      </div>
+      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'}`}>
+      <details
+        data-sway-account-integrations="true"
+        className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
+            <p className="mt-1 text-xs text-slate-500">Music sources, payouts, and your public performer profile.</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
+            Manage
+          </span>
+        </summary>
+        <div className="mt-5 space-y-5">
       <MusicSourcesPanel
         providers={musicSourceCapabilities}
         linkedSourceCount={linkedSourceCount}
@@ -2416,6 +2426,8 @@ export default function TalentDashboard({
             {publicProfileStatus === 'saving' ? 'Saving profile...' : 'Save public profile'}
           </button>
         </form>
+      </details>
+        </div>
       </details>
       </div>
 

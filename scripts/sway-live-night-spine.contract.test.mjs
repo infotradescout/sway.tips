@@ -39,6 +39,8 @@ requireIncludes('TalentDashboard', talentDashboard, [
   "{ id: 'settings', label: 'Control' }",
   'Copy link',
   'Account & integrations',
+  'data-sway-account-integrations="true"',
+  'Music sources, payouts, and your public performer profile.',
   "Tonight's money settings",
   'before creating the room link and QR',
   'Minimum request',
