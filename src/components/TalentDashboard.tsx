@@ -1086,6 +1086,7 @@ export default function TalentDashboard({
   const queueActionPendingRef = useRef<string | null>(null);
   const actionInFlightRef = useRef(false);
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
+  const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(false);
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
   const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -1638,7 +1639,7 @@ export default function TalentDashboard({
   };
 
   useEffect(() => {
-    if (session.status === 'inactive') return;
+    if (session.status === 'inactive' || !hardwareControlsEnabled) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1660,10 +1661,13 @@ export default function TalentDashboard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue]);
+  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue, hardwareControlsEnabled]);
 
   useEffect(() => {
-    if (session.status === 'inactive') return;
+    if (session.status === 'inactive' || !hardwareControlsEnabled) {
+      setHardwareInputStatus('idle');
+      return;
+    }
     let cancelled = false;
     let midiAccess: any = null;
 
@@ -1711,7 +1715,7 @@ export default function TalentDashboard({
         });
       }
     };
-  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue]);
+  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue, hardwareControlsEnabled]);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -1741,8 +1745,48 @@ export default function TalentDashboard({
       <div
         id="talent_dashboard_panel"
         data-sway-performer-live-cockpit="true"
-        className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
+        className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
       >
+        {hardwareControlsEnabled ? (
+          <div
+            data-sway-hardware-controls-enabled="true"
+            className="absolute inset-0 z-50 overflow-y-auto bg-slate-950/95 p-3 backdrop-blur"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Advanced key controls"
+          >
+            <div className="mx-auto max-w-2xl space-y-2">
+              <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900 px-4 py-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-white">Hardware controls are on</p>
+                  <p className="mt-1 text-[10px] text-slate-400">Keyboard and MIDI actions only listen while this panel is open.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHardwareLearnTarget(null);
+                    setHardwareControlsEnabled(false);
+                  }}
+                  className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs font-black uppercase text-slate-200"
+                >
+                  Done
+                </button>
+              </div>
+              <HardwareMappingPanel
+                bindings={hardwareBindings}
+                learnTarget={hardwareLearnTarget}
+                midiStatus={hardwareInputStatus}
+                bridgeCommand={bridgeCommand}
+                bridgeTokenStatus={bridgeTokenStatus}
+                bridgeTokenMessage={bridgeTokenMessage}
+                onLearn={setHardwareLearnTarget}
+                onClear={clearHardwareInput}
+                onIssueBridgeToken={issueBridgeToken}
+                onDownloadBridgePreset={downloadBridgePreset}
+              />
+            </div>
+          </div>
+        ) : null}
         <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]">
           {actionError ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
@@ -2003,7 +2047,7 @@ export default function TalentDashboard({
             </div>
           </main>
 
-          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-2">
+          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] gap-2">
             <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
@@ -2015,6 +2059,14 @@ export default function TalentDashboard({
               className="min-h-12 rounded-xl bg-fuchsia-600 px-3 text-xs font-black uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
             >
               {liveLinkCopied ? 'Copied' : 'Copy link'}
+            </button>
+            <button
+              type="button"
+              data-sway-enable-hardware-controls="true"
+              onClick={() => setHardwareControlsEnabled(true)}
+              className="min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black uppercase tracking-wide text-cyan-200"
+            >
+              Keys
             </button>
             <button
               type="button"
