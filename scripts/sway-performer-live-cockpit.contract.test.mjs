@@ -59,6 +59,20 @@ if (!talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={11
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
+if (talentDashboard.match(/session\.status !== 'inactive'/g)?.length !== 2) {
+  failures.push('TalentDashboard must have one active-room branch and no second live-session renderer below it.');
+}
+
+for (const retiredParallelSurface of [
+  'FEATURED PERFORMER PREMIUM HUB',
+  'Earnings tonight',
+  '3. Live Core Session Workflows'
+]) {
+  if (talentDashboard.includes(retiredParallelSurface)) {
+    failures.push(`TalentDashboard still contains retired parallel live UI: ${retiredParallelSurface}`);
+  }
+}
+
 const testContracts = packageJson.scripts?.['test:contracts'] ?? '';
 if (!testContracts.includes('node scripts/sway-performer-live-cockpit.contract.test.mjs')) {
   failures.push('test:contracts must include the performer live cockpit contract.');
