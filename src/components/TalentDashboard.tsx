@@ -1153,6 +1153,10 @@ export default function TalentDashboard({
 
   useEffect(() => {
     if (session.status !== 'inactive') return;
+    if (!defaultPerformerName && !setupName.trim()) {
+      setShowSettings(true);
+      return;
+    }
     if (!defaultPerformerName || setupName.trim()) return;
     setSetupName(defaultPerformerName);
   }, [defaultPerformerName, session.status, setupName]);
@@ -2441,15 +2445,15 @@ export default function TalentDashboard({
           <form onSubmit={handleStart} className="space-y-5">
             <details
               className="group rounded-2xl border border-white/10 bg-slate-950/60 p-4"
-              open={showSettings}
+              open={showSettings || !setupName.trim()}
               onToggle={(event) => setShowSettings((event.currentTarget as HTMLDetailsElement).open)}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Tonight's money settings</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Room details & pricing</p>
                   {showSettings ? (
                     <p className="mt-1 text-sm text-slate-400">
-                      Set paid or free requests, fee handling, and minimums before creating the room link and QR. Approve, deny, complete once the room is live.
+                      Confirm the performer, then choose paid or free requests, fee handling, and minimums. Approve, deny, complete once the room is live.
                     </p>
                   ) : (
                     <p className="mt-1 text-sm text-slate-400">
@@ -2639,9 +2643,17 @@ export default function TalentDashboard({
                   Verify your email before creating a room.
                 </div>
               ) : null}
+              {!setupName.trim() ? (
+                <div
+                  data-sway-performer-name-required="true"
+                  className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+                >
+                  Add a performer name in Room details & pricing before creating the room.
+                </div>
+              ) : null}
               <button
                 type="submit"
-                disabled={!performerEmailVerified}
+                disabled={!performerEmailVerified || !setupName.trim()}
                 className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
               >
                 <Play className="h-4 w-4" /> Create room
