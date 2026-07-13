@@ -7,6 +7,10 @@ const talentSource = fs.readFileSync(path.join(root, 'src', 'shells', 'TalentApp
 
 const failures = [];
 
+if (!patronSource.includes('showHeader={false}')) {
+  failures.push('Patron mobile room must use the top bar as its single visible room heading.');
+}
+
 for (const banned of ['Gig route:', 'Performer link:']) {
   if (patronSource.includes(banned)) {
     failures.push(`Patron mobile top bar must not expose technical route copy: ${banned}`);

@@ -26,12 +26,12 @@ export default function PerformerAudienceScreen({
       </div>
       <div className="min-w-0 self-center overflow-hidden landscape:text-center">
         <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Customer Screen</p>
-        <p className="mt-1 font-display text-2xl font-black uppercase tracking-wide text-white landscape:text-4xl">Scan to Request</p>
+        <p className="mt-1 font-display text-xl font-black uppercase tracking-wide text-white min-[360px]:text-2xl landscape:text-4xl">Scan to Request</p>
         <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">
           {session.operatingMode === 'crowd_autopilot' ? 'Crowd Picks What Is Next' : 'Tip / Boost / Move the Queue'}
         </p>
         <p className="mt-2 truncate font-mono text-[10px] font-bold text-slate-400">{activeGigId ? `/g/${activeGigId}` : 'Room link after start'}</p>
-        <div className="mt-3 grid gap-1.5 text-left landscape:mt-4">
+        <div className="mt-3 hidden gap-1.5 text-left min-[360px]:grid landscape:mt-4 landscape:grid">
           <div className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2">
             <p className="text-[8px] font-black uppercase tracking-widest text-cyan-300">Now</p>
             <p className="truncate text-sm font-black text-white">{nowPlaying?.title ?? (session.requestsOpen ? 'Requests open' : 'Requests paused')}</p>

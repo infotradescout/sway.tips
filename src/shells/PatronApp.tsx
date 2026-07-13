@@ -396,6 +396,7 @@ export default function PatronApp() {
             <SplitViewShell
               title="Live room"
               eyebrow="Live Room"
+              showHeader={false}
               primaryLabel="Request, Tip, Boost, and see status"
               secondaryLabel="Room status"
               isEmpty={requests.length === 0 && performers.length === 0}

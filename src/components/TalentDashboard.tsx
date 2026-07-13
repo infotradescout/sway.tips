@@ -372,7 +372,7 @@ function CompactRequestPanel({
             <article key={request.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-black text-white">{request.title}</p>
-                <p className="truncate text-[11px] font-semibold text-slate-400">{request.subtitle || request.senderName}</p>
+                <p className="truncate text-[11px] font-semibold text-slate-400 max-[359px]:hidden">{request.subtitle || request.senderName}</p>
                 <div className="mt-1 flex items-center gap-2 text-[10px] font-mono font-black text-cyan-300">
                   {paymentsEnabled && (
                     <>
@@ -383,7 +383,7 @@ function CompactRequestPanel({
                   <span className="truncate text-slate-400">{request.senderName}</span>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-1 [&>button]:flex [&>button]:h-10 [&>button]:w-10 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-lg [&>button]:font-black">
+              <div className="grid grid-cols-2 gap-1 [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-lg [&>button]:font-black min-[360px]:[&>button]:h-10 min-[360px]:[&>button]:w-10">
                 {renderActions(request)}
               </div>
             </article>
@@ -1518,7 +1518,10 @@ export default function TalentDashboard({
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
               <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Tip path</p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">Direct tips</p>
+              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
+                <span className="min-[360px]:hidden">Tips</span>
+                <span className="hidden min-[360px]:inline">Direct tips</span>
+              </p>
             </div>
           </section>
 
@@ -1701,7 +1704,7 @@ export default function TalentDashboard({
             </div>
           </main>
 
-          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] gap-2">
+          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
             <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
@@ -1710,7 +1713,7 @@ export default function TalentDashboard({
               type="button"
               onClick={handleCopyLiveRoomLink}
               disabled={!selectedRoomUrl}
-              className="min-h-12 rounded-xl bg-fuchsia-600 px-3 text-xs font-black uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              className="hidden min-h-12 rounded-xl bg-fuchsia-600 px-3 text-xs font-black uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 sm:block"
             >
               {liveLinkCopied ? 'Copied' : 'Copy link'}
             </button>
@@ -1718,7 +1721,7 @@ export default function TalentDashboard({
               type="button"
               data-sway-enable-hardware-controls="true"
               onClick={() => setHardwareControlsEnabled(true)}
-              className="min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black uppercase tracking-wide text-cyan-200"
+              className="hidden min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black uppercase tracking-wide text-cyan-200 sm:block"
             >
               Keys
             </button>
