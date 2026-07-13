@@ -1105,9 +1105,9 @@ export default function PatronView({
                   setActiveTab('tip');
                   setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip });
                 }}
-                className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99]"
+                className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-2 py-3 text-center text-xs font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99] min-[360px]:px-4 min-[360px]:text-sm"
               >
-                <span className="inline-flex items-center justify-center gap-2"><Coins className="h-4 w-4" /> Tip</span>
+                <span className="inline-flex items-center justify-center gap-1 min-[360px]:gap-2"><Coins className="h-4 w-4" /> Tip</span>
               </button>
               <button
                 type="button"
@@ -1115,9 +1115,9 @@ export default function PatronView({
                   setActiveTab('request');
                   setSelectedTrack(null);
                 }}
-                className="min-h-14 rounded-xl border border-fuchsia-500/40 bg-fuchsia-600 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-white shadow-lg transition-all active:scale-[0.99]"
+                className="min-h-14 rounded-xl border border-fuchsia-500/40 bg-fuchsia-600 px-2 py-3 text-center text-xs font-black uppercase tracking-wide text-white shadow-lg transition-all active:scale-[0.99] min-[360px]:px-4 min-[360px]:text-sm"
               >
-                <span className="inline-flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" /> Request</span>
+                <span className="inline-flex items-center justify-center gap-1 min-[360px]:gap-2"><Sparkles className="h-4 w-4" /> Request</span>
               </button>
             </div>
             <div className="w-full max-w-md rounded-xl border border-cyan-500/20 bg-slate-950/70 px-4 py-3 text-left">
