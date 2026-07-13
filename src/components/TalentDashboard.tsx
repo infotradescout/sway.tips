@@ -35,6 +35,7 @@ import {
   Keyboard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { ActiveRoomSummary, GigSession, RequestItem, RequestPreset } from '../types';
 import PerformerShareKit from './PerformerShareKit';
 
@@ -426,6 +427,35 @@ async function copyCompactLink(value: string) {
   document.body.removeChild(textArea);
 }
 
+function CompactRoomQr({ activeGigId, size }: { activeGigId: string | null; size: number }) {
+  const roomLink = resolveLiveRoomLink(activeGigId);
+
+  if (!roomLink) {
+    return (
+      <div
+        aria-label="QR code appears after the room starts"
+        className="flex aspect-square items-center justify-center bg-white text-slate-400"
+      >
+        <QrCode className="h-8 w-8" aria-hidden="true" />
+      </div>
+    );
+  }
+
+  return (
+    <QRCodeCanvas
+      value={roomLink}
+      size={size}
+      bgColor="#ffffff"
+      fgColor="#000000"
+      level="M"
+      marginSize={1}
+      title="Scan to open this live Sway room"
+      className="h-auto w-full"
+      data-sway-compact-room-qr="true"
+    />
+  );
+}
+
 function CompactSharePanel({ activeGigId }: { activeGigId: string | null }) {
   const roomLink = resolveLiveRoomLink(activeGigId);
   const overlayLink = resolveLiveOverlayLink(activeGigId);
@@ -455,7 +485,7 @@ function CompactSharePanel({ activeGigId }: { activeGigId: string | null }) {
       <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 overflow-hidden rounded-xl border border-white/10 bg-slate-950 p-3">
         <div className="rounded-xl bg-white p-2">
           <div className="flex h-28 w-28 items-center justify-center bg-white text-slate-900">
-            <QrCode className="h-8 w-8" />
+            <CompactRoomQr activeGigId={activeGigId} size={112} />
           </div>
         </div>
         <div className="min-w-0 space-y-2">
@@ -527,7 +557,7 @@ function CompactAudienceScreenPanel({
     >
       <div className="rounded-xl bg-white p-2 text-slate-950 landscape:mx-auto landscape:w-full landscape:max-w-56">
         <div className="flex aspect-square items-center justify-center">
-          <QrCode className="h-8 w-8" />
+          <CompactRoomQr activeGigId={activeGigId} size={224} />
         </div>
       </div>
       <div className="min-w-0 self-center overflow-hidden landscape:text-center">
