@@ -608,7 +608,7 @@ function CompactControlPanel({
   actionPending: boolean;
   onToggleRequests: (open: boolean) => void;
   onSetMode: (mode: 'manual' | 'open_call' | 'crowd_autopilot') => void;
-  onSetSearchScope: (scope: 'library' | 'catalog' | 'setlist') => void;
+  onSetSearchScope: (scope: 'library' | 'catalog') => void;
   onEndSession: () => void;
 }) {
   return (
@@ -672,16 +672,15 @@ function CompactControlPanel({
           <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Request scope</p>
           <p className="truncate text-[10px] font-bold text-white">{requestScopeLabel}</p>
         </div>
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1">
         {[
           ['library', 'Lib'],
-          ['setlist', 'Set'],
           ['catalog', 'Cat']
         ].map(([scope, label]) => (
           <button
             key={scope}
             type="button"
-            onClick={() => onSetSearchScope(scope as 'library' | 'catalog' | 'setlist')}
+            onClick={() => onSetSearchScope(scope as 'library' | 'catalog')}
             disabled={actionPending}
             className={`min-h-7 rounded-lg px-2 text-[10px] font-black ${
               session.searchScope === scope ? 'bg-emerald-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
