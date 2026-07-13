@@ -3,6 +3,7 @@ import { Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
+import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
 import VictoryScreen from '../components/VictoryScreen';
@@ -126,13 +127,7 @@ export default function TalentApp() {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
 
-  const handleStartSession = async (setupData: {
-    talentName: string;
-    talentRole: 'DJ' | 'Bartender' | 'Performer';
-    feeType: 'talent' | 'patron';
-    minimumTip: number;
-    paymentsEnabled: boolean;
-  }) => {
+  const handleStartSession = async (setupData: PerformerRoomSetupData) => {
     if (demoMode) return rejectDemoMutation();
     try {
       const performerIdentityName =
@@ -229,7 +224,8 @@ export default function TalentApp() {
       talentRole: 'DJ',
       feeType: 'patron',
       minimumTip: 5,
-      paymentsEnabled: true
+      paymentsEnabled: true,
+      searchScope: 'library'
     });
   };
 
