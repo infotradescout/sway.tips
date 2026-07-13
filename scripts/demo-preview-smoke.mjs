@@ -24,7 +24,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-off-public.png',
-        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools'],
+        expectedText: ['Sway', 'SCAN', 'Create account', 'Login'],
         absentText: demoOffForbiddenText
       },
       {
@@ -78,7 +78,7 @@ const scenarios = [
         path: '/',
         host: 'sway.tips',
         screenshot: 'demo-on-public.png',
-        expectedText: ['Sway', 'Audience: start request', 'Performer: open console', 'Venue: operator tools'],
+        expectedText: ['Sway', 'SCAN', 'Create account', 'Login'],
         absentText: []
       },
       {
@@ -104,14 +104,6 @@ const scenarios = [
         screenshot: 'demo-on-talent.png',
         expectedText: ['Performer Console', 'Demo data', 'Demo data only; no live tips are being collected.', 'Midnight City', 'Demo only', 'Demo total shown'],
         absentText: ['No active session yet', 'Fulfill & Capture', 'Current captured total:', 'Veto / Cancel Promotion']
-      },
-      {
-        surface: 'operator demo Split View',
-        path: '/admin',
-        host: 'app.sway.tips',
-        screenshot: 'demo-on-admin.png',
-        expectedText: ['Operator App', 'Operations overview', 'Operator access is protected', 'Read-only status is shown here until operator access is available.'],
-        absentText: ['Operator features remain unavailable']
       },
       {
         surface: 'overlay demo live room',

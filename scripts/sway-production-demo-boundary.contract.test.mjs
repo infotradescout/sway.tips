@@ -11,6 +11,7 @@ const publicShell = read('shells/public.html');
 const legacyAppShell = read('src/App.tsx');
 const patronShell = read('src/shells/PatronApp.tsx');
 const packageJson = read('package.json');
+const demoPreviewSmoke = read('scripts/demo-preview-smoke.mjs');
 
 const failures = [];
 
@@ -55,6 +56,23 @@ for (const forbiddenPublicOverlayEntry of ['/overlay/live', 'Open overlay']) {
   if (publicShell.includes(forbiddenPublicOverlayEntry)) {
     failures.push(`Public landing must not expose overlay before performer sign-in: ${forbiddenPublicOverlayEntry}`);
   }
+}
+
+for (const forbiddenThirdSide of [
+  'Venue: operator tools',
+  "surface: 'operator demo Split View'"
+]) {
+  if (demoPreviewSmoke.includes(forbiddenThirdSide)) {
+    failures.push(`Browser smoke must preserve the two-sided customer/performer product: ${forbiddenThirdSide}`);
+  }
+}
+
+for (const requiredPublicEntry of ['SCAN', 'Create account', 'Login']) {
+  requireIncludes(
+    demoPreviewSmoke,
+    requiredPublicEntry,
+    `Browser smoke missing canonical public entry: ${requiredPublicEntry}`
+  );
 }
 
 for (const source of [
