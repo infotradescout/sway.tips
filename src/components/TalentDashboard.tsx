@@ -1880,7 +1880,7 @@ export default function TalentDashboard({
             {[
               { id: 'live', label: 'Live' },
               { id: 'share', label: 'Show QR' },
-              { id: 'settings', label: 'End' }
+              { id: 'settings', label: 'Control' }
             ].map((item) => (
               <button
                 key={item.id}
@@ -2123,11 +2123,11 @@ export default function TalentDashboard({
           <div className="font-sans">
             <div className="flex items-center gap-2">
               <h2 className="font-display text-lg font-bold text-white tracking-wide uppercase">
-                Set Up Session
+                Start a Room
               </h2>
             </div>
             <p className="text-xs text-slate-400 font-sans mt-0.5">
-              Select your performance rules to prepare a print-ready room link and QR sign.
+              Choose tonight's request rules, then create a print-ready room link and QR.
             </p>
             {previewMode && (
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
@@ -2138,8 +2138,12 @@ export default function TalentDashboard({
         </div>
       </div>
 
-      {/* 1b. Library linking is a developer-only integration path, kept out of the default view. */}
+      {/* Account and music tools stay separate from the one-decision room start. */}
       <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'} space-y-5`}>
+      <div className="mx-auto max-w-3xl px-1">
+        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
+        <p className="mt-1 text-xs text-slate-500">Music sources, payouts, and your public performer profile.</p>
+      </div>
       <MusicSourcesPanel
         providers={musicSourceCapabilities}
         linkedSourceCount={linkedSourceCount}
