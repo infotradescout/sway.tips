@@ -96,7 +96,7 @@ for (const term of [
   'Metadata',
   'Library sync',
   'Open source',
-  '<SpotifyOpenLink request={req} />'
+  '<SpotifyOpenLink request={request} />'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing music sources panel term: ${term}`);
 }
