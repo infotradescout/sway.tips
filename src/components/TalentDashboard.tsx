@@ -38,11 +38,12 @@ import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
 import PerformerRoomControls from './PerformerRoomControls';
 import PerformerAudienceScreen from './PerformerAudienceScreen';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
+import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 
 interface TalentDashboardProps {
   session: GigSession;
   requests: RequestItem[];
-  onStartSession: (data: { talentName: string; talentRole: 'DJ' | 'Bartender' | 'Performer'; feeType: 'talent' | 'patron'; minimumTip: number; paymentsEnabled: boolean }) => void;
+  onStartSession: (data: PerformerRoomSetupData) => void;
   onEndSession: () => void;
   onCloseout: () => void;
   onTriage: (requestId: string, action: 'approve' | 'deny') => void;
@@ -708,22 +709,7 @@ export default function TalentDashboard({
   const writableGigId = selectedGigId ?? activeGigId;
   const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
   const welcomePerformerName = defaultPerformerName || session.talentName || 'Performer';
-  // Session Configuration Setup States (for Starting New Session)
-  const [setupName, setSetupName] = useState('');
-  const [setupRole, setSetupRole] = useState<'DJ' | 'Bartender' | 'Performer'>('DJ');
-  const [setupFeeType, setSetupFeeType] = useState<'talent' | 'patron'>('patron');
-  const [setupMinTip, setSetupMinTip] = useState(5);
-  const [setupPaymentsEnabled, setSetupPaymentsEnabled] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
-  
-  // Local state for interactive settings drawer. Collapsed by default: the
-  // room-settings form (money rules, fee handling, minimums) is the bulk of
-  // the pre-"Create room" scroll on a phone -- five-plus screens of it -- for
-  // a performer who has seconds between songs to get a room live. The
-  // defaults underneath (Paid, $5 minimum, pass-fee-to-patron, account name)
-  // are sane, so most performers can hit Create room immediately and only
-  // expand this to customize.
-  const [showSettings, setShowSettings] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
 
@@ -835,16 +821,6 @@ export default function TalentDashboard({
       setQueueActionPendingKey(null);
     }
   };
-
-  useEffect(() => {
-    if (session.status !== 'inactive') return;
-    if (!defaultPerformerName && !setupName.trim()) {
-      setShowSettings(true);
-      return;
-    }
-    if (!defaultPerformerName || setupName.trim()) return;
-    setSetupName(defaultPerformerName);
-  }, [defaultPerformerName, session.status, setupName]);
 
   // Live request window countdown.
   const [windowTimeLeft, setWindowTimeLeft] = useState<string>('');
@@ -1409,17 +1385,6 @@ export default function TalentDashboard({
   // Formatter for currency
   const formatValue = (val: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-  };
-
-  const handleStart = (e: React.FormEvent) => {
-    e.preventDefault();
-    onStartSession({
-      talentName: setupName,
-      talentRole: setupRole,
-      feeType: setupFeeType,
-      minimumTip: Math.max(5, setupMinTip),
-      paymentsEnabled: setupPaymentsEnabled
-    });
   };
 
   if (session.status !== 'inactive') {
@@ -2120,233 +2085,16 @@ export default function TalentDashboard({
       </details>
       </div>
 
-      {/* 2. Inactive Session Configuration Form */}
-      {session.status === 'inactive' && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="order-2 max-w-3xl mx-auto space-y-5"
-        >
-          <form onSubmit={handleStart} className="space-y-5">
-            <details
-              className="group rounded-2xl border border-white/10 bg-slate-950/60 p-4"
-              open={showSettings || !setupName.trim()}
-              onToggle={(event) => setShowSettings((event.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Room details & pricing</p>
-                  {showSettings ? (
-                    <p className="mt-1 text-sm text-slate-400">
-                      Confirm the performer, then choose paid or free requests, fee handling, and minimums. Approve, deny, complete once the room is live.
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-slate-400">
-                      {setupPaymentsEnabled
-                        ? `Paid • $${setupMinTip} minimum • ${setupFeeType === 'patron' ? 'fee passed to patron' : 'you absorb the fee'}`
-                        : 'Free requests • direct tips stay paid'}
-                      {' — tap to change.'}
-                    </p>
-                  )}
-                </div>
-                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
-                  {showSettings ? 'Collapse' : 'Expand'}
-                </span>
-              </summary>
-
-              <div className="mt-4 space-y-6">
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMER NAME</label>
-                    <input
-                      type="text"
-                      value={setupName}
-                      onChange={(e) => setSetupName(e.target.value)}
-                      placeholder="e.g. DJ Luna, Neon Atlas"
-                      required
-                      className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-white text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium font-sans"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">PERFORMANCE TYPE</label>
-                    <select
-                      value={setupRole}
-                      onChange={(e) => setSetupRole(e.target.value as any)}
-                      className="w-full bg-slate-950 px-4 py-3 rounded-xl border border-white/5 text-slate-300 text-sm focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none font-medium cursor-pointer"
-                    >
-                      <option value="DJ">DJ</option>
-                      <option value="Performer">Performer</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-slate-950 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">REQUEST MODE</p>
-                      <p className="mt-1 text-[11px] text-slate-500 font-sans leading-relaxed">
-                        {setupPaymentsEnabled
-                          ? 'Paid requests and boosts use the $5 minimum. Direct tips stay paid.'
-                          : 'Requests are free, boosts become free upvotes, and direct tips stay paid.'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSetupPaymentsEnabled(true)}
-                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${
-                          setupPaymentsEnabled
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-slate-900 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                        }`}
-                      >
-                        Paid
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSetupPaymentsEnabled(false)}
-                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${
-                          !setupPaymentsEnabled
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-slate-900 border border-white/10 text-slate-300 hover:border-emerald-500/40'
-                        }`}
-                      >
-                        Free requests
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-xs text-slate-400 font-semibold font-mono tracking-wider uppercase">
-                      {setupPaymentsEnabled ? 'EAT PLATFORM TRANSACTION FEE ($1.00)' : 'DIRECT TIP PLATFORM FEE ($1.00)'}
-                    </label>
-                    <span className="text-[10px] font-mono text-cyan-400 uppercase font-black">PLATFORM FEE</span>
-                  </div>
-                  {!setupPaymentsEnabled && (
-                    <p className="text-[11px] text-amber-200/90 font-sans">
-                      Requests are free in this mode, so this only applies to direct tips — tips always stay paid.
-                    </p>
-                  )}
-
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setSetupFeeType('patron')}
-                      className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                        setupFeeType === 'patron'
-                          ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
-                          : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
-                      }`}
-                    >
-                      <span className="text-xs font-bold text-white mb-1">Pass as Convenience Fee</span>
-                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                        {setupPaymentsEnabled
-                          ? 'Audience pays the $1.00 platform fee on each request. Performer collects 100% of the tip.'
-                          : 'Audience pays the $1.00 platform fee on each direct tip. Performer collects 100% of the tip.'}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setSetupFeeType('talent')}
-                      className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                        setupFeeType === 'talent'
-                          ? 'border-fuchsia-500 bg-fuchsia-500/5 text-fuchsia-400 glow-fuchsia'
-                          : 'border-white/5 bg-slate-950/40 text-slate-400 hover:border-white/20'
-                      }`}
-                    >
-                      <span className="text-xs font-bold text-white mb-1">Absorb Processing Cost</span>
-                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                        {setupPaymentsEnabled
-                          ? 'Performer absorbs the flat $1.00 fee to keep patron pricing clean and boost volume.'
-                          : 'Performer absorbs the flat $1.00 fee on direct tips to keep patron pricing clean.'}
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-3">
-                  <div className="flex justify-between items-center text-sm font-mono text-slate-400">
-                    <span>{setupPaymentsEnabled ? 'Minimum Request' : 'Minimum Direct Tip'}</span>
-                    <span className="text-fuchsia-400 font-bold">${setupMinTip}.00</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="5"
-                    max="25"
-                    step="1"
-                    value={setupMinTip}
-                    onChange={(e) => setSetupMinTip(Math.max(5, Number(e.target.value)))}
-                    className="w-full accent-fuchsia-500 cursor-pointer"
-                  />
-                  <p className="text-[11px] text-slate-500 font-sans font-medium">
-                    {setupPaymentsEnabled
-                      ? 'Paid requests and boosts require this baseline to prevent micro-transaction spam and system clutter.'
-                      : 'Requests and boosts are free in this mode. This baseline only applies to direct tips, which always stay paid.'}
-                  </p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
-                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Boost minimum</p>
-                    <p className="mt-2 text-sm font-black text-white">
-                      {setupPaymentsEnabled ? `$${setupMinTip}.00 per boost` : 'Free upvotes'}
-                    </p>
-                    <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                      {setupPaymentsEnabled
-                        ? 'Paid boosts only apply to approved queue items and increase queue rank; they do not approve a request.'
-                        : 'Free boosts become upvotes on approved queue items; they do not approve a request.'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
-                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Tip path</p>
-                    <p className="mt-2 text-sm font-black text-white">Direct support stays available</p>
-                    <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                      Patrons can send a straight tip even when new requests are paused.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </details>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-semibold text-white">
-                  Performer: {welcomePerformerName}
-                </span>
-                {performerProfile?.handle ? (
-                  <span className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 font-mono text-cyan-300">
-                    @{performerProfile.handle}
-                  </span>
-                ) : null}
-              </div>
-              {!performerEmailVerified ? (
-                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                  Verify your email before creating a room.
-                </div>
-              ) : null}
-              {!setupName.trim() ? (
-                <div
-                  data-sway-performer-name-required="true"
-                  className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
-                >
-                  Add a performer name in Room details & pricing before creating the room.
-                </div>
-              ) : null}
-              <button
-                type="submit"
-                disabled={!performerEmailVerified || !setupName.trim()}
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl auction-gradient px-5 py-3 text-sm font-black text-white shadow-lg transition-all active:scale-[0.99]"
-              >
-                <Play className="h-4 w-4" /> Create room
-              </button>
-            </div>
-          </form>
-        </motion.div>
-      )}
+      {session.status === 'inactive' ? (
+        <div className="order-2">
+          <PerformerRoomSetup
+            defaultPerformerName={welcomePerformerName}
+            performerHandle={performerProfile?.handle}
+            performerEmailVerified={performerEmailVerified}
+            onStartSession={onStartSession}
+          />
+        </div>
+      ) : null}
 
     </div>
   );
