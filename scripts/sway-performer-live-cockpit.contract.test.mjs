@@ -29,6 +29,10 @@ if (activeBranch.includes('<SplitViewShell')) {
 for (const term of [
   'data-sway-performer-live-cockpit="true"',
   'data-sway-performer-audience-screen="true"',
+  'data-sway-compact-room-qr="true"',
+  '<QRCodeCanvas',
+  'value={roomLink}',
+  'Scan to open this live Sway room',
   'Scan to Request',
   'h-[var(--sway-viewport-height,100vh)] overflow-hidden',
   'grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto]',
@@ -38,6 +42,21 @@ for (const term of [
   "aria-label=\"Live-night sections\""
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing no-scroll cockpit term: ${term}`);
+}
+
+const compactQrStart = talentDashboard.indexOf('function CompactRoomQr');
+const compactShareStart = talentDashboard.indexOf('function CompactSharePanel');
+const compactQrSource = compactQrStart === -1 || compactShareStart === -1
+  ? ''
+  : talentDashboard.slice(compactQrStart, compactShareStart);
+
+if (!compactQrSource.includes('if (!roomLink)')) {
+  failures.push('Compact room QR must fail closed when there is no active room link.');
+}
+
+if (!talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={112} />')
+  || !talentDashboard.includes('<CompactRoomQr activeGigId={activeGigId} size={224} />')) {
+  failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
 const testContracts = packageJson.scripts?.['test:contracts'] ?? '';
