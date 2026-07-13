@@ -5,7 +5,10 @@ const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const businessStore = readFileSync(join(root, 'src/server/business-store.ts'), 'utf8');
 const types = readFileSync(join(root, 'src/types.ts'), 'utf8');
-const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const talentDashboard = [
+  readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8'),
+  readFileSync(join(root, 'src/components/PerformerRoomControls.tsx'), 'utf8')
+].join('\n');
 const patronView = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const overlayApp = readFileSync(join(root, 'src/shells/OverlayApp.tsx'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -28,7 +31,7 @@ for (const term of [
 
 for (const term of [
   'data-sway-crowd-autopilot-control="true"',
-  "onSetMode('crowd_autopilot')",
+  "['crowd_autopilot', 'Auto']",
   'Autopilot live',
   'Clean requests jump straight to up next',
   'Autopilot is moving clean requests into the queue',

@@ -21,6 +21,7 @@ function requireExcludes(label, source, terms) {
 }
 
 const talentDashboard = read('src/components/TalentDashboard.tsx');
+const performerRoomControls = read('src/components/PerformerRoomControls.tsx');
 const patronView = read('src/components/PatronView.tsx');
 const server = read('server.ts');
 const overlayApp = read('src/shells/OverlayApp.tsx');
@@ -55,6 +56,17 @@ requireIncludes('TalentDashboard', talentDashboard, [
 ]);
 
 requireExcludes('TalentDashboard selectable request scopes', talentDashboard, [
+  "['setlist', 'Set']"
+]);
+
+requireIncludes('PerformerRoomControls', performerRoomControls, [
+  'data-sway-performer-room-controls="true"',
+  'Request scope',
+  "['library', 'Library']",
+  "['catalog', 'Catalog']"
+]);
+
+requireExcludes('PerformerRoomControls selectable request scopes', performerRoomControls, [
   "['setlist', 'Set']"
 ]);
 
