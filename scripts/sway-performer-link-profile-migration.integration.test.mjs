@@ -221,6 +221,15 @@ async function main() {
     const afterMigration = await client.query(legacySnapshotSql, [OWNER_USER_ID]);
     assert.deepEqual(afterMigration.rows, beforeMigration.rows, '0016 must not rewrite existing account, profile, gig, or active-room rows.');
 
+    await applyMigrationFile(client, '0017_unclaimed_performer_profile_previews.sql');
+    const previewTable = await client.query(
+      `SELECT to_regclass('public.performer_profile_previews') AS table_name,
+              count(*)::int AS row_count
+       FROM performer_profile_previews`
+    );
+    assert.equal(previewTable.rows[0].table_name, 'performer_profile_previews');
+    assert.equal(previewTable.rows[0].row_count, 0, 'Preview schema migration must not invent profile data.');
+
     const addedProfileColumns = await client.query(
       `SELECT column_name
        FROM information_schema.columns
@@ -394,7 +403,10 @@ async function main() {
     console.log(JSON.stringify({
       database: databaseName,
       baselineHead: previousHeadMigrations.at(-1),
-      migrationApplied: '0016_performer_link_profiles.sql',
+      migrationApplied: [
+        '0016_performer_link_profiles.sql',
+        '0017_unclaimed_performer_profile_previews.sql'
+      ],
       existingRowsPreserved: {
         users: 1,
         performers: 1,

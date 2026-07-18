@@ -14,6 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:preflight:performer-handles": "node scripts/sway-performer-handle-duplicate-preflight.mjs",
+    "db:seed:performer-previews": "node scripts/sway-seed-performer-previews.mjs",
     "library:bridge": "node scripts/sway-library-bridge.mjs",
     "control:bridge": "node scripts/sway-control-bridge.mjs",
     "performer:access:link": "node scripts/sway-performer-access-link.mjs",

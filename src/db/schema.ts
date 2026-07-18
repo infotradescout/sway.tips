@@ -154,6 +154,36 @@ export const performerPublicProfiles = pgTable('performer_public_profiles', {
   updatedAtIdx: index('performer_public_profiles_updated_at_idx').on(table.updatedAt)
 }));
 
+// Curated, read-only profile previews are deliberately separate from performers.
+// A preview has no owner account, password, terms receipt, or private contact data.
+// It becomes a normal performer profile only through the owner-controlled invite flow.
+export const performerProfilePreviews = pgTable('performer_profile_previews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  handle: text('handle').notNull(),
+  claimedPerformerId: uuid('claimed_performer_id').references(() => performers.id),
+  displayName: text('display_name').notNull(),
+  bio: text('bio'),
+  headline: text('headline'),
+  specialties: jsonb('specialties').$type<string[]>(),
+  city: text('city'),
+  avatarUrl: text('avatar_url'),
+  facebookUrl: text('facebook_url'),
+  instagramUrl: text('instagram_url'),
+  tiktokUrl: text('tiktok_url'),
+  youtubeUrl: text('youtube_url'),
+  soundcloudUrl: text('soundcloud_url'),
+  websiteUrl: text('website_url'),
+  links: jsonb('links'),
+  metadata: jsonb('metadata'),
+  isActive: boolean('is_active').notNull().default(true),
+  ...timestamps
+}, (table) => ({
+  handleLowerIdx: uniqueIndex('performer_profile_previews_handle_lower_idx').on(sql`lower(${table.handle})`),
+  claimedPerformerIdx: uniqueIndex('performer_profile_previews_claimed_performer_idx').on(table.claimedPerformerId),
+  handleNotReserved: check('performer_profile_previews_handle_not_reserved', sql`lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
+  activeIdx: index('performer_profile_previews_active_idx').on(table.isActive)
+}));
+
 export const performerProfileLinks = pgTable('performer_profile_links', {
   id: uuid('id').primaryKey().defaultRandom(),
   performerId: uuid('performer_id').notNull().references(() => performers.id, { onDelete: 'cascade' }),
