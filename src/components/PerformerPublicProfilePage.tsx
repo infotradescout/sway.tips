@@ -13,7 +13,6 @@ import { motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 
 type PublicProfileLink = {
-  id: string;
   label: string;
   description: string | null;
   url: string;
@@ -22,7 +21,6 @@ type PublicProfileLink = {
 };
 
 type PublicPerformerProfile = {
-  id: string;
   displayName: string;
   handle: string | null;
   bio: string | null;
@@ -40,7 +38,6 @@ type PublicPerformerProfile = {
     active: boolean;
     kind: string | null;
     termsVersion: string | null;
-    grantedAt: string | null;
   };
 };
 
@@ -115,7 +112,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           socialLinks: data.performer.socialLinks || {},
           specialties: Array.isArray(data.performer.specialties) ? data.performer.specialties : [],
           links: Array.isArray(data.performer.links) ? data.performer.links : [],
-          partner: data.performer.partner || { active: false, kind: null, termsVersion: null, grantedAt: null }
+          partner: data.performer.partner || { active: false, kind: null, termsVersion: null }
         });
         setActiveRoom(data.activeRoom || null);
         setAvatarFailed(false);
@@ -305,7 +302,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <section className="mt-4 space-y-3" aria-label="Profile links">
             {profile.links.map((link, index) => (
               <motion.a
-                key={link.id}
+                key={`${link.sortOrder}:${link.url}`}
                 href={link.url}
                 target="_blank"
                 rel="noreferrer"

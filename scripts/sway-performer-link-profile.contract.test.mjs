@@ -5,22 +5,45 @@ import { spawnSync } from 'node:child_process';
 const root = process.cwd();
 const failures = [];
 const read = (path) => readFileSync(join(root, path), 'utf8');
-const files = [
+
+function requireIncludes(source, term, label) {
+  if (!source.includes(term)) failures.push(`${label} missing term: ${term}`);
+}
+
+function requireExcludes(source, term, label) {
+  if (source.includes(term)) failures.push(`${label} must exclude term: ${term}`);
+}
+
+function sliceBetween(source, start, end, label) {
+  const startIndex = source.indexOf(start);
+  const endIndex = startIndex === -1 ? -1 : source.indexOf(end, startIndex + start.length);
+  if (startIndex === -1 || endIndex === -1) {
+    failures.push(`Unable to locate ${label}.`);
+    return '';
+  }
+  return source.slice(startIndex, endIndex);
+}
+
+const requiredFiles = [
   'src/db/schema.ts',
   'drizzle/0016_performer_link_profiles.sql',
   'src/server/public-profile.ts',
   'src/server/partner-entitlement.ts',
+  'src/server/partner-entitlement-store.ts',
+  'src/server/payment-service.ts',
+  'src/server/performer-login.ts',
   'src/components/PerformerPublicProfilePage.tsx',
   'src/components/PerformerPublicProfileEditor.tsx',
+  'src/components/TalentInviteAcceptCard.tsx',
   'src/shells/PatronApp.tsx',
-  'src/shells/shared.tsx',
   'src/shells/AdminAccountsPage.tsx',
   'docs/SWAY_PARTNER_TERMS_V1.md',
-  'scripts/sway-performer-link-profile.behavior.test.ts'
+  'scripts/sway-performer-link-profile.behavior.test.ts',
+  'scripts/sway-performer-link-profile-migration.integration.test.mjs'
 ];
 
-for (const file of files) {
-  if (!existsSync(join(root, file))) failures.push(`Missing performer profile foundation file: ${file}`);
+for (const file of requiredFiles) {
+  if (!existsSync(join(root, file))) failures.push(`Missing performer profile release-gate file: ${file}`);
 }
 
 const schema = read('src/db/schema.ts');
@@ -28,23 +51,32 @@ const migration = read('drizzle/0016_performer_link_profiles.sql');
 const server = read('server.ts');
 const normalizers = read('src/server/public-profile.ts');
 const partnerTerms = read('src/server/partner-entitlement.ts');
+const partnerStore = read('src/server/partner-entitlement-store.ts');
+const paymentService = read('src/server/payment-service.ts');
+const performerLogin = read('src/server/performer-login.ts');
 const publicPage = read('src/components/PerformerPublicProfilePage.tsx');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
+const inviteCard = read('src/components/TalentInviteAcceptCard.tsx');
 const patronApp = read('src/shells/PatronApp.tsx');
 const sharedShell = read('src/shells/shared.tsx');
 const admin = read('src/shells/AdminAccountsPage.tsx');
+const accessControl = read('src/server/access-control.ts');
+const appRoutes = read('src/App.tsx');
+const talentApp = read('src/shells/TalentApp.tsx');
 const termsDoc = read('docs/SWAY_PARTNER_TERMS_V1.md');
+const migrationProof = read('scripts/sway-performer-link-profile-migration.integration.test.mjs');
 const packageJson = read('package.json');
 
 for (const term of [
   "export const performerProfileLinks = pgTable('performer_profile_links'",
   "export const performerPartnerEntitlements = pgTable('performer_partner_entitlements'",
-  "specialties: jsonb('specialties')",
-  "partnerKind: text('partner_kind').notNull().default('brand')",
-  "termsSnapshot: jsonb('terms_snapshot')"
-]) {
-  if (!schema.includes(term)) failures.push(`Profile schema missing durable term: ${term}`);
-}
+  "export const performerPartnerEntitlementStatusEvents = pgTable('performer_partner_entitlement_status_events'",
+  "export const performerPartnerTermsAcceptances = pgTable('performer_partner_terms_acceptances'",
+  "termsHash: text('terms_hash').notNull()",
+  "termsText: text('terms_text').notNull()",
+  "statusAllowed: check('performer_partner_entitlement_status_events_status_allowed'",
+  "handleNotReserved: check('performers_handle_not_reserved'"
+]) requireIncludes(schema, term, 'Profile schema');
 
 for (const term of [
   '"booking_email" text',
@@ -53,41 +85,257 @@ for (const term of [
   '"specialties" jsonb',
   '"performer_profile_links"',
   '"performer_partner_entitlements"',
-  '"partner_kind" text NOT NULL DEFAULT \'brand\'',
-  '"terms_snapshot" jsonb NOT NULL'
-]) {
-  if (!migration.includes(term)) failures.push(`Profile migration missing durable term: ${term}`);
+  '"performer_partner_entitlement_status_events"',
+  '"performer_partner_terms_acceptances"',
+  '"performers_handle_not_reserved"',
+  '"performer_partner_terms_acceptances_validate_owner_terms"',
+  'performer."owner_user_id" = NEW."account_user_id"',
+  'entitlement."terms_hash" = NEW."terms_hash"',
+  'entitlement."terms_text" = NEW."terms_text"',
+  'entitlement."terms_snapshot" = NEW."terms_snapshot"',
+  '"sway_reject_immutable_partner_record_mutation"',
+  'BEFORE UPDATE OR DELETE ON "performer_partner_entitlements"',
+  'BEFORE UPDATE OR DELETE ON "performer_partner_entitlement_status_events"',
+  'BEFORE UPDATE OR DELETE ON "performer_partner_terms_acceptances"'
+]) requireIncludes(migration, term, 'Profile migration');
+
+const inviteAcceptRoute = sliceBetween(
+  server,
+  "app.post('/api/talent/invite/accept'",
+  "app.post('/api/talent/password-reset/accept'",
+  'owner invitation acceptance route'
+);
+for (const term of [
+  'termsAccepted === true',
+  'validatePerformerPasswordStrength(password)',
+  'expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE',
+  'isNull(users.passwordHash)',
+  'passwordHash,',
+  'termsAcceptedAt: completedAt',
+  'passwordSetByOwner: true',
+  'issuedBy: account.userId'
+]) requireIncludes(inviteAcceptRoute, term, 'Owner invitation acceptance route');
+
+const passwordResetAcceptRoute = sliceBetween(
+  server,
+  "app.post('/api/talent/password-reset/accept'",
+  "app.post('/api/talent/signup'",
+  'owner password reset acceptance route'
+);
+for (const term of [
+  'expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET',
+  'validatePerformerPasswordStrength(password)',
+  'revokeActiveSessionsForActorUser',
+  'passwordSetByOwner: true'
+]) requireIncludes(passwordResetAcceptRoute, term, 'Owner password reset acceptance route');
+
+const adminOnboardRoute = sliceBetween(
+  server,
+  "app.post('/api/admin/accounts/onboard'",
+  "app.post('/api/admin/accounts/:userId/invite'",
+  'admin onboarding route'
+);
+for (const term of [
+  'passwordHash: null',
+  'termsAcceptedAt: null',
+  'emailVerifiedAt: null',
+  'isActive: false',
+  'PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE',
+  'sendAccountInvitation',
+  'passwordSetByAdmin: false',
+  'termsAcceptedByAdmin: false'
+]) requireIncludes(adminOnboardRoute, term, 'Admin onboarding route');
+for (const forbidden of [
+  'req.body?.password',
+  'hashPerformerPassword(',
+  'termsAcceptedAt: new Date(',
+  'emailVerifiedAt: new Date('
+]) requireExcludes(adminOnboardRoute, forbidden, 'Admin onboarding route');
+
+const adminResetRoute = sliceBetween(
+  server,
+  "app.post('/api/admin/accounts/:userId/reset-password'",
+  "app.delete('/api/admin/accounts/:userId'",
+  'admin password reset route'
+);
+for (const term of [
+  'PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET',
+  'sendOwnerPasswordReset',
+  'passwordSetByAdmin: false'
+]) requireIncludes(adminResetRoute, term, 'Admin password reset route');
+for (const forbidden of ['req.body?.password', 'hashPerformerPassword(', '.update(users)']) {
+  requireExcludes(adminResetRoute, forbidden, 'Admin password reset route');
 }
+
+const partnerAcceptRoute = sliceBetween(
+  server,
+  "app.post('/api/talent/partner/terms/accept'",
+  "app.post('/api/talent/profile/public'",
+  'Brand Partner owner acceptance route'
+);
+for (const term of [
+  'requireTalentAccess(req)',
+  'req.body?.accepted !== true',
+  'loadOwnedPerformerByActorUserId(talentAccess.actor.actorId)',
+  'requestedTermsVersion !== partnerState.termsVersion',
+  'requestedTermsHash !== partnerState.termsHash',
+  '.insert(performerPartnerTermsAcceptances)',
+  'accountUserId: talentAccess.actor.actorId',
+  'termsVersion: partnerState.termsVersion',
+  'termsHash: partnerState.termsHash',
+  'termsText: partnerState.termsText',
+  'termsSnapshot: partnerState.termsSnapshot',
+  'acceptedAt',
+  'acceptedByAdmin: false'
+]) requireIncludes(partnerAcceptRoute, term, 'Brand Partner owner acceptance route');
+
+const acceptanceInsertCount = (server.match(/\.insert\(performerPartnerTermsAcceptances\)/g) || []).length;
+if (acceptanceInsertCount !== 1) {
+  failures.push(`Brand Partner acceptance must have exactly one owner-authenticated insert path; found ${acceptanceInsertCount}.`);
+}
+for (const forbidden of [
+  '.delete(performerPartnerEntitlements)',
+  '.update(performerPartnerEntitlements)',
+  '.delete(performerPartnerEntitlementStatusEvents)',
+  '.update(performerPartnerEntitlementStatusEvents)',
+  '.delete(performerPartnerTermsAcceptances)',
+  '.update(performerPartnerTermsAcceptances)'
+]) requireExcludes(server, forbidden, 'Product routes');
 
 for (const term of [
-  "app.get('/api/talent/profile/public'",
-  "app.post('/api/talent/profile/public'",
-  "app.get('/api/public/performer/:handle'",
-  'businessDb.transaction(async (tx)',
-  'await tx.delete(performerProfileLinks)',
-  'eq(performerProfileLinks.isActive, true)',
-  'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['suspended'])",
-  "eventType: 'performer_public_profile.update'",
-  "eventType: 'admin_account.partner_grant'",
-  'buildSwayPartnerTermsSnapshot()',
-  "partnerKind: 'brand'"
-]) {
-  if (!server.includes(term)) failures.push(`Profile server path missing term: ${term}`);
-}
+  "PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE = 'account_invite'",
+  "PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET = 'password_reset'",
+  'expectedChallengeType',
+  'isNull(performerLoginChallenges.consumedAt)',
+  'isNull(performerLoginChallenges.revokedAt)',
+  'RESERVED_PERFORMER_HANDLES.has(trimmed.toLowerCase())'
+]) requireIncludes(performerLogin, term, 'Performer login security');
 
-if (server.includes('delete(performerPartnerEntitlements)')) {
-  failures.push('Brand Partner grants must remain append-only from product routes.');
+for (const term of [
+  "fetch(isReset ? '/api/talent/password-reset/accept' : '/api/talent/invite/accept'",
+  'Choose your own password',
+  'This secure link can be used once.',
+  'administrators cannot choose your password',
+  'termsAccepted'
+]) requireIncludes(inviteCard, term, 'Owner invitation UI');
+for (const sourceTerm of [
+  [accessControl, "req.path === '/talent/invite'", 'Talent invite public shell entry'],
+  [appRoutes, "'/talent/invite'", 'Route spine'],
+  [talentApp, "pathname === '/talent/invite'", 'Talent shell invite route']
+]) requireIncludes(...sourceTerm);
+
+for (const term of [
+  'loadPartnerEntitlementStateForPerformer',
+  'eq(performerPartnerTermsAcceptances.accountUserId, grant.ownerUserId)',
+  "currentStatus !== 'active'",
+  'isEffective: isAccepted && !isSuspended',
+  'Math.min(proposedPlatformFeeCents, platformFeeCapCents)'
+]) requireIncludes(partnerStore, term, 'Partner entitlement resolver');
+
+const resolverCallCount = (paymentService.match(/resolveSwayPlatformFeePolicyForGig\(/g) || []).length;
+if (resolverCallCount !== 2) {
+  failures.push(`Payment service must resolve the fee policy for create and confirm paths; found ${resolverCallCount} calls.`);
 }
+for (const term of [
+  'platform_fee_policy_unavailable',
+  'platformFee: feePolicy.platformFeeCents',
+  'calculateSwayPaymentAmounts',
+  "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
+  "platformFeePayer === 'patron'",
+  'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
+  'applicationFeeAmountCents: feePolicy.platformFeeCents',
+  'sway_platform_fee_cents: String(feePolicy.platformFeeCents)',
+  'sway_platform_fee_payer: platformFeePayer',
+  'sway_platform_fee_charged_to_patron_cents: String(platformFeeChargedToPatronCents)',
+  'payment.platformFee === feePolicy.platformFeeCents'
+]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
+
+const requestCreateRoute = sliceBetween(
+  server,
+  'app.post("/api/request/create"',
+  'app.post("/api/request/boost"',
+  'Request and Tip payment route'
+);
+for (const term of [
+  "actionType: isStraightTip ? 'tip' : 'request'",
+  'platformFeeCents: proposedPlatformFeeCents',
+  'platformFeePayer,',
+  'newItem.platformFee = authorization.platformFeeCents / 100'
+]) requireIncludes(requestCreateRoute, term, 'Request and Tip payment route');
+
+const boostRoute = sliceBetween(
+  server,
+  'app.post("/api/request/boost"',
+  'app.post("/api/request/triage"',
+  'Boost payment route'
+);
+for (const term of [
+  "actionType: 'boost'",
+  'platformFeeCents: appliedBoostPlatformFeeCents',
+  'platformFeePayer: boostPlatformFeePayer',
+  'appliedBoostPlatformFeeCents = authorization.platformFeeCents',
+  'request.platformFee += appliedBoostPlatformFeeCents / 100'
+]) requireIncludes(boostRoute, term, 'Boost payment route');
+requireExcludes(boostRoute, 'request.platformFee += 1.0', 'Boost payment route');
+
+for (const [term, source, label] of [
+  ['publicProfileHostingFeeCents: 0', partnerTerms, 'Partner terms code'],
+  ['performerSubscriptionFeeCents: 0', partnerTerms, 'Partner terms code'],
+  ['paidInteractionPlatformFeeCents: 100', partnerTerms, 'Partner terms code'],
+  ["createHash('sha256')", partnerTerms, 'Partner terms code'],
+  ['Request, Tip, or Boost', partnerTerms, 'Partner terms code'],
+  ['payment processor fees', partnerTerms, 'Partner terms code'],
+  ['taxes', partnerTerms, 'Partner terms code'],
+  ['refunds', partnerTerms, 'Partner terms code'],
+  ['disputes', partnerTerms, 'Partner terms code'],
+  ['Only the Sway-controlled `platformFee` is capped.', termsDoc, 'Partner terms document']
+]) requireIncludes(source, term, label);
 
 for (const term of [
   'PUBLIC_PROFILE_MAX_LINKS = 12',
   "parsed.protocol !== 'https:' && parsed.protocol !== 'http:'",
   'parsed.username || parsed.password',
-  'normalizePublicProfileSpecialties'
-]) {
-  if (!normalizers.includes(term)) failures.push(`Profile normalizer missing safety term: ${term}`);
-}
+  'escapePublicProfileMetadataAttribute',
+  ".replace(/&/g, '&amp;')",
+  ".replace(/\"/g, '&quot;')",
+  ".replace(/</g, '&lt;')",
+  ".replace(/>/g, '&gt;')"
+]) requireIncludes(normalizers, term, 'Public profile normalizer');
+
+const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
+for (const term of [
+  'eq(performers.isActive, true)',
+  "notInArray(performers.onboardingStatus, ['suspended'])",
+  "inArray(activeRoomRegistry.registryStatus, ['active', 'ending'])",
+  'normalizePublicProfileUrl(room.avatarUrl)'
+]) requireIncludes(shareMetadataRoute, term, 'Share metadata resolver');
+
+const publicFeedRoute = sliceBetween(server, "app.get('/api/public/feed'", "app.get('/api/public/performer/:handle'", 'public feed route');
+for (const term of [
+  'eq(performers.isActive, true)',
+  "notInArray(performers.onboardingStatus, ['suspended'])",
+  '.filter((room) => detailsByGigId.has(room.gigId))',
+  'normalizePublicProfileUrl(detail.avatarUrl)'
+]) requireIncludes(publicFeedRoute, term, 'Public feed route');
+
+const publicPerformerRoute = sliceBetween(server, "app.get('/api/public/performer/:handle'", 'app.get("/api/lyrics"', 'public performer route');
+for (const term of [
+  'eq(performers.isActive, true)',
+  "notInArray(performers.onboardingStatus, ['suspended'])",
+  'normalizePublicProfileUrl(profile.avatarUrl)',
+  'normalizePublicProfileEmail(profile.bookingEmail)',
+  'normalizePublicProfilePhone(profile.bookingPhone)',
+  'partnerState?.isEffective'
+]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
+const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
+for (const forbidden of [
+  'performerId: profile.performerId',
+  'id: performerProfileLinks.id',
+  'grantedAt:',
+  'termsHash:',
+  'termsText:',
+  'statusReason:'
+]) requireExcludes(publicPayload, forbidden, 'Public performer payload');
 
 for (const term of [
   'PerformerPublicProfilePage',
@@ -96,65 +344,57 @@ for (const term of [
   'profile.links.map',
   'profile.booking.email',
   'Create your own free Sway page'
-]) {
-  if (!publicPage.includes(term)) failures.push(`Standalone public page missing term: ${term}`);
+]) requireIncludes(publicPage, term, 'Standalone public page');
+for (const forbidden of ['performerId', 'entitlementId', 'termsHash', 'grantedAt']) {
+  requireExcludes(publicPage, forbidden, 'Standalone public page');
 }
 
 for (const term of [
-  'PerformerPublicProfileEditor',
-  'A free website that works between events',
-  'A live room and payment setup are optional.',
-  'Media is optional.',
-  'min-h-12',
-  'moveLink',
-  'specialties'
-]) {
-  if (!editor.includes(term)) failures.push(`Profile editor missing term: ${term}`);
-}
+  'Review the exact Brand Partner terms',
+  'partner.termsText',
+  'partner.termsHash',
+  "fetch('/api/talent/partner/terms/accept'",
+  'accepted: true',
+  'Accept exact Brand Partner terms'
+]) requireIncludes(editor, term, 'Authenticated profile editor');
+
+for (const term of [
+  'one-time invitation to the owner',
+  'administrators never receive or set either one',
+  'append-only grandfather grant',
+  'Pending owner',
+  'Operationally suspend partner benefits without deleting history',
+  'Administrators never see or choose the replacement password.'
+]) requireIncludes(admin, term, 'Admin account controls');
 
 for (const term of [
   'return <PerformerPublicProfilePage performerHandle={route.performerHandle} />',
   "if (route.name === 'performer') return;",
   'PatronNoSessionRecovery'
-]) {
-  if (!patronApp.includes(term)) failures.push(`Patron route separation missing term: ${term}`);
-}
-
-if (patronApp.includes('performerHandle={route.name')) {
-  failures.push('Standalone performer pages must not be rendered inside no-session scan/login recovery.');
-}
-
-if (!sharedShell.includes('if (!statePath || isDemoModeEnabled()) return;')) {
-  failures.push('A standalone profile route must not leave the live-room polling interval running without a state path.');
-}
+]) requireIncludes(patronApp, term, 'Patron route separation');
+requireExcludes(patronApp, 'performerHandle={route.name', 'Patron route separation');
+requireIncludes(sharedShell, 'if (!statePath || isDemoModeEnabled()) return;', 'Standalone profile polling guard');
 
 for (const term of [
-  'Grant Sway Brand Partner status',
-  'append-only grandfather grant',
-  'disabled={Boolean(account.partnerTermsVersion)}',
-  'partnerNote'
-]) {
-  if (!admin.includes(term)) failures.push(`Admin Brand Partner control missing term: ${term}`);
-}
+  "SWAY_DISPOSABLE_MIGRATION_PROOF === '1'",
+  "['127.0.0.1', 'localhost']",
+  "'0015_performer_music_source_connections.sql'",
+  "applyMigrationFile(client, '0016_performer_link_profiles.sql')",
+  'assert.deepEqual(afterMigration.rows, beforeMigration.rows',
+  'Existing room must remain discoverable as active.',
+  'An administrator must not accept terms on behalf of a performer.',
+  'Accepted active Brand Partner fee must cap at $1.',
+  'Entitlement grants must be immutable.',
+  'New handles must reject reserved names case-insensitively.'
+]) requireIncludes(migrationProof, term, 'Disposable migration proof');
 
-for (const [term, source, label] of [
-  ['publicProfileHostingFeeCents: 0', partnerTerms, 'partner terms code'],
-  ['performerSubscriptionFeeCents: 0', partnerTerms, 'partner terms code'],
-  ['paidInteractionPlatformFeeCents: 100', partnerTerms, 'partner terms code'],
-  ['Future billing or subscription code must read the entitlement', termsDoc, 'partner terms document'],
-  ['does not bypass identity verification, KYC, payout eligibility', termsDoc, 'partner terms document']
-]) {
-  if (!source.includes(term)) failures.push(`${label} missing term: ${term}`);
-}
+requireIncludes(packageJson, 'node scripts/sway-performer-link-profile.contract.test.mjs', 'package.json contract gate');
+requireIncludes(packageJson, 'node scripts/sway-performer-link-profile-migration.integration.test.mjs', 'package.json migration proof command');
 
 for (const source of [publicPage, editor]) {
-  for (const forbidden of ['Stripe', 'payoutsEnabled', 'chargesEnabled']) {
-    if (source.includes(forbidden)) failures.push(`Free profile surface must not depend on ${forbidden}.`);
+  for (const forbidden of ['payoutsEnabled', 'chargesEnabled']) {
+    requireExcludes(source, forbidden, 'Free performer profile surface');
   }
-}
-
-if (!packageJson.includes('node scripts/sway-performer-link-profile.contract.test.mjs')) {
-  failures.push('package.json must register the performer link profile contract in test:contracts.');
 }
 
 if (!failures.length) {
@@ -162,7 +402,9 @@ if (!failures.length) {
     cwd: root,
     encoding: 'utf8'
   });
-  if (behavior.status !== 0) failures.push(`Performer profile behavior test failed:\n${behavior.stdout || ''}${behavior.stderr || ''}`);
+  if (behavior.status !== 0) {
+    failures.push(`Performer profile behavior test failed:\n${behavior.stdout || ''}${behavior.stderr || ''}`);
+  }
 }
 
 if (failures.length) {

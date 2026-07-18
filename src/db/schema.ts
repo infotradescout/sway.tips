@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -129,6 +130,7 @@ export const performers = pgTable('performers', {
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
   handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
+  handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 
@@ -168,10 +170,13 @@ export const performerProfileLinks = pgTable('performer_profile_links', {
 }));
 
 export const performerPartnerEntitlements = pgTable('performer_partner_entitlements', {
-  performerId: uuid('performer_id').primaryKey().references(() => performers.id, { onDelete: 'cascade' }),
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
   grantedByUserId: uuid('granted_by_user_id').notNull().references(() => users.id),
   partnerKind: text('partner_kind').notNull().default('brand'),
   termsVersion: text('terms_version').notNull(),
+  termsHash: text('terms_hash').notNull(),
+  termsText: text('terms_text').notNull(),
   termsSnapshot: jsonb('terms_snapshot').$type<{
     guarantee: string;
     publicProfileHostingFeeCents: number;
@@ -182,7 +187,47 @@ export const performerPartnerEntitlements = pgTable('performer_partner_entitleme
   note: text('note'),
   grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
+  performerKindIdx: uniqueIndex('performer_partner_entitlements_performer_kind_idx').on(table.performerId, table.partnerKind),
   termsVersionIdx: index('performer_partner_entitlements_terms_version_idx').on(table.termsVersion)
+}));
+
+export const performerPartnerEntitlementStatusEvents = pgTable('performer_partner_entitlement_status_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  entitlementId: uuid('entitlement_id').notNull().references(() => performerPartnerEntitlements.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  status: text('status').notNull(),
+  reason: text('reason'),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  entitlementCreatedIdx: index('performer_partner_entitlement_status_events_entitlement_created_idx').on(table.entitlementId, table.createdAt),
+  performerCreatedIdx: index('performer_partner_entitlement_status_events_performer_created_idx').on(table.performerId, table.createdAt),
+  statusAllowed: check('performer_partner_entitlement_status_events_status_allowed', sql`${table.status} in ('active', 'suspended')`)
+}));
+
+export const performerPartnerTermsAcceptances = pgTable('performer_partner_terms_acceptances', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  entitlementId: uuid('entitlement_id').notNull().references(() => performerPartnerEntitlements.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  accountUserId: uuid('account_user_id').notNull().references(() => users.id),
+  termsVersion: text('terms_version').notNull(),
+  termsHash: text('terms_hash').notNull(),
+  termsText: text('terms_text').notNull(),
+  termsSnapshot: jsonb('terms_snapshot').$type<{
+    guarantee: string;
+    publicProfileHostingFeeCents: number;
+    performerSubscriptionFeeCents: number;
+    paidInteractionPlatformFeeCents: number;
+    externalChargesExcluded: string[];
+  }>().notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  immutableReceiptIdx: uniqueIndex('performer_partner_terms_acceptances_receipt_idx').on(
+    table.entitlementId,
+    table.accountUserId,
+    table.termsHash
+  ),
+  performerAcceptedIdx: index('performer_partner_terms_acceptances_performer_accepted_idx').on(table.performerId, table.acceptedAt)
 }));
 
 export const performerMemberships = pgTable('performer_memberships', {

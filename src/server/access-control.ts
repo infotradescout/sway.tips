@@ -49,7 +49,11 @@ function isBrowserHtmlRequest(req: Request) {
 }
 
 function isPublicTalentLoginEntryRoute(req: Request) {
-  return req.method === 'GET' && (req.path === '/talent/login' || req.path === '/talent/signup');
+  return req.method === 'GET' && (
+    req.path === '/talent/login'
+    || req.path === '/talent/signup'
+    || req.path === '/talent/invite'
+  );
 }
 
 function isPublicAdminLoginEntryRoute(req: Request) {

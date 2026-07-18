@@ -28,6 +28,14 @@ export type NormalizedPublicProfileLinksResult = {
   error: string | null;
 };
 
+export function escapePublicProfileMetadataAttribute(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export function normalizePublicProfileSpecialties(value: unknown) {
   if (value === undefined) return null;
   if (!Array.isArray(value)) return null;

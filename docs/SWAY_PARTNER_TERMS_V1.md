@@ -18,4 +18,10 @@ Pass-through payment processor fees, taxes, refunds, disputes, and chargebacks a
 
 ## Persistence rule
 
-Brand Partner status is granted by an administrator and stored in `performer_partner_entitlements` with `partner_kind = 'brand'`, this version, and a JSON snapshot. The grant is append-only from the product UI: routine account editing cannot remove it. Future billing or subscription code must read the entitlement before applying a new or increased Sway-controlled fee.
+An administrator may create the Brand Partner grant, but cannot accept it for the performer. The authenticated performer owner must review the exact text, version, and SHA-256 hash and accept them from the performer surface.
+
+The immutable receipt in `performer_partner_terms_acceptances` records the entitlement, performer account ID, terms version, terms hash, exact text and snapshot, and acceptance timestamp. Database triggers reject updates and deletes to grants, status events, and acceptance receipts.
+
+Operational suspension or restoration appends a row to `performer_partner_entitlement_status_events`; it never deletes or rewrites the underlying grant or receipt. Public badges and fee-cap effectiveness require an owner acceptance receipt and a latest operational status of `active`.
+
+`src/server/payment-service.ts` resolves the effective entitlement before it creates or confirms any Request, Tip, or Boost payment. Only the Sway-controlled `platformFee` is capped. That fee is always recorded for a paid interaction; the room setting controls whether it is added to the patron total or absorbed from performer proceeds. Payment processor fees, taxes, refunds, disputes, and chargebacks remain separate from that field and from the cap.

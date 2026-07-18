@@ -6,6 +6,7 @@ import TalentDashboard from '../components/TalentDashboard';
 import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
+import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -17,6 +18,10 @@ function isTalentLogin(pathname: string) {
 
 function isTalentSignup(pathname: string) {
   return pathname === '/talent/signup';
+}
+
+function isTalentInvite(pathname: string) {
+  return pathname === '/talent/invite';
 }
 
 type TalentPerformerProfile = {
@@ -32,7 +37,7 @@ type TalentPerformerProfile = {
 
 export default function TalentApp() {
   const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
-  const isAuthEntryRoute = isTalentLogin(pathname) || isTalentSignup(pathname);
+  const isAuthEntryRoute = isTalentLogin(pathname) || isTalentSignup(pathname) || isTalentInvite(pathname);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
@@ -235,6 +240,10 @@ export default function TalentApp() {
 
   if (isTalentSignup(pathname)) {
     return <TalentSignupCard />;
+  }
+
+  if (isTalentInvite(pathname)) {
+    return <TalentInviteAcceptCard />;
   }
 
   if (isLoading) return <LoadingState />;

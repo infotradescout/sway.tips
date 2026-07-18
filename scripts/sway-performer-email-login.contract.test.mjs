@@ -118,8 +118,10 @@ async function main() {
     'TalentApp must not present bootstrap session links as the primary performer login UX.'
   );
   assert.ok(
-    accessControlSource.includes("/talent/login' || req.path === '/talent/signup'"),
-    'Public talent auth entry-route guard must allow GET /talent/login and GET /talent/signup only.'
+    accessControlSource.includes("req.path === '/talent/login'")
+      && accessControlSource.includes("req.path === '/talent/signup'")
+      && accessControlSource.includes("req.path === '/talent/invite'"),
+    'Public talent auth entry-route guard must allow login, signup, and one-time owner invitation pages.'
   );
 
   for (const term of [
