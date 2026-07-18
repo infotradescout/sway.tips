@@ -397,7 +397,7 @@ function escapeShareCardText(value: string) {
     .replace(/'/g, '&apos;');
 }
 
-function wrapShareCardText(value: string, maxCharacters = 48) {
+function wrapShareCardText(value: string, maxCharacters = 34) {
   const words = value.trim().split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   for (const word of words) {
@@ -449,6 +449,7 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
 
   const headline = profile.headline || profile.bio || `Discover @${profile.handle} on Sway.`;
   const headlineLines = wrapShareCardText(headline);
+  const nameFontSize = profile.displayName.length > 25 ? 60 : profile.displayName.length > 18 ? 74 : 92;
   const overlay = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
@@ -463,7 +464,7 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
     <rect width="${width}" height="${height}" fill="url(#shade)"/>
     <rect x="92" y="105" width="104" height="7" rx="3.5" fill="url(#accent)"/>
     <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PERFORMER PROFILE</text>
-    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800">${escapeShareCardText(profile.displayName)}</text>
+    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="${nameFontSize}" font-weight="800">${escapeShareCardText(profile.displayName)}</text>
     <text x="96" y="402" fill="#55d9ff" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700">@${escapeShareCardText(profile.handle)}</text>
     ${headlineLines.map((line, index) => `<text x="96" y="${510 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
     <text x="96" y="800" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">sway to play</text>
