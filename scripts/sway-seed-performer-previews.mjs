@@ -11,13 +11,28 @@ const previews = [
   {
     handle: 'dj3x',
     displayName: 'Broughton Frank',
-    headline: 'DJ3X · DJ · Live events · Entertainment',
-    bio: 'All things entertainment. DJ3X brings live music, event energy, hosts, and the people behind the moment into one place.',
-    specialties: ['DJ', 'Live events', 'Event host', 'Entertainment', 'Brand partnerships'],
+    headline: 'DJ Three X · Crowd-first DJ · Sound design · Event energy',
+    bio: 'Frank Broughton, known as DJ Three X, is a Pensacola DJ and sound designer whose crowd-first sets blend throwbacks, R&B, hip-hop, and whatever the room is ready for. Performing since 1992, he also brings live-event and media-production experience through Vybe Café.',
+    specialties: ['DJ', 'Sound design', 'Event consulting', 'Event host', 'Live events', 'R&B + hip-hop', 'Brand partnerships'],
     city: 'Pensacola, FL',
-    avatarUrl: null,
+    avatarUrl: 'https://images.squarespace-cdn.com/content/v1/5cf285bbb53c220001bebf7d/1622122633773-7NUVXLO3VXOEC2LIFYQH/0A0A0388.jpg',
     facebookUrl: 'https://www.facebook.com/frank.broughton.507',
+    websiteUrl: 'https://djthreeex.com',
     links: [
+      {
+        label: 'DJ Three X website',
+        description: 'DJ services, sound design, and consulting.',
+        url: 'https://djthreeex.com',
+        kind: 'booking',
+        isActive: true
+      },
+      {
+        label: 'Profile interview: Taking A Spin With DJ Three X',
+        description: 'A published conversation about his craft, roots, and crowd-first approach.',
+        url: 'https://www.kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
+        kind: 'press',
+        isActive: true
+      },
       {
         label: 'Follow Broughton Frank',
         description: 'Entertainment, events, and live moments.',

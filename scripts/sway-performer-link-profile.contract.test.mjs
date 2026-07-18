@@ -100,6 +100,10 @@ for (const term of [
   "handle: 'dj3x'",
   "handle: 'coreymack'",
   "displayName: 'Broughton Frank'",
+  "DJ Three X · Crowd-first DJ · Sound design · Event energy",
+  'Performing since 1992',
+  'djthreeex.com',
+  'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
   "title: 'Kita P x Corey Mack in New Orleans'",
   'www.youtube.com/watch?v=--7MMybc6Vw',
@@ -398,6 +402,9 @@ for (const term of [
   'Featured performance',
   'media.embedUrl',
   'allowFullScreen',
+  'Tip {profile.displayName}',
+  'Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.',
+  'Tips open when this performer is live in a Sway room.',
   'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');

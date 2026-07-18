@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   BadgeCheck,
+  Coins,
   Globe2,
   LockKeyhole,
   Mail,
@@ -99,6 +100,23 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [tipMessage, setTipMessage] = useState<string | null>(null);
+
+  const handleTipClick = () => {
+    if (!profile) return;
+
+    if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
+      return;
+    }
+
+    if (activeRoom) {
+      window.location.assign(activeRoom.routePath);
+      return;
+    }
+
+    setTipMessage('Tips open when this performer is live in a Sway room. Check back during a live session.');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -306,6 +324,22 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               </p>
             </div>
           ) : null}
+
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={handleTipClick}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.08] px-4 py-3 text-sm font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
+            >
+              <Coins className="h-4 w-4" />
+              Tip {profile.displayName}
+            </button>
+            {tipMessage ? (
+              <p id="public-profile-tip-message" role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-amber-100/90">
+                {tipMessage}
+              </p>
+            ) : null}
+          </div>
 
           {activeRoom ? (
             <a
