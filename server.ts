@@ -6442,9 +6442,13 @@ app.post("/api/request/create", async (req, res) => {
     payment_method,
     payment_intent_id
   } = req.body;
+  const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return res.status(422).json({ error: "Sway Request and Tip payments currently support USD only." });
   }
 
   const durableGigId = parseDurableGigId(gig_id);
@@ -6479,7 +6483,7 @@ app.post("/api/request/create", async (req, res) => {
     action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     target_entity_id: title || 'request',
     amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     payload_hash
   });
 
@@ -6490,7 +6494,7 @@ app.post("/api/request/create", async (req, res) => {
     gigId: durableGigId,
     actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     targetEntityType: targetType || 'music',
     targetEntityId: title || 'request',
     payloadHash: payload_hash,
@@ -6610,7 +6614,7 @@ app.post("/api/request/create", async (req, res) => {
     gigId: durableGigId,
     payloadHash: payload_hash,
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     boosts: []
   };
 
@@ -6628,7 +6632,7 @@ app.post("/api/request/create", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: proposedPlatformFeeCents,
           platformFeePayer,
-          currency: String(currency).toUpperCase(),
+          currency: normalizedCurrency,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
           processorPaymentIntentId: confirmedPaymentIntentId
@@ -6639,7 +6643,7 @@ app.post("/api/request/create", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: proposedPlatformFeeCents,
           platformFeePayer,
-          currency: String(currency).toUpperCase(),
+          currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
@@ -6732,8 +6736,12 @@ app.post("/api/request/boost", async (req, res) => {
     payment_method,
     payment_intent_id
   } = req.body;
+  const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return res.status(422).json({ error: "Sway Boost payments currently support USD only." });
   }
 
   const durableGigId = parseDurableGigId(gig_id);
@@ -6800,7 +6808,7 @@ app.post("/api/request/boost", async (req, res) => {
     action_type: 'boost',
     target_entity_id: requestId,
     amount_cents,
-    currency,
+    currency: normalizedCurrency,
     payload_hash
   });
 
@@ -6811,7 +6819,7 @@ app.post("/api/request/boost", async (req, res) => {
     gigId: durableGigId,
     actionType: 'boost',
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     targetEntityType: 'request',
     targetEntityId: requestId,
     payloadHash: payload_hash,
@@ -6895,7 +6903,7 @@ app.post("/api/request/boost", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: appliedBoostPlatformFeeCents,
           platformFeePayer: boostPlatformFeePayer,
-          currency: String(currency).toUpperCase(),
+          currency: normalizedCurrency,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,
           processorPaymentIntentId: confirmedPaymentIntentId
@@ -6906,7 +6914,7 @@ app.post("/api/request/boost", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: appliedBoostPlatformFeeCents,
           platformFeePayer: boostPlatformFeePayer,
-          currency: String(currency).toUpperCase(),
+          currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,

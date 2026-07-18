@@ -259,6 +259,9 @@ const requestCreateRoute = sliceBetween(
 );
 for (const term of [
   "actionType: isStraightTip ? 'tip' : 'request'",
+  "normalizedCurrency !== 'USD'",
+  'Sway Request and Tip payments currently support USD only.',
+  'currency: normalizedCurrency',
   'platformFeeCents: proposedPlatformFeeCents',
   'platformFeePayer,',
   'newItem.platformFee = authorization.platformFeeCents / 100'
@@ -272,6 +275,9 @@ const boostRoute = sliceBetween(
 );
 for (const term of [
   "actionType: 'boost'",
+  "normalizedCurrency !== 'USD'",
+  'Sway Boost payments currently support USD only.',
+  'currency: normalizedCurrency',
   'platformFeeCents: appliedBoostPlatformFeeCents',
   'platformFeePayer: boostPlatformFeePayer',
   'appliedBoostPlatformFeeCents = authorization.platformFeeCents',
