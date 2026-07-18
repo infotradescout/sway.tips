@@ -16,7 +16,9 @@ const previews = [
     bio: 'Frank Broughton, known as DJ Three X, is a Pensacola DJ and sound designer whose crowd-first sets blend throwbacks, R&B, hip-hop, and whatever the room is ready for. Performing since 1992, he also brings live-event and media-production experience through Vybe Café.',
     specialties: ['DJ', 'Sound design', 'Event consulting', 'Event host', 'Live events', 'R&B + hip-hop', 'Brand partnerships'],
     city: 'Pensacola, FL',
-    avatarUrl: 'https://images.squarespace-cdn.com/content/v1/5cf285bbb53c220001bebf7d/1622122633773-7NUVXLO3VXOEC2LIFYQH/0A0A0388.jpg',
+    // Supplied from Frank's public Facebook profile image; stored locally so
+    // the public page does not depend on a third-party hotlink.
+    avatarUrl: '/assets/frank-broughton-avatar.png',
     facebookUrl: 'https://www.facebook.com/frank.broughton.507',
     websiteUrl: 'https://djthreeex.com',
     links: [

@@ -100,6 +100,7 @@ for (const term of [
   "handle: 'dj3x'",
   "handle: 'coreymack'",
   "displayName: 'Broughton Frank'",
+  "avatarUrl: '/assets/frank-broughton-avatar.png'",
   "DJ Three X · Crowd-first DJ · Sound design · Event energy",
   'Performing since 1992',
   'djthreeex.com',
@@ -110,6 +111,9 @@ for (const term of [
   'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');
+if (!existsSync(join(root, 'public/assets/frank-broughton-avatar.png'))) {
+  failures.push('Frank curated avatar asset is missing.');
+}
 for (const forbidden of ['owner_user_id', 'password_hash', 'invitation_token', 'terms_hash']) {
   requireExcludes(previewSeed, forbidden, 'Curated preview seed');
 }

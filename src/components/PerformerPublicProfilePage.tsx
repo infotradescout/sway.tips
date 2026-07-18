@@ -85,7 +85,7 @@ const SOCIAL_LABELS: Record<string, string> = {
 // visual fallback while an already-claimed partner row is being hydrated from
 // that curated record; owners can replace it from the authenticated editor.
 const CURATED_PUBLIC_AVATAR_FALLBACKS: Record<string, string> = {
-  dj3x: 'https://images.squarespace-cdn.com/content/v1/5cf285bbb53c220001bebf7d/1622122633773-7NUVXLO3VXOEC2LIFYQH/0A0A0388.jpg',
+  dj3x: '/assets/frank-broughton-avatar.png',
   coreymack: 'https://img1.wsimg.com/isteam/ip/507cdd9e-ba65-48f1-ac5c-290e6c33023b/72E6855B-ABEB-492D-8EA4-0DAB48CAA65E.jpeg'
 };
 
