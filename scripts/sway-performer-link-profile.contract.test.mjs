@@ -103,7 +103,6 @@ for (const term of [
   "avatarUrl: '/assets/frank-broughton-avatar.png'",
   "DJ Three X · Crowd-first DJ · Sound design · Event energy",
   'Performing since 1992',
-  'djthreeex.com',
   'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
   "title: 'Kita P x Corey Mack in New Orleans'",
@@ -111,6 +110,7 @@ for (const term of [
   'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');
+requireExcludes(previewSeed, 'djthreeex.com', 'Curated preview seed');
 if (!existsSync(join(root, 'public/assets/frank-broughton-avatar.png'))) {
   failures.push('Frank curated avatar asset is missing.');
 }
