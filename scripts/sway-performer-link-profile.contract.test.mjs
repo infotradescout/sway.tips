@@ -98,6 +98,7 @@ for (const term of [
   'BEFORE UPDATE OR DELETE ON "performer_partner_entitlement_status_events"',
   'BEFORE UPDATE OR DELETE ON "performer_partner_terms_acceptances"'
 ]) requireIncludes(migration, term, 'Profile migration');
+requireExcludes(migration, ') NOT VALID;', 'Profile migration reserved-handle constraint');
 
 const inviteAcceptRoute = sliceBetween(
   server,
@@ -387,6 +388,11 @@ for (const term of [
   'Entitlement grants must be immutable.',
   'New handles must reject reserved names case-insensitively.'
 ]) requireIncludes(migrationProof, term, 'Disposable migration proof');
+requireIncludes(
+  migrationProof,
+  'Reserved-handle protection must validate all existing performer rows during 0016.',
+  'Disposable migration proof'
+);
 
 requireIncludes(packageJson, 'node scripts/sway-performer-link-profile.contract.test.mjs', 'package.json contract gate');
 requireIncludes(packageJson, 'node scripts/sway-performer-link-profile-migration.integration.test.mjs', 'package.json migration proof command');

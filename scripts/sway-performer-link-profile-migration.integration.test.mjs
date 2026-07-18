@@ -234,6 +234,18 @@ async function main() {
       ['booking_email', 'booking_phone', 'facebook_url', 'specialties']
     );
 
+    const reservedHandleConstraint = await client.query(
+      `SELECT convalidated
+       FROM pg_constraint
+       WHERE conname = 'performers_handle_not_reserved'`
+    );
+    assert.equal(reservedHandleConstraint.rowCount, 1);
+    assert.equal(
+      reservedHandleConstraint.rows[0].convalidated,
+      true,
+      'Reserved-handle protection must validate all existing performer rows during 0016.'
+    );
+
     const activeRoomBehavior = await client.query(
       `SELECT r.gig_id, r.route_path, r.registry_status, r.talent_name, g.status, g.runtime_session_state
        FROM active_room_registry r
@@ -410,7 +422,8 @@ async function main() {
       },
       handleProtection: {
         caseInsensitiveUnique: true,
-        reservedCaseInsensitive: true
+        reservedCaseInsensitive: true,
+        reservedConstraintValidatedForExistingRows: true
       }
     }, null, 2));
   } finally {

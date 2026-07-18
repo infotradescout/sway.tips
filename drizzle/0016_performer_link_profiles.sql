@@ -12,7 +12,7 @@ ALTER TABLE "performers"
       'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway',
       'talent', 'terms', 'www'
     )
-  ) NOT VALID;
+  );
 
 CREATE TABLE IF NOT EXISTS "performer_partner_entitlements" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
