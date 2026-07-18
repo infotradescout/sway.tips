@@ -402,12 +402,16 @@ function wrapShareCardText(value: string, maxCharacters = 34) {
   const lines: string[] = [];
   for (const word of words) {
     const current = lines[lines.length - 1] || '';
-    if (!current || `${current} ${word}`.length > maxCharacters) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (!current || candidate.length <= maxCharacters) {
+      if (!current) lines.push(word);
+      else lines[lines.length - 1] = candidate;
+    } else if (lines.length < 2) {
       lines.push(word);
     } else {
-      lines[lines.length - 1] = `${current} ${word}`;
+      lines[lines.length - 1] = `${current.replace(/[.\u2026]+$/, '')}…`;
+      break;
     }
-    if (lines.length === 2 && words.indexOf(word) < words.length - 1) break;
   }
   return lines.slice(0, 2);
 }
