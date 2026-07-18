@@ -39,6 +39,7 @@ import PerformerRoomControls from './PerformerRoomControls';
 import PerformerAudienceScreen from './PerformerAudienceScreen';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
+import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -738,19 +739,6 @@ export default function TalentDashboard({
     syncKey: string;
     syncEndpointPath: string;
   } | null>(null);
-  const [publicProfileForm, setPublicProfileForm] = useState({
-    headline: '',
-    city: '',
-    avatarUrl: '',
-    instagram: '',
-    tiktok: '',
-    youtube: '',
-    soundcloud: '',
-    website: ''
-  });
-  const [publicProfileStatus, setPublicProfileStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [publicProfileMessage, setPublicProfileMessage] = useState<string | null>(null);
-
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [queueActionPendingKey, setQueueActionPendingKey] = useState<string | null>(null);
@@ -976,67 +964,6 @@ export default function TalentDashboard({
       console.warn('Spotify playlist import failed:', error);
       setSpotifyImportStatus('error');
       setSpotifyImportMessage(error instanceof Error ? error.message : 'Spotify playlist import failed.');
-    }
-  };
-
-  const refreshPublicProfile = async () => {
-    if (previewMode) return;
-    try {
-      const response = await fetch('/api/talent/profile/public');
-      if (!response.ok) return;
-      const data = await response.json().catch(() => null);
-      const profile = data?.profile;
-      if (!profile) return;
-      setPublicProfileForm({
-        headline: typeof profile.headline === 'string' ? profile.headline : '',
-        city: typeof profile.city === 'string' ? profile.city : '',
-        avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : '',
-        instagram: typeof profile.socialLinks?.instagram === 'string' ? profile.socialLinks.instagram : '',
-        tiktok: typeof profile.socialLinks?.tiktok === 'string' ? profile.socialLinks.tiktok : '',
-        youtube: typeof profile.socialLinks?.youtube === 'string' ? profile.socialLinks.youtube : '',
-        soundcloud: typeof profile.socialLinks?.soundcloud === 'string' ? profile.socialLinks.soundcloud : '',
-        website: typeof profile.socialLinks?.website === 'string' ? profile.socialLinks.website : ''
-      });
-    } catch (error) {
-      console.warn('Unable to load performer public profile:', error);
-    }
-  };
-
-  useEffect(() => {
-    void refreshPublicProfile();
-  }, [previewMode]);
-
-  const handleSavePublicProfile = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (previewMode || publicProfileStatus === 'saving') return;
-    setPublicProfileStatus('saving');
-    setPublicProfileMessage(null);
-    try {
-      const response = await fetch('/api/talent/profile/public', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          headline: publicProfileForm.headline,
-          city: publicProfileForm.city,
-          avatarUrl: publicProfileForm.avatarUrl,
-          socialLinks: {
-            instagram: publicProfileForm.instagram,
-            tiktok: publicProfileForm.tiktok,
-            youtube: publicProfileForm.youtube,
-            soundcloud: publicProfileForm.soundcloud,
-            website: publicProfileForm.website
-          }
-        })
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save public profile.');
-      }
-      setPublicProfileStatus('success');
-      setPublicProfileMessage('Public profile and social links saved.');
-    } catch (error) {
-      setPublicProfileStatus('error');
-      setPublicProfileMessage(error instanceof Error ? error.message : 'Unable to save public profile.');
     }
   };
 
@@ -1795,8 +1722,12 @@ export default function TalentDashboard({
         </div>
       </div>
 
+      <div className={`${session.status === 'inactive' ? 'order-2' : 'order-5 hidden xl:block'}`}>
+        <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
+      </div>
+
       {/* Account and music tools stay separate from the one-decision room start. */}
-      <div className={`${session.status === 'inactive' ? 'order-3' : 'order-5 hidden lg:block'}`}>
+      <div className={`${session.status === 'inactive' ? 'order-4' : 'order-6 hidden lg:block'}`}>
       <details
         data-sway-account-integrations="true"
         className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
@@ -1804,7 +1735,7 @@ export default function TalentDashboard({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
-            <p className="mt-1 text-xs text-slate-500">Music sources, payouts, and your public performer profile.</p>
+            <p className="mt-1 text-xs text-slate-500">Music sources, hardware bridges, and payouts.</p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
             Manage
@@ -1967,129 +1898,12 @@ export default function TalentDashboard({
         )}
       </div>
 
-      <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
-        <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
-          <div>
-            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-cyan-300">Public profile, socials, and feed card</h4>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-              This controls what patrons see on your public performer card and live feed listing.
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
-            <span className="group-open:hidden">Expand</span>
-            <span className="hidden group-open:inline">Collapse</span>
-          </span>
-        </summary>
-
-        <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={handleSavePublicProfile}>
-          <label className="space-y-1.5 sm:col-span-2">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Headline</span>
-            <input
-              type="text"
-              value={publicProfileForm.headline}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, headline: event.target.value }))}
-              placeholder="Open format DJ and crowd-hype specialist"
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">City</span>
-            <input
-              type="text"
-              value={publicProfileForm.city}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, city: event.target.value }))}
-              placeholder="Austin, TX"
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Avatar URL</span>
-            <input
-              type="url"
-              value={publicProfileForm.avatarUrl}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, avatarUrl: event.target.value }))}
-              placeholder="https://..."
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Instagram</span>
-            <input
-              type="url"
-              value={publicProfileForm.instagram}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, instagram: event.target.value }))}
-              placeholder="https://instagram.com/..."
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">TikTok</span>
-            <input
-              type="url"
-              value={publicProfileForm.tiktok}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, tiktok: event.target.value }))}
-              placeholder="https://tiktok.com/@..."
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">YouTube</span>
-            <input
-              type="url"
-              value={publicProfileForm.youtube}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, youtube: event.target.value }))}
-              placeholder="https://youtube.com/..."
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">SoundCloud</span>
-            <input
-              type="url"
-              value={publicProfileForm.soundcloud}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, soundcloud: event.target.value }))}
-              placeholder="https://soundcloud.com/..."
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-          <label className="space-y-1.5 sm:col-span-2">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Website</span>
-            <input
-              type="url"
-              value={publicProfileForm.website}
-              onChange={(event) => setPublicProfileForm((current) => ({ ...current, website: event.target.value }))}
-              placeholder="https://yourdomain.com"
-              className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-500"
-            />
-          </label>
-
-          {publicProfileMessage ? (
-            <div
-              className={`sm:col-span-2 rounded-xl px-3 py-3 text-xs ${
-                publicProfileStatus === 'success'
-                  ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
-                  : 'border border-rose-500/20 bg-rose-500/10 text-rose-100'
-              }`}
-            >
-              {publicProfileMessage}
-            </div>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={previewMode || publicProfileStatus === 'saving'}
-            className="sm:col-span-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-3 text-xs font-bold text-slate-950 transition-all hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {publicProfileStatus === 'saving' ? 'Saving profile...' : 'Save public profile'}
-          </button>
-        </form>
-      </details>
         </div>
       </details>
       </div>
 
       {session.status === 'inactive' ? (
-        <div className="order-2">
+        <div className="order-3">
           <PerformerRoomSetup
             defaultPerformerName={welcomePerformerName}
             performerHandle={performerProfile?.handle}

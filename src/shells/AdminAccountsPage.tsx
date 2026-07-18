@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Lock, Plus, RefreshCw, Search, ShieldAlert, X } from 'lucide-react';
+import { BadgeCheck, Lock, Plus, RefreshCw, Search, ShieldAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { StatusBanner } from '../components/TalentAuthStatus';
 
@@ -14,6 +14,7 @@ type AdminAccount = {
   email: string | null;
   displayName: string | null;
   role: AdminAccountRole;
+  passwordSetupRequired: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;
   performerId: string | null;
@@ -25,6 +26,14 @@ type AdminAccount = {
   payoutsEnabled: boolean | null;
   chargesEnabled: boolean | null;
   payoutHoldReason: string | null;
+  partnerKind: string | null;
+  partnerEntitlementId: string | null;
+  partnerTermsVersion: string | null;
+  partnerTermsHash: string | null;
+  partnerGrantedAt: string | null;
+  partnerAcceptedAt: string | null;
+  partnerStatus: string | null;
+  partnerStatusReason: string | null;
 };
 
 const ONBOARDING_STATUSES = [
@@ -57,9 +66,9 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
   const [email, setEmail] = useState('');
   const [handle, setHandle] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [isPartner, setIsPartner] = useState(false);
+  const [partnerNote, setPartnerNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +82,7 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
       const response = await fetch('/api/admin/accounts/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, handle, displayName, password, confirmPassword, isActive })
+        body: JSON.stringify({ email, handle, displayName, isActive, isPartner, partnerNote })
       });
       const data = await parseJsonResponse(response);
       if (!response.ok) {
@@ -113,15 +122,26 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
         </div>
         <div className="flex items-end gap-2 pb-2">
           <input id="create-active" type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="h-4 w-4" />
-          <label htmlFor="create-active" className="text-sm text-slate-300">Activate immediately</label>
+          <label htmlFor="create-active" className="text-sm text-slate-300">Activate after owner setup</label>
         </div>
-        <div className="space-y-1">
-          <label className={labelClass()}>Temporary password</label>
-          <input type="text" className={inputClass()} value={password} onChange={(event) => setPassword(event.target.value)} required />
+        <div className="sm:col-span-2 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4 text-xs leading-5 text-cyan-100/80">
+          Sway sends a one-time invitation to the owner. The owner chooses the password and accepts account terms; administrators never receive or set either one.
         </div>
-        <div className="space-y-1">
-          <label className={labelClass()}>Confirm password</label>
-          <input type="text" className={inputClass()} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
+
+        <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-amber-100">
+            <input type="checkbox" checked={isPartner} onChange={(event) => setIsPartner(event.target.checked)} className="h-5 w-5" />
+            Grant Sway Brand Partner status
+          </label>
+          <p className="mt-2 text-xs leading-5 text-amber-100/70">
+            This is an append-only grandfather grant. It preserves the Sway-controlled pricing documented in the current Brand Partner terms and cannot be removed through routine account editing.
+          </p>
+          {isPartner ? (
+            <label className="mt-3 block space-y-1">
+              <span className={labelClass()}>Internal partner note — optional</span>
+              <input className={inputClass()} maxLength={280} value={partnerNote} onChange={(event) => setPartnerNote(event.target.value)} placeholder="Influencer, strategic partnership, or relationship context" />
+            </label>
+          ) : null}
         </div>
 
         <div className="sm:col-span-2">
@@ -130,7 +150,7 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
             disabled={submitting}
             className="inline-flex min-h-10 items-center justify-center rounded-xl bg-fuchsia-600 px-5 py-2 text-sm font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {submitting ? 'Creating...' : 'Create account'}
+            {submitting ? 'Creating invitation...' : 'Create account and send owner invitation'}
           </button>
         </div>
       </form>
@@ -155,12 +175,14 @@ function EditAccountPanel({
   const [isActive, setIsActive] = useState(Boolean(account.isActive));
   const [onboardingStatus, setOnboardingStatus] = useState(account.onboardingStatus ?? 'created');
   const [payoutHoldReason, setPayoutHoldReason] = useState(account.payoutHoldReason ?? '');
+  const [isPartner, setIsPartner] = useState(Boolean(account.partnerTermsVersion));
+  const [partnerNote, setPartnerNote] = useState('');
+  const [partnerSuspended, setPartnerSuspended] = useState(account.partnerStatus === 'suspended');
+  const [partnerStatusReason, setPartnerStatusReason] = useState(account.partnerStatusReason ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
@@ -189,6 +211,12 @@ function EditAccountPanel({
       body.isActive = isActive;
       body.onboardingStatus = onboardingStatus;
       body.payoutHoldReason = payoutHoldReason;
+      body.isPartner = isPartner;
+      if (!account.partnerTermsVersion && isPartner) body.partnerNote = partnerNote;
+      if (account.partnerTermsVersion) {
+        body.partnerSuspended = partnerSuspended;
+        body.partnerStatusReason = partnerStatusReason;
+      }
     }
 
     try {
@@ -210,28 +238,32 @@ function EditAccountPanel({
     }
   };
 
-  const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSendOwnerAccessLink = async () => {
     if (resettingPassword) return;
     setResettingPassword(true);
     setResetError(null);
     setResetMessage(null);
 
     try {
-      const response = await fetch(`/api/admin/accounts/${account.id}/reset-password`, {
+      const endpoint = account.passwordSetupRequired
+        ? `/api/admin/accounts/${account.id}/invite`
+        : `/api/admin/accounts/${account.id}/reset-password`;
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword, confirmPassword: confirmNewPassword })
+        body: JSON.stringify(account.passwordSetupRequired
+          ? { activateAfterSetup: true, onboardingStatus: 'gig_ready' }
+          : {})
       });
       const data = await parseJsonResponse(response);
       if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not reset password.');
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not send the owner access link.');
       }
-      setResetMessage('Password reset. All existing sessions were signed out.');
-      setNewPassword('');
-      setConfirmNewPassword('');
+      setResetMessage(account.passwordSetupRequired
+        ? 'One-time setup invitation sent to the owner.'
+        : 'One-time password reset link sent to the owner. The existing password is unchanged until the owner uses it.');
     } catch (resetErr) {
-      setResetError(resetErr instanceof Error ? resetErr.message : 'Could not reset password.');
+      setResetError(resetErr instanceof Error ? resetErr.message : 'Could not send the owner access link.');
     } finally {
       setResettingPassword(false);
     }
@@ -321,6 +353,55 @@ function EditAccountPanel({
             <div className="sm:col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
               Payment/Stripe status (charges, payouts, KYC) is driven by Stripe and is intentionally not editable here to avoid drifting from the real account state.
             </div>
+            <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+              <label className={`flex min-h-11 items-center gap-3 text-sm font-bold text-amber-100 ${account.partnerTermsVersion ? 'cursor-default' : 'cursor-pointer'}`}>
+                <input
+                  type="checkbox"
+                  checked={isPartner}
+                  disabled={Boolean(account.partnerTermsVersion)}
+                  onChange={(event) => setIsPartner(event.target.checked)}
+                  className="h-5 w-5"
+                />
+                Sway Brand Partner
+              </label>
+              {account.partnerTermsVersion ? (
+                <div className="mt-2 space-y-3 text-xs leading-5 text-amber-100/70">
+                  <p>
+                    Grant recorded under terms {account.partnerTermsVersion}. This append-only grant cannot be removed here.
+                  </p>
+                  <p>
+                    Owner acceptance: {account.partnerAcceptedAt ? `recorded ${new Date(account.partnerAcceptedAt).toLocaleString()}` : 'pending — an administrator cannot accept for the owner'}.
+                  </p>
+                  <label className="flex min-h-11 items-center gap-3 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-amber-100">
+                    <input
+                      type="checkbox"
+                      checked={partnerSuspended}
+                      onChange={(event) => setPartnerSuspended(event.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Operationally suspend partner benefits without deleting history
+                  </label>
+                  {partnerSuspended !== (account.partnerStatus === 'suspended') ? (
+                    <label className="block space-y-1">
+                      <span className={labelClass()}>Status-event reason — optional</span>
+                      <input className={inputClass()} maxLength={280} value={partnerStatusReason} onChange={(event) => setPartnerStatusReason(event.target.value)} />
+                    </label>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <p className="mt-2 text-xs leading-5 text-amber-100/70">
+                    Granting creates an append-only offer. The authenticated performer owner must review and accept the exact version and hash before the pricing entitlement becomes effective.
+                  </p>
+                  {isPartner ? (
+                    <label className="mt-3 block space-y-1">
+                      <span className={labelClass()}>Internal partner note — optional</span>
+                      <input className={inputClass()} maxLength={280} value={partnerNote} onChange={(event) => setPartnerNote(event.target.value)} />
+                    </label>
+                  ) : null}
+                </>
+              )}
+            </div>
           </>
         ) : null}
 
@@ -338,29 +419,23 @@ function EditAccountPanel({
       <div className="mt-5 rounded-xl border border-white/10 bg-slate-950/70 p-4">
         <div className="flex items-center gap-2 text-sm font-bold text-white">
           <ShieldAlert className="h-4 w-4 text-fuchsia-300" />
-          Reset password
+          Owner-controlled account access
         </div>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          {account.passwordSetupRequired
+            ? 'Send a fresh one-time setup invitation. The owner chooses the password and accepts account terms.'
+            : 'Send a one-time password reset link. Administrators never see or choose the replacement password.'}
+        </p>
         {resetError ? <StatusBanner tone="rose" message={resetError} /> : null}
         {resetMessage ? <StatusBanner tone="emerald" message={resetMessage} /> : null}
-        <form className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={handleResetPassword}>
-          <div className="space-y-1">
-            <label className={labelClass()}>New password</label>
-            <input type="text" className={inputClass()} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className={labelClass()}>Confirm new password</label>
-            <input type="text" className={inputClass()} value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} required />
-          </div>
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              disabled={resettingPassword}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-5 py-2 text-sm font-black text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {resettingPassword ? 'Resetting...' : 'Reset password'}
-            </button>
-          </div>
-        </form>
+        <button
+          type="button"
+          onClick={handleSendOwnerAccessLink}
+          disabled={resettingPassword}
+          className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-5 py-2 text-sm font-black text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {resettingPassword ? 'Sending...' : account.passwordSetupRequired ? 'Resend owner setup invitation' : 'Send owner password reset link'}
+        </button>
       </div>
 
       <div className="mt-5 rounded-xl border border-rose-500/30 bg-rose-950/20 p-4">
@@ -545,6 +620,7 @@ export default function AdminAccountsPage() {
                 <th className="px-4 py-3">Handle</th>
                 <th className="px-4 py-3">Verified</th>
                 <th className="px-4 py-3">Active</th>
+                <th className="px-4 py-3">Brand partner</th>
                 <th className="px-4 py-3">Payment status</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -552,11 +628,11 @@ export default function AdminAccountsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Loading accounts...</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Loading accounts...</td>
                 </tr>
               ) : accounts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">No accounts match this search.</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">No accounts match this search.</td>
                 </tr>
               ) : (
                 accounts.map((account) => (
@@ -569,6 +645,13 @@ export default function AdminAccountsPage() {
                     <td className="px-4 py-3 text-slate-300">{account.handle || '—'}</td>
                     <td className="px-4 py-3 text-slate-300">{account.emailVerifiedAt ? 'Yes' : 'No'}</td>
                     <td className="px-4 py-3 text-slate-300">{account.performerId ? (account.isActive ? 'Yes' : 'No') : '—'}</td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {account.partnerTermsVersion ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-100">
+                          <BadgeCheck className="h-3.5 w-3.5" /> {account.partnerStatus === 'suspended' ? 'Suspended' : account.partnerAcceptedAt ? 'Brand' : 'Pending owner'}
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="px-4 py-3 text-slate-300">{account.paymentAccountStatus || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       <button

@@ -13,7 +13,7 @@ import { readFileSync } from "fs";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -31,7 +31,9 @@ import {
   normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
+  PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
+  PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
   PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_LOGIN_SUCCESS_COPY,
   PERFORMER_SIGNUP_SUCCESS_COPY,
@@ -49,6 +51,18 @@ import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capab
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { lookupLyrics } from "./src/server/lyrics-provider";
+import {
+  escapePublicProfileMetadataAttribute,
+  normalizePublicProfileEmail,
+  normalizePublicProfileLinks,
+  normalizePublicProfilePhone,
+  normalizePublicProfileSpecialties,
+  normalizePublicProfileText,
+  normalizePublicProfileUrl,
+  resolveVerifiedPublicBookingContact
+} from "./src/server/public-profile";
+import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
+import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -244,14 +258,6 @@ const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=1';
 const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
 const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
 
-function escapeHtmlAttribute(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 function resolveRequestOrigin(req: express.Request) {
   const configuredBaseUrl = (process.env.SWAY_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');
   if (configuredBaseUrl) return configuredBaseUrl;
@@ -283,11 +289,11 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
 }
 
 function renderShareMetaTags(metadata: ShareMetadata) {
-  const title = escapeHtmlAttribute(metadata.title);
-  const description = escapeHtmlAttribute(metadata.description);
-  const url = escapeHtmlAttribute(metadata.url);
-  const image = escapeHtmlAttribute(metadata.image);
-  const imageAlt = escapeHtmlAttribute(metadata.imageAlt);
+  const title = escapePublicProfileMetadataAttribute(metadata.title);
+  const description = escapePublicProfileMetadataAttribute(metadata.description);
+  const url = escapePublicProfileMetadataAttribute(metadata.url);
+  const image = escapePublicProfileMetadataAttribute(metadata.image);
+  const imageAlt = escapePublicProfileMetadataAttribute(metadata.imageAlt);
 
   return [
     '<meta name="sway-share-meta" content="server-rendered" />',
@@ -341,7 +347,11 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       })
       .from(performers)
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+      .where(and(
+        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ))
       .limit(1);
 
     if (!profile) return defaultMetadata;
@@ -349,12 +359,12 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     const title = `${profile.displayName} on Sway`;
     const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
     const locationCopy = profile.city ? ` in ${profile.city}` : '';
-    const description = profile.headline || profile.bio || `Join ${handleCopy}${locationCopy} on Sway for live requests, tips, boosts, and queue updates.`;
+    const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
 
     return defaultShareMetadata(req, {
       title,
       description,
-      image: profile.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      image: normalizePublicProfileUrl(profile.avatarUrl) || DEFAULT_SHARE_IMAGE_PATH,
       imageAlt: `${profile.displayName} Sway performer profile`
     });
   }
@@ -373,7 +383,12 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       .from(activeRoomRegistry)
       .innerJoin(performers, eq(performers.id, activeRoomRegistry.performerId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(eq(activeRoomRegistry.gigId, pathParts[1]))
+      .where(and(
+        eq(activeRoomRegistry.gigId, pathParts[1]),
+        inArray(activeRoomRegistry.registryStatus, ['active', 'ending']),
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ))
       .limit(1);
 
     if (!room) return defaultMetadata;
@@ -389,7 +404,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       title,
       description,
       url: room.routePath || req.originalUrl,
-      image: room.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      image: normalizePublicProfileUrl(room.avatarUrl) || DEFAULT_SHARE_IMAGE_PATH,
       imageAlt: `${performerName} Sway live room`
     });
   }
@@ -1139,7 +1154,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
     .select({
       performerId: performers.id,
       displayName: performers.displayName,
-      handle: performers.handle
+      handle: performers.handle,
+      bio: performers.bio
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -1153,27 +1169,8 @@ function normalizeLibraryText(value: unknown, maxLength = 160) {
   return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
-function normalizePublicProfileText(value: unknown, maxLength = 160) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, maxLength);
-}
-
-function normalizePublicProfileUrl(value: unknown) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
 function toPublicSocialLinks(row: {
+  facebookUrl: string | null;
   instagramUrl: string | null;
   tiktokUrl: string | null;
   youtubeUrl: string | null;
@@ -1181,11 +1178,12 @@ function toPublicSocialLinks(row: {
   websiteUrl: string | null;
 }) {
   return {
-    instagram: row.instagramUrl,
-    tiktok: row.tiktokUrl,
-    youtube: row.youtubeUrl,
-    soundcloud: row.soundcloudUrl,
-    website: row.websiteUrl
+    facebook: normalizePublicProfileUrl(row.facebookUrl),
+    instagram: normalizePublicProfileUrl(row.instagramUrl),
+    tiktok: normalizePublicProfileUrl(row.tiktokUrl),
+    youtube: normalizePublicProfileUrl(row.youtubeUrl),
+    soundcloud: normalizePublicProfileUrl(row.soundcloudUrl),
+    website: normalizePublicProfileUrl(row.websiteUrl)
   };
 }
 
@@ -2135,6 +2133,259 @@ app.get('/api/payment/config', (_req, res) => {
   }
 
   return res.json({ publishableKey, mode });
+});
+
+app.post('/api/talent/invite/accept', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Performer invitation setup is temporarily unavailable.' });
+  }
+
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const termsAccepted = req.body?.termsAccepted === true;
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_invite__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    return res.status(429).json({ error: 'Too many performer setup attempts. Please try again later.' });
+  }
+  if (!token) {
+    return res.status(422).json({ error: 'A valid one-time invitation is required.' });
+  }
+  if (!termsAccepted) {
+    return res.status(422).json({ error: 'Account terms acceptance is required to finish setup.' });
+  }
+  if (!password) {
+    return res.status(422).json({ error: 'Choose a password to finish setup.' });
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    return res.status(422).json({ error: passwordValidation.error });
+  }
+  if (!confirmPassword || password !== confirmPassword) {
+    return res.status(422).json({ error: 'Password confirmation does not match.' });
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const invitation = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
+        executor: tx
+      });
+
+      if (!invitation?.actorUserId) return null;
+
+      const metadata = invitation.challengeMetadata && typeof invitation.challengeMetadata === 'object'
+        ? invitation.challengeMetadata as Record<string, unknown>
+        : {};
+      const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
+        ? metadata.performerId
+        : null;
+      if (!performerId) return null;
+
+      const [account] = await tx
+        .select({
+          userId: users.id,
+          performerId: performers.id,
+          passwordHash: users.passwordHash
+        })
+        .from(users)
+        .innerJoin(performers, eq(performers.ownerUserId, users.id))
+        .where(and(
+          eq(users.id, invitation.actorUserId),
+          eq(performers.id, performerId)
+        ))
+        .limit(1);
+
+      if (!account || account.passwordHash) return null;
+
+      const completedAt = new Date();
+      const [updatedUser] = await tx
+        .update(users)
+        .set({
+          passwordHash,
+          emailVerifiedAt: completedAt,
+          termsAcceptedAt: completedAt,
+          updatedAt: completedAt
+        })
+        .where(and(
+          eq(users.id, account.userId),
+          isNull(users.passwordHash)
+        ))
+        .returning({ id: users.id });
+
+      if (!updatedUser) return null;
+
+      const requestedOnboardingStatus = typeof metadata.onboardingStatus === 'string'
+        && VALID_ONBOARDING_STATUSES.has(metadata.onboardingStatus)
+        ? metadata.onboardingStatus
+        : 'profile_started';
+      const activateAfterSetup = metadata.activateAfterSetup === true;
+
+      await tx
+        .update(performers)
+        .set({
+          isActive: activateAfterSetup,
+          onboardingStatus: requestedOnboardingStatus as typeof performers.onboardingStatus.enumValues[number],
+          updatedAt: completedAt
+        })
+        .where(eq(performers.id, account.performerId));
+
+      const issuedSession = await performerSessionStore.issueSession({
+        actorUserId: account.userId,
+        issuedBy: account.userId,
+        executor: tx
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: account.userId,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: invitation.id,
+        eventType: 'performer_invitation.accept',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          performerId: account.performerId,
+          accountTermsAcceptedAt: completedAt.toISOString(),
+          passwordSetByOwner: true
+        }
+      });
+
+      return { issuedSession };
+    });
+
+    if (!outcome) {
+      return res.status(410).json({ error: 'This invitation is invalid, expired, or already used.' });
+    }
+
+    res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+      expires: outcome.issuedSession.expiresAt
+    });
+    return res.status(200).json({ success: true, redirectPath: '/talent' });
+  } catch (error) {
+    console.warn('Performer invitation acceptance failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({ error: 'Unable to finish performer setup right now.' });
+  }
+});
+
+app.post('/api/talent/password-reset/accept', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Owner password reset is temporarily unavailable.' });
+  }
+
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_password_reset__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    return res.status(429).json({ error: 'Too many password reset attempts. Please try again later.' });
+  }
+  if (!token || !password) {
+    return res.status(422).json({ error: 'A valid one-time reset link and new password are required.' });
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    return res.status(422).json({ error: passwordValidation.error });
+  }
+  if (!confirmPassword || password !== confirmPassword) {
+    return res.status(422).json({ error: 'Password confirmation does not match.' });
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const resetChallenge = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
+        executor: tx
+      });
+      if (!resetChallenge?.actorUserId) return null;
+
+      const [updatedUser] = await tx
+        .update(users)
+        .set({
+          passwordHash,
+          emailVerifiedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(users.id, resetChallenge.actorUserId))
+        .returning({ id: users.id });
+      if (!updatedUser) return null;
+
+      const revokedSessions = await performerSessionStore.revokeActiveSessionsForActorUser({
+        actorUserId: updatedUser.id,
+        executor: tx
+      });
+      const issuedSession = await performerSessionStore.issueSession({
+        actorUserId: updatedUser.id,
+        issuedBy: updatedUser.id,
+        executor: tx
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: updatedUser.id,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: resetChallenge.id,
+        eventType: 'performer_password_reset.accept',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          passwordSetByOwner: true,
+          revokedSessionCount: revokedSessions.length
+        }
+      });
+
+      return { issuedSession };
+    });
+
+    if (!outcome) {
+      return res.status(410).json({ error: 'This reset link is invalid, expired, or already used.' });
+    }
+
+    res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+      expires: outcome.issuedSession.expiresAt
+    });
+    return res.status(200).json({ success: true, redirectPath: '/talent' });
+  } catch (error) {
+    console.warn('Owner password reset failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({ error: 'Unable to reset this password right now.' });
+  }
 });
 
 app.post('/api/talent/signup', async (req, res) => {
@@ -3365,6 +3616,7 @@ const adminAccountSelectColumns = {
   email: users.email,
   displayName: users.displayName,
   role: users.role,
+  passwordSetupRequired: sql<boolean>`${users.passwordHash} is null`,
   emailVerifiedAt: users.emailVerifiedAt,
   createdAt: users.createdAt,
   performerId: performers.id,
@@ -3375,14 +3627,43 @@ const adminAccountSelectColumns = {
   paymentAccountStatus: performers.paymentAccountStatus,
   payoutsEnabled: performers.payoutsEnabled,
   chargesEnabled: performers.chargesEnabled,
-  payoutHoldReason: performers.payoutHoldReason
+  payoutHoldReason: performers.payoutHoldReason,
+  partnerEntitlementId: performerPartnerEntitlements.id,
+  partnerTermsVersion: performerPartnerEntitlements.termsVersion,
+  partnerTermsHash: performerPartnerEntitlements.termsHash,
+  partnerGrantedAt: performerPartnerEntitlements.grantedAt,
+  partnerKind: performerPartnerEntitlements.partnerKind,
+  partnerAcceptedAt: sql<Date | null>`(
+    select ${performerPartnerTermsAcceptances.acceptedAt}
+    from ${performerPartnerTermsAcceptances}
+    where ${performerPartnerTermsAcceptances.entitlementId} = ${performerPartnerEntitlements.id}
+      and ${performerPartnerTermsAcceptances.accountUserId} = ${users.id}
+      and ${performerPartnerTermsAcceptances.termsHash} = ${performerPartnerEntitlements.termsHash}
+    order by ${performerPartnerTermsAcceptances.acceptedAt} desc
+    limit 1
+  )`,
+  partnerStatus: sql<string | null>`(
+    select ${performerPartnerEntitlementStatusEvents.status}
+    from ${performerPartnerEntitlementStatusEvents}
+    where ${performerPartnerEntitlementStatusEvents.entitlementId} = ${performerPartnerEntitlements.id}
+    order by ${performerPartnerEntitlementStatusEvents.createdAt} desc, ${performerPartnerEntitlementStatusEvents.id} desc
+    limit 1
+  )`,
+  partnerStatusReason: sql<string | null>`(
+    select ${performerPartnerEntitlementStatusEvents.reason}
+    from ${performerPartnerEntitlementStatusEvents}
+    where ${performerPartnerEntitlementStatusEvents.entitlementId} = ${performerPartnerEntitlements.id}
+    order by ${performerPartnerEntitlementStatusEvents.createdAt} desc, ${performerPartnerEntitlementStatusEvents.id} desc
+    limit 1
+  )`
 };
 
 function loadAdminAccountsBaseQuery(db: NonNullable<typeof businessDb>) {
   return db
     .select(adminAccountSelectColumns)
     .from(users)
-    .leftJoin(performers, eq(performers.ownerUserId, users.id));
+    .leftJoin(performers, eq(performers.ownerUserId, users.id))
+    .leftJoin(performerPartnerEntitlements, eq(performerPartnerEntitlements.performerId, performers.id));
 }
 
 app.get('/api/admin/accounts', async (req, res) => {
@@ -3473,9 +3754,9 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
   const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
   const normalizedHandle = normalizePerformerHandle(req.body?.handle);
   const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
-  const password = normalizePerformerPassword(req.body?.password);
-  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
   const isActive = req.body?.isActive !== false;
+  const isPartner = req.body?.isPartner === true;
+  const partnerNote = normalizePublicProfileText(req.body?.partnerNote, 280);
   const onboardingStatus = typeof req.body?.onboardingStatus === 'string' && VALID_ONBOARDING_STATUSES.has(req.body.onboardingStatus)
     ? req.body.onboardingStatus
     : 'gig_ready';
@@ -3485,19 +3766,12 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     return;
   }
 
-  if (!password) {
-    res.status(422).json({ error: 'Password is required.' });
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    res.status(503).json({ error: 'Performer invitation email delivery is temporarily unavailable.' });
     return;
   }
-
-  const passwordValidation = validatePerformerPasswordStrength(password);
-  if (!passwordValidation.ok) {
-    res.status(422).json({ error: passwordValidation.error });
-    return;
-  }
-
-  if (!confirmPassword || password !== confirmPassword) {
-    res.status(422).json({ error: 'Password confirmation does not match.' });
+  if (!performerLoginChallengeStore.hasDurableStore) {
+    res.status(503).json({ error: 'Performer invitation issuance requires durable persistence.' });
     return;
   }
 
@@ -3511,17 +3785,15 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     return;
   }
 
-  const passwordHash = await hashPerformerPassword(password);
-
   const outcome = await businessDb.transaction(async (tx) => {
     const [createdUser] = await tx
       .insert(users)
       .values({
         email: normalizedEmail,
         displayName: normalizedDisplayName,
-        passwordHash,
-        emailVerifiedAt: new Date(),
-        termsAcceptedAt: new Date(),
+        passwordHash: null,
+        emailVerifiedAt: null,
+        termsAcceptedAt: null,
         role: 'performer'
       })
       .returning({ id: users.id });
@@ -3532,10 +3804,49 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
         ownerUserId: createdUser.id,
         handle: normalizedHandle,
         displayName: normalizedDisplayName,
-        isActive,
-        onboardingStatus
+        isActive: false,
+        onboardingStatus: 'created'
       })
       .returning({ id: performers.id });
+
+    let partnerEntitlementId: string | null = null;
+    if (isPartner) {
+      const [createdEntitlement] = await tx
+        .insert(performerPartnerEntitlements)
+        .values({
+          performerId: createdPerformer.id,
+          grantedByUserId: adminAccess.actor.actorId,
+          partnerKind: 'brand',
+          termsVersion: SWAY_PARTNER_TERMS_VERSION,
+          termsHash: SWAY_PARTNER_TERMS_HASH,
+          termsText: SWAY_PARTNER_TERMS_TEXT,
+          termsSnapshot: buildSwayPartnerTermsSnapshot(),
+          note: partnerNote
+        })
+        .returning({ id: performerPartnerEntitlements.id });
+      partnerEntitlementId = createdEntitlement.id;
+
+      await tx.insert(performerPartnerEntitlementStatusEvents).values({
+        entitlementId: createdEntitlement.id,
+        performerId: createdPerformer.id,
+        status: 'active',
+        reason: 'Initial Brand Partner grant; owner acceptance pending.',
+        actorUserId: adminAccess.actor.actorId
+      });
+    }
+
+    const invitation = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: createdUser.id,
+      targetEmail: normalizedEmail,
+      challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
+      challengeMetadata: {
+        performerId: createdPerformer.id,
+        activateAfterSetup: isActive,
+        onboardingStatus
+      },
+      requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
+      executor: tx
+    });
 
     await writeAuditEvent(tx, {
       actorId: adminAccess.actor.actorId,
@@ -3548,14 +3859,154 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
       metadata: {
         targetEmail: normalizedEmail,
         targetHandle: normalizedHandle,
-        performerId: createdPerformer.id
+        performerId: createdPerformer.id,
+        passwordSetByAdmin: false,
+        termsAcceptedByAdmin: false,
+        invitationChallengeId: invitation.challengeId,
+        isPartner,
+        partnerKind: isPartner ? 'brand' : null,
+        partnerTermsVersion: isPartner ? SWAY_PARTNER_TERMS_VERSION : null,
+        partnerTermsHash: isPartner ? SWAY_PARTNER_TERMS_HASH : null,
+        partnerEntitlementId
       }
     });
 
-    return { userId: createdUser.id, performerId: createdPerformer.id };
+    return {
+      userId: createdUser.id,
+      performerId: createdPerformer.id,
+      challengeId: invitation.challengeId,
+      invitationToken: invitation.token
+    };
   });
 
-  res.status(201).json({ success: true, userId: outcome.userId, performerId: outcome.performerId });
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const invitationLink = `${appBaseUrl}/talent/invite?token=${encodeURIComponent(outcome.invitationToken)}`;
+  const deliveryResult = await performerLoginMailer.sendAccountInvitation({
+    toEmail: normalizedEmail,
+    invitationLink
+  });
+
+  if (!deliveryResult.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({ challengeId: outcome.challengeId });
+    res.status(503).json({
+      error: 'The performer account was created, but invitation delivery failed. Use the resend invitation action.',
+      accountCreated: true,
+      userId: outcome.userId,
+      performerId: outcome.performerId
+    });
+    return;
+  }
+
+  res.status(201).json({
+    success: true,
+    userId: outcome.userId,
+    performerId: outcome.performerId,
+    invitationDelivery: deliveryResult.provider,
+    ...(!isProduction && deliveryResult.provider === 'mock' ? { invitationLink } : {})
+  });
+});
+
+app.post('/api/admin/accounts/:userId/invite', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  }
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Performer invitation issuance requires durable persistence.' });
+  }
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Performer invitation email delivery is temporarily unavailable.' });
+  }
+  if (!UUID_PATTERN.test(req.params.userId)) {
+    return res.status(404).json({ error: 'Account not found.' });
+  }
+
+  const [account] = await businessDb
+    .select({
+      userId: users.id,
+      email: users.email,
+      passwordHash: users.passwordHash,
+      performerId: performers.id
+    })
+    .from(users)
+    .innerJoin(performers, eq(performers.ownerUserId, users.id))
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+
+  const normalizedEmail = normalizePerformerLoginEmail(account?.email);
+  if (!account || !normalizedEmail) {
+    return res.status(404).json({ error: 'Performer account not found.' });
+  }
+  if (account.passwordHash) {
+    return res.status(409).json({ error: 'This owner has already completed password setup.' });
+  }
+
+  const activateAfterSetup = req.body?.activateAfterSetup !== false;
+  const onboardingStatus = typeof req.body?.onboardingStatus === 'string'
+    && VALID_ONBOARDING_STATUSES.has(req.body.onboardingStatus)
+    ? req.body.onboardingStatus
+    : 'gig_ready';
+
+  const invitation = await businessDb.transaction(async (tx) => {
+    await tx
+      .update(performerLoginChallenges)
+      .set({ revokedAt: new Date() })
+      .where(and(
+        eq(performerLoginChallenges.actorUserId, account.userId),
+        eq(performerLoginChallenges.challengeType, PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE),
+        isNull(performerLoginChallenges.consumedAt),
+        isNull(performerLoginChallenges.revokedAt)
+      ));
+
+    const issued = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: account.userId,
+      targetEmail: normalizedEmail,
+      challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
+      challengeMetadata: {
+        performerId: account.performerId,
+        activateAfterSetup,
+        onboardingStatus
+      },
+      requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
+      executor: tx
+    });
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'performer_login_challenge',
+      entityId: issued.challengeId,
+      eventType: 'admin_account.invitation_issue',
+      previousStatus: null,
+      nextStatus: 'pending',
+      metadata: {
+        targetUserId: account.userId,
+        performerId: account.performerId,
+        passwordSetByAdmin: false,
+        termsAcceptedByAdmin: false
+      }
+    });
+
+    return issued;
+  });
+
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const invitationLink = `${appBaseUrl}/talent/invite?token=${encodeURIComponent(invitation.token)}`;
+  const deliveryResult = await performerLoginMailer.sendAccountInvitation({
+    toEmail: normalizedEmail,
+    invitationLink
+  });
+
+  if (!deliveryResult.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({ challengeId: invitation.challengeId });
+    return res.status(503).json({ error: 'Invitation delivery failed. No password or terms acceptance was changed.' });
+  }
+
+  return res.status(202).json({
+    success: true,
+    invitationDelivery: deliveryResult.provider,
+    ...(!isProduction && deliveryResult.provider === 'mock' ? { invitationLink } : {})
+  });
 });
 
 app.patch('/api/admin/accounts/:userId', async (req, res) => {
@@ -3589,6 +4040,30 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
   const userUpdates: Record<string, unknown> = {};
   const performerUpdates: Record<string, unknown> = {};
   const changedFields: string[] = [];
+  const shouldGrantPartner = Boolean(
+    existingAccount.performerId
+    && req.body?.isPartner === true
+    && !existingAccount.partnerTermsVersion
+  );
+  const partnerNote = normalizePublicProfileText(req.body?.partnerNote, 280);
+  const requestedPartnerStatus = req.body?.partnerSuspended === true
+    ? 'suspended'
+    : req.body?.partnerSuspended === false
+      ? 'active'
+      : null;
+  const shouldChangePartnerStatus = Boolean(
+    existingAccount.partnerEntitlementId
+    && requestedPartnerStatus
+    && existingAccount.partnerStatus !== requestedPartnerStatus
+  );
+  const partnerStatusReason = normalizePublicProfileText(req.body?.partnerStatusReason, 280);
+
+  if (shouldGrantPartner) {
+    changedFields.push('partner');
+  }
+  if (shouldChangePartnerStatus) {
+    changedFields.push('partnerStatus');
+  }
 
   if (req.body?.email !== undefined) {
     const normalizedEmail = normalizePerformerLoginEmail(req.body.email);
@@ -3659,6 +4134,10 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     }
 
     if (req.body?.isActive !== undefined) {
+      if (Boolean(req.body.isActive) && existingAccount.passwordSetupRequired) {
+        res.status(409).json({ error: 'The performer owner must finish the one-time password setup before activation.' });
+        return;
+      }
       performerUpdates.isActive = Boolean(req.body.isActive);
       changedFields.push('isActive');
     }
@@ -3692,6 +4171,84 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     if (existingAccount.performerId && Object.keys(performerUpdates).length > 0) {
       await tx.update(performers).set(performerUpdates).where(eq(performers.id, existingAccount.performerId));
     }
+    if (shouldGrantPartner && existingAccount.performerId) {
+      const grantedPartnerRows = await tx
+        .insert(performerPartnerEntitlements)
+        .values({
+          performerId: existingAccount.performerId,
+          grantedByUserId: adminAccess.actor.actorId,
+          partnerKind: 'brand',
+          termsVersion: SWAY_PARTNER_TERMS_VERSION,
+          termsHash: SWAY_PARTNER_TERMS_HASH,
+          termsText: SWAY_PARTNER_TERMS_TEXT,
+          termsSnapshot: buildSwayPartnerTermsSnapshot(),
+          note: partnerNote
+        })
+        .onConflictDoNothing()
+        .returning({
+          id: performerPartnerEntitlements.id,
+          performerId: performerPartnerEntitlements.performerId
+        });
+
+      if (grantedPartnerRows.length > 0) {
+        await tx.insert(performerPartnerEntitlementStatusEvents).values({
+          entitlementId: grantedPartnerRows[0].id,
+          performerId: existingAccount.performerId,
+          status: 'active',
+          reason: 'Initial Brand Partner grant; owner acceptance pending.',
+          actorUserId: adminAccess.actor.actorId
+        });
+
+        await writeAuditEvent(tx, {
+          actorId: adminAccess.actor.actorId,
+          actorType: 'admin',
+          entityType: 'performer',
+          entityId: existingAccount.performerId,
+          eventType: 'admin_account.partner_grant',
+          previousStatus: null,
+          nextStatus: 'partner',
+          metadata: {
+            targetEmail: existingAccount.email,
+            partnerKind: 'brand',
+            termsVersion: SWAY_PARTNER_TERMS_VERSION,
+            termsHash: SWAY_PARTNER_TERMS_HASH,
+            ownerAcceptanceRequired: true
+          }
+        });
+      }
+    }
+
+    if (
+      shouldChangePartnerStatus
+      && existingAccount.performerId
+      && existingAccount.partnerEntitlementId
+      && requestedPartnerStatus
+    ) {
+      await tx.insert(performerPartnerEntitlementStatusEvents).values({
+        entitlementId: existingAccount.partnerEntitlementId,
+        performerId: existingAccount.performerId,
+        status: requestedPartnerStatus,
+        reason: partnerStatusReason,
+        actorUserId: adminAccess.actor.actorId
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: adminAccess.actor.actorId,
+        actorType: 'admin',
+        entityType: 'performer',
+        entityId: existingAccount.performerId,
+        eventType: requestedPartnerStatus === 'suspended'
+          ? 'admin_account.partner_suspend'
+          : 'admin_account.partner_restore',
+        previousStatus: existingAccount.partnerStatus,
+        nextStatus: requestedPartnerStatus,
+        metadata: {
+          entitlementId: existingAccount.partnerEntitlementId,
+          reason: partnerStatusReason,
+          entitlementDeleted: false
+        }
+      });
+    }
 
     await writeAuditEvent(tx, {
       actorId: adminAccess.actor.actorId,
@@ -3718,20 +4275,20 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
 app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
   const adminAccess = await accessControl.requireAdminAccess(req);
   if (adminAccess.allowed === false) {
-    res.status(adminAccess.status).json({ error: adminAccess.reason });
-    return;
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
   }
 
-  if (!businessDb) {
-    res.status(503).json({ error: 'Admin accounts require durable persistence.' });
-    return;
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Owner password reset requires durable persistence.' });
+  }
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Owner password reset email delivery is temporarily unavailable.' });
   }
 
   applyNoStoreHeaders(res);
 
   if (!UUID_PATTERN.test(req.params.userId)) {
-    res.status(404).json({ error: 'Account not found.' });
-    return;
+    return res.status(404).json({ error: 'Account not found.' });
   }
 
   const [existingUser] = await businessDb
@@ -3741,54 +4298,67 @@ app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
     .limit(1);
 
   if (!existingUser) {
-    res.status(404).json({ error: 'Account not found.' });
-    return;
+    return res.status(404).json({ error: 'Account not found.' });
   }
 
-  const password = normalizePerformerPassword(req.body?.password);
-  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
-
-  if (!password) {
-    res.status(422).json({ error: 'Password is required.' });
-    return;
+  const normalizedEmail = normalizePerformerLoginEmail(existingUser.email);
+  if (!normalizedEmail) {
+    return res.status(422).json({ error: 'This account has no deliverable owner email.' });
   }
 
-  const passwordValidation = validatePerformerPasswordStrength(password);
-  if (!passwordValidation.ok) {
-    res.status(422).json({ error: passwordValidation.error });
-    return;
-  }
+  const resetChallenge = await businessDb.transaction(async (tx) => {
+    await tx
+      .update(performerLoginChallenges)
+      .set({ revokedAt: new Date() })
+      .where(and(
+        eq(performerLoginChallenges.actorUserId, existingUser.id),
+        eq(performerLoginChallenges.challengeType, PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET),
+        isNull(performerLoginChallenges.consumedAt),
+        isNull(performerLoginChallenges.revokedAt)
+      ));
 
-  if (!confirmPassword || password !== confirmPassword) {
-    res.status(422).json({ error: 'Password confirmation does not match.' });
-    return;
-  }
-
-  const passwordHash = await hashPerformerPassword(password);
-
-  await businessDb.transaction(async (tx) => {
-    await tx.update(users).set({ passwordHash }).where(eq(users.id, req.params.userId));
-
-    const revokedSessions = performerSessionStore.hasDurableStore
-      ? await performerSessionStore.revokeActiveSessionsForActorUser({ actorUserId: req.params.userId, executor: tx })
-      : [];
+    const issued = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: existingUser.id,
+      targetEmail: normalizedEmail,
+      challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
+      requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
+      executor: tx
+    });
 
     await writeAuditEvent(tx, {
       actorId: adminAccess.actor.actorId,
       actorType: 'admin',
-      entityType: 'user',
-      entityId: req.params.userId,
-      eventType: 'admin_account.password_reset',
+      entityType: 'performer_login_challenge',
+      entityId: issued.challengeId,
+      eventType: 'admin_account.password_reset_issue',
       previousStatus: null,
-      nextStatus: null,
+      nextStatus: 'pending',
       metadata: {
         targetEmail: existingUser.email,
-        revokedSessionCount: revokedSessions.length
+        passwordSetByAdmin: false
       }
     });
+
+    return issued;
   });
 
-  res.json({ success: true });
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const resetLink = `${appBaseUrl}/talent/invite?mode=reset&token=${encodeURIComponent(resetChallenge.token)}`;
+  const deliveryResult = await performerLoginMailer.sendOwnerPasswordReset({
+    toEmail: normalizedEmail,
+    resetLink
+  });
+
+  if (!deliveryResult.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({ challengeId: resetChallenge.challengeId });
+    return res.status(503).json({ error: 'Password reset delivery failed. The existing password was not changed.' });
+  }
+
+  return res.status(202).json({
+    success: true,
+    deliveryMode: deliveryResult.provider,
+    ...(!isProduction && deliveryResult.provider === 'mock' ? { resetLink } : {})
+  });
 });
 
 app.delete('/api/admin/accounts/:userId', async (req, res) => {
@@ -3842,6 +4412,16 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
         onboardingStatus: 'suspended',
         bio: null
       }).where(eq(performers.id, existingAccount.performerId));
+
+      if (existingAccount.partnerEntitlementId && existingAccount.partnerStatus !== 'suspended') {
+        await tx.insert(performerPartnerEntitlementStatusEvents).values({
+          entitlementId: existingAccount.partnerEntitlementId,
+          performerId: existingAccount.performerId,
+          status: 'suspended',
+          reason: 'Account privacy deletion and access suspension.',
+          actorUserId: adminAccess.actor.actorId
+        });
+      }
     }
 
     if (performerSessionStore.hasDurableStore) {
@@ -4036,39 +4616,162 @@ app.get('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
-  const [profileRow] = await businessDb
-    .select({
-      performerId: performerPublicProfiles.performerId,
-      headline: performerPublicProfiles.headline,
-      city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl,
-      instagramUrl: performerPublicProfiles.instagramUrl,
-      tiktokUrl: performerPublicProfiles.tiktokUrl,
-      youtubeUrl: performerPublicProfiles.youtubeUrl,
-      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-      websiteUrl: performerPublicProfiles.websiteUrl,
-      updatedAt: performerPublicProfiles.updatedAt
-    })
-    .from(performerPublicProfiles)
-    .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
-    .limit(1);
+  const [[profileRow], linkRows, partnerState] = await Promise.all([
+    businessDb
+      .select({
+        performerId: performerPublicProfiles.performerId,
+        headline: performerPublicProfiles.headline,
+        specialties: performerPublicProfiles.specialties,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl,
+        bookingEmail: performerPublicProfiles.bookingEmail,
+        bookingPhone: performerPublicProfiles.bookingPhone,
+        facebookUrl: performerPublicProfiles.facebookUrl,
+        instagramUrl: performerPublicProfiles.instagramUrl,
+        tiktokUrl: performerPublicProfiles.tiktokUrl,
+        youtubeUrl: performerPublicProfiles.youtubeUrl,
+        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+        websiteUrl: performerPublicProfiles.websiteUrl,
+        updatedAt: performerPublicProfiles.updatedAt
+      })
+      .from(performerPublicProfiles)
+      .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .limit(1),
+    businessDb
+      .select({
+        id: performerProfileLinks.id,
+        label: performerProfileLinks.label,
+        description: performerProfileLinks.description,
+        url: performerProfileLinks.url,
+        kind: performerProfileLinks.kind,
+        sortOrder: performerProfileLinks.sortOrder,
+        isActive: performerProfileLinks.isActive
+      })
+      .from(performerProfileLinks)
+      .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
+      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
+    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
+  ]);
 
   return res.json({
     profile: {
       performerId: performerOwner.performerId,
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
+      bio: performerOwner.bio,
       headline: profileRow?.headline ?? null,
+      specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
+      booking: {
+        email: profileRow?.bookingEmail ?? null,
+        phone: profileRow?.bookingPhone ?? null
+      },
       socialLinks: toPublicSocialLinks({
+        facebookUrl: profileRow?.facebookUrl ?? null,
         instagramUrl: profileRow?.instagramUrl ?? null,
         tiktokUrl: profileRow?.tiktokUrl ?? null,
         youtubeUrl: profileRow?.youtubeUrl ?? null,
         soundcloudUrl: profileRow?.soundcloudUrl ?? null,
         websiteUrl: profileRow?.websiteUrl ?? null
       }),
+      links: linkRows,
+      partner: {
+        granted: Boolean(partnerState),
+        active: partnerState?.isEffective ?? false,
+        accepted: partnerState?.isAccepted ?? false,
+        suspended: partnerState?.isSuspended ?? false,
+        acceptanceRequired: Boolean(partnerState && !partnerState.isAccepted),
+        kind: partnerState?.partnerKind ?? null,
+        termsVersion: partnerState?.termsVersion ?? null,
+        termsHash: partnerState?.termsHash ?? null,
+        termsText: partnerState?.termsText ?? null,
+        termsSnapshot: partnerState?.termsSnapshot ?? null,
+        grantedAt: partnerState?.grantedAt ?? null,
+        acceptedAt: partnerState?.acceptedAt ?? null,
+        status: partnerState?.currentStatus ?? null,
+        statusReason: partnerState?.statusReason ?? null
+      },
       updatedAt: profileRow?.updatedAt ?? null
+    }
+  });
+});
+
+app.post('/api/talent/partner/terms/accept', async (req, res) => {
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Brand Partner terms acceptance requires durable authenticated persistence.' });
+  }
+  if (req.body?.accepted !== true) {
+    return res.status(422).json({ error: 'Explicit owner acceptance is required.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can accept Brand Partner terms.' });
+  }
+
+  const partnerState = await loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId);
+  if (!partnerState) {
+    return res.status(404).json({ error: 'No Brand Partner grant is pending for this performer.' });
+  }
+
+  const requestedTermsVersion = typeof req.body?.termsVersion === 'string' ? req.body.termsVersion.trim() : '';
+  const requestedTermsHash = typeof req.body?.termsHash === 'string' ? req.body.termsHash.trim().toLowerCase() : '';
+  if (requestedTermsVersion !== partnerState.termsVersion || requestedTermsHash !== partnerState.termsHash) {
+    return res.status(409).json({ error: 'The Brand Partner terms changed. Reload and review the exact version before accepting.' });
+  }
+
+  const acceptedAt = new Date();
+  const receiptRows = await businessDb.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(performerPartnerTermsAcceptances)
+      .values({
+        entitlementId: partnerState.entitlementId,
+        performerId: performerOwner.performerId,
+        accountUserId: talentAccess.actor.actorId,
+        termsVersion: partnerState.termsVersion,
+        termsHash: partnerState.termsHash,
+        termsText: partnerState.termsText,
+        termsSnapshot: partnerState.termsSnapshot,
+        acceptedAt
+      })
+      .onConflictDoNothing()
+      .returning({ id: performerPartnerTermsAcceptances.id });
+
+    if (inserted.length > 0) {
+      await writeAuditEvent(tx, {
+        actorId: talentAccess.actor.actorId,
+        actorType: 'performer',
+        entityType: 'performer',
+        entityId: performerOwner.performerId,
+        eventType: 'performer_partner_terms.accept',
+        previousStatus: 'pending_acceptance',
+        nextStatus: 'accepted',
+        metadata: {
+          accountUserId: talentAccess.actor.actorId,
+          entitlementId: partnerState.entitlementId,
+          termsVersion: partnerState.termsVersion,
+          termsHash: partnerState.termsHash,
+          acceptedAt: acceptedAt.toISOString(),
+          acceptedByAdmin: false
+        }
+      });
+    }
+
+    return inserted;
+  });
+
+  return res.status(receiptRows.length > 0 ? 201 : 200).json({
+    success: true,
+    receipt: {
+      accountUserId: talentAccess.actor.actorId,
+      termsVersion: partnerState.termsVersion,
+      termsHash: partnerState.termsHash,
+      acceptedAt: receiptRows.length > 0 ? acceptedAt : partnerState.acceptedAt
     }
   });
 });
@@ -4087,43 +4790,143 @@ app.post('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
+  const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
+  const specialtiesProvided = req.body?.specialties !== undefined;
+  const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
   const avatarUrl = normalizePublicProfileUrl(req.body?.avatarUrl);
+  const bookingEmail = normalizePublicProfileEmail(req.body?.booking?.email);
+  const bookingPhone = normalizePublicProfilePhone(req.body?.booking?.phone);
+  const facebookUrl = normalizePublicProfileUrl(req.body?.socialLinks?.facebook);
   const instagramUrl = normalizePublicProfileUrl(req.body?.socialLinks?.instagram);
   const tiktokUrl = normalizePublicProfileUrl(req.body?.socialLinks?.tiktok);
   const youtubeUrl = normalizePublicProfileUrl(req.body?.socialLinks?.youtube);
   const soundcloudUrl = normalizePublicProfileUrl(req.body?.socialLinks?.soundcloud);
   const websiteUrl = normalizePublicProfileUrl(req.body?.socialLinks?.website);
+  const normalizedLinks = normalizePublicProfileLinks(req.body?.links);
 
-  await businessDb
-    .insert(performerPublicProfiles)
-    .values({
-      performerId: performerOwner.performerId,
-      headline,
-      city,
-      avatarUrl,
-      instagramUrl,
-      tiktokUrl,
-      youtubeUrl,
-      soundcloudUrl,
-      websiteUrl,
-      updatedAt: new Date()
-    })
-    .onConflictDoUpdate({
-      target: performerPublicProfiles.performerId,
-      set: {
+  if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
+    return res.status(422).json({ error: 'Specialties must be an array.' });
+  }
+
+  const invalidUrlField = [
+    ['Avatar URL', req.body?.avatarUrl, avatarUrl],
+    ['Facebook URL', req.body?.socialLinks?.facebook, facebookUrl],
+    ['Instagram URL', req.body?.socialLinks?.instagram, instagramUrl],
+    ['TikTok URL', req.body?.socialLinks?.tiktok, tiktokUrl],
+    ['YouTube URL', req.body?.socialLinks?.youtube, youtubeUrl],
+    ['SoundCloud URL', req.body?.socialLinks?.soundcloud, soundcloudUrl],
+    ['Website URL', req.body?.socialLinks?.website, websiteUrl]
+  ].find(([, rawValue, normalizedValue]) => (
+    typeof rawValue === 'string' && rawValue.trim().length > 0 && !normalizedValue
+  ));
+
+  if (invalidUrlField) {
+    return res.status(422).json({ error: `${invalidUrlField[0]} must be a valid http or https URL.` });
+  }
+  if (typeof req.body?.booking?.email === 'string' && req.body.booking.email.trim() && !bookingEmail) {
+    return res.status(422).json({ error: 'Booking email must be a valid email address.' });
+  }
+  if (typeof req.body?.booking?.phone === 'string' && req.body.booking.phone.trim() && !bookingPhone) {
+    return res.status(422).json({ error: 'Booking phone must be a valid public phone number.' });
+  }
+  if (normalizedLinks.error) {
+    return res.status(422).json({ error: normalizedLinks.error });
+  }
+
+  const savedLinks = await businessDb.transaction(async (tx) => {
+    const now = new Date();
+
+    await tx
+      .update(performers)
+      .set({ bio, updatedAt: now })
+      .where(eq(performers.id, performerOwner.performerId));
+
+    await tx
+      .insert(performerPublicProfiles)
+      .values({
+        performerId: performerOwner.performerId,
         headline,
+        specialties: specialties ?? [],
         city,
         avatarUrl,
+        bookingEmail,
+        bookingPhone,
+        facebookUrl,
         instagramUrl,
         tiktokUrl,
         youtubeUrl,
         soundcloudUrl,
         websiteUrl,
-        updatedAt: new Date()
+        updatedAt: now
+      })
+      .onConflictDoUpdate({
+        target: performerPublicProfiles.performerId,
+        set: {
+          headline,
+          specialties: specialties ?? [],
+          city,
+          avatarUrl,
+          bookingEmail,
+          bookingPhone,
+          facebookUrl,
+          instagramUrl,
+          tiktokUrl,
+          youtubeUrl,
+          soundcloudUrl,
+          websiteUrl,
+          updatedAt: now
+        }
+      });
+
+    if (normalizedLinks.provided) {
+      await tx.delete(performerProfileLinks).where(eq(performerProfileLinks.performerId, performerOwner.performerId));
+      if (normalizedLinks.links.length) {
+        await tx.insert(performerProfileLinks).values(normalizedLinks.links.map((link) => ({
+          performerId: performerOwner.performerId,
+          label: link.label,
+          description: link.description,
+          url: link.url,
+          kind: link.kind,
+          sortOrder: link.sortOrder,
+          isActive: link.isActive,
+          updatedAt: now
+        })));
+      }
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: talentAccess.actor.actorId,
+      actorType: 'performer',
+      entityType: 'performer',
+      entityId: performerOwner.performerId,
+      eventType: 'performer_public_profile.update',
+      previousStatus: null,
+      nextStatus: 'published',
+      metadata: {
+        hasBio: Boolean(bio),
+        specialtyCount: specialties?.length ?? 0,
+        hasBookingEmail: Boolean(bookingEmail),
+        hasBookingPhone: Boolean(bookingPhone),
+        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null
       }
     });
+
+    return tx
+      .select({
+        id: performerProfileLinks.id,
+        label: performerProfileLinks.label,
+        description: performerProfileLinks.description,
+        url: performerProfileLinks.url,
+        kind: performerProfileLinks.kind,
+        sortOrder: performerProfileLinks.sortOrder,
+        isActive: performerProfileLinks.isActive
+      })
+      .from(performerProfileLinks)
+      .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
+      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
+  });
 
   return res.status(202).json({
     success: true,
@@ -4131,16 +4934,24 @@ app.post('/api/talent/profile/public', async (req, res) => {
       performerId: performerOwner.performerId,
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
+      bio,
       headline,
+      specialties: specialties ?? [],
       city,
       avatarUrl,
+      booking: {
+        email: bookingEmail,
+        phone: bookingPhone
+      },
       socialLinks: {
+        facebook: facebookUrl,
         instagram: instagramUrl,
         tiktok: tiktokUrl,
         youtube: youtubeUrl,
         soundcloud: soundcloudUrl,
         website: websiteUrl
-      }
+      },
+      links: savedLinks
     }
   });
 });
@@ -4893,17 +5704,7 @@ app.get('/api/public/feed', async (_req, res) => {
     const selectedRooms = activeRooms.slice(0, roomLimit);
 
     if (!businessDb) {
-      return res.json({
-        rooms: selectedRooms.map((room) => ({
-          gigId: room.gigId,
-          routePath: room.routePath,
-          performerName: room.performerName,
-          talentRole: room.talentRole,
-          requestCount: room.requestCount,
-          startedAt: room.startedAt,
-          profile: null
-        }))
-      });
+      return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
     const gigIds = selectedRooms.map((room) => room.gigId);
@@ -4915,6 +5716,7 @@ app.get('/api/public/feed', async (_req, res) => {
         headline: performerPublicProfiles.headline,
         city: performerPublicProfiles.city,
         avatarUrl: performerPublicProfiles.avatarUrl,
+        facebookUrl: performerPublicProfiles.facebookUrl,
         instagramUrl: performerPublicProfiles.instagramUrl,
         tiktokUrl: performerPublicProfiles.tiktokUrl,
         youtubeUrl: performerPublicProfiles.youtubeUrl,
@@ -4924,34 +5726,41 @@ app.get('/api/public/feed', async (_req, res) => {
       .from(gigSessions)
       .innerJoin(performers, eq(performers.id, gigSessions.performerId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(inArray(gigSessions.id, gigIds));
+      .where(and(
+        inArray(gigSessions.id, gigIds),
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ));
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
 
     return res.json({
-      rooms: selectedRooms.map((room) => {
-        const detail = detailsByGigId.get(room.gigId);
+      rooms: selectedRooms
+        .filter((room) => detailsByGigId.has(room.gigId))
+        .map((room) => {
+        const detail = detailsByGigId.get(room.gigId)!;
         return {
           gigId: room.gigId,
           routePath: room.routePath,
-          performerName: detail?.performerName || room.performerName,
-          performerHandle: detail?.performerHandle || null,
-          performerPath: detail?.performerHandle ? `/p/${detail.performerHandle}` : null,
+          performerName: detail.performerName || room.performerName,
+          performerHandle: detail.performerHandle || null,
+          performerPath: detail.performerHandle ? `/p/${detail.performerHandle}` : null,
           talentRole: room.talentRole,
           requestCount: room.requestCount,
           startedAt: room.startedAt,
-          profile: detail ? {
+          profile: {
             headline: detail.headline,
             city: detail.city,
-            avatarUrl: detail.avatarUrl,
+            avatarUrl: normalizePublicProfileUrl(detail.avatarUrl),
             socialLinks: toPublicSocialLinks({
+              facebookUrl: detail.facebookUrl,
               instagramUrl: detail.instagramUrl,
               tiktokUrl: detail.tiktokUrl,
               youtubeUrl: detail.youtubeUrl,
               soundcloudUrl: detail.soundcloudUrl,
               websiteUrl: detail.websiteUrl
             })
-          } : null
+          }
         };
       })
     });
@@ -4977,12 +5786,17 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     const [profile] = await businessDb
       .select({
         performerId: performers.id,
+        ownerEmailVerifiedAt: users.emailVerifiedAt,
         displayName: performers.displayName,
         handle: performers.handle,
         bio: performers.bio,
         headline: performerPublicProfiles.headline,
+        specialties: performerPublicProfiles.specialties,
         city: performerPublicProfiles.city,
         avatarUrl: performerPublicProfiles.avatarUrl,
+        bookingEmail: performerPublicProfiles.bookingEmail,
+        bookingPhone: performerPublicProfiles.bookingPhone,
+        facebookUrl: performerPublicProfiles.facebookUrl,
         instagramUrl: performerPublicProfiles.instagramUrl,
         tiktokUrl: performerPublicProfiles.tiktokUrl,
         youtubeUrl: performerPublicProfiles.youtubeUrl,
@@ -4990,50 +5804,89 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         websiteUrl: performerPublicProfiles.websiteUrl
       })
       .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+      .where(and(
+        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ))
       .limit(1);
 
     if (!profile) {
       return res.status(404).json({ error: 'Performer profile not found.' });
     }
 
-    const [activeRoom] = await businessDb
-      .select({
-        gigId: activeRoomRegistry.gigId,
-        routePath: activeRoomRegistry.routePath,
-        talentRole: activeRoomRegistry.talentRole,
-        startedAt: activeRoomRegistry.startedAt
-      })
-      .from(activeRoomRegistry)
-      .where(and(
-        eq(activeRoomRegistry.performerId, profile.performerId),
-        eq(activeRoomRegistry.registryStatus, 'active')
-      ))
-      .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
-      .limit(1);
+    const [[activeRoom], linkRows, partnerState] = await Promise.all([
+      businessDb
+        .select({
+          gigId: activeRoomRegistry.gigId,
+          routePath: activeRoomRegistry.routePath,
+          talentRole: activeRoomRegistry.talentRole,
+          startedAt: activeRoomRegistry.startedAt
+        })
+        .from(activeRoomRegistry)
+        .where(and(
+          eq(activeRoomRegistry.performerId, profile.performerId),
+          eq(activeRoomRegistry.registryStatus, 'active')
+        ))
+        .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
+        .limit(1),
+      businessDb
+        .select({
+          label: performerProfileLinks.label,
+          description: performerProfileLinks.description,
+          url: performerProfileLinks.url,
+          kind: performerProfileLinks.kind,
+          sortOrder: performerProfileLinks.sortOrder
+        })
+        .from(performerProfileLinks)
+        .where(and(
+          eq(performerProfileLinks.performerId, profile.performerId),
+          eq(performerProfileLinks.isActive, true)
+        ))
+        .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
+      loadPartnerEntitlementStateForPerformer(businessDb, profile.performerId)
+    ]);
 
-    const activeRooms = await listReadableActiveRooms();
+    const activeRooms = await listReadableActiveRooms(profile.performerId);
     const activeRoomSummary = activeRoom
       ? activeRooms.find((room) => room.gigId === activeRoom.gigId) ?? null
       : null;
+    const publicLinkRows = linkRows.flatMap((link) => {
+      const safeUrl = normalizePublicProfileUrl(link.url);
+      return safeUrl ? [{ ...link, url: safeUrl }] : [];
+    });
+    const publicBooking = resolveVerifiedPublicBookingContact({
+      email: profile.bookingEmail,
+      phone: profile.bookingPhone,
+      ownerEmailVerifiedAt: profile.ownerEmailVerifiedAt
+    });
 
     return res.json({
       performer: {
-        id: profile.performerId,
         displayName: profile.displayName,
         handle: profile.handle,
         bio: profile.bio,
         headline: profile.headline,
+        specialties: profile.specialties ?? [],
         city: profile.city,
-        avatarUrl: profile.avatarUrl,
+        avatarUrl: normalizePublicProfileUrl(profile.avatarUrl),
+        booking: publicBooking,
         socialLinks: toPublicSocialLinks({
+          facebookUrl: profile.facebookUrl,
           instagramUrl: profile.instagramUrl,
           tiktokUrl: profile.tiktokUrl,
           youtubeUrl: profile.youtubeUrl,
           soundcloudUrl: profile.soundcloudUrl,
           websiteUrl: profile.websiteUrl
-        })
+        }),
+        links: publicLinkRows,
+        partner: {
+          active: partnerState?.isEffective ?? false,
+          kind: partnerState?.isEffective ? partnerState.partnerKind : null,
+          termsVersion: partnerState?.isEffective ? partnerState.termsVersion : null
+        }
       },
       activeRoom: activeRoom
         ? {
@@ -5589,9 +6442,13 @@ app.post("/api/request/create", async (req, res) => {
     payment_method,
     payment_intent_id
   } = req.body;
+  const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return res.status(422).json({ error: "Sway Request and Tip payments currently support USD only." });
   }
 
   const durableGigId = parseDurableGigId(gig_id);
@@ -5626,7 +6483,7 @@ app.post("/api/request/create", async (req, res) => {
     action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     target_entity_id: title || 'request',
     amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     payload_hash
   });
 
@@ -5637,7 +6494,7 @@ app.post("/api/request/create", async (req, res) => {
     gigId: durableGigId,
     actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     targetEntityType: targetType || 'music',
     targetEntityId: title || 'request',
     payloadHash: payload_hash,
@@ -5673,7 +6530,8 @@ app.post("/api/request/create", async (req, res) => {
 
   const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
   const holdAmount = tipAmount;
-  const platformFee = paymentsEnabledForAction ? 1.0 : 0;
+  const proposedPlatformFeeCents = paymentsEnabledForAction ? 100 : 0;
+  const platformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
 
   // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
   if (!isStraightTip && (!roomState.session.requestsOpen || roomState.session.status !== 'active')) {
@@ -5741,7 +6599,7 @@ app.post("/api/request/create", async (req, res) => {
     message: message || "",
     amount: tipAmount,
     holdAmount: holdAmount,
-    platformFee: platformFee,
+    platformFee: proposedPlatformFeeCents / 100,
     sponsorCount: 1,
     status: shadowBanned ? 'hold' : (isStraightTip ? 'fulfilled' : (shouldAutopilotApprove ? 'approved' : 'hold')),
     shadowBanned: shadowBanned,
@@ -5756,7 +6614,7 @@ app.post("/api/request/create", async (req, res) => {
     gigId: durableGigId,
     payloadHash: payload_hash,
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     boosts: []
   };
 
@@ -5767,14 +6625,14 @@ app.post("/api/request/create", async (req, res) => {
     // Free room, non-tip request: no money changes hands, nothing to authorize.
     newItem.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
-    const platformFeeCents = roomState.session.feeType === 'patron' ? 100 : 0;
     const authorization = confirmedPaymentIntentId
       ? await paymentService.confirmAuthorizedAction({
           gigId: durableGigId,
           actionType: isStraightTip ? 'tip' : 'request',
           amountSubtotalCents: amount_cents,
-          platformFeeCents,
-          currency: String(currency).toUpperCase(),
+          platformFeeCents: proposedPlatformFeeCents,
+          platformFeePayer,
+          currency: normalizedCurrency,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
           processorPaymentIntentId: confirmedPaymentIntentId
@@ -5783,8 +6641,9 @@ app.post("/api/request/create", async (req, res) => {
           gigId: durableGigId,
           actionType: isStraightTip ? 'tip' : 'request',
           amountSubtotalCents: amount_cents,
-          platformFeeCents,
-          currency: String(currency).toUpperCase(),
+          platformFeeCents: proposedPlatformFeeCents,
+          platformFeePayer,
+          currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
@@ -5812,6 +6671,7 @@ app.post("/api/request/create", async (req, res) => {
     // status === 'authorized': a real hold exists. Only now may the request enter
     // app state / Private Triage.
     if (authorization.status === 'authorized') {
+      newItem.platformFee = authorization.platformFeeCents / 100;
       newItem.paymentId = authorization.paymentId;
       newItem.paymentIntentId = authorization.processorPaymentIntentId;
       newItem.paymentStatus = 'authorized';
@@ -5876,8 +6736,12 @@ app.post("/api/request/boost", async (req, res) => {
     payment_method,
     payment_intent_id
   } = req.body;
+  const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return res.status(422).json({ error: "Sway Boost payments currently support USD only." });
   }
 
   const durableGigId = parseDurableGigId(gig_id);
@@ -5944,7 +6808,7 @@ app.post("/api/request/boost", async (req, res) => {
     action_type: 'boost',
     target_entity_id: requestId,
     amount_cents,
-    currency,
+    currency: normalizedCurrency,
     payload_hash
   });
 
@@ -5955,7 +6819,7 @@ app.post("/api/request/boost", async (req, res) => {
     gigId: durableGigId,
     actionType: 'boost',
     amountCents: amount_cents,
-    currency: String(currency).toUpperCase(),
+    currency: normalizedCurrency,
     targetEntityType: 'request',
     targetEntityId: requestId,
     payloadHash: payload_hash,
@@ -6022,6 +6886,8 @@ app.post("/api/request/boost", async (req, res) => {
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
+  let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? 100 : 0;
+  const boostPlatformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
 
   // Provider-backed authorization/hold for the boost. The booster only reaches
   // this point because the target request already cleared Private Triage, so the
@@ -6035,8 +6901,9 @@ app.post("/api/request/boost", async (req, res) => {
           gigId: durableGigId,
           actionType: 'boost',
           amountSubtotalCents: amount_cents,
-          platformFeeCents: 100,
-          currency: String(currency).toUpperCase(),
+          platformFeeCents: appliedBoostPlatformFeeCents,
+          platformFeePayer: boostPlatformFeePayer,
+          currency: normalizedCurrency,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,
           processorPaymentIntentId: confirmedPaymentIntentId
@@ -6045,8 +6912,9 @@ app.post("/api/request/boost", async (req, res) => {
           gigId: durableGigId,
           actionType: 'boost',
           amountSubtotalCents: amount_cents,
-          platformFeeCents: 100,
-          currency: String(currency).toUpperCase(),
+          platformFeeCents: appliedBoostPlatformFeeCents,
+          platformFeePayer: boostPlatformFeePayer,
+          currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,
@@ -6073,6 +6941,7 @@ app.post("/api/request/boost", async (req, res) => {
     // status === 'authorized': a real hold exists. The target request already
     // cleared Private Triage, so the approved boost is captured immediately.
     if (authorization.status === 'authorized') {
+      appliedBoostPlatformFeeCents = authorization.platformFeeCents;
       newBoost.paymentId = authorization.paymentId;
       newBoost.paymentIntentId = authorization.processorPaymentIntentId;
       newBoost.paymentStatus = 'authorized';
@@ -6092,7 +6961,7 @@ app.post("/api/request/boost", async (req, res) => {
 
   request.boosts.push(newBoost);
   request.amount += amt; // Pool funds!
-  request.platformFee += 1.0; // Flat platform fee grows by $1 per boost
+  request.platformFee += appliedBoostPlatformFeeCents / 100;
   request.sponsorCount += 1;
 
   if (isBackerShadowed) {

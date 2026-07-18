@@ -144,6 +144,36 @@ export function createPerformerLoginMailer({
         subject: 'Verify your Sway performer account',
         introLine: 'Verify your Sway performer email so you can start live rooms with your account.'
       });
+    },
+
+    sendAccountInvitation({
+      toEmail,
+      invitationLink
+    }: {
+      toEmail: string;
+      invitationLink: string;
+    }) {
+      return deliverLink({
+        toEmail,
+        link: invitationLink,
+        subject: 'Finish setting up your Sway performer account',
+        introLine: 'You were invited to a Sway performer account. Open this one-time link to choose your own password and accept the account terms.'
+      });
+    },
+
+    sendOwnerPasswordReset({
+      toEmail,
+      resetLink
+    }: {
+      toEmail: string;
+      resetLink: string;
+    }) {
+      return deliverLink({
+        toEmail,
+        link: resetLink,
+        subject: 'Choose a new Sway password',
+        introLine: 'Open this one-time link to choose a new password for your Sway account. Administrators cannot choose it for you.'
+      });
     }
   };
 }

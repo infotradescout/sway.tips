@@ -71,8 +71,10 @@ async function main() {
   assert.ok(signupCardSource.includes('Open local verification link'), 'Local mock signup must expose the verification link instead of implying real email delivery.');
 
   assert.ok(
-    accessSource.includes("req.path === '/talent/login' || req.path === '/talent/signup'"),
-    'Public talent auth allowlist must include both /talent/login and /talent/signup.'
+    accessSource.includes("req.path === '/talent/login'")
+      && accessSource.includes("req.path === '/talent/signup'")
+      && accessSource.includes("req.path === '/talent/invite'"),
+    'Public talent auth allowlist must include login, signup, and one-time owner invitation pages.'
   );
 
   for (const term of [
@@ -105,6 +107,7 @@ async function main() {
   assert.equal(normalizePerformerHandle('DJ-Sunset'), 'DJ-Sunset', 'Performer handles must allow performer-chosen casing.');
   assert.equal(normalizePerformerHandle('bad handle'), null, 'Performer handles must reject spaces.');
   assert.equal(normalizePerformerHandle('bad*handle'), null, 'Performer handles must reject unsupported characters.');
+  assert.equal(normalizePerformerHandle('Admin'), null, 'Performer handles must reject reserved names case-insensitively.');
   assert.ok(
     schemaSource.includes("uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`)"),
     'Performer handle uniqueness must be case-insensitive at the schema level.'

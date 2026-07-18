@@ -3,12 +3,14 @@ import { createSwayDb } from '../db/client';
 import { payments, gigSessions, performers } from '../db/schema';
 import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
+import { resolveSwayPlatformFeePolicyForGig } from './partner-entitlement-store';
 
 export type AuthorizeActionInput = {
   gigId: string;
   actionType: 'tip' | 'request' | 'boost' | 'bump' | 'vip';
   amountSubtotalCents: number;
   platformFeeCents: number;
+  platformFeePayer?: 'patron' | 'performer';
   currency: string;
   idempotencyKey: string;
   runtimeRequestId?: string | null;
@@ -27,11 +29,11 @@ export type AuthorizeActionResult =
   // 'authorized' is returned ONLY when the provider confirms the funds are held
   // (PaymentIntent requires_capture). A request may enter app state / triage only
   // on this result.
-  | { status: 'authorized'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null }
+  | { status: 'authorized'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null; platformFeeCents: number; platformFeeCapCents: number | null; partnerTermsVersion: string | null; partnerTermsHash: string | null }
   // 'requires_confirmation' means a PaymentIntent exists but is not yet a hold.
   // The caller MUST NOT create app state; the patron must confirm the payment
   // (via clientSecret) before the action can proceed.
-  | { status: 'requires_confirmation'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null; providerStatus: string }
+  | { status: 'requires_confirmation'; paymentId: string; processorPaymentIntentId: string; clientSecret: string | null; providerStatus: string; platformFeeCents: number; platformFeeCapCents: number | null; partnerTermsVersion: string | null; partnerTermsHash: string | null }
   | { status: 'failed'; reason: string };
 
 export type SettleResult =
@@ -47,6 +49,25 @@ export type CloseoutTotals = {
   capturedTotalCents: number;
   platformFeeCents: number;
 };
+
+export function calculateSwayPaymentAmounts(input: {
+  amountSubtotalCents: number;
+  platformFeeCents: number;
+  platformFeePayer?: 'patron' | 'performer';
+}) {
+  const platformFeePayer = input.platformFeePayer === 'performer' ? 'performer' : 'patron';
+  const platformFeeChargedToPatronCents = platformFeePayer === 'patron'
+    ? input.platformFeeCents
+    : 0;
+
+  return {
+    amountSubtotalCents: input.amountSubtotalCents,
+    platformFeeCents: input.platformFeeCents,
+    platformFeePayer,
+    platformFeeChargedToPatronCents,
+    amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents
+  };
+}
 
 /**
  * Provider-backed payment orchestration.
@@ -75,7 +96,26 @@ export function createPaymentService(config: {
       return { status: 'disabled' };
     }
 
-    const amountTotalCents = input.amountSubtotalCents + input.platformFeeCents;
+    let feePolicy;
+    try {
+      feePolicy = await resolveSwayPlatformFeePolicyForGig({
+        db,
+        gigId: input.gigId,
+        proposedPlatformFeeCents: input.platformFeeCents
+      });
+    } catch {
+      return { status: 'failed', reason: 'platform_fee_policy_unavailable' };
+    }
+
+    const {
+      platformFeePayer,
+      platformFeeChargedToPatronCents,
+      amountTotalCents
+    } = calculateSwayPaymentAmounts({
+      amountSubtotalCents: input.amountSubtotalCents,
+      platformFeeCents: feePolicy.platformFeeCents,
+      platformFeePayer: input.platformFeePayer
+    });
 
     const [created] = await db
       .insert(payments)
@@ -86,7 +126,7 @@ export function createPaymentService(config: {
         paymentStatus: 'created',
         processor: provider.processor,
         amountSubtotal: input.amountSubtotalCents,
-        platformFee: input.platformFeeCents,
+        platformFee: feePolicy.platformFeeCents,
         amountTotal: amountTotalCents,
         currency: input.currency,
         captureMode: 'manual'
@@ -121,12 +161,18 @@ export function createPaymentService(config: {
         paymentMethod: input.paymentMethod,
         confirm: input.confirm,
         ...(destinationAccountId
-          ? { destinationAccountId, applicationFeeAmountCents: input.platformFeeCents }
+          ? { destinationAccountId, applicationFeeAmountCents: feePolicy.platformFeeCents }
           : {}),
         metadata: {
           sway_payment_id: paymentId,
           sway_gig_id: input.gigId,
           sway_action_type: input.actionType,
+          sway_platform_fee_cents: String(feePolicy.platformFeeCents),
+          sway_platform_fee_payer: platformFeePayer,
+          sway_platform_fee_charged_to_patron_cents: String(platformFeeChargedToPatronCents),
+          ...(feePolicy.platformFeeCapCents === null ? {} : { sway_platform_fee_cap_cents: String(feePolicy.platformFeeCapCents) }),
+          ...(feePolicy.partnerTermsVersion ? { sway_partner_terms_version: feePolicy.partnerTermsVersion } : {}),
+          ...(feePolicy.partnerTermsHash ? { sway_partner_terms_hash: feePolicy.partnerTermsHash } : {}),
           ...(input.runtimeRequestId ? { sway_runtime_request_id: input.runtimeRequestId } : {}),
           ...(input.clientRequestId ? { sway_client_request_id: input.clientRequestId } : {}),
           ...(input.metadata ?? {})
@@ -165,7 +211,8 @@ export function createPaymentService(config: {
           paymentId,
           processorPaymentIntentId: authorization.processorPaymentIntentId,
           clientSecret: authorization.clientSecret,
-          providerStatus: authorization.status
+          providerStatus: authorization.status,
+          ...feePolicy
         };
       }
 
@@ -186,7 +233,8 @@ export function createPaymentService(config: {
         status: 'authorized',
         paymentId,
         processorPaymentIntentId: authorization.processorPaymentIntentId,
-        clientSecret: authorization.clientSecret
+        clientSecret: authorization.clientSecret,
+        ...feePolicy
       };
     } catch (error) {
       // Fail safe: mark the payment failed so no successful financial state exists.
@@ -208,7 +256,22 @@ export function createPaymentService(config: {
       return { status: 'disabled' };
     }
 
-    const amountTotalCents = input.amountSubtotalCents + input.platformFeeCents;
+    let feePolicy;
+    try {
+      feePolicy = await resolveSwayPlatformFeePolicyForGig({
+        db,
+        gigId: input.gigId,
+        proposedPlatformFeeCents: input.platformFeeCents
+      });
+    } catch {
+      return { status: 'failed', reason: 'platform_fee_policy_unavailable' };
+    }
+
+    const { amountTotalCents } = calculateSwayPaymentAmounts({
+      amountSubtotalCents: input.amountSubtotalCents,
+      platformFeeCents: feePolicy.platformFeeCents,
+      platformFeePayer: input.platformFeePayer
+    });
     const [payment] = await db
       .select({
         id: payments.id,
@@ -232,7 +295,7 @@ export function createPaymentService(config: {
     const sameFinancialIntent =
       payment.gigId === input.gigId
       && payment.amountSubtotal === input.amountSubtotalCents
-      && payment.platformFee === input.platformFeeCents
+      && payment.platformFee === feePolicy.platformFeeCents
       && payment.amountTotal === amountTotalCents
       && payment.currency.toUpperCase() === input.currency.toUpperCase();
 
@@ -245,7 +308,8 @@ export function createPaymentService(config: {
         status: 'authorized',
         paymentId: payment.id,
         processorPaymentIntentId: payment.processorPaymentIntentId,
-        clientSecret: null
+        clientSecret: null,
+        ...feePolicy
       };
     }
 
@@ -278,7 +342,8 @@ export function createPaymentService(config: {
           paymentId: payment.id,
           processorPaymentIntentId: authorization.processorPaymentIntentId,
           clientSecret: authorization.clientSecret,
-          providerStatus: authorization.status
+          providerStatus: authorization.status,
+          ...feePolicy
         };
       }
 
@@ -300,7 +365,8 @@ export function createPaymentService(config: {
         status: 'authorized',
         paymentId: payment.id,
         processorPaymentIntentId: authorization.processorPaymentIntentId,
-        clientSecret: authorization.clientSecret
+        clientSecret: authorization.clientSecret,
+        ...feePolicy
       };
     } catch (error) {
       return { status: 'failed', reason: error instanceof Error ? error.message : 'unknown_provider_error' };

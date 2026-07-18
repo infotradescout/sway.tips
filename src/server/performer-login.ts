@@ -10,6 +10,37 @@ export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_MAX = 3;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN = 'login';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL = 'verify_email';
+export const PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE = 'account_invite';
+export const PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET = 'password_reset';
+
+export const RESERVED_PERFORMER_HANDLES = new Set([
+  'admin',
+  'api',
+  'app',
+  'assets',
+  'auth',
+  'billing',
+  'contact',
+  'discover',
+  'g',
+  'help',
+  'login',
+  'logout',
+  'overlay',
+  'p',
+  'privacy',
+  'profile',
+  'public',
+  'room',
+  'settings',
+  'shells',
+  'signup',
+  'support',
+  'sway',
+  'talent',
+  'terms',
+  'www'
+]);
 
 type DbExecutor = SwayDb | any;
 
@@ -36,7 +67,9 @@ export function normalizePerformerHandle(rawValue: unknown) {
 
   const trimmed = rawValue.trim();
   if (!trimmed) return null;
+  if (trimmed.length > 64) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) return null;
+  if (RESERVED_PERFORMER_HANDLES.has(trimmed.toLowerCase())) return null;
 
   return trimmed;
 }
@@ -197,10 +230,12 @@ export function createPerformerLoginChallengeStore({
 
     async consumeChallengeFromToken({
       token,
+      expectedChallengeType,
       executor,
       now = new Date()
     }: {
       token: string;
+      expectedChallengeType?: string;
       executor?: DbExecutor | null;
       now?: Date;
     }) {
@@ -215,6 +250,9 @@ export function createPerformerLoginChallengeStore({
         })
         .where(and(
           eq(performerLoginChallenges.tokenHash, tokenHash),
+          expectedChallengeType
+            ? eq(performerLoginChallenges.challengeType, expectedChallengeType)
+            : undefined,
           isNull(performerLoginChallenges.consumedAt),
           isNull(performerLoginChallenges.revokedAt),
           gt(performerLoginChallenges.expiresAt, now)
