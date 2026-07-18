@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
 
 type PublicProfileLink = {
@@ -180,12 +181,21 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const socialLinks = useMemo(() => Object.entries(profile?.socialLinks || {})
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0), [profile]);
 
+  const profileUrl = useMemo(() => {
+    if (!profile) return '';
+    const canonicalHandle = profile.handle || performerHandle;
+    const profilePath = `/p/${encodeURIComponent(canonicalHandle)}`;
+    return typeof window === 'undefined'
+      ? profilePath
+      : new URL(profilePath, window.location.origin).toString();
+  }, [performerHandle, profile]);
+
   const handleShare = async () => {
     if (!profile) return;
     const shareData = {
       title: `${profile.displayName} on Sway`,
       text: profile.headline || `Visit ${profile.displayName}'s public Sway page.`,
-      url: window.location.href
+      url: profileUrl
     };
 
     try {
@@ -193,7 +203,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
         await navigator.share(shareData);
         return;
       }
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(profileUrl);
       setShareMessage('Link copied');
       window.setTimeout(() => setShareMessage(null), 1800);
     } catch {
@@ -340,6 +350,43 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               </p>
             ) : null}
           </div>
+
+          <section className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.05] p-4 text-left" aria-label="Share public profile">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Share this page</p>
+                <p className="mt-2 text-sm font-bold text-white">Scan to open {profile.displayName}'s public Sway profile.</p>
+                <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileUrl}</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(profileUrl);
+                      setShareMessage('Profile link copied');
+                      window.setTimeout(() => setShareMessage(null), 1800);
+                    } catch {
+                      setShareMessage('Copy unavailable');
+                    }
+                  }}
+                  className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-300/[0.08] px-3 py-2 text-xs font-black text-cyan-100 transition hover:border-cyan-200/60 hover:bg-cyan-300/[0.14]"
+                >
+                  Copy profile link
+                </button>
+              </div>
+              <div className="shrink-0 self-center rounded-2xl bg-white p-3 shadow-inner" data-public-profile-qr="true">
+                <QRCodeCanvas
+                  key={profileUrl}
+                  aria-label="Public Sway profile QR code"
+                  value={profileUrl}
+                  size={156}
+                  level="H"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  marginSize={4}
+                />
+              </div>
+            </div>
+          </section>
 
           {activeRoom ? (
             <a
