@@ -124,6 +124,102 @@ const previews = [
         isActive: true
       }
     ]
+  },
+  {
+    handle: 'bubbakhain',
+    displayName: 'Bubba Khain',
+    metadata: { stageName: 'Bubba Khain' },
+    headline: 'Hip-hop artist · Rapper · Independent recording artist',
+    bio: 'Bubba Khain is a Hammond, Louisiana-based hip-hop artist whose independent catalog includes the 1,040 Degrees EP and singles including Groove, KEEP GOIN.MIX-1, FAKE LOVE, and Major. His collaborations with Drew Maze include Major, FAKE LOVE, Facts II, and Neighborhood Watch.',
+    specialties: ['Hip-hop / rap', 'Rapper', 'Recording artist', 'Songwriter', 'Collaborations'],
+    city: 'Hammond, LA',
+    // Bubba Khain's official YouTube channel avatar, stored locally so the
+    // public page does not depend on a third-party hotlink.
+    avatarUrl: 'https://sway.tips/assets/bubba-khain-avatar.jpg',
+    // No booking destination is published until Bubba supplies or explicitly
+    // approves it. Public-source research is not owner approval.
+    youtubeUrl: 'https://www.youtube.com/@bubbakhain406',
+    links: [
+      {
+        label: 'Listen on Spotify',
+        description: 'The official Bubba Khain artist catalog.',
+        url: 'https://open.spotify.com/artist/7Fv5AO4ZRzYhX8fV7SL4xH',
+        kind: 'other',
+        isActive: true
+      },
+      {
+        label: 'Listen on Apple Music',
+        description: '1,040 Degrees and Bubba Khain singles and collaborations.',
+        url: 'https://music.apple.com/us/artist/bubba-khain/1450529807',
+        kind: 'other',
+        isActive: true
+      },
+      {
+        label: 'Bubba Khain on Audiomack',
+        description: 'Independent releases including Major featuring Drew Maze.',
+        url: 'https://audiomack.com/bubba-khain',
+        kind: 'other',
+        isActive: true
+      }
+    ],
+    featuredMedia: [
+      {
+        kind: 'youtube',
+        title: 'Bubba Khain: artist interview',
+        description: 'Bubba Khain discusses his start in rap, family, and his goals in music.',
+        url: 'https://www.youtube.com/watch?v=3NuzTNtwpBk',
+        isActive: true
+      }
+    ]
+  },
+  {
+    handle: 'calliehines',
+    displayName: 'Callie Hines',
+    metadata: { stageName: 'Callie Hines' },
+    headline: 'Americana · Folk · Singer-songwriter · Guitarist',
+    bio: 'Callie Hines is a Louisiana singer-songwriter, guitarist, and vocalist whose music blends Americana, folk, bluegrass, and country. Their debut EP, Tell Me Why I’ve Come Home, draws on a musical family upbringing and Cajun roots in rural South Louisiana.',
+    specialties: ['Americana', 'Folk', 'Singer-songwriter', 'Guitar', 'Vocals', 'Country', 'Bluegrass'],
+    city: 'Ponchatoula, LA',
+    // Photo supplied by Callie Hines to OffBeat Magazine and stored locally so
+    // the public page does not depend on a third-party hotlink.
+    avatarUrl: 'https://sway.tips/assets/callie-hines-avatar.jpg',
+    instagramUrl: 'https://www.instagram.com/thecalliehines',
+    facebookUrl: 'https://www.facebook.com/thecalliehines',
+    youtubeUrl: 'https://www.youtube.com/@TheCalliehinesmusic',
+    // No booking destination is published until Callie supplies or explicitly
+    // approves it. Public-source research is not owner approval.
+    links: [
+      {
+        label: 'Listen on Spotify',
+        description: 'Tell Me Why I’ve Come Home and Callie Hines releases.',
+        url: 'https://open.spotify.com/artist/2xxnkOlnJBeYGnxkcK5O5g',
+        kind: 'other',
+        isActive: true
+      },
+      {
+        label: 'Listen on Apple Music',
+        description: 'The official Callie Hines artist catalog.',
+        url: 'https://music.apple.com/us/artist/callie-hines/1660646267',
+        kind: 'other',
+        isActive: true
+      },
+      {
+        label: 'OffBeat: Tell Me Why I’ve Come Home',
+        description: 'A review of Callie’s debut EP and its Louisiana roots.',
+        url: 'https://www.offbeat.com/music/callie-hines-tell-me-why-ive-come-home-ep/',
+        kind: 'press',
+        isActive: true
+      }
+    ],
+    featuredMedia: [
+      {
+        kind: 'youtube',
+        title: 'Wolves',
+        description: 'Music from Callie Hines’ official YouTube channel.',
+        url: 'https://www.youtube.com/watch?v=On5_YE674Zo',
+        isActive: true
+      }
+    ]
   }
 ];
 

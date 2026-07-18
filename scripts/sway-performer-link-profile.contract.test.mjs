@@ -127,7 +127,7 @@ for (const forbidden of [
 const drewMazePreview = sliceBetween(
   previewSeed,
   "  {\n    handle: 'drewmaze'",
-  '\n  }\n];',
+  "\n  },\n  {\n    handle: 'bubbakhain'",
   'Drew Maze curated preview'
 );
 for (const term of [
@@ -150,6 +150,57 @@ if (!existsSync(join(root, 'public/assets/drew-maze-avatar.jpg'))) {
 }
 for (const forbidden of ['websiteUrl:', "kind: 'booking'", 'city:']) {
   requireExcludes(drewMazePreview, forbidden, 'Drew Maze unapproved profile fields');
+}
+
+const bubbaKhainPreview = sliceBetween(
+  previewSeed,
+  "  {\n    handle: 'bubbakhain'",
+  "\n  },\n  {\n    handle: 'calliehines'",
+  'Bubba Khain curated preview'
+);
+for (const term of [
+  "handle: 'bubbakhain'",
+  "displayName: 'Bubba Khain'",
+  'Hip-hop artist · Rapper · Independent recording artist',
+  "city: 'Hammond, LA'",
+  'open.spotify.com/artist/7Fv5AO4ZRzYhX8fV7SL4xH',
+  'music.apple.com/us/artist/bubba-khain/1450529807',
+  'youtube.com/@bubbakhain406',
+  "avatarUrl: 'https://sway.tips/assets/bubba-khain-avatar.jpg'",
+  'www.youtube.com/watch?v=3NuzTNtwpBk',
+  'Public-source research is not owner approval.'
+]) requireIncludes(bubbaKhainPreview, term, 'Bubba Khain curated preview');
+if (!existsSync(join(root, 'public/assets/bubba-khain-avatar.jpg'))) {
+  failures.push('Bubba Khain official YouTube avatar asset is missing.');
+}
+for (const forbidden of ['websiteUrl:', "kind: 'booking'", 'instagramUrl:', 'facebookUrl:']) {
+  requireExcludes(bubbaKhainPreview, forbidden, 'Bubba Khain unapproved profile fields');
+}
+
+const callieHinesPreview = sliceBetween(
+  previewSeed,
+  "  {\n    handle: 'calliehines'",
+  '\n  }\n];',
+  'Callie Hines curated preview'
+);
+for (const term of [
+  "handle: 'calliehines'",
+  "displayName: 'Callie Hines'",
+  'Americana · Folk · Singer-songwriter · Guitarist',
+  "city: 'Ponchatoula, LA'",
+  'open.spotify.com/artist/2xxnkOlnJBeYGnxkcK5O5g',
+  'music.apple.com/us/artist/callie-hines/1660646267',
+  'instagram.com/thecalliehines',
+  'youtube.com/@TheCalliehinesmusic',
+  "avatarUrl: 'https://sway.tips/assets/callie-hines-avatar.jpg'",
+  'www.youtube.com/watch?v=On5_YE674Zo',
+  'Public-source research is not owner approval.'
+]) requireIncludes(callieHinesPreview, term, 'Callie Hines curated preview');
+if (!existsSync(join(root, 'public/assets/callie-hines-avatar.jpg'))) {
+  failures.push('Callie Hines press-supplied avatar asset is missing.');
+}
+for (const forbidden of ['websiteUrl:', "kind: 'booking'"]) {
+  requireExcludes(callieHinesPreview, forbidden, 'Callie Hines unapproved profile fields');
 }
 
 for (const term of [
