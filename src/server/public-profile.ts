@@ -1,6 +1,8 @@
 export const PUBLIC_PROFILE_MAX_LINKS = 12;
 export const PUBLIC_PROFILE_MAX_FEATURED_MEDIA = 4;
 
+const SUPPRESSED_PUBLIC_PROFILE_DOMAINS = ['djthreeex.com'];
+
 export const PUBLIC_PROFILE_LINK_KINDS = [
   'booking',
   'brand',
@@ -84,9 +86,26 @@ export function normalizePublicProfileUrl(value: unknown) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
     if (parsed.username || parsed.password) return null;
+    const hostname = parsed.hostname.toLowerCase();
+    const suppressed = SUPPRESSED_PUBLIC_PROFILE_DOMAINS.some((domain) => (
+      hostname === domain || hostname.endsWith(`.${domain}`)
+    ));
+    if (suppressed) return null;
     return parsed.toString();
   } catch {
     return null;
+  }
+}
+
+function isSuppressedPublicProfileUrl(value: unknown) {
+  if (typeof value !== 'string') return false;
+  try {
+    const hostname = new URL(value.trim()).hostname.toLowerCase();
+    return SUPPRESSED_PUBLIC_PROFILE_DOMAINS.some((domain) => (
+      hostname === domain || hostname.endsWith(`.${domain}`)
+    ));
+  } catch {
+    return false;
   }
 }
 
@@ -235,7 +254,8 @@ export function normalizePublicProfileLinks(value: unknown): NormalizedPublicPro
 
     const label = normalizePublicProfileText((rawLink as any).label, 80)?.replace(/\s+/g, ' ') ?? null;
     const description = normalizePublicProfileText((rawLink as any).description, 180);
-    const url = normalizePublicProfileUrl((rawLink as any).url);
+    const rawUrl = (rawLink as any).url;
+    const url = normalizePublicProfileUrl(rawUrl);
     const requestedKind = typeof (rawLink as any).kind === 'string'
       ? (rawLink as any).kind.trim().toLowerCase()
       : 'other';
@@ -245,6 +265,7 @@ export function normalizePublicProfileLinks(value: unknown): NormalizedPublicPro
       return { provided: true, links: [], error: `Profile link ${index + 1} needs a label.` };
     }
     if (!url) {
+      if (isSuppressedPublicProfileUrl(rawUrl)) continue;
       return { provided: true, links: [], error: `Profile link ${index + 1} needs a valid http or https URL.` };
     }
 
