@@ -10,6 +10,8 @@ import { createServer as createViteServer } from "vite";
 import { execFileSync } from "child_process";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
+import { existsSync } from "fs";
+import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
@@ -253,6 +255,15 @@ type ShareMetadata = {
   imageAlt: string;
 };
 
+type PublicShareProfile = {
+  displayName: string;
+  handle: string;
+  bio: string | null;
+  headline: string | null;
+  city: string | null;
+  avatarUrl: string | null;
+};
+
 const DEFAULT_SHARE_TITLE = 'Sway | Live Crowd Requests';
 const DEFAULT_SHARE_DESCRIPTION = 'Scan into a live Sway room to request, tip, boost, and follow the queue in real time.';
 const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=1';
@@ -327,6 +338,159 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
 }
 
+async function findPublicShareProfile(rawHandle: string): Promise<PublicShareProfile | null> {
+  const normalizedHandle = normalizePerformerHandle(rawHandle);
+  if (!normalizedHandle || !businessDb) return null;
+
+  const [profile] = await businessDb
+    .select({
+      displayName: performers.displayName,
+      handle: performers.handle,
+      bio: performers.bio,
+      headline: performerPublicProfiles.headline,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl
+    })
+    .from(performers)
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(and(
+      sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+      eq(performers.isActive, true),
+      notInArray(performers.onboardingStatus, ['suspended'])
+    ))
+    .limit(1);
+
+  if (profile) return profile;
+
+  const [existingPerformer] = await businessDb
+    .select({ id: performers.id })
+    .from(performers)
+    .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+    .limit(1);
+  if (existingPerformer) return null;
+
+  const [preview] = await businessDb
+    .select({
+      displayName: performerProfilePreviews.displayName,
+      handle: performerProfilePreviews.handle,
+      bio: performerProfilePreviews.bio,
+      headline: performerProfilePreviews.headline,
+      city: performerProfilePreviews.city,
+      avatarUrl: performerProfilePreviews.avatarUrl
+    })
+    .from(performerProfilePreviews)
+    .where(and(
+      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+      eq(performerProfilePreviews.isActive, true)
+    ))
+    .limit(1);
+
+  return preview || null;
+}
+
+function escapeShareCardText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function wrapShareCardText(value: string, maxCharacters = 48) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  for (const word of words) {
+    const current = lines[lines.length - 1] || '';
+    if (!current || `${current} ${word}`.length > maxCharacters) {
+      lines.push(word);
+    } else {
+      lines[lines.length - 1] = `${current} ${word}`;
+    }
+    if (lines.length === 2 && words.indexOf(word) < words.length - 1) break;
+  }
+  return lines.slice(0, 2);
+}
+
+async function readShareCardAvatar(avatarUrl: string | null): Promise<Buffer | null> {
+  const safeUrl = normalizePublicProfileUrl(avatarUrl);
+  if (!safeUrl) return null;
+
+  const parsed = new URL(safeUrl);
+  if (['sway.tips', 'www.sway.tips', 'app.sway.tips'].includes(parsed.hostname) && parsed.pathname.startsWith('/assets/')) {
+    const assetName = path.basename(parsed.pathname);
+    for (const root of [path.join(process.cwd(), 'dist', 'assets'), path.join(process.cwd(), 'public', 'assets')]) {
+      const candidate = path.join(root, assetName);
+      if (existsSync(candidate)) return readFileSync(candidate);
+    }
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  try {
+    const response = await fetch(safeUrl, { signal: controller.signal });
+    if (!response.ok) return null;
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function renderPerformerShareCard(profile: PublicShareProfile) {
+  const width = DEFAULT_SHARE_IMAGE_WIDTH;
+  const height = DEFAULT_SHARE_IMAGE_HEIGHT;
+  const backgroundPath = [
+    path.join(process.cwd(), 'dist', 'social-preview.png'),
+    path.join(process.cwd(), 'public', 'social-preview.png')
+  ].find((candidate) => existsSync(candidate));
+  if (!backgroundPath) throw new Error('Sway share-card background is unavailable.');
+
+  const headline = profile.headline || profile.bio || `Discover @${profile.handle} on Sway.`;
+  const headlineLines = wrapShareCardText(headline);
+  const overlay = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#03030a" stop-opacity="0.96"/>
+        <stop offset="0.52" stop-color="#08051b" stop-opacity="0.86"/>
+        <stop offset="1" stop-color="#03030a" stop-opacity="0.48"/>
+      </linearGradient>
+      <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#ff20d6"/><stop offset="1" stop-color="#27c8ff"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#shade)"/>
+    <rect x="92" y="105" width="104" height="7" rx="3.5" fill="url(#accent)"/>
+    <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PERFORMER PROFILE</text>
+    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800">${escapeShareCardText(profile.displayName)}</text>
+    <text x="96" y="402" fill="#55d9ff" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700">@${escapeShareCardText(profile.handle)}</text>
+    ${headlineLines.map((line, index) => `<text x="96" y="${510 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
+    <text x="96" y="800" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">sway to play</text>
+    <text x="96" y="846" fill="#aab0c8" font-family="Arial, Helvetica, sans-serif" font-size="25">app.sway.tips/${escapeShareCardText(profile.handle)}</text>
+  </svg>`);
+
+  const composites: Array<{ input: Buffer; top: number; left: number }> = [{ input: overlay, top: 0, left: 0 }];
+  const avatar = await readShareCardAvatar(profile.avatarUrl);
+  if (avatar) {
+    const size = 650;
+    const roundedMask = Buffer.from(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" rx="72" fill="#fff"/></svg>`);
+    const framedAvatar = await sharp(avatar)
+      .resize(size, size, { fit: 'cover', position: 'attention' })
+      .ensureAlpha()
+      .composite([{ input: roundedMask, blend: 'dest-in' }])
+      .png()
+      .toBuffer();
+    composites.push({ input: framedAvatar, top: 145, left: 930 });
+  }
+
+  return sharp(backgroundPath)
+    .resize(width, height, { fit: 'cover' })
+    .composite(composites)
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
 async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata> {
   const pathParts = req.path.split('/').filter(Boolean);
   const defaultMetadata = defaultShareMetadata(req);
@@ -337,23 +501,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     const normalizedHandle = normalizePerformerHandle(pathParts[1]);
     if (!normalizedHandle) return defaultMetadata;
 
-    const [profile] = await businessDb
-      .select({
-        displayName: performers.displayName,
-        handle: performers.handle,
-        bio: performers.bio,
-        headline: performerPublicProfiles.headline,
-        city: performerPublicProfiles.city,
-        avatarUrl: performerPublicProfiles.avatarUrl
-      })
-      .from(performers)
-      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(and(
-        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
-        eq(performers.isActive, true),
-        notInArray(performers.onboardingStatus, ['suspended'])
-      ))
-      .limit(1);
+    const profile = await findPublicShareProfile(normalizedHandle);
 
     if (!profile) return defaultMetadata;
 
@@ -365,7 +513,8 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     return defaultShareMetadata(req, {
       title,
       description,
-      image: normalizePublicProfileUrl(profile.avatarUrl) || DEFAULT_SHARE_IMAGE_PATH,
+      url: `/p/${profile.handle}`,
+      image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
       imageAlt: `${profile.displayName} Sway performer profile`
     });
   }
@@ -5816,6 +5965,22 @@ app.get('/api/public/feed', async (_req, res) => {
   }
 });
 
+app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
+  const profile = await findPublicShareProfile(req.params.handle);
+  if (!profile) return res.status(404).send('Performer profile not found.');
+
+  try {
+    const card = await renderPerformerShareCard(profile);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    res.setHeader('Content-Length', String(card.length));
+    return res.status(200).send(card);
+  } catch (error) {
+    console.error('Performer share card render failed:', error);
+    return res.status(500).send('Unable to render performer share card.');
+  }
+});
+
 app.get('/api/public/performer/:handle', async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -7754,6 +7919,19 @@ app.post("/api/music/search", (req, res) => {
       integrationMode: 'manual_request_only'
     });
   });
+});
+
+app.get('/:handle', async (req, res, next) => {
+  const normalizedHandle = normalizePerformerHandle(req.params.handle);
+  if (!normalizedHandle) return next();
+
+  try {
+    const profile = await findPublicShareProfile(normalizedHandle);
+    if (!profile) return next();
+    return res.redirect(308, `/p/${encodeURIComponent(profile.handle)}`);
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.use('/api', (_req, res) => {

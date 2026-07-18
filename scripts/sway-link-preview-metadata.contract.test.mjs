@@ -13,6 +13,12 @@ for (const term of [
   'DEFAULT_SHARE_IMAGE_PATH = \'/social-preview.png?v=1\'',
   'function injectShareMetadata',
   'function resolveShareMetadata',
+  'function findPublicShareProfile',
+  'function renderPerformerShareCard',
+  "app.get('/api/public/performer/:handle/share-card.png'",
+  "image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`",
+  "url: `/p/${profile.handle}`",
+  "import sharp from \"sharp\"",
   'renderShareMetaTags',
   'sway-share-meta',
   "pathParts[0] === 'p'",
@@ -61,6 +67,9 @@ for (const term of ['og:title', 'twitter:card', 'sway-share-meta']) {
 
 if (!packageJson.includes('node scripts/sway-link-preview-metadata.contract.test.mjs')) {
   failures.push('package.json must register the link-preview metadata contract in test:contracts.');
+}
+if (!packageJson.includes('"sharp"')) {
+  failures.push('package.json must include the server-side PNG renderer used by performer share cards.');
 }
 
 if (failures.length) {
