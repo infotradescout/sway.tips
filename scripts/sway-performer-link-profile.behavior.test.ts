@@ -28,6 +28,9 @@ assert.equal(normalizePublicProfileUrl('file:///etc/passwd'), null);
 assert.equal(normalizePublicProfileUrl('ftp://example.com/file'), null);
 assert.equal(normalizePublicProfileUrl('https://user:secret@example.com/'), null);
 assert.equal(normalizePublicProfileUrl('https://example.com/path'), 'https://example.com/path');
+assert.equal(normalizePublicProfileUrl('https://djthreeex.com'), null);
+assert.equal(normalizePublicProfileUrl('https://www.djthreeex.com/book'), null);
+assert.equal(normalizePublicProfileUrl('https://booking.djthreeex.com/request'), null);
 assert.equal(normalizePublicProfileEmail(' BOOKING@Example.com '), 'booking@example.com');
 assert.equal(normalizePublicProfileEmail('not-an-email'), null);
 assert.equal(normalizePublicProfilePhone('(850) 555-0123'), '(850) 555-0123');
@@ -98,6 +101,13 @@ assert.equal(orderedLinks.provided, true);
 assert.deepEqual(orderedLinks.links.map((link) => link.sortOrder), [0, 1]);
 assert.deepEqual(orderedLinks.links.map((link) => link.kind), ['booking', 'community']);
 assert.equal(orderedLinks.links[1].isActive, false);
+
+const linksWithSuppressedDomain = normalizePublicProfileLinks([
+  { label: 'Dead website', url: 'https://djthreeex.com', kind: 'booking' },
+  { label: 'Published interview', url: 'https://example.com/interview', kind: 'press' }
+]);
+assert.equal(linksWithSuppressedDomain.error, null);
+assert.deepEqual(linksWithSuppressedDomain.links.map((link) => link.label), ['Published interview']);
 
 assert.match(normalizePublicProfileLinks([{ url: 'https://example.com' }]).error || '', /needs a label/);
 assert.match(normalizePublicProfileLinks([{ label: 'Bad', url: 'javascript:alert(1)' }]).error || '', /valid http or https URL/);

@@ -346,6 +346,10 @@ for (const [term, source, label] of [
 
 for (const term of [
   'PUBLIC_PROFILE_MAX_LINKS = 12',
+  'SUPPRESSED_PUBLIC_PROFILE_DOMAINS',
+  "'djthreeex.com'",
+  'hostname.endsWith(`.${domain}`)',
+  'isSuppressedPublicProfileUrl',
   "parsed.protocol !== 'https:' && parsed.protocol !== 'http:'",
   'parsed.username || parsed.password',
   'escapePublicProfileMetadataAttribute',
