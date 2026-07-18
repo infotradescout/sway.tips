@@ -20,15 +20,7 @@ const previews = [
     // the public page does not depend on a third-party hotlink.
     avatarUrl: '/assets/frank-broughton-avatar.png',
     facebookUrl: 'https://www.facebook.com/frank.broughton.507',
-    websiteUrl: 'https://djthreeex.com',
     links: [
-      {
-        label: 'DJ Three X website',
-        description: 'DJ services, sound design, and consulting.',
-        url: 'https://djthreeex.com',
-        kind: 'booking',
-        isActive: true
-      },
       {
         label: 'Profile interview: Taking A Spin With DJ Three X',
         description: 'A published conversation about his craft, roots, and crowd-first approach.',
