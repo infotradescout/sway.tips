@@ -441,10 +441,18 @@ for (const term of [
   'verificationRequired: !ownerEmailVerified && hasConfiguredContact'
 ]) requireIncludes(normalizers, term, 'Public profile normalizer');
 
-const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
+const shareProfileLookup = sliceBetween(server, 'async function findPublicShareProfile', 'function escapeShareCardText', 'share profile lookup');
 for (const term of [
   'eq(performers.isActive, true)',
   "notInArray(performers.onboardingStatus, ['suspended'])",
+  'performerProfilePreviews',
+  'existingPerformer'
+]) requireIncludes(shareProfileLookup, term, 'Share profile lookup');
+
+const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
+for (const term of [
+  'findPublicShareProfile(normalizedHandle)',
+  'share-card.png?v=1',
   "inArray(activeRoomRegistry.registryStatus, ['active', 'ending'])",
   'normalizePublicProfileUrl(room.avatarUrl)'
 ]) requireIncludes(shareMetadataRoute, term, 'Share metadata resolver');

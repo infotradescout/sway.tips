@@ -18,6 +18,8 @@ for (const term of [
   "new Set(['sway.tips', 'www.sway.tips'])",
   'shouldRedirectToAppHost',
   'buildAppHostRedirectUrl',
+  "app.get('/:handle'",
+  "res.redirect(308, `/p/${encodeURIComponent(profile.handle)}`)",
   'req.originalUrl',
   'redirect(308, buildAppHostRedirectUrl(req.originalUrl))',
   "if (urlPath === '/') return 'public';",
