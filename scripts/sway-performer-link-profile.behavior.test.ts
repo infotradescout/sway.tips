@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   escapePublicProfileMetadataAttribute,
   normalizePublicProfileEmail,
+  normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
   normalizePublicProfileSpecialties,
@@ -104,6 +105,18 @@ assert.match(
   normalizePublicProfileLinks(Array.from({ length: 13 }, (_, index) => ({ label: `Link ${index}`, url: `https://example.com/${index}` }))).error || '',
   /up to 12 links/
 );
+
+const featuredMedia = normalizePublicProfileFeaturedMedia([
+  {
+    title: 'Corey Mack live',
+    description: 'Beatbox cover',
+    url: 'https://www.youtube.com/watch?v=--7MMybc6Vw'
+  }
+]);
+assert.equal(featuredMedia.error, null);
+assert.equal(featuredMedia.media[0].kind, 'youtube');
+assert.equal(featuredMedia.media[0].embedUrl, 'https://www.youtube-nocookie.com/embed/--7MMybc6Vw?rel=0&modestbranding=1');
+assert.match(normalizePublicProfileFeaturedMedia([{ title: 'Bad', url: 'https://example.com/video' }]).error || '', /valid YouTube video URL/);
 
 const firstSnapshot = buildSwayPartnerTermsSnapshot();
 const secondSnapshot = buildSwayPartnerTermsSnapshot();

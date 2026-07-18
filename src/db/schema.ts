@@ -148,6 +148,7 @@ export const performerPublicProfiles = pgTable('performer_public_profiles', {
   youtubeUrl: text('youtube_url'),
   soundcloudUrl: text('soundcloud_url'),
   websiteUrl: text('website_url'),
+  featuredMedia: jsonb('featured_media'),
   metadata: jsonb('metadata'),
   ...timestamps
 }, (table) => ({
@@ -174,6 +175,7 @@ export const performerProfilePreviews = pgTable('performer_profile_previews', {
   soundcloudUrl: text('soundcloud_url'),
   websiteUrl: text('website_url'),
   links: jsonb('links'),
+  featuredMedia: jsonb('featured_media'),
   metadata: jsonb('metadata'),
   isActive: boolean('is_active').notNull().default(true),
   ...timestamps

@@ -230,6 +230,24 @@ async function main() {
     assert.equal(previewTable.rows[0].table_name, 'performer_profile_previews');
     assert.equal(previewTable.rows[0].row_count, 0, 'Preview schema migration must not invent profile data.');
 
+    await applyMigrationFile(client, '0018_public_profile_featured_media.sql');
+    const featuredMediaColumns = await client.query(
+      `SELECT table_name, column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND column_name = 'featured_media'
+         AND table_name IN ('performer_public_profiles', 'performer_profile_previews')
+       ORDER BY table_name`
+    );
+    assert.deepEqual(
+      featuredMediaColumns.rows,
+      [
+        { table_name: 'performer_profile_previews', column_name: 'featured_media' },
+        { table_name: 'performer_public_profiles', column_name: 'featured_media' }
+      ],
+      'Featured media must be available to both claimed profiles and unclaimed previews.'
+    );
+
     const addedProfileColumns = await client.query(
       `SELECT column_name
        FROM information_schema.columns
@@ -405,7 +423,8 @@ async function main() {
       baselineHead: previousHeadMigrations.at(-1),
       migrationApplied: [
         '0016_performer_link_profiles.sql',
-        '0017_unclaimed_performer_profile_previews.sql'
+        '0017_unclaimed_performer_profile_previews.sql',
+        '0018_public_profile_featured_media.sql'
       ],
       existingRowsPreserved: {
         users: 1,

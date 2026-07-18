@@ -1,4 +1,5 @@
 export const PUBLIC_PROFILE_MAX_LINKS = 12;
+export const PUBLIC_PROFILE_MAX_FEATURED_MEDIA = 4;
 
 export const PUBLIC_PROFILE_LINK_KINDS = [
   'booking',
@@ -25,6 +26,22 @@ export type NormalizedPublicProfileLink = {
 export type NormalizedPublicProfileLinksResult = {
   provided: boolean;
   links: NormalizedPublicProfileLink[];
+  error: string | null;
+};
+
+export type NormalizedPublicProfileMedia = {
+  kind: 'youtube';
+  title: string;
+  description: string | null;
+  url: string;
+  embedUrl: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type NormalizedPublicProfileMediaResult = {
+  provided: boolean;
+  media: NormalizedPublicProfileMedia[];
   error: string | null;
 };
 
@@ -71,6 +88,79 @@ export function normalizePublicProfileUrl(value: unknown) {
   } catch {
     return null;
   }
+}
+
+function extractYouTubeVideoId(value: string) {
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    let candidate = '';
+
+    if (hostname === 'youtu.be') {
+      candidate = parsed.pathname.split('/').filter(Boolean)[0] || '';
+    } else if (hostname === 'youtube.com' || hostname === 'www.youtube.com' || hostname === 'm.youtube.com') {
+      if (parsed.pathname === '/watch') {
+        candidate = parsed.searchParams.get('v') || '';
+      } else if (/^\/(shorts|embed|live)\//.test(parsed.pathname)) {
+        candidate = parsed.pathname.split('/').filter(Boolean)[1] || '';
+      }
+    }
+
+    return /^[A-Za-z0-9_-]{6,20}$/.test(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizePublicProfileFeaturedMedia(value: unknown): NormalizedPublicProfileMediaResult {
+  if (value === undefined) {
+    return { provided: false, media: [], error: null };
+  }
+
+  if (!Array.isArray(value)) {
+    return { provided: true, media: [], error: 'Featured media must be an array.' };
+  }
+
+  if (value.length > PUBLIC_PROFILE_MAX_FEATURED_MEDIA) {
+    return {
+      provided: true,
+      media: [],
+      error: `A profile can include up to ${PUBLIC_PROFILE_MAX_FEATURED_MEDIA} featured videos.`
+    };
+  }
+
+  const media: NormalizedPublicProfileMedia[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const rawMedia = value[index];
+    if (!rawMedia || typeof rawMedia !== 'object') {
+      return { provided: true, media: [], error: `Featured media ${index + 1} is invalid.` };
+    }
+
+    const url = normalizePublicProfileUrl((rawMedia as any).url);
+    const videoId = url ? extractYouTubeVideoId(url) : null;
+    const title = normalizePublicProfileText((rawMedia as any).title, 120)?.replace(/\s+/g, ' ') ?? 'Featured video';
+    const description = normalizePublicProfileText((rawMedia as any).description, 200);
+
+    if (!url || !videoId) {
+      return {
+        provided: true,
+        media: [],
+        error: `Featured media ${index + 1} must be a valid YouTube video URL.`
+      };
+    }
+
+    media.push({
+      kind: 'youtube',
+      title,
+      description,
+      url,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&modestbranding=1`,
+      sortOrder: index,
+      isActive: (rawMedia as any).isActive !== false
+    });
+  }
+
+  return { provided: true, media, error: null };
 }
 
 export function normalizePublicProfileEmail(value: unknown) {
