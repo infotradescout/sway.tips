@@ -140,7 +140,7 @@ for (const term of [
   'instagram.com/drewmaze_',
   'youtube.com/@drewmaze_',
   'soundcloud.com/drewmaze',
-  "avatarUrl: '/assets/drew-maze-avatar.jpg'",
+  "avatarUrl: 'https://sway.tips/assets/drew-maze-avatar.jpg'",
   "title: 'Pen Pal (Official Video)'",
   'www.youtube.com/watch?v=XW-6-4jWJ9w',
   'Public-source research is not owner approval.'
