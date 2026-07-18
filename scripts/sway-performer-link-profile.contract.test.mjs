@@ -28,6 +28,7 @@ const requiredFiles = [
   'src/db/schema.ts',
   'drizzle/0016_performer_link_profiles.sql',
   'drizzle/0017_unclaimed_performer_profile_previews.sql',
+  'drizzle/0018_public_profile_featured_media.sql',
   'src/server/public-profile.ts',
   'src/server/partner-entitlement.ts',
   'src/server/partner-entitlement-store.ts',
@@ -51,6 +52,7 @@ for (const file of requiredFiles) {
 const schema = read('src/db/schema.ts');
 const migration = read('drizzle/0016_performer_link_profiles.sql');
 const previewMigration = read('drizzle/0017_unclaimed_performer_profile_previews.sql');
+const mediaMigration = read('drizzle/0018_public_profile_featured_media.sql');
 const server = read('server.ts');
 const normalizers = read('src/server/public-profile.ts');
 const partnerTerms = read('src/server/partner-entitlement.ts');
@@ -87,6 +89,9 @@ requireIncludes(schema, "handleLowerIdx: uniqueIndex('performer_profile_previews
 requireIncludes(previewMigration, 'CREATE TABLE IF NOT EXISTS "performer_profile_previews"', 'Unclaimed preview migration');
 requireIncludes(previewMigration, 'lower("handle")', 'Unclaimed preview migration');
 requireExcludes(previewMigration, 'owner_user_id', 'Unclaimed preview migration');
+for (const term of ['featured_media', 'performer_public_profiles', 'performer_profile_previews']) {
+  requireIncludes(mediaMigration, term, 'Featured media migration');
+}
 for (const term of [
   'db:seed:performer-previews',
   'sway-seed-performer-previews.mjs'
@@ -96,6 +101,9 @@ for (const term of [
   "handle: 'coreymack'",
   "displayName: 'Broughton Frank'",
   "displayName: 'Corey Mack'",
+  "title: 'Kita P x Corey Mack in New Orleans'",
+  'www.youtube.com/watch?v=--7MMybc6Vw',
+  'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');
 for (const forbidden of ['owner_user_id', 'password_hash', 'invitation_token', 'terms_hash']) {
@@ -360,6 +368,7 @@ for (const term of [
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
   'normalizePublicProfileUrl(profile.avatarUrl)',
   'resolveVerifiedPublicBookingContact',
+  'normalizePublicProfileFeaturedMedia',
   'booking: publicBooking',
   'partnerState?.isEffective',
   'performerProfilePreviews',
@@ -386,6 +395,9 @@ for (const term of [
   'profile.isPreview',
   'Unclaimed · ready to review',
   'Prepared for the performer',
+  'Featured performance',
+  'media.embedUrl',
+  'allowFullScreen',
   'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');

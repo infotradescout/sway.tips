@@ -127,6 +127,13 @@
       "when": 1784426400000,
       "tag": "0017_unclaimed_performer_profile_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784428200000,
+      "tag": "0018_public_profile_featured_media",
+      "breakpoints": true
     }
   ]
 }

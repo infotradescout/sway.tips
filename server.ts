@@ -54,6 +54,7 @@ import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
   normalizePublicProfileEmail,
+  normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
   normalizePublicProfileSpecialties,
@@ -5828,7 +5829,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         tiktokUrl: performerPublicProfiles.tiktokUrl,
         youtubeUrl: performerPublicProfiles.youtubeUrl,
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-        websiteUrl: performerPublicProfiles.websiteUrl
+        websiteUrl: performerPublicProfiles.websiteUrl,
+        featuredMedia: performerPublicProfiles.featuredMedia
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
@@ -5869,7 +5871,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           youtubeUrl: performerProfilePreviews.youtubeUrl,
           soundcloudUrl: performerProfilePreviews.soundcloudUrl,
           websiteUrl: performerProfilePreviews.websiteUrl,
-          links: performerProfilePreviews.links
+          links: performerProfilePreviews.links,
+          featuredMedia: performerProfilePreviews.featuredMedia
         })
         .from(performerProfilePreviews)
         .where(and(
@@ -5886,6 +5889,10 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       const previewLinks = normalizedPreviewLinks.links
         .filter((link) => link.isActive)
         .map(({ isActive: _isActive, ...link }) => link);
+      const normalizedPreviewMedia = normalizePublicProfileFeaturedMedia(preview.featuredMedia ?? undefined);
+      const previewMedia = normalizedPreviewMedia.media
+        .filter((media) => media.isActive)
+        .map(({ isActive: _isActive, ...media }) => media);
 
       return res.json({
         performer: {
@@ -5911,6 +5918,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
             websiteUrl: preview.websiteUrl
           }),
           links: previewLinks,
+          featuredMedia: previewMedia,
           partner: {
             active: false,
             kind: null,
@@ -5963,6 +5971,10 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       const safeUrl = normalizePublicProfileUrl(link.url);
       return safeUrl ? [{ ...link, url: safeUrl }] : [];
     });
+    const normalizedMedia = normalizePublicProfileFeaturedMedia(profile.featuredMedia ?? undefined);
+    const publicMedia = normalizedMedia.media
+      .filter((media) => media.isActive)
+      .map(({ isActive: _isActive, ...media }) => media);
     const publicBooking = resolveVerifiedPublicBookingContact({
       email: profile.bookingEmail,
       phone: profile.bookingPhone,
@@ -5988,6 +6000,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           websiteUrl: profile.websiteUrl
         }),
         links: publicLinkRows,
+        featuredMedia: publicMedia,
         partner: {
           active: partnerState?.isEffective ?? false,
           kind: partnerState?.isEffective ? partnerState.partnerKind : null,

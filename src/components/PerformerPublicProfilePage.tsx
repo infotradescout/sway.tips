@@ -6,6 +6,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  Play,
   Radio,
   Share2,
   Sparkles
@@ -18,6 +19,15 @@ type PublicProfileLink = {
   description: string | null;
   url: string;
   kind: string;
+  sortOrder: number;
+};
+
+type PublicProfileMedia = {
+  kind: 'youtube';
+  title: string;
+  description: string | null;
+  url: string;
+  embedUrl: string;
   sortOrder: number;
 };
 
@@ -37,6 +47,7 @@ type PublicPerformerProfile = {
   };
   socialLinks: Record<string, string | null>;
   links: PublicProfileLink[];
+  featuredMedia: PublicProfileMedia[];
   partner: {
     active: boolean;
     kind: string | null;
@@ -122,6 +133,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           socialLinks: data.performer.socialLinks || {},
           specialties: Array.isArray(data.performer.specialties) ? data.performer.specialties : [],
           links: Array.isArray(data.performer.links) ? data.performer.links : [],
+          featuredMedia: Array.isArray(data.performer.featuredMedia) ? data.performer.featuredMedia : [],
           partner: data.performer.partner || { active: false, kind: null, termsVersion: null },
           isPreview: data.performer.isPreview === true,
           claimState: data.performer.claimState === 'pending'
@@ -310,6 +322,46 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 {activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'}
               </span>
             </a>
+          ) : null}
+
+          {profile.featuredMedia.length ? (
+            <section className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/30" aria-label="Featured media">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-500/15 text-red-200">
+                    <Play className="h-4 w-4 fill-current" />
+                  </span>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-200">Featured performance</p>
+                    <p className="mt-0.5 text-xs text-slate-500">Watch the work in motion</p>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-4 p-3 sm:p-4">
+                {profile.featuredMedia.map((media) => (
+                  <article key={`${media.sortOrder}:${media.embedUrl}`} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
+                    <div className="aspect-video bg-black">
+                      <iframe
+                        title={media.title}
+                        src={media.embedUrl}
+                        className="h-full w-full"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerPolicy="strict-origin-when-cross-origin"
+                        allowFullScreen
+                      />
+                    </div>
+                    <div className="flex items-start justify-between gap-4 px-4 py-3">
+                      <div>
+                        <h2 className="text-sm font-black text-white">{media.title}</h2>
+                        {media.description ? <p className="mt-1 text-xs leading-5 text-slate-400">{media.description}</p> : null}
+                      </div>
+                      <a href={media.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold text-red-200 hover:text-white">Open</a>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
           ) : null}
 
           {(profile.booking.email || telephoneHref) ? (
