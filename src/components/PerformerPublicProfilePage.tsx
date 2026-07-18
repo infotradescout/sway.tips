@@ -81,6 +81,14 @@ const SOCIAL_LABELS: Record<string, string> = {
   website: 'Website'
 };
 
+// Curated public profile assets are also carried by the preview seed. Keep a
+// visual fallback while an already-claimed partner row is being hydrated from
+// that curated record; owners can replace it from the authenticated editor.
+const CURATED_PUBLIC_AVATAR_FALLBACKS: Record<string, string> = {
+  dj3x: 'https://images.squarespace-cdn.com/content/v1/5cf285bbb53c220001bebf7d/1622122633773-7NUVXLO3VXOEC2LIFYQH/0A0A0388.jpg',
+  coreymack: 'https://img1.wsimg.com/isteam/ip/507cdd9e-ba65-48f1-ac5c-290e6c33023b/72E6855B-ABEB-492D-8EA4-0DAB48CAA65E.jpeg'
+};
+
 function profileInitials(displayName: string) {
   return displayName
     .split(/\s+/)
@@ -258,6 +266,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     : null;
   const stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName);
   const hasDistinctDisplayName = stageName.trim().toLowerCase() !== profile.displayName.trim().toLowerCase();
+  const publicAvatarUrl = profile.avatarUrl || (profile.handle ? CURATED_PUBLIC_AVATAR_FALLBACKS[profile.handle.toLowerCase()] || null : null);
 
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-[#05060a] text-slate-100">
@@ -288,9 +297,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <div className="flex flex-col items-center text-center">
             <div className="relative">
               <div className="absolute -inset-2 rounded-[2rem] bg-gradient-to-br from-fuchsia-500/45 to-cyan-400/35 blur-xl" />
-              {profile.avatarUrl && !avatarFailed ? (
+              {publicAvatarUrl && !avatarFailed ? (
                 <img
-                  src={profile.avatarUrl}
+                  src={publicAvatarUrl}
                   alt={`${profile.displayName} profile`}
                   onError={() => setAvatarFailed(true)}
                   className="relative h-28 w-28 rounded-[1.75rem] border border-white/15 object-cover shadow-2xl sm:h-32 sm:w-32"
