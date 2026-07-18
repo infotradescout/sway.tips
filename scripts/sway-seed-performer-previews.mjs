@@ -91,8 +91,11 @@ const previews = [
     headline: 'Rapper · Producer · Recording artist · Audio engineer',
     bio: 'Drew Maze is a hip-hop and rap artist, producer, and audio engineer with a catalog of independent singles and collaborations. His releases include Dead People, The Honorable, Oh Really?, Mutual, OBE, Alter, and Comfortable, alongside featured work with artists including Bubba Khain and Kyngovilla.',
     specialties: ['Hip-hop / rap', 'Rapper', 'Producer', 'Recording artist', 'Audio engineer', 'Mixing & mastering', 'Collaborations'],
-    // No city, avatar, website, or booking destination is published until Drew
-    // supplies or explicitly approves it. Public-source research is not owner approval.
+    // Drew's official YouTube channel avatar, stored locally so the public page
+    // does not depend on a third-party hotlink.
+    avatarUrl: '/assets/drew-maze-avatar.jpg',
+    // No city, website, or booking destination is published until Drew supplies
+    // or explicitly approves it. Public-source research is not owner approval.
     instagramUrl: 'https://www.instagram.com/drewmaze_',
     youtubeUrl: 'https://www.youtube.com/@drewmaze_',
     soundcloudUrl: 'https://soundcloud.com/drewmaze',

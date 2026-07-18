@@ -140,11 +140,15 @@ for (const term of [
   'instagram.com/drewmaze_',
   'youtube.com/@drewmaze_',
   'soundcloud.com/drewmaze',
+  "avatarUrl: '/assets/drew-maze-avatar.jpg'",
   "title: 'Pen Pal (Official Video)'",
   'www.youtube.com/watch?v=XW-6-4jWJ9w',
   'Public-source research is not owner approval.'
 ]) requireIncludes(drewMazePreview, term, 'Drew Maze curated preview');
-for (const forbidden of ['websiteUrl:', "kind: 'booking'", 'city:', 'avatarUrl:']) {
+if (!existsSync(join(root, 'public/assets/drew-maze-avatar.jpg'))) {
+  failures.push('Drew Maze official YouTube avatar asset is missing.');
+}
+for (const forbidden of ['websiteUrl:', "kind: 'booking'", 'city:']) {
   requireExcludes(drewMazePreview, forbidden, 'Drew Maze unapproved profile fields');
 }
 
