@@ -35,6 +35,7 @@ type PublicProfileMedia = {
 
 type PublicPerformerProfile = {
   displayName: string;
+  stageName: string | null;
   handle: string | null;
   bio: string | null;
   headline: string | null;
@@ -171,7 +172,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
         setActiveRoom(data.activeRoom || null);
         setAvatarFailed(false);
         setStatus('ready');
-        document.title = `${data.performer.displayName} on Sway`;
+        document.title = `${data.performer.stageName || (data.performer.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : data.performer.displayName)} on Sway`;
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
@@ -184,15 +185,6 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       controller.abort();
     };
   }, [performerHandle]);
-
-  useEffect(() => {
-    if (!profile || typeof window === 'undefined' || window.location.hash !== '#tip') return;
-    if (profile.isPreview || profile.claimState !== 'claimed') {
-      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
-      return;
-    }
-    setTipOpen(true);
-  }, [profile]);
 
   const socialLinks = useMemo(() => Object.entries(profile?.socialLinks || {})
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0), [profile]);
@@ -264,6 +256,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const telephoneHref = profile.booking.phone
     ? `tel:${profile.booking.phone.replace(/[^\d+]/g, '')}`
     : null;
+  const stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName);
+  const hasDistinctDisplayName = stageName.trim().toLowerCase() !== profile.displayName.trim().toLowerCase();
 
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-[#05060a] text-slate-100">
@@ -321,7 +315,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 </span>
               ) : null}
             </div>
-            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{profile.displayName}</h1>
+            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{stageName}</h1>
+            {hasDistinctDisplayName ? <p className="mt-1 text-sm font-bold text-slate-400">{profile.displayName}</p> : null}
             <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
               {profile.handle ? <span>@{profile.handle}</span> : null}
               {profile.city ? (
@@ -360,7 +355,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.08] px-4 py-3 text-sm font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
             >
               <Coins className="h-4 w-4" />
-              Tip {profile.displayName}
+              Tip {stageName}
             </button>
             {tipMessage ? (
               <p id="public-profile-tip-message" role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-amber-100/90">
@@ -373,8 +368,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-left" aria-label="Tip this performer">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {profile.displayName}</p>
-                <p className="mt-2 text-sm font-bold text-white">Scan to tip {profile.displayName}, or pay directly here.</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {stageName}</p>
+                <p className="mt-2 text-sm font-bold text-white">Scan to tip {stageName}, or pay directly here.</p>
                 <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileTipUrl}</p>
                 <button
                   type="button"
