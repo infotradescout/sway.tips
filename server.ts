@@ -13,7 +13,7 @@ import { readFileSync } from "fs";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -1120,14 +1120,25 @@ async function performerSignupEmailExists(executor: any, email: string) {
   return Boolean(row);
 }
 
-async function performerHandleExists(executor: any, handle: string) {
+async function performerHandleExists(executor: any, handle: string, options: { includePreviews?: boolean } = {}) {
   const [row] = await executor
     .select({ id: performers.id })
     .from(performers)
     .where(sql`lower(${performers.handle}) = ${handle.toLowerCase()}`)
     .limit(1);
 
-  return Boolean(row);
+  if (row || options.includePreviews === false) return Boolean(row);
+
+  const [preview] = await executor
+    .select({ id: performerProfilePreviews.id })
+    .from(performerProfilePreviews)
+    .where(and(
+      sql`lower(${performerProfilePreviews.handle}) = ${handle.toLowerCase()}`,
+      eq(performerProfilePreviews.isActive, true)
+    ))
+    .limit(1);
+
+  return Boolean(preview);
 }
 
 async function loadPerformerOwnerVerificationState(actorUserId: string) {
@@ -3775,7 +3786,16 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     return;
   }
 
-  if (await performerHandleExists(businessDb, normalizedHandle)) {
+  const [reservedPreview] = await businessDb
+    .select({ id: performerProfilePreviews.id })
+    .from(performerProfilePreviews)
+    .where(and(
+      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+      eq(performerProfilePreviews.isActive, true)
+    ))
+    .limit(1);
+
+  if (await performerHandleExists(businessDb, normalizedHandle, { includePreviews: false })) {
     res.status(409).json({ error: 'This handle is already taken.' });
     return;
   }
@@ -3808,6 +3828,13 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
         onboardingStatus: 'created'
       })
       .returning({ id: performers.id });
+
+    if (reservedPreview) {
+      await tx
+        .update(performerProfilePreviews)
+        .set({ claimedPerformerId: createdPerformer.id, updatedAt: new Date() })
+        .where(eq(performerProfilePreviews.id, reservedPreview.id));
+    }
 
     let partnerEntitlementId: string | null = null;
     if (isPartner) {
@@ -5814,7 +5841,86 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       .limit(1);
 
     if (!profile) {
-      return res.status(404).json({ error: 'Performer profile not found.' });
+      // Never fall back to a preview when a real performer row exists but is
+      // inactive or suspended. That keeps inactive/suspended handles dark.
+      const [existingPerformer] = await businessDb
+        .select({ id: performers.id })
+        .from(performers)
+        .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+        .limit(1);
+
+      if (existingPerformer) {
+        return res.status(404).json({ error: 'Performer profile not found.' });
+      }
+
+      const [preview] = await businessDb
+        .select({
+          displayName: performerProfilePreviews.displayName,
+          handle: performerProfilePreviews.handle,
+          claimedPerformerId: performerProfilePreviews.claimedPerformerId,
+          bio: performerProfilePreviews.bio,
+          headline: performerProfilePreviews.headline,
+          specialties: performerProfilePreviews.specialties,
+          city: performerProfilePreviews.city,
+          avatarUrl: performerProfilePreviews.avatarUrl,
+          facebookUrl: performerProfilePreviews.facebookUrl,
+          instagramUrl: performerProfilePreviews.instagramUrl,
+          tiktokUrl: performerProfilePreviews.tiktokUrl,
+          youtubeUrl: performerProfilePreviews.youtubeUrl,
+          soundcloudUrl: performerProfilePreviews.soundcloudUrl,
+          websiteUrl: performerProfilePreviews.websiteUrl,
+          links: performerProfilePreviews.links
+        })
+        .from(performerProfilePreviews)
+        .where(and(
+          sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+          eq(performerProfilePreviews.isActive, true)
+        ))
+        .limit(1);
+
+      if (!preview) {
+        return res.status(404).json({ error: 'Performer profile not found.' });
+      }
+
+      const normalizedPreviewLinks = normalizePublicProfileLinks(preview.links ?? undefined);
+      const previewLinks = normalizedPreviewLinks.links
+        .filter((link) => link.isActive)
+        .map(({ isActive: _isActive, ...link }) => link);
+
+      return res.json({
+        performer: {
+          displayName: preview.displayName,
+          handle: preview.handle,
+          bio: preview.bio,
+          headline: preview.headline,
+          specialties: preview.specialties ?? [],
+          city: preview.city,
+          avatarUrl: normalizePublicProfileUrl(preview.avatarUrl),
+          booking: {
+            email: null,
+            phone: null,
+            available: false,
+            verificationRequired: false
+          },
+          socialLinks: toPublicSocialLinks({
+            facebookUrl: preview.facebookUrl,
+            instagramUrl: preview.instagramUrl,
+            tiktokUrl: preview.tiktokUrl,
+            youtubeUrl: preview.youtubeUrl,
+            soundcloudUrl: preview.soundcloudUrl,
+            websiteUrl: preview.websiteUrl
+          }),
+          links: previewLinks,
+          partner: {
+            active: false,
+            kind: null,
+            termsVersion: null
+          },
+          isPreview: true,
+          claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'
+        },
+        activeRoom: null
+      });
     }
 
     const [[activeRoom], linkRows, partnerState] = await Promise.all([
@@ -5886,7 +5992,9 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           active: partnerState?.isEffective ?? false,
           kind: partnerState?.isEffective ? partnerState.partnerKind : null,
           termsVersion: partnerState?.isEffective ? partnerState.termsVersion : null
-        }
+        },
+        isPreview: false,
+        claimState: 'claimed'
       },
       activeRoom: activeRoom
         ? {

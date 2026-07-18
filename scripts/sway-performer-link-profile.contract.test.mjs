@@ -27,6 +27,7 @@ function sliceBetween(source, start, end, label) {
 const requiredFiles = [
   'src/db/schema.ts',
   'drizzle/0016_performer_link_profiles.sql',
+  'drizzle/0017_unclaimed_performer_profile_previews.sql',
   'src/server/public-profile.ts',
   'src/server/partner-entitlement.ts',
   'src/server/partner-entitlement-store.ts',
@@ -39,7 +40,8 @@ const requiredFiles = [
   'src/shells/AdminAccountsPage.tsx',
   'docs/SWAY_PARTNER_TERMS_V1.md',
   'scripts/sway-performer-link-profile.behavior.test.ts',
-  'scripts/sway-performer-link-profile-migration.integration.test.mjs'
+  'scripts/sway-performer-link-profile-migration.integration.test.mjs',
+  'scripts/sway-seed-performer-previews.mjs'
 ];
 
 for (const file of requiredFiles) {
@@ -48,6 +50,7 @@ for (const file of requiredFiles) {
 
 const schema = read('src/db/schema.ts');
 const migration = read('drizzle/0016_performer_link_profiles.sql');
+const previewMigration = read('drizzle/0017_unclaimed_performer_profile_previews.sql');
 const server = read('server.ts');
 const normalizers = read('src/server/public-profile.ts');
 const partnerTerms = read('src/server/partner-entitlement.ts');
@@ -66,6 +69,7 @@ const talentApp = read('src/shells/TalentApp.tsx');
 const termsDoc = read('docs/SWAY_PARTNER_TERMS_V1.md');
 const migrationProof = read('scripts/sway-performer-link-profile-migration.integration.test.mjs');
 const packageJson = read('package.json');
+const previewSeed = read('scripts/sway-seed-performer-previews.mjs');
 
 for (const term of [
   "export const performerProfileLinks = pgTable('performer_profile_links'",
@@ -77,6 +81,26 @@ for (const term of [
   "statusAllowed: check('performer_partner_entitlement_status_events_status_allowed'",
   "handleNotReserved: check('performers_handle_not_reserved'"
 ]) requireIncludes(schema, term, 'Profile schema');
+
+requireIncludes(schema, "export const performerProfilePreviews = pgTable('performer_profile_previews'", 'Unclaimed preview schema');
+requireIncludes(schema, "handleLowerIdx: uniqueIndex('performer_profile_previews_handle_lower_idx')", 'Unclaimed preview schema');
+requireIncludes(previewMigration, 'CREATE TABLE IF NOT EXISTS "performer_profile_previews"', 'Unclaimed preview migration');
+requireIncludes(previewMigration, 'lower("handle")', 'Unclaimed preview migration');
+requireExcludes(previewMigration, 'owner_user_id', 'Unclaimed preview migration');
+for (const term of [
+  'db:seed:performer-previews',
+  'sway-seed-performer-previews.mjs'
+]) requireIncludes(packageJson, term, 'Unclaimed preview seed command');
+for (const term of [
+  "handle: 'dj3x'",
+  "handle: 'coreymack'",
+  "displayName: 'Broughton Frank'",
+  "displayName: 'Corey Mack'",
+  'no email, phone, password, owner id, invitation token, or terms acceptance'
+]) requireIncludes(previewSeed, term, 'Curated preview seed');
+for (const forbidden of ['owner_user_id', 'password_hash', 'invitation_token', 'terms_hash']) {
+  requireExcludes(previewSeed, forbidden, 'Curated preview seed');
+}
 
 for (const term of [
   '"booking_email" text',
@@ -337,7 +361,10 @@ for (const term of [
   'normalizePublicProfileUrl(profile.avatarUrl)',
   'resolveVerifiedPublicBookingContact',
   'booking: publicBooking',
-  'partnerState?.isEffective'
+  'partnerState?.isEffective',
+  'performerProfilePreviews',
+  'existingPerformer',
+  "claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'"
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
 for (const forbidden of [
@@ -356,6 +383,9 @@ for (const term of [
   'profile.links.map',
   'profile.booking.email',
   'profile.booking.verificationRequired',
+  'profile.isPreview',
+  'Unclaimed · ready to review',
+  'Prepared for the performer',
   'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');
@@ -371,6 +401,12 @@ for (const term of [
   'accepted: true',
   'Accept exact Brand Partner terms'
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
+
+for (const term of [
+  'includePreviews: false',
+  'reservedPreview',
+  'claimedPerformerId: createdPerformer.id'
+]) requireIncludes(server, term, 'Preview handle reservation');
 
 for (const term of [
   'one-time invitation to the owner',

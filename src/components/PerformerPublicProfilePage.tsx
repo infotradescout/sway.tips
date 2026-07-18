@@ -42,6 +42,8 @@ type PublicPerformerProfile = {
     kind: string | null;
     termsVersion: string | null;
   };
+  isPreview: boolean;
+  claimState: 'unclaimed' | 'pending' | 'claimed';
 };
 
 type ActiveProfileRoom = {
@@ -120,7 +122,13 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           socialLinks: data.performer.socialLinks || {},
           specialties: Array.isArray(data.performer.specialties) ? data.performer.specialties : [],
           links: Array.isArray(data.performer.links) ? data.performer.links : [],
-          partner: data.performer.partner || { active: false, kind: null, termsVersion: null }
+          partner: data.performer.partner || { active: false, kind: null, termsVersion: null },
+          isPreview: data.performer.isPreview === true,
+          claimState: data.performer.claimState === 'pending'
+            ? 'pending'
+            : data.performer.claimState === 'unclaimed'
+              ? 'unclaimed'
+              : 'claimed'
         });
         setActiveRoom(data.activeRoom || null);
         setAvatarFailed(false);
@@ -243,7 +251,12 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Public performer page</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">{profile.isPreview ? 'Working profile preview' : 'Public performer page'}</p>
+              {profile.isPreview ? (
+                <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-cyan-100">
+                  {profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · ready to review'}
+                </span>
+              ) : null}
               {profile.partner.active ? (
                 <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-amber-100">
                   <BadgeCheck className="h-3.5 w-3.5" /> Sway Brand Partner
@@ -272,6 +285,15 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             ) : null}
             {profile.bio ? <p className="mt-3 max-w-xl whitespace-pre-line text-sm leading-6 text-slate-400">{profile.bio}</p> : null}
           </div>
+
+          {profile.isPreview ? (
+            <div className="mt-6 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.06] px-4 py-4 text-left">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Prepared for the performer</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                This is a review-ready Sway page. It is not claimed yet, and direct booking contact stays locked until the owner verifies the account.
+              </p>
+            </div>
+          ) : null}
 
           {activeRoom ? (
             <a
