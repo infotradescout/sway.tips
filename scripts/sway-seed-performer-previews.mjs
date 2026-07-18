@@ -18,7 +18,7 @@ const previews = [
     city: 'Pensacola, FL',
     // Supplied from Frank's public Facebook profile image; stored locally so
     // the public page does not depend on a third-party hotlink.
-    avatarUrl: '/assets/frank-broughton-avatar.png',
+    avatarUrl: 'https://sway.tips/assets/frank-broughton-avatar.png',
     facebookUrl: 'https://www.facebook.com/frank.broughton.507',
     // Do not publish a website or booking destination until Frank supplies or
     // explicitly approves it. Public-source research is not owner approval.

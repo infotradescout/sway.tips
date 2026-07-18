@@ -100,7 +100,7 @@ for (const term of [
   "handle: 'dj3x'",
   "handle: 'coreymack'",
   "displayName: 'Broughton Frank'",
-  "avatarUrl: '/assets/frank-broughton-avatar.png'",
+  "avatarUrl: 'https://sway.tips/assets/frank-broughton-avatar.png'",
   "DJ Three X · Crowd-first DJ · Sound design · Event energy",
   'Performing since 1992',
   'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
