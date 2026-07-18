@@ -135,8 +135,12 @@ export const performers = pgTable('performers', {
 export const performerPublicProfiles = pgTable('performer_public_profiles', {
   performerId: uuid('performer_id').primaryKey().references(() => performers.id),
   headline: text('headline'),
+  specialties: jsonb('specialties').$type<string[]>(),
   city: text('city'),
   avatarUrl: text('avatar_url'),
+  bookingEmail: text('booking_email'),
+  bookingPhone: text('booking_phone'),
+  facebookUrl: text('facebook_url'),
   instagramUrl: text('instagram_url'),
   tiktokUrl: text('tiktok_url'),
   youtubeUrl: text('youtube_url'),
@@ -146,6 +150,39 @@ export const performerPublicProfiles = pgTable('performer_public_profiles', {
   ...timestamps
 }, (table) => ({
   updatedAtIdx: index('performer_public_profiles_updated_at_idx').on(table.updatedAt)
+}));
+
+export const performerProfileLinks = pgTable('performer_profile_links', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id, { onDelete: 'cascade' }),
+  label: text('label').notNull(),
+  description: text('description'),
+  url: text('url').notNull(),
+  kind: text('kind').notNull().default('other'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isActive: boolean('is_active').notNull().default(true),
+  ...timestamps
+}, (table) => ({
+  performerSortIdx: index('performer_profile_links_performer_sort_idx').on(table.performerId, table.sortOrder),
+  performerActiveIdx: index('performer_profile_links_performer_active_idx').on(table.performerId, table.isActive)
+}));
+
+export const performerPartnerEntitlements = pgTable('performer_partner_entitlements', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id, { onDelete: 'cascade' }),
+  grantedByUserId: uuid('granted_by_user_id').notNull().references(() => users.id),
+  partnerKind: text('partner_kind').notNull().default('brand'),
+  termsVersion: text('terms_version').notNull(),
+  termsSnapshot: jsonb('terms_snapshot').$type<{
+    guarantee: string;
+    publicProfileHostingFeeCents: number;
+    performerSubscriptionFeeCents: number;
+    paidInteractionPlatformFeeCents: number;
+    externalChargesExcluded: string[];
+  }>().notNull(),
+  note: text('note'),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  termsVersionIdx: index('performer_partner_entitlements_terms_version_idx').on(table.termsVersion)
 }));
 
 export const performerMemberships = pgTable('performer_memberships', {

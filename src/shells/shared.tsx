@@ -213,7 +213,7 @@ export function useSwayState(options?: {
   useEffect(() => {
     fetchState();
 
-    if (isDemoModeEnabled()) return;
+    if (!statePath || isDemoModeEnabled()) return;
 
     const interval = setInterval(fetchState, 4000);
     const handleForceSync = () => fetchState();

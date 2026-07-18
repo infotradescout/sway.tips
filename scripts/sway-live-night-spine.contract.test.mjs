@@ -40,7 +40,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Copy link',
   'Account & integrations',
   'data-sway-account-integrations="true"',
-  'Music sources, payouts, and your public performer profile.',
+  'Music sources, hardware bridges, and payouts.',
   'Backers',
   '<PerformerRoomSetup'
 ]);

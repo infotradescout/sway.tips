@@ -13,7 +13,7 @@ import { readFileSync } from "fs";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerProfileLinks, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -49,6 +49,15 @@ import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capab
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { lookupLyrics } from "./src/server/lyrics-provider";
+import {
+  normalizePublicProfileEmail,
+  normalizePublicProfileLinks,
+  normalizePublicProfilePhone,
+  normalizePublicProfileSpecialties,
+  normalizePublicProfileText,
+  normalizePublicProfileUrl
+} from "./src/server/public-profile";
+import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -341,7 +350,11 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       })
       .from(performers)
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+      .where(and(
+        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ))
       .limit(1);
 
     if (!profile) return defaultMetadata;
@@ -349,7 +362,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     const title = `${profile.displayName} on Sway`;
     const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
     const locationCopy = profile.city ? ` in ${profile.city}` : '';
-    const description = profile.headline || profile.bio || `Join ${handleCopy}${locationCopy} on Sway for live requests, tips, boosts, and queue updates.`;
+    const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
 
     return defaultShareMetadata(req, {
       title,
@@ -1139,7 +1152,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
     .select({
       performerId: performers.id,
       displayName: performers.displayName,
-      handle: performers.handle
+      handle: performers.handle,
+      bio: performers.bio
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -1153,27 +1167,8 @@ function normalizeLibraryText(value: unknown, maxLength = 160) {
   return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
-function normalizePublicProfileText(value: unknown, maxLength = 160) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, maxLength);
-}
-
-function normalizePublicProfileUrl(value: unknown) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
 function toPublicSocialLinks(row: {
+  facebookUrl: string | null;
   instagramUrl: string | null;
   tiktokUrl: string | null;
   youtubeUrl: string | null;
@@ -1181,6 +1176,7 @@ function toPublicSocialLinks(row: {
   websiteUrl: string | null;
 }) {
   return {
+    facebook: row.facebookUrl,
     instagram: row.instagramUrl,
     tiktok: row.tiktokUrl,
     youtube: row.youtubeUrl,
@@ -3375,14 +3371,18 @@ const adminAccountSelectColumns = {
   paymentAccountStatus: performers.paymentAccountStatus,
   payoutsEnabled: performers.payoutsEnabled,
   chargesEnabled: performers.chargesEnabled,
-  payoutHoldReason: performers.payoutHoldReason
+  payoutHoldReason: performers.payoutHoldReason,
+  partnerTermsVersion: performerPartnerEntitlements.termsVersion,
+  partnerGrantedAt: performerPartnerEntitlements.grantedAt,
+  partnerKind: performerPartnerEntitlements.partnerKind
 };
 
 function loadAdminAccountsBaseQuery(db: NonNullable<typeof businessDb>) {
   return db
     .select(adminAccountSelectColumns)
     .from(users)
-    .leftJoin(performers, eq(performers.ownerUserId, users.id));
+    .leftJoin(performers, eq(performers.ownerUserId, users.id))
+    .leftJoin(performerPartnerEntitlements, eq(performerPartnerEntitlements.performerId, performers.id));
 }
 
 app.get('/api/admin/accounts', async (req, res) => {
@@ -3476,6 +3476,8 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
   const password = normalizePerformerPassword(req.body?.password);
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
   const isActive = req.body?.isActive !== false;
+  const isPartner = req.body?.isPartner === true;
+  const partnerNote = normalizePublicProfileText(req.body?.partnerNote, 280);
   const onboardingStatus = typeof req.body?.onboardingStatus === 'string' && VALID_ONBOARDING_STATUSES.has(req.body.onboardingStatus)
     ? req.body.onboardingStatus
     : 'gig_ready';
@@ -3537,6 +3539,17 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
       })
       .returning({ id: performers.id });
 
+    if (isPartner) {
+      await tx.insert(performerPartnerEntitlements).values({
+        performerId: createdPerformer.id,
+        grantedByUserId: adminAccess.actor.actorId,
+        partnerKind: 'brand',
+        termsVersion: SWAY_PARTNER_TERMS_VERSION,
+        termsSnapshot: buildSwayPartnerTermsSnapshot(),
+        note: partnerNote
+      });
+    }
+
     await writeAuditEvent(tx, {
       actorId: adminAccess.actor.actorId,
       actorType: 'admin',
@@ -3548,7 +3561,10 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
       metadata: {
         targetEmail: normalizedEmail,
         targetHandle: normalizedHandle,
-        performerId: createdPerformer.id
+        performerId: createdPerformer.id,
+        isPartner,
+        partnerKind: isPartner ? 'brand' : null,
+        partnerTermsVersion: isPartner ? SWAY_PARTNER_TERMS_VERSION : null
       }
     });
 
@@ -3589,6 +3605,16 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
   const userUpdates: Record<string, unknown> = {};
   const performerUpdates: Record<string, unknown> = {};
   const changedFields: string[] = [];
+  const shouldGrantPartner = Boolean(
+    existingAccount.performerId
+    && req.body?.isPartner === true
+    && !existingAccount.partnerTermsVersion
+  );
+  const partnerNote = normalizePublicProfileText(req.body?.partnerNote, 280);
+
+  if (shouldGrantPartner) {
+    changedFields.push('partner');
+  }
 
   if (req.body?.email !== undefined) {
     const normalizedEmail = normalizePerformerLoginEmail(req.body.email);
@@ -3691,6 +3717,37 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     }
     if (existingAccount.performerId && Object.keys(performerUpdates).length > 0) {
       await tx.update(performers).set(performerUpdates).where(eq(performers.id, existingAccount.performerId));
+    }
+    if (shouldGrantPartner && existingAccount.performerId) {
+      const grantedPartnerRows = await tx
+        .insert(performerPartnerEntitlements)
+        .values({
+          performerId: existingAccount.performerId,
+          grantedByUserId: adminAccess.actor.actorId,
+          partnerKind: 'brand',
+          termsVersion: SWAY_PARTNER_TERMS_VERSION,
+          termsSnapshot: buildSwayPartnerTermsSnapshot(),
+          note: partnerNote
+        })
+        .onConflictDoNothing()
+        .returning({ performerId: performerPartnerEntitlements.performerId });
+
+      if (grantedPartnerRows.length > 0) {
+        await writeAuditEvent(tx, {
+          actorId: adminAccess.actor.actorId,
+          actorType: 'admin',
+          entityType: 'performer',
+          entityId: existingAccount.performerId,
+          eventType: 'admin_account.partner_grant',
+          previousStatus: null,
+          nextStatus: 'partner',
+          metadata: {
+            targetEmail: existingAccount.email,
+            partnerKind: 'brand',
+            termsVersion: SWAY_PARTNER_TERMS_VERSION
+          }
+        });
+      }
     }
 
     await writeAuditEvent(tx, {
@@ -4036,38 +4093,80 @@ app.get('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
-  const [profileRow] = await businessDb
-    .select({
-      performerId: performerPublicProfiles.performerId,
-      headline: performerPublicProfiles.headline,
-      city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl,
-      instagramUrl: performerPublicProfiles.instagramUrl,
-      tiktokUrl: performerPublicProfiles.tiktokUrl,
-      youtubeUrl: performerPublicProfiles.youtubeUrl,
-      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-      websiteUrl: performerPublicProfiles.websiteUrl,
-      updatedAt: performerPublicProfiles.updatedAt
-    })
-    .from(performerPublicProfiles)
-    .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
-    .limit(1);
+  const [[profileRow], linkRows, [partnerRow]] = await Promise.all([
+    businessDb
+      .select({
+        performerId: performerPublicProfiles.performerId,
+        headline: performerPublicProfiles.headline,
+        specialties: performerPublicProfiles.specialties,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl,
+        bookingEmail: performerPublicProfiles.bookingEmail,
+        bookingPhone: performerPublicProfiles.bookingPhone,
+        facebookUrl: performerPublicProfiles.facebookUrl,
+        instagramUrl: performerPublicProfiles.instagramUrl,
+        tiktokUrl: performerPublicProfiles.tiktokUrl,
+        youtubeUrl: performerPublicProfiles.youtubeUrl,
+        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+        websiteUrl: performerPublicProfiles.websiteUrl,
+        updatedAt: performerPublicProfiles.updatedAt
+      })
+      .from(performerPublicProfiles)
+      .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .limit(1),
+    businessDb
+      .select({
+        id: performerProfileLinks.id,
+        label: performerProfileLinks.label,
+        description: performerProfileLinks.description,
+        url: performerProfileLinks.url,
+        kind: performerProfileLinks.kind,
+        sortOrder: performerProfileLinks.sortOrder,
+        isActive: performerProfileLinks.isActive
+      })
+      .from(performerProfileLinks)
+      .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
+      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
+    businessDb
+      .select({
+        partnerKind: performerPartnerEntitlements.partnerKind,
+        termsVersion: performerPartnerEntitlements.termsVersion,
+        grantedAt: performerPartnerEntitlements.grantedAt
+      })
+      .from(performerPartnerEntitlements)
+      .where(eq(performerPartnerEntitlements.performerId, performerOwner.performerId))
+      .limit(1)
+  ]);
 
   return res.json({
     profile: {
       performerId: performerOwner.performerId,
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
+      bio: performerOwner.bio,
       headline: profileRow?.headline ?? null,
+      specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
+      booking: {
+        email: profileRow?.bookingEmail ?? null,
+        phone: profileRow?.bookingPhone ?? null
+      },
       socialLinks: toPublicSocialLinks({
+        facebookUrl: profileRow?.facebookUrl ?? null,
         instagramUrl: profileRow?.instagramUrl ?? null,
         tiktokUrl: profileRow?.tiktokUrl ?? null,
         youtubeUrl: profileRow?.youtubeUrl ?? null,
         soundcloudUrl: profileRow?.soundcloudUrl ?? null,
         websiteUrl: profileRow?.websiteUrl ?? null
       }),
+      links: linkRows,
+      partner: {
+        active: Boolean(partnerRow),
+        kind: partnerRow?.partnerKind ?? null,
+        termsVersion: partnerRow?.termsVersion ?? null,
+        grantedAt: partnerRow?.grantedAt ?? null
+      },
       updatedAt: profileRow?.updatedAt ?? null
     }
   });
@@ -4087,43 +4186,143 @@ app.post('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
+  const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
+  const specialtiesProvided = req.body?.specialties !== undefined;
+  const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
   const avatarUrl = normalizePublicProfileUrl(req.body?.avatarUrl);
+  const bookingEmail = normalizePublicProfileEmail(req.body?.booking?.email);
+  const bookingPhone = normalizePublicProfilePhone(req.body?.booking?.phone);
+  const facebookUrl = normalizePublicProfileUrl(req.body?.socialLinks?.facebook);
   const instagramUrl = normalizePublicProfileUrl(req.body?.socialLinks?.instagram);
   const tiktokUrl = normalizePublicProfileUrl(req.body?.socialLinks?.tiktok);
   const youtubeUrl = normalizePublicProfileUrl(req.body?.socialLinks?.youtube);
   const soundcloudUrl = normalizePublicProfileUrl(req.body?.socialLinks?.soundcloud);
   const websiteUrl = normalizePublicProfileUrl(req.body?.socialLinks?.website);
+  const normalizedLinks = normalizePublicProfileLinks(req.body?.links);
 
-  await businessDb
-    .insert(performerPublicProfiles)
-    .values({
-      performerId: performerOwner.performerId,
-      headline,
-      city,
-      avatarUrl,
-      instagramUrl,
-      tiktokUrl,
-      youtubeUrl,
-      soundcloudUrl,
-      websiteUrl,
-      updatedAt: new Date()
-    })
-    .onConflictDoUpdate({
-      target: performerPublicProfiles.performerId,
-      set: {
+  if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
+    return res.status(422).json({ error: 'Specialties must be an array.' });
+  }
+
+  const invalidUrlField = [
+    ['Avatar URL', req.body?.avatarUrl, avatarUrl],
+    ['Facebook URL', req.body?.socialLinks?.facebook, facebookUrl],
+    ['Instagram URL', req.body?.socialLinks?.instagram, instagramUrl],
+    ['TikTok URL', req.body?.socialLinks?.tiktok, tiktokUrl],
+    ['YouTube URL', req.body?.socialLinks?.youtube, youtubeUrl],
+    ['SoundCloud URL', req.body?.socialLinks?.soundcloud, soundcloudUrl],
+    ['Website URL', req.body?.socialLinks?.website, websiteUrl]
+  ].find(([, rawValue, normalizedValue]) => (
+    typeof rawValue === 'string' && rawValue.trim().length > 0 && !normalizedValue
+  ));
+
+  if (invalidUrlField) {
+    return res.status(422).json({ error: `${invalidUrlField[0]} must be a valid http or https URL.` });
+  }
+  if (typeof req.body?.booking?.email === 'string' && req.body.booking.email.trim() && !bookingEmail) {
+    return res.status(422).json({ error: 'Booking email must be a valid email address.' });
+  }
+  if (typeof req.body?.booking?.phone === 'string' && req.body.booking.phone.trim() && !bookingPhone) {
+    return res.status(422).json({ error: 'Booking phone must be a valid public phone number.' });
+  }
+  if (normalizedLinks.error) {
+    return res.status(422).json({ error: normalizedLinks.error });
+  }
+
+  const savedLinks = await businessDb.transaction(async (tx) => {
+    const now = new Date();
+
+    await tx
+      .update(performers)
+      .set({ bio, updatedAt: now })
+      .where(eq(performers.id, performerOwner.performerId));
+
+    await tx
+      .insert(performerPublicProfiles)
+      .values({
+        performerId: performerOwner.performerId,
         headline,
+        specialties: specialties ?? [],
         city,
         avatarUrl,
+        bookingEmail,
+        bookingPhone,
+        facebookUrl,
         instagramUrl,
         tiktokUrl,
         youtubeUrl,
         soundcloudUrl,
         websiteUrl,
-        updatedAt: new Date()
+        updatedAt: now
+      })
+      .onConflictDoUpdate({
+        target: performerPublicProfiles.performerId,
+        set: {
+          headline,
+          specialties: specialties ?? [],
+          city,
+          avatarUrl,
+          bookingEmail,
+          bookingPhone,
+          facebookUrl,
+          instagramUrl,
+          tiktokUrl,
+          youtubeUrl,
+          soundcloudUrl,
+          websiteUrl,
+          updatedAt: now
+        }
+      });
+
+    if (normalizedLinks.provided) {
+      await tx.delete(performerProfileLinks).where(eq(performerProfileLinks.performerId, performerOwner.performerId));
+      if (normalizedLinks.links.length) {
+        await tx.insert(performerProfileLinks).values(normalizedLinks.links.map((link) => ({
+          performerId: performerOwner.performerId,
+          label: link.label,
+          description: link.description,
+          url: link.url,
+          kind: link.kind,
+          sortOrder: link.sortOrder,
+          isActive: link.isActive,
+          updatedAt: now
+        })));
+      }
+    }
+
+    await writeAuditEvent(tx, {
+      actorId: talentAccess.actor.actorId,
+      actorType: 'performer',
+      entityType: 'performer',
+      entityId: performerOwner.performerId,
+      eventType: 'performer_public_profile.update',
+      previousStatus: null,
+      nextStatus: 'published',
+      metadata: {
+        hasBio: Boolean(bio),
+        specialtyCount: specialties?.length ?? 0,
+        hasBookingEmail: Boolean(bookingEmail),
+        hasBookingPhone: Boolean(bookingPhone),
+        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null
       }
     });
+
+    return tx
+      .select({
+        id: performerProfileLinks.id,
+        label: performerProfileLinks.label,
+        description: performerProfileLinks.description,
+        url: performerProfileLinks.url,
+        kind: performerProfileLinks.kind,
+        sortOrder: performerProfileLinks.sortOrder,
+        isActive: performerProfileLinks.isActive
+      })
+      .from(performerProfileLinks)
+      .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
+      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
+  });
 
   return res.status(202).json({
     success: true,
@@ -4131,16 +4330,24 @@ app.post('/api/talent/profile/public', async (req, res) => {
       performerId: performerOwner.performerId,
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
+      bio,
       headline,
+      specialties: specialties ?? [],
       city,
       avatarUrl,
+      booking: {
+        email: bookingEmail,
+        phone: bookingPhone
+      },
       socialLinks: {
+        facebook: facebookUrl,
         instagram: instagramUrl,
         tiktok: tiktokUrl,
         youtube: youtubeUrl,
         soundcloud: soundcloudUrl,
         website: websiteUrl
-      }
+      },
+      links: savedLinks
     }
   });
 });
@@ -4915,6 +5122,7 @@ app.get('/api/public/feed', async (_req, res) => {
         headline: performerPublicProfiles.headline,
         city: performerPublicProfiles.city,
         avatarUrl: performerPublicProfiles.avatarUrl,
+        facebookUrl: performerPublicProfiles.facebookUrl,
         instagramUrl: performerPublicProfiles.instagramUrl,
         tiktokUrl: performerPublicProfiles.tiktokUrl,
         youtubeUrl: performerPublicProfiles.youtubeUrl,
@@ -4945,6 +5153,7 @@ app.get('/api/public/feed', async (_req, res) => {
             city: detail.city,
             avatarUrl: detail.avatarUrl,
             socialLinks: toPublicSocialLinks({
+              facebookUrl: detail.facebookUrl,
               instagramUrl: detail.instagramUrl,
               tiktokUrl: detail.tiktokUrl,
               youtubeUrl: detail.youtubeUrl,
@@ -4981,37 +5190,66 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         handle: performers.handle,
         bio: performers.bio,
         headline: performerPublicProfiles.headline,
+        specialties: performerPublicProfiles.specialties,
         city: performerPublicProfiles.city,
         avatarUrl: performerPublicProfiles.avatarUrl,
+        bookingEmail: performerPublicProfiles.bookingEmail,
+        bookingPhone: performerPublicProfiles.bookingPhone,
+        facebookUrl: performerPublicProfiles.facebookUrl,
         instagramUrl: performerPublicProfiles.instagramUrl,
         tiktokUrl: performerPublicProfiles.tiktokUrl,
         youtubeUrl: performerPublicProfiles.youtubeUrl,
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-        websiteUrl: performerPublicProfiles.websiteUrl
+        websiteUrl: performerPublicProfiles.websiteUrl,
+        partnerTermsVersion: performerPartnerEntitlements.termsVersion,
+        partnerGrantedAt: performerPartnerEntitlements.grantedAt,
+        partnerKind: performerPartnerEntitlements.partnerKind
       })
       .from(performers)
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+      .leftJoin(performerPartnerEntitlements, eq(performerPartnerEntitlements.performerId, performers.id))
+      .where(and(
+        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended'])
+      ))
       .limit(1);
 
     if (!profile) {
       return res.status(404).json({ error: 'Performer profile not found.' });
     }
 
-    const [activeRoom] = await businessDb
-      .select({
-        gigId: activeRoomRegistry.gigId,
-        routePath: activeRoomRegistry.routePath,
-        talentRole: activeRoomRegistry.talentRole,
-        startedAt: activeRoomRegistry.startedAt
-      })
-      .from(activeRoomRegistry)
-      .where(and(
-        eq(activeRoomRegistry.performerId, profile.performerId),
-        eq(activeRoomRegistry.registryStatus, 'active')
-      ))
-      .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
-      .limit(1);
+    const [[activeRoom], linkRows] = await Promise.all([
+      businessDb
+        .select({
+          gigId: activeRoomRegistry.gigId,
+          routePath: activeRoomRegistry.routePath,
+          talentRole: activeRoomRegistry.talentRole,
+          startedAt: activeRoomRegistry.startedAt
+        })
+        .from(activeRoomRegistry)
+        .where(and(
+          eq(activeRoomRegistry.performerId, profile.performerId),
+          eq(activeRoomRegistry.registryStatus, 'active')
+        ))
+        .orderBy(sql`${activeRoomRegistry.lastActivityAt} desc`)
+        .limit(1),
+      businessDb
+        .select({
+          id: performerProfileLinks.id,
+          label: performerProfileLinks.label,
+          description: performerProfileLinks.description,
+          url: performerProfileLinks.url,
+          kind: performerProfileLinks.kind,
+          sortOrder: performerProfileLinks.sortOrder
+        })
+        .from(performerProfileLinks)
+        .where(and(
+          eq(performerProfileLinks.performerId, profile.performerId),
+          eq(performerProfileLinks.isActive, true)
+        ))
+        .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt))
+    ]);
 
     const activeRooms = await listReadableActiveRooms();
     const activeRoomSummary = activeRoom
@@ -5025,15 +5263,28 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         handle: profile.handle,
         bio: profile.bio,
         headline: profile.headline,
+        specialties: profile.specialties ?? [],
         city: profile.city,
         avatarUrl: profile.avatarUrl,
+        booking: {
+          email: profile.bookingEmail,
+          phone: profile.bookingPhone
+        },
         socialLinks: toPublicSocialLinks({
+          facebookUrl: profile.facebookUrl,
           instagramUrl: profile.instagramUrl,
           tiktokUrl: profile.tiktokUrl,
           youtubeUrl: profile.youtubeUrl,
           soundcloudUrl: profile.soundcloudUrl,
           websiteUrl: profile.websiteUrl
-        })
+        }),
+        links: linkRows,
+        partner: {
+          active: Boolean(profile.partnerTermsVersion),
+          kind: profile.partnerKind,
+          termsVersion: profile.partnerTermsVersion,
+          grantedAt: profile.partnerGrantedAt
+        }
       },
       activeRoom: activeRoom
         ? {

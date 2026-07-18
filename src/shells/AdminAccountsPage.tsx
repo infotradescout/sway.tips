@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Lock, Plus, RefreshCw, Search, ShieldAlert, X } from 'lucide-react';
+import { BadgeCheck, Lock, Plus, RefreshCw, Search, ShieldAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { StatusBanner } from '../components/TalentAuthStatus';
 
@@ -25,6 +25,9 @@ type AdminAccount = {
   payoutsEnabled: boolean | null;
   chargesEnabled: boolean | null;
   payoutHoldReason: string | null;
+  partnerKind: string | null;
+  partnerTermsVersion: string | null;
+  partnerGrantedAt: string | null;
 };
 
 const ONBOARDING_STATUSES = [
@@ -60,6 +63,8 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [isPartner, setIsPartner] = useState(false);
+  const [partnerNote, setPartnerNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +78,7 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
       const response = await fetch('/api/admin/accounts/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, handle, displayName, password, confirmPassword, isActive })
+        body: JSON.stringify({ email, handle, displayName, password, confirmPassword, isActive, isPartner, partnerNote })
       });
       const data = await parseJsonResponse(response);
       if (!response.ok) {
@@ -124,6 +129,22 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
           <input type="text" className={inputClass()} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
         </div>
 
+        <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-amber-100">
+            <input type="checkbox" checked={isPartner} onChange={(event) => setIsPartner(event.target.checked)} className="h-5 w-5" />
+            Grant Sway Brand Partner status
+          </label>
+          <p className="mt-2 text-xs leading-5 text-amber-100/70">
+            This is an append-only grandfather grant. It preserves the Sway-controlled pricing documented in the current Brand Partner terms and cannot be removed through routine account editing.
+          </p>
+          {isPartner ? (
+            <label className="mt-3 block space-y-1">
+              <span className={labelClass()}>Internal partner note — optional</span>
+              <input className={inputClass()} maxLength={280} value={partnerNote} onChange={(event) => setPartnerNote(event.target.value)} placeholder="Influencer, strategic partnership, or relationship context" />
+            </label>
+          ) : null}
+        </div>
+
         <div className="sm:col-span-2">
           <button
             type="submit"
@@ -155,6 +176,8 @@ function EditAccountPanel({
   const [isActive, setIsActive] = useState(Boolean(account.isActive));
   const [onboardingStatus, setOnboardingStatus] = useState(account.onboardingStatus ?? 'created');
   const [payoutHoldReason, setPayoutHoldReason] = useState(account.payoutHoldReason ?? '');
+  const [isPartner, setIsPartner] = useState(Boolean(account.partnerTermsVersion));
+  const [partnerNote, setPartnerNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -189,6 +212,8 @@ function EditAccountPanel({
       body.isActive = isActive;
       body.onboardingStatus = onboardingStatus;
       body.payoutHoldReason = payoutHoldReason;
+      body.isPartner = isPartner;
+      if (!account.partnerTermsVersion && isPartner) body.partnerNote = partnerNote;
     }
 
     try {
@@ -320,6 +345,35 @@ function EditAccountPanel({
             </div>
             <div className="sm:col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
               Payment/Stripe status (charges, payouts, KYC) is driven by Stripe and is intentionally not editable here to avoid drifting from the real account state.
+            </div>
+            <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
+              <label className={`flex min-h-11 items-center gap-3 text-sm font-bold text-amber-100 ${account.partnerTermsVersion ? 'cursor-default' : 'cursor-pointer'}`}>
+                <input
+                  type="checkbox"
+                  checked={isPartner}
+                  disabled={Boolean(account.partnerTermsVersion)}
+                  onChange={(event) => setIsPartner(event.target.checked)}
+                  className="h-5 w-5"
+                />
+                Sway Brand Partner
+              </label>
+              {account.partnerTermsVersion ? (
+                <p className="mt-2 text-xs leading-5 text-amber-100/70">
+                  Grandfathered under terms {account.partnerTermsVersion}. This append-only grant cannot be removed here.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2 text-xs leading-5 text-amber-100/70">
+                    Granting this permanently preserves the current Sway-controlled pricing for this performer.
+                  </p>
+                  {isPartner ? (
+                    <label className="mt-3 block space-y-1">
+                      <span className={labelClass()}>Internal partner note — optional</span>
+                      <input className={inputClass()} maxLength={280} value={partnerNote} onChange={(event) => setPartnerNote(event.target.value)} />
+                    </label>
+                  ) : null}
+                </>
+              )}
             </div>
           </>
         ) : null}
@@ -545,6 +599,7 @@ export default function AdminAccountsPage() {
                 <th className="px-4 py-3">Handle</th>
                 <th className="px-4 py-3">Verified</th>
                 <th className="px-4 py-3">Active</th>
+                <th className="px-4 py-3">Brand partner</th>
                 <th className="px-4 py-3">Payment status</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -552,11 +607,11 @@ export default function AdminAccountsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Loading accounts...</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Loading accounts...</td>
                 </tr>
               ) : accounts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">No accounts match this search.</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">No accounts match this search.</td>
                 </tr>
               ) : (
                 accounts.map((account) => (
@@ -569,6 +624,13 @@ export default function AdminAccountsPage() {
                     <td className="px-4 py-3 text-slate-300">{account.handle || '—'}</td>
                     <td className="px-4 py-3 text-slate-300">{account.emailVerifiedAt ? 'Yes' : 'No'}</td>
                     <td className="px-4 py-3 text-slate-300">{account.performerId ? (account.isActive ? 'Yes' : 'No') : '—'}</td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {account.partnerTermsVersion ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-100">
+                          <BadgeCheck className="h-3.5 w-3.5" /> Brand
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="px-4 py-3 text-slate-300">{account.paymentAccountStatus || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       <button
