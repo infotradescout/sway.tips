@@ -83,6 +83,44 @@ const previews = [
         isActive: true
       }
     ]
+  },
+  {
+    handle: 'drewmaze',
+    displayName: 'Drew Maze',
+    metadata: { stageName: 'Drew Maze' },
+    headline: 'Rapper · Producer · Recording artist · Audio engineer',
+    bio: 'Drew Maze is a hip-hop and rap artist, producer, and audio engineer with a catalog of independent singles and collaborations. His releases include Dead People, The Honorable, Oh Really?, Mutual, OBE, Alter, and Comfortable, alongside featured work with artists including Bubba Khain and Kyngovilla.',
+    specialties: ['Hip-hop / rap', 'Rapper', 'Producer', 'Recording artist', 'Audio engineer', 'Mixing & mastering', 'Collaborations'],
+    // No city, avatar, website, or booking destination is published until Drew
+    // supplies or explicitly approves it. Public-source research is not owner approval.
+    instagramUrl: 'https://www.instagram.com/drewmaze_',
+    youtubeUrl: 'https://www.youtube.com/@drewmaze_',
+    soundcloudUrl: 'https://soundcloud.com/drewmaze',
+    links: [
+      {
+        label: 'Listen on Apple Music',
+        description: 'Drew Maze singles and featured collaborations.',
+        url: 'https://music.apple.com/us/artist/drew-maze/1528296799',
+        kind: 'other',
+        isActive: true
+      },
+      {
+        label: 'Listen on Spotify',
+        description: 'The official Drew Maze artist catalog.',
+        url: 'https://open.spotify.com/artist/5HzKESfZrghtTUznfXHo0A',
+        kind: 'other',
+        isActive: true
+      }
+    ],
+    featuredMedia: [
+      {
+        kind: 'youtube',
+        title: 'Pen Pal (Official Video)',
+        description: 'Official Drew Maze video. Produced by Tone Jones.',
+        url: 'https://www.youtube.com/watch?v=XW-6-4jWJ9w',
+        isActive: true
+      }
+    ]
   }
 ];
 

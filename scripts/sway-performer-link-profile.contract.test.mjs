@@ -124,6 +124,30 @@ for (const forbidden of [
   requireExcludes(previewSeed, forbidden, 'Curated preview seed');
 }
 
+const drewMazePreview = sliceBetween(
+  previewSeed,
+  "  {\n    handle: 'drewmaze'",
+  '\n  }\n];',
+  'Drew Maze curated preview'
+);
+for (const term of [
+  "handle: 'drewmaze'",
+  "displayName: 'Drew Maze'",
+  "metadata: { stageName: 'Drew Maze' }",
+  'Rapper · Producer · Recording artist · Audio engineer',
+  'music.apple.com/us/artist/drew-maze/1528296799',
+  'open.spotify.com/artist/5HzKESfZrghtTUznfXHo0A',
+  'instagram.com/drewmaze_',
+  'youtube.com/@drewmaze_',
+  'soundcloud.com/drewmaze',
+  "title: 'Pen Pal (Official Video)'",
+  'www.youtube.com/watch?v=XW-6-4jWJ9w',
+  'Public-source research is not owner approval.'
+]) requireIncludes(drewMazePreview, term, 'Drew Maze curated preview');
+for (const forbidden of ['websiteUrl:', "kind: 'booking'", 'city:', 'avatarUrl:']) {
+  requireExcludes(drewMazePreview, forbidden, 'Drew Maze unapproved profile fields');
+}
+
 for (const term of [
   '"booking_email" text',
   '"booking_phone" text',
