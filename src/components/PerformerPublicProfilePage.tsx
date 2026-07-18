@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   BadgeCheck,
+  Coins,
   Globe2,
   LockKeyhole,
   Mail,
@@ -12,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
 
 type PublicProfileLink = {
@@ -33,6 +35,7 @@ type PublicProfileMedia = {
 
 type PublicPerformerProfile = {
   displayName: string;
+  stageName: string | null;
   handle: string | null;
   bio: string | null;
   headline: string | null;
@@ -78,6 +81,14 @@ const SOCIAL_LABELS: Record<string, string> = {
   website: 'Website'
 };
 
+// Curated public profile assets are also carried by the preview seed. Keep a
+// visual fallback while an already-claimed partner row is being hydrated from
+// that curated record; owners can replace it from the authenticated editor.
+const CURATED_PUBLIC_AVATAR_FALLBACKS: Record<string, string> = {
+  dj3x: '/assets/frank-broughton-avatar.png',
+  coreymack: 'https://img1.wsimg.com/isteam/ip/507cdd9e-ba65-48f1-ac5c-290e6c33023b/72E6855B-ABEB-492D-8EA4-0DAB48CAA65E.jpeg'
+};
+
 function profileInitials(displayName: string) {
   return displayName
     .split(/\s+/)
@@ -99,6 +110,30 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [tipMessage, setTipMessage] = useState<string | null>(null);
+  const [tipOpen, setTipOpen] = useState(false);
+
+  const handleTipClick = () => {
+    if (!profile) return;
+
+    if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipOpen(false);
+      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
+      return;
+    }
+
+    setTipMessage(null);
+    setTipOpen(true);
+  };
+
+  const handlePayClick = () => {
+    if (!profile) return;
+    if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
+      return;
+    }
+    setTipMessage('Direct profile payments are not enabled for this performer yet. No payment was started.');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +180,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
         setActiveRoom(data.activeRoom || null);
         setAvatarFailed(false);
         setStatus('ready');
-        document.title = `${data.performer.displayName} on Sway`;
+        document.title = `${data.performer.stageName || (data.performer.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : data.performer.displayName)} on Sway`;
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
@@ -162,12 +197,23 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const socialLinks = useMemo(() => Object.entries(profile?.socialLinks || {})
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0), [profile]);
 
+  const profileUrl = useMemo(() => {
+    if (!profile) return '';
+    const canonicalHandle = profile.handle || performerHandle;
+    const profilePath = `/p/${encodeURIComponent(canonicalHandle)}`;
+    return typeof window === 'undefined'
+      ? profilePath
+      : new URL(profilePath, window.location.origin).toString();
+  }, [performerHandle, profile]);
+
+  const profileTipUrl = useMemo(() => `${profileUrl}#tip`, [profileUrl]);
+
   const handleShare = async () => {
     if (!profile) return;
     const shareData = {
       title: `${profile.displayName} on Sway`,
       text: profile.headline || `Visit ${profile.displayName}'s public Sway page.`,
-      url: window.location.href
+      url: profileUrl
     };
 
     try {
@@ -175,7 +221,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
         await navigator.share(shareData);
         return;
       }
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(profileUrl);
       setShareMessage('Link copied');
       window.setTimeout(() => setShareMessage(null), 1800);
     } catch {
@@ -218,6 +264,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const telephoneHref = profile.booking.phone
     ? `tel:${profile.booking.phone.replace(/[^\d+]/g, '')}`
     : null;
+  const stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName);
+  const hasDistinctDisplayName = stageName.trim().toLowerCase() !== profile.displayName.trim().toLowerCase();
+  const publicAvatarUrl = profile.avatarUrl || (profile.handle ? CURATED_PUBLIC_AVATAR_FALLBACKS[profile.handle.toLowerCase()] || null : null);
 
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-[#05060a] text-slate-100">
@@ -248,9 +297,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <div className="flex flex-col items-center text-center">
             <div className="relative">
               <div className="absolute -inset-2 rounded-[2rem] bg-gradient-to-br from-fuchsia-500/45 to-cyan-400/35 blur-xl" />
-              {profile.avatarUrl && !avatarFailed ? (
+              {publicAvatarUrl && !avatarFailed ? (
                 <img
-                  src={profile.avatarUrl}
+                  src={publicAvatarUrl}
                   alt={`${profile.displayName} profile`}
                   onError={() => setAvatarFailed(true)}
                   className="relative h-28 w-28 rounded-[1.75rem] border border-white/15 object-cover shadow-2xl sm:h-32 sm:w-32"
@@ -275,7 +324,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 </span>
               ) : null}
             </div>
-            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{profile.displayName}</h1>
+            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{stageName}</h1>
+            {hasDistinctDisplayName ? <p className="mt-1 text-sm font-bold text-slate-400">{profile.displayName}</p> : null}
             <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
               {profile.handle ? <span>@{profile.handle}</span> : null}
               {profile.city ? (
@@ -305,6 +355,68 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 This is a review-ready Sway page. It is not claimed yet, and direct booking contact stays locked until the owner verifies the account.
               </p>
             </div>
+          ) : null}
+
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={handleTipClick}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.08] px-4 py-3 text-sm font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
+            >
+              <Coins className="h-4 w-4" />
+              Tip {stageName}
+            </button>
+            {tipMessage ? (
+              <p id="public-profile-tip-message" role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-amber-100/90">
+                {tipMessage}
+              </p>
+            ) : null}
+          </div>
+
+          {tipOpen ? (
+            <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-left" aria-label="Tip this performer">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {stageName}</p>
+                <p className="mt-2 text-sm font-bold text-white">Scan to tip {stageName}, or pay directly here.</p>
+                <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileTipUrl}</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(profileTipUrl);
+                      setShareMessage('Tip link copied');
+                      window.setTimeout(() => setShareMessage(null), 1800);
+                    } catch {
+                      setShareMessage('Copy unavailable');
+                    }
+                  }}
+                  className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
+                >
+                  Copy tip link
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePayClick}
+                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-200 sm:w-auto"
+                >
+                  Pay through Sway
+                </button>
+              </div>
+              <div className="shrink-0 self-center rounded-2xl bg-white p-3 shadow-inner" data-public-profile-qr="true">
+                <QRCodeCanvas
+                  key={profileTipUrl}
+                  aria-label="Sway tip QR code"
+                  value={profileTipUrl}
+                  size={156}
+                  level="H"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  marginSize={4}
+                />
+              </div>
+            </div>
+            </section>
           ) : null}
 
           {activeRoom ? (

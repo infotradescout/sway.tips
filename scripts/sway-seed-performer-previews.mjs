@@ -11,13 +11,31 @@ const previews = [
   {
     handle: 'dj3x',
     displayName: 'Broughton Frank',
-    headline: 'DJ3X · DJ · Live events · Entertainment',
-    bio: 'All things entertainment. DJ3X brings live music, event energy, hosts, and the people behind the moment into one place.',
-    specialties: ['DJ', 'Live events', 'Event host', 'Entertainment', 'Brand partnerships'],
+    metadata: { stageName: 'DJ3X' },
+    headline: 'DJ Three X · Crowd-first DJ · Sound design · Event energy',
+    bio: 'Frank Broughton, known as DJ Three X, is a Pensacola DJ and sound designer whose crowd-first sets blend throwbacks, R&B, hip-hop, and whatever the room is ready for. Performing since 1992, he also brings live-event and media-production experience through Vybe Café.',
+    specialties: ['DJ', 'Sound design', 'Event consulting', 'Event host', 'Live events', 'R&B + hip-hop', 'Brand partnerships'],
     city: 'Pensacola, FL',
-    avatarUrl: null,
+    // Supplied from Frank's public Facebook profile image; stored locally so
+    // the public page does not depend on a third-party hotlink.
+    avatarUrl: '/assets/frank-broughton-avatar.png',
     facebookUrl: 'https://www.facebook.com/frank.broughton.507',
+    websiteUrl: 'https://djthreeex.com',
     links: [
+      {
+        label: 'DJ Three X website',
+        description: 'DJ services, sound design, and consulting.',
+        url: 'https://djthreeex.com',
+        kind: 'booking',
+        isActive: true
+      },
+      {
+        label: 'Profile interview: Taking A Spin With DJ Three X',
+        description: 'A published conversation about his craft, roots, and crowd-first approach.',
+        url: 'https://www.kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
+        kind: 'press',
+        isActive: true
+      },
       {
         label: 'Follow Broughton Frank',
         description: 'Entertainment, events, and live moments.',
@@ -31,6 +49,7 @@ const previews = [
   {
     handle: 'coreymack',
     displayName: 'Corey Mack',
+    metadata: { stageName: 'Corey Mack' },
     headline: 'The Jester of Sound and Soul',
     bio: 'A one-man festival blending beatboxing, DJ sets, stand-up, live looping, MC work, and high-energy event hosting. More than 15 years of rhythm, laughter, and connection.',
     specialties: ['Beatbox', 'DJ', 'Stand-up comedy', 'Live looping', 'MC', 'Event host'],
@@ -96,7 +115,8 @@ try {
       preview.soundcloudUrl ?? null,
       preview.websiteUrl ?? null,
       JSON.stringify(preview.links),
-      JSON.stringify(preview.featuredMedia)
+      JSON.stringify(preview.featuredMedia),
+      JSON.stringify(preview.metadata ?? {})
     ];
 
     const updated = await client.query(
@@ -116,6 +136,7 @@ try {
            website_url = $13,
            links = $14::jsonb,
            featured_media = $15::jsonb,
+           metadata = $16::jsonb,
            is_active = true,
            updated_at = now()
        WHERE lower(handle) = lower($1)
@@ -127,8 +148,8 @@ try {
       const inserted = await client.query(
         `INSERT INTO performer_profile_previews
           (handle, display_name, bio, headline, specialties, city, avatar_url, facebook_url,
-           instagram_url, tiktok_url, youtube_url, soundcloud_url, website_url, links, featured_media)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb)
+           instagram_url, tiktok_url, youtube_url, soundcloud_url, website_url, links, featured_media, metadata)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb)
          RETURNING id`,
         values
       );

@@ -1199,6 +1199,24 @@ function toPublicSocialLinks(row: {
   };
 }
 
+function resolvePublicStageName(input: {
+  displayName: string | null;
+  handle: string | null;
+  headline: string | null;
+  metadata: unknown;
+}) {
+  const metadataStageName = input.metadata && typeof input.metadata === 'object'
+    ? normalizePublicProfileText((input.metadata as Record<string, unknown>).stageName, 80)
+    : null;
+  if (metadataStageName) return metadataStageName;
+
+  // DJ3X is the performer-facing name already established by the public
+  // handle and headline. Keep it ahead of the legal/display name until the
+  // owner supplies an explicit stageName in their public profile metadata.
+  if (input.handle?.trim().toLowerCase() === 'dj3x') return 'DJ3X';
+  return input.displayName || input.handle || 'Performer';
+}
+
 function normalizeLibrarySourceKey(value: unknown) {
   const normalized = normalizeLibraryText(value, 64).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || null;
@@ -5822,6 +5840,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         specialties: performerPublicProfiles.specialties,
         city: performerPublicProfiles.city,
         avatarUrl: performerPublicProfiles.avatarUrl,
+        metadata: performerPublicProfiles.metadata,
         bookingEmail: performerPublicProfiles.bookingEmail,
         bookingPhone: performerPublicProfiles.bookingPhone,
         facebookUrl: performerPublicProfiles.facebookUrl,
@@ -5865,6 +5884,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           specialties: performerProfilePreviews.specialties,
           city: performerProfilePreviews.city,
           avatarUrl: performerProfilePreviews.avatarUrl,
+          metadata: performerProfilePreviews.metadata,
           facebookUrl: performerProfilePreviews.facebookUrl,
           instagramUrl: performerProfilePreviews.instagramUrl,
           tiktokUrl: performerProfilePreviews.tiktokUrl,
@@ -5897,6 +5917,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       return res.json({
         performer: {
           displayName: preview.displayName,
+          stageName: resolvePublicStageName({
+            displayName: preview.displayName,
+            handle: preview.handle,
+            headline: preview.headline,
+            metadata: preview.metadata
+          }),
           handle: preview.handle,
           bio: preview.bio,
           headline: preview.headline,
@@ -5931,7 +5957,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       });
     }
 
-    const [[activeRoom], linkRows, partnerState] = await Promise.all([
+    const [[activeRoom], linkRows, partnerState, [curatedPreview]] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -5960,7 +5986,34 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           eq(performerProfileLinks.isActive, true)
         ))
         .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
-      loadPartnerEntitlementStateForPerformer(businessDb, profile.performerId)
+      loadPartnerEntitlementStateForPerformer(businessDb, profile.performerId),
+      businessDb
+        .select({
+          claimedPerformerId: performerProfilePreviews.claimedPerformerId,
+          displayName: performerProfilePreviews.displayName,
+          handle: performerProfilePreviews.handle,
+          bio: performerProfilePreviews.bio,
+          headline: performerProfilePreviews.headline,
+          specialties: performerProfilePreviews.specialties,
+          city: performerProfilePreviews.city,
+          avatarUrl: performerProfilePreviews.avatarUrl,
+          metadata: performerProfilePreviews.metadata,
+          facebookUrl: performerProfilePreviews.facebookUrl,
+          instagramUrl: performerProfilePreviews.instagramUrl,
+          tiktokUrl: performerProfilePreviews.tiktokUrl,
+          youtubeUrl: performerProfilePreviews.youtubeUrl,
+          soundcloudUrl: performerProfilePreviews.soundcloudUrl,
+          websiteUrl: performerProfilePreviews.websiteUrl,
+          links: performerProfilePreviews.links,
+          featuredMedia: performerProfilePreviews.featuredMedia
+        })
+        .from(performerProfilePreviews)
+        .where(and(
+          sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+          eq(performerProfilePreviews.isActive, true),
+          or(isNull(performerProfilePreviews.claimedPerformerId), eq(performerProfilePreviews.claimedPerformerId, profile.performerId))
+        ))
+        .limit(1)
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -5971,10 +6024,35 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       const safeUrl = normalizePublicProfileUrl(link.url);
       return safeUrl ? [{ ...link, url: safeUrl }] : [];
     });
-    const normalizedMedia = normalizePublicProfileFeaturedMedia(profile.featuredMedia ?? undefined);
+    const normalizedCuratedLinks = normalizePublicProfileLinks(curatedPreview?.links ?? undefined);
+    const curatedLinkRows = normalizedCuratedLinks.links
+      .filter((link) => link.isActive)
+      .map(({ isActive: _isActive, ...link }) => link);
+    const combinedLinkRows = [...publicLinkRows, ...curatedLinkRows.filter((curatedLink) => (
+      !publicLinkRows.some((publicLink) => publicLink.url === curatedLink.url || publicLink.label.toLowerCase() === curatedLink.label.toLowerCase())
+    ))].slice(0, 12);
+    const effectiveHeadline = profile.headline || curatedPreview?.headline || null;
+    const effectiveBio = profile.bio || curatedPreview?.bio || null;
+    const effectiveSpecialties = profile.specialties?.length
+      ? profile.specialties
+      : curatedPreview?.specialties ?? [];
+    const effectiveCity = profile.city || curatedPreview?.city || null;
+    const effectiveAvatarUrl = profile.avatarUrl || curatedPreview?.avatarUrl || null;
+    const normalizedMedia = normalizePublicProfileFeaturedMedia(
+      Array.isArray(profile.featuredMedia) && profile.featuredMedia.length
+        ? profile.featuredMedia
+        : curatedPreview?.featuredMedia
+    );
     const publicMedia = normalizedMedia.media
       .filter((media) => media.isActive)
       .map(({ isActive: _isActive, ...media }) => media);
+    const effectiveMetadata = profile.metadata || curatedPreview?.metadata || null;
+    const stageName = resolvePublicStageName({
+      displayName: profile.displayName,
+      handle: profile.handle,
+      headline: effectiveHeadline,
+      metadata: effectiveMetadata
+    });
     const publicBooking = resolveVerifiedPublicBookingContact({
       email: profile.bookingEmail,
       phone: profile.bookingPhone,
@@ -5984,22 +6062,23 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     return res.json({
       performer: {
         displayName: profile.displayName,
+        stageName,
         handle: profile.handle,
-        bio: profile.bio,
-        headline: profile.headline,
-        specialties: profile.specialties ?? [],
-        city: profile.city,
-        avatarUrl: normalizePublicProfileUrl(profile.avatarUrl),
+        bio: effectiveBio,
+        headline: effectiveHeadline,
+        specialties: effectiveSpecialties,
+        city: effectiveCity,
+        avatarUrl: normalizePublicProfileUrl(effectiveAvatarUrl),
         booking: publicBooking,
         socialLinks: toPublicSocialLinks({
-          facebookUrl: profile.facebookUrl,
-          instagramUrl: profile.instagramUrl,
-          tiktokUrl: profile.tiktokUrl,
-          youtubeUrl: profile.youtubeUrl,
-          soundcloudUrl: profile.soundcloudUrl,
-          websiteUrl: profile.websiteUrl
+          facebookUrl: profile.facebookUrl || curatedPreview?.facebookUrl || null,
+          instagramUrl: profile.instagramUrl || curatedPreview?.instagramUrl || null,
+          tiktokUrl: profile.tiktokUrl || curatedPreview?.tiktokUrl || null,
+          youtubeUrl: profile.youtubeUrl || curatedPreview?.youtubeUrl || null,
+          soundcloudUrl: profile.soundcloudUrl || curatedPreview?.soundcloudUrl || null,
+          websiteUrl: profile.websiteUrl || curatedPreview?.websiteUrl || null
         }),
-        links: publicLinkRows,
+        links: combinedLinkRows,
         featuredMedia: publicMedia,
         partner: {
           active: partnerState?.isEffective ?? false,

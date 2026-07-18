@@ -100,12 +100,20 @@ for (const term of [
   "handle: 'dj3x'",
   "handle: 'coreymack'",
   "displayName: 'Broughton Frank'",
+  "avatarUrl: '/assets/frank-broughton-avatar.png'",
+  "DJ Three X · Crowd-first DJ · Sound design · Event energy",
+  'Performing since 1992',
+  'djthreeex.com',
+  'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
   "title: 'Kita P x Corey Mack in New Orleans'",
   'www.youtube.com/watch?v=--7MMybc6Vw',
   'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');
+if (!existsSync(join(root, 'public/assets/frank-broughton-avatar.png'))) {
+  failures.push('Frank curated avatar asset is missing.');
+}
 for (const forbidden of ['owner_user_id', 'password_hash', 'invitation_token', 'terms_hash']) {
   requireExcludes(previewSeed, forbidden, 'Curated preview seed');
 }
@@ -366,7 +374,7 @@ for (const term of [
   "notInArray(performers.onboardingStatus, ['suspended'])",
   'ownerEmailVerifiedAt: users.emailVerifiedAt',
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
-  'normalizePublicProfileUrl(profile.avatarUrl)',
+  'normalizePublicProfileUrl(effectiveAvatarUrl)',
   'resolveVerifiedPublicBookingContact',
   'normalizePublicProfileFeaturedMedia',
   'booking: publicBooking',
@@ -398,6 +406,20 @@ for (const term of [
   'Featured performance',
   'media.embedUrl',
   'allowFullScreen',
+  'QRCodeCanvas',
+  'data-public-profile-qr="true"',
+  'Sway tip QR code',
+  'Copy tip link',
+  'Pay through Sway',
+  'Scan to tip {stageName}',
+  'profileTipUrl',
+  'const [tipOpen, setTipOpen] = useState(false)',
+  "stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName)",
+  'Tip {stageName}',
+  'stageName: string | null',
+  'canonicalHandle',
+  'Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.',
+  'Direct profile payments are not enabled for this performer yet. No payment was started.',
   'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');
