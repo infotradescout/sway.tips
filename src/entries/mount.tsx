@@ -8,7 +8,9 @@ import SwayInstallPrompt from '../shells/SwayInstallPrompt';
 function registerServiceWorker() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js').catch(() => {});
+    void navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+      void registration.update();
+    }).catch(() => {});
   });
 }
 

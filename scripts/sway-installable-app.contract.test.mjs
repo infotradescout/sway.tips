@@ -50,8 +50,21 @@ for (const term of ['"display": "standalone"', '"start_url": "/home?source=insta
   if (!manifest.includes(term)) failures.push(`Manifest missing term: ${term}`);
 }
 
-for (const term of ['CACHE_NAME', '/offline.html', '/favicon.png', 'serviceWorker.register', "navigator.serviceWorker.register('/sw.js')"]) {
+for (const term of ['CACHE_NAME', '/offline.html', '/favicon.png', 'serviceWorker.register']) {
   if (!sw.includes(term) && !mount.includes(term)) failures.push(`Installable app runtime missing term: ${term}`);
+}
+
+for (const term of [
+  "const CACHE_NAME = 'sway-app-shell-v2'",
+  'APP_SHELL_ASSETS.includes(url.pathname)',
+  "updateViaCache: 'none'",
+  'registration.update()'
+]) {
+  if (!sw.includes(term) && !mount.includes(term)) failures.push(`Installable app stale-cache protection missing term: ${term}`);
+}
+
+for (const forbidden of ['cache.put(request, clone)', 'caches.match(request).then((cached) => {']) {
+  if (sw.includes(forbidden)) failures.push(`Service worker must not cache arbitrary production assets: ${forbidden}`);
 }
 
 for (const term of ['public/assets/sway-site-icon-source.png', 'object-fit:cover', 'public/favicon.png']) {
