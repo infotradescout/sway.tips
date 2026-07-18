@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && node scripts/copy-public-share-assets.mjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "start": "npm run db:seed:performer-previews && node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "check": "npm run lint",
     "lint": "tsc --noEmit",
