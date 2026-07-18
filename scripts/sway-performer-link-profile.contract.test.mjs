@@ -103,7 +103,6 @@ for (const term of [
   "avatarUrl: '/assets/frank-broughton-avatar.png'",
   "DJ Three X · Crowd-first DJ · Sound design · Event energy",
   'Performing since 1992',
-  'djthreeex.com',
   'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
   "title: 'Kita P x Corey Mack in New Orleans'",
@@ -117,6 +116,7 @@ if (!existsSync(join(root, 'public/assets/frank-broughton-avatar.png'))) {
 for (const forbidden of ['owner_user_id', 'password_hash', 'invitation_token', 'terms_hash']) {
   requireExcludes(previewSeed, forbidden, 'Curated preview seed');
 }
+requireExcludes(previewSeed, 'djthreeex.com', 'Curated preview seed Truth Lock');
 
 for (const term of [
   '"booking_email" text',
@@ -487,7 +487,7 @@ for (const source of [publicPage, editor]) {
 }
 
 if (!failures.length) {
-  const behavior = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/sway-performer-link-profile.behavior.test.ts'], {
+  const behavior = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-performer-link-profile.behavior.test.ts'], {
     cwd: root,
     encoding: 'utf8'
   });
