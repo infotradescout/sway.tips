@@ -93,7 +93,7 @@ const previews = [
     specialties: ['Hip-hop / rap', 'Rapper', 'Producer', 'Recording artist', 'Audio engineer', 'Mixing & mastering', 'Collaborations'],
     // Drew's official YouTube channel avatar, stored locally so the public page
     // does not depend on a third-party hotlink.
-    avatarUrl: '/assets/drew-maze-avatar.jpg',
+    avatarUrl: 'https://sway.tips/assets/drew-maze-avatar.jpg',
     // No city, website, or booking destination is published until Drew supplies
     // or explicitly approves it. Public-source research is not owner approval.
     instagramUrl: 'https://www.instagram.com/drewmaze_',
