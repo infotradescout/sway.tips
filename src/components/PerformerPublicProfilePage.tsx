@@ -102,21 +102,28 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [tipMessage, setTipMessage] = useState<string | null>(null);
+  const [tipOpen, setTipOpen] = useState(false);
 
   const handleTipClick = () => {
     if (!profile) return;
 
     if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipOpen(false);
       setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
       return;
     }
 
-    if (activeRoom) {
-      window.location.assign(activeRoom.routePath);
+    setTipMessage(null);
+    setTipOpen(true);
+  };
+
+  const handlePayClick = () => {
+    if (!profile) return;
+    if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
       return;
     }
-
-    setTipMessage('Tips open when this performer is live in a Sway room. Check back during a live session.');
+    setTipMessage('Direct profile payments are not enabled for this performer yet. No payment was started.');
   };
 
   useEffect(() => {
@@ -178,6 +185,15 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     };
   }, [performerHandle]);
 
+  useEffect(() => {
+    if (!profile || typeof window === 'undefined' || window.location.hash !== '#tip') return;
+    if (profile.isPreview || profile.claimState !== 'claimed') {
+      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
+      return;
+    }
+    setTipOpen(true);
+  }, [profile]);
+
   const socialLinks = useMemo(() => Object.entries(profile?.socialLinks || {})
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0), [profile]);
 
@@ -189,6 +205,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       ? profilePath
       : new URL(profilePath, window.location.origin).toString();
   }, [performerHandle, profile]);
+
+  const profileTipUrl = useMemo(() => `${profileUrl}#tip`, [profileUrl]);
 
   const handleShare = async () => {
     if (!profile) return;
@@ -351,33 +369,41 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             ) : null}
           </div>
 
-          <section className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.05] p-4 text-left" aria-label="Share public profile">
+          {tipOpen ? (
+            <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-left" aria-label="Tip this performer">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Share this page</p>
-                <p className="mt-2 text-sm font-bold text-white">Scan to open {profile.displayName}'s public Sway profile.</p>
-                <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileUrl}</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {profile.displayName}</p>
+                <p className="mt-2 text-sm font-bold text-white">Scan to tip {profile.displayName}, or pay directly here.</p>
+                <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileTipUrl}</p>
                 <button
                   type="button"
                   onClick={async () => {
                     try {
-                      await navigator.clipboard.writeText(profileUrl);
-                      setShareMessage('Profile link copied');
+                      await navigator.clipboard.writeText(profileTipUrl);
+                      setShareMessage('Tip link copied');
                       window.setTimeout(() => setShareMessage(null), 1800);
                     } catch {
                       setShareMessage('Copy unavailable');
                     }
                   }}
-                  className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-300/[0.08] px-3 py-2 text-xs font-black text-cyan-100 transition hover:border-cyan-200/60 hover:bg-cyan-300/[0.14]"
+                  className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
                 >
-                  Copy profile link
+                  Copy tip link
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePayClick}
+                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-200 sm:w-auto"
+                >
+                  Pay through Sway
                 </button>
               </div>
               <div className="shrink-0 self-center rounded-2xl bg-white p-3 shadow-inner" data-public-profile-qr="true">
                 <QRCodeCanvas
-                  key={profileUrl}
-                  aria-label="Public Sway profile QR code"
-                  value={profileUrl}
+                  key={profileTipUrl}
+                  aria-label="Sway tip QR code"
+                  value={profileTipUrl}
                   size={156}
                   level="H"
                   bgColor="#ffffff"
@@ -386,7 +412,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 />
               </div>
             </div>
-          </section>
+            </section>
+          ) : null}
 
           {activeRoom ? (
             <a
