@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   BadgeCheck,
   Globe2,
+  LockKeyhole,
   Mail,
   MapPin,
   Phone,
@@ -31,6 +32,8 @@ type PublicPerformerProfile = {
   booking: {
     email: string | null;
     phone: string | null;
+    available: boolean;
+    verificationRequired: boolean;
   };
   socialLinks: Record<string, string | null>;
   links: PublicProfileLink[];
@@ -108,7 +111,12 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
 
         setProfile({
           ...data.performer,
-          booking: data.performer.booking || { email: null, phone: null },
+          booking: data.performer.booking || {
+            email: null,
+            phone: null,
+            available: false,
+            verificationRequired: false
+          },
           socialLinks: data.performer.socialLinks || {},
           specialties: Array.isArray(data.performer.specialties) ? data.performer.specialties : [],
           links: Array.isArray(data.performer.links) ? data.performer.links : [],
@@ -294,6 +302,12 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                   <Phone className="h-4 w-4" /> Call
                 </a>
               ) : null}
+            </div>
+          ) : null}
+          {profile.booking.verificationRequired ? (
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-left text-xs leading-5 text-amber-100/80">
+              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+              <span>Direct booking contact unlocks after this performer claims and verifies the profile.</span>
             </div>
           ) : null}
         </motion.section>

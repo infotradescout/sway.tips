@@ -90,6 +90,33 @@ export function normalizePublicProfilePhone(value: unknown) {
   return normalized;
 }
 
+export type PublicBookingContact = {
+  email: string | null;
+  phone: string | null;
+  available: boolean;
+  verificationRequired: boolean;
+};
+
+export function resolveVerifiedPublicBookingContact(input: {
+  email: unknown;
+  phone: unknown;
+  ownerEmailVerifiedAt: Date | string | null | undefined;
+}): PublicBookingContact {
+  const email = normalizePublicProfileEmail(input.email);
+  const phone = normalizePublicProfilePhone(input.phone);
+  const hasConfiguredContact = Boolean(email || phone);
+  const ownerEmailVerified = input.ownerEmailVerifiedAt instanceof Date
+    ? !Number.isNaN(input.ownerEmailVerifiedAt.getTime())
+    : typeof input.ownerEmailVerifiedAt === 'string' && input.ownerEmailVerifiedAt.trim().length > 0;
+
+  return {
+    email: ownerEmailVerified ? email : null,
+    phone: ownerEmailVerified ? phone : null,
+    available: ownerEmailVerified && hasConfiguredContact,
+    verificationRequired: !ownerEmailVerified && hasConfiguredContact
+  };
+}
+
 export function normalizePublicProfileLinks(value: unknown): NormalizedPublicProfileLinksResult {
   if (value === undefined) {
     return { provided: false, links: [], error: null };

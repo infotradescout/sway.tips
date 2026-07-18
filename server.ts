@@ -58,7 +58,8 @@ import {
   normalizePublicProfilePhone,
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
-  normalizePublicProfileUrl
+  normalizePublicProfileUrl,
+  resolveVerifiedPublicBookingContact
 } from "./src/server/public-profile";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
@@ -5785,6 +5786,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     const [profile] = await businessDb
       .select({
         performerId: performers.id,
+        ownerEmailVerifiedAt: users.emailVerifiedAt,
         displayName: performers.displayName,
         handle: performers.handle,
         bio: performers.bio,
@@ -5802,6 +5804,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         websiteUrl: performerPublicProfiles.websiteUrl
       })
       .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .where(and(
         sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
@@ -5854,6 +5857,11 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       const safeUrl = normalizePublicProfileUrl(link.url);
       return safeUrl ? [{ ...link, url: safeUrl }] : [];
     });
+    const publicBooking = resolveVerifiedPublicBookingContact({
+      email: profile.bookingEmail,
+      phone: profile.bookingPhone,
+      ownerEmailVerifiedAt: profile.ownerEmailVerifiedAt
+    });
 
     return res.json({
       performer: {
@@ -5864,10 +5872,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         specialties: profile.specialties ?? [],
         city: profile.city,
         avatarUrl: normalizePublicProfileUrl(profile.avatarUrl),
-        booking: {
-          email: normalizePublicProfileEmail(profile.bookingEmail),
-          phone: normalizePublicProfilePhone(profile.bookingPhone)
-        },
+        booking: publicBooking,
         socialLinks: toPublicSocialLinks({
           facebookUrl: profile.facebookUrl,
           instagramUrl: profile.instagramUrl,

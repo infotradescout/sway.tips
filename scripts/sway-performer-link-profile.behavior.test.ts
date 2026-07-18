@@ -5,7 +5,8 @@ import {
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
   normalizePublicProfileSpecialties,
-  normalizePublicProfileUrl
+  normalizePublicProfileUrl,
+  resolveVerifiedPublicBookingContact
 } from '../src/server/public-profile';
 import {
   buildSwayPartnerTermsSnapshot,
@@ -30,6 +31,45 @@ assert.equal(normalizePublicProfileEmail(' BOOKING@Example.com '), 'booking@exam
 assert.equal(normalizePublicProfileEmail('not-an-email'), null);
 assert.equal(normalizePublicProfilePhone('(850) 555-0123'), '(850) 555-0123');
 assert.equal(normalizePublicProfilePhone('123'), null);
+assert.deepEqual(
+  resolveVerifiedPublicBookingContact({
+    email: ' BOOKING@Example.com ',
+    phone: '(850) 555-0123',
+    ownerEmailVerifiedAt: null
+  }),
+  {
+    email: null,
+    phone: null,
+    available: false,
+    verificationRequired: true
+  }
+);
+assert.deepEqual(
+  resolveVerifiedPublicBookingContact({
+    email: ' BOOKING@Example.com ',
+    phone: '(850) 555-0123',
+    ownerEmailVerifiedAt: new Date('2026-07-18T12:00:00.000Z')
+  }),
+  {
+    email: 'booking@example.com',
+    phone: '(850) 555-0123',
+    available: true,
+    verificationRequired: false
+  }
+);
+assert.deepEqual(
+  resolveVerifiedPublicBookingContact({
+    email: null,
+    phone: null,
+    ownerEmailVerifiedAt: null
+  }),
+  {
+    email: null,
+    phone: null,
+    available: false,
+    verificationRequired: false
+  }
+);
 assert.equal(
   escapePublicProfileMetadataAttribute('\"><script>alert(1)</script>&'),
   '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;&amp;'

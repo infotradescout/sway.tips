@@ -300,7 +300,10 @@ for (const term of [
   ".replace(/&/g, '&amp;')",
   ".replace(/\"/g, '&quot;')",
   ".replace(/</g, '&lt;')",
-  ".replace(/>/g, '&gt;')"
+  ".replace(/>/g, '&gt;')",
+  'resolveVerifiedPublicBookingContact',
+  'ownerEmailVerifiedAt',
+  'verificationRequired: !ownerEmailVerified && hasConfiguredContact'
 ]) requireIncludes(normalizers, term, 'Public profile normalizer');
 
 const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
@@ -323,9 +326,11 @@ const publicPerformerRoute = sliceBetween(server, "app.get('/api/public/performe
 for (const term of [
   'eq(performers.isActive, true)',
   "notInArray(performers.onboardingStatus, ['suspended'])",
+  'ownerEmailVerifiedAt: users.emailVerifiedAt',
+  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
   'normalizePublicProfileUrl(profile.avatarUrl)',
-  'normalizePublicProfileEmail(profile.bookingEmail)',
-  'normalizePublicProfilePhone(profile.bookingPhone)',
+  'resolveVerifiedPublicBookingContact',
+  'booking: publicBooking',
   'partnerState?.isEffective'
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
@@ -344,6 +349,8 @@ for (const term of [
   'profile.specialties',
   'profile.links.map',
   'profile.booking.email',
+  'profile.booking.verificationRequired',
+  'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');
 for (const forbidden of ['performerId', 'entitlementId', 'termsHash', 'grantedAt']) {
