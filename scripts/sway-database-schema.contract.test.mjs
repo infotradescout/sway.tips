@@ -88,7 +88,8 @@ const requiredTables = [
   'active_blocks',
   'audit_events',
   'idempotency_keys',
-  'client_pending_actions'
+  'client_pending_actions',
+  'promotion_campaigns'
 ];
 
 for (const table of requiredTables) {
@@ -123,6 +124,8 @@ const requiredEnums = {
     'paid_out'
   ],
   gig_session_status: ['draft', 'scheduled', 'active', 'closeout_pending', 'closed', 'expired', 'canceled'],
+  campaign_status: ['draft', 'active', 'paused', 'ended'],
+  attribution_source: ['creator_direct', 'sway_promoted'],
   performer_onboarding_status: [
     'created',
     'profile_started',
@@ -219,9 +222,23 @@ const requiredTableColumns = {
     'platform_fee',
     'amount_total',
     'currency',
+    'attribution_source',
+    'campaign_id',
+    'commission_bps_applied',
     'capture_mode',
     'refund_status',
     'payout_status',
+    'created_at',
+    'updated_at'
+  ],
+  promotion_campaigns: [
+    'id',
+    'performer_id',
+    'campaign_code',
+    'label',
+    'commission_bps',
+    'status',
+    'expires_at',
     'created_at',
     'updated_at'
   ],
@@ -324,9 +341,19 @@ for (const term of [
   "requesterIpHash: text('requester_ip_hash').notNull()",
   "export const activeBlocks",
   'export const idempotencyKeys',
-  'export const clientPendingActions'
+  'export const clientPendingActions',
+  'export const promotionCampaigns',
+  "commissionBps: integer('commission_bps').notNull()",
+  "attributionSource: attributionSourceEnum('attribution_source').notNull().default('creator_direct')",
+  "campaignId: uuid('campaign_id').references(() => promotionCampaigns.id)"
 ]) {
   if (!schema.includes(term)) failures.push(`Schema source missing required term: ${term}`);
+}
+
+// Sway must never invent the promoted commission rate -- commissionBps is a required
+// input on every campaign (an explicit deal term), not a code-level default.
+if (/commissionBps:\s*integer\('commission_bps'\)[^,\n]*\.default\(/.test(schema)) {
+  failures.push('promotionCampaigns.commissionBps must not have a code-level default -- it is always an explicit deal term.');
 }
 
 for (const forbidden of [/app\.use\(/, /app\.post\(/, /app\.put\(/, /new Stripe/i, /stripe\.paymentIntents/i, /createPaymentIntent/i, /seed/i]) {

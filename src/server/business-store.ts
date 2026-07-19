@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
+import type { FeeAttribution } from './fee-policy';
 import {
   activeRoomRegistry,
   gigSessions,
@@ -9,6 +10,7 @@ import {
   requests,
   users,
   performers,
+  promotionCampaigns,
   requestStatusEnum
 } from '../db/schema';
 
@@ -422,6 +424,33 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     return restoreSnapshotForGig(sessionRow);
   }
 
+  // Server-side authority on attribution: a client can supply a campaign code, but
+  // it only counts as sway_promoted when it resolves to a real, active campaign tied
+  // to the specific performer running this gig. No code, no match, wrong performer,
+  // or an inactive/expired campaign all fall back to creator_direct.
+  async function resolveCampaignAttribution(gigId: string, campaignCode: string | null | undefined): Promise<FeeAttribution> {
+    if (!db || !campaignCode) return { kind: 'creator_direct' };
+
+    const [row] = await db
+      .select({
+        campaignId: promotionCampaigns.id,
+        commissionBps: promotionCampaigns.commissionBps
+      })
+      .from(promotionCampaigns)
+      .innerJoin(gigSessions, eq(gigSessions.performerId, promotionCampaigns.performerId))
+      .where(and(
+        eq(gigSessions.id, gigId),
+        eq(promotionCampaigns.campaignCode, campaignCode),
+        eq(promotionCampaigns.status, 'active'),
+        or(isNull(promotionCampaigns.expiresAt), gt(promotionCampaigns.expiresAt, new Date()))
+      ))
+      .limit(1);
+
+    if (!row) return { kind: 'creator_direct' };
+
+    return { kind: 'sway_promoted', campaignId: row.campaignId, commissionBps: row.commissionBps };
+  }
+
   async function listTrackedGigIds(): Promise<string[]> {
     if (!db) return [];
 
@@ -594,6 +623,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     listActiveRoomSummaries,
     listTrackedGigIds,
     persistState,
+    resolveCampaignAttribution,
     createGigId: () => randomUUID()
   };
 }

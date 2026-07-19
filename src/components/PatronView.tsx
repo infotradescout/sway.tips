@@ -39,6 +39,13 @@ const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this reques
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
 
+// Preview only -- mirrors the creator-direct tier (20% below $5, flat $1 at $5+).
+// The server is authoritative: a Sway-promoted room's true fee is resolved there
+// (campaign rate isn't known to the client), so this is just the common-case estimate.
+function estimatePlatformFee(amountDollars: number): number {
+  return amountDollars < 5 ? Math.round(amountDollars * 0.20 * 100) / 100 : 1.0;
+}
+
 interface PatronViewProps {
   session: GigSession;
   requests: RequestItem[];
@@ -718,7 +725,7 @@ export default function PatronView({
       amt = paymentsEnabledForRoom ? targetBoostAmount : 1;
     }
 
-    const platformFee = paymentsEnabledForRoom && session.feeType === 'patron' ? 1.0 : 0;
+    const platformFee = paymentsEnabledForRoom && session.feeType === 'patron' ? estimatePlatformFee(amt) : 0;
     const total = amt + platformFee;
 
     if (type === 'request') {
@@ -958,7 +965,7 @@ export default function PatronView({
       return;
     }
 
-    const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+    const platformFee = session.feeType === 'patron' ? estimatePlatformFee(tipAmount) : 0;
     sendRequestStarted(funnelTelemetryPayload);
     setPaymentConfirmationState(null);
     setCheckoutPayload({
@@ -2091,7 +2098,7 @@ export default function PatronView({
                                 return;
                               }
                               // Open confirmation
-                              const platformFee = session.feeType === 'patron' ? 1.0 : 0;
+                              const platformFee = session.feeType === 'patron' ? estimatePlatformFee(tipAmount) : 0;
                               sendRequestStarted(funnelTelemetryPayload);
                               setPaymentConfirmationState(null);
                               setCheckoutPayload({

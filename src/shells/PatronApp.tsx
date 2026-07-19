@@ -18,6 +18,7 @@ import {
   sendPatronNoSessionReturnHomeClicked,
   sendRoomEntryViewed
 } from './frictionClient';
+import { captureCampaignCode } from './campaignAttribution';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -103,6 +104,8 @@ export default function PatronApp() {
   const roomEntryEventKeyRef = useRef<string | null>(null);
   const recoveryEventKeyRef = useRef<string | null>(null);
 
+  const campaignCode = captureCampaignCode();
+
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
@@ -110,7 +113,7 @@ export default function PatronApp() {
   const handleCreateRequest = async (requestData: Record<string, unknown>) => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/request/create', requestData);
+      const data = await postJson('/api/request/create', { ...requestData, campaign_code: campaignCode });
       setBState(data.state);
       return data;
     } catch (e) {
@@ -139,7 +142,8 @@ export default function PatronApp() {
         idempotency_key: idempotencyKey,
         expires_at: expiresAt,
         gig_id: gigId,
-        payment_intent_id: paymentIntentId
+        payment_intent_id: paymentIntentId,
+        campaign_code: campaignCode
       });
       setBState(data.state);
       return data;

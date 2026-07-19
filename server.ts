@@ -15,7 +15,7 @@ import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -23,6 +23,7 @@ import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { createPaymentService } from "./src/server/payment-service";
+import { resolveProposedPlatformFee } from "./src/server/fee-policy";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
@@ -4649,6 +4650,158 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
   res.json({ success: true });
 });
 
+// Sway-issued promotion campaigns: the only source of the "sway_promoted"
+// commission rate (never invented in code -- always a negotiated deal term ops
+// types in here). See resolveCampaignAttribution in business-store.ts for how a
+// campaign_code on a sale gets verified against these rows.
+app.get('/api/admin/campaigns', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminOrSupportAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin campaigns require durable persistence.' });
+    return;
+  }
+  applyNoStoreHeaders(res);
+
+  const performerId = typeof req.query.performerId === 'string' ? req.query.performerId : undefined;
+  if (performerId && !UUID_PATTERN.test(performerId)) {
+    res.status(422).json({ error: 'Invalid performerId.' });
+    return;
+  }
+
+  const rows = await businessDb
+    .select()
+    .from(promotionCampaigns)
+    .where(performerId ? eq(promotionCampaigns.performerId, performerId) : undefined)
+    .orderBy(desc(promotionCampaigns.createdAt));
+
+  res.json({ campaigns: rows });
+});
+
+app.post('/api/admin/campaigns', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin campaigns require durable persistence.' });
+    return;
+  }
+  applyNoStoreHeaders(res);
+
+  const performerId = typeof req.body?.performerId === 'string' ? req.body.performerId : '';
+  const campaignCode = typeof req.body?.campaignCode === 'string' ? req.body.campaignCode.trim() : '';
+  const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+  const commissionBps = Number.isInteger(req.body?.commissionBps) ? req.body.commissionBps : null;
+  const expiresAt = typeof req.body?.expiresAt === 'string' && req.body.expiresAt ? new Date(req.body.expiresAt) : null;
+
+  if (!UUID_PATTERN.test(performerId)) {
+    res.status(422).json({ error: 'A valid performerId is required.' });
+    return;
+  }
+  if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(campaignCode)) {
+    res.status(422).json({ error: 'campaignCode must be 2-64 lowercase alphanumeric/hyphen characters.' });
+    return;
+  }
+  if (!label) {
+    res.status(422).json({ error: 'A label describing the deal is required.' });
+    return;
+  }
+  // Sway never invents this number -- it must come from the negotiated deal, every time.
+  if (commissionBps === null || commissionBps <= 0 || commissionBps > 10000) {
+    res.status(422).json({ error: 'commissionBps is required and must be between 1 and 10000 (the negotiated rate).' });
+    return;
+  }
+
+  const [performerRow] = await businessDb.select({ id: performers.id }).from(performers).where(eq(performers.id, performerId)).limit(1);
+  if (!performerRow) {
+    res.status(404).json({ error: 'Performer not found.' });
+    return;
+  }
+
+  const [existingCode] = await businessDb.select({ id: promotionCampaigns.id }).from(promotionCampaigns).where(eq(promotionCampaigns.campaignCode, campaignCode)).limit(1);
+  if (existingCode) {
+    res.status(409).json({ error: 'This campaign code is already in use.' });
+    return;
+  }
+
+  const [created] = await businessDb
+    .insert(promotionCampaigns)
+    .values({ performerId, campaignCode, label, commissionBps, expiresAt })
+    .returning();
+
+  await writeAuditEvent(businessDb, {
+    actorId: adminAccess.actor.actorId,
+    actorType: 'admin',
+    entityType: 'promotion_campaign',
+    entityId: created.id,
+    eventType: 'admin_campaign.create',
+    previousStatus: null,
+    nextStatus: created.status,
+    metadata: { performerId, campaignCode, commissionBps }
+  });
+
+  res.status(201).json({ success: true, campaign: created });
+});
+
+app.patch('/api/admin/campaigns/:campaignId', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).json({ error: adminAccess.reason });
+    return;
+  }
+  if (!businessDb) {
+    res.status(503).json({ error: 'Admin campaigns require durable persistence.' });
+    return;
+  }
+  applyNoStoreHeaders(res);
+
+  if (!UUID_PATTERN.test(req.params.campaignId)) {
+    res.status(404).json({ error: 'Campaign not found.' });
+    return;
+  }
+
+  const [existing] = await businessDb.select().from(promotionCampaigns).where(eq(promotionCampaigns.id, req.params.campaignId)).limit(1);
+  if (!existing) {
+    res.status(404).json({ error: 'Campaign not found.' });
+    return;
+  }
+
+  const VALID_CAMPAIGN_STATUSES = new Set(['draft', 'active', 'paused', 'ended']);
+  if (req.body?.status !== undefined && !VALID_CAMPAIGN_STATUSES.has(req.body.status)) {
+    res.status(422).json({ error: 'Invalid status.' });
+    return;
+  }
+
+  const [updated] = await businessDb
+    .update(promotionCampaigns)
+    .set({
+      ...(req.body?.status !== undefined ? { status: req.body.status } : {}),
+      ...(req.body?.label !== undefined ? { label: String(req.body.label).trim() } : {}),
+      ...(req.body?.expiresAt !== undefined ? { expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : null } : {}),
+      updatedAt: new Date()
+    })
+    .where(eq(promotionCampaigns.id, req.params.campaignId))
+    .returning();
+
+  await writeAuditEvent(businessDb, {
+    actorId: adminAccess.actor.actorId,
+    actorType: 'admin',
+    entityType: 'promotion_campaign',
+    entityId: req.params.campaignId,
+    eventType: 'admin_campaign.update',
+    previousStatus: existing.status,
+    nextStatus: updated.status,
+    metadata: { changedFields: Object.keys(req.body ?? {}) }
+  });
+
+  res.json({ success: true, campaign: updated });
+});
+
 const shellTelemetryAllowedEvents = new Set([
   'telemetry_friction_patron_no_session_recovery_viewed',
   'telemetry_friction_patron_no_session_return_home_clicked',
@@ -6810,9 +6963,11 @@ app.post("/api/request/create", async (req, res) => {
     currency = "USD",
     expires_at,
     payment_method,
-    payment_intent_id
+    payment_intent_id,
+    campaign_code
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+  const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
@@ -6900,7 +7055,11 @@ app.post("/api/request/create", async (req, res) => {
 
   const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
   const holdAmount = tipAmount;
-  const proposedPlatformFeeCents = paymentsEnabledForAction ? 100 : 0;
+  const attribution = paymentsEnabledForAction
+    ? await businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)
+    : { kind: 'creator_direct' as const };
+  const proposedFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution });
+  const proposedPlatformFeeCents = paymentsEnabledForAction ? proposedFee.proposedPlatformFeeCents : 0;
   const platformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
 
   // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
@@ -7002,6 +7161,9 @@ app.post("/api/request/create", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: proposedPlatformFeeCents,
           platformFeePayer,
+          attributionSource: proposedFee.attributionSource,
+          campaignId: proposedFee.campaignId,
+          commissionBpsApplied: proposedFee.commissionBpsApplied,
           currency: normalizedCurrency,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
@@ -7013,6 +7175,9 @@ app.post("/api/request/create", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: proposedPlatformFeeCents,
           platformFeePayer,
+          attributionSource: proposedFee.attributionSource,
+          campaignId: proposedFee.campaignId,
+          commissionBpsApplied: proposedFee.commissionBpsApplied,
           currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: newItem.id,
@@ -7104,9 +7269,11 @@ app.post("/api/request/boost", async (req, res) => {
     currency = "USD",
     expires_at,
     payment_method,
-    payment_intent_id
+    payment_intent_id,
+    campaign_code
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+  const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
@@ -7256,7 +7423,11 @@ app.post("/api/request/boost", async (req, res) => {
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
-  let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? 100 : 0;
+  const boostAttribution = paymentsEnabledForRoom
+    ? await businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)
+    : { kind: 'creator_direct' as const };
+  const proposedBoostFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution: boostAttribution });
+  let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? proposedBoostFee.proposedPlatformFeeCents : 0;
   const boostPlatformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
 
   // Provider-backed authorization/hold for the boost. The booster only reaches
@@ -7273,6 +7444,9 @@ app.post("/api/request/boost", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: appliedBoostPlatformFeeCents,
           platformFeePayer: boostPlatformFeePayer,
+          attributionSource: proposedBoostFee.attributionSource,
+          campaignId: proposedBoostFee.campaignId,
+          commissionBpsApplied: proposedBoostFee.commissionBpsApplied,
           currency: normalizedCurrency,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,
@@ -7284,6 +7458,9 @@ app.post("/api/request/boost", async (req, res) => {
           amountSubtotalCents: amount_cents,
           platformFeeCents: appliedBoostPlatformFeeCents,
           platformFeePayer: boostPlatformFeePayer,
+          attributionSource: proposedBoostFee.attributionSource,
+          campaignId: proposedBoostFee.campaignId,
+          commissionBpsApplied: proposedBoostFee.commissionBpsApplied,
           currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
           runtimeRequestId: request.id,

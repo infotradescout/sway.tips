@@ -9,8 +9,13 @@ export type AuthorizeActionInput = {
   gigId: string;
   actionType: 'tip' | 'request' | 'boost' | 'bump' | 'vip';
   amountSubtotalCents: number;
+  // The fee Sway proposes before any Brand Partner cap -- resolveSwayPlatformFeePolicyForGig
+  // may clamp this down; the persisted platformFee always reflects the post-cap amount.
   platformFeeCents: number;
   platformFeePayer?: 'patron' | 'performer';
+  attributionSource: 'creator_direct' | 'sway_promoted';
+  campaignId: string | null;
+  commissionBpsApplied: number | null;
   currency: string;
   idempotencyKey: string;
   runtimeRequestId?: string | null;
@@ -129,6 +134,9 @@ export function createPaymentService(config: {
         platformFee: feePolicy.platformFeeCents,
         amountTotal: amountTotalCents,
         currency: input.currency,
+        attributionSource: input.attributionSource,
+        campaignId: input.campaignId,
+        commissionBpsApplied: input.commissionBpsApplied,
         captureMode: 'manual'
       })
       .returning({ id: payments.id });
@@ -282,7 +290,10 @@ export function createPaymentService(config: {
         amountSubtotal: payments.amountSubtotal,
         platformFee: payments.platformFee,
         amountTotal: payments.amountTotal,
-        currency: payments.currency
+        currency: payments.currency,
+        attributionSource: payments.attributionSource,
+        campaignId: payments.campaignId,
+        commissionBpsApplied: payments.commissionBpsApplied
       })
       .from(payments)
       .where(eq(payments.processorPaymentIntentId, input.processorPaymentIntentId))
@@ -297,7 +308,10 @@ export function createPaymentService(config: {
       && payment.amountSubtotal === input.amountSubtotalCents
       && payment.platformFee === feePolicy.platformFeeCents
       && payment.amountTotal === amountTotalCents
-      && payment.currency.toUpperCase() === input.currency.toUpperCase();
+      && payment.currency.toUpperCase() === input.currency.toUpperCase()
+      && payment.attributionSource === input.attributionSource
+      && payment.campaignId === input.campaignId
+      && payment.commissionBpsApplied === input.commissionBpsApplied;
 
     if (!sameFinancialIntent) {
       return { status: 'failed', reason: 'payment_intent_mismatch' };

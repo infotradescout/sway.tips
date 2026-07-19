@@ -15,6 +15,7 @@ import {
 import { motion } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
+import { captureCampaignCode } from '../shells/campaignAttribution';
 
 type PublicProfileLink = {
   label: string;
@@ -105,6 +106,10 @@ function formatLinkKind(kind: string) {
 }
 
 export default function PerformerPublicProfilePage({ performerHandle }: { performerHandle: string }) {
+  // A Sway-issued campaign link may land here (?camp=<code>) before the fan clicks
+  // through to the live room; this just needs the persistence side effect -- PatronApp
+  // reads it back on the room route. This page never submits a payment itself.
+  captureCampaignCode();
   const [profile, setProfile] = useState<PublicPerformerProfile | null>(null);
   const [activeRoom, setActiveRoom] = useState<ActiveProfileRoom | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
