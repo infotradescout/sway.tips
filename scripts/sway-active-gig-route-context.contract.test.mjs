@@ -37,7 +37,8 @@ for (const term of [
   'async function resolveLegacyWritableRoom(req: express.Request, res: express.Response)',
   'async function findRoomStateByRequestId(requestId: string)',
   'await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState())',
-  'activeGigId: talentAccess.allowed ? state.activeGigId : null'
+  'projectPublicRoomState(state)',
+  'projectOperatorRoomState(state)'
 ]) {
   if (!server.includes(term)) {
     failures.push(`server.ts missing required active gig route context behavior: ${term}`);
@@ -48,8 +49,12 @@ if (!businessStore.includes('hydrateStateByGigId') || !businessStore.includes('l
   failures.push('Business store must expose gig-scoped hydration helpers for room isolation.');
 }
 
-if (!server.includes('res.json({') || !server.includes('session: state.session') || !server.includes('requests: state.requests') || !server.includes('performers: state.performers')) {
-  failures.push('/api/state must explicitly serialize the allowlisted legacy state payload.');
+if (!server.includes('projectPublicRoomState(state)') || !server.includes("wantsPrivateRoomState(req)")) {
+  failures.push('/api/state must separate the anonymous projection from explicitly requested private talent state.');
+}
+
+if (!talentApp.includes("'/api/state?audience=talent'") || !talentApp.includes('`/api/state/${selectedGigId}?audience=talent`')) {
+  failures.push('TalentApp must explicitly request authenticated operator room state.');
 }
 
 const apiStateSection = server.slice(server.indexOf('app.get("/api/state"'), server.indexOf('app.post("/api/pending-action/reconcile"'));

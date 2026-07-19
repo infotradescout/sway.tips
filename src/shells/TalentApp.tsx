@@ -42,7 +42,7 @@ export default function TalentApp() {
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
-  const statePath = isAuthEntryRoute ? null : (selectedGigId ? `/api/state/${selectedGigId}` : '/api/state');
+  const statePath = isAuthEntryRoute ? null : (selectedGigId ? `/api/state/${selectedGigId}?audience=talent` : '/api/state?audience=talent');
   const { bState, isLoading, setBState } = useSwayState({ statePath });
 
   const refreshPerformerProfile = async () => {
@@ -57,7 +57,7 @@ export default function TalentApp() {
     }
 
     try {
-      const response = await fetch('/api/state');
+      const response = await fetch('/api/state?audience=talent');
       if (!response.ok) {
         setPerformerProfile(null);
         return;

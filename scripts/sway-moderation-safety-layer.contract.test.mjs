@@ -46,13 +46,22 @@ const requiredServerTerms = [
   '/api/support/contact',
   '/api/privacy/data-deletion-placeholder',
   'moderationOutcome.decision',
-  "outage_behavior: 'block_submission'"
+  'This request could not be submitted.'
 ];
 
 for (const term of requiredServerTerms) {
   if (!server.includes(term)) {
     failures.push(`Server moderation path missing required term: ${term}`);
   }
+}
+
+const patronMutationStart = server.indexOf('app.post("/api/request/create"');
+const patronMutationEnd = server.indexOf('// Triage Queue Action', patronMutationStart);
+const patronMutationSource = patronMutationStart >= 0 && patronMutationEnd > patronMutationStart
+  ? server.slice(patronMutationStart, patronMutationEnd)
+  : '';
+if (patronMutationSource.includes('error: moderationOutcome.reason') || patronMutationSource.includes("outage_behavior: 'block_submission'")) {
+  failures.push('Patron mutation responses must not expose moderation reasons or outage decisions.');
 }
 
 const bannedExecutionTerms = [

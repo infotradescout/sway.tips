@@ -255,6 +255,27 @@ export default function App() {
     return data;
   };
 
+  const handleGetPatronRequestStatus = async (gigId: string, requestId: string, receipt: string) => {
+    if (isDemoMode) return { requestId, status: 'pending' };
+    const response = await fetch('/api/patron/request-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gig_id: gigId,
+        request_id: requestId,
+        patron_status_receipt: receipt
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error || 'Request status lookup failed.'), {
+        status: response.status,
+        body: data
+      });
+    }
+    return data;
+  };
+
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
@@ -465,6 +486,7 @@ export default function App() {
               onCreateRequest={handleCreateRequest}
               onBoostRequest={handleBoostRequest}
               onReconcilePendingAction={handleReconcilePendingAction}
+              onGetPatronRequestStatus={handleGetPatronRequestStatus}
               onReportContent={handleReportContent}
               onBlockFoundation={handleBlockFoundation}
               onSupportContact={handleSupportContact}
@@ -520,6 +542,7 @@ export default function App() {
             onCreateRequest={handleCreateRequest}
             onBoostRequest={handleBoostRequest}
             onReconcilePendingAction={handleReconcilePendingAction}
+            onGetPatronRequestStatus={handleGetPatronRequestStatus}
             onReportContent={handleReportContent}
             onBlockFoundation={handleBlockFoundation}
             onSupportContact={handleSupportContact}

@@ -20,6 +20,19 @@ import { createAccessControl, routeFamilyGuard } from "./src/server/access-contr
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
+import {
+  projectOperatorRoomState,
+  projectPatronActionResponse,
+  projectPatronRequestStatus,
+  projectPublicRoomState,
+  projectStoredPatronActionResponse
+} from "./src/server/public-room-state";
+import {
+  findMatchingPatronStatusReceipt,
+  hashPatronStatusReceipt,
+  isValidPatronStatusReceipt,
+  registerPatronStatusReceipt
+} from "./src/server/patron-status-receipt";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { createPaymentService } from "./src/server/payment-service";
@@ -71,6 +84,7 @@ dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
 
 const app = express();
+app.set('json replacer', (key: string, value: unknown) => key === 'patronStatusReceipts' ? undefined : value);
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
 const hasSwayEmailProvider = Boolean(process.env.SWAY_EMAIL_PROVIDER?.trim());
@@ -122,6 +136,10 @@ const adminPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter({
   maxFailures: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_MAX, 5),
   windowMs: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
 });
+const patronRequestStatusRateLimiter = createPerformerLoginRateLimiter({
+  maxRequests: parsePositiveInteger(process.env.SWAY_PATRON_STATUS_RATE_LIMIT_MAX, 30),
+  windowMs: parsePositiveInteger(process.env.SWAY_PATRON_STATUS_RATE_LIMIT_WINDOW_MS, 60 * 1000)
+});
 const performerLoginMailer = createPerformerLoginMailer({
   env: process.env,
   isProduction
@@ -153,6 +171,14 @@ function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
+}
+
+function wantsPrivateRoomState(req: express.Request) {
+  return req.query.audience === 'talent';
+}
+
+function patronRequestStatusUnavailable(res: express.Response) {
+  return res.status(404).json({ error: 'Request status unavailable.' });
 }
 
 function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
@@ -5877,17 +5903,39 @@ app.post("/api/payment/webhook", async (req, res) => {
 
 app.get("/api/state", async (req, res) => {
   await refreshBusinessState();
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  const performerProfile = talentAccess.allowed
-    ? await loadAuthenticatedPerformerProfile(req)
-    : null;
   applyNoStoreHeaders(res);
-  res.json({
-    session: state.session,
-    requests: state.requests,
-    performers: state.performers,
-    activeGigId: talentAccess.allowed ? state.activeGigId : null,
-    performerProfile
+
+  if (!wantsPrivateRoomState(req)) {
+    return res.json(projectPublicRoomState(state));
+  }
+
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+
+  const performerProfile = await loadAuthenticatedPerformerProfile(req);
+  if (!state.activeGigId) {
+    return res.json({
+      ...projectOperatorRoomState(createEmptyBackendState()),
+      performerProfile,
+      room_lookup: 'global'
+    });
+  }
+
+  const gigAccess = await accessControl.requireGigMutationAccess(req, state.activeGigId);
+  if (gigAccess.allowed === false) {
+    return res.json({
+      ...projectOperatorRoomState(createEmptyBackendState()),
+      performerProfile,
+      room_lookup: 'global'
+    });
+  }
+
+  return res.json({
+    ...projectOperatorRoomState(state),
+    performerProfile,
+    room_lookup: 'active'
   });
 });
 
@@ -6299,6 +6347,23 @@ app.get("/api/state/:gigId", async (req, res) => {
     });
   }
 
+  if (wantsPrivateRoomState(req)) {
+    const gigAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
+    if (gigAccess.allowed === false) {
+      return res.status(gigAccess.status).json({ error: gigAccess.reason });
+    }
+
+    const privateRoomSnapshot = await loadRoomState(requestedGigId);
+    if (privateRoomSnapshot.roomStatus === 'missing') {
+      return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+    }
+
+    return res.json({
+      ...projectOperatorRoomState(privateRoomSnapshot.state),
+      room_lookup: privateRoomSnapshot.roomStatus
+    });
+  }
+
   const roomSnapshot = await loadRoomState(requestedGigId);
 
   if (roomSnapshot.roomStatus === 'missing') {
@@ -6326,10 +6391,7 @@ app.get("/api/state/:gigId", async (req, res) => {
   }
 
   return res.json({
-    session: roomSnapshot.state.session,
-    requests: roomSnapshot.state.requests,
-    performers: roomSnapshot.state.performers,
-    activeGigId: roomSnapshot.state.activeGigId,
+    ...projectPublicRoomState(roomSnapshot.state),
     room_lookup: 'active'
   });
 });
@@ -6365,7 +6427,39 @@ app.get("/api/admin/active-rooms", async (req, res) => {
   return res.json({ rooms: await listReadableActiveRooms() });
 });
 
+app.post('/api/patron/request-status', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = patronRequestStatusRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: 'patron-request-status'
+  });
+  if (!rateLimitResult.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(rateLimitResult.retryAfterMs / 1000))));
+    return res.status(429).json({ error: 'Too many request-status checks. Try again shortly.' });
+  }
+
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const requestId = typeof req.body?.request_id === 'string' && /^req-[A-Za-z0-9_-]{1,64}$/.test(req.body.request_id)
+    ? req.body.request_id
+    : null;
+  const receipt = req.body?.patron_status_receipt;
+  if (!gigId || !requestId || !isValidPatronStatusReceipt(receipt)) {
+    return patronRequestStatusUnavailable(res);
+  }
+
+  const roomSnapshot = await loadRoomState(gigId);
+  const request = roomSnapshot.state.requests.find((candidate) => candidate.id === requestId);
+  if (!request || !findMatchingPatronStatusReceipt(request.patronStatusReceipts, receipt)) {
+    return patronRequestStatusUnavailable(res);
+  }
+
+  return res.json(projectPatronRequestStatus(request));
+});
+
 app.post("/api/pending-action/reconcile", async (req, res) => {
+  applyNoStoreHeaders(res);
   const { client_request_id, idempotency_key } = req.body;
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
@@ -6381,6 +6475,18 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
   }
   if (result.status === 'expired') {
     return res.status(410).json({ error: "Pending action expired before backend confirmation." });
+  }
+
+  if (result.status === 'reconciled') {
+    const safeResponseBody = projectStoredPatronActionResponse(result.responseBody);
+    if (!safeResponseBody) {
+      return res.status(409).json({ error: 'Pending action could not be reconciled safely.' });
+    }
+    return res.json({
+      status: result.status,
+      responseStatus: result.responseStatus,
+      responseBody: safeResponseBody
+    });
   }
 
   return res.json(result);
@@ -6789,6 +6895,7 @@ app.post("/api/session/window/preset/delete", async (req, res) => {
 
 // Create request + check profanity
 app.post("/api/request/create", async (req, res) => {
+  applyNoStoreHeaders(res);
   if (!requirePersistentBusinessStore(res)) return;
   const resolvedActor = accessControl.resolveServerActor(req);
   const {
@@ -6805,6 +6912,7 @@ app.post("/api/request/create", async (req, res) => {
     spotifyUrl,
     client_request_id,
     idempotency_key,
+    patron_status_receipt,
     patron_device_id_hash = "anonymous-device",
     gig_id,
     currency = "USD",
@@ -6838,6 +6946,12 @@ app.post("/api/request/create", async (req, res) => {
   // performer directly and are always allowed, regardless of room state.
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
   const paymentsEnabledForAction = isStraightTip || roomState.session.paymentsEnabled !== false;
+  const normalizedPatronStatusReceipt = !isStraightTip && patron_status_receipt !== undefined
+    ? patron_status_receipt
+    : null;
+  if (normalizedPatronStatusReceipt !== null && !isValidPatronStatusReceipt(normalizedPatronStatusReceipt)) {
+    return res.status(422).json({ error: 'A valid patron request-status receipt is required when one is supplied.' });
+  }
 
   const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
@@ -6845,7 +6959,21 @@ app.post("/api/request/create", async (req, res) => {
   const normalizedSourceProvider = normalizeLibraryText(sourceProvider, 80) || null;
   const normalizedSpotifyUri = normalizeLibraryText(spotifyUri, 256) || null;
   const normalizedSpotifyUrl = normalizeLibraryText(spotifyUrl, 512) || null;
-  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
+  const payload_hash = hashPayload({
+    type,
+    targetType,
+    title,
+    subtitle,
+    senderName,
+    message,
+    albumArt,
+    normalizedSourceProvider,
+    normalizedSpotifyUri,
+    normalizedSpotifyUrl,
+    patronStatusReceiptHash: normalizedPatronStatusReceipt
+      ? hashPatronStatusReceipt(normalizedPatronStatusReceipt)
+      : null
+  });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash,
@@ -6880,7 +7008,11 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
-    return res.status(durableReplay.status).json(durableReplay.body);
+    const safeReplayBody = projectStoredPatronActionResponse(durableReplay.body);
+    if (!safeReplayBody) {
+      return res.status(409).json({ error: 'Request replay could not be returned safely.' });
+    }
+    return res.status(durableReplay.status).json(safeReplayBody);
   }
 
   const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
@@ -6888,7 +7020,12 @@ app.post("/api/request/create", async (req, res) => {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request: existingRequest, state: roomState, reconciled: true };
+    const responseBody = projectPatronActionResponse({
+      success: true,
+      request: existingRequest,
+      state: roomState,
+      reconciled: true
+    });
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -6943,10 +7080,7 @@ app.post("/api/request/create", async (req, res) => {
       actorUserId: resolveActorUserId(req),
       patronDeviceIdHash: patron_device_id_hash
     });
-    return res.status(403).json({
-      error: moderationOutcome.reason,
-      outage_behavior: 'block_submission'
-    });
+    return res.status(403).json({ error: 'This request could not be submitted.' });
   }
 
   const shadowBanned = moderationOutcome.decision === 'hold_for_review';
@@ -6987,6 +7121,17 @@ app.post("/api/request/create", async (req, res) => {
     currency: normalizedCurrency,
     boosts: []
   };
+
+  if (normalizedPatronStatusReceipt) {
+    const receiptRegistration = registerPatronStatusReceipt({
+      receipt: normalizedPatronStatusReceipt,
+      existingRecords: newItem.patronStatusReceipts
+    });
+    if (!receiptRegistration) {
+      return res.status(422).json({ error: 'A valid patron request-status receipt is required.' });
+    }
+    newItem.patronStatusReceipts = receiptRegistration.records;
+  }
 
   // Provider-backed authorization/hold. A paid request/tip must NOT enter app
   // state or Private Triage until the provider confirms a real hold
@@ -7069,17 +7214,11 @@ app.post("/api/request/create", async (req, res) => {
   recalculateTotals(roomState);
   await persistBusinessStateForRoom(roomState, durableGigId);
 
-  const responseBody = {
-    success: true, 
+  const responseBody = projectPatronActionResponse({
+    success: true,
     request: newItem,
-    state: roomState,
-    moderation: {
-      outage_behavior: moderationOutcome.decision,
-      ai_assistive_only: true,
-      crowd_autopilot_auto_approved: shouldAutopilotApprove
-    },
-    shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
-  };
+    state: roomState
+  });
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
@@ -7091,6 +7230,7 @@ app.post("/api/request/create", async (req, res) => {
 
 // Boost an existing request
 app.post("/api/request/boost", async (req, res) => {
+  applyNoStoreHeaders(res);
   if (!requirePersistentBusinessStore(res)) return;
   const resolvedActor = accessControl.resolveServerActor(req);
   const {
@@ -7205,7 +7345,11 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
-    return res.status(durableReplay.status).json(durableReplay.body);
+    const safeReplayBody = projectStoredPatronActionResponse(durableReplay.body);
+    if (!safeReplayBody) {
+      return res.status(409).json({ error: 'Boost replay could not be returned safely.' });
+    }
+    return res.status(durableReplay.status).json(safeReplayBody);
   }
 
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
@@ -7213,7 +7357,12 @@ app.post("/api/request/boost", async (req, res) => {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request, boost: existingBoost, state: roomState, reconciled: true };
+    const responseBody = projectPatronActionResponse({
+      success: true,
+      request,
+      state: roomState,
+      reconciled: true
+    });
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -7237,10 +7386,7 @@ app.post("/api/request/boost", async (req, res) => {
       actorUserId: resolveActorUserId(req),
       patronDeviceIdHash: patron_device_id_hash
     });
-    return res.status(403).json({
-      error: moderationOutcome.reason,
-      outage_behavior: 'block_submission'
-    });
+    return res.status(403).json({ error: 'This boost could not be submitted.' });
   }
 
   const isBackerShadowed = moderationOutcome.decision === 'hold_for_review';
@@ -7340,7 +7486,11 @@ app.post("/api/request/boost", async (req, res) => {
 
   recalculateTotals(roomState);
   await persistBusinessStateForRoom(roomState, durableGigId);
-  const responseBody = { success: true, request, state: roomState };
+  const responseBody = projectPatronActionResponse({
+    success: true,
+    request,
+    state: roomState
+  });
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,

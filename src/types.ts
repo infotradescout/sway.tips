@@ -34,6 +34,19 @@ export interface BoostContribution {
   paymentStatus?: string | null;
 }
 
+export interface PatronStatusReceiptRecord {
+  receiptHash: string;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export type PatronRequestStatusCode = 'pending' | 'approved' | 'not_approved' | 'fulfilled';
+
+export interface PatronRequestStatus {
+  requestId: string;
+  status: PatronRequestStatusCode;
+}
+
 export interface RequestItem {
   id: string;
   type: 'request' | 'tip';
@@ -69,6 +82,7 @@ export interface RequestItem {
   paymentId?: string | null;
   paymentIntentId?: string | null;
   paymentStatus?: string | null;
+  patronStatusReceipts?: PatronStatusReceiptRecord[];
   boosts: BoostContribution[];
 }
 

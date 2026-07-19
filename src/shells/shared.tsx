@@ -149,10 +149,11 @@ export function useSwayState(options?: {
   statePath?: string | null;
 }) {
   const statePath = options?.statePath === undefined ? '/api/state' : options.statePath;
+  const isGlobalStatePath = statePath === '/api/state' || Boolean(statePath?.startsWith('/api/state?'));
   const [bState, setBState] = useState<BackendState>(initialState);
   const [isLoading, setIsLoading] = useState(true);
   const [roomLookup, setRoomLookup] = useState<RoomLookupState>({
-    status: statePath === '/api/state' ? 'global' : 'missing',
+    status: isGlobalStatePath ? 'global' : 'missing',
     message: null
   });
 
@@ -169,7 +170,7 @@ export function useSwayState(options?: {
         const demoState = await loadDemoBackendState();
         if (demoState) {
           setBState(demoState);
-          setRoomLookup({ status: statePath === '/api/state' ? 'global' : 'active', message: null });
+          setRoomLookup({ status: isGlobalStatePath ? 'global' : 'active', message: null });
         }
       } catch (e) {
         console.warn('Unable to load demo fixture state:', e);
