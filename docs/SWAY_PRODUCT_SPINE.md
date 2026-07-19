@@ -73,3 +73,11 @@ The shipped baseline centers the performer and patron live-night loop: room sett
 DB-backed local QA proved the deeper live-night flow. Production smoke verified the deployed build marker and non-mutating recovery surfaces. Do not describe that smoke as a real production room mutation or a Stripe retest.
 
 PR #44 control bridge is merged and deployed as a baseline by owner override. Do not claim live hardware/control proof without a real room/token smoke, and do not prioritize new hardware/control expansion before adoption proof unless the owner explicitly reorders the lane.
+
+## Owner-Directed Expansion (2026-07-18)
+
+The owner has explicitly reordered the roadmap to add creator-owned audio collaboration, catalog migration, Sway-only publication/playback, and external distribution as a strategic lane under the broader FlavorGood Marketing goal. This expansion does not remove or weaken the live-night loop, public performer/customer split, payment truth, or moderation boundaries above.
+
+Producer, engineer, collaborator, and reviewer remain private resource-scoped roles on the performer side. File-connection QRs are one-time account-pairing links, separate from the static room QR; pairing creates no room, project, or file authorization. Selected-file access references the immutable stored version without moving or copying its original bytes.
+
+No new publishing capability may be presented as live until its persistence, access, rights, failure, audit, and production boundaries are proven. See `docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md`.
