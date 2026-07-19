@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
+import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile, PatronRequestStatusCode } from '../types';
 import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 
@@ -38,6 +38,32 @@ const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-i
 const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this request.';
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
+const PATRON_REQUEST_STATUS_STORAGE_KEY = 'sway.patronRequestStatus';
+const PATRON_REQUEST_STATUS_TTL_MS = 48 * 60 * 60 * 1000;
+
+type StoredPatronRequestStatus = {
+  gigId: string;
+  requestId: string;
+  receipt: string;
+  status: PatronRequestStatusCode;
+  expiresAt: string;
+};
+
+function createSecurePatronStatusReceipt() {
+  if (!globalThis.crypto?.getRandomValues) return undefined;
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function isPatronRequestStatusCode(value: unknown): value is PatronRequestStatusCode {
+  return value === 'pending' || value === 'approved' || value === 'not_approved' || value === 'fulfilled';
+}
 
 interface PatronViewProps {
   session: GigSession;
@@ -58,12 +84,14 @@ interface PatronViewProps {
     spotifyUrl?: string;
     client_request_id?: string;
     idempotency_key?: string;
+    patron_status_receipt?: string;
     expires_at?: string;
     gig_id?: string;
     payment_intent_id?: string;
   }) => Promise<any>;
   onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string, paymentIntentId?: string) => Promise<any>;
   onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string) => Promise<any>;
+  onGetPatronRequestStatus: (gigId: string, requestId: string, receipt: string) => Promise<any>;
   onReportContent: (requestId: string, reason: string, details?: string) => Promise<any>;
   onBlockFoundation: (scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name', value: string, reason: string) => Promise<any>;
   onSupportContact: () => Promise<any>;
@@ -225,6 +253,7 @@ export default function PatronView({
   onCreateRequest,
   onBoostRequest,
   onReconcilePendingAction,
+  onGetPatronRequestStatus,
   onReportContent,
   onBlockFoundation,
   onSupportContact,
@@ -283,6 +312,7 @@ export default function PatronView({
     trackArt?: string;
     clientRequestId: string;
     idempotencyKey: string;
+    patronStatusReceipt?: string;
     expires_at: string;
     gigId: string;
     // A straight tip always goes through real payment, regardless of the room's
@@ -299,6 +329,18 @@ export default function PatronView({
   const [stripeConfigError, setStripeConfigError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
+  const [patronRequestStatus, setPatronRequestStatus] = useState<StoredPatronRequestStatus | null>(() => {
+    try {
+      const raw = localStorage.getItem(PATRON_REQUEST_STATUS_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as StoredPatronRequestStatus;
+      if (parsed.gigId !== gigId || Date.now() >= new Date(parsed.expiresAt).getTime()) return null;
+      if (!parsed.requestId || !parsed.receipt || !isPatronRequestStatusCode(parsed.status)) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  });
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
   const [formToast, setFormToast] = useState<string | null>(null);
@@ -318,9 +360,30 @@ export default function PatronView({
       }
     : null, [checkoutPayload?.clientSecret]);
 
-  const latestRequest = [...requests]
-    .filter((item) => !item.hidden && !item.removed)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  const rememberPatronRequestStatus = (
+    result: any,
+    payload: { gigId?: string; patronStatusReceipt?: string; isTip?: boolean }
+  ) => {
+    if (payload.isTip || !payload.gigId || !payload.patronStatusReceipt) return;
+    const requestId = typeof result?.request?.requestId === 'string' ? result.request.requestId : null;
+    const status = result?.request?.status;
+    if (!requestId || !isPatronRequestStatusCode(status)) return;
+
+    const record: StoredPatronRequestStatus = {
+      gigId: payload.gigId,
+      requestId,
+      receipt: payload.patronStatusReceipt,
+      status,
+      expiresAt: new Date(Date.now() + PATRON_REQUEST_STATUS_TTL_MS).toISOString()
+    };
+    localStorage.setItem(PATRON_REQUEST_STATUS_STORAGE_KEY, JSON.stringify(record));
+    setPatronRequestStatus(record);
+  };
+
+  const forgetPatronRequestStatus = () => {
+    localStorage.removeItem(PATRON_REQUEST_STATUS_STORAGE_KEY);
+    setPatronRequestStatus(null);
+  };
 
   // A plain-language status for the patron's most recent request, if any.
   // Only surfaced when there's something to report -- a brand-new patron
@@ -329,10 +392,10 @@ export default function PatronView({
     if (session.status === 'closed') return { text: 'Ended: this room is no longer accepting requests.', tone: 'slate' };
     if (!session.requestsOpen || session.status === 'ending') return { text: 'Requests are paused right now.', tone: 'slate' };
     if (degraded || pendingAction) return { text: 'Syncing your last action...', tone: 'cyan' };
-    if (!latestRequest || latestRequest.hidden || latestRequest.removed) return null;
-    if (latestRequest.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
-    if (latestRequest.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
-    if (latestRequest.status === 'denied') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
+    if (!patronRequestStatus) return null;
+    if (patronRequestStatus.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
+    if (patronRequestStatus.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
+    if (patronRequestStatus.status === 'not_approved') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
     return { text: 'Your last request is pending review.', tone: 'fuchsia' };
   })();
 
@@ -356,6 +419,55 @@ export default function PatronView({
       setDegraded(!status.connected);
     });
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PATRON_REQUEST_STATUS_STORAGE_KEY);
+      if (!raw) {
+        setPatronRequestStatus(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as StoredPatronRequestStatus;
+      if (Date.now() >= new Date(parsed.expiresAt).getTime()) {
+        forgetPatronRequestStatus();
+        return;
+      }
+      setPatronRequestStatus(parsed.gigId === gigId ? parsed : null);
+    } catch {
+      forgetPatronRequestStatus();
+    }
+  }, [gigId]);
+
+  useEffect(() => {
+    if (!patronRequestStatus || patronRequestStatus.gigId !== gigId) return;
+    let cancelled = false;
+
+    const refreshOwnedRequestStatus = async () => {
+      try {
+        const result = await onGetPatronRequestStatus(
+          patronRequestStatus.gigId,
+          patronRequestStatus.requestId,
+          patronRequestStatus.receipt
+        );
+        if (cancelled || !isPatronRequestStatusCode(result?.status)) return;
+        setPatronRequestStatus((current) => {
+          if (!current || current.requestId !== patronRequestStatus.requestId) return current;
+          const next = { ...current, status: result.status };
+          localStorage.setItem(PATRON_REQUEST_STATUS_STORAGE_KEY, JSON.stringify(next));
+          return next;
+        });
+      } catch (error: any) {
+        if (!cancelled && error?.status === 404) forgetPatronRequestStatus();
+      }
+    };
+
+    void refreshOwnedRequestStatus();
+    const interval = window.setInterval(refreshOwnedRequestStatus, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [gigId, patronRequestStatus?.gigId, patronRequestStatus?.requestId, patronRequestStatus?.receipt]);
 
   useEffect(() => {
     const storedPendingAction = localStorage.getItem('sway.pendingAction');
@@ -385,6 +497,7 @@ export default function PatronView({
         .then((result) => {
           if (cancelled) return;
           if (result?.status === 'reconciled') {
+            rememberPatronRequestStatus(result.responseBody, parsed);
             localStorage.removeItem('sway.pendingAction');
             setPendingAction(null);
             setPendingActionMessage('');
@@ -440,11 +553,12 @@ export default function PatronView({
     };
   }, []);
 
-  const createClientActionIds = () => {
+  const createClientActionIds = (includePatronStatusReceipt: boolean) => {
     const id = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return {
       clientRequestId: id,
       idempotencyKey: `sway:${id}`,
+      ...(includePatronStatusReceipt ? { patronStatusReceipt: createSecurePatronStatusReceipt() } : {}),
       expires_at: new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString()
     };
   };
@@ -739,7 +853,7 @@ export default function PatronView({
       targetId: type === 'boost' ? (boostTarget ?? boostingItem)?.id : undefined,
       trackArt,
       gigId,
-      ...createClientActionIds()
+      ...createClientActionIds(type === 'request')
     });
   };
 
@@ -748,7 +862,7 @@ export default function PatronView({
 
     if (checkoutPayload.type === 'request') {
       const isCustom = session.talentRole !== 'DJ';
-      await submitWithBoundedRetry(() => onCreateRequest({
+      return submitWithBoundedRetry(() => onCreateRequest({
         type: checkoutPayload.isTip ? 'tip' : 'request',
         targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
         title: checkoutPayload.title,
@@ -762,15 +876,15 @@ export default function PatronView({
         spotifyUrl: selectedTrack?.spotifyUrl,
         client_request_id: checkoutPayload.clientRequestId,
         idempotency_key: checkoutPayload.idempotencyKey,
+        patron_status_receipt: checkoutPayload.patronStatusReceipt,
         expires_at: checkoutPayload.expires_at,
         gig_id: checkoutPayload.gigId,
         payment_intent_id: paymentIntentId
       }), checkoutPayload.expires_at);
-      return;
     }
 
     if (checkoutPayload.targetId) {
-      await submitWithBoundedRetry(() => onBoostRequest(
+      return submitWithBoundedRetry(() => onBoostRequest(
         checkoutPayload.targetId,
         boostPatronName,
         checkoutPayload.amount,
@@ -904,7 +1018,8 @@ export default function PatronView({
     beginPendingSubmit();
 
     try {
-      await submitCheckoutPayload();
+      const result = await submitCheckoutPayload();
+      rememberPatronRequestStatus(result, checkoutPayload);
       completeCheckoutSuccess(checkoutPayload.type);
     } catch (e) {
       await handleCheckoutError(e);
@@ -921,7 +1036,8 @@ export default function PatronView({
     beginPendingSubmit(payloadWithIntent);
 
     try {
-      await submitCheckoutPayload(paymentIntentId);
+      const result = await submitCheckoutPayload(paymentIntentId);
+      rememberPatronRequestStatus(result, payloadWithIntent);
       completeCheckoutSuccess(checkoutPayload.type);
     } catch (e) {
       await handleCheckoutError(e);
@@ -971,7 +1087,7 @@ export default function PatronView({
       fee: platformFee,
       total: tipAmount + platformFee,
       gigId,
-      ...createClientActionIds()
+      ...createClientActionIds(false)
     });
   };
 
@@ -2103,7 +2219,7 @@ export default function PatronView({
                                 fee: platformFee,
                                 total: tipAmount + platformFee,
                                 gigId,
-                                ...createClientActionIds()
+                                ...createClientActionIds(true)
                               });
                             }}
                             disabled={isSubmitLocked}

@@ -163,6 +163,15 @@ export default function PatronApp() {
     return data;
   };
 
+  const handleGetPatronRequestStatus = async (gigId: string, requestId: string, receipt: string) => {
+    if (demoMode) return { requestId, status: 'pending' };
+    return postJson('/api/patron/request-status', {
+      gig_id: gigId,
+      request_id: requestId,
+      patron_status_receipt: receipt
+    });
+  };
+
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
     if (demoMode) return rejectDemoMutation();
     return postJson('/api/moderation/report', { requestId, reason, details });
@@ -326,6 +335,7 @@ export default function PatronApp() {
                   onCreateRequest={handleCreateRequest}
                   onBoostRequest={handleBoostRequest}
                   onReconcilePendingAction={handleReconcilePendingAction}
+                  onGetPatronRequestStatus={handleGetPatronRequestStatus}
                   onReportContent={handleReportContent}
                   onBlockFoundation={handleBlockFoundation}
                   onSupportContact={handleSupportContact}

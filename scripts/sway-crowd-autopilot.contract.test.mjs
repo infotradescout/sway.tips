@@ -21,7 +21,7 @@ for (const term of [
   "roomState.session.operatingMode === 'crowd_autopilot'",
   'shouldAutopilotApprove',
   "status: shadowBanned ? 'hold' : (isStraightTip ? 'fulfilled' : (shouldAutopilotApprove ? 'approved' : 'hold'))",
-  'crowd_autopilot_auto_approved: shouldAutopilotApprove',
+  'projectPatronActionResponse',
   "input.operatingMode === 'open_call' || input.operatingMode === 'crowd_autopilot'",
   'clean_requests_auto_approved_after_moderation_and_payment_authorization'
 ]) {

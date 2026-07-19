@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 import { Client } from 'pg';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 function createInactiveSession() {
   return {
@@ -122,6 +122,8 @@ async function main() {
 
   const firstStore = createBusinessStore(databaseUrl, createInactiveSession);
   const activeGigId = randomUUID();
+  const rawPatronStatusReceipt = Buffer.alloc(32, 7).toString('base64url');
+  const patronStatusReceiptIssuedAt = new Date();
 
   const preCrashState = createFallbackState();
   preCrashState.session = {
@@ -179,6 +181,11 @@ async function main() {
       payloadHash: 'payload-a',
       amountCents: 1500,
       currency: 'USD',
+      patronStatusReceipts: [{
+        receiptHash: createHash('sha256').update(rawPatronStatusReceipt, 'utf8').digest('hex'),
+        issuedAt: patronStatusReceiptIssuedAt.toISOString(),
+        expiresAt: new Date(patronStatusReceiptIssuedAt.getTime() + 48 * 60 * 60 * 1000).toISOString()
+      }],
       boosts: [
         {
           id: 'boost-a1',
@@ -334,7 +341,13 @@ async function main() {
   assert.deepEqual(
     normalizedPost.requests,
     normalizedPre.requests,
-    'Requests, boosts, statuses, and moderation effects should survive store reinitialization.'
+    'Requests, boosts, statuses, receipt hashes, and moderation effects should survive store reinitialization.'
+  );
+
+  assert.equal(
+    JSON.stringify(normalizedPost).includes(rawPatronStatusReceipt),
+    false,
+    'Raw patron request-status receipt must never persist in runtime request state.'
   );
 
   console.log('Business store process-kill integration test passed.');

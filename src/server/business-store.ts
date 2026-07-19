@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
+import { normalizePatronStatusReceiptRecords } from './patron-status-receipt';
 import {
   activeRoomRegistry,
   gigSessions,
@@ -170,6 +171,7 @@ function coerceRequest(raw: unknown): RequestItem | null {
     paymentId: input.paymentId ?? null,
     paymentIntentId: input.paymentIntentId ?? null,
     paymentStatus: input.paymentStatus ?? null,
+    patronStatusReceipts: normalizePatronStatusReceiptRecords(input.patronStatusReceipts),
     boosts
   };
 }
