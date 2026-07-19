@@ -6967,6 +6967,7 @@ app.post("/api/request/create", async (req, res) => {
     campaign_code
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+  const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
@@ -7055,7 +7056,7 @@ app.post("/api/request/create", async (req, res) => {
   const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
   const holdAmount = tipAmount;
   const attribution = paymentsEnabledForAction
-    ? await businessStore.resolveCampaignAttribution(durableGigId, campaign_code)
+    ? await businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)
     : { kind: 'creator_direct' as const };
   const proposedFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution });
   const proposedPlatformFeeCents = paymentsEnabledForAction ? proposedFee.proposedPlatformFeeCents : 0;
@@ -7272,6 +7273,7 @@ app.post("/api/request/boost", async (req, res) => {
     campaign_code
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+  const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
   }
@@ -7422,7 +7424,7 @@ app.post("/api/request/boost", async (req, res) => {
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
   const boostAttribution = paymentsEnabledForRoom
-    ? await businessStore.resolveCampaignAttribution(durableGigId, campaign_code)
+    ? await businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)
     : { kind: 'creator_direct' as const };
   const proposedBoostFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution: boostAttribution });
   let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? proposedBoostFee.proposedPlatformFeeCents : 0;

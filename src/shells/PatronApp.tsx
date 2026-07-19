@@ -18,6 +18,7 @@ import {
   sendPatronNoSessionReturnHomeClicked,
   sendRoomEntryViewed
 } from './frictionClient';
+import { captureCampaignCode } from './campaignAttribution';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -30,21 +31,6 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CAMPAIGN_CODE_STORAGE_KEY = 'sway.campaignCode';
-
-// Sway-issued campaign links carry ?camp=<code>. Captured on entry, persisted for the
-// rest of the tab session so it survives navigating from a profile page into a room,
-// and verified server-side before it ever affects a fee -- this is a hint, not an
-// authority (resolveCampaignAttribution in business-store.ts is the real gate).
-function captureCampaignCode(): string | null {
-  if (typeof window === 'undefined') return null;
-  const fromQuery = new URLSearchParams(window.location.search).get('camp');
-  if (fromQuery) {
-    window.sessionStorage.setItem(CAMPAIGN_CODE_STORAGE_KEY, fromQuery);
-    return fromQuery;
-  }
-  return window.sessionStorage.getItem(CAMPAIGN_CODE_STORAGE_KEY);
-}
 
 function PatronNoSessionRecovery({
   onReturnHomeClick,

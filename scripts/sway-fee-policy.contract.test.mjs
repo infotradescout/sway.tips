@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -28,7 +28,11 @@ if (/appliedBoostPlatformFeeCents = paymentsEnabledForRoom \? 100 : 0;/.test(ser
 }
 requireIncludes(serverSource, 'resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution })', 'The tip/request route must compute the proposed fee via resolveProposedPlatformFee.');
 requireIncludes(serverSource, 'resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution: boostAttribution })', 'The boost route must compute the proposed fee via resolveProposedPlatformFee.');
-requireIncludes(serverSource, 'businessStore.resolveCampaignAttribution(durableGigId, campaign_code)', 'server.ts must resolve campaign attribution server-side before computing a fee.');
+requireIncludes(serverSource, 'businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)', 'server.ts must resolve campaign attribution server-side before computing a fee.');
+// campaign_code arrives as untyped req.body input -- must be type-guarded before use,
+// never passed raw into a DB query (a non-string body value could otherwise throw
+// inside an unguarded async handler).
+requireIncludes(serverSource, "const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;", 'server.ts must type-guard campaign_code before querying with it.');
 
 // 2. The proposed fee is a pure "what Sway wants to charge" number -- it must NOT
 //    itself apply the patron/performer split or any cap. Both of those are owned
@@ -141,6 +145,17 @@ requireIncludes(
   'node scripts/sway-fee-policy.contract.test.mjs',
   'test:contracts must include the fee policy contract.'
 );
+
+// The Brand Partner cap interaction can only be proven against a real database --
+// this just confirms the DB-backed proof exists and is wired in, not that it passed.
+requireIncludes(
+  packageJson.scripts?.['test:integration:fee-policy-brand-partner-cap'] ?? '',
+  'node scripts/sway-fee-policy-brand-partner-cap.integration.test.mjs',
+  'package.json must wire up the Brand Partner cap integration test.'
+);
+if (!existsSync(join(root, 'scripts/sway-fee-policy-brand-partner-cap.integration.test.mjs'))) {
+  failures.push('Brand Partner cap integration test file is missing.');
+}
 
 if (failures.length) {
   console.error('Fee policy contract failed:');

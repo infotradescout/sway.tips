@@ -511,6 +511,11 @@ export const payments = pgTable('payments', {
   currency: text('currency').notNull().default('USD'),
   attributionSource: attributionSourceEnum('attribution_source').notNull().default('creator_direct'),
   campaignId: uuid('campaign_id').references(() => promotionCampaigns.id),
+  // The campaign's NEGOTIATED rate at time of sale -- not necessarily the effective
+  // rate collected. A Brand Partner's fee cap (resolveSwayPlatformFeePolicyForGig) can
+  // clamp platformFee below what this bps would imply on amountSubtotal. platformFee is
+  // always the source of truth for what was actually collected; never derive financial
+  // totals from commissionBpsApplied.
   commissionBpsApplied: integer('commission_bps_applied'),
   captureMode: captureModeEnum('capture_mode').notNull().default('manual'),
   refundStatus: refundStatusEnum('refund_status').notNull().default('not_refunded'),
