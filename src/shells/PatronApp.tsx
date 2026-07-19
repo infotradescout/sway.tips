@@ -30,6 +30,21 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CAMPAIGN_CODE_STORAGE_KEY = 'sway.campaignCode';
+
+// Sway-issued campaign links carry ?camp=<code>. Captured on entry, persisted for the
+// rest of the tab session so it survives navigating from a profile page into a room,
+// and verified server-side before it ever affects a fee -- this is a hint, not an
+// authority (resolveCampaignAttribution in business-store.ts is the real gate).
+function captureCampaignCode(): string | null {
+  if (typeof window === 'undefined') return null;
+  const fromQuery = new URLSearchParams(window.location.search).get('camp');
+  if (fromQuery) {
+    window.sessionStorage.setItem(CAMPAIGN_CODE_STORAGE_KEY, fromQuery);
+    return fromQuery;
+  }
+  return window.sessionStorage.getItem(CAMPAIGN_CODE_STORAGE_KEY);
+}
 
 function PatronNoSessionRecovery({
   onReturnHomeClick,
@@ -103,6 +118,8 @@ export default function PatronApp() {
   const roomEntryEventKeyRef = useRef<string | null>(null);
   const recoveryEventKeyRef = useRef<string | null>(null);
 
+  const campaignCode = captureCampaignCode();
+
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
@@ -110,7 +127,7 @@ export default function PatronApp() {
   const handleCreateRequest = async (requestData: Record<string, unknown>) => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/request/create', requestData);
+      const data = await postJson('/api/request/create', { ...requestData, campaign_code: campaignCode });
       setBState(data.state);
       return data;
     } catch (e) {
@@ -139,7 +156,8 @@ export default function PatronApp() {
         idempotency_key: idempotencyKey,
         expires_at: expiresAt,
         gig_id: gigId,
-        payment_intent_id: paymentIntentId
+        payment_intent_id: paymentIntentId,
+        campaign_code: campaignCode
       });
       setBState(data.state);
       return data;

@@ -104,7 +104,21 @@ function formatLinkKind(kind: string) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+const CAMPAIGN_CODE_STORAGE_KEY = 'sway.campaignCode';
+
+// A Sway-issued campaign link may land here (?camp=<code>) before the fan clicks
+// through to the live room. Persisted to sessionStorage so it's still there when
+// PatronApp reads it on the room route -- this page never submits a payment itself.
+function captureCampaignCode(): void {
+  if (typeof window === 'undefined') return;
+  const fromQuery = new URLSearchParams(window.location.search).get('camp');
+  if (fromQuery) {
+    window.sessionStorage.setItem(CAMPAIGN_CODE_STORAGE_KEY, fromQuery);
+  }
+}
+
 export default function PerformerPublicProfilePage({ performerHandle }: { performerHandle: string }) {
+  captureCampaignCode();
   const [profile, setProfile] = useState<PublicPerformerProfile | null>(null);
   const [activeRoom, setActiveRoom] = useState<ActiveProfileRoom | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');

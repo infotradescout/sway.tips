@@ -91,6 +91,8 @@ export const pendingActionStatusEnum = pgEnum('pending_action_status', [
   'expired',
   'failed'
 ]);
+export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'active', 'paused', 'ended']);
+export const attributionSourceEnum = pgEnum('attribution_source', ['creator_direct', 'sway_promoted']);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -444,6 +446,20 @@ export const performerSetlistTracks = pgTable('performer_setlist_tracks', {
   performerSearchIdx: index('performer_setlist_tracks_performer_search_idx').on(table.performerId, table.addedAt)
 }));
 
+export const promotionCampaigns = pgTable('promotion_campaigns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  campaignCode: text('campaign_code').notNull(),
+  label: text('label').notNull(),
+  commissionBps: integer('commission_bps').notNull(),
+  status: campaignStatusEnum('status').notNull().default('draft'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  codeIdx: uniqueIndex('promotion_campaigns_code_idx').on(table.campaignCode),
+  performerStatusIdx: index('promotion_campaigns_performer_status_idx').on(table.performerId, table.status)
+}));
+
 export const requests = pgTable('requests', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
@@ -488,16 +504,22 @@ export const payments = pgTable('payments', {
   processorPaymentIntentId: text('processor_payment_intent_id'),
   processorChargeId: text('processor_charge_id'),
   amountSubtotal: integer('amount_subtotal').notNull(),
+  // Sway's actual commission collected (== Stripe application_fee_amount), regardless of
+  // whether it was added to the patron's charge or deducted from the performer's payout.
   platformFee: integer('platform_fee').notNull().default(0),
   amountTotal: integer('amount_total').notNull(),
   currency: text('currency').notNull().default('USD'),
+  attributionSource: attributionSourceEnum('attribution_source').notNull().default('creator_direct'),
+  campaignId: uuid('campaign_id').references(() => promotionCampaigns.id),
+  commissionBpsApplied: integer('commission_bps_applied'),
   captureMode: captureModeEnum('capture_mode').notNull().default('manual'),
   refundStatus: refundStatusEnum('refund_status').notNull().default('not_refunded'),
   payoutStatus: payoutStatusEnum('payout_status').notNull().default('not_started'),
   ...timestamps
 }, (table) => ({
   gigStatusIdx: index('payments_gig_status_idx').on(table.gigId, table.paymentStatus),
-  processorIntentIdx: uniqueIndex('payments_processor_payment_intent_idx').on(table.processorPaymentIntentId)
+  processorIntentIdx: uniqueIndex('payments_processor_payment_intent_idx').on(table.processorPaymentIntentId),
+  campaignIdx: index('payments_campaign_id_idx').on(table.campaignId)
 }));
 
 export const paymentEvents = pgTable('payment_events', {
