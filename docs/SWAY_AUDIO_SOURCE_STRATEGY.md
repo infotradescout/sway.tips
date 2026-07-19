@@ -10,7 +10,7 @@ The near-term product is:
 
 - Sway manages the room, requests, tips, boosts, queue, overlay, and audience display.
 - Sway syncs or links to the performer's music library so requests can be matched to what the performer can actually play.
-- The performer plays audio from their existing lawful playback stack unless Sway owns a licensed playback path for that source.
+- The performer plays audio from their existing lawful playback stack unless Sway operates an authorized, licensed playback path for that source.
 
 The future paid product can be:
 
@@ -167,3 +167,13 @@ Build a provider/source capability model before OAuth UI:
 - explicit UI labels for "playable in Sway" versus "open in provider"
 
 Then implement one provider connector at a time, starting with SoundCloud only if the app has API credentials and a compliant use case.
+
+## Owner-Directed Publishing Expansion (2026-07-18)
+
+The owner has explicitly reordered the audio lane: Sway should grow from source metadata and live-room control into creator-owned audio collaboration, Sway-only publication/playback, catalog migration, and external distribution through an approved delivery partner.
+
+This does not relax the source restrictions above. Spotify remains metadata/deep-link only for Sway's commercial live-room use unless Spotify approves a different path. Performer-owned audio becomes playable or distributable only after Sway has private lossless storage, durable access, rights evidence, moderation, playback/reporting, takedown, and delivery controls for that exact use.
+
+Continuum plugs into this lane as a source-manifest, embed, derivative-planning, and portable-media connector. Its current hosted publisher stores validated manifests, not lossless audio masters or Sway account permissions. When that storage slice is implemented, Sway—not Continuum—must operate the master vault and serve as system of record for immutable checksum identity, project access, release state, rights evidence, and audit history; connector capabilities remain fail-closed. Creators retain their copyrights.
+
+The first implementation contract is documented in `docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md`.
