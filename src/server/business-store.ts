@@ -138,6 +138,7 @@ function coerceRequest(raw: unknown): RequestItem | null {
   const boosts = Array.isArray(input.boosts)
     ? input.boosts.map((boost) => coerceBoost(boost)).filter((boost): boost is BoostContribution => Boolean(boost))
     : [];
+  const patronStatusReceipts = normalizePatronStatusReceiptRecords(input.patronStatusReceipts);
 
   return {
     id: input.id,
@@ -171,7 +172,7 @@ function coerceRequest(raw: unknown): RequestItem | null {
     paymentId: input.paymentId ?? null,
     paymentIntentId: input.paymentIntentId ?? null,
     paymentStatus: input.paymentStatus ?? null,
-    patronStatusReceipts: normalizePatronStatusReceiptRecords(input.patronStatusReceipts),
+    ...(patronStatusReceipts.length ? { patronStatusReceipts } : {}),
     boosts
   };
 }
