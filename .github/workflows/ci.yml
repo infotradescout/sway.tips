@@ -65,3 +65,32 @@ jobs:
 
       - name: Run Identity Ownership Durable Integration Test
         run: npm run test:integration:identity-ownership-durable
+
+      # Pro Mode (Phase 2 Slice 1A) disposable proofs. Each targets its own
+      # freshly created, uniquely named database inside the same ephemeral
+      # CI Postgres service -- the service container itself is discarded at
+      # job end, so no explicit drop step is needed here (unlike local dev,
+      # where the same long-lived container persists across many runs).
+      - name: Create Pro Mode Disposable Proof Databases
+        run: |
+          PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_migration_proof_ci;"
+          PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_concurrency_proof_ci;"
+          PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_lifecycle_proof_ci;"
+
+      - name: Run Pro Mode Migration Integration Proof
+        run: npm run test:integration:pro-mode-migration
+        env:
+          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_pro_mode_migration_proof_ci
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
+
+      - name: Run Pro Mode Concurrency Integration Proof
+        run: npm run test:integration:pro-mode-concurrency
+        env:
+          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_pro_mode_concurrency_proof_ci
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
+
+      - name: Run Pro Mode Account Lifecycle Integration Proof
+        run: npm run test:integration:pro-mode-account-lifecycle
+        env:
+          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_pro_mode_lifecycle_proof_ci
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'

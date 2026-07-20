@@ -23,6 +23,7 @@ export type AccessControl = {
   requireTalentAccess: (req: Request) => Promise<GuardResult>;
   requireAdminAccess: (req: Request) => Promise<GuardResult>;
   requireAdminOrSupportAccess: (req: Request) => Promise<GuardResult>;
+  requireAuthenticatedAccountAccess: (req: Request) => Promise<GuardResult>;
   requireGigMutationAccess: (req: Request, gigId: string) => Promise<GuardResult>;
   allowPublicPatronAccess: (req: Request) => Promise<GuardResult>;
   requireOverlayAccess: (req: Request) => Promise<GuardResult>;
@@ -588,6 +589,24 @@ export function createAccessControl({
       }
 
       return { allowed: false, status: 403, reason: 'Admin or support authorization required.' };
+    },
+
+    // Universal-account gate: any resolvable users row, any role. This is the
+    // gate for account/Pro-Mode surfaces that must work for patrons who have
+    // never been granted talent/admin/support access -- there is no
+    // role-specific check here by design.
+    async requireAuthenticatedAccountAccess(req) {
+      await hydrateRequestActor(req);
+      const actor = resolveActor(req);
+      if (!actor.actorId) return missingActor();
+      if (!db) return missingPersistence();
+
+      const role = await getActorRole(db, actor.actorId);
+      if (!role) {
+        return { allowed: false, status: 401, reason: 'Resolved actor identity is not recognized.' };
+      }
+
+      return { allowed: true, actor, role };
     },
 
     async requireGigMutationAccess(req, gigId) {
