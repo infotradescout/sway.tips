@@ -34,7 +34,9 @@ import {
   normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
+  normalizePerformerPhone,
   PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
+  PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
   PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
   PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
@@ -2472,6 +2474,157 @@ app.post('/api/talent/invite/accept', async (req, res) => {
   }
 });
 
+app.post('/api/talent/claim/accept', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore || !performerSessionStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Performer claim setup is temporarily unavailable.' });
+  }
+
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const normalizedEmail = normalizePerformerLoginEmail(req.body?.email);
+  const normalizedPhone = normalizePerformerPhone(req.body?.phone);
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const termsAccepted = req.body?.termsAccepted === true;
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_claim__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    return res.status(429).json({ error: 'Too many claim attempts. Please try again later.' });
+  }
+  if (!token) {
+    return res.status(422).json({ error: 'A valid claim code is required.' });
+  }
+  if (!termsAccepted) {
+    return res.status(422).json({ error: 'Account terms acceptance is required to finish setup.' });
+  }
+  if (!normalizedEmail) {
+    return res.status(422).json({ error: 'A valid email is required.' });
+  }
+  if (!normalizedPhone) {
+    return res.status(422).json({ error: 'A valid phone number is required.' });
+  }
+  if (!password) {
+    return res.status(422).json({ error: 'Choose a password to finish setup.' });
+  }
+
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) {
+    return res.status(422).json({ error: passwordValidation.error });
+  }
+  if (!confirmPassword || password !== confirmPassword) {
+    return res.status(422).json({ error: 'Password confirmation does not match.' });
+  }
+  if (await performerSignupEmailExists(businessDb, normalizedEmail)) {
+    return res.status(409).json({ error: 'This email is already in use on another account.' });
+  }
+
+  const passwordHash = await hashPerformerPassword(password);
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const claim = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+        executor: tx
+      });
+
+      if (!claim?.actorUserId) return null;
+
+      const metadata = claim.challengeMetadata && typeof claim.challengeMetadata === 'object'
+        ? claim.challengeMetadata as Record<string, unknown>
+        : {};
+      const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
+        ? metadata.performerId
+        : null;
+      if (!performerId) return null;
+
+      const [account] = await tx
+        .select({
+          userId: users.id,
+          performerId: performers.id,
+          passwordHash: users.passwordHash
+        })
+        .from(users)
+        .innerJoin(performers, eq(performers.ownerUserId, users.id))
+        .where(and(
+          eq(users.id, claim.actorUserId),
+          eq(performers.id, performerId)
+        ))
+        .limit(1);
+
+      if (!account) return null;
+
+      // The one deliberate difference from the invite-accept flow: no
+      // "already has a password" guard. Whatever the artist submits here
+      // overrides whatever was there before -- that's the handoff.
+      const wasHandoff = Boolean(account.passwordHash);
+      const completedAt = new Date();
+      const [updatedUser] = await tx
+        .update(users)
+        .set({
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          passwordHash,
+          emailVerifiedAt: completedAt,
+          termsAcceptedAt: completedAt,
+          updatedAt: completedAt
+        })
+        .where(eq(users.id, account.userId))
+        .returning({ id: users.id });
+
+      if (!updatedUser) return null;
+
+      const issuedSession = await performerSessionStore.issueSession({
+        actorUserId: account.userId,
+        issuedBy: account.userId,
+        executor: tx
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: account.userId,
+        actorType: 'performer',
+        entityType: 'performer_login_challenge',
+        entityId: claim.id,
+        eventType: 'performer_claim.accept',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          performerId: account.performerId,
+          accountTermsAcceptedAt: completedAt.toISOString(),
+          wasHandoff
+        }
+      });
+
+      return { issuedSession };
+    });
+
+    if (!outcome) {
+      return res.status(410).json({ error: 'This claim code is invalid, expired, or already used.' });
+    }
+
+    res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+      expires: outcome.issuedSession.expiresAt
+    });
+    return res.status(200).json({ success: true, redirectPath: '/talent' });
+  } catch (error) {
+    console.warn('Performer claim acceptance failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({ error: 'Unable to finish performer claim right now.' });
+  }
+});
+
 app.post('/api/talent/password-reset/accept', async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -4208,6 +4361,132 @@ app.post('/api/admin/accounts/:userId/invite', async (req, res) => {
     invitationDelivery: deliveryResult.provider,
     ...(!isProduction && deliveryResult.provider === 'mock' ? { invitationLink } : {})
   });
+});
+
+// Claim-code flow: no email required from the admin at all -- the artist supplies
+// their own email/password/phone when redeeming the code. Works for a brand-new
+// performer slot (pass handle+displayName) or an existing one you already set up
+// yourself (pass performerId), including one that already has a password -- that's
+// the handoff case. The link is always returned directly; there is no email step.
+app.post('/api/admin/performers/claim-link', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  }
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Claim link issuance requires durable persistence.' });
+  }
+
+  const requestedPerformerId = typeof req.body?.performerId === 'string' ? req.body.performerId : null;
+
+  let userId: string;
+  let performerId: string;
+  let wasNewPerformer = false;
+
+  if (requestedPerformerId) {
+    if (!UUID_PATTERN.test(requestedPerformerId)) {
+      return res.status(422).json({ error: 'Invalid performerId.' });
+    }
+    const [existing] = await businessDb
+      .select({ userId: users.id, performerId: performers.id })
+      .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
+      .where(eq(performers.id, requestedPerformerId))
+      .limit(1);
+    if (!existing) {
+      return res.status(404).json({ error: 'Performer not found.' });
+    }
+    userId = existing.userId;
+    performerId = existing.performerId;
+  } else {
+    const normalizedHandle = normalizePerformerHandle(req.body?.handle);
+    const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
+    if (!normalizedHandle || !normalizedDisplayName) {
+      return res.status(422).json({ error: 'A handle and display name are required to create a new performer slot.' });
+    }
+    if (await performerHandleExists(businessDb, normalizedHandle, { includePreviews: false })) {
+      return res.status(409).json({ error: 'This handle is already taken.' });
+    }
+
+    const [reservedPreview] = await businessDb
+      .select({ id: performerProfilePreviews.id })
+      .from(performerProfilePreviews)
+      .where(and(
+        sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performerProfilePreviews.isActive, true)
+      ))
+      .limit(1);
+
+    const created = await businessDb.transaction(async (tx) => {
+      const [createdUser] = await tx
+        .insert(users)
+        .values({ email: null, displayName: normalizedDisplayName, passwordHash: null, role: 'performer' })
+        .returning({ id: users.id });
+      const [createdPerformer] = await tx
+        .insert(performers)
+        .values({
+          ownerUserId: createdUser.id,
+          handle: normalizedHandle,
+          displayName: normalizedDisplayName,
+          isActive: false,
+          onboardingStatus: 'created'
+        })
+        .returning({ id: performers.id });
+
+      if (reservedPreview) {
+        await tx
+          .update(performerProfilePreviews)
+          .set({ claimedPerformerId: createdPerformer.id, updatedAt: new Date() })
+          .where(eq(performerProfilePreviews.id, reservedPreview.id));
+      }
+
+      return { userId: createdUser.id, performerId: createdPerformer.id };
+    });
+    userId = created.userId;
+    performerId = created.performerId;
+    wasNewPerformer = true;
+  }
+
+  const issued = await businessDb.transaction(async (tx) => {
+    await tx
+      .update(performerLoginChallenges)
+      .set({ revokedAt: new Date() })
+      .where(and(
+        eq(performerLoginChallenges.actorUserId, userId),
+        eq(performerLoginChallenges.challengeType, PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE),
+        isNull(performerLoginChallenges.consumedAt),
+        isNull(performerLoginChallenges.revokedAt)
+      ));
+
+    // targetEmail is unused for this challenge type -- no email is ever sent for a
+    // claim code, the artist supplies their own email when redeeming it.
+    const challenge = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: userId,
+      targetEmail: '',
+      challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+      challengeMetadata: { performerId },
+      requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
+      executor: tx
+    });
+
+    await writeAuditEvent(tx, {
+      actorId: adminAccess.actor.actorId,
+      actorType: 'admin',
+      entityType: 'performer_login_challenge',
+      entityId: challenge.challengeId,
+      eventType: 'admin_performer.claim_link_issue',
+      previousStatus: null,
+      nextStatus: 'pending',
+      metadata: { userId, performerId, wasNewPerformer }
+    });
+
+    return challenge;
+  });
+
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const claimLink = `${appBaseUrl}/talent/claim?code=${encodeURIComponent(issued.token)}`;
+
+  return res.status(201).json({ success: true, userId, performerId, wasNewPerformer, claimLink });
 });
 
 app.patch('/api/admin/accounts/:userId', async (req, res) => {

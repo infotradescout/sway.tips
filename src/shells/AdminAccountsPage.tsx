@@ -71,23 +71,45 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
   const [partnerNote, setPartnerNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [claimLink, setClaimLink] = useState<string | null>(null);
+
+  const hasEmail = email.trim().length > 0;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    setClaimLink(null);
 
     try {
-      const response = await fetch('/api/admin/accounts/onboard', {
+      if (hasEmail) {
+        const response = await fetch('/api/admin/accounts/onboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, handle, displayName, isActive, isPartner, partnerNote })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(typeof data?.error === 'string' ? data.error : 'Could not create account.');
+        }
+        onCreated();
+        return;
+      }
+
+      // No email: create a bare performer slot and hand back a claim link instead --
+      // no invitation email is sent (there's nothing to send it to). The artist
+      // supplies their own email/password/phone when they redeem the link.
+      const response = await fetch('/api/admin/performers/claim-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, handle, displayName, isActive, isPartner, partnerNote })
+        body: JSON.stringify({ handle, displayName })
       });
       const data = await parseJsonResponse(response);
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Could not create account.');
       }
+      setClaimLink(typeof data?.claimLink === 'string' ? data.claimLink : null);
       onCreated();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not create account.');
@@ -106,6 +128,18 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
       </div>
 
       {error ? <StatusBanner tone="rose" message={error} /> : null}
+      {claimLink ? (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
+          <code className="flex-1 truncate text-xs text-cyan-100">{claimLink}</code>
+          <button
+            type="button"
+            onClick={() => navigator.clipboard?.writeText(claimLink)}
+            className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
+          >
+            Copy
+          </button>
+        </div>
+      ) : null}
 
       <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={handleSubmit}>
         <div className="space-y-1">
@@ -117,26 +151,30 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
           <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} required />
         </div>
         <div className="space-y-1">
-          <label className={labelClass()}>Email</label>
-          <input type="email" className={inputClass()} value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <label className={labelClass()}>Email — optional</label>
+          <input type="email" className={inputClass()} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Leave blank to generate a claim link instead" />
         </div>
         <div className="flex items-end gap-2 pb-2">
           <input id="create-active" type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="h-4 w-4" />
           <label htmlFor="create-active" className="text-sm text-slate-300">Activate after owner setup</label>
         </div>
         <div className="sm:col-span-2 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4 text-xs leading-5 text-cyan-100/80">
-          Sway sends a one-time invitation to the owner. The owner chooses the password and accepts account terms; administrators never receive or set either one.
+          {hasEmail
+            ? 'Sway sends a one-time invitation to the owner. The owner chooses the password and accepts account terms; administrators never receive or set either one.'
+            : 'No email is sent. You’ll get a one-time claim link to hand to the artist directly — they set their own email, password, and phone when they use it.'}
         </div>
 
         <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-amber-100">
-            <input type="checkbox" checked={isPartner} onChange={(event) => setIsPartner(event.target.checked)} className="h-5 w-5" />
+          <label className={`flex min-h-11 items-center gap-3 text-sm font-bold text-amber-100 ${hasEmail ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+            <input type="checkbox" checked={isPartner} disabled={!hasEmail} onChange={(event) => setIsPartner(event.target.checked)} className="h-5 w-5" />
             Grant Sway Brand Partner status
           </label>
           <p className="mt-2 text-xs leading-5 text-amber-100/70">
-            This is an append-only grandfather grant. It preserves the Sway-controlled pricing documented in the current Brand Partner terms and cannot be removed through routine account editing.
+            {hasEmail
+              ? 'This is an append-only grandfather grant. It preserves the Sway-controlled pricing documented in the current Brand Partner terms and cannot be removed through routine account editing.'
+              : 'Not available on the claim-link path yet — add an email above to grant Brand Partner status at creation, or grant it after the artist claims their account.'}
           </p>
-          {isPartner ? (
+          {isPartner && hasEmail ? (
             <label className="mt-3 block space-y-1">
               <span className={labelClass()}>Internal partner note — optional</span>
               <input className={inputClass()} maxLength={280} value={partnerNote} onChange={(event) => setPartnerNote(event.target.value)} placeholder="Influencer, strategic partnership, or relationship context" />
@@ -150,7 +188,7 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
             disabled={submitting}
             className="inline-flex min-h-10 items-center justify-center rounded-xl bg-fuchsia-600 px-5 py-2 text-sm font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {submitting ? 'Creating invitation...' : 'Create account and send owner invitation'}
+            {submitting ? 'Creating...' : hasEmail ? 'Create account and send owner invitation' : 'Create account and generate claim link'}
           </button>
         </div>
       </form>
@@ -186,6 +224,10 @@ function EditAccountPanel({
   const [resettingPassword, setResettingPassword] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+
+  const [generatingClaimLink, setGeneratingClaimLink] = useState(false);
+  const [claimLinkError, setClaimLinkError] = useState<string | null>(null);
+  const [claimLink, setClaimLink] = useState<string | null>(null);
 
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -266,6 +308,30 @@ function EditAccountPanel({
       setResetError(resetErr instanceof Error ? resetErr.message : 'Could not send the owner access link.');
     } finally {
       setResettingPassword(false);
+    }
+  };
+
+  const handleGenerateClaimLink = async () => {
+    if (generatingClaimLink || !account.performerId) return;
+    setGeneratingClaimLink(true);
+    setClaimLinkError(null);
+    setClaimLink(null);
+
+    try {
+      const response = await fetch('/api/admin/performers/claim-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performerId: account.performerId })
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not generate a claim link.');
+      }
+      setClaimLink(typeof data?.claimLink === 'string' ? data.claimLink : null);
+    } catch (claimErr) {
+      setClaimLinkError(claimErr instanceof Error ? claimErr.message : 'Could not generate a claim link.');
+    } finally {
+      setGeneratingClaimLink(false);
     }
   };
 
@@ -437,6 +503,41 @@ function EditAccountPanel({
           {resettingPassword ? 'Sending...' : account.passwordSetupRequired ? 'Resend owner setup invitation' : 'Send owner password reset link'}
         </button>
       </div>
+
+      {account.performerId ? (
+        <div className="mt-5 rounded-xl border border-white/10 bg-slate-950/70 p-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-white">
+            <ShieldAlert className="h-4 w-4 text-cyan-300" />
+            Claim link
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            No email needed. Generate a one-time link and code and hand it to the artist yourself (text, DM, in person) --
+            they set their own email, password, and phone when they use it. This overrides whatever password is on
+            the account today, so it also works as a handoff for accounts you set up yourself.
+          </p>
+          {claimLinkError ? <StatusBanner tone="rose" message={claimLinkError} /> : null}
+          {claimLink ? (
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
+              <code className="flex-1 truncate text-xs text-cyan-100">{claimLink}</code>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(claimLink)}
+                className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
+              >
+                Copy
+              </button>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleGenerateClaimLink}
+            disabled={generatingClaimLink}
+            className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {generatingClaimLink ? 'Generating...' : claimLink ? 'Generate a new claim link' : 'Generate claim link'}
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-5 rounded-xl border border-rose-500/30 bg-rose-950/20 p-4">
         <div className="flex items-center gap-2 text-sm font-bold text-rose-200">
