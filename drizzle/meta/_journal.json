@@ -148,6 +148,13 @@
       "when": 1784508085346,
       "tag": "0020_many_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784576915339,
+      "tag": "0021_pro_mode_universal_account",
+      "breakpoints": true
     }
   ]
 }

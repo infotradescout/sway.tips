@@ -15,7 +15,7 @@ import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -27,6 +27,7 @@ import { resolveProposedPlatformFee } from "./src/server/fee-policy";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
+import { applyProModeTransition, getProModeStatus, type ProModeTransitionResult } from "./src/server/pro-mode";
 import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
@@ -2808,11 +2809,23 @@ app.post('/api/talent/signup', async (req, res) => {
           passwordHash,
           emailVerifiedAt: null,
           termsAcceptedAt: new Date(),
-          role: 'performer'
+          role: 'performer',
+          // Performer signup begins Pro Mode onboarding immediately -- there is
+          // no separate performer account type, just the universal users row
+          // starting past the patron default of 'disabled'.
+          proModeStatus: 'onboarding'
         })
         .returning({
           id: users.id
         });
+
+      await tx.insert(proModeStatusEvents).values({
+        userId: createdUser.id,
+        previousStatus: 'disabled',
+        nextStatus: 'onboarding',
+        reason: 'performer_signup',
+        actorUserId: createdUser.id
+      });
 
       const [createdPerformer] = await tx
         .insert(performers)
@@ -3482,6 +3495,63 @@ app.post('/api/talent/session/logout', async (req, res) => {
   }
 
   res.json({ success: true });
+});
+
+// Universal-account Pro Mode surface (Phase 2 Slice 1). Deliberately gated by
+// requireAuthenticatedAccountAccess, not requireTalentAccess -- a patron who
+// has never touched a performer route must still be able to read and
+// activate their own Pro Mode state on the same account.
+app.get('/api/account/pro-mode', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const access = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (access.allowed === false) {
+    res.status(access.status).json({ error: access.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Pro Mode requires durable persistence.' });
+    return;
+  }
+
+  const status = await getProModeStatus(businessDb, access.actor.actorId!);
+  if (!status) {
+    res.status(404).json({ error: 'Account not found.' });
+    return;
+  }
+
+  res.json({ status });
+});
+
+app.post('/api/account/pro-mode/activate', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const access = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (access.allowed === false) {
+    res.status(access.status).json({ error: access.reason });
+    return;
+  }
+
+  if (!businessDb) {
+    res.status(503).json({ error: 'Pro Mode requires durable persistence.' });
+    return;
+  }
+
+  const actorId = access.actor.actorId!;
+  const transition: ProModeTransitionResult = await applyProModeTransition(businessDb, {
+    userId: actorId,
+    action: 'self_activate',
+    actorUserId: actorId,
+    reason: 'patron_self_activate'
+  });
+
+  if (transition.allowed === false) {
+    res.status(409).json({ error: transition.reason });
+    return;
+  }
+
+  res.json({ status: transition.nextStatus, changed: transition.changed });
 });
 
 app.post('/api/talent/control-bridge/token', async (req, res) => {
