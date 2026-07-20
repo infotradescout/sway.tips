@@ -12,6 +12,12 @@ export const PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN = 'login';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL = 'verify_email';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE = 'account_invite';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET = 'password_reset';
+// Distinct from ACCOUNT_INVITE: no target email is known when the code is issued
+// (the artist supplies their own email/password/phone when redeeming it), delivery
+// is a link the admin hands over directly rather than an email send, and redeeming
+// it is allowed even when the performer account already has a password set --
+// that's the handoff case, not just first-time setup.
+export const PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE = 'claim_code';
 
 export const RESERVED_PERFORMER_HANDLES = new Set([
   'admin',
@@ -80,6 +86,18 @@ export function normalizePerformerDisplayName(rawValue: unknown) {
   const normalized = rawValue.trim();
   if (!normalized) return null;
   if (normalized.length > 80) return null;
+
+  return normalized;
+}
+
+// Stored as entered -- no SMS verification (see PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE).
+// Loose format check only: digits, spaces, and common separators, 7-20 characters.
+export function normalizePerformerPhone(rawValue: unknown) {
+  if (typeof rawValue !== 'string') return null;
+
+  const normalized = rawValue.trim();
+  if (!normalized) return null;
+  if (!/^[0-9+()\-.\s]{7,20}$/.test(normalized)) return null;
 
   return normalized;
 }

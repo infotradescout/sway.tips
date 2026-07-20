@@ -104,6 +104,10 @@ export const users = pgTable('users', {
   email: text('email'),
   displayName: text('display_name'),
   passwordHash: text('password_hash'),
+  // Collected at claim time (see claim_code flow in server.ts), stored as entered --
+  // no SMS verification. Distinct from performer_public_profiles.bookingPhone, which
+  // is public-facing fan/booking contact info, not an account field.
+  phone: text('phone'),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
   role: userRoleEnum('role').notNull().default('patron'),

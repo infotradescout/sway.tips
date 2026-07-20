@@ -7,6 +7,7 @@ import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
+import TalentClaimCard from '../components/TalentClaimCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -22,6 +23,10 @@ function isTalentSignup(pathname: string) {
 
 function isTalentInvite(pathname: string) {
   return pathname === '/talent/invite';
+}
+
+function isTalentClaim(pathname: string) {
+  return pathname === '/talent/claim';
 }
 
 type TalentPerformerProfile = {
@@ -244,6 +249,10 @@ export default function TalentApp() {
 
   if (isTalentInvite(pathname)) {
     return <TalentInviteAcceptCard />;
+  }
+
+  if (isTalentClaim(pathname)) {
+    return <TalentClaimCard />;
   }
 
   if (isLoading) return <LoadingState />;
