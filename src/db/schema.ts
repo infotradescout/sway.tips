@@ -126,15 +126,27 @@ export const users = pgTable('users', {
 }));
 
 // Append-only audit trail for every Pro Mode state transition. Mirrors the
-// performerPartnerEntitlementStatusEvents pattern: immutable once written,
-// see the 0021 migration trigger.
+// performerPartnerEntitlementStatusEvents pattern: immutable once written
+// (see the 0022 migration trigger).
+//
+// userId/actorUserId are deliberately plain uuid columns, not foreign keys to
+// users.id (see 0022). Sway's account-deletion path retains the users row
+// (email/name/password scrubbed, row kept) so a live FK would not normally be
+// at risk there -- but a real hard DELETE of a users row does exist elsewhere
+// (signup rollback when verification-email delivery fails, in server.ts),
+// and a live FK there would make an already-committed Pro Mode event block
+// that unrelated cleanup. These columns hold immutable, pseudonymous
+// historical identifiers on purpose: once written, they must never be
+// updated, deleted, or cascaded away, even if the account they reference is
+// later scrubbed or removed. They never store email, name, phone, or other
+// direct personal data.
 export const proModeStatusEvents = pgTable('pro_mode_status_events', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull().references(() => users.id),
+  userId: uuid('user_id').notNull(),
   previousStatus: text('previous_status'),
   nextStatus: text('next_status').notNull(),
   reason: text('reason').notNull(),
-  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  actorUserId: uuid('actor_user_id').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   userCreatedIdx: index('pro_mode_status_events_user_created_idx').on(table.userId, table.createdAt),

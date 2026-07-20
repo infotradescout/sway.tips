@@ -29,11 +29,11 @@ export function resolveProModeTransition(input: {
     }
 
     case 'self_activate': {
-      if (input.currentStatus === 'disabled') {
-        return { allowed: true, nextStatus: 'onboarding', changed: true };
+      if (input.currentStatus === 'disabled' || input.currentStatus === 'onboarding') {
+        return { allowed: true, nextStatus: 'active', changed: true };
       }
-      if (input.currentStatus === 'onboarding' || input.currentStatus === 'active') {
-        return { allowed: true, nextStatus: input.currentStatus, changed: false };
+      if (input.currentStatus === 'active') {
+        return { allowed: true, nextStatus: 'active', changed: false };
       }
       return {
         allowed: false,
@@ -56,6 +56,19 @@ export async function getProModeStatus(db: SwayDb, userId: string): Promise<ProM
 // changes the status -- writes the users row and an append-only audit event
 // in one transaction. Self-activation on an already-onboarding/active
 // account is a no-op success (idempotent), not a duplicate event.
+//
+// Concurrency: the initial SELECT takes FOR UPDATE, row-locking the target
+// users row for the duration of the transaction. A second concurrent caller
+// targeting the same account blocks until the first transaction commits,
+// then re-reads the now-updated status and correctly resolves to a
+// changed:false no-op instead of racing to a duplicate transition/event.
+//
+// Boundary: this function only ever reads/writes users.pro_mode_status and
+// pro_mode_status_events. It never reads or writes performers.*, so
+// activation can never change onboarding status, payout/payment-provider
+// readiness, or talent access -- those remain governed entirely by
+// requireTalentAccess and the performers table, independent of Pro Mode
+// state.
 export async function applyProModeTransition(
   db: SwayDb,
   input: { userId: string; action: ProModeAction; actorUserId: string; reason: string }
@@ -65,6 +78,7 @@ export async function applyProModeTransition(
       .select({ proModeStatus: users.proModeStatus })
       .from(users)
       .where(eq(users.id, input.userId))
+      .for('update')
       .limit(1);
 
     if (!rows.length) {

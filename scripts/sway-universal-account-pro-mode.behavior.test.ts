@@ -12,18 +12,20 @@ for (const currentStatus of ['onboarding', 'active', 'suspended', 'revoked'] as 
   assert.equal(result.allowed, false, `performer_signup must be rejected from ${currentStatus}`);
 }
 
-// Patron/listener self-activation: disabled -> onboarding.
+// Patron/listener self-activation goes straight to 'active' -- both from the
+// universal 'disabled' starting point and from a performer account still
+// mid-onboarding.
 assert.deepEqual(
   resolveProModeTransition({ currentStatus: 'disabled', action: 'self_activate' }),
-  { allowed: true, nextStatus: 'onboarding', changed: true }
+  { allowed: true, nextStatus: 'active', changed: true }
 );
-
-// Idempotent: activating again while already onboarding/active is a
-// no-op success, not an error and not a duplicate transition.
 assert.deepEqual(
   resolveProModeTransition({ currentStatus: 'onboarding', action: 'self_activate' }),
-  { allowed: true, nextStatus: 'onboarding', changed: false }
+  { allowed: true, nextStatus: 'active', changed: true }
 );
+
+// Idempotent: activating again while already active is a no-op success, not
+// an error and not a duplicate transition.
 assert.deepEqual(
   resolveProModeTransition({ currentStatus: 'active', action: 'self_activate' }),
   { allowed: true, nextStatus: 'active', changed: false }
