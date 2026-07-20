@@ -122,6 +122,8 @@ export default function TalentSignupCard() {
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-400">
             Already have an account? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/talent/login">Log in</a>
+            {' · '}
+            Have a claim code? <a className="font-bold text-cyan-300 hover:text-cyan-200" href="/talent/claim">Claim with code</a>
           </p>
 
           {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}

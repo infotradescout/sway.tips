@@ -5,10 +5,11 @@ import { StatusBanner } from './TalentAuthStatus';
 const PASSWORD_MIN_LENGTH = 8;
 
 export default function TalentClaimCard() {
-  const code = useMemo(() => {
+  const codeFromLink = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('code')?.trim() || '';
   }, []);
+  const [code, setCode] = useState(codeFromLink);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -59,10 +60,23 @@ export default function TalentClaimCard() {
           This secure code can be used once. Set your own email and password now -- anything set up on your behalf before this is replaced by what you enter here.
         </p>
 
-        {!code ? <StatusBanner tone="rose" message="This claim link is missing its one-time code." /> : null}
         {message ? <StatusBanner tone="rose" message={message} /> : null}
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Claim code</span>
+            <input
+              type="text"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              value={code}
+              onChange={(event) => setCode(event.target.value.trim())}
+              placeholder="Paste or type the code you were given"
+              required
+              className="min-h-12 w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-cyan-400"
+            />
+          </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Email</span>
             <input
