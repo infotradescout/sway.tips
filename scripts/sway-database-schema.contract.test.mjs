@@ -71,6 +71,32 @@ for (const entry of journalEntries) {
   }
 }
 
+// "drizzle-kit generate" diffs against the newest snapshot file it can find in
+// drizzle/meta/ -- if that snapshot is missing (e.g. never committed), it silently
+// diffs against an OLDER, stale one instead of erroring, producing a migration that
+// re-creates schema already applied by intervening migrations. This has bitten this
+// repo twice already (migrations 0016 and 0019 both had to be hand-corrected after
+// generate produced a bogus "recreate everything since the stale snapshot" diff).
+// This check only requires the LATEST entry to have a snapshot -- that's the one
+// future "db:generate" runs actually diff against, so it's the one that matters.
+const metaDir = join(root, 'drizzle/meta');
+const snapshotFiles = existsSync(metaDir)
+  ? new Set(readdirSync(metaDir).filter((name) => name.endsWith('_snapshot.json')))
+  : new Set();
+const latestJournalEntry = journalEntries.reduce((latest, entry) => (
+  typeof entry?.idx === 'number' && (!latest || entry.idx > latest.idx) ? entry : latest
+), null);
+if (latestJournalEntry) {
+  const expectedSnapshot = `${String(latestJournalEntry.idx).padStart(4, '0')}_snapshot.json`;
+  if (!snapshotFiles.has(expectedSnapshot)) {
+    failures.push(
+      `Missing drizzle/meta/${expectedSnapshot} for the latest migration journal entry (idx ${latestJournalEntry.idx}, ` +
+      `tag ${latestJournalEntry.tag}). Without it, the next "npm run db:generate" will silently diff against a ` +
+      `stale snapshot and produce a migration that re-creates already-applied schema. Regenerate and commit it.`
+    );
+  }
+}
+
 const requiredTables = [
   'users',
   'performers',
