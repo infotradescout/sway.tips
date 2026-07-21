@@ -1,4 +1,5 @@
-import { ExternalLink, FolderLock, QrCode, Radio } from 'lucide-react';
+import { ExternalLink, QrCode, Radio } from 'lucide-react';
+import PerformerAudioFiles from './PerformerAudioFiles';
 
 export default function PerformerAccountHome({
   performerHandle,
@@ -66,14 +67,7 @@ export default function PerformerAccountHome({
           </div>
         )}
 
-        <div
-          aria-disabled="true"
-          title="Publishing foundation is on main as schema/contracts. Upload and share runtime is next."
-          className="inline-flex min-h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-black text-slate-500"
-        >
-          <FolderLock className="h-4 w-4" aria-hidden="true" />
-          Files &amp; projects — next
-        </div>
+        <PerformerAudioFiles />
       </div>
     </section>
   );
