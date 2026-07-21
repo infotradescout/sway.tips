@@ -124,7 +124,8 @@ async function main() {
   assert.equal(normalizePerformerPassword('secret123'), 'secret123', 'Performer passwords must stay in request scope only as raw strings.');
   assert.equal(normalizePerformerPassword(''), null, 'Empty performer passwords must be rejected.');
 
-  assert.equal(validatePerformerPasswordStrength('short').ok, false, 'Weak passwords must be rejected.');
+  assert.equal(validatePerformerPasswordStrength('12').ok, false, 'Too-short passwords must be rejected.');
+  assert.equal(validatePerformerPasswordStrength('123').ok, true, 'Short numeric quick-access passwords must pass.');
   assert.equal(validatePerformerPasswordStrength('longpassword').ok, false, 'Passwords without digits must be rejected.');
   assert.equal(validatePerformerPasswordStrength('sway1234').ok, true, 'Passwords with minimum strength must pass.');
   assert.equal(PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL, 'verify_email', 'Verification links must use the verify_email challenge type.');

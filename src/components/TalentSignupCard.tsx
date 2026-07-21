@@ -7,7 +7,7 @@ const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 // Mirrors src/server/performer-login.ts normalizePerformerHandle and
 // src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
 const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
-const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MIN_LENGTH = 3;
 
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
 type EntryMode = 'code' | 'create';
@@ -280,7 +280,7 @@ export default function TalentSignupCard() {
                     autoComplete="new-password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
-                    placeholder="At least 8 characters"
+                    placeholder="123 is fine for now"
                     required
                     aria-invalid={passwordError ? true : undefined}
                     className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
@@ -401,7 +401,7 @@ export default function TalentSignupCard() {
                     autoComplete="new-password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
-                    placeholder="At least 8 characters"
+                    placeholder="At least 8 characters with a letter + number"
                     required
                     aria-invalid={passwordError ? true : undefined}
                     className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
