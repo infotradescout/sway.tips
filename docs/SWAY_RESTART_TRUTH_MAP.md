@@ -2,110 +2,52 @@
 
 ## Product Lock
 
-Sway is a simple app for one live loop:
+Sway is a creator account product with two permanent surfaces:
 
-1. Audience joins a live performer or DJ room.
-2. Audience pays to send a song request or tip.
-3. Performer or DJ manages the queue.
+1. **Live audience money** — join or run a live room for tips, requests, and queue control.
+2. **Publishing & collaboration** — preserve masters, collaborate, share files, deliver releases, and (eventually) transfer catalogs with fail-closed continuity.
 
-If a file, route, or doc does not help that loop, it is not core product scope.
+A live room is night mode, not an entry tax. One account covers audience and creator. Stripe verification unlocks getting paid, not using the site.
 
-## Current State Note (2026-07-20)
+If a file, route, or doc does not help those surfaces — or honesty about what is unfinished — it is not core product scope.
 
-The live-night loop above is unchanged in shape. Since the last restart pass, the following landed without changing that loop:
+See `docs/SWAY_COMPLETE_PRODUCT_GAP.md` and `docs/SWAY_PRODUCT_SPINE.md`.
 
-- `users.proModeStatus` account state (Phase 2 Slice 1A) is deployed but has no patron-facing surface. Sway still does not provide patron account creation or login. Do not describe Pro Mode as something a patron can activate.
-- The Render deploy pipeline now runs `drizzle-kit migrate` via `preDeployCommand` before every rollout. A schema-changing PR is not deploy-ready until its migration has actually run in production, not merely generated locally.
-- Public room-state reads (`GET /api/state`, `GET /api/state/:gigId`) return a sanitized projection to any caller without performer authorization. Patron-scoped request status is resolved by an opaque per-submission receipt, never by "the newest request in the room." See `src/server/public-room-state.ts` and `src/server/patron-status-receipt.ts`.
-- `scripts/sway-performer-link-profile.contract.test.mjs` (and the seed data it reads) previously failed on Windows `core.autocrlf` checkouts; `.gitattributes` now forces LF for `scripts/sway-seed-performer-previews.mjs` so the contract holds across platforms.
+## Current State Note (2026-07-21)
+
+- Live-night loop remains implemented on `main`.
+- Stripe test keys (publishable + secret + webhook) are present on Render; payment form config returns test mode. That is plumbing, not complete-product ship.
+- Audio publishing / file-sharing / DistroKid-class catalog transfer foundation authored on `agent/audio-publishing-foundation` was **not** on `main`. Re-entry ports it as migration `0023_audio_publishing_foundation` + contracts. Runtime upload/share/cutover flags remain false until durable implementation exists.
+- Unified account home (usable with zero live room) is required and not yet complete.
+- Old “patron accounts held / live-loop-only” spine language is superseded by owner direction: do not ship incomplete product; publishing/collab are in-scope.
 
 ## Keep
 
-These areas align with the actual product and should form the restart base:
-
-- Public audience and performer entry:
-  - `shells/public.html`
-  - `src/components/TalentLoginCard.tsx`
-  - `src/components/TalentSignupCard.tsx`
-- Audience room flow:
-  - `src/shells/PatronApp.tsx`
-  - `src/components/PatronView.tsx`
-  - `/g/:gigId`
-  - `/p/:performerHandle`
-- Performer room flow:
-  - `src/shells/TalentApp.tsx`
-  - `src/components/TalentDashboard.tsx`
-  - `src/components/PerformerShareKit.tsx`
-  - `/talent/login`
-  - `/talent/signup`
-  - `/talent/gigs`
-- Durable auth and performer identity:
-  - `src/server/performer-login.ts`
-  - `src/server/performer-password-auth.ts`
-  - `src/server/performer-session-store.ts`
-  - `src/server/performer-login-mailer.ts`
-- Durable business and payment foundations:
-  - `src/db/schema.ts`
-  - `src/server/business-store.ts`
-  - `src/server/idempotency-store.ts`
-  - `src/server/payment-service.ts`
-  - `src/server/payment-lifecycle.ts`
-  - `src/server/payment-provider.ts`
-  - `src/server/payment-webhook.ts`
-- Core server routes in `server.ts`:
-  - performer signup/login/session routes
-  - audience state routes
-  - request/tip/boost routes
-  - performer queue/session routes
+- Live room: `PatronApp`, `TalentApp`, `TalentDashboard`, `PerformerShareKit` / `PerformerRoomShare`, payment + business store modules
+- Auth: performer login/session (becoming unified account auth)
+- Publishing foundation (re-entering): `docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md`, `src/server/audio-publishing-contract.ts`, `drizzle/0023_audio_publishing_foundation.sql`
 
 ## Quarantine
 
-These areas may stay in the repo for now, but they should be treated as internal or legacy rather than product-defining:
-
-- `/admin` route family
-- `src/shells/AdminApp.tsx`
-- `src/shells/AdminOpsRuntime.tsx`
-- `src/shells/AdminOpsShell.tsx`
-- `src/shells/admin/**`
-- `src/shells/OperatorAppShell.tsx`
-- `src/shells/OperatorRuntime.tsx`
-- `src/shells/operator/**`
-- admin/operator fallback and access-control copy that is not part of the public story
-- admin/operator extraction docs and parity plans
-
-Rule: quarantine code must not shape public copy, onboarding, or the marketed product story.
+- `/admin` and operator extraction surfaces — internal only
+- Side branches that claim product without `main` + production evidence
 
 ## Cut Or Rewrite First
 
-These are the first places that should stop telling the wrong story:
-
-- Public landing copy that mentions venues or operator tools
-- Top-level docs that describe venues as a core user
-- README/product spine language that broadens beyond audience + performer/DJ
-- Any support-style auth wording that sounds like the primary sign-in method instead of account login
-
-## Internal-Only, Not Marketed
-
-These may exist technically, but they are not part of the MVP story:
-
-- `/admin`
-- support-only recovery affordances
-- moderation internals
-- compliance and App Store packaging work
+- Any UI that implies DistroKid cutover, lossless collab, or file QR pairing is live before runtime exists
+- Talent idle state that forces “create room” as the only useful action
+- Docs that say publishing waits for “adoption proof”
 
 ## Restart Build Order
 
-1. Truthful public entry: audience + performer/DJ only
-2. Performer account creation and login
-3. Performer starts a live room and shares the room link/QR
-4. Audience joins that specific room
-5. Audience pays to send a request or tip
-6. Performer sees and manages the queue
-7. Payments, closeout, and ledger truth
+1. Correct product truth (this map + spine + gap ledger)
+2. Land publishing foundation schema/contracts on `main` as `0023` (no fake runtime claims)
+3. Account home usable with zero live room
+4. First durable file upload + share path
+5. Catalog transfer execution only after continuity evidence
 
 ## Immediate Cleanup Targets
 
-- Remove venue/operator language from public entry points
-- Keep admin/internal routes protected and unmarketed
-- Continue reducing legacy docs that redefine the product
-- Do not start new venue, operator, or marketplace work unless explicitly requested
+- Finish re-entry PR for `0023` + contract wiring
+- Remove “held” language that blocks unified account work
+- Do not prioritize Stripe victory-laps over missing publishing/collab runtime

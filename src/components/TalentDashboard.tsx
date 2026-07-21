@@ -37,6 +37,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
 import PerformerRoomControls from './PerformerRoomControls';
 import PerformerAudienceScreen from './PerformerAudienceScreen';
+import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
@@ -1903,13 +1904,20 @@ export default function TalentDashboard({
       </div>
 
       {session.status === 'inactive' ? (
-        <div className="order-3">
-          <PerformerRoomSetup
-            defaultPerformerName={welcomePerformerName}
+        <div className="order-3 space-y-4">
+          <PerformerAccountHome
+            displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
-            performerEmailVerified={performerEmailVerified}
-            onStartSession={onStartSession}
+            stripeReady={Boolean(performerProfile?.payouts_enabled)}
           />
+          <div id="sway-start-room">
+            <PerformerRoomSetup
+              defaultPerformerName={welcomePerformerName}
+              performerHandle={performerProfile?.handle}
+              performerEmailVerified={performerEmailVerified}
+              onStartSession={onStartSession}
+            />
+          </div>
         </div>
       ) : null}
 
