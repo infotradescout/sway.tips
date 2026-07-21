@@ -30,8 +30,17 @@ if (!patronSource.includes('if (isLoading || !shouldShowNoSessionRecovery) retur
   failures.push('PatronApp.tsx must gate recovery telemetry until loading completes.');
 }
 
-if (!patronSource.includes('Scan') || !patronSource.includes('Create account') || !patronSource.includes('Login')) {
-  failures.push('PatronApp.tsx must render visible Scan/Create account/Login recovery CTAs for invalid /g/:gigId routes.');
+if (!patronSource.includes('Scan')) {
+  failures.push('PatronApp.tsx must render a visible Scan recovery CTA for invalid /g/:gigId routes.');
+}
+
+// Removed by ux/patron-room-not-found-auth-cta-removal: a patron whose room
+// link failed to resolve must not be offered performer claim/authentication
+// as the recovery path from a public audience surface.
+for (const forbidden of ['Create account', 'href="/talent/signup"', 'href="/talent/login"']) {
+  if (recoverySource.includes(forbidden)) {
+    failures.push(`PatronNoSessionRecovery must not route patrons into performer auth flows: found "${forbidden}"`);
+  }
 }
 
 if (!patronSource.includes("const statePath = routeGigId ? `/api/state/${routeGigId}` : null;")) {

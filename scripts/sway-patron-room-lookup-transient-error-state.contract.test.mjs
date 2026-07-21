@@ -95,12 +95,12 @@ for (const forbidden of [
   requireExcludes(connectionRecoverySource, forbidden, `PatronConnectionRecovery must not expose paid actions or state mutation: found "${forbidden}"`);
 }
 
-// This lane must stay separate from the queued CTA-removal lane: the
-// no-session recovery screen's existing Scan/Create account/Login CTAs must
-// be untouched by this change.
-for (const term of ['Scan', 'Create account', 'Login', "href=\"/talent/signup\"", "href=\"/talent/login\""]) {
-  requireIncludes(patronApp, term, `PatronNoSessionRecovery CTAs must remain untouched by this lane: missing "${term}"`);
-}
+// This lane's own recovery screen (Scan/"sway to play") must remain intact.
+// The separate ux/patron-room-not-found-auth-cta-removal lane subsequently
+// removed the Create account/Login CTAs from PatronNoSessionRecovery -- that
+// is expected and is enforced by its own contract tests
+// (sway-invalid-patron-room-recovery, sway-patron-recovery), not here.
+requireIncludes(patronApp, 'Scan', 'PatronNoSessionRecovery must keep its Scan CTA.');
 
 // The room-entry-viewed telemetry effect must not fire during a transport
 // error (it previously could not fire during 'error' only because 'error'
