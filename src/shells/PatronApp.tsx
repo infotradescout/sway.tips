@@ -32,6 +32,30 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Matches the RoomLookupStatus union produced by useSwayState in shared.tsx.
+// Duplicated locally (not imported) because shared.tsx does not export it and
+// this lane must not modify shared.tsx.
+type RoomLookupStatusValue = 'global' | 'active' | 'missing' | 'ended' | 'error';
+
+export type PatronRoomRecoveryBranch = 'ended' | 'connection-error' | 'no-session' | 'room-active';
+
+// Pure decision function so the branch selection is unit-testable without
+// rendering JSX or adding a DOM-testing dependency. A transport/fetch
+// exception ('error') must resolve to its own non-terminal branch, distinct
+// from a confirmed-missing room -- it must never fall through to 'no-session'.
+export function resolvePatronRoomRecoveryBranch(input: {
+  roomLookup: { status: RoomLookupStatusValue };
+  hasPatronRouteContext: boolean;
+  hasSessionContext: boolean;
+}): PatronRoomRecoveryBranch {
+  if (input.roomLookup.status === 'ended') return 'ended';
+  if (input.roomLookup.status === 'error') return 'connection-error';
+  if (input.roomLookup.status === 'missing' || (!input.hasPatronRouteContext && !input.hasSessionContext)) {
+    return 'no-session';
+  }
+  return 'room-active';
+}
+
 function PatronNoSessionRecovery({
   onReturnHomeClick,
   attemptedGigId
@@ -90,6 +114,25 @@ function PatronNoSessionRecovery({
       </motion.div>
 
       {scannerOpen ? <QrScanner onClose={() => setScannerOpen(false)} /> : null}
+    </div>
+  );
+}
+
+// Non-terminal state for a transport/fetch exception. Must never claim the
+// room does not exist and must never expose Request/Tip/Boost -- those stay
+// gated behind the room-active branch only.
+function PatronConnectionRecovery() {
+  return (
+    <div className="mx-auto flex w-full max-w-xl items-center px-4 py-10">
+      <div className="w-full rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/25 bg-amber-500/10 text-amber-300">
+          <Flame className="h-5 w-5" />
+        </div>
+        <h1 className="font-display text-2xl font-black text-white">Connection interrupted</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">
+          Trying to reconnect to this room automatically. Hang tight&mdash;this usually resolves in a few seconds.
+        </p>
+      </div>
     </div>
   );
 }
@@ -214,11 +257,14 @@ export default function PatronApp() {
     Boolean(session.talentName) ||
     requests.length > 0 ||
     performers.length > 0;
-  const shouldShowEndedRoomRecovery = roomLookup.status === 'ended';
-  const shouldShowNoSessionRecovery =
-    roomLookup.status === 'missing' ||
-    roomLookup.status === 'error' ||
-    (!hasPatronRouteContext && !hasSessionContext);
+  const recoveryBranch = resolvePatronRoomRecoveryBranch({
+    roomLookup,
+    hasPatronRouteContext,
+    hasSessionContext
+  });
+  const shouldShowEndedRoomRecovery = recoveryBranch === 'ended';
+  const shouldShowConnectionRecovery = recoveryBranch === 'connection-error';
+  const shouldShowNoSessionRecovery = recoveryBranch === 'no-session';
   const routeFamily = routeGigId ? 'patron-gig' : 'patron-root';
   const patronTopbarSubtitle = shouldShowNoSessionRecovery
     ? 'Open a room link or sign in as the performer'
@@ -245,7 +291,7 @@ export default function PatronApp() {
 
   useEffect(() => {
     if (route.name === 'performer') return;
-    if (isLoading || shouldShowNoSessionRecovery || shouldShowEndedRoomRecovery || !hasPatronRouteContext) return;
+    if (isLoading || shouldShowNoSessionRecovery || shouldShowEndedRoomRecovery || shouldShowConnectionRecovery || !hasPatronRouteContext) return;
     const eventKey = `${routeFamily}:${routeGigId ?? 'none'}:entry`;
     if (roomEntryEventKeyRef.current === eventKey) return;
     roomEntryEventKeyRef.current = eventKey;
@@ -257,7 +303,7 @@ export default function PatronApp() {
       has_session_context: hasSessionContext,
       build_commit: 'unknown'
     });
-  }, [hasPatronRouteContext, hasSessionContext, isLoading, route.name, routeFamily, routeGigId, shouldShowEndedRoomRecovery, shouldShowNoSessionRecovery]);
+  }, [hasPatronRouteContext, hasSessionContext, isLoading, route.name, routeFamily, routeGigId, shouldShowConnectionRecovery, shouldShowEndedRoomRecovery, shouldShowNoSessionRecovery]);
 
   const handleReturnHomeClick = () => {
     sendPatronNoSessionReturnHomeClicked({
@@ -302,6 +348,8 @@ export default function PatronApp() {
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           {shouldShowEndedRoomRecovery ? (
             <EndedLiveRoomRecovery />
+          ) : shouldShowConnectionRecovery ? (
+            <PatronConnectionRecovery />
           ) : shouldShowNoSessionRecovery ? (
             <PatronNoSessionRecovery
               onReturnHomeClick={handleReturnHomeClick}
