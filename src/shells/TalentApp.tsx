@@ -7,7 +7,7 @@ import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
-import TalentClaimCard from '../components/TalentClaimCard';
+import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -29,6 +29,10 @@ function isTalentClaim(pathname: string) {
   return pathname === '/talent/claim';
 }
 
+function isTalentFileConnect(pathname: string) {
+  return pathname === '/talent/connect/files';
+}
+
 type TalentPerformerProfile = {
   performer_id: string;
   display_name: string;
@@ -42,7 +46,11 @@ type TalentPerformerProfile = {
 
 export default function TalentApp() {
   const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
-  const isAuthEntryRoute = isTalentLogin(pathname) || isTalentSignup(pathname) || isTalentInvite(pathname);
+  const isAuthEntryRoute = isTalentLogin(pathname)
+    || isTalentSignup(pathname)
+    || isTalentInvite(pathname)
+    || isTalentClaim(pathname)
+    || isTalentFileConnect(pathname);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
@@ -252,7 +260,16 @@ export default function TalentApp() {
   }
 
   if (isTalentClaim(pathname)) {
-    return <TalentClaimCard />;
+    const params = typeof window === 'undefined' ? '' : window.location.search;
+    const target = `/talent/signup${params || ''}`;
+    if (typeof window !== 'undefined') {
+      window.location.replace(target);
+    }
+    return <LoadingState />;
+  }
+
+  if (isTalentFileConnect(pathname)) {
+    return <TalentFileConnectCard />;
   }
 
   if (isLoading) return <LoadingState />;

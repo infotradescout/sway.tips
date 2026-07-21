@@ -36,6 +36,7 @@ import {
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
   normalizePerformerPhone,
+  PERFORMER_CLAIM_CODE_TTL_MS,
   PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
@@ -81,6 +82,7 @@ import {
 } from "./src/server/public-room-state";
 import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
 import { createAudioPublishingService } from "./src/server/audio-publishing-service";
+import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 
 dotenv.config({ path: ".env.local", override: false });
@@ -128,6 +130,9 @@ const audioObjectStore = (() => {
 const audioPublishingService = businessDb && audioObjectStore
   ? createAudioPublishingService({ db: businessDb, store: audioObjectStore })
   : null;
+const audioFilePairingService = businessDb
+  ? createAudioFilePairingService({ db: businessDb })
+  : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -140,6 +145,10 @@ const performerLoginRateLimiter = createPerformerLoginRateLimiter();
 const performerSignupRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX, 3),
   windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
+});
+const performerClaimPeekRateLimiter = createPerformerLoginRateLimiter({
+  maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_MAX, 20),
+  windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_WINDOW_MS, 5 * 60 * 1000)
 });
 const performerPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter();
 const hasAdminBootstrapSecret = Boolean(process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim());
@@ -2528,6 +2537,59 @@ app.post('/api/talent/invite/accept', async (req, res) => {
   }
 });
 
+app.post('/api/talent/claim/peek', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Performer claim lookup is temporarily unavailable.' });
+  }
+
+  const token = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerClaimPeekRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_claim_peek__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    return res.status(429).json({ error: 'Too many lookups. Please slow down.' });
+  }
+  if (!token) {
+    return res.status(422).json({ error: 'A code is required.' });
+  }
+
+  const claim = await performerLoginChallengeStore.peekChallengeByToken({
+    token,
+    expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE
+  });
+
+  const metadata = claim?.challengeMetadata && typeof claim.challengeMetadata === 'object'
+    ? claim.challengeMetadata as Record<string, unknown>
+    : {};
+  const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
+    ? metadata.performerId
+    : null;
+
+  if (!claim || !performerId) {
+    return res.status(404).json({ error: 'This code is invalid, expired, or already used.' });
+  }
+
+  const [performer] = await businessDb
+    .select({ handle: performers.handle, displayName: performers.displayName })
+    .from(performers)
+    .where(eq(performers.id, performerId))
+    .limit(1);
+
+  if (!performer) {
+    return res.status(404).json({ error: 'This code is invalid, expired, or already used.' });
+  }
+
+  res.status(200).json({
+    handle: performer.handle,
+    displayName: performer.displayName
+  });
+});
+
 app.post('/api/talent/claim/accept', async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -2559,8 +2621,9 @@ app.post('/api/talent/claim/accept', async (req, res) => {
   if (!normalizedEmail) {
     return res.status(422).json({ error: 'A valid email is required.' });
   }
-  if (!normalizedPhone) {
-    return res.status(422).json({ error: 'A valid phone number is required.' });
+  // Phone is optional on claim — code handoff should bypass onboarding fields.
+  if (req.body?.phone != null && String(req.body.phone).trim() && !normalizedPhone) {
+    return res.status(422).json({ error: 'Phone number format is invalid.' });
   }
   if (!password) {
     return res.status(422).json({ error: 'Choose a password to finish setup.' });
@@ -4589,7 +4652,8 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
       challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
       challengeMetadata: { performerId },
       requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
-      executor: tx
+      executor: tx,
+      ttlMs: PERFORMER_CLAIM_CODE_TTL_MS
     });
 
     await writeAuditEvent(tx, {
@@ -4607,7 +4671,7 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   });
 
   const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  const claimLink = `${appBaseUrl}/talent/claim?code=${encodeURIComponent(issued.token)}`;
+  const claimLink = `${appBaseUrl}/talent/signup?code=${encodeURIComponent(issued.token)}`;
 
   return res.status(201).json({ success: true, userId, performerId, wasNewPerformer, claimLink });
 });
@@ -6260,6 +6324,123 @@ app.post('/api/talent/audio/shares/download', async (req, res) => {
     downloaded.stream.pipe(res);
   } catch (error) {
     return res.status(403).json({ error: error instanceof Error ? error.message : 'Share download denied.' });
+  }
+});
+
+function requireFilePairingRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.fileConnectionQrRoutes) {
+    res.status(503).json({ error: 'Private file-pairing QR routes are not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioFilePairingService) {
+    res.status(503).json({ error: 'File pairing requires durable database persistence.' });
+    return false;
+  }
+  return true;
+}
+
+app.post('/api/talent/audio/pairing/tokens', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  try {
+    const issued = await audioFilePairingService.createPairingToken({
+      createdByUserId: talentAccess.actor.actorId,
+      purpose: req.body?.purpose,
+      tokenHash: req.body?.tokenHash,
+      idempotencyKey: req.body?.idempotencyKey,
+      connectionLabel: req.body?.connectionLabel
+    });
+    return res.status(issued.reused ? 200 : 201).json(issued);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to create pairing QR.' });
+  }
+});
+
+app.post('/api/talent/audio/pairing/preview', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!rawToken) return res.status(422).json({ error: 'token is required in the POST body.' });
+
+  try {
+    const preview = await audioFilePairingService.previewPairingToken({
+      claimingUserId: accountAccess.actor.actorId,
+      rawToken
+    });
+    return res.json(preview);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 410;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to preview pairing QR.' });
+  }
+});
+
+app.post('/api/talent/audio/pairing/claim', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!rawToken) return res.status(422).json({ error: 'token is required in the POST body.' });
+
+  try {
+    const claimed = await audioFilePairingService.claimPairingToken({
+      claimingUserId: accountAccess.actor.actorId,
+      rawToken
+    });
+    return res.json(claimed);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 410;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to claim pairing QR.' });
+  }
+});
+
+app.get('/api/talent/audio/pairing/connections', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const connections = await audioFilePairingService.listConnections({ userId: talentAccess.actor.actorId });
+  return res.json({ connections });
+});
+
+app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  try {
+    const revoked = await audioFilePairingService.revokeConnection({
+      userId: talentAccess.actor.actorId,
+      connectionId: String(req.params.connectionId || ''),
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : null
+    });
+    return res.json(revoked);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to revoke connection.' });
   }
 });
 

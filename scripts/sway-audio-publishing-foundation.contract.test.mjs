@@ -325,7 +325,7 @@ for (const term of [
   'catalogCutoverAutomation: false',
   'losslessObjectStorage: true',
   'resumableUploadRoutes: true',
-  'fileConnectionQrRoutes: false',
+  'fileConnectionQrRoutes: true',
   'privateDownloadAuthorization: true',
   'creatorDealExecution: false',
   'swayPlayback: false',
@@ -337,13 +337,13 @@ for (const term of [
 }
 
 for (const term of [
-  'This is a schema-and-contract slice with Slice 1 upload/share runtime.',
+  'This is a schema-and-contract slice with Slice 1 upload/share runtime and live file-pairing QR routes.',
   'Sway preserves everything the stores allow us to preserve',
   'An accepted original asset version is immutable evidence.',
   'bind the sealed row to its upload session, verifier, verification timestamp, and non-empty evidence',
   'whose SHA-256 digest matches the accepted source version',
-  "The required future file-pairing QR flow is separate from Sway's static room QR.",
-  'No private file-pairing QR route is live in this slice',
+  "The required file-pairing QR flow is separate from Sway's static room QR.",
+  'Private file-pairing QR routes are live for one-time connection claims',
   'The one-time rule will apply to the QR claim, not to the resulting connection.',
   '/talent/connect/files#token={opaque-token}',
   'opaque token in its URL fragment',

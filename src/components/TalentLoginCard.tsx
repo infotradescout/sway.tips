@@ -25,6 +25,10 @@ export default function TalentLoginCard() {
     unavailable: 'Performer sign-in is temporarily unavailable. Please try again in a moment.',
     verified: 'Your email is verified. Log in to open your Sway performer console.'
   });
+  const redirectTarget = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('redirect');
+  }, []);
 
   const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -41,7 +45,8 @@ export default function TalentLoginCard() {
         },
         body: JSON.stringify({
           email,
-          password
+          password,
+          ...(redirectTarget ? { redirect: redirectTarget } : {})
         })
       });
 

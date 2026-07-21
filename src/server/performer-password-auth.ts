@@ -1,6 +1,6 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 
-export const PERFORMER_PASSWORD_MIN_LENGTH = 8;
+export const PERFORMER_PASSWORD_MIN_LENGTH = 3;
 export const DEFAULT_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_MAX = 5;
 export const DEFAULT_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -88,6 +88,18 @@ export function validatePerformerPasswordStrength(password: string) {
     return {
       ok: false as const,
       error: `Password must be at least ${PERFORMER_PASSWORD_MIN_LENGTH} characters.`
+    };
+  }
+
+  // Allow short numeric quick-access passwords (e.g. 123) for claim handoff.
+  if (/^\d{3,7}$/.test(password)) {
+    return { ok: true as const };
+  }
+
+  if (password.length < 8) {
+    return {
+      ok: false as const,
+      error: 'Use at least 8 characters with a letter and a number, or a short numeric code like 123.'
     };
   }
 
