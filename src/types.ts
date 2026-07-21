@@ -69,6 +69,7 @@ export interface RequestItem {
   paymentId?: string | null;
   paymentIntentId?: string | null;
   paymentStatus?: string | null;
+  patronStatusReceiptHash?: string;
   boosts: BoostContribution[];
 }
 
@@ -151,4 +152,56 @@ export interface BackendState {
   requests: RequestItem[];
   performers: PerformerProfile[];
   activeGigId: string | null;
+}
+
+export interface PublicBoostContribution {
+  id: string;
+  patronName: string;
+  amount: number;
+  timestamp: string;
+}
+
+export interface PublicRequestItem {
+  id: string;
+  type: RequestItem['type'];
+  targetType: RequestItem['targetType'];
+  title: string;
+  subtitle: string;
+  albumArt?: string;
+  senderName: string;
+  amount: number;
+  sponsorCount: number;
+  status: 'approved' | 'fulfilled';
+  createdAt: string;
+  boosts: PublicBoostContribution[];
+}
+
+export interface PublicGigSession {
+  status: GigSession['status'];
+  talentName: string;
+  talentRole: GigSession['talentRole'];
+  feeType: GigSession['feeType'];
+  minimumTip: number;
+  requestsOpen: boolean;
+  requestWindowMode: GigSession['requestWindowMode'];
+  requestWindowExpiresAt: string | null;
+  requestWindowDuration: number | null;
+  requestWindowLabel: string | null;
+  operatingMode: GigSession['operatingMode'];
+  searchScope: GigSession['searchScope'];
+  paymentsEnabled: boolean;
+}
+
+export interface PublicRoomState {
+  session: PublicGigSession;
+  requests: PublicRequestItem[];
+  performers: PerformerProfile[];
+  activeGigId: string | null;
+}
+
+export interface PatronRequestStatus {
+  actionType: RequestItem['type'];
+  status: RequestItem['status'] | 'unavailable';
+  title: string;
+  submittedAt: string;
 }

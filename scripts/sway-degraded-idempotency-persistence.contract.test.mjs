@@ -135,7 +135,7 @@ for (const term of [
   'gig_id: gigId',
   '/api/pending-action/reconcile',
   "data.status === 'reconciled'",
-  'setBState(data.responseBody.state)'
+  'applyPatronMutationResponse(data.responseBody)'
 ]) {
   if (!patronApp.includes(term)) failures.push(`Patron shell missing route gig/reconciliation behavior: ${term}`);
 }
