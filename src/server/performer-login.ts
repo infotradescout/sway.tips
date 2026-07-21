@@ -288,6 +288,43 @@ export function createPerformerLoginChallengeStore({
       return consumed ?? null;
     },
 
+    async peekChallengeByToken({
+      token,
+      expectedChallengeType,
+      executor,
+      now = new Date()
+    }: {
+      token: string;
+      expectedChallengeType?: string;
+      executor?: DbExecutor | null;
+      now?: Date;
+    }) {
+      const reader = executorOrDb(executor);
+      if (!reader || !token) return null;
+
+      const tokenHash = hashPerformerLoginToken(token);
+      const [found] = await reader
+        .select({
+          id: performerLoginChallenges.id,
+          actorUserId: performerLoginChallenges.actorUserId,
+          challengeType: performerLoginChallenges.challengeType,
+          challengeMetadata: performerLoginChallenges.challengeMetadata
+        })
+        .from(performerLoginChallenges)
+        .where(and(
+          eq(performerLoginChallenges.tokenHash, tokenHash),
+          expectedChallengeType
+            ? eq(performerLoginChallenges.challengeType, expectedChallengeType)
+            : undefined,
+          isNull(performerLoginChallenges.consumedAt),
+          isNull(performerLoginChallenges.revokedAt),
+          gt(performerLoginChallenges.expiresAt, now)
+        ))
+        .limit(1);
+
+      return found ?? null;
+    },
+
     async revokeChallengeById({
       challengeId,
       executor,

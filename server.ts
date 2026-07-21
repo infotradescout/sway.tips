@@ -145,6 +145,10 @@ const performerSignupRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX, 3),
   windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_SIGNUP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
 });
+const performerClaimPeekRateLimiter = createPerformerLoginRateLimiter({
+  maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_MAX, 20),
+  windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_WINDOW_MS, 5 * 60 * 1000)
+});
 const performerPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter();
 const hasAdminBootstrapSecret = Boolean(process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim());
 const adminBootstrapRateLimiter = createPerformerLoginRateLimiter({
@@ -2530,6 +2534,59 @@ app.post('/api/talent/invite/accept', async (req, res) => {
     });
     return res.status(500).json({ error: 'Unable to finish performer setup right now.' });
   }
+});
+
+app.post('/api/talent/claim/peek', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Performer claim lookup is temporarily unavailable.' });
+  }
+
+  const token = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerClaimPeekRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__talent_claim_peek__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    return res.status(429).json({ error: 'Too many lookups. Please slow down.' });
+  }
+  if (!token) {
+    return res.status(422).json({ error: 'A code is required.' });
+  }
+
+  const claim = await performerLoginChallengeStore.peekChallengeByToken({
+    token,
+    expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE
+  });
+
+  const metadata = claim?.challengeMetadata && typeof claim.challengeMetadata === 'object'
+    ? claim.challengeMetadata as Record<string, unknown>
+    : {};
+  const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
+    ? metadata.performerId
+    : null;
+
+  if (!claim || !performerId) {
+    return res.status(404).json({ error: 'This code is invalid, expired, or already used.' });
+  }
+
+  const [performer] = await businessDb
+    .select({ handle: performers.handle, displayName: performers.displayName })
+    .from(performers)
+    .where(eq(performers.id, performerId))
+    .limit(1);
+
+  if (!performer) {
+    return res.status(404).json({ error: 'This code is invalid, expired, or already used.' });
+  }
+
+  res.status(200).json({
+    handle: performer.handle,
+    displayName: performer.displayName
+  });
 });
 
 app.post('/api/talent/claim/accept', async (req, res) => {

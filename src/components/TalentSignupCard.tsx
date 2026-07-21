@@ -20,6 +20,9 @@ type SignupResponse = {
   redirectPath?: string;
 };
 
+type PeekStatus = 'idle' | 'loading' | 'found' | 'not-found';
+type PeekProfile = { handle: string; displayName: string | null };
+
 export default function TalentSignupCard() {
   const initial = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -44,6 +47,64 @@ export default function TalentSignupCard() {
   const [status, setStatus] = useState<SignupStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [verificationLink, setVerificationLink] = useState<string | null>(null);
+  const [peekStatus, setPeekStatus] = useState<PeekStatus>('idle');
+  const [peekProfile, setPeekProfile] = useState<PeekProfile | null>(null);
+
+  useEffect(() => {
+    if (mode !== 'code') {
+      setPeekStatus('idle');
+      setPeekProfile(null);
+      return;
+    }
+
+    const trimmed = claimCode.trim();
+    if (trimmed.length < 8) {
+      setPeekStatus('idle');
+      setPeekProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+    setPeekStatus('loading');
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch('/api/talent/claim/peek', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: trimmed })
+        });
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setPeekStatus('not-found');
+          setPeekProfile(null);
+          return;
+        }
+
+        const data = await response.json().catch(() => null) as PeekProfile | null;
+        if (cancelled) return;
+
+        if (data?.handle) {
+          setPeekStatus('found');
+          setPeekProfile({ handle: data.handle, displayName: data.displayName ?? null });
+        } else {
+          setPeekStatus('not-found');
+          setPeekProfile(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPeekStatus('not-found');
+          setPeekProfile(null);
+        }
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [claimCode, mode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -251,6 +312,20 @@ export default function TalentSignupCard() {
                   required
                   className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none transition focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500"
                 />
+                {peekStatus === 'loading' ? (
+                  <p className="text-xs text-slate-400">Checking code...</p>
+                ) : null}
+                {peekStatus === 'found' && peekProfile ? (
+                  <p className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
+                    Claiming {peekProfile.displayName || `@${peekProfile.handle}`}
+                    {peekProfile.displayName ? ` (@${peekProfile.handle})` : ''}
+                  </p>
+                ) : null}
+                {peekStatus === 'not-found' ? (
+                  <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
+                    We couldn't find a profile for this code. Double-check it, or switch to Create account.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">
