@@ -79,6 +79,9 @@ import {
   projectPublicRoomState,
   sanitizePatronMutationResponseBody
 } from "./src/server/public-room-state";
+import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
+import { createAudioPublishingService } from "./src/server/audio-publishing-service";
+import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -112,6 +115,19 @@ const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
+const audioObjectStore = (() => {
+  try {
+    return createConfiguredAudioObjectStore(process.env);
+  } catch (error) {
+    if (process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
+      console.error('[sway.audio] storage config rejected:', error instanceof Error ? error.message : error);
+    }
+    return null;
+  }
+})();
+const audioPublishingService = businessDb && audioObjectStore
+  ? createAudioPublishingService({ db: businessDb, store: audioObjectStore })
+  : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -6035,6 +6051,216 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   }
 
   return res.json({ success: true, revoked: true });
+});
+
+function requireAudioPublishingRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.resumableUploadRoutes
+    || !AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.losslessObjectStorage
+    || !AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.privateDownloadAuthorization) {
+    res.status(503).json({ error: 'Audio publishing runtime is not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioPublishingService || !audioObjectStore) {
+    res.status(503).json({
+      error: 'Audio file storage is not configured. Set SWAY_AUDIO_STORAGE_PROVIDER=local_private_fs with a private object directory.'
+    });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/talent/audio/projects', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can manage audio projects.' });
+
+  const projects = await audioPublishingService.listProjects({
+    performerId: performerOwner.performerId,
+    actorUserId: talentAccess.actor.actorId
+  });
+  return res.json({ projects });
+});
+
+app.post('/api/talent/audio/projects', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can create audio projects.' });
+
+  try {
+    const project = await audioPublishingService.createProject({
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      projectKind: req.body?.projectKind
+    });
+    return res.status(201).json({ project });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not create project.' });
+  }
+});
+
+app.get('/api/talent/audio/projects/:projectId/assets', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const payload = await audioPublishingService.listProjectAssets({
+      projectId: req.params.projectId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json(payload);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Project access denied.' });
+  }
+});
+
+app.post('/api/talent/audio/projects/:projectId/uploads', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const session = await audioPublishingService.initiateUpload({
+      projectId: req.params.projectId,
+      actorUserId: talentAccess.actor.actorId,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      assetKind: typeof req.body?.assetKind === 'string' ? req.body.assetKind : 'master_audio',
+      originalFilename: typeof req.body?.originalFilename === 'string' ? req.body.originalFilename : 'upload.bin',
+      mimeType: typeof req.body?.mimeType === 'string' ? req.body.mimeType : 'application/octet-stream',
+      expectedByteSize: Number(req.body?.expectedByteSize),
+      expectedSha256: typeof req.body?.expectedSha256 === 'string' ? req.body.expectedSha256 : '',
+      idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : '',
+      partSizeBytes: req.body?.partSizeBytes != null ? Number(req.body.partSizeBytes) : undefined
+    });
+    if (!session.idempotencyKey) {
+      return res.status(422).json({ error: 'idempotencyKey is required.' });
+    }
+    return res.status(201).json({ uploadSession: session });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not start upload.' });
+  }
+});
+
+app.put('/api/talent/audio/uploads/:uploadSessionId/parts/:partNumber', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const partNumber = Number(req.params.partNumber);
+  const contentBase64 = typeof req.body?.contentBase64 === 'string' ? req.body.contentBase64 : '';
+  if (!contentBase64) return res.status(422).json({ error: 'contentBase64 is required for this upload part.' });
+
+  let body: Buffer;
+  try {
+    body = Buffer.from(contentBase64, 'base64');
+  } catch {
+    return res.status(422).json({ error: 'contentBase64 is invalid.' });
+  }
+  if (!body.byteLength || body.byteLength > 6 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
+  }
+
+  try {
+    const written = await audioPublishingService.writeUploadPart({
+      uploadSessionId: req.params.uploadSessionId,
+      actorUserId: talentAccess.actor.actorId,
+      partNumber,
+      body
+    });
+    return res.json({ part: written });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not store upload part.' });
+  }
+});
+
+app.post('/api/talent/audio/uploads/:uploadSessionId/complete', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can seal uploads.' });
+
+  try {
+    const version = await audioPublishingService.completeAndSealUpload({
+      uploadSessionId: req.params.uploadSessionId,
+      actorUserId: talentAccess.actor.actorId,
+      performerId: performerOwner.performerId
+    });
+    return res.json({ version });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not seal upload.' });
+  }
+});
+
+app.post('/api/talent/audio/versions/:versionId/shares', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const result = await audioPublishingService.createShareGrant({
+      versionId: req.params.versionId,
+      actorUserId: talentAccess.actor.actorId,
+      maxUses: req.body?.maxUses != null ? Number(req.body.maxUses) : 5,
+      recipientLabel: typeof req.body?.recipientLabel === 'string' ? req.body.recipientLabel : null
+    });
+    return res.status(201).json({
+      shareGrantId: result.grant.id,
+      expiresAt: result.grant.expiresAt,
+      maxUses: result.grant.maxUses,
+      // Returned once. Client should keep it in memory / fragment transport only.
+      shareToken: result.rawToken
+    });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not create share grant.' });
+  }
+});
+
+app.post('/api/talent/audio/shares/download', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const shareToken = typeof req.body?.shareToken === 'string' ? req.body.shareToken : '';
+  if (!shareToken) return res.status(422).json({ error: 'shareToken is required in the POST body.' });
+
+  try {
+    const downloaded = await audioPublishingService.downloadSharedOriginal({
+      rawToken: shareToken,
+      actorUserId: talentAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', downloaded.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(downloaded.byteSize));
+    res.setHeader('Content-Disposition', `attachment; filename="${downloaded.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', downloaded.version.sha256);
+    downloaded.stream.pipe(res);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Share download denied.' });
+  }
 });
 
 app.get('/api/talent/setlist', async (req, res) => {

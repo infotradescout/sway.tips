@@ -35,9 +35,10 @@ for (const term of [
   'externalDspDelivery: false',
   'directSales: false',
   'export const AUDIO_PUBLISHING_RUNTIME_CAPABILITIES',
-  'losslessObjectStorage: false',
-  'resumableUploadRoutes: false',
-  'privateDownloadAuthorization: false',
+  'losslessObjectStorage: true',
+  'resumableUploadRoutes: true',
+  'privateDownloadAuthorization: true',
+  'fileConnectionQrRoutes: false',
   'swayPlayback: false',
   'royaltyAccounting: false'
 ]) {
@@ -52,9 +53,7 @@ for (const forbidden of [
   'audioPlayback: true',
   'externalDspDelivery: true',
   'directSales: true',
-  'losslessObjectStorage: true',
-  'resumableUploadRoutes: true',
-  'privateDownloadAuthorization: true',
+  'fileConnectionQrRoutes: true',
   'swayPlayback: true',
   'royaltyAccounting: true'
 ]) {
@@ -168,10 +167,7 @@ if (contract && schema && migration) {
 
     const unavailableRuntimeCapabilities = [
       'catalogCutoverAutomation',
-      'losslessObjectStorage',
-      'resumableUploadRoutes',
       'fileConnectionQrRoutes',
-      'privateDownloadAuthorization',
       'swayPlayback',
       'externalDspDelivery',
       'directSales',
@@ -180,6 +176,17 @@ if (contract && schema && migration) {
     for (const capability of unavailableRuntimeCapabilities) {
       if (AUDIO_PUBLISHING_RUNTIME_CAPABILITIES[capability] !== false) {
         throw new Error('Audio publishing runtime must fail closed for: ' + capability);
+      }
+    }
+
+    const enabledRuntimeCapabilities = [
+      'losslessObjectStorage',
+      'resumableUploadRoutes',
+      'privateDownloadAuthorization'
+    ];
+    for (const capability of enabledRuntimeCapabilities) {
+      if (AUDIO_PUBLISHING_RUNTIME_CAPABILITIES[capability] !== true) {
+        throw new Error('Audio publishing Slice 1 runtime must enable: ' + capability);
       }
     }
 

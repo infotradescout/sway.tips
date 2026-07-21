@@ -6,7 +6,7 @@ Date: 2026-07-18
 
 Sway will build an audio publishing and collaboration foundation for musicians, producers, engineers, comedians, podcasters, and other audio creators. The first slice defines how original files must be preserved, records project-scoped access and rights evidence, models release delivery and catalog transfers, and defines a fail-closed Continuum connector.
 
-This is a schema-and-contract slice. It does **not** make storage, private file or QR routes, exact-original download authorization, playback, creator-deal execution, store delivery, sales, royalties, or catalog migration live. Runtime capability flags must remain false until each capability has a durable implementation and production evidence.
+This is a schema-and-contract slice with Slice 1 upload/share runtime. It does **not** make private file-pairing QR routes, DistroKid/DSP cutover, playback, creator-deal execution, store delivery, sales, or royalties live. Capability flags stay false until each remaining capability has durable implementation and production evidence.
 
 Sway still has two public sides: performer and customer. Producer, engineer, collaborator, and reviewer are private project-scoped roles on the performer side, not a third public side.
 
@@ -40,7 +40,7 @@ Resumable upload sessions are idempotent. A session records expected size and di
 
 ## Private File Connections and QR Pairing
 
-The required future file-pairing QR flow is separate from Sway's static room QR. No private file or pairing route is live in this slice; the behavior below defines implementation invariants for that later runtime.
+The required future file-pairing QR flow is separate from Sway's static room QR. No private file-pairing QR route is live in this slice; the behavior below defines implementation invariants for that later runtime.
 
 | QR | Scope | Reuse | Result |
 | --- | --- | --- | --- |
