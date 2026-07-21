@@ -38,7 +38,7 @@ for (const term of [
   'losslessObjectStorage: true',
   'resumableUploadRoutes: true',
   'privateDownloadAuthorization: true',
-  'fileConnectionQrRoutes: false',
+  'fileConnectionQrRoutes: true',
   'swayPlayback: false',
   'royaltyAccounting: false'
 ]) {
@@ -53,7 +53,6 @@ for (const forbidden of [
   'audioPlayback: true',
   'externalDspDelivery: true',
   'directSales: true',
-  'fileConnectionQrRoutes: true',
   'swayPlayback: true',
   'royaltyAccounting: true'
 ]) {
@@ -167,7 +166,6 @@ if (contract && schema && migration) {
 
     const unavailableRuntimeCapabilities = [
       'catalogCutoverAutomation',
-      'fileConnectionQrRoutes',
       'swayPlayback',
       'externalDspDelivery',
       'directSales',
@@ -182,7 +180,8 @@ if (contract && schema && migration) {
     const enabledRuntimeCapabilities = [
       'losslessObjectStorage',
       'resumableUploadRoutes',
-      'privateDownloadAuthorization'
+      'privateDownloadAuthorization',
+      'fileConnectionQrRoutes'
     ];
     for (const capability of enabledRuntimeCapabilities) {
       if (AUDIO_PUBLISHING_RUNTIME_CAPABILITIES[capability] !== true) {

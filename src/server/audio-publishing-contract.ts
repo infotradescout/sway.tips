@@ -324,7 +324,7 @@ export const AUDIO_PUBLISHING_RUNTIME_CAPABILITIES = {
   catalogCutoverAutomation: false,
   losslessObjectStorage: true,
   resumableUploadRoutes: true,
-  fileConnectionQrRoutes: false,
+  fileConnectionQrRoutes: true,
   privateDownloadAuthorization: true,
   creatorDealExecution: false,
   swayPlayback: false,

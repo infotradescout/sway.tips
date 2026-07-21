@@ -6,7 +6,7 @@ Date: 2026-07-18
 
 Sway will build an audio publishing and collaboration foundation for musicians, producers, engineers, comedians, podcasters, and other audio creators. The first slice defines how original files must be preserved, records project-scoped access and rights evidence, models release delivery and catalog transfers, and defines a fail-closed Continuum connector.
 
-This is a schema-and-contract slice with Slice 1 upload/share runtime. It does **not** make private file-pairing QR routes, DistroKid/DSP cutover, playback, creator-deal execution, store delivery, sales, or royalties live. Capability flags stay false until each remaining capability has durable implementation and production evidence.
+This is a schema-and-contract slice with Slice 1 upload/share runtime and live file-pairing QR routes. It does **not** make DistroKid/DSP cutover, playback, creator-deal execution, store delivery, sales, or royalties live. Capability flags stay false until each remaining capability has durable implementation and production evidence.
 
 Sway still has two public sides: performer and customer. Producer, engineer, collaborator, and reviewer are private project-scoped roles on the performer side, not a third public side.
 
@@ -40,7 +40,7 @@ Resumable upload sessions are idempotent. A session records expected size and di
 
 ## Private File Connections and QR Pairing
 
-The required future file-pairing QR flow is separate from Sway's static room QR. No private file-pairing QR route is live in this slice; the behavior below defines implementation invariants for that later runtime.
+The required file-pairing QR flow is separate from Sway's static room QR. Private file-pairing QR routes are live for one-time connection claims; selected-file access grants after pairing remain explicit and are not granted by pairing alone. The behavior below defines the pairing invariants.
 
 | QR | Scope | Reuse | Result |
 | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ Sway's existing live-room revenue and future merch fulfillment, ticketed shows, 
 1. Apply and verify the schema in a non-production database.
 2. Select private versioned object storage and define retention, encryption, malware scanning, and restore behavior.
 3. Build authenticated project access plus resumable upload and exact-byte download routes.
-4. Build one-time request/send pairing claims and revocable private file connections.
+4. Build one-time request/send pairing claims and revocable private file connections. (live for connection create/claim/revoke; selected-file grants after pairing still pending)
 5. Build immutable version, derivative, review, and approval workflows.
 6. Build rights declarations, immutable creator-deal versions, authenticated acceptance evidence, and release-readiness checks after legal review.
 7. Build catalog intake, parity comparison, transition enforcement, overlap verification, and artist cutover approval.

@@ -55,6 +55,7 @@ function isPublicTalentLoginEntryRoute(req: Request) {
     || req.path === '/talent/signup'
     || req.path === '/talent/invite'
     || req.path === '/talent/claim'
+    || req.path === '/talent/connect/files'
   );
 }
 
