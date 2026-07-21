@@ -170,7 +170,7 @@ async function pgReconnectRevokeAndIssue(input) {
       })
     ]);
 
-    const link = `${input.baseUrl}/talent/claim?code=${encodeURIComponent(issued.token)}`;
+    const link = `${input.baseUrl}/talent/signup?code=${encodeURIComponent(issued.token)}`;
     console.log(`${input.displayName ?? '(no display name)'}  @${input.handle ?? '(no handle)'}`);
     console.log(`  ${link}\n`);
   } finally {

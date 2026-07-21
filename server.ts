@@ -2563,8 +2563,9 @@ app.post('/api/talent/claim/accept', async (req, res) => {
   if (!normalizedEmail) {
     return res.status(422).json({ error: 'A valid email is required.' });
   }
-  if (!normalizedPhone) {
-    return res.status(422).json({ error: 'A valid phone number is required.' });
+  // Phone is optional on claim — code handoff should bypass onboarding fields.
+  if (req.body?.phone != null && String(req.body.phone).trim() && !normalizedPhone) {
+    return res.status(422).json({ error: 'Phone number format is invalid.' });
   }
   if (!password) {
     return res.status(422).json({ error: 'Choose a password to finish setup.' });
@@ -4611,7 +4612,7 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   });
 
   const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  const claimLink = `${appBaseUrl}/talent/claim?code=${encodeURIComponent(issued.token)}`;
+  const claimLink = `${appBaseUrl}/talent/signup?code=${encodeURIComponent(issued.token)}`;
 
   return res.status(201).json({ success: true, userId, performerId, wasNewPerformer, claimLink });
 });

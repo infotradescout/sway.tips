@@ -7,6 +7,14 @@ import { BadgeCheck, Lock, Plus, RefreshCw, Search, ShieldAlert, X } from 'lucid
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { StatusBanner } from '../components/TalentAuthStatus';
 
+function claimCodeFromLink(claimLink: string) {
+  try {
+    return new URL(claimLink, 'https://app.sway.tips').searchParams.get('code')?.trim() || claimLink;
+  } catch {
+    return claimLink;
+  }
+}
+
 type AdminAccountRole = 'patron' | 'performer' | 'admin' | 'support';
 
 type AdminAccount = {
@@ -129,15 +137,18 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
 
       {error ? <StatusBanner tone="rose" message={error} /> : null}
       {claimLink ? (
-        <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
-          <code className="flex-1 truncate text-xs text-cyan-100">{claimLink}</code>
-          <button
-            type="button"
-            onClick={() => navigator.clipboard?.writeText(claimLink)}
-            className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
-          >
-            Copy
-          </button>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
+            <code className="flex-1 break-all text-xs text-cyan-100">{claimCodeFromLink(claimLink)}</code>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(claimCodeFromLink(claimLink) || claimLink)}
+              className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
+            >
+              Copy code
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">They enter that code on Create account → I have a code.</p>
         </div>
       ) : null}
 
@@ -161,7 +172,7 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
         <div className="sm:col-span-2 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4 text-xs leading-5 text-cyan-100/80">
           {hasEmail
             ? 'Sway sends a one-time invitation to the owner. The owner chooses the password and accepts account terms; administrators never receive or set either one.'
-            : 'No email is sent. You’ll get a one-time claim link to hand to the artist directly — they set their own email, password, and phone when they use it.'}
+            : 'No email is sent. You’ll get a one-time code to hand to the artist — they enter it on Create account, set email/password, and take the prepared profile.'}
         </div>
 
         <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
@@ -508,24 +519,25 @@ function EditAccountPanel({
         <div className="mt-5 rounded-xl border border-white/10 bg-slate-950/70 p-4">
           <div className="flex items-center gap-2 text-sm font-bold text-white">
             <ShieldAlert className="h-4 w-4 text-cyan-300" />
-            Claim link
+            Claim code
           </div>
           <p className="mt-2 text-xs leading-5 text-slate-400">
-            No email needed. Generate a one-time link and code and hand it to the artist yourself (text, DM, in person) --
-            they set their own email, password, and phone when they use it. This overrides whatever password is on
-            the account today, so it also works as a handoff for accounts you set up yourself.
+            Generate a one-time code and send it to the artist. They open Create account, choose I have a code,
+            enter the code, set email/password, and take over this profile — no handle onboarding.
           </p>
           {claimLinkError ? <StatusBanner tone="rose" message={claimLinkError} /> : null}
           {claimLink ? (
-            <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
-              <code className="flex-1 truncate text-xs text-cyan-100">{claimLink}</code>
-              <button
-                type="button"
-                onClick={() => navigator.clipboard?.writeText(claimLink)}
-                className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
-              >
-                Copy
-              </button>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2">
+                <code className="flex-1 break-all text-xs text-cyan-100">{claimCodeFromLink(claimLink)}</code>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(claimCodeFromLink(claimLink) || claimLink)}
+                  className="shrink-0 rounded-lg border border-cyan-300/30 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/10"
+                >
+                  Copy code
+                </button>
+              </div>
             </div>
           ) : null}
           <button
@@ -534,7 +546,7 @@ function EditAccountPanel({
             disabled={generatingClaimLink}
             className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {generatingClaimLink ? 'Generating...' : claimLink ? 'Generate a new claim link' : 'Generate claim link'}
+            {generatingClaimLink ? 'Generating...' : claimLink ? 'Generate a new code' : 'Generate code'}
           </button>
         </div>
       ) : null}

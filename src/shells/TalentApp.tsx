@@ -7,7 +7,6 @@ import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
-import TalentClaimCard from '../components/TalentClaimCard';
 import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
@@ -261,7 +260,12 @@ export default function TalentApp() {
   }
 
   if (isTalentClaim(pathname)) {
-    return <TalentClaimCard />;
+    const params = typeof window === 'undefined' ? '' : window.location.search;
+    const target = `/talent/signup${params || ''}`;
+    if (typeof window !== 'undefined') {
+      window.location.replace(target);
+    }
+    return <LoadingState />;
   }
 
   if (isTalentFileConnect(pathname)) {

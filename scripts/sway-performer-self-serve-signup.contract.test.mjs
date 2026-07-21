@@ -60,6 +60,9 @@ async function main() {
 
   assert.ok(appSource.includes('/talent/signup'), 'App route spine must include /talent/signup.');
   assert.ok(talentAppSource.includes('TalentSignupCard'), 'TalentApp must route /talent/signup to TalentSignupCard.');
+  assert.ok(signupCardSource.includes('I have a code'), 'Talent signup card must expose code claim entry at the top.');
+  assert.ok(signupCardSource.includes('/api/talent/claim/accept'), 'Talent signup card must redeem claim codes without separate onboarding.');
+  assert.ok(signupCardSource.includes('Claim profile'), 'Talent signup card must claim the prepared profile from a code.');
   assert.ok(signupCardSource.includes('Performer Name'), 'Talent signup card must collect performer name.');
   assert.ok(signupCardSource.includes('Handle'), 'Talent signup card must collect the performer handle.');
   assert.ok(signupCardSource.includes('Password'), 'Talent signup card must collect a password.');
