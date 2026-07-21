@@ -17,7 +17,7 @@ The live-night loop above is unchanged in shape. Since the last restart pass, th
 - `users.proModeStatus` account state (Phase 2 Slice 1A) is deployed but has no patron-facing surface. Sway still does not provide patron account creation or login. Do not describe Pro Mode as something a patron can activate.
 - The Render deploy pipeline now runs `drizzle-kit migrate` via `preDeployCommand` before every rollout. A schema-changing PR is not deploy-ready until its migration has actually run in production, not merely generated locally.
 - Public room-state reads (`GET /api/state`, `GET /api/state/:gigId`) return a sanitized projection to any caller without performer authorization. Patron-scoped request status is resolved by an opaque per-submission receipt, never by "the newest request in the room." See `src/server/public-room-state.ts` and `src/server/patron-status-receipt.ts`.
-- `scripts/sway-performer-link-profile.contract.test.mjs` (and the seed data it reads) remains fragile to Windows `core.autocrlf` checkouts; this is a known, not-yet-fixed issue tracked for a narrowly scoped `.gitattributes` micro-PR, not a real product defect.
+- `scripts/sway-performer-link-profile.contract.test.mjs` (and the seed data it reads) previously failed on Windows `core.autocrlf` checkouts; `.gitattributes` now forces LF for `scripts/sway-seed-performer-previews.mjs` so the contract holds across platforms.
 
 ## Keep
 

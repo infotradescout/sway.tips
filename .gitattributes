@@ -1,0 +1,8 @@
+# scripts/sway-performer-link-profile.contract.test.mjs reads this file and
+# slices it using markers that embed a literal "\n" (e.g. "  {\n    handle:
+# 'drewmaze'"). On a Windows checkout with core.autocrlf=true, this file
+# would otherwise be materialized with CRLF line endings, silently breaking
+# those literal-newline marker matches and failing the contract test even
+# though nothing about the actual content changed. Force LF on checkout so
+# the contract test's assumptions hold regardless of the checkout platform.
+scripts/sway-seed-performer-previews.mjs text eol=lf
