@@ -66,7 +66,8 @@ async function main() {
     createSwayDb,
     createPerformerLoginChallengeStore,
     hashPerformerLoginRequesterIp,
-    PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE
+    PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+    PERFORMER_CLAIM_CODE_TTL_MS
   } = await loadModules();
 
   const db = createSwayDb(databaseUrl);
@@ -125,6 +126,7 @@ async function main() {
       handle: row.handle,
       ipHash,
       challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+      ttlMs: PERFORMER_CLAIM_CODE_TTL_MS,
       baseUrl
     });
   }
@@ -148,7 +150,8 @@ async function pgReconnectRevokeAndIssue(input) {
       targetEmail: '',
       challengeType: input.challengeType,
       challengeMetadata: { performerId: input.performerId },
-      requesterIpHash: input.ipHash
+      requesterIpHash: input.ipHash,
+      ttlMs: input.ttlMs
     });
 
     await pg.query(`

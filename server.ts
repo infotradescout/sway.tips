@@ -36,6 +36,7 @@ import {
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
   normalizePerformerPhone,
+  PERFORMER_CLAIM_CODE_TTL_MS,
   PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN,
@@ -4651,7 +4652,8 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
       challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
       challengeMetadata: { performerId },
       requesterIpHash: hashPerformerLoginRequesterIp(req.ip || null),
-      executor: tx
+      executor: tx,
+      ttlMs: PERFORMER_CLAIM_CODE_TTL_MS
     });
 
     await writeAuditEvent(tx, {

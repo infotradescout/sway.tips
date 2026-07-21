@@ -50,7 +50,8 @@ async function main() {
     createSwayDb,
     createPerformerLoginChallengeStore,
     hashPerformerLoginRequesterIp,
-    PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE
+    PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+    PERFORMER_CLAIM_CODE_TTL_MS
   } = await loadModules();
 
   const db = createSwayDb(databaseUrl);
@@ -123,7 +124,8 @@ async function main() {
         targetEmail: '',
         challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
         challengeMetadata: { performerId },
-        requesterIpHash: ipHash
+        requesterIpHash: ipHash,
+        ttlMs: PERFORMER_CLAIM_CODE_TTL_MS
       });
 
       console.log(`${displayName}  @${handle}`);

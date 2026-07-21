@@ -6,6 +6,10 @@ import { performerLoginChallenges } from '../db/schema';
 export const PERFORMER_LOGIN_SUCCESS_COPY = 'If this email is on an approved Sway performer account, we sent a link.';
 export const PERFORMER_SIGNUP_SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 export const PERFORMER_LOGIN_LINK_TTL_MS = 15 * 60 * 1000;
+// Claim codes are handed to an admin to relay to the artist outside of Sway
+// (text, DM, printed sheet) rather than clicked within minutes of issuance
+// like a login/verify-email link, so they need a much longer window.
+export const PERFORMER_CLAIM_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_MAX = 3;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN = 'login';
@@ -197,7 +201,8 @@ export function createPerformerLoginChallengeStore({
       requesterIpHash,
       sendCount = 1,
       executor,
-      now = new Date()
+      now = new Date(),
+      ttlMs = PERFORMER_LOGIN_LINK_TTL_MS
     }: {
       actorUserId?: string | null;
       targetEmail: string;
@@ -207,6 +212,7 @@ export function createPerformerLoginChallengeStore({
       sendCount?: number;
       executor?: DbExecutor | null;
       now?: Date;
+      ttlMs?: number;
     }) {
       const writer = executorOrDb(executor);
       if (!writer) {
@@ -215,7 +221,7 @@ export function createPerformerLoginChallengeStore({
 
       const token = randomBytes(32).toString('base64url');
       const tokenHash = hashPerformerLoginToken(token);
-      const expiresAt = new Date(now.getTime() + PERFORMER_LOGIN_LINK_TTL_MS);
+      const expiresAt = new Date(now.getTime() + ttlMs);
 
       const [inserted] = await writer
         .insert(performerLoginChallenges)
