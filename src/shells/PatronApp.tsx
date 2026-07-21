@@ -17,6 +17,7 @@ import {
   sendPatronNoSessionReturnHomeClicked,
   sendRoomEntryViewed
 } from './frictionClient';
+import type { PatronRequestStatus } from '../types';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -29,6 +30,11 @@ function resolvePatronRoute(pathname: string): PatronRoute {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PATRON_STATUS_RECEIPT_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+function patronStatusReceiptStorageKey(gigId: string) {
+  return `sway.patronStatusReceipt:${gigId}`;
+}
 
 function PatronNoSessionRecovery({
   onReturnHomeClick,
@@ -194,6 +200,57 @@ export default function PatronApp() {
   const demoMode = isDemoModeEnabled();
   const roomEntryEventKeyRef = useRef<string | null>(null);
   const recoveryEventKeyRef = useRef<string | null>(null);
+  const [patronStatusReceipt, setPatronStatusReceipt] = useState<string | null>(() => {
+    if (!routeGigId) return null;
+    const storedReceipt = window.localStorage.getItem(patronStatusReceiptStorageKey(routeGigId));
+    return storedReceipt && PATRON_STATUS_RECEIPT_PATTERN.test(storedReceipt) ? storedReceipt : null;
+  });
+  const [patronRequestStatus, setPatronRequestStatus] = useState<PatronRequestStatus | null>(null);
+
+  const applyPatronMutationResponse = (data: any) => {
+    if (data?.state) setBState(data.state);
+
+    const receipt = data?.patron_status_receipt;
+    const status = data?.patron_status;
+    if (!routeGigId || typeof receipt !== 'string' || !PATRON_STATUS_RECEIPT_PATTERN.test(receipt)) return;
+    if (!status || typeof status !== 'object') return;
+
+    window.localStorage.setItem(patronStatusReceiptStorageKey(routeGigId), receipt);
+    setPatronStatusReceipt(receipt);
+    setPatronRequestStatus(status as PatronRequestStatus);
+  };
+
+  useEffect(() => {
+    if (!routeGigId || !patronStatusReceipt || demoMode) {
+      setPatronRequestStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshPatronRequestStatus = async () => {
+      try {
+        const data = await postJson('/api/patron/request-status', {
+          gig_id: routeGigId,
+          patron_status_receipt: patronStatusReceipt
+        });
+        if (!cancelled && data?.patron_status) {
+          setPatronRequestStatus(data.patron_status as PatronRequestStatus);
+        }
+      } catch (error: any) {
+        if (cancelled || error?.status !== 404) return;
+        window.localStorage.removeItem(patronStatusReceiptStorageKey(routeGigId));
+        setPatronStatusReceipt(null);
+        setPatronRequestStatus(null);
+      }
+    };
+
+    void refreshPatronRequestStatus();
+    const interval = window.setInterval(refreshPatronRequestStatus, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [demoMode, patronStatusReceipt, routeGigId]);
 
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
@@ -203,7 +260,7 @@ export default function PatronApp() {
     if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/request/create', requestData);
-      setBState(data.state);
+      applyPatronMutationResponse(data);
       return data;
     } catch (e) {
       console.error(e);
@@ -233,7 +290,7 @@ export default function PatronApp() {
         gig_id: gigId,
         payment_intent_id: paymentIntentId
       });
-      setBState(data.state);
+      applyPatronMutationResponse(data);
       return data;
     } catch (e) {
       console.error(e);
@@ -249,7 +306,7 @@ export default function PatronApp() {
     });
 
     if (data.status === 'reconciled' && data.responseBody?.state) {
-      setBState(data.responseBody.state);
+      applyPatronMutationResponse(data.responseBody);
     }
 
     return data;
@@ -412,6 +469,7 @@ export default function PatronApp() {
                   requests={requests}
                   performers={performers}
                   gigId={routeGigId}
+                  patronRequestStatus={patronRequestStatus}
                   onCreateRequest={handleCreateRequest}
                   onBoostRequest={handleBoostRequest}
                   onReconcilePendingAction={handleReconcilePendingAction}

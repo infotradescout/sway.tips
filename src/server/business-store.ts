@@ -170,6 +170,7 @@ function coerceRequest(raw: unknown): RequestItem | null {
     paymentId: input.paymentId ?? null,
     paymentIntentId: input.paymentIntentId ?? null,
     paymentStatus: input.paymentStatus ?? null,
+    patronStatusReceiptHash: input.patronStatusReceiptHash,
     boosts
   };
 }

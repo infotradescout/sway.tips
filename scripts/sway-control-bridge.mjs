@@ -224,10 +224,13 @@ async function readUpstreamJson(response) {
   }
 }
 
-async function fetchRoomState({ swayUrl, gigId }) {
+async function fetchRoomState({ swayUrl, gigId, authHeaders }) {
   const response = await fetch(`${swayUrl}/api/state/${encodeURIComponent(gigId)}`, {
     method: 'GET',
-    headers: { accept: 'application/json' }
+    headers: {
+      accept: 'application/json',
+      ...authHeaders
+    }
   });
   const data = await readUpstreamJson(response);
   if (!response.ok) {
@@ -340,7 +343,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/state') {
     try {
-      const state = await fetchRoomState({ swayUrl, gigId });
+      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
       const approved = topApprovedRequest(state);
       const pending = topPendingRequest(state);
       return sendJson(res, 200, {
@@ -368,7 +371,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/top/text') {
     try {
-      const state = await fetchRoomState({ swayUrl, gigId });
+      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
       const approved = topApprovedRequest(state);
       const text = topRequestText(approved);
       if (!text) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
@@ -384,7 +387,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/top/search') {
     try {
-      const state = await fetchRoomState({ swayUrl, gigId });
+      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
       const approved = topApprovedRequest(state);
       const payload = topRequestPayload(approved);
       if (!payload) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });

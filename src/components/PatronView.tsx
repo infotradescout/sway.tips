@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile } from '../types';
+import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile, PatronRequestStatus } from '../types';
 import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 
@@ -44,6 +44,7 @@ interface PatronViewProps {
   requests: RequestItem[];
   performers: PerformerProfile[];
   gigId?: string;
+  patronRequestStatus?: PatronRequestStatus | null;
   onCreateRequest: (data: {
     type: 'request' | 'tip';
     targetType: 'music' | 'custom' | 'straight_tip';
@@ -222,6 +223,7 @@ export default function PatronView({
   requests,
   performers,
   gigId,
+  patronRequestStatus = null,
   onCreateRequest,
   onBoostRequest,
   onReconcilePendingAction,
@@ -318,21 +320,25 @@ export default function PatronView({
       }
     : null, [checkoutPayload?.clientSecret]);
 
-  const latestRequest = [...requests]
-    .filter((item) => !item.hidden && !item.removed)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-
-  // A plain-language status for the patron's most recent request, if any.
-  // Only surfaced when there's something to report -- a brand-new patron
-  // with no requests yet has nothing to show here.
+  // A personalized status is rendered only when the browser holds the opaque
+  // receipt returned for its own submission. Public queue order is never used
+  // as a proxy for patron ownership.
   const latestRequestStatusMessage: { text: string; tone: 'fuchsia' | 'cyan' | 'slate' | 'rose' } | null = (() => {
     if (session.status === 'closed') return { text: 'Ended: this room is no longer accepting requests.', tone: 'slate' };
     if (!session.requestsOpen || session.status === 'ending') return { text: 'Requests are paused right now.', tone: 'slate' };
     if (degraded || pendingAction) return { text: 'Syncing your last action...', tone: 'cyan' };
-    if (!latestRequest || latestRequest.hidden || latestRequest.removed) return null;
-    if (latestRequest.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
-    if (latestRequest.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
-    if (latestRequest.status === 'denied') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
+    if (!patronRequestStatus) return null;
+    if (patronRequestStatus.status === 'unavailable') {
+      return { text: 'Your last request is no longer available in this room.', tone: 'slate' };
+    }
+    if (patronRequestStatus.actionType === 'tip') {
+      if (patronRequestStatus.status === 'fulfilled') return { text: 'Your tip submission was received.', tone: 'cyan' };
+      if (patronRequestStatus.status === 'denied') return { text: "Your tip wasn't completed.", tone: 'rose' };
+      return { text: 'Your tip submission is pending confirmation.', tone: 'fuchsia' };
+    }
+    if (patronRequestStatus.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
+    if (patronRequestStatus.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
+    if (patronRequestStatus.status === 'denied') return { text: "Your last request wasn't approved this time.", tone: 'rose' };
     return { text: 'Your last request is pending review.', tone: 'fuchsia' };
   })();
 
