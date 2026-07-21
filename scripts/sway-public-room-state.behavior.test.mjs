@@ -81,6 +81,11 @@ const approvedRequest = requestFixture({
 });
 const hiddenRequest = requestFixture({ id: 'req-hidden', status: 'fulfilled', hidden: true });
 const shadowRequest = requestFixture({ id: 'req-shadow', status: 'hold', shadowBanned: true });
+// Deliberately 'approved' (a publicly-visible status) so this proves
+// shadowBanned exclusion on its own merits -- req-shadow above is already
+// excluded by its 'hold' status regardless of the shadowBanned flag, so it
+// cannot by itself prove the flag is what's doing the work.
+const shadowApprovedRequest = requestFixture({ id: 'req-shadow-approved', status: 'approved', shadowBanned: true });
 const deniedRequest = requestFixture({ id: 'req-denied', status: 'denied' });
 const fulfilledTip = requestFixture({
   id: 'req-tip',
@@ -122,7 +127,7 @@ const internalState = {
       topRequest: 'Public title'
     }
   },
-  requests: [pendingRequest, approvedRequest, hiddenRequest, shadowRequest, deniedRequest, fulfilledTip],
+  requests: [pendingRequest, approvedRequest, hiddenRequest, shadowRequest, shadowApprovedRequest, deniedRequest, fulfilledTip],
   performers: [{
     id: 'p-active',
     name: 'DJ Public',

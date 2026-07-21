@@ -76,6 +76,7 @@ jobs:
           PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_migration_proof_ci;"
           PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_concurrency_proof_ci;"
           PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_pro_mode_lifecycle_proof_ci;"
+          PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_public_state_projection_proof_ci;"
 
       - name: Run Pro Mode Migration Integration Proof
         run: npm run test:integration:pro-mode-migration
@@ -93,4 +94,16 @@ jobs:
         run: npm run test:integration:pro-mode-account-lifecycle
         env:
           DATABASE_URL: postgres://sway:sway@localhost:5432/sway_pro_mode_lifecycle_proof_ci
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
+
+      # Proves the public/performer room-state projection boundary: patrons
+      # and any unauthenticated caller never receive internal fields (payment
+      # identifiers, idempotency keys, device hashes, moderation flags), a
+      # patron's own status never bleeds into or out of another patron's, and
+      # the performer still gets the full operational state needed to run
+      # the room. See PR #109.
+      - name: Run Public Room State Projection Integration Proof
+        run: npm run test:integration:public-room-state-projection
+        env:
+          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_public_state_projection_proof_ci
           SWAY_DISPOSABLE_MIGRATION_PROOF: '1'

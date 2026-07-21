@@ -2,9 +2,18 @@
 
 ## Current Baseline
 
-`main @ 7d6fbf735d4794383323a43ac67f447680ecb390`
+`main @ ab990921452a2cc64656ce877a121de98d79dc25`
 
-This baseline shipped the Live-Night Spine V1 repair. Future work must protect the live-night money loop before it expands the system.
+This baseline shipped the Live-Night Spine V1 repair, then PRs #105-#109: universal Pro Mode account state (Phase 2 Slice 1A, deployed but not user-facing), the mandatory pre-deploy migration gate, patron room-lookup transient-error handling, removal of performer signup/login CTAs from patron recovery surfaces, and the public/performer room-state projection boundary. Future work must protect the live-night money loop before it expands the system.
+
+## Phase 2 Slice 1A Status (Pro Mode)
+
+`users.proModeStatus` and its supporting audit trail (`pro_mode_status_events`) are deployed to production. This is foundation-layer account state only:
+
+- It has no patron-facing surface, no marketing, and no way for a patron to activate or see it today.
+- Existing performer accounts were backfilled from `performers.onboarding_status` on migration.
+- The honest current statement is: Pro Mode infrastructure exists for authenticated accounts, but Sway does not currently provide patron account creation or login.
+- Phase 2 Slice 2 (patron signup/login, and any patron-facing meaning for Pro Mode) is explicitly HELD. Do not begin it until a separate product decision document resolves the concrete patron job, optional-vs-required accounts, low-friction QR-to-payment preservation, anonymous-activity claiming, identity/account-recovery, and privacy/retention questions. Schema existing is not authorization to build the surface that uses it.
 
 ## Product Law
 
@@ -46,6 +55,8 @@ Sway lets a performer set room settings, create a room, show a QR/link, collect 
 - Internal-console wording must stay off patron and performer first-use surfaces.
 - Do not claim new Stripe/payment-provider behavior from product-glass changes.
 - Do not claim production live-room proof from recovery-surface smoke alone.
+- Public room state is a projection, never the internal room object. A patron can see only that patron's own request status. Performer-only operational state requires performer authorization. Payment identifiers, idempotency keys, device hashes, moderation flags, and other internal fields never enter the public projection. This is a permanent security boundary, not a point-in-time fix (see PR #109).
+- Any change to `drizzle/` schema must ship with its migration applied through the deploy pipeline's `preDeployCommand`, not merely generated locally. A schema-changing PR that lacks a verified production migration path is incomplete, regardless of whether the application code compiles and passes contract tests.
 
 ## Do Not Prioritize Before Adoption Proof
 
