@@ -70,6 +70,15 @@ import {
 } from "./src/server/public-profile";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
+import {
+  issuePatronStatusReceipt,
+  matchesPatronStatusReceipt,
+  projectPatronRequestStatus
+} from "./src/server/patron-status-receipt";
+import {
+  projectPublicRoomState,
+  sanitizePatronMutationResponseBody
+} from "./src/server/public-room-state";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -885,6 +894,34 @@ function prepareRoomState(inputState: BackendState, gigId: string | null) {
   syncActiveGigRouteContext(inputState, gigId);
   syncActivePerformer(inputState);
   return inputState;
+}
+
+function buildPatronRequestMutationResponse(input: {
+  request: RequestItem;
+  roomState: BackendState;
+  gigId: string;
+  receipt: string;
+  reconciled?: boolean;
+}) {
+  return {
+    success: true,
+    ...(input.reconciled ? { reconciled: true } : {}),
+    state: projectPublicRoomState(input.roomState, input.gigId),
+    patron_status: projectPatronRequestStatus(input.request),
+    patron_status_receipt: input.receipt
+  };
+}
+
+function buildPatronBoostMutationResponse(input: {
+  roomState: BackendState;
+  gigId: string;
+  reconciled?: boolean;
+}) {
+  return {
+    success: true,
+    ...(input.reconciled ? { reconciled: true } : {}),
+    state: projectPublicRoomState(input.roomState, input.gigId)
+  };
 }
 
 async function refreshBusinessState() {
@@ -6384,12 +6421,19 @@ app.get("/api/state", async (req, res) => {
     ? await loadAuthenticatedPerformerProfile(req)
     : null;
   applyNoStoreHeaders(res);
-  res.json({
-    session: state.session,
-    requests: state.requests,
-    performers: state.performers,
-    activeGigId: talentAccess.allowed ? state.activeGigId : null,
-    performerProfile
+  if (talentAccess.allowed) {
+    return res.json({
+      session: state.session,
+      requests: state.requests,
+      performers: state.performers,
+      activeGigId: state.activeGigId,
+      performerProfile
+    });
+  }
+
+  return res.json({
+    ...projectPublicRoomState(state, null),
+    performerProfile: null
   });
 });
 
@@ -6827,13 +6871,45 @@ app.get("/api/state/:gigId", async (req, res) => {
     });
   }
 
+  const privateRoomAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
+  if (privateRoomAccess.allowed) {
+    return res.json({
+      session: roomSnapshot.state.session,
+      requests: roomSnapshot.state.requests,
+      performers: roomSnapshot.state.performers,
+      activeGigId: roomSnapshot.state.activeGigId,
+      room_lookup: 'active'
+    });
+  }
+
   return res.json({
-    session: roomSnapshot.state.session,
-    requests: roomSnapshot.state.requests,
-    performers: roomSnapshot.state.performers,
-    activeGigId: roomSnapshot.state.activeGigId,
+    ...projectPublicRoomState(roomSnapshot.state, requestedGigId),
     room_lookup: 'active'
   });
+});
+
+app.post("/api/patron/request-status", async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const requestedGigId = parseDurableGigId(req.body?.gig_id);
+  const receipt = req.body?.patron_status_receipt;
+  if (!requestedGigId || typeof receipt !== 'string') {
+    return res.status(404).json({ error: 'Patron request status not found.' });
+  }
+
+  const roomSnapshot = await loadRoomState(requestedGigId);
+  if (roomSnapshot.roomStatus === 'missing') {
+    return res.status(404).json({ error: 'Patron request status not found.' });
+  }
+
+  const request = roomSnapshot.state.requests.find((candidate) =>
+    matchesPatronStatusReceipt(receipt, candidate.patronStatusReceiptHash)
+  );
+  if (!request) {
+    return res.status(404).json({ error: 'Patron request status not found.' });
+  }
+
+  return res.json({ patron_status: projectPatronRequestStatus(request) });
 });
 
 app.get("/api/talent/active-rooms", async (req, res) => {
@@ -6883,6 +6959,13 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
   }
   if (result.status === 'expired') {
     return res.status(410).json({ error: "Pending action expired before backend confirmation." });
+  }
+
+  if (result.status === 'reconciled') {
+    return res.json({
+      ...result,
+      responseBody: sanitizePatronMutationResponseBody(result.responseBody)
+    });
   }
 
   return res.json(result);
@@ -7384,7 +7467,7 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
-    return res.status(durableReplay.status).json(durableReplay.body);
+    return res.status(durableReplay.status).json(sanitizePatronMutationResponseBody(durableReplay.body));
   }
 
   const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
@@ -7392,7 +7475,16 @@ app.post("/api/request/create", async (req, res) => {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request: existingRequest, state: roomState, reconciled: true };
+    const patronStatusReceipt = issuePatronStatusReceipt();
+    existingRequest.patronStatusReceiptHash = patronStatusReceipt.receiptHash;
+    await persistBusinessStateForRoom(roomState, durableGigId);
+    const responseBody = buildPatronRequestMutationResponse({
+      request: existingRequest,
+      roomState,
+      gigId: durableGigId,
+      receipt: patronStatusReceipt.receipt,
+      reconciled: true
+    });
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -7462,6 +7554,7 @@ app.post("/api/request/create", async (req, res) => {
     roomState.session.operatingMode === 'crowd_autopilot'
     && !isStraightTip
     && !shadowBanned;
+  const patronStatusReceipt = issuePatronStatusReceipt();
 
   const newItem: RequestItem = {
     id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
@@ -7493,6 +7586,7 @@ app.post("/api/request/create", async (req, res) => {
     payloadHash: payload_hash,
     amountCents: amount_cents,
     currency: normalizedCurrency,
+    patronStatusReceiptHash: patronStatusReceipt.receiptHash,
     boosts: []
   };
 
@@ -7583,17 +7677,12 @@ app.post("/api/request/create", async (req, res) => {
   recalculateTotals(roomState);
   await persistBusinessStateForRoom(roomState, durableGigId);
 
-  const responseBody = {
-    success: true, 
+  const responseBody = buildPatronRequestMutationResponse({
     request: newItem,
-    state: roomState,
-    moderation: {
-      outage_behavior: moderationOutcome.decision,
-      ai_assistive_only: true,
-      crowd_autopilot_auto_approved: shouldAutopilotApprove
-    },
-    shadowBannedFeedback: shadowBanned ? "Request received and queued for performer review." : null
-  };
+    roomState,
+    gigId: durableGigId,
+    receipt: patronStatusReceipt.receipt
+  });
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
@@ -7721,7 +7810,7 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
-    return res.status(durableReplay.status).json(durableReplay.body);
+    return res.status(durableReplay.status).json(sanitizePatronMutationResponseBody(durableReplay.body));
   }
 
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
@@ -7729,7 +7818,11 @@ app.post("/api/request/boost", async (req, res) => {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
-    const responseBody = { success: true, request, boost: existingBoost, state: roomState, reconciled: true };
+    const responseBody = buildPatronBoostMutationResponse({
+      roomState,
+      gigId: durableGigId,
+      reconciled: true
+    });
     await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
@@ -7866,7 +7959,7 @@ app.post("/api/request/boost", async (req, res) => {
 
   recalculateTotals(roomState);
   await persistBusinessStateForRoom(roomState, durableGigId);
-  const responseBody = { success: true, request, state: roomState };
+  const responseBody = buildPatronBoostMutationResponse({ roomState, gigId: durableGigId });
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,

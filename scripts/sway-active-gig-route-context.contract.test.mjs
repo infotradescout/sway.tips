@@ -37,7 +37,8 @@ for (const term of [
   'async function resolveLegacyWritableRoom(req: express.Request, res: express.Response)',
   'async function findRoomStateByRequestId(requestId: string)',
   'await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState())',
-  'activeGigId: talentAccess.allowed ? state.activeGigId : null'
+  'if (talentAccess.allowed)',
+  '...projectPublicRoomState(state, null)'
 ]) {
   if (!server.includes(term)) {
     failures.push(`server.ts missing required active gig route context behavior: ${term}`);
@@ -49,7 +50,7 @@ if (!businessStore.includes('hydrateStateByGigId') || !businessStore.includes('l
 }
 
 if (!server.includes('res.json({') || !server.includes('session: state.session') || !server.includes('requests: state.requests') || !server.includes('performers: state.performers')) {
-  failures.push('/api/state must explicitly serialize the allowlisted legacy state payload.');
+  failures.push('/api/state must explicitly serialize private performer state only after talent access succeeds.');
 }
 
 const apiStateSection = server.slice(server.indexOf('app.get("/api/state"'), server.indexOf('app.post("/api/pending-action/reconcile"'));
