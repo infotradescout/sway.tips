@@ -91,18 +91,10 @@ function PatronNoSessionRecovery({
         >
           Scan
         </button>
-        <a
-          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
-          href="/talent/signup"
-        >
-          Create account
-        </a>
-        <a
-          className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/10 bg-slate-950/60 px-5 py-3 text-base font-bold text-slate-100 backdrop-blur transition-colors hover:border-fuchsia-500/40 hover:text-white"
-          href="/talent/login"
-        >
-          Login
-        </a>
+        {/* Intentionally no performer sign-up/sign-in links here -- this is a
+            public audience surface reached by any patron whose room link
+            failed to resolve, and it must not route them into performer
+            claim/authentication flows (see ux/patron-room-not-found-auth-cta-removal). */}
         <a
           className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
           href="/faq"

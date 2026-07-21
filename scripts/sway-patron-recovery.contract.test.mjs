@@ -12,13 +12,17 @@ function requireIncludes(source, term, message) {
 
 for (const term of [
   'Scan',
-  'Create account',
-  'Login',
   'sway to play',
   'href="/faq"'
 ]) {
   requireIncludes(patronApp, term, `Patron recovery copy missing required term: ${term}`);
 }
+
+const recoveryStart = patronApp.indexOf('function PatronNoSessionRecovery');
+const recoveryEnd = patronApp.indexOf('export default function PatronApp');
+const recoverySource = recoveryStart >= 0 && recoveryEnd > recoveryStart
+  ? patronApp.slice(recoveryStart, recoveryEnd)
+  : (recoveryStart === -1 ? patronApp : patronApp.slice(recoveryStart));
 
 for (const forbidden of [
   /checkout/i,
@@ -28,10 +32,16 @@ for (const forbidden of [
   /\bMVP\b/i,
   /\bbeta\b/i
 ]) {
-  const recoveryStart = patronApp.indexOf('function PatronNoSessionRecovery');
-  const recoverySource = recoveryStart === -1 ? patronApp : patronApp.slice(recoveryStart);
   if (forbidden.test(recoverySource)) {
     failures.push(`Patron recovery contains forbidden terminology: ${forbidden}`);
+  }
+}
+
+// Removed by ux/patron-room-not-found-auth-cta-removal: this public audience
+// surface must not route patrons into performer claim/authentication flows.
+for (const forbidden of ['Create account', 'href="/talent/signup"', 'href="/talent/login"']) {
+  if (recoverySource.includes(forbidden)) {
+    failures.push(`Patron recovery must not route patrons into performer auth flows: found "${forbidden}"`);
   }
 }
 
