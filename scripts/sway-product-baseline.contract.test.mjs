@@ -6,7 +6,7 @@ const failures = [];
 const spine = readFileSync(join(root, 'docs/SWAY_PRODUCT_SPINE.md'), 'utf8');
 
 for (const term of [
-  'main @ 7d6fbf735d4794383323a43ac67f447680ecb390',
+  'main @ ab990921452a2cc64656ce877a121de98d79dc25',
   'Sway work must protect the live-night money loop first.',
   'Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.',
   'Room Money Mode',
