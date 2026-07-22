@@ -35,7 +35,7 @@ for (const term of [
 
 for (const term of [
   "useState<'live' | 'share' | 'settings'>('live')",
-  'Step {step + 1} of 5',
+  'Step {step + 1} of 4',
   'Minimum request',
   'Direct tips remain available',
   'Create room',

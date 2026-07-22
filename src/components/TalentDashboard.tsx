@@ -1917,11 +1917,11 @@ export default function TalentDashboard({
 
       {inactiveWorkspace === 'catalog' ? (
         <section
-          data-sway-original-audio-catalog="true"
+          data-sway-audio-catalog="true"
           className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-fuchsia-500/20 bg-slate-900/70 p-5 shadow-lg"
         >
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Original audio catalog</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Audio catalog</p>
             <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Your work, versioned and private</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
               Keep masters, beats, stems, spoken word, audiobooks, demos, and any other audio you own separate from request-library metadata.
@@ -1999,7 +1999,8 @@ export default function TalentDashboard({
       {inactiveWorkspace === 'room' ? (
         <div id="sway-start-room" className="order-3">
           <PerformerRoomSetup
-            defaultPerformerName={welcomePerformerName}
+            performerName={welcomePerformerName}
+            talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
             performerHandle={performerProfile?.handle}
             performerEmailVerified={performerEmailVerified}
             onStartSession={onStartSession}

@@ -69,7 +69,7 @@ for (const term of [
   'Share with connection',
   'Shared with me',
   'Shared by me',
-  'Download original',
+  'Download source file',
   'Request changes',
   'Approve',
   'Review history',
