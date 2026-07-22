@@ -14,7 +14,12 @@ for (const path of [
   'src/components/PerformerAudioFiles.tsx',
   'src/components/PerformerFilePairing.tsx',
   'src/components/TalentFileConnectCard.tsx',
-  'docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md'
+  'docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md',
+  'src/server/audio-object-storage.ts',
+  'src/server/audio-object-storage-r2.ts',
+  'src/server/audio-publishing-service.ts',
+  'src/server/audio-file-pairing-service.ts',
+  'src/server/audio-file-collaboration-service.ts'
 ]) {
   if (existsSync(join(root, path))) failures.push(`Retired product surface still exists: ${path}`);
 }
@@ -38,8 +43,13 @@ if (!server.includes("app.all(/^\\/api\\/talent\\/audio(?:\\/|$)/")) {
   failures.push('Server must tombstone every historical talent audio route before legacy handlers.');
 }
 if (!server.includes("status(410)")) failures.push('Retired audio API must return 410 Gone.');
-if (server.indexOf("app.all(/^\\/api\\/talent\\/audio") > server.indexOf("app.get('/api/talent/audio/projects'")) {
-  failures.push('Audio API tombstone must run before every historical audio handler.');
+for (const retiredHandler of [
+  "app.get('/api/talent/audio/projects'",
+  "app.post('/api/talent/audio/projects'",
+  "app.post('/api/talent/audio/pairing/tokens'",
+  "app.get('/api/talent/audio/files/shared-with-me'"
+]) {
+  if (server.includes(retiredHandler)) failures.push(`Retired audio handler remains in server.ts: ${retiredHandler}`);
 }
 if (server.includes('await audioObjectStore.verifyReady()')) {
   failures.push('Sway startup must not depend on retired audio object storage.');

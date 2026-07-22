@@ -6,7 +6,9 @@ const failures = [];
 for (const path of [
   'src/components/PerformerAudioFiles.tsx',
   'src/components/PerformerFilePairing.tsx',
-  'src/components/TalentFileConnectCard.tsx'
+  'src/components/TalentFileConnectCard.tsx',
+  'src/server/audio-file-pairing-service.ts',
+  'src/server/audio-file-collaboration-service.ts'
 ]) {
   if (existsSync(join(root, path))) failures.push(`File collaboration UI must remain removed: ${path}`);
 }
