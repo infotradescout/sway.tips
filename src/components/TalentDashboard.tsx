@@ -31,7 +31,9 @@ import {
   Link as LinkIcon,
   Music2,
   ShieldCheck,
-  Keyboard
+  Keyboard,
+  Home,
+  UserRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
@@ -68,6 +70,15 @@ interface TalentDashboardProps {
   } | null;
   performerEmailVerified?: boolean;
 }
+
+type InactivePerformerWorkspace = 'home' | 'room' | 'profile' | 'account';
+
+const INACTIVE_PERFORMER_NAVIGATION = [
+  { id: 'home', label: 'Home', icon: Home },
+  { id: 'room', label: 'Room', icon: Radio },
+  { id: 'profile', label: 'Profile', icon: UserRound },
+  { id: 'account', label: 'Account', icon: Settings }
+] as const;
 
 type MusicSourceCapability = {
   providerKey: 'local_library' | 'spotify' | 'soundcloud' | 'sway_upload';
@@ -712,6 +723,7 @@ export default function TalentDashboard({
   const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
   const welcomePerformerName = defaultPerformerName || session.talentName || 'Performer';
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
+  const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>('home');
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
 
@@ -1678,7 +1690,7 @@ export default function TalentDashboard({
   }
 
   return (
-    <div id="talent_dashboard_panel" className="max-w-6xl mx-auto py-6 px-4 flex flex-col gap-8">
+    <div id="talent_dashboard_panel" className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:py-6">
 
       {actionError && (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 flex items-center justify-between gap-3">
@@ -1693,8 +1705,35 @@ export default function TalentDashboard({
         </div>
       )}
 
+      <nav
+        data-sway-performer-app-navigation="true"
+        aria-label="Performer console sections"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-4 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur"
+      >
+        {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
+          const selected = inactiveWorkspace === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-current={selected ? 'page' : undefined}
+              onClick={() => setInactiveWorkspace(id)}
+              className={`inline-flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-black uppercase tracking-wider transition sm:flex-row sm:text-xs ${
+                selected
+                  ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/40'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {label}
+            </button>
+          );
+        })}
+      </nav>
+
       {/* 1. Header & Live Stand Indicators */}
-      <div className="order-1 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-white/10 p-6 rounded-2xl glass-panel glow-fuchsia">
+      {inactiveWorkspace === 'room' ? (
+      <div className="order-2 flex flex-col justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900 p-6 glass-panel glow-fuchsia md:flex-row md:items-center">
         <div className="flex items-center gap-4">
           <div className="relative">
             <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 font-sans">
@@ -1722,14 +1761,19 @@ export default function TalentDashboard({
           </div>
         </div>
       </div>
+      ) : null}
 
-      <div className={`${session.status === 'inactive' ? 'order-2' : 'order-5 hidden xl:block'}`}>
+      {inactiveWorkspace === 'profile' ? (
+      <div className="order-2">
         <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
       </div>
+      ) : null}
 
       {/* Account and music tools stay separate from the one-decision room start. */}
-      <div className={`${session.status === 'inactive' ? 'order-4' : 'order-6 hidden lg:block'}`}>
+      {inactiveWorkspace === 'account' ? (
+      <div className="order-2">
       <details
+        open
         data-sway-account-integrations="true"
         className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
       >
@@ -1902,15 +1946,21 @@ export default function TalentDashboard({
         </div>
       </details>
       </div>
+      ) : null}
 
-      {session.status === 'inactive' ? (
-        <div className="order-3 space-y-4">
+      {inactiveWorkspace === 'home' ? (
+        <div className="order-2">
           <PerformerAccountHome
             displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
             stripeReady={Boolean(performerProfile?.payouts_enabled)}
+            onStartRoom={() => setInactiveWorkspace('room')}
           />
-          <div id="sway-start-room">
+        </div>
+      ) : null}
+
+      {inactiveWorkspace === 'room' ? (
+          <div id="sway-start-room" className="order-3">
             <PerformerRoomSetup
               defaultPerformerName={welcomePerformerName}
               performerHandle={performerProfile?.handle}
@@ -1918,7 +1968,6 @@ export default function TalentDashboard({
               onStartSession={onStartSession}
             />
           </div>
-        </div>
       ) : null}
 
     </div>

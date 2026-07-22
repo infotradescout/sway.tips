@@ -34,6 +34,14 @@ const app = read('src/App.tsx');
 
 requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
+  "useState<InactivePerformerWorkspace>('home')",
+  'data-sway-performer-app-navigation="true"',
+  'aria-label="Performer console sections"',
+  "inactiveWorkspace === 'home'",
+  "inactiveWorkspace === 'room'",
+  "inactiveWorkspace === 'profile'",
+  "inactiveWorkspace === 'account'",
+  "onStartRoom={() => setInactiveWorkspace('room')}",
   'Start a Room',
   'Show QR',
   "{ id: 'settings', label: 'Control' }",
@@ -81,6 +89,7 @@ requireExcludes('PerformerRoomControls selectable request scopes', performerRoom
 ]);
 
 requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
+  '<div className="order-3 space-y-4">',
   "useState<'live' | 'share' | 'settings' | 'hardware'>('live')",
   "{ id: 'hardware'",
   "mobilePanel === 'hardware'",
