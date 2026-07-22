@@ -2,6 +2,8 @@
 
 Zachary's QA + DRY direction is mandatory operating law for Sway lanes.
 
+`docs/VIBE_ENGINEERING_DOCTRINE.md` governs ownership and evidence. Agent output, a passing local command, a merged PR, a deployment hook, or a build marker is never sufficient by itself to establish the requested customer outcome.
+
 This release gate applies before approval, merge, or deployment posture for every user-facing feature, runtime refactor, product polish lane, or release lane.
 
 ## Required Operating Order
@@ -27,6 +29,10 @@ This release gate applies before approval, merge, or deployment posture for ever
 ## Evidence Standard
 
 Release evidence must use real command output, real route evidence, and real manual QA notes. Claims such as "tested conceptually", "assumed pass", "simulated output", or "would pass" are not valid evidence.
+
+Evidence must identify the requested outcome, the verifier, the environment, the observed result, the remaining uncontrolled risks, and the rollback trigger. Evidence created by the implementing agent must be corroborated by a system gate, an independent reviewer, production observability, or direct production behavior before it can approve launch readiness.
+
+Complete-product launch approval is separate from iterative deployment approval. For Sway, `npm run readiness:assert` must fail closed until both the DistroKid-replacement pillar and the original-Sway pillar are production verified.
 
 ## Scope Separation
 

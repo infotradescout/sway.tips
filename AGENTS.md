@@ -4,6 +4,10 @@ This repository uses the AI Council operating model.
 
 These rules are mandatory for Codex, Gemini/Objector, and Merlin/Orchestrator work in this repo.
 
+`docs/VIBE_ENGINEERING_DOCTRINE.md` is mandatory operating law. Productivity is measured by verified outcomes delivered without increasing uncontrolled risk, not by code volume. Humans own intent, constraints, risk tolerance, architecture boundaries, and final authority. Agents own exploration, implementation, repetition, testing assistance, analysis, documentation, and continuous challenge. Systems own policy enforcement, validation gates, audit trails, observability, deployment controls, and rollback triggers.
+
+No task is complete because an agent says it is complete. No deployment is successful merely because it deployed. Independent evidence must support the requested outcome.
+
 ## Council Roles
 
 ```text

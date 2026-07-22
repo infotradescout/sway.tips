@@ -1,74 +1,78 @@
 # Sway Complete Product Gap Ledger
 
 Date: 2026-07-21  
-Branch: `ops/complete-product-reentry`  
-Owner bar: **Do not ship until the product is complete. Partial AI scaffolding is not a product.**
+Branch baseline: `main` at `628c72b4`
+Complete-product decision: **HOLD**
 
-## Product Law (owner-corrected)
+The machine-readable source for the current decision is `config/sway-complete-product-readiness.json`. The fail-closed launch assertion is `npm run readiness:assert`.
+
+Owner bar: **Do not ship until the product is complete.**
+
+## Product Law
 
 1. One account can be audience and creator. Stripe verification unlocks getting paid, not using the site.
-2. A live room is night mode, not an entry tax. The site must be usable with zero live room.
-3. Live-room money loop is one product surface, not the whole company.
-4. Publishing, collaboration, file sharing, and catalog transfer are first-class product — not “after adoption.”
-5. Schema/docs/contracts without durable runtime + UI + production evidence are unfinished work, not shipped features.
+2. A live room is night mode, not an entry tax. The site must be useful with zero live room.
+3. Original Sway—rooms, requests, tips, boosts, queue control, QR sharing, profiles, moderation, earnings, and closeout—must remain intact.
+4. Sway must replace the core DistroKid workflow: durable masters, releases, DSP delivery, delivery management, royalties, splits and payouts, promotion, and safe catalog transfer.
+5. The original and distribution pillars must form one cohesive customer journey.
+6. Schema, code, tests, PRs, deployments, and build markers are evidence inputs. None independently proves the customer outcome.
 
-## Shipped on `main` (usable today)
+## Current Verified Production Facts
 
-| Surface | Status |
-|--------|--------|
-| Performer signup / login / session | Live |
-| Live room create / queue / tip / request / boost | Live (local proven; Stripe test keys now on Render) |
-| Room QR / share / overlay route | Live |
-| Public profile `/p/:handle` | Live |
-| Library metadata sync bridge | Live (metadata only) |
-| Control bridge baseline | Merged; live hardware not proven |
-| Moderation, idempotency, payments lifecycle code | Live in code |
-| Pro Mode columns on `users` | Deployed; no user-facing meaning |
-| Admin | Internal quarantine |
+- The performer console is deployed with focused Home, Room, Profile, and Account workspaces.
+- Production migration `0023_audio_publishing_foundation` is applied. The live migration ledger and required audio tables were inspected after the migration.
+- Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
+- Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
+- Production object storage is not configured. The authenticated Files & Projects surface reports this fail-closed.
+- The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
-## Missing / incomplete (blocks “complete”)
+## Original Sway Pillar
 
-### Account & home
-| Gap | Truth |
-|-----|--------|
-| Unified account (audience + creator) | Not built. Patron signup/login held in old spine. |
-| Usable home with no live room | Missing. Talent idle ≈ setup void; patron home ≈ scan-only. |
-| Stripe verifies payouts / paid intake, not site access | Partially true in code; product copy/UX still room-first. |
+| Capability | Current truth | Readiness impact |
+|---|---|---|
+| Performer signup, login, and session | Implemented | Needs a current production role/access evidence packet |
+| Creator home and public profile | Implemented and deployed | Full audience-to-creator account journey remains unverified |
+| Live room, QR, requests, tips, boosts, and queue | Implemented with contracts and historical QA | Needs current production transaction proof for the complete loop |
+| Moderation, idempotency, and payment lifecycle | Implemented in code and contracts | Code/contracts alone are not production outcome evidence |
+| Overlay, earnings, closeout, and recap | Implemented | Needs current production live-night closeout evidence |
+| Unified account for audience and creator | Incomplete | Blocks cohesive product readiness |
 
-### Publishing & catalog (DistroKid-class)
-| Gap | Truth |
-|-----|--------|
-| Audio publishing foundation | Exists only on `origin/agent/audio-publishing-foundation` (`9a4a45b`). **Not on `main`.** |
-| Migration | Branch used `0019_audio_publishing_foundation`; `main` already used `0019`–`0022` for other work. Must renumber to `0023+`. |
-| Runtime uploads / private storage | Explicitly off in foundation doc |
-| DistroKid / store delivery / cutover | Contract + state machine only; `CATALOG_CUTOVER_EXECUTION_ENABLED = false` |
-| Sales / royalties / composition publishing admin | Not claimed; not built |
+## DistroKid-Replacement Pillar
 
-### Collaboration & file sharing
-| Gap | Truth |
-|-----|--------|
-| Project invites / collaborator roles | Schema on branch only |
-| Private file pairing QR (`/talent/connect/files`) | Spec only; no live routes |
-| Exact-original download / review comments | Spec only |
-| Continuum connector | Contract tests on branch; not live |
+| Capability | Current truth | Readiness impact |
+|---|---|---|
+| Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
+| Durable exact-original master storage | Runtime supports private filesystem; production storage is not configured | Blocks upload and exact-download outcome |
+| Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
+| Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
+| Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |
+| DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
+| Store status, corrections, failures, and takedowns | State machine only | Critical blocker |
+| Royalty statements and reconciliation | No distribution royalty ledger/runtime | Critical blocker |
+| Collaborator splits, KYC/tax, and payouts | No distribution split/payout runtime | Critical blocker |
+| Promotion and pre-save pages | Not built as a release-linked workflow | Blocks practical replacement |
+| Catalog transfer and DistroKid cutover | Parity/continuity schema only; execution disabled | Critical blocker |
 
-### Creator performance toolchain
-| Gap | Truth |
-|-----|--------|
-| In-app playback / DJ software companion | Explicitly not built (`SWAY_PERFORMER_INTEGRATION_TRUTH_MAP`) |
-| OBS automation beyond manual overlay URL | Not built |
-| SoundCloud / Spotify as venue playback | Not allowed / not built as claimed product |
+No contracted DSP delivery provider exists. No royalty ledger, collaborator distribution splits, or distribution payouts exist. Live-room payment records must never be reused as proof of distribution accounting.
 
-## Re-entry order (this branch)
+## Correct Outcome Order
 
-1. Correct product spine / restart truth so work is no longer illegally “held.”
-2. Port audio publishing foundation onto `main` as `0023` (schema + contracts + docs) without claiming runtime.
-3. Account home that works with zero live room (Join + Start + Profile + Files entry points).
-4. First durable publishing runtime slice (storage + upload seal + one share path) — only after (2)–(3) land.
-5. Catalog transfer / DistroKid path remains fail-closed until continuity evidence exists.
+1. Configure durable private production object storage and prove upload, seal, exact-download, restore, and access denial.
+2. Complete the project collaboration journey: connect, claim, share one immutable version, review, approve, revoke, and replay denial.
+3. Build the cohesive Music workspace around projects, releases, delivery, promotion, earnings, and catalog transfer.
+4. Build release readiness: metadata, identifiers, artwork, rights declarations, creator-deal evidence, and immutable approval.
+5. Contract with and integrate one external DSP delivery provider; prove sandbox then controlled production delivery.
+6. Build provider-backed status, correction, failure, takedown, and observability controls.
+7. Build a separate append-only royalty ledger, statement reconciliation, splits, KYC/tax, and payouts.
+8. Prove safe catalog parity, overlap, store matching, artist approval, cutover, and tail-royalty reconciliation.
+9. Re-run the original Sway live-night production proof so distribution work cannot regress the original product.
+10. Change the readiness decision to `GO` only after every required capability has independent production evidence.
 
-## Explicit non-claims
+## Explicit Non-Claims
 
-- Porting the foundation does not equal shipping publishing.
-- Stripe test keys on Render do not equal complete product.
-- Contract tests do not equal user-visible features.
+- Applying migration `0023` does not ship music distribution.
+- A generated pairing QR does not prove collaboration or file transfer.
+- A configured storage path does not prove durability or restore.
+- A provider submission does not prove store acceptance or a live release.
+- A deployed commit does not prove a successful deployment outcome.
+- Passing contracts do not prove complete-product readiness.
