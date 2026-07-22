@@ -32,16 +32,21 @@ for (const term of requiredRouteTerms) {
   if (!server.includes(term)) failures.push(`Server route decoupling missing term: ${term}`);
 }
 
-const shellMappingBranches = [
-  "if (urlPath.startsWith('/talent')) return 'talent';",
-  "if (urlPath.startsWith('/overlay')) return 'overlay';",
-  "if (urlPath.startsWith('/admin')) return 'admin';",
-  "if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';",
-  "if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';"
+const shellMappings = [
+  { route: '/talent', shell: 'talent' },
+  { route: '/overlay', shell: 'overlay' },
+  { route: '/admin', shell: 'admin' },
+  { route: '/dev/sandbox', shell: 'dev-sandbox' },
+  { route: '/g/', shell: 'patron' },
+  { route: '/p/', shell: 'patron' }
 ];
 
-for (const branch of shellMappingBranches) {
-  if (!server.includes(branch)) failures.push(`Server route classifier missing exact branch: ${branch}`);
+for (const { route, shell } of shellMappings) {
+  const routeIndex = server.indexOf(route);
+  const shellIndex = server.indexOf(`return '${shell}'`, Math.max(routeIndex, 0));
+  if (routeIndex === -1 || shellIndex === -1 || shellIndex - routeIndex > 180) {
+    failures.push(`Server must map ${route} to ${shell} shell.`);
+  }
 }
 
 if (/res\.sendFile\(path\.join\(distPath,\s*['"]index\.html['"]\)\)/.test(server)) {

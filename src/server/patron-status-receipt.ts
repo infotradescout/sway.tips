@@ -46,10 +46,19 @@ export function projectPatronRequestStatus(request: RequestItem): PatronRequestS
   };
 }
 
+export function projectPatronBoostStatus(boost: RequestItem['boosts'][number], request: RequestItem): PatronRequestStatus {
+  return {
+    actionType: 'boost',
+    status: request.hidden || request.removed ? 'unavailable' : 'fulfilled',
+    title: request.title,
+    submittedAt: boost.timestamp
+  };
+}
+
 export function sanitizePatronRequestStatus(value: unknown): PatronRequestStatus | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
-  if (input.actionType !== 'request' && input.actionType !== 'tip') return null;
+  if (input.actionType !== 'request' && input.actionType !== 'tip' && input.actionType !== 'boost') return null;
   if (typeof input.status !== 'string' || !PATRON_REQUEST_STATUSES.has(input.status as PatronRequestStatus['status'])) {
     return null;
   }

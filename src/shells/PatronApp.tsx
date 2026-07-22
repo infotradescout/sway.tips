@@ -20,14 +20,27 @@ import {
 } from './frictionClient';
 import { captureCampaignCode } from './campaignAttribution';
 import type { PatronRequestStatus } from '../types';
+import { AccountHome, AccountLogin, AccountSignup } from '../components/AccountAccess';
+import PublicReleasePage from '../components/PublicReleasePage';
+import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
-  | { name: 'performer'; performerHandle: string };
+  | { name: 'performer'; performerHandle: string }
+  | { name: 'release'; releaseId: string }
+  | { name: 'account-home' }
+  | { name: 'account-rights-review' }
+  | { name: 'account-login' }
+  | { name: 'account-signup' };
 
 function resolvePatronRoute(pathname: string): PatronRoute {
   const parts = pathname.split('/').filter(Boolean);
+  if (pathname === '/account/login') return { name: 'account-login' };
+  if (pathname === '/account/signup') return { name: 'account-signup' };
+  if (pathname === '/account/reviews') return { name: 'account-rights-review' };
+  if (pathname === '/account') return { name: 'account-home' };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
+  if (parts[0] === 'r' && parts[1]) return { name: 'release', releaseId: parts[1] };
   return { name: 'patron-gig', gigId: parts[1] || '' };
 }
 
@@ -35,7 +48,27 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const PATRON_STATUS_RECEIPT_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 function patronStatusReceiptStorageKey(gigId: string) {
-  return `sway.patronStatusReceipt:${gigId}`;
+  return `sway.patronStatusReceipts:${gigId}`;
+}
+
+type PatronActivity = { receipt: string; status: PatronRequestStatus };
+
+function readPatronActivity(gigId: string | undefined): PatronActivity[] {
+  if (!gigId) return [];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(patronStatusReceiptStorageKey(gigId)) || '[]');
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((entry): entry is PatronActivity =>
+      Boolean(entry)
+      && typeof entry === 'object'
+      && typeof entry.receipt === 'string'
+      && PATRON_STATUS_RECEIPT_PATTERN.test(entry.receipt)
+      && Boolean(entry.status)
+      && typeof entry.status === 'object'
+    ).slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 // Matches the RoomLookupStatus union produced by useSwayState in shared.tsx.
@@ -103,7 +136,7 @@ function PatronNoSessionRecovery({
             claim/authentication flows (see ux/patron-room-not-found-auth-cta-removal). */}
         <a
           className="mt-4 inline-flex min-h-10 items-center justify-center text-sm font-semibold text-fuchsia-300 transition-colors hover:text-fuchsia-200"
-          href="/faq"
+          href="/about"
           onClick={onReturnHomeClick}
         >
           sway to play
@@ -144,12 +177,7 @@ export default function PatronApp() {
   const demoMode = isDemoModeEnabled();
   const roomEntryEventKeyRef = useRef<string | null>(null);
   const recoveryEventKeyRef = useRef<string | null>(null);
-  const [patronStatusReceipt, setPatronStatusReceipt] = useState<string | null>(() => {
-    if (!routeGigId) return null;
-    const storedReceipt = window.localStorage.getItem(patronStatusReceiptStorageKey(routeGigId));
-    return storedReceipt && PATRON_STATUS_RECEIPT_PATTERN.test(storedReceipt) ? storedReceipt : null;
-  });
-  const [patronRequestStatus, setPatronRequestStatus] = useState<PatronRequestStatus | null>(null);
+  const [patronActivity, setPatronActivity] = useState<PatronActivity[]>(() => readPatronActivity(routeGigId));
 
   const applyPatronMutationResponse = (data: any) => {
     if (data?.state) setBState(data.state);
@@ -159,33 +187,36 @@ export default function PatronApp() {
     if (!routeGigId || typeof receipt !== 'string' || !PATRON_STATUS_RECEIPT_PATTERN.test(receipt)) return;
     if (!status || typeof status !== 'object') return;
 
-    window.localStorage.setItem(patronStatusReceiptStorageKey(routeGigId), receipt);
-    setPatronStatusReceipt(receipt);
-    setPatronRequestStatus(status as PatronRequestStatus);
+    setPatronActivity((current) => {
+      const next = [
+        { receipt, status: status as PatronRequestStatus },
+        ...current.filter((entry) => entry.receipt !== receipt)
+      ].slice(0, 20);
+      window.localStorage.setItem(patronStatusReceiptStorageKey(routeGigId), JSON.stringify(next));
+      return next;
+    });
   };
 
   useEffect(() => {
-    if (!routeGigId || !patronStatusReceipt || demoMode) {
-      setPatronRequestStatus(null);
-      return;
-    }
+    if (!routeGigId || patronActivity.length === 0 || demoMode) return;
 
     let cancelled = false;
     const refreshPatronRequestStatus = async () => {
-      try {
-        const data = await postJson('/api/patron/request-status', {
-          gig_id: routeGigId,
-          patron_status_receipt: patronStatusReceipt
-        });
-        if (!cancelled && data?.patron_status) {
-          setPatronRequestStatus(data.patron_status as PatronRequestStatus);
+      const refreshed = await Promise.all(patronActivity.map(async (entry) => {
+        try {
+          const data = await postJson('/api/patron/request-status', {
+            gig_id: routeGigId,
+            patron_status_receipt: entry.receipt
+          });
+          return data?.patron_status ? { ...entry, status: data.patron_status as PatronRequestStatus } : entry;
+        } catch (error: any) {
+          return error?.status === 404 ? null : entry;
         }
-      } catch (error: any) {
-        if (cancelled || error?.status !== 404) return;
-        window.localStorage.removeItem(patronStatusReceiptStorageKey(routeGigId));
-        setPatronStatusReceipt(null);
-        setPatronRequestStatus(null);
-      }
+      }));
+      if (cancelled) return;
+      const next = refreshed.filter((entry): entry is PatronActivity => Boolean(entry));
+      setPatronActivity(next);
+      window.localStorage.setItem(patronStatusReceiptStorageKey(routeGigId), JSON.stringify(next));
     };
 
     void refreshPatronRequestStatus();
@@ -194,7 +225,7 @@ export default function PatronApp() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [demoMode, patronStatusReceipt, routeGigId]);
+  }, [demoMode, routeGigId, patronActivity.map((entry) => entry.receipt).join('|')]);
 
   const campaignCode = captureCampaignCode();
 
@@ -323,7 +354,7 @@ export default function PatronApp() {
     .sort((a, b) => b.amount - a.amount)[0];
 
   useEffect(() => {
-    if (route.name === 'performer') return;
+    if (route.name !== 'patron-gig') return;
     if (isLoading || !shouldShowNoSessionRecovery) return;
     const eventKey = `${routeFamily}:${hasPatronRouteContext}:${hasSessionContext}:recovery`;
     if (recoveryEventKeyRef.current === eventKey) return;
@@ -339,7 +370,7 @@ export default function PatronApp() {
   }, [hasPatronRouteContext, hasSessionContext, isLoading, route.name, routeFamily, shouldShowNoSessionRecovery]);
 
   useEffect(() => {
-    if (route.name === 'performer') return;
+    if (route.name !== 'patron-gig') return;
     if (isLoading || shouldShowNoSessionRecovery || shouldShowEndedRoomRecovery || shouldShowConnectionRecovery || !hasPatronRouteContext) return;
     const eventKey = `${routeFamily}:${routeGigId ?? 'none'}:entry`;
     if (roomEntryEventKeyRef.current === eventKey) return;
@@ -368,6 +399,11 @@ export default function PatronApp() {
   if (route.name === 'performer') {
     return <PerformerPublicProfilePage performerHandle={route.performerHandle} />;
   }
+  if (route.name === 'release') return <PublicReleasePage releaseId={route.releaseId} />;
+  if (route.name === 'account-login') return <AccountLogin />;
+  if (route.name === 'account-signup') return <AccountSignup />;
+  if (route.name === 'account-rights-review') return <PerformerRightsReviewQueue backHref="/account" backLabel="Back to account" />;
+  if (route.name === 'account-home') return <AccountHome />;
 
   if (isLoading) return <LoadingState />;
 
@@ -424,7 +460,8 @@ export default function PatronApp() {
                   requests={requests}
                   performers={performers}
                   gigId={routeGigId}
-                  patronRequestStatus={patronRequestStatus}
+                  patronRequestStatus={patronActivity[0]?.status ?? null}
+                  patronActivity={patronActivity.map((entry) => entry.status)}
                   onCreateRequest={handleCreateRequest}
                   onBoostRequest={handleBoostRequest}
                   onReconcilePendingAction={handleReconcilePendingAction}

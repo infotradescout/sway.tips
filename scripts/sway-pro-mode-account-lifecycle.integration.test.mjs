@@ -143,13 +143,11 @@ async function main() {
     const anonPost = await fetch(`${BASE}/api/account/pro-mode/activate`, { method: 'POST' });
     assert.equal(anonPost.status, 401, 'Unauthenticated POST must return 401.');
 
-    // ---- A patron-role account with no performers row (session minted
-    // directly since no patron signup/login route exists yet -- see the
-    // Slice 1 handoff's documented gap). This exercises the real
-    // requireAuthenticatedAccountAccess/cookie-reading code path; only
-    // session *creation* is done programmatically. ----
+    // ---- A verified patron-role account with no performers row. This
+    // exercises the real requireAuthenticatedAccountAccess/cookie-reading
+    // code path; only session creation is done programmatically. ----
     const patronRow = await setupClient.query(
-      `INSERT INTO users (email, display_name, role) VALUES ('lifecycle-patron@example.test', 'Lifecycle Patron', 'patron') RETURNING id`
+      `INSERT INTO users (email, display_name, role, email_verified_at) VALUES ('lifecycle-patron@example.test', 'Lifecycle Patron', 'patron', NOW()) RETURNING id`
     );
     const patronUserId = patronRow.rows[0].id;
     const performerRowsBeforeActivation = await setupClient.query(`SELECT count(*)::int AS count FROM performers WHERE owner_user_id = $1`, [patronUserId]);
@@ -177,10 +175,19 @@ async function main() {
     assert.equal(spoofBody.status, 'disabled', 'The route must ignore any attempt to read another account and must only ever resolve identity from the session.');
 
     // ---- Activation matrix over HTTP: disabled -> active for the patron ----
-    const patronActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, { method: 'POST', headers: { cookie: patronCookie } });
+    const patronHandle = `lifecyclepatron${Date.now().toString().slice(-8)}`;
+    const activationProfile = { displayName: 'Lifecycle Patron', handle: patronHandle };
+    const patronActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, {
+      method: 'POST',
+      headers: { cookie: patronCookie, 'content-type': 'application/json' },
+      body: JSON.stringify(activationProfile)
+    });
     const patronActivateBody = await patronActivate.json();
     assert.equal(patronActivate.status, 200);
-    assert.deepEqual(patronActivateBody, { status: 'active', changed: true });
+    assert.equal(patronActivateBody.status, 'active');
+    assert.equal(patronActivateBody.changed, true);
+    assert.equal(patronActivateBody.performer.displayName, activationProfile.displayName);
+    assert.equal(patronActivateBody.performer.handle, activationProfile.handle);
 
     // ---- Now prove the activate route itself ignores any account
     // identifier supplied in the body: passing another account's id must
@@ -193,47 +200,74 @@ async function main() {
       body: JSON.stringify({ userId: otherUserRow.rows[0].id, actorId: otherUserRow.rows[0].id })
     });
     const spoofActivateBody = await spoofActivate.json();
-    assert.deepEqual(spoofActivateBody, { status: 'active', changed: false }, 'A spoofed body must not redirect activation onto another account; it must resolve to the already-active session-derived caller as a no-op.');
+    assert.equal(spoofActivate.status, 200);
+    assert.equal(spoofActivateBody.status, 'active');
+    assert.equal(spoofActivateBody.changed, false, 'A spoofed body must not redirect activation onto another account; it must resolve to the already-active session-derived caller as a no-op.');
+    assert.equal(spoofActivateBody.performer.id, patronActivateBody.performer.id);
     const otherAccountUnaffected = await setupClient.query(`SELECT pro_mode_status::text AS pro_mode_status FROM users WHERE id = $1`, [otherUserRow.rows[0].id]);
     assert.equal(otherAccountUnaffected.rows[0].pro_mode_status, 'active', 'The unrelated other account must be completely untouched by the spoofed call (it was already active for unrelated reasons, not changed by this call).');
 
-    // ---- Boundary isolation: activating Pro Mode must not create a
-    // performers row, must not grant talent access, must not imply
-    // gig-ready eligibility. ----
-    const performerRowsAfterActivation = await setupClient.query(`SELECT count(*)::int AS count FROM performers WHERE owner_user_id = $1`, [patronUserId]);
-    assert.equal(performerRowsAfterActivation.rows[0].count, 0, 'Pro Mode activation must not create a performers row.');
+    // ---- Same-account activation creates exactly one usable, gig-ready
+    // performer identity without changing the account that owns it. ----
+    const performerRowsAfterActivation = await setupClient.query(
+      `SELECT id, display_name, handle, onboarding_status, is_active FROM performers WHERE owner_user_id = $1`,
+      [patronUserId]
+    );
+    assert.equal(performerRowsAfterActivation.rowCount, 1, 'Pro Mode activation must create exactly one performer row.');
+    assert.equal(performerRowsAfterActivation.rows[0].id, patronActivateBody.performer.id);
+    assert.equal(performerRowsAfterActivation.rows[0].display_name, activationProfile.displayName);
+    assert.equal(performerRowsAfterActivation.rows[0].handle, activationProfile.handle);
+    assert.equal(performerRowsAfterActivation.rows[0].onboarding_status, 'gig_ready');
+    assert.equal(performerRowsAfterActivation.rows[0].is_active, true);
     const talentGatedResponse = await fetch(`${BASE}/api/talent/active-rooms`, { headers: { cookie: patronCookie } });
-    assert.equal(talentGatedResponse.status, 403, 'An active-Pro-Mode account without a performers row must still be denied talent-gated routes.');
+    assert.equal(talentGatedResponse.status, 200, 'The activated account must be able to open performer routes immediately.');
+    assert.deepEqual(await talentGatedResponse.json(), { rooms: [] });
 
     // ---- Idempotent no-op over HTTP ----
     const patronActivateAgain = await fetch(`${BASE}/api/account/pro-mode/activate`, { method: 'POST', headers: { cookie: patronCookie } });
     const patronActivateAgainBody = await patronActivateAgain.json();
-    assert.deepEqual(patronActivateAgainBody, { status: 'active', changed: false });
+    assert.equal(patronActivateAgain.status, 200);
+    assert.equal(patronActivateAgainBody.status, 'active');
+    assert.equal(patronActivateAgainBody.changed, false);
+    assert.equal(patronActivateAgainBody.performer.id, patronActivateBody.performer.id);
+    const performerRowsAfterRetry = await setupClient.query(`SELECT count(*)::int AS count FROM performers WHERE owner_user_id = $1`, [patronUserId]);
+    assert.equal(performerRowsAfterRetry.rows[0].count, 1, 'Retry-safe activation must not create a duplicate performer.');
 
     // ---- Suspended/revoked rejection over HTTP ----
     for (const blockedStatus of ['suspended', 'revoked']) {
       const blockedRow = await setupClient.query(
-        `INSERT INTO users (email, display_name, role, pro_mode_status) VALUES ($1, 'Blocked', 'patron', $2) RETURNING id`,
+        `INSERT INTO users (email, display_name, role, pro_mode_status, email_verified_at) VALUES ($1, 'Blocked', 'patron', $2, NOW()) RETURNING id`,
         [`lifecycle-${blockedStatus}@example.test`, blockedStatus]
       );
       const blockedSession = await sessionStore.issueSession({ actorUserId: blockedRow.rows[0].id, issuedBy: blockedRow.rows[0].id });
       const blockedCookie = `${sessionStore.cookieName}=${encodeURIComponent(blockedSession.token)}`;
-      const blockedActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, { method: 'POST', headers: { cookie: blockedCookie } });
+      const blockedActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, {
+        method: 'POST',
+        headers: { cookie: blockedCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Blocked', handle: `blocked${blockedStatus}${Date.now().toString().slice(-6)}` })
+      });
       assert.equal(blockedActivate.status, 409, `A ${blockedStatus} account must be rejected with 409.`);
+      const blockedPerformer = await setupClient.query(`SELECT count(*)::int AS count FROM performers WHERE owner_user_id = $1`, [blockedRow.rows[0].id]);
+      assert.equal(blockedPerformer.rows[0].count, 0, `A ${blockedStatus} account must not gain a performer identity.`);
     }
 
     // ---- Admin and support account activation remains allowed ----
     for (const role of ['admin', 'support']) {
       const roleRow = await setupClient.query(
-        `INSERT INTO users (email, display_name, role) VALUES ($1, 'Role Account', $2) RETURNING id`,
+        `INSERT INTO users (email, display_name, role, email_verified_at) VALUES ($1, 'Role Account', $2, NOW()) RETURNING id`,
         [`lifecycle-${role}@example.test`, role]
       );
       const roleSession = await sessionStore.issueSession({ actorUserId: roleRow.rows[0].id, issuedBy: roleRow.rows[0].id });
       const roleCookie = `${sessionStore.cookieName}=${encodeURIComponent(roleSession.token)}`;
-      const roleActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, { method: 'POST', headers: { cookie: roleCookie } });
+      const roleActivate = await fetch(`${BASE}/api/account/pro-mode/activate`, {
+        method: 'POST',
+        headers: { cookie: roleCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Role Account', handle: `role${role}${Date.now().toString().slice(-8)}` })
+      });
       const roleActivateBody = await roleActivate.json();
       assert.equal(roleActivate.status, 200, `${role} accounts must remain able to use the role-agnostic account endpoint.`);
       assert.equal(roleActivateBody.status, 'active');
+      assert.ok(roleActivateBody.performer?.id, `${role} activation must create its owned performer identity.`);
     }
 
     // ---- Real performer signup + real admin soft-delete route ----

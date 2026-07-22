@@ -32,8 +32,9 @@ Release evidence must use real command output, real route evidence, and real man
 
 Evidence must identify the requested outcome, the verifier, the environment, the observed result, the remaining uncontrolled risks, and the rollback trigger. Evidence created by the implementing agent must be corroborated by a system gate, an independent reviewer, production observability, or direct production behavior before it can approve launch readiness.
 
-Complete-product launch approval is separate from iterative deployment approval. For Sway, `npm run readiness:assert` must fail closed until the complete customer and performer live-room journey is production verified.
+Complete-product launch approval is separate from iterative deployment approval. For Sway, `npm run readiness:assert` must fail closed until both the DistroKid-replacement pillar and the original-Sway pillar are production verified.
 
 ## Scope Separation
 
 QA, fixes, DRY/SRP cleanup, and feature work must be separate lanes unless the owner explicitly approves a combined lane with documented risk.
+

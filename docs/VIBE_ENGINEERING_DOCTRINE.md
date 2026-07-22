@@ -6,11 +6,32 @@ We measure it by verified outcomes delivered without increasing uncontrolled ris
 
 ## Ownership
 
-Humans own intent, constraints, risk tolerance, architecture boundaries, product scope, and final authority.
+Humans own:
 
-Agents own exploration, implementation, repetition, testing assistance, analysis, documentation, and continuous challenge.
+- Intent
+- Constraints
+- Risk tolerance
+- Architecture boundaries
+- Final authority
 
-Systems own policy enforcement, validation gates, audit trails, observability, deployment controls, and rollback triggers.
+Agents own:
+
+- Exploration
+- Implementation
+- Repetition
+- Testing assistance
+- Analysis
+- Documentation
+- Continuous challenge
+
+Systems own:
+
+- Policy enforcement
+- Validation gates
+- Audit trails
+- Observability
+- Deployment controls
+- Rollback triggers
 
 ## Evidence Law
 
@@ -20,33 +41,19 @@ No task is complete because an agent says it is complete.
 
 No deployment is successful merely because it deployed.
 
-The work advances only when independent evidence supports the requested outcome. The objective is maximum verified throughput per unit of human attention.
+The work advances only when independent evidence supports the requested outcome.
 
-## Sway Product Law
+The objective is not maximum automation.
 
-Sway is one simple two-sided live product:
+The objective is maximum verified throughput per unit of human attention.
 
-- Customer side: join a performer room, request, tip, boost, pay, and see status.
-- Performer side: start and share a room, set request rules, manage the queue, receive money, end the room, and review the recap.
+## Sway Production-Readiness Law
 
-One person may use both sides of the same account. Pro Mode activates performer capabilities; it does not create a separate product or identity silo.
+Sway is production ready only when both pillars are independently verified in production:
 
-The complete live loop is:
+1. Sway replaces the core DistroKid workflow: durable masters, release metadata and identifiers, DSP delivery, delivery lifecycle, royalty statements, collaborator splits and payouts, promotion, and safe catalog transfer.
+2. Sway retains its original product: one-account access, public profiles, live rooms, room QR and sharing, requests, tips, boosts, moderation, queue control, overlays, earnings, and closeout.
 
-`Start room -> Share QR/link -> Join -> Request/Tip/Boost -> Pay/confirm -> Approve/Deny/Complete -> Status -> Earnings -> End room -> Recap`
+Both pillars must form one cohesive customer journey. Schema, code, contracts, a merged pull request, a build marker, or a deployment is not sufficient evidence by itself. Until every required capability is production verified, the complete-product readiness decision is `HOLD`.
 
-Profiles, authentication, moderation, payment operations, overlays, and internal administration are supporting systems for that loop. They are not separate customer-facing product pillars.
-
-## Scope Lock
-
-Do not add music distribution, release delivery, royalty accounting, master storage, file collaboration, catalog transfer, social networking, venue management, or any other adjacent product without a new explicit owner decision.
-
-Historical audio-distribution schema may remain dormant to avoid destructive production rollback. It must not be exposed through navigation, customer/performer routes, startup dependencies, readiness requirements, or roadmap instructions.
-
-No future task may treat an old migration, dormant module, closed pull request, or archived evidence packet as product authorization.
-
-## Readiness Law
-
-Sway is ready only when the customer and performer journeys are independently verified together in production. Schema, code, contracts, a merged pull request, a build marker, or a deployment is not sufficient evidence by itself.
-
-`npm run readiness:assert` must fail closed until every required live-room capability has current production evidence.
+Iterative deployments may continue to build and repair the product. They must not be described as complete-product launch approval. `npm run readiness:assert` is the fail-closed launch assertion; `npm run readiness:report` is the non-approving diagnostic report.

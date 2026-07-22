@@ -63,7 +63,12 @@ for (const term of persistedAuthSchemaTerms) {
 }
 
 const dbBackedGuardTerms = [
-  "import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema'",
+  "from '../db/schema'",
+  'gigAccessGrants',
+  'gigSessions',
+  'performerMemberships',
+  'performers',
+  'users',
   'createSwayDb(databaseUrl)',
   'createPerformerSessionStore({ databaseUrl, dbOverride: db })',
   'performerSessionStore?.resolveSessionFromToken(sessionToken)',

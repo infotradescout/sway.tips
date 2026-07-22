@@ -1,52 +1,149 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 1,
   "decision": "HOLD",
-  "ownerStandard": "Sway must prove the complete customer and performer live-room loop in one cohesive production experience.",
+  "ownerStandard": "Sway must replace the core DistroKid workflow and retain the original Sway features in one cohesive production experience.",
   "allowedStatuses": [
     "production_verified",
     "implemented_unverified",
+    "schema_only",
     "blocked",
     "missing"
   ],
   "pillars": [
     {
-      "id": "live_room_product",
-      "label": "Customer and performer live-room product",
+      "id": "distrokid_replacement",
+      "label": "DistroKid replacement",
+      "capabilities": [
+        {
+          "id": "durable_master_storage",
+          "label": "Durable exact-original master storage and download",
+          "status": "implemented_unverified",
+          "evidence": [
+            "scripts/sway-audio-durable-storage.integration.test.mjs",
+            "scripts/sway-production-audio-proof.mjs",
+            "scripts/sway-production-audio-evidence-audit.mjs",
+            "docs/qa-packets/2026-07-22-audio-production-evidence.md",
+            "docs/runbooks/audio-master-vault.md"
+          ],
+          "holdReason": "The private R2 adapter, live bucket, authenticated production upload/seal/share/download journey, exact-byte recovery, sealed-version UI, and unauthenticated HTTP denial are verified. The cross-account audit is implemented but still requires production database execution; separately controlled independent recovery is not configured or verified."
+        },
+        {
+          "id": "project_collaboration",
+          "label": "Projects, private pairing, selected-file sharing, review, and approval",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/server/audio-file-pairing-service.ts",
+            "src/server/audio-file-collaboration-service.ts",
+            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+          ],
+          "holdReason": "Pairing, selected immutable-version grants, exact authorized download, review, approval, grant/connection revocation, replay denial, and audit pass in a disposable durable integration. The complete two-account journey is not yet production verified."
+        },
+        {
+          "id": "release_metadata_identifiers",
+          "label": "Release drafts, artwork, credits, territories, ISRC, and UPC",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/components/PerformerReleaseDrafts.tsx",
+            "src/server/audio-publishing-service.ts",
+            "scripts/sway-release-drafts.contract.test.mjs",
+            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+          ],
+          "holdReason": "The release workspace now supports audited editing, artwork, full recording credits, territories, identifiers, optimistic revision checks, sealed rights declarations, independent review, and fail-closed readiness. Disposable PostgreSQL and production journey evidence are still required for this exact tree; no store delivery is enabled."
+        },
+        {
+          "id": "dsp_delivery",
+          "label": "Contracted DSP delivery to selected stores",
+          "status": "missing",
+          "evidence": [],
+          "holdReason": "No contracted delivery provider or production delivery integration is active."
+        },
+        {
+          "id": "delivery_lifecycle",
+          "label": "Store status, corrections, failures, and takedowns",
+          "status": "schema_only",
+          "evidence": [],
+          "holdReason": "Lifecycle contracts exist without provider-backed execution evidence."
+        },
+        {
+          "id": "royalty_statements",
+          "label": "Royalty statement import, reconciliation, and creator reporting",
+          "status": "missing",
+          "evidence": [],
+          "holdReason": "No separate royalty ledger or statement reconciliation runtime exists."
+        },
+        {
+          "id": "collaborator_splits_payouts",
+          "label": "Contract-versioned collaborator splits, KYC, tax, and payouts",
+          "status": "missing",
+          "evidence": [],
+          "holdReason": "Live-room payments cannot substitute for distribution royalties and collaborator payouts."
+        },
+        {
+          "id": "promotion_presave",
+          "label": "Stable release promotion and pre-save pages",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/components/PublicReleasePage.tsx",
+            "src/components/PerformerPublicProfilePage.tsx",
+            "scripts/sway-release-drafts.contract.test.mjs"
+          ],
+          "holdReason": "Stable public release pages and release cards on creator profiles are implemented. Provider-backed destination links, true pre-save actions, and destination update evidence remain missing."
+        },
+        {
+          "id": "catalog_transfer",
+          "label": "Safe catalog intake, parity lock, overlap verification, and cutover",
+          "status": "schema_only",
+          "evidence": [],
+          "holdReason": "Catalog transfer remains fail-closed without provider execution or production continuity evidence."
+        }
+      ]
+    },
+    {
+      "id": "original_sway",
+      "label": "Original Sway product",
       "capabilities": [
         {
           "id": "one_account_journey",
-          "label": "One account can use customer and performer sides",
+          "label": "One cohesive audience and creator account journey",
           "status": "implemented_unverified",
-          "evidence": [],
-          "holdReason": "Universal account and Pro Mode code exist without a current independent production journey packet."
+          "evidence": [
+            "src/components/AccountAccess.tsx",
+            "scripts/sway-universal-account-pro-mode.contract.test.mjs"
+          ],
+          "holdReason": "Universal signup, login, session, logout, audience access, and atomic Pro Mode activation are implemented. The complete audience-to-creator journey is not production verified."
         },
         {
-          "id": "room_start_and_join",
-          "label": "Performer starts and shares a room; customer joins",
+          "id": "profiles_and_creator_home",
+          "label": "Creator home and public profile",
           "status": "implemented_unverified",
-          "evidence": [],
-          "holdReason": "Room and QR/link paths exist without current end-to-end production evidence on the deployed build."
+          "evidence": [
+            "src/components/PerformerAccountHome.tsx",
+            "src/components/PerformerPublicProfilePage.tsx",
+            "src/components/PublicReleasePage.tsx",
+            "scripts/sway-performer-link-profile.contract.test.mjs"
+          ],
+          "holdReason": "Creator home, website-replacement public profile, live-room entry, and verified public release cards are implemented. The complete production journey is not yet recorded in this gate."
         },
         {
-          "id": "request_tip_boost_payment",
-          "label": "Customer requests, tips, boosts, pays, and sees status",
+          "id": "live_room_core",
+          "label": "Live room, QR, requests, tips, boosts, and queue control",
           "status": "implemented_unverified",
           "evidence": [],
-          "holdReason": "Runtime and contracts exist without a current production transaction proof packet for every action."
+          "holdReason": "The runtime and contracts exist without a current production transaction proof packet for the complete loop."
         },
         {
-          "id": "queue_control_and_safety",
-          "label": "Performer queue control, role isolation, moderation, and retry safety",
+          "id": "moderation_and_access",
+          "label": "Role isolation, moderation, reporting, blocking, and fail-closed access",
           "status": "implemented_unverified",
           "evidence": [],
-          "holdReason": "Code and contracts are not a current production role, moderation, degraded-network, and duplicate-retry evidence packet."
+          "holdReason": "Code and contracts are not a current production role/access evidence packet."
         },
         {
-          "id": "earnings_closeout_recap",
-          "label": "Earnings, end-room closeout, and recap",
+          "id": "overlay_earnings_closeout",
+          "label": "Overlay, earnings, end-room closeout, and recap",
           "status": "implemented_unverified",
           "evidence": [],
-          "holdReason": "The complete production closeout outcome is not independently recorded for the current deployed build."
+          "holdReason": "The complete production live-night closeout loop is not independently recorded here."
         }
       ]
     }

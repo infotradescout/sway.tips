@@ -116,11 +116,11 @@ requireIncludes(
 
 // Hook order must remain stable: no hook may move behind either early return.
 const useEffectIndex = patronApp.indexOf('useEffect(() => {');
-const performerReturnIndex = patronApp.indexOf("if (route.name === 'performer') return");
+const nonRoomReturnIndex = patronApp.indexOf("if (route.name !== 'patron-gig') return");
 const loadingReturnIndex = patronApp.indexOf('if (isLoading) return <LoadingState />;');
-if (useEffectIndex === -1 || performerReturnIndex === -1 || loadingReturnIndex === -1) {
+if (useEffectIndex === -1 || nonRoomReturnIndex === -1 || loadingReturnIndex === -1) {
   failures.push('PatronApp.tsx must keep its useEffect hooks and both early returns.');
-} else if (!(useEffectIndex < performerReturnIndex && performerReturnIndex < loadingReturnIndex)) {
+} else if (!(useEffectIndex < nonRoomReturnIndex && nonRoomReturnIndex < loadingReturnIndex)) {
   failures.push('PatronApp.tsx must keep both useEffect hooks before both early returns; hook order must stay unconditional and stable.');
 }
 

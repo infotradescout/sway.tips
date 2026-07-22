@@ -5,6 +5,9 @@ import { BackendState, GigSession } from '../types';
 
 export const emptySession: GigSession = {
   status: 'inactive',
+  startedAt: null,
+  autoCloseoutAt: null,
+  closedAt: null,
   talentName: '',
   talentRole: 'DJ',
   feeType: 'patron',

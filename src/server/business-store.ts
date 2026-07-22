@@ -81,6 +81,9 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
   const input = raw as Partial<GigSession>;
   return {
     status: input.status ?? fallback.status,
+    startedAt: input.startedAt ?? fallback.startedAt ?? null,
+    autoCloseoutAt: input.autoCloseoutAt ?? fallback.autoCloseoutAt ?? null,
+    closedAt: input.closedAt ?? fallback.closedAt ?? null,
     ownerActorUserId: input.ownerActorUserId ?? fallback.ownerActorUserId ?? null,
     lastMutationActorUserId: input.lastMutationActorUserId ?? fallback.lastMutationActorUserId ?? null,
     talentName: input.talentName ?? fallback.talentName,
@@ -127,7 +130,8 @@ function coerceBoost(raw: unknown): BoostContribution | null {
     idempotencyExpiresAt: input.idempotencyExpiresAt,
     paymentId: input.paymentId ?? null,
     paymentIntentId: input.paymentIntentId ?? null,
-    paymentStatus: input.paymentStatus ?? null
+    paymentStatus: input.paymentStatus ?? null,
+    patronStatusReceiptHash: input.patronStatusReceiptHash
   };
 }
 
@@ -519,12 +523,12 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       title: `runtime_room:${input.activeGigId}`,
       venueName: 'runtime',
       runtimeSessionState: session,
-      startedAt: session.status === 'active' || session.status === 'ending' || session.status === 'closed' ? now : null,
+      startedAt: session.startedAt ? new Date(session.startedAt) : now,
       scheduledEndAt: null,
       lastActivityAt: now,
       manualCloseoutStartedAt: session.status === 'ending' ? now : null,
       manualCloseoutCompletedAt: session.status === 'closed' ? now : null,
-      autoCloseoutAt: new Date(now.getTime() + 4 * 60 * 60 * 1000),
+      autoCloseoutAt: session.autoCloseoutAt ? new Date(session.autoCloseoutAt) : new Date(now.getTime() + 4 * 60 * 60 * 1000),
       autoCloseoutReason: null,
       closeoutPolicy: 'max_started_at_4h_or_scheduled_end_at_30m',
       updatedAt: now
@@ -538,11 +542,11 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         title: `runtime_room:${input.activeGigId}`,
         venueName: 'runtime',
         runtimeSessionState: session,
-        startedAt: session.status === 'active' || session.status === 'ending' || session.status === 'closed' ? now : null,
+        startedAt: session.startedAt ? new Date(session.startedAt) : now,
         lastActivityAt: now,
         manualCloseoutStartedAt: session.status === 'ending' ? now : null,
         manualCloseoutCompletedAt: session.status === 'closed' ? now : null,
-        autoCloseoutAt: new Date(now.getTime() + 4 * 60 * 60 * 1000),
+        autoCloseoutAt: session.autoCloseoutAt ? new Date(session.autoCloseoutAt) : new Date(now.getTime() + 4 * 60 * 60 * 1000),
         updatedAt: now
       }
     });

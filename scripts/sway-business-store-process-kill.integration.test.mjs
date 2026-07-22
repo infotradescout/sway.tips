@@ -9,6 +9,9 @@ import { randomUUID } from 'node:crypto';
 function createInactiveSession() {
   return {
     status: 'inactive',
+    startedAt: null,
+    autoCloseoutAt: null,
+    closedAt: null,
     ownerActorUserId: null,
     lastMutationActorUserId: null,
     talentName: '',

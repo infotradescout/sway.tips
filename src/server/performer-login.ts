@@ -14,6 +14,7 @@ export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_MAX = 3;
 export const DEFAULT_PERFORMER_LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_LOGIN = 'login';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL = 'verify_email';
+export const ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL = 'verify_account_email';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE = 'account_invite';
 export const PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET = 'password_reset';
 // Distinct from ACCOUNT_INVITE: no target email is known when the code is issued

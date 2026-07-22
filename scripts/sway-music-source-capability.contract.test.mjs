@@ -48,18 +48,13 @@ for (const term of [
   "providerKey: 'spotify'",
   "providerKey: 'soundcloud'",
   "providerKey: 'local_library'",
+  "providerKey: 'sway_upload'",
   'playInSway: false',
   'requiresTrackAvailabilityCheck: true',
   'Sway must not claim venue playback from Spotify',
   'SoundCloud access depends on OAuth'
 ]) {
   if (!capabilities.includes(term)) failures.push(`Capability catalog missing required term: ${term}`);
-}
-
-for (const retiredProvider of ["providerKey: 'sway_upload'", "sourceMode: 'sway_owned_audio'"]) {
-  if (capabilities.includes(retiredProvider) || talentDashboard.includes(retiredProvider)) {
-    failures.push(`Retired audio provider is still exposed: ${retiredProvider}`);
-  }
 }
 
 for (const term of [
