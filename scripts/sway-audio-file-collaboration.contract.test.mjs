@@ -8,6 +8,7 @@ const servicePath = 'src/server/audio-file-collaboration-service.ts';
 
 if (!existsSync(join(root, servicePath))) failures.push('Missing selected-file collaboration service.');
 const service = existsSync(join(root, servicePath)) ? read(servicePath) : '';
+const publishingService = read('src/server/audio-publishing-service.ts');
 const pairing = read('src/server/audio-file-pairing-service.ts');
 const schema = read('src/db/schema.ts');
 const server = read('server.ts');
@@ -42,6 +43,7 @@ for (const term of ['ADD COLUMN "can_comment"', 'ADD COLUMN "can_approve"']) {
 }
 for (const route of [
   "/api/talent/audio/assets/:assetId/requestable",
+  "/api/talent/audio/versions/:versionId/content",
   "/api/talent/audio/pairing/connections/:connectionId/shares",
   "/api/talent/audio/files/shared-with-me",
   "/api/talent/audio/files/shared-by-me",
@@ -66,7 +68,14 @@ if (!server.includes("return res.status(503).json({ error: 'Shared files are tem
 if (!workflow.includes('Run Audio File Collaboration Integration Proof')) {
   failures.push('CI must run the disposable collaboration integration proof.');
 }
+for (const term of ['openOwnedVersion', 'needDownload: true']) {
+  if (!publishingService.includes(term)) failures.push(`Owner Catalog playback service is missing: ${term}`);
+}
+for (const term of ['Content-Disposition', 'inline; filename=']) {
+  if (!server.includes(term)) failures.push(`Owner Catalog playback route is missing: ${term}`);
+}
 for (const term of [
+  '<audio controls preload="metadata"',
   'Add audio to Catalog',
   'Allow requests',
   'Remove from requests',
