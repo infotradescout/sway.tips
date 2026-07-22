@@ -106,6 +106,7 @@ for (const term of [
   'await service.completeAndSealUpload',
   'await service.downloadSharedOriginal',
   'downloadedBody.equals(body)',
+  'downloaded.version.sha256 !== sha256',
   "outcome: 'verified'",
   'exactBytesRecovered: true'
 ]) {

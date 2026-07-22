@@ -111,7 +111,7 @@ async function main() {
     const downloadedSha256 = createHash('sha256').update(downloadedBody).digest('hex');
 
     if (!downloadedBody.equals(body)) throw new Error('Downloaded production master bytes differ from the uploaded fixture.');
-    if (downloadedSha256 !== sha256 || downloaded.sha256 !== sha256) {
+    if (downloadedSha256 !== sha256 || downloaded.version.sha256 !== sha256) {
       throw new Error('Downloaded production master SHA-256 evidence does not match.');
     }
     if (downloaded.byteSize !== body.length || version.byteSize !== body.length) {
