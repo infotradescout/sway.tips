@@ -334,7 +334,7 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Tonight's Room</span>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Performer Console</span>
               <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
@@ -345,12 +345,12 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? 'Create room' : "Tonight's room"}
+            title={session.status === 'inactive' ? 'Performer console' : "Tonight's room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
             primaryLabel={session.status === 'inactive'
-              ? 'Set room settings, then create the room link and QR'
+              ? 'Choose one workspace at a time'
               : 'Queue, QR, earnings, and room controls'}
-            secondaryLabel={session.status === 'inactive' ? 'Money settings' : 'Room status'}
+            secondaryLabel={session.status === 'inactive' ? 'Account status' : 'Room status'}
             showHeader={session.status !== 'inactive'}
             isEmpty={false}
             emptyState={

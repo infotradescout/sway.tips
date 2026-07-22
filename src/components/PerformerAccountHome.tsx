@@ -5,11 +5,13 @@ import PerformerFilePairing from './PerformerFilePairing';
 export default function PerformerAccountHome({
   performerHandle,
   displayName,
-  stripeReady
+  stripeReady,
+  onStartRoom
 }: {
   performerHandle?: string | null;
   displayName: string;
   stripeReady: boolean;
+  onStartRoom: () => void;
 }) {
   const publicPath = performerHandle ? `/p/${performerHandle}` : null;
 
@@ -44,13 +46,14 @@ export default function PerformerAccountHome({
           Join / scan a room
         </a>
 
-        <a
-          href="#sway-start-room"
+        <button
+          type="button"
+          onClick={onStartRoom}
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white transition hover:bg-fuchsia-500"
         >
           <Radio className="h-4 w-4" aria-hidden="true" />
           Start a live room
-        </a>
+        </button>
 
         {publicPath ? (
           <a
