@@ -20,9 +20,12 @@
           "status": "implemented_unverified",
           "evidence": [
             "scripts/sway-audio-durable-storage.integration.test.mjs",
+            "scripts/sway-production-audio-proof.mjs",
+            "scripts/sway-production-audio-evidence-audit.mjs",
+            "docs/qa-packets/2026-07-22-audio-production-evidence.md",
             "docs/runbooks/audio-master-vault.md"
           ],
-          "holdReason": "The private R2 adapter and deterministic exact-byte restart evidence pass, but the live bucket, authenticated production journey, public-access denial, authorization denial, and independent recovery are not verified."
+          "holdReason": "The private R2 adapter, live bucket, authenticated production upload/seal/share/download journey, exact-byte recovery, sealed-version UI, and unauthenticated HTTP denial are verified. The cross-account audit is implemented but still requires production database execution; separately controlled independent recovery is not configured or verified."
         },
         {
           "id": "project_collaboration",

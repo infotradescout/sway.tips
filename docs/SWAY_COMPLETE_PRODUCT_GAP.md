@@ -24,6 +24,7 @@ Owner bar: **Do not ship until the product is complete.**
 - Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
 - Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
 - The repository now uses a private Cloudflare R2 adapter for production masters; Render remains only the application host. The server verifies bucket access before accepting traffic and rejects local filesystem storage in production.
+- Production commit `0fff1da9` reports verified R2 readiness and rejects an unauthenticated project-asset request with `401` plus `Cache-Control: no-store`; the sanitized packet is `docs/qa-packets/2026-07-22-audio-production-evidence.md`.
 - Deterministic storage evidence proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, and identity/traversal denial. It does not prove the live bucket, production authorization journey, or independent recovery.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
@@ -43,7 +44,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
-| Durable exact-original master storage | Private R2 runtime and deterministic exact-byte proof implemented | Live bucket, authenticated production flow, public/access denial, and independent recovery remain unverified |
+| Durable exact-original master storage | Live private R2 upload/seal/download and unauthenticated HTTP denial verified | Cross-account evidence command still needs production execution; separately controlled independent recovery remains unverified |
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
 | Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |
