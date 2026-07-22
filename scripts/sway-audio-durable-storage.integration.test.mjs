@@ -27,6 +27,7 @@ const renderBlueprint = read('render.yaml');
 const envExample = read('.env.example');
 const filesSurface = read('src/components/PerformerAudioFiles.tsx');
 const productionProof = read('scripts/sway-production-audio-proof.mjs');
+const productionEvidenceAudit = read('scripts/sway-production-audio-evidence-audit.mjs');
 const packageJson = read('package.json');
 
 for (const term of [
@@ -118,6 +119,18 @@ for (const term of [
 }
 if (!packageJson.includes('"proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs"')) {
   failures.push('Package scripts must expose the fail-closed production audio proof command.');
+}
+for (const term of [
+  'unauthenticatedHttpDenied',
+  'crossAccountProjectReadDenied',
+  'deniedAccessReachedObjectStorage',
+  'independentRecoveryVerified: false',
+  "notIlike(users.email, '%smoke%')"
+]) {
+  if (!productionEvidenceAudit.includes(term)) failures.push(`Production audio evidence audit is missing required denial control: ${term}`);
+}
+if (!packageJson.includes('"audit:audio:production-evidence": "tsx scripts/sway-production-audio-evidence-audit.mjs"')) {
+  failures.push('Package scripts must expose the fail-closed production audio evidence audit.');
 }
 
 for (const term of [
