@@ -75,6 +75,13 @@ const immutableVersionWrite = sealTransaction.indexOf('tx.insert(audioProjectAss
 if (completedSessionWrite < 0 || immutableVersionWrite < 0 || completedSessionWrite > immutableVersionWrite) {
   failures.push('The upload session must become completed before the verified-seal trigger accepts the immutable version row.');
 }
+for (const term of [
+  "if (session.uploadStatus === 'initiated' || session.uploadStatus === 'uploading')",
+  "if (session.uploadStatus !== 'verifying')",
+  "!['initiated', 'uploading', 'uploaded', 'verifying'].includes(session.uploadStatus)"
+]) {
+  if (!service.includes(term)) failures.push(`Upload sealing must remain monotonic and retry-safe: ${term}`);
+}
 
 if (!server.includes('await audioObjectStore.verifyReady()')
   || !server.includes('objectStorageVerified: audioObjectStoreVerified')
