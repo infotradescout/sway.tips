@@ -6490,8 +6490,13 @@ app.get('/api/talent/audio/files/shared-with-me', async (req, res) => {
   if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
   if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
 
-  const files = await audioFileCollaborationService.listSharedWithMe({ userId: accountAccess.actor.actorId });
-  return res.json({ files });
+  try {
+    const files = await audioFileCollaborationService.listSharedWithMe({ userId: accountAccess.actor.actorId });
+    return res.json({ files });
+  } catch (error) {
+    console.error('[sway.audio] failed to list files shared with account.', error);
+    return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
+  }
 });
 
 app.get('/api/talent/audio/files/shared-by-me', async (req, res) => {
@@ -6501,8 +6506,13 @@ app.get('/api/talent/audio/files/shared-by-me', async (req, res) => {
   if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
   if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
 
-  const files = await audioFileCollaborationService.listSharedByMe({ userId: accountAccess.actor.actorId });
-  return res.json({ files });
+  try {
+    const files = await audioFileCollaborationService.listSharedByMe({ userId: accountAccess.actor.actorId });
+    return res.json({ files });
+  } catch (error) {
+    console.error('[sway.audio] failed to list files shared by account.', error);
+    return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
+  }
 });
 
 app.get('/api/talent/audio/file-grants/:grantId/download', async (req, res) => {

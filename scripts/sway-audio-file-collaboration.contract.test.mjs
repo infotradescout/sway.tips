@@ -56,6 +56,12 @@ if (!pairing.includes('cascadedFileGrantRevocation: true') || !pairing.includes(
 if (!packageJson.includes('"test:integration:audio-file-collaboration"')) {
   failures.push('Package scripts must expose the disposable collaboration integration proof.');
 }
+if (!packageJson.includes('"start": "npm run db:migrate && node dist/server.cjs"')) {
+  failures.push('Production startup must apply pending migrations before accepting traffic.');
+}
+if (!server.includes("return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });")) {
+  failures.push('Shared-file list routes must contain database failures instead of crashing the process.');
+}
 if (!workflow.includes('Run Audio File Collaboration Integration Proof')) {
   failures.push('CI must run the disposable collaboration integration proof.');
 }
