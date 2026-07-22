@@ -23,8 +23,8 @@ Owner bar: **Do not ship until the product is complete.**
 - Production migration `0023_audio_publishing_foundation` is applied. The live migration ledger and required audio tables were inspected after the migration.
 - Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
 - Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
-- The repository now declares a Render persistent disk and the server rejects a configured production vault unless the mount is real. The live service has not been shown to have consumed that Blueprint.
-- Local deterministic storage evidence proves exact bytes after store reinitialization plus checksum, identity, and traversal denial. It does not prove a production restart or snapshot restore.
+- The repository now uses a private Cloudflare R2 adapter for production masters; Render remains only the application host. The server verifies bucket access before accepting traffic and rejects local filesystem storage in production.
+- Deterministic storage evidence proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, and identity/traversal denial. It does not prove the live bucket, production authorization journey, or independent recovery.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
 ## Original Sway Pillar
@@ -43,7 +43,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
-| Durable exact-original master storage | Disk-backed runtime configuration and local exact-byte proof implemented | Live disk attachment, authenticated production flow, access denial, and snapshot restore remain unverified |
+| Durable exact-original master storage | Private R2 runtime and deterministic exact-byte proof implemented | Live bucket, authenticated production flow, public/access denial, and independent recovery remain unverified |
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
 | Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |

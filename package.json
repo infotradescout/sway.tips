@@ -44,6 +44,7 @@
     "audit:release-gate": "node scripts/sway-release-gate.contract.test.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1092.0",
     "@stripe/react-stripe-js": "^6.7.0",
     "@stripe/stripe-js": "^9.9.0",
     "@tailwindcss/vite": "^4.1.14",

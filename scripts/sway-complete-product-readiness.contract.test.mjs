@@ -47,8 +47,8 @@ for (const term of [
   'Complete-product decision: **HOLD**',
   'Production migration `0023_audio_publishing_foundation` is applied',
   'Pairing-token creation is production verified',
-  'live service has not been shown to have consumed that Blueprint',
-  'snapshot restore',
+  'private Cloudflare R2 adapter',
+  'independent recovery',
   'No contracted DSP delivery provider',
   'No royalty ledger, collaborator distribution splits, or distribution payouts'
 ]) {

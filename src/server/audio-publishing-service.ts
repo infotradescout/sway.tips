@@ -11,7 +11,7 @@ import {
   audioUploadSessions,
   auditEvents
 } from '../db/schema';
-import type { AudioObjectStore } from './audio-object-storage';
+import { parseAudioStorageProvider, type AudioObjectIdentity, type AudioObjectStore } from './audio-object-storage';
 
 const DEFAULT_PART_SIZE = 5 * 1024 * 1024;
 const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
@@ -48,6 +48,20 @@ export function createAudioPublishingService(config: {
   store: AudioObjectStore;
 }) {
   const { db, store } = config;
+
+  function sessionObjectIdentity(session: {
+    storageProvider: string;
+    storageBucket: string;
+    storageKey: string;
+    providerUploadId: string;
+  }): AudioObjectIdentity {
+    return {
+      storageProvider: parseAudioStorageProvider(session.storageProvider),
+      storageBucket: session.storageBucket,
+      storageKey: session.storageKey,
+      providerUploadId: session.providerUploadId
+    };
+  }
 
   async function requireProjectAccess(input: {
     projectId: string;
@@ -197,8 +211,12 @@ export function createAudioPublishingService(config: {
     const expectedSha256 = input.expectedSha256.trim().toLowerCase();
     if (!input.idempotencyKey.trim()) throw new Error('idempotencyKey is required.');
     if (!/^[0-9a-f]{64}$/.test(expectedSha256)) throw new Error('expectedSha256 must be a 64-char hex digest.');
-    if (!Number.isFinite(input.expectedByteSize) || input.expectedByteSize <= 0) {
+    if (!Number.isSafeInteger(input.expectedByteSize) || input.expectedByteSize <= 0) {
       throw new Error('expectedByteSize must be a positive integer.');
+    }
+    const partSizeBytes = input.partSizeBytes ?? DEFAULT_PART_SIZE;
+    if (!Number.isSafeInteger(partSizeBytes) || partSizeBytes < DEFAULT_PART_SIZE || partSizeBytes > 6 * 1024 * 1024) {
+      throw new Error('partSizeBytes must be an integer from 5 MiB through 6 MiB.');
     }
 
     const existing = await db
@@ -211,44 +229,57 @@ export function createAudioPublishingService(config: {
       .limit(1);
     if (existing[0]) return existing[0];
 
-    return db.transaction(async (tx) => {
-      const [asset] = await tx.insert(audioAssets).values({
-        projectId: input.projectId,
-        createdByUserId: input.actorUserId,
-        title: input.title.trim() || input.originalFilename,
-        assetKind: input.assetKind,
-        provenanceType: 'user_upload',
-        status: 'active'
-      }).returning();
+    let objectIdentity: AudioObjectIdentity | null = null;
+    try {
+      return await db.transaction(async (tx) => {
+        const [asset] = await tx.insert(audioAssets).values({
+          projectId: input.projectId,
+          createdByUserId: input.actorUserId,
+          title: input.title.trim() || input.originalFilename,
+          assetKind: input.assetKind,
+          provenanceType: 'user_upload',
+          status: 'active'
+        }).returning();
 
-      const uploadSessionId = randomUUID();
-      const storageKey = store.createObjectKey({
-        projectId: input.projectId,
-        uploadSessionId,
-        filename: input.originalFilename
+        const uploadSessionId = randomUUID();
+        objectIdentity = await store.beginUpload({
+          projectId: input.projectId,
+          uploadSessionId,
+          filename: input.originalFilename,
+          mimeType: input.mimeType
+        });
+
+        const [session] = await tx.insert(audioUploadSessions).values({
+          id: uploadSessionId,
+          projectId: input.projectId,
+          assetId: asset.id,
+          initiatedByUserId: input.actorUserId,
+          idempotencyKey: input.idempotencyKey,
+          storageProvider: objectIdentity.storageProvider,
+          storageBucket: objectIdentity.storageBucket,
+          providerUploadId: objectIdentity.providerUploadId!,
+          storageKey: objectIdentity.storageKey,
+          originalFilename: input.originalFilename,
+          expectedMimeType: input.mimeType,
+          expectedByteSize: input.expectedByteSize,
+          expectedSha256,
+          partSizeBytes,
+          uploadStatus: 'initiated',
+          expiresAt: new Date(Date.now() + UPLOAD_TTL_MS)
+        }).returning();
+
+        return session;
       });
-
-      const [session] = await tx.insert(audioUploadSessions).values({
-        id: uploadSessionId,
-        projectId: input.projectId,
-        assetId: asset.id,
-        initiatedByUserId: input.actorUserId,
-        idempotencyKey: input.idempotencyKey,
-        storageProvider: store.provider,
-        storageBucket: store.bucket,
-        providerUploadId: uploadSessionId,
-        storageKey,
-        originalFilename: input.originalFilename,
-        expectedMimeType: input.mimeType,
-        expectedByteSize: input.expectedByteSize,
-        expectedSha256,
-        partSizeBytes: input.partSizeBytes ?? DEFAULT_PART_SIZE,
-        uploadStatus: 'initiated',
-        expiresAt: new Date(Date.now() + UPLOAD_TTL_MS)
-      }).returning();
-
-      return session;
-    });
+    } catch (error) {
+      if (objectIdentity) {
+        try {
+          await store.abortUpload(objectIdentity);
+        } catch (abortError) {
+          console.error('[sway.audio] failed to abort orphaned provider upload:', abortError);
+        }
+      }
+      throw error;
+    }
   }
 
   async function writeUploadPart(input: {
@@ -276,11 +307,7 @@ export function createAudioPublishingService(config: {
     if (!access) throw new Error('Upload permission required.');
 
     const written = await store.writePart({
-      identity: {
-        storageProvider: 'local_private_fs',
-        storageBucket: session.storageBucket,
-        storageKey: session.storageKey
-      },
+      identity: sessionObjectIdentity(session),
       partNumber: input.partNumber,
       body: input.body
     });
@@ -344,6 +371,10 @@ export function createAudioPublishingService(config: {
     if (!parts.length) throw new Error('No upload parts found.');
     for (let i = 0; i < parts.length; i += 1) {
       if (parts[i].partNumber !== i + 1) throw new Error('Upload parts must be contiguous starting at 1.');
+      if (parts[i].byteSize > session.partSizeBytes) throw new Error(`Upload part ${parts[i].partNumber} exceeds the declared part size.`);
+      if (i < parts.length - 1 && parts[i].byteSize < DEFAULT_PART_SIZE) {
+        throw new Error(`Upload part ${parts[i].partNumber} is below the provider minimum of 5 MiB.`);
+      }
     }
 
     await db
@@ -359,14 +390,14 @@ export function createAudioPublishingService(config: {
     let assembled: { byteSize: number; sha256: string };
     try {
       assembled = await store.assembleParts({
-        identity: {
-          storageProvider: 'local_private_fs',
-          storageBucket: session.storageBucket,
-          storageKey: session.storageKey
-        },
-        partNumbers: parts.map((part) => part.partNumber),
+        identity: sessionObjectIdentity(session),
+        parts: parts.map((part) => ({
+          partNumber: part.partNumber,
+          etag: part.providerEtag
+        })),
         expectedByteSize: session.expectedByteSize,
-        expectedSha256: session.expectedSha256
+        expectedSha256: session.expectedSha256,
+        mimeType: session.expectedMimeType
       });
     } catch (error) {
       await db
@@ -400,7 +431,7 @@ export function createAudioPublishingService(config: {
         byteSize: assembled.byteSize,
         sha256: assembled.sha256,
         integrityStatus: 'verified',
-        integrityVerifierKey: 'sway.local_private_fs.sha256',
+        integrityVerifierKey: `sway.${store.provider}.sha256`,
         integrityVerifiedAt: verifiedAt,
         integrityEvidence: {
           expectedSha256: session.expectedSha256,
@@ -408,7 +439,7 @@ export function createAudioPublishingService(config: {
           expectedByteSize: session.expectedByteSize,
           assembledByteSize: assembled.byteSize,
           partCount: parts.length,
-          verifier: 'sway.local_private_fs.sha256'
+          verifier: `sway.${store.provider}.sha256`
         },
         originalPreserved: true,
         sealedAt: verifiedAt
@@ -533,8 +564,8 @@ export function createAudioPublishingService(config: {
       metadata: { versionId: version.id, sha256: version.sha256 }
     });
 
-    const object = store.openOriginal({
-      storageProvider: 'local_private_fs',
+    const object = await store.openOriginal({
+      storageProvider: parseAudioStorageProvider(version.storageProvider),
       storageBucket: version.storageBucket,
       storageKey: version.storageKey
     });

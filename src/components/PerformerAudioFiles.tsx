@@ -15,14 +15,6 @@ function chunkFile(file: File, partSize: number) {
   return parts;
 }
 
-async function blobToBase64(blob: Blob) {
-  const buffer = await blob.arrayBuffer();
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
 type Project = { id: string; title: string };
 type Version = {
   id: string;
@@ -126,13 +118,12 @@ export default function PerformerAudioFiles() {
       const parts = chunkFile(file, partSize);
       for (let index = 0; index < parts.length; index += 1) {
         setStatus(`Uploading part ${index + 1}/${parts.length}…`);
-        const contentBase64 = await blobToBase64(parts[index]);
         const partResponse = await fetch(
           `/api/talent/audio/uploads/${startData.uploadSession.id}/parts/${index + 1}`,
           {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contentBase64 })
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: parts[index]
           }
         );
         const partData = await partResponse.json().catch(() => ({}));

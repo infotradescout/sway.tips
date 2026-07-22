@@ -22,7 +22,7 @@
             "scripts/sway-audio-durable-storage.integration.test.mjs",
             "docs/runbooks/audio-master-vault.md"
           ],
-          "holdReason": "The code and Render Blueprint fail closed and local exact-byte restart evidence passes, but the live disk, authenticated production journey, access denial, and snapshot restore are not verified."
+          "holdReason": "The private R2 adapter and deterministic exact-byte restart evidence pass, but the live bucket, authenticated production journey, public-access denial, authorization denial, and independent recovery are not verified."
         },
         {
           "id": "project_collaboration",
