@@ -98,7 +98,7 @@ if (!filesSurface.includes("headers: { 'Content-Type': 'application/octet-stream
   || filesSurface.includes('blobToBase64')) {
   failures.push('The performer uploader must send raw binary parts without base64 inflation.');
 }
-if (!filesSurface.includes('aria-label="Upload master audio"')
+if (!filesSurface.includes('aria-label="Add audio to Catalog"')
   || filesSurface.includes('type="file"\n            className="hidden"')) {
   failures.push('The production master picker must remain keyboard-addressable instead of hiding the file input from interaction.');
 }

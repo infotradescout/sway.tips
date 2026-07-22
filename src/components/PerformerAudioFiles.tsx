@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Download, FolderOpen, Loader2, MessageSquare, Upload, UserRound } from 'lucide-react';
 
 async function sha256Hex(file: File) {
@@ -16,6 +16,7 @@ function chunkFile(file: File, partSize: number) {
 }
 
 type Project = { id: string; title: string };
+type Asset = { id: string; title: string; metadata?: { requestable?: boolean } | null };
 type Version = {
   id: string;
   assetId: string;
@@ -49,8 +50,9 @@ type ReviewEvent = {
 };
 
 export default function PerformerAudioFiles() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [versions, setVersions] = useState<Version[]>([]);
   const [title, setTitle] = useState('Masters');
@@ -86,6 +88,7 @@ export default function PerformerAudioFiles() {
     const response = await fetch(`/api/talent/audio/projects/${projectId}/assets`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error || 'Could not load assets.');
+    setAssets(data.assets || []);
     setVersions(data.versions || []);
   };
 
@@ -129,6 +132,10 @@ export default function PerformerAudioFiles() {
     }
   };
 
+  useEffect(() => {
+    void openPanel();
+  }, []);
+
   const createProject = async () => {
     setBusy(true);
     setStatus(null);
@@ -151,14 +158,28 @@ export default function PerformerAudioFiles() {
   };
 
   const uploadFile = async (file: File | null) => {
-    if (!file || !selectedProjectId) return;
+    if (!file) return;
     setBusy(true);
     setStatus(`Hashing ${file.name}…`);
     setShareToken(null);
     try {
+      let projectId = selectedProjectId;
+      if (!projectId) {
+        setStatus('Preparing your Catalog…');
+        const projectResponse = await fetch('/api/talent/audio/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'My Catalog' })
+        });
+        const projectData = await projectResponse.json().catch(() => ({}));
+        if (!projectResponse.ok) throw new Error(projectData?.error || 'Could not prepare your Catalog.');
+        projectId = projectData.project.id;
+        await refreshProjects();
+        setSelectedProjectId(projectId);
+      }
       const expectedSha256 = await sha256Hex(file);
       const partSize = 5 * 1024 * 1024;
-      const start = await fetch(`/api/talent/audio/projects/${selectedProjectId}/uploads`, {
+      const start = await fetch(`/api/talent/audio/projects/${projectId}/uploads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -168,7 +189,7 @@ export default function PerformerAudioFiles() {
           mimeType: file.type || 'application/octet-stream',
           expectedByteSize: file.size,
           expectedSha256,
-          idempotencyKey: `upload:${selectedProjectId}:${expectedSha256}:${file.size}`,
+          idempotencyKey: `upload:${projectId}:${expectedSha256}:${file.size}`,
           partSizeBytes: partSize
         })
       });
@@ -196,10 +217,31 @@ export default function PerformerAudioFiles() {
       });
       const completeData = await complete.json().catch(() => ({}));
       if (!complete.ok) throw new Error(completeData?.error || 'Could not seal upload.');
-      await refreshAssets(selectedProjectId);
+      await refreshAssets(projectId);
       setStatus(`Sealed v${completeData.version.versionNumber} · ${completeData.version.sha256.slice(0, 12)}…`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Upload failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setRequestable = async (assetId: string, requestable: boolean) => {
+    if (!selectedProjectId) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/talent/audio/assets/${assetId}/requestable`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestable })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not update request availability.');
+      await refreshAssets(selectedProjectId);
+      setStatus(requestable ? 'This track is now available in Library.' : 'This track is private to Catalog.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not update request availability.');
     } finally {
       setBusy(false);
     }
@@ -318,67 +360,52 @@ export default function PerformerAudioFiles() {
     <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4 sm:col-span-2">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Files &amp; projects</p>
-          <p className="mt-1 text-xs text-slate-400">Immutable source files with SHA-256 seals. Private pairing is available; music distribution is not yet live.</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your Catalog</p>
+          <p className="mt-1 text-xs text-slate-400">Upload your audio here. It stays private unless you choose “Allow requests.”</p>
         </div>
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" /> : null}
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-        <input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          className="min-h-11 rounded-xl border border-white/10 bg-slate-900 px-3 text-sm font-bold text-white"
-          placeholder="Project title"
-        />
-        <button type="button" onClick={createProject} disabled={busy} className="min-h-11 rounded-xl bg-fuchsia-600 px-4 text-xs font-black text-white disabled:opacity-50">
-          Create project
-        </button>
-      </div>
-
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <select
-          value={selectedProjectId}
-          onChange={async (event) => {
-            setSelectedProjectId(event.target.value);
-            if (event.target.value) {
-              setBusy(true);
-              try {
-                await refreshAssets(event.target.value);
-              } catch (error) {
-                setStatus(error instanceof Error ? error.message : 'Could not load assets.');
-              } finally {
-                setBusy(false);
-              }
-            }
-          }}
-          className="min-h-11 rounded-xl border border-white/10 bg-slate-900 px-3 text-sm font-bold text-white"
-        >
-          <option value="">Select project</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>{project.title}</option>
-          ))}
-        </select>
-        <label className={`relative inline-flex min-h-11 items-center justify-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-slate-900 px-4 text-xs font-black text-white focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-400/40 ${selectedProject ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
-          <Upload className="h-4 w-4" />
-          Upload master
+      <label className="relative mt-4 inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white focus-within:ring-2 focus-within:ring-fuchsia-300 disabled:opacity-50">
+          <Upload className="h-4 w-4" aria-hidden="true" />
+          Add audio
           <input
             type="file"
-            aria-label="Upload master audio"
+            accept="audio/*"
+            aria-label="Add audio to Catalog"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-            disabled={!selectedProject || busy}
+            disabled={busy}
             onChange={(event) => uploadFile(event.target.files?.[0] ?? null)}
           />
-        </label>
-      </div>
+      </label>
+
+      <details className="mt-3 rounded-xl border border-white/10 bg-slate-900 p-3">
+        <summary className="cursor-pointer list-none text-xs font-bold text-slate-400">Organize projects</summary>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <select value={selectedProjectId} onChange={async (event) => { setSelectedProjectId(event.target.value); if (event.target.value) await refreshAssets(event.target.value); }} className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white">
+            <option value="">My Catalog</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+          </select>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white" placeholder="Project title" />
+            <button type="button" onClick={createProject} disabled={busy} className="rounded-xl border border-fuchsia-500/30 px-3 text-xs font-black text-fuchsia-100 disabled:opacity-50">Create</button>
+          </div>
+        </div>
+      </details>
 
       <div className="mt-4 space-y-2">
         {versions.length === 0 ? (
           <p className="text-xs text-slate-500">No sealed versions yet.</p>
-        ) : versions.map((version) => (
-          <div key={version.id} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+        ) : versions.map((version) => {
+          const asset = assets.find((candidate) => candidate.id === version.assetId);
+          const requestable = asset?.metadata?.requestable === true;
+          return <div key={version.id} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-3">
             <p className="truncate text-sm font-bold text-white">{version.originalFilename} · v{version.versionNumber}</p>
-            <p className="mt-1 font-mono text-[10px] text-slate-400">{version.sha256}</p>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${requestable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 text-slate-400'}`}>{requestable ? 'In Library' : 'Private'}</span>
+              <button type="button" onClick={() => setRequestable(version.assetId, !requestable)} disabled={busy} className="rounded-lg border border-fuchsia-500/30 px-3 py-2 text-xs font-black text-fuchsia-100 disabled:opacity-50">{requestable ? 'Remove from requests' : 'Allow requests'}</button>
+            </div>
+            <details className="mt-2"><summary className="cursor-pointer text-[10px] text-slate-500">File details and sharing</summary><p className="mt-2 font-mono text-[10px] text-slate-500">{version.sha256}</p>
             <button
               type="button"
               onClick={() => createShare(version.id)}
@@ -395,8 +422,9 @@ export default function PerformerAudioFiles() {
             >
               Share with connection
             </button>
-          </div>
-        ))}
+            </details>
+          </div>;
+        })}
       </div>
 
       <div className="mt-5 rounded-xl border border-white/10 bg-slate-900 p-3">
