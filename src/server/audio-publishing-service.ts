@@ -361,6 +361,9 @@ export function createAudioPublishingService(config: {
         .limit(1);
       if (existing) return existing;
     }
+    if (!['initiated', 'uploading', 'uploaded', 'verifying'].includes(session.uploadStatus)) {
+      throw new Error(`Upload session is ${session.uploadStatus} and cannot be sealed.`);
+    }
 
     const parts = await db
       .select()
@@ -377,15 +380,19 @@ export function createAudioPublishingService(config: {
       }
     }
 
-    await db
-      .update(audioUploadSessions)
-      .set({ uploadStatus: 'uploaded', updatedAt: new Date() })
-      .where(eq(audioUploadSessions.id, session.id));
+    if (session.uploadStatus === 'initiated' || session.uploadStatus === 'uploading') {
+      await db
+        .update(audioUploadSessions)
+        .set({ uploadStatus: 'uploaded', updatedAt: new Date() })
+        .where(eq(audioUploadSessions.id, session.id));
+    }
 
-    await db
-      .update(audioUploadSessions)
-      .set({ uploadStatus: 'verifying', updatedAt: new Date() })
-      .where(eq(audioUploadSessions.id, session.id));
+    if (session.uploadStatus !== 'verifying') {
+      await db
+        .update(audioUploadSessions)
+        .set({ uploadStatus: 'verifying', updatedAt: new Date() })
+        .where(eq(audioUploadSessions.id, session.id));
+    }
 
     let assembled: { byteSize: number; sha256: string };
     try {
