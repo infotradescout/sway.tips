@@ -104,6 +104,39 @@ for (const requiredTerm of ['Request', 'Tip', 'Boost', 'Pending', 'Approved', 'P
   }
 }
 
+const performerDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const performerHome = readFileSync(join(root, 'src/components/PerformerAccountHome.tsx'), 'utf8');
+for (const workspace of [
+  "{ id: 'home', label: 'Home'",
+  "{ id: 'room', label: 'Live'",
+  "{ id: 'library', label: 'Library'",
+  "{ id: 'profile', label: 'Profile'",
+  "{ id: 'account', label: 'Account'"
+]) {
+  if (!performerDashboard.includes(workspace)) {
+    failures.push(`Performer app is missing workspace: ${workspace}`);
+  }
+}
+for (const boundary of [
+  'data-sway-performer-app-navigation="true"',
+  'data-sway-library-workspace="true"',
+  'data-sway-account-workspace="true"',
+  'aria-label="File collaboration tools"'
+]) {
+  if (!performerDashboard.includes(boundary)) {
+    failures.push(`Performer app is missing workspace boundary: ${boundary}`);
+  }
+}
+if (!performerDashboard.includes('<PerformerAudioFiles />') || !performerDashboard.includes('<PerformerFilePairing />')) {
+  failures.push('Library workspace must own audio files and private pairing.');
+}
+if (performerHome.includes('<PerformerAudioFiles />') || performerHome.includes('<PerformerFilePairing />')) {
+  failures.push('Home must stay an overview instead of absorbing library workflows.');
+}
+if (!performerDashboard.includes('Money & access')) {
+  failures.push('Account workspace must own payout and access administration.');
+}
+
 if (failures.length) {
   console.error('Phase 2 shell migration contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));

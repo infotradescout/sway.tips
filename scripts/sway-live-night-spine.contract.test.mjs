@@ -39,6 +39,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'aria-label="Performer console sections"',
   "inactiveWorkspace === 'home'",
   "inactiveWorkspace === 'room'",
+  "inactiveWorkspace === 'library'",
   "inactiveWorkspace === 'profile'",
   "inactiveWorkspace === 'account'",
   "onStartRoom={() => setInactiveWorkspace('room')}",
@@ -46,9 +47,11 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Show QR',
   "{ id: 'settings', label: 'Control' }",
   'Copy link',
-  'Account & integrations',
-  'data-sway-account-integrations="true"',
-  'Music sources, hardware bridges, and payouts.',
+  'Library & files',
+  'data-sway-library-workspace="true"',
+  'Music sources, immutable masters, and private collaborators.',
+  'data-sway-account-workspace="true"',
+  'Money & access',
   'Backers',
   '<PerformerRoomSetup'
 ]);
