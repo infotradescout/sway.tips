@@ -13,6 +13,7 @@
     "validate": "npm run lint && npm run build && npm run test:contracts",
     "readiness:report": "node scripts/sway-complete-product-readiness.mjs",
     "readiness:assert": "node scripts/sway-complete-product-readiness.mjs --assert-ready",
+    "proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:migrate": "drizzle-kit migrate",
