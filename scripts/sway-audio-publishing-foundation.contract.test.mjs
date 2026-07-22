@@ -19,6 +19,9 @@ const migration = read('drizzle/0023_audio_publishing_foundation.sql');
 const contract = read('src/server/audio-publishing-contract.ts');
 const doc = read('docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md');
 const packageJson = read('package.json');
+const server = read('server.ts');
+const pairingService = read('src/server/audio-file-pairing-service.ts');
+const pairingCreator = read('src/components/PerformerFilePairing.tsx');
 const roomQrSources = [
   read('src/components/PerformerShareKit.tsx'),
   read('src/components/PerformerRoomShare.tsx'),
@@ -392,6 +395,37 @@ for (const forbidden of ["'/g/'", 'gigId', 'roomId']) {
   }
 }
 
+if (!pairingCreator.includes('const tokenHash = await sha256Hex(secret);')) {
+  failures.push('File-pairing QR creation must hash the random token bytes before storing the digest.');
+}
+
+for (const term of [
+  "Buffer.from(normalizedToken, 'base64url')",
+  "eventType: 'audio_file_pairing.claim_denied'",
+  "'consumed_token_replay'",
+  "'concurrent_consumption_replay'"
+]) {
+  if (!pairingService.includes(term)) {
+    failures.push(`File-pairing runtime missing review hardening term: ${term}`);
+  }
+}
+
+const revokeRouteStart = server.indexOf("app.post('/api/talent/audio/pairing/connections/:connectionId/revoke'");
+const revokeRouteEnd = server.indexOf("app.get('/api/talent/setlist'", revokeRouteStart);
+const revokeRoute = revokeRouteStart >= 0 && revokeRouteEnd > revokeRouteStart
+  ? server.slice(revokeRouteStart, revokeRouteEnd)
+  : '';
+if (!revokeRoute) {
+  failures.push('Unable to locate the file-pairing connection revoke route.');
+} else {
+  if (!revokeRoute.includes('accessControl.requireAuthenticatedAccountAccess(req)')) {
+    failures.push('Every authenticated connection member must be able to reach the revoke membership check.');
+  }
+  if (revokeRoute.includes('accessControl.requireTalentAccess(req)')) {
+    failures.push('The revoke route must not reject a non-talent connection member before checking membership.');
+  }
+}
+
 for (const forbidden of [
   'request_files',
   'send_files',
@@ -413,6 +447,8 @@ if (!packageJson.includes('node scripts/sway-audio-publishing-migration.contract
 
 if (contract && schema && migration) {
   const behaviorProgram = String.raw`
+    import { createHash } from 'node:crypto';
+    import { strict as assert } from 'node:assert';
     import {
       AUDIO_FILE_ACCESS_MODEL,
       AUDIO_FILE_CONNECTION_QR_CONTRACT,
@@ -424,6 +460,10 @@ if (contract && schema && migration) {
       SWAY_DISTRIBUTION_RIGHTS_POLICY,
       normalizeIsrc
     } from './src/server/audio-publishing-contract.ts';
+    import {
+      createAudioFilePairingService,
+      hashAudioFilePairingToken
+    } from './src/server/audio-file-pairing-service.ts';
 
     const expectThrow = (label, operation) => {
       let threw = false;
@@ -498,6 +538,95 @@ if (contract && schema && migration) {
     expectThrow('expired QR must fail closed', () => {
       assertAudioFilePairingClaim({ ...validClaim, now: '2026-07-20T00:00:00.000Z' });
     });
+
+    const qrSecretBytes = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const qrToken = Buffer.from(qrSecretBytes).toString('base64url');
+    const browserStoredHash = createHash('sha256').update(qrSecretBytes).digest('hex');
+    assert.equal(
+      hashAudioFilePairingToken(qrToken),
+      browserStoredHash,
+      'Server claim lookup must hash the same decoded bytes the browser hashed when creating the QR.'
+    );
+    expectThrow('non-canonical pairing tokens must fail closed', () => {
+      hashAudioFilePairingToken(qrToken + '=');
+    });
+
+    const replayAudits = [];
+    const consumedToken = {
+      id: 'pairing-token-1',
+      createdByUserId: 'creator',
+      consumedAt: new Date('2026-07-18T01:00:00.000Z'),
+      revokedAt: null,
+      expiresAt: new Date('2026-07-19T00:00:00.000Z')
+    };
+    const replayTransaction = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [consumedToken]
+          })
+        })
+      })
+    };
+    const replayDb = {
+      transaction: async (operation) => operation(replayTransaction),
+      insert: () => ({
+        values: async (row) => {
+          replayAudits.push(row);
+          return [];
+        }
+      })
+    };
+    const replayService = createAudioFilePairingService({ db: replayDb });
+    await assert.rejects(
+      replayService.claimPairingToken({ claimingUserId: 'collaborator', rawToken: qrToken }),
+      /already been used/i
+    );
+    assert.equal(replayAudits.length, 1, 'A consumed-token replay must write one durable denial audit.');
+    assert.equal(replayAudits[0].eventType, 'audio_file_pairing.claim_denied');
+    assert.equal(replayAudits[0].entityId, consumedToken.id);
+    assert.equal(replayAudits[0].metadata?.reason, 'consumed_token_replay');
+
+    const connectionForUniversalMember = {
+      id: 'connection-1',
+      memberOneUserId: 'creator',
+      memberTwoUserId: 'universal-account-member',
+      revokedAt: null,
+      revokedByUserId: null,
+      revocationReason: null,
+      updatedAt: new Date('2026-07-18T00:00:00.000Z')
+    };
+    const revokeEvents = [];
+    const revokeDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [connectionForUniversalMember]
+          })
+        })
+      }),
+      update: () => ({
+        set: (changes) => ({
+          where: () => ({
+            returning: async () => [{ ...connectionForUniversalMember, ...changes }]
+          })
+        })
+      }),
+      insert: () => ({
+        values: async (row) => {
+          revokeEvents.push(row);
+          return [];
+        }
+      })
+    };
+    const revokeService = createAudioFilePairingService({ db: revokeDb });
+    const revoked = await revokeService.revokeConnection({
+      userId: 'universal-account-member',
+      connectionId: connectionForUniversalMember.id,
+      reason: 'Member requested removal'
+    });
+    assert.equal(revoked.connectionId, connectionForUniversalMember.id);
+    assert.equal(revokeEvents.length, 2, 'A non-talent connection member revoke must emit connection and audit evidence.');
 
     if (AUDIO_FILE_CONNECTION_QR_CONTRACT.claimSecretTransport !== 'url_fragment_then_authenticated_post_body') {
       throw new Error('File-pairing claim secrets must be separated from room paths and ordinary HTTP URL transport.');
