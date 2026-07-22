@@ -581,6 +581,29 @@ export function createAudioPublishingService(config: {
     return { version, ...object };
   }
 
+  async function openOwnedVersion(input: { versionId: string; actorUserId: string }) {
+    const [version] = await db
+      .select()
+      .from(audioProjectAssetVersions)
+      .where(eq(audioProjectAssetVersions.id, input.versionId))
+      .limit(1);
+    if (!version) throw new Error('Catalog audio not found.');
+
+    const access = await requireProjectAccess({
+      projectId: version.projectId,
+      userId: input.actorUserId,
+      needDownload: true
+    });
+    if (!access) throw new Error('Catalog audio access denied.');
+
+    const object = await store.openOriginal({
+      storageProvider: parseAudioStorageProvider(version.storageProvider),
+      storageBucket: version.storageBucket,
+      storageKey: version.storageKey
+    });
+    return { version, ...object };
+  }
+
   return {
     createProject,
     listProjects,
@@ -589,6 +612,7 @@ export function createAudioPublishingService(config: {
     writeUploadPart,
     completeAndSealUpload,
     createShareGrant,
+    openOwnedVersion,
     downloadSharedOriginal
   };
 }

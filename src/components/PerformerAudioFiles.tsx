@@ -24,6 +24,7 @@ type Version = {
   originalFilename: string;
   byteSize: number;
   sha256: string;
+  mimeType: string;
 };
 type Connection = {
   connectionId: string;
@@ -401,6 +402,7 @@ export default function PerformerAudioFiles() {
           const requestable = asset?.metadata?.requestable === true;
           return <div key={version.id} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-3">
             <p className="truncate text-sm font-bold text-white">{version.originalFilename} · v{version.versionNumber}</p>
+            {version.mimeType.startsWith('audio/') ? <audio controls preload="metadata" src={`/api/talent/audio/versions/${version.id}/content`} className="mt-3 w-full" aria-label={`Play ${version.originalFilename}`} /> : null}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${requestable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 text-slate-400'}`}>{requestable ? 'In Library' : 'Private'}</span>
               <button type="button" onClick={() => setRequestable(version.assetId, !requestable)} disabled={busy} className="rounded-lg border border-fuchsia-500/30 px-3 py-2 text-xs font-black text-fuchsia-100 disabled:opacity-50">{requestable ? 'Remove from requests' : 'Allow requests'}</button>

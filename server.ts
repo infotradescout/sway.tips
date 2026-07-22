@@ -6447,6 +6447,28 @@ app.post('/api/talent/audio/versions/:versionId/shares', async (req, res) => {
   }
 });
 
+app.get('/api/talent/audio/versions/:versionId/content', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const opened = await audioPublishingService.openOwnedVersion({
+      versionId: req.params.versionId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', opened.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(opened.byteSize));
+    res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', opened.version.sha256);
+    opened.stream.pipe(res);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Catalog audio access denied.' });
+  }
+});
+
 app.post('/api/talent/audio/shares/download', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
