@@ -88,6 +88,7 @@ type SearchTrack = {
   description?: string;
   source?: string;
   sourceProvider?: string;
+  category?: 'sway_catalog' | 'external_request_music';
   spotifyUri?: string;
   spotifyUrl?: string;
   targetType?: 'music' | 'custom';
@@ -645,6 +646,18 @@ export default function PatronView({
     // Auto populate minimum or baseline price
     setTipAmount(Math.max(session.minimumTip, track.basePrice || session.minimumTip));
   };
+
+  const renderSearchResult = (song: SearchTrack) => (
+    <button key={song.id} type="button" onClick={() => handleSelectTrack(song)} className="w-full p-2.5 bg-slate-900/40 hover:bg-slate-900 border border-white/5 hover:border-white/10 rounded-lg flex items-center gap-3 text-left transition-colors cursor-pointer">
+      <img src={song.albumArt} alt={`${song.title} album art`} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.src = REQUEST_ART_PLACEHOLDER; }} className="w-10 h-10 rounded shrink-0 object-cover border border-white/5" />
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-bold text-white truncate">{song.title}</div>
+        <p className="text-[10px] text-slate-400 truncate mt-0.5">{song.artist}</p>
+        {song.source ? <p className="text-[9px] text-fuchsia-300 mt-1 font-bold uppercase tracking-wider">{song.source}</p> : null}
+        {song.description ? <p className="text-[9px] text-cyan-400 italic font-mono mt-1 line-clamp-1">{song.description}</p> : null}
+      </div>
+    </button>
+  );
 
   // Open confirmation. boostTarget/boostAmountOverride are passed explicitly
   // for boosts rather than relying on boostingItem/boostAmount state set
@@ -1517,32 +1530,18 @@ export default function PatronView({
                     {!searchError && !isSearching && searchQuery.trim() && searchResults.length === 0 && (
                       <p className="text-xs text-slate-400 font-sans px-1">No matches found.</p>
                     )}
-                    {searchResults.map((song) => (
-                      <button
-                        key={song.id}
-                        type="button"
-                        onClick={() => handleSelectTrack(song)}
-                        className="w-full p-2.5 bg-slate-900/40 hover:bg-slate-900 border border-white/5 hover:border-white/10 rounded-lg flex items-center gap-3 text-left transition-colors cursor-pointer"
-                      >
-                        <img
-                          src={song.albumArt}
-                          alt={`${song.title} album art`}
-                          referrerPolicy="no-referrer"
-                          onError={(e) => { e.currentTarget.src = REQUEST_ART_PLACEHOLDER; }}
-                          className="w-10 h-10 rounded shrink-0 object-cover border border-white/5"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-bold text-white truncate">{song.title}</div>
-                          <p className="text-[10px] text-slate-400 truncate mt-0.5">{song.artist}</p>
-                          {song.source && (
-                            <p className="text-[9px] text-fuchsia-300 mt-1 font-bold uppercase tracking-wider">{song.source}</p>
-                          )}
-                          {song.description && (
-                            <p className="text-[9px] text-cyan-400 italic font-mono mt-1 line-clamp-1">{song.description}</p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+                    {searchResults.some((song) => song.category === 'sway_catalog') ? (
+                      <div className="space-y-2 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-2">
+                        <p className="px-1 text-[10px] font-black uppercase tracking-wider text-fuchsia-200">Catalog audio · stored in Sway</p>
+                        {searchResults.filter((song) => song.category === 'sway_catalog').map(renderSearchResult)}
+                      </div>
+                    ) : null}
+                    {searchResults.some((song) => song.category !== 'sway_catalog') ? (
+                      <div className="space-y-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-2">
+                        <div className="px-1"><p className="text-[10px] font-black uppercase tracking-wider text-cyan-200">External request music</p><p className="mt-0.5 text-[9px] text-slate-500">The performer plays this from Spotify, DJ software, or another external source.</p></div>
+                        {searchResults.filter((song) => song.category !== 'sway_catalog').map(renderSearchResult)}
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>

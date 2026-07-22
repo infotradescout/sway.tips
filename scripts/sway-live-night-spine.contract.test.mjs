@@ -53,7 +53,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Synced catalogs and external music sources used for audience requests.',
   'data-sway-audio-catalog="true"',
   'Audio catalog',
-  'masters, beats, stems, spoken word, audiobooks, demos',
+  'masters, beats, mixes, spoken word, audiobooks, demos',
   'data-sway-account-workspace="true"',
   'Money & access',
   'Backers',

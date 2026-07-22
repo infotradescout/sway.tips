@@ -41,6 +41,7 @@ for (const term of ['ADD COLUMN "can_comment"', 'ADD COLUMN "can_approve"']) {
   if (!migration.includes(term)) failures.push(`Collaboration migration is missing: ${term}`);
 }
 for (const route of [
+  "/api/talent/audio/assets/:assetId/requestable",
   "/api/talent/audio/pairing/connections/:connectionId/shares",
   "/api/talent/audio/files/shared-with-me",
   "/api/talent/audio/files/shared-by-me",
@@ -66,6 +67,10 @@ if (!workflow.includes('Run Audio File Collaboration Integration Proof')) {
   failures.push('CI must run the disposable collaboration integration proof.');
 }
 for (const term of [
+  'Add audio to Catalog',
+  'Allow requests',
+  'Remove from requests',
+  'This track is now available in Library.',
   'Share with connection',
   'Shared with me',
   'Shared by me',

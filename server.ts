@@ -15,7 +15,7 @@ import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -1569,6 +1569,50 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   }
 
   return { importedCount: normalizedTracks.length, removedCount };
+}
+
+async function loadRequestableCatalogTracks(executor: any, input: {
+  performerId: string;
+  query?: string;
+  limit?: number;
+}) {
+  const query = normalizeLibraryText(input.query, 160).toLowerCase();
+  const likeQuery = `%${query}%`;
+  const filters = [
+    eq(audioProjects.performerId, input.performerId),
+    eq(audioProjects.status, 'active'),
+    eq(audioAssets.status, 'active'),
+    inArray(audioAssets.assetKind, ['master_audio', 'mix', 'other']),
+    sql`${audioAssets.metadata}->>'requestable' = 'true'`
+  ];
+  if (query) {
+    filters.push(sql`lower(concat_ws(' ', ${audioAssets.title}, ${audioProjects.title}, ${audioProjectAssetVersions.originalFilename})) like ${likeQuery}`);
+  }
+
+  const rows = await executor
+    .select({
+      id: audioProjectAssetVersions.id,
+      assetId: audioAssets.id,
+      title: audioAssets.title,
+      projectTitle: audioProjects.title,
+      filename: audioProjectAssetVersions.originalFilename,
+      versionNumber: audioProjectAssetVersions.versionNumber,
+      durationMs: audioProjectAssetVersions.durationMs,
+      createdAt: audioProjectAssetVersions.createdAt
+    })
+    .from(audioProjectAssetVersions)
+    .innerJoin(audioAssets, eq(audioAssets.id, audioProjectAssetVersions.assetId))
+    .innerJoin(audioProjects, eq(audioProjects.id, audioProjectAssetVersions.projectId))
+    .where(and(...filters))
+    .orderBy(desc(audioProjectAssetVersions.versionNumber), desc(audioProjectAssetVersions.createdAt))
+    .limit(Math.max(1, Math.min(Number(input.limit) || 100, 250)));
+
+  const seenAssets = new Set<string>();
+  return rows.filter((row: { assetId: string }) => {
+    if (seenAssets.has(row.assetId)) return false;
+    seenAssets.add(row.assetId);
+    return true;
+  });
 }
 
 async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
@@ -5879,6 +5923,62 @@ app.get('/api/talent/library/sources', async (req, res) => {
   return res.json({ sources });
 });
 
+app.get('/api/talent/library/tracks', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Your music requires a durable database connection.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can view this library.' });
+  }
+
+  const [libraryRows, catalogRows] = await Promise.all([
+    businessDb
+      .select({
+        id: performerLibraryTracks.id,
+        title: performerLibraryTracks.title,
+        artist: performerLibraryTracks.artist,
+        album: performerLibraryTracks.album,
+        artworkUrl: performerLibraryTracks.artworkUrl,
+        sourceLabel: performerLibraryTracks.sourceLabel
+      })
+      .from(performerLibraryTracks)
+      .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
+      .orderBy(desc(performerLibraryTracks.updatedAt))
+      .limit(100),
+    loadRequestableCatalogTracks(businessDb, { performerId: performerOwner.performerId, limit: 100 })
+  ]);
+
+  return res.json({
+    catalog: {
+      category: 'sway_catalog',
+      label: 'Catalog audio',
+      playbackBoundary: 'sway_stored_audio',
+      tracks: catalogRows.map((row: any) => ({
+        id: `catalog:${row.id}`,
+        title: row.title || row.filename,
+        artist: performerOwner.displayName,
+        album: row.projectTitle,
+        artworkUrl: null,
+        sourceLabel: 'Catalog',
+        sourceKey: 'catalog'
+      }))
+    },
+    external: {
+      category: 'external_request_music',
+      label: 'External request music',
+      playbackBoundary: 'external_source_required',
+      tracks: libraryRows.map((row) => ({ ...row, sourceKey: 'external' }))
+    }
+  });
+});
+
 app.get('/api/talent/music/source-capabilities', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -6207,6 +6307,38 @@ app.get('/api/talent/audio/projects/:projectId/assets', async (req, res) => {
   } catch (error) {
     return res.status(403).json({ error: error instanceof Error ? error.message : 'Project access denied.' });
   }
+});
+
+app.post('/api/talent/audio/assets/:assetId/requestable', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId || !businessDb) return res.status(503).json({ error: 'Catalog access requires a durable database connection.' });
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can change request availability.' });
+
+  const [asset] = await businessDb
+    .select({ id: audioAssets.id, metadata: audioAssets.metadata })
+    .from(audioAssets)
+    .innerJoin(audioProjects, eq(audioProjects.id, audioAssets.projectId))
+    .where(and(
+      eq(audioAssets.id, req.params.assetId),
+      eq(audioProjects.performerId, performerOwner.performerId)
+    ))
+    .limit(1);
+  if (!asset) return res.status(404).json({ error: 'Catalog track not found.' });
+
+  const requestable = req.body?.requestable === true;
+  const metadata = asset.metadata && typeof asset.metadata === 'object' && !Array.isArray(asset.metadata)
+    ? asset.metadata as Record<string, unknown>
+    : {};
+  await businessDb
+    .update(audioAssets)
+    .set({ metadata: { ...metadata, requestable }, updatedAt: new Date() })
+    .where(eq(audioAssets.id, asset.id));
+
+  return res.json({ success: true, assetId: asset.id, requestable });
 });
 
 app.post('/api/talent/audio/projects/:projectId/uploads', async (req, res) => {
@@ -9114,19 +9246,39 @@ app.post("/api/music/search", (req, res) => {
       )
       .limit(25);
 
+    const catalogRows = await loadRequestableCatalogTracks(businessDb, {
+      performerId: gigRow.performerId,
+      query,
+      limit: 25
+    });
+
     return res.json({
-      results: libraryRows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        artist: row.artist,
-        albumArt: row.artworkUrl || albumArt,
-        description: row.album || 'Available in performer library',
-        source: row.sourceLabel,
-        sourceProvider: typeof (row.metadata as any)?.sourceProvider === 'string' ? (row.metadata as any).sourceProvider : undefined,
-        spotifyUri: typeof (row.metadata as any)?.spotifyUri === 'string' ? (row.metadata as any).spotifyUri : undefined,
-        spotifyUrl: typeof (row.metadata as any)?.spotifyUrl === 'string' ? (row.metadata as any).spotifyUrl : undefined,
-        targetType: 'music'
-      })),
+      results: [
+        ...catalogRows.map((row: any) => ({
+          id: `catalog:${row.id}`,
+          title: row.title || row.filename,
+          artist: 'Catalog',
+          albumArt,
+          description: row.projectTitle || 'Catalog',
+          source: 'Catalog',
+          sourceProvider: 'sway_catalog',
+          category: 'sway_catalog',
+          targetType: 'music'
+        })),
+        ...libraryRows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          albumArt: row.artworkUrl || albumArt,
+          description: row.album || 'Available in performer library',
+          source: row.sourceLabel,
+          category: 'external_request_music',
+          sourceProvider: typeof (row.metadata as any)?.sourceProvider === 'string' ? (row.metadata as any).sourceProvider : undefined,
+          spotifyUri: typeof (row.metadata as any)?.spotifyUri === 'string' ? (row.metadata as any).spotifyUri : undefined,
+          spotifyUrl: typeof (row.metadata as any)?.spotifyUrl === 'string' ? (row.metadata as any).spotifyUrl : undefined,
+          targetType: 'music'
+        }))
+      ].slice(0, 25),
       integrationMode: 'performer_library'
     });
   })().catch((error) => {

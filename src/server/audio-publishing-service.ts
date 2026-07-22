@@ -165,6 +165,7 @@ export function createAudioPublishingService(config: {
         title: audioAssets.title,
         assetKind: audioAssets.assetKind,
         status: audioAssets.status,
+        metadata: audioAssets.metadata,
         createdAt: audioAssets.createdAt
       })
       .from(audioAssets)
