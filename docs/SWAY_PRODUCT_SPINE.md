@@ -1,97 +1,61 @@
 # Sway Product Spine
 
-## Current Baseline
+## Decision
 
-`main @ 3e61b27` (plus re-entry work on `ops/complete-product-reentry`)
+Sway is a two-sided live request, tip, and boost product. It is not a music distribution or file-collaboration platform.
 
-Owner bar (2026-07-21): **Do not ship an incomplete product.** Live-room money alone is not completeness. Publishing, collaboration, file sharing, and a usable account home without a live room are in-scope product, not “later expansion.”
+## Product Sides
 
-See `docs/SWAY_COMPLETE_PRODUCT_GAP.md` for the honest shipped-vs-missing ledger.
+### Customer
 
-## Product Law
+Join a performer room, request, tip, boost, pay, and track the result.
 
-1. One Sway account can act as audience and creator. Stripe verification unlocks receiving payouts / paid intake — not permission to use the site.
-2. A live room is optional night mode. Users must be able to use Sway with zero live room (home, profile, join others, files/collab entry).
-3. The live-night money loop remains sacred and must stay truthful, but it is **one surface**, not the whole product.
-4. Publishing / collaboration / file-sharing foundations that exist only as schema or side branches are unfinished until durable runtime + UI + production evidence exist.
-5. Do not market DistroKid replacement, lossless collab, or catalog cutover until those runtimes are fail-closed and proven.
+### Performer
 
-## Core Surfaces
+Activate Pro Mode, start a room, share the QR/link, control requests, complete the session, and review earnings.
 
-### A. Account home (required; not yet complete)
-- Sign in once
-- Join a room / scan
-- Start a room when ready
-- Profile and public page
-- Entry to files / projects when that runtime exists
-- Stripe Connect status for getting paid
+One account can use both sides. Pro Mode is a capability state, not a separate account type.
 
-### B. Live-night money loop (shipped locally; production payments in test)
-Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.
+## Core Loop
 
-### C. Publishing & collaboration (foundation unmerged / incomplete)
-- Preserve original masters with integrity
-- Project-scoped collaborators
-- Private file pairing and explicit share grants
-- Release delivery and catalog transfer contracts
-- Continuum connector (fail-closed until real)
+Room settings -> Create room -> Show QR/link -> Customer joins -> Request/Tip/Boost -> Backend payment confirmation -> Performer approves/denies/completes -> Customer sees status -> Performer sees earnings -> End room -> Recap.
 
-## One-Sentence Product Lock
+## Money Modes
 
-Sway is the creator’s account for live audience money **and** audio collaboration/publishing — usable every day, with live rooms and payouts when the creator chooses.
-
-## Room Money Mode
-
-- Paid request rooms use the room minimum for paid requests and paid boosts; the current floor is $5.
+- Paid request rooms use the configured minimum for paid requests and boosts; the current floor is $5.
 - Free request rooms make requests free and convert boosts into free upvotes with fixed weight 1.
-- Direct tips remain paid even when request mode is free.
-- Room creation captures the selected `paymentsEnabled` mode.
-- Stripe/payment provider integration remains separate from room-entry UX and money-mode copy changes unless explicitly scoped.
+- Direct tips remain paid when requests are free.
+- Payment success appears only after backend confirmation.
 
-## Core Users
+## Product Rules
 
-- A **user** can join rooms as audience and, when they choose, create/perform.
-- **Collaborators** (producer, engineer, reviewer) are project-scoped roles — not a third public marketing side.
-- **Admin** remains internal-only.
+- A customer route never exposes performer controls.
+- A performer route never relies on customer-side routing as security.
+- Public totals reflect real persisted room activity only.
+- Every money mutation is idempotent and auditable.
+- Degraded networks never turn an unavailable room lookup into a false “room not found.”
+- Moderation remains available without AI.
+- End-room closeout is durable and does not rely on one browser staying open.
+- Supporting profiles, libraries, integrations, overlays, and admin tools must directly serve the live loop.
 
-## Production Principles
+## Explicitly Out of Scope
 
-- Public totals must only reflect real persisted activity.
-- Payment language must describe the processor flow exactly as implemented.
-- Moderation must remain active even when AI providers are unavailable.
-- Every money event must have a lifecycle and ledger trail.
-- Public room state is a projection, never the internal room object (PR #109 boundary).
-- Any `drizzle/` change must apply via deploy `preDeployCommand`, not hope.
-- Capability flags stay false until durable implementation + production evidence exist.
-- Side-branch schema is not shipped product.
+- Music distribution or DSP delivery.
+- Releases, UPC/ISRC workflows, royalties, splits, or catalog transfer.
+- Master-audio vaults, file pairing, review, or collaboration.
+- Venue accounts or venue-management product surfaces.
+- A third customer-facing side beyond customer and performer.
 
-## Phase 2 / Pro Mode
+Historical schema for retired experiments remains untouched until a separately approved data-retention cleanup. It is not roadmap authority.
 
-`users.proModeStatus` is deployed. It is account-layer state for authenticated users.
+## Build Order
 
-- Old “patron accounts held” gate is **lifted by owner direction** (2026-07-21): unified account home is required for completeness.
-- Pro Mode must not be marketed as a patron upsell until the account home and payment gates are honest.
-- Stripe Connect / payout readiness remains the gate for **getting paid**, not for logging in or joining rooms.
+1. Keep account, role, and Pro Mode boundaries correct.
+2. Prove room creation and QR/link joining.
+3. Prove request, tip, boost, and payment confirmation.
+4. Prove performer queue control and customer status updates.
+5. Prove moderation, degraded-network recovery, and idempotency.
+6. Prove earnings, end-room closeout, and recap.
+7. Improve the shortest real customer or performer journey based on production evidence.
 
-## Required Route Spine (current + target)
-
-### Live today
-- `/` public landing
-- `/home` audience scan/entry
-- `/talent/login`, `/talent/signup`, `/talent/gigs`, `/talent/gigs/:gigId`
-- `/g/:gigId`
-- `/p/:performerHandle`
-- `/overlay/:gigId`
-- `/admin` internal-only
-
-### Required for completeness (not complete until runtime exists)
-- Authenticated account home that does not require an active gig
-- `/talent/connect/files` (private pairing; foundation spec only today)
-- Publishing/project routes when runtime lands
-
-## Current Product State
-
-- Live-night loop: implemented and locally QA’d; Stripe publishable/secret/webhook present on Render in **test** mode as of 2026-07-21.
-- Audio publishing foundation: authored on `agent/audio-publishing-foundation`, **not previously on main**; re-entry ports it as `0023_audio_publishing_foundation`. Runtime upload/share/cutover remain fail-closed until durable implementation exists.
-- File sharing / collab / DistroKid cutover: **not user-usable**.
-- Complete-product ship decision: **NO** until the gap ledger’s missing rows are closed or explicitly cut with owner sign-off.
+Complete-product decision: **HOLD** until the current production evidence ledger proves the whole two-sided loop.

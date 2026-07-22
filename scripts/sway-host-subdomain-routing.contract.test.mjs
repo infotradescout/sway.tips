@@ -54,18 +54,13 @@ for (const routePath of ['/', '/home']) {
 requireTerm("return 'public'", 'app/local/root public landing shell');
 requireTerm("return 'patron'", '/home patron shell');
 
-for (const routeToShell of [
-  { route: '/g/', shell: "return 'patron'" },
-  { route: '/p/', shell: "return 'patron'" },
-  { route: '/talent', shell: "return 'talent'" },
-  { route: '/overlay', shell: "return 'overlay'" },
-  { route: '/admin', shell: "return 'admin'" }
+for (const routeBranch of [
+  "if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';",
+  "if (urlPath.startsWith('/talent')) return 'talent';",
+  "if (urlPath.startsWith('/overlay')) return 'overlay';",
+  "if (urlPath.startsWith('/admin')) return 'admin';"
 ]) {
-  const routeIndex = server.indexOf(routeToShell.route);
-  const shellIndex = server.indexOf(routeToShell.shell, Math.max(routeIndex, 0));
-  if (routeIndex === -1 || shellIndex === -1 || shellIndex - routeIndex > 240) {
-    failures.push(`Expected ${routeToShell.route} to map to ${routeToShell.shell}.`);
-  }
+  if (!server.includes(routeBranch)) failures.push(`Expected exact route classifier branch: ${routeBranch}`);
 }
 
 for (const term of [

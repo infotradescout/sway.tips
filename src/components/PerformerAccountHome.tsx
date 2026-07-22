@@ -1,18 +1,16 @@
-import { AudioLines, ExternalLink, Music2, QrCode, Radio } from 'lucide-react';
+import { ExternalLink, Music2, QrCode, Radio } from 'lucide-react';
 
 export default function PerformerAccountHome({
   performerHandle,
   displayName,
   stripeReady,
   onStartRoom,
-  onOpenCatalog,
   onOpenLibrary
 }: {
   performerHandle?: string | null;
   displayName: string;
   stripeReady: boolean;
   onStartRoom: () => void;
-  onOpenCatalog: () => void;
   onOpenLibrary: () => void;
 }) {
   const publicPath = performerHandle ? `/p/${performerHandle}` : null;
@@ -27,7 +25,7 @@ export default function PerformerAccountHome({
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your Sway</p>
           <h2 className="mt-1 font-display text-xl font-black uppercase text-white">{displayName}</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Your music is ready here whenever you sign in. Start a room only when you want a live crowd queue.
+            Start a room when you are ready to take requests, tips, and boosts from a live crowd.
           </p>
         </div>
         <div
@@ -40,10 +38,6 @@ export default function PerformerAccountHome({
       </div>
 
       <div className="mt-5 grid gap-2 sm:grid-cols-2">
-        <button type="button" onClick={onOpenCatalog} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white transition hover:bg-fuchsia-500">
-          <AudioLines className="h-4 w-4" aria-hidden="true" />
-          Open my Catalog
-        </button>
         <button type="button" onClick={onOpenLibrary} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300 hover:text-white">
           <Music2 className="h-4 w-4" aria-hidden="true" />
           Open request Library

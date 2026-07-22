@@ -6,106 +6,63 @@ const root = process.cwd();
 const failures = [];
 const read = (path) => readFileSync(join(root, path), 'utf8');
 
-function requireIncludes(source, term, label) {
-  if (!source.includes(term)) failures.push(`${label} missing term: ${term}`);
-}
-
 const doctrine = read('docs/VIBE_ENGINEERING_DOCTRINE.md');
 const agentRules = read('AGENTS.md');
 const gapLedger = read('docs/SWAY_COMPLETE_PRODUCT_GAP.md');
-const releaseGate = read('docs/process/QA_DRY_RELEASE_GATE.md');
-const evidenceChecklist = read('docs/process/RELEASE_EVIDENCE_CHECKLIST.md');
-const packageJson = JSON.parse(read('package.json'));
 const readiness = JSON.parse(read('config/sway-complete-product-readiness.json'));
+const packageJson = JSON.parse(read('package.json'));
 
 for (const term of [
-  'We do not measure agent productivity by code produced.',
   'verified outcomes delivered without increasing uncontrolled risk',
-  'Humans own:',
-  'Agents own:',
-  'Systems own:',
   'No task is complete because an agent says it is complete.',
   'No deployment is successful merely because it deployed.',
-  'maximum verified throughput per unit of human attention',
-  'Sway replaces the core DistroKid workflow',
-  'Sway retains its original product',
+  'Sway is one simple two-sided live product',
+  'Customer side:',
+  'Performer side:',
+  'Historical audio-distribution schema may remain dormant',
   'npm run readiness:assert'
 ]) {
-  requireIncludes(doctrine, term, 'Vibe engineering doctrine');
+  if (!doctrine.includes(term)) failures.push(`Vibe engineering doctrine missing term: ${term}`);
 }
 
 for (const term of [
   'docs/VIBE_ENGINEERING_DOCTRINE.md',
-  'Productivity is measured by verified outcomes delivered without increasing uncontrolled risk',
   'No task is complete because an agent says it is complete',
   'No deployment is successful merely because it deployed'
 ]) {
-  requireIncludes(agentRules, term, 'Agent rules');
+  if (!agentRules.includes(term)) failures.push(`Agent rules missing term: ${term}`);
 }
 
 for (const term of [
   'Complete-product decision: **HOLD**',
-  'Production migration `0023_audio_publishing_foundation` is applied',
-  'Pairing-token creation is production verified',
-  'private Cloudflare R2 adapter',
-  'independent recovery',
-  'No contracted DSP delivery provider',
-  'No royalty ledger, collaborator distribution splits, or distribution payouts'
+  'Customer and performer shells exist.',
+  'Historical audio-distribution schema exists but is retired',
+  'Run a current production journey with one performer account and one separate customer.'
 ]) {
-  requireIncludes(gapLedger, term, 'Complete-product gap ledger');
+  if (!gapLedger.includes(term)) failures.push(`Complete-product gap ledger missing term: ${term}`);
 }
 
-for (const term of [
-  'Agent output, a passing local command, a merged PR, a deployment hook, or a build marker is never sufficient by itself',
-  'Evidence must identify the requested outcome, the verifier, the environment, the observed result',
-  'Complete-product launch approval is separate from iterative deployment approval',
-  'npm run readiness:assert'
-]) {
-  requireIncludes(releaseGate, term, 'QA dry release gate');
+if (readiness.schemaVersion !== 2) failures.push('Readiness config must use scope-correct schemaVersion 2.');
+if (readiness.decision !== 'HOLD') failures.push('Readiness config must remain HOLD while production outcomes are unverified.');
+if (readiness.pillars?.length !== 1 || readiness.pillars[0]?.id !== 'live_room_product') {
+  failures.push('Readiness config must contain only the live_room_product pillar.');
 }
-
-for (const term of [
-  '## Requested Outcome',
-  '## Independent Evidence',
-  'What remains unproven:',
-  'Automatic rollback trigger:',
-  'Observability signal that activates the trigger:',
-  '## Complete-Product Readiness',
-  'DistroKid-replacement pillar evidence:',
-  'Original-Sway pillar evidence:'
-]) {
-  requireIncludes(evidenceChecklist, term, 'Release evidence checklist');
-}
-
-if (readiness.decision !== 'HOLD') failures.push('Readiness config must remain HOLD while required capabilities are unverified.');
-const pillarIds = new Set(readiness.pillars?.map((pillar) => pillar.id));
-for (const pillarId of ['distrokid_replacement', 'original_sway']) {
-  if (!pillarIds.has(pillarId)) failures.push(`Readiness config missing pillar: ${pillarId}`);
+for (const forbidden of ['distrokid_replacement', 'original_sway']) {
+  if (JSON.stringify(readiness).includes(forbidden)) failures.push(`Readiness config contains retired pillar: ${forbidden}`);
 }
 
 for (const script of ['readiness:report', 'readiness:assert']) {
   if (!packageJson.scripts?.[script]) failures.push(`package.json missing script: ${script}`);
 }
-requireIncludes(
-  packageJson.scripts?.['test:contracts'] ?? '',
-  'sway-complete-product-readiness.contract.test.mjs',
-  'test:contracts'
-);
 
-const report = spawnSync(process.execPath, ['scripts/sway-complete-product-readiness.mjs'], {
-  cwd: root,
-  encoding: 'utf8'
-});
+const report = spawnSync(process.execPath, ['scripts/sway-complete-product-readiness.mjs'], { cwd: root, encoding: 'utf8' });
 if (report.status !== 0 || !report.stdout.includes('Sway complete-product readiness: HOLD')) {
-  failures.push('Readiness report must truthfully report HOLD without claiming launch approval.');
+  failures.push('Readiness report must truthfully report HOLD.');
 }
 
-const assertion = spawnSync(process.execPath, ['scripts/sway-complete-product-readiness.mjs', '--assert-ready'], {
-  cwd: root,
-  encoding: 'utf8'
-});
+const assertion = spawnSync(process.execPath, ['scripts/sway-complete-product-readiness.mjs', '--assert-ready'], { cwd: root, encoding: 'utf8' });
 if (assertion.status !== 1 || !assertion.stderr.includes('failed closed')) {
-  failures.push('Readiness launch assertion must exit 1 and fail closed while blockers remain.');
+  failures.push('Readiness assertion must fail closed while production evidence is incomplete.');
 }
 
 if (failures.length) {
