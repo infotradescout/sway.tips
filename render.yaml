@@ -15,13 +15,3 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: SWAY_AUDIO_STORAGE_PROVIDER
-        value: r2
-      - key: SWAY_AUDIO_R2_BUCKET
-        value: sway-audio-originals
-      - key: SWAY_AUDIO_R2_ACCOUNT_ID
-        sync: false
-      - key: SWAY_AUDIO_R2_ACCESS_KEY_ID
-        sync: false
-      - key: SWAY_AUDIO_R2_SECRET_ACCESS_KEY
-        sync: false

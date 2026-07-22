@@ -1530,16 +1530,10 @@ export default function PatronView({
                     {!searchError && !isSearching && searchQuery.trim() && searchResults.length === 0 && (
                       <p className="text-xs text-slate-400 font-sans px-1">No matches found.</p>
                     )}
-                    {searchResults.some((song) => song.category === 'sway_catalog') ? (
-                      <div className="space-y-2 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-2">
-                        <p className="px-1 text-[10px] font-black uppercase tracking-wider text-fuchsia-200">Catalog audio · stored in Sway</p>
-                        {searchResults.filter((song) => song.category === 'sway_catalog').map(renderSearchResult)}
-                      </div>
-                    ) : null}
-                    {searchResults.some((song) => song.category !== 'sway_catalog') ? (
+                    {searchResults.length > 0 ? (
                       <div className="space-y-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-2">
                         <div className="px-1"><p className="text-[10px] font-black uppercase tracking-wider text-cyan-200">External request music</p><p className="mt-0.5 text-[9px] text-slate-500">The performer plays this from Spotify, DJ software, or another external source.</p></div>
-                        {searchResults.filter((song) => song.category !== 'sway_catalog').map(renderSearchResult)}
+                        {searchResults.map(renderSearchResult)}
                       </div>
                     ) : null}
                   </div>

@@ -17,16 +17,16 @@ try {
   failConfiguration(error instanceof Error ? error.message : 'configuration could not be read');
 }
 
-if (config.schemaVersion !== 1) failConfiguration('schemaVersion must be 1');
+if (config.schemaVersion !== 2) failConfiguration('schemaVersion must be 2');
 if (!['HOLD', 'GO'].includes(config.decision)) failConfiguration('decision must be HOLD or GO');
 if (!Array.isArray(config.allowedStatuses) || !config.allowedStatuses.includes('production_verified')) {
   failConfiguration('allowedStatuses must include production_verified');
 }
-if (!Array.isArray(config.pillars) || config.pillars.length !== 2) {
-  failConfiguration('exactly two readiness pillars are required');
+if (!Array.isArray(config.pillars) || config.pillars.length !== 1) {
+  failConfiguration('exactly one live-room readiness pillar is required');
 }
 
-const requiredPillars = new Set(['distrokid_replacement', 'original_sway']);
+const requiredPillars = new Set(['live_room_product']);
 const seenPillars = new Set();
 const seenCapabilities = new Set();
 const blockers = [];

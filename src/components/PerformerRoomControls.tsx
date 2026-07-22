@@ -85,7 +85,7 @@ export default function PerformerRoomControls({
         <div className="grid grid-cols-2 gap-1">
           {[
             ['library', 'Library'],
-            ['catalog', 'Catalog']
+            ['catalog', 'Open requests']
           ].map(([scope, label]) => (
             <button
               key={scope}

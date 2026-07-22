@@ -244,6 +244,16 @@ app.use(express.json({
   }
 }));
 
+// Product-scope tombstone: Sway is a live customer/performer room product.
+// Historical audio-distribution tables remain untouched for rollback safety,
+// but their API surface is intentionally unavailable.
+app.all(/^\/api\/talent\/audio(?:\/|$)/, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(410).json({
+    error: 'This retired product surface is not part of Sway.'
+  });
+});
+
 app.use(async (req, _res, next) => {
   try {
     await accessControl.hydrateRequestActor(req);
@@ -5938,38 +5948,21 @@ app.get('/api/talent/library/tracks', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can view this library.' });
   }
 
-  const [libraryRows, catalogRows] = await Promise.all([
-    businessDb
-      .select({
-        id: performerLibraryTracks.id,
-        title: performerLibraryTracks.title,
-        artist: performerLibraryTracks.artist,
-        album: performerLibraryTracks.album,
-        artworkUrl: performerLibraryTracks.artworkUrl,
-        sourceLabel: performerLibraryTracks.sourceLabel
-      })
-      .from(performerLibraryTracks)
-      .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
-      .orderBy(desc(performerLibraryTracks.updatedAt))
-      .limit(100),
-    loadRequestableCatalogTracks(businessDb, { performerId: performerOwner.performerId, limit: 100 })
-  ]);
+  const libraryRows = await businessDb
+    .select({
+      id: performerLibraryTracks.id,
+      title: performerLibraryTracks.title,
+      artist: performerLibraryTracks.artist,
+      album: performerLibraryTracks.album,
+      artworkUrl: performerLibraryTracks.artworkUrl,
+      sourceLabel: performerLibraryTracks.sourceLabel
+    })
+    .from(performerLibraryTracks)
+    .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
+    .orderBy(desc(performerLibraryTracks.updatedAt))
+    .limit(100);
 
   return res.json({
-    catalog: {
-      category: 'sway_catalog',
-      label: 'Catalog audio',
-      playbackBoundary: 'sway_stored_audio',
-      tracks: catalogRows.map((row: any) => ({
-        id: `catalog:${row.id}`,
-        title: row.title || row.filename,
-        artist: performerOwner.displayName,
-        album: row.projectTitle,
-        artworkUrl: null,
-        sourceLabel: 'Catalog',
-        sourceKey: 'catalog'
-      }))
-    },
     external: {
       category: 'external_request_music',
       label: 'External request music',
@@ -9268,25 +9261,8 @@ app.post("/api/music/search", (req, res) => {
       )
       .limit(25);
 
-    const catalogRows = await loadRequestableCatalogTracks(businessDb, {
-      performerId: gigRow.performerId,
-      query,
-      limit: 25
-    });
-
     return res.json({
       results: [
-        ...catalogRows.map((row: any) => ({
-          id: `catalog:${row.id}`,
-          title: row.title || row.filename,
-          artist: 'Catalog',
-          albumArt,
-          description: row.projectTitle || 'Catalog',
-          source: 'Catalog',
-          sourceProvider: 'sway_catalog',
-          category: 'sway_catalog',
-          targetType: 'music'
-        })),
         ...libraryRows.map((row) => ({
           id: row.id,
           title: row.title,
@@ -9331,11 +9307,6 @@ app.use('/api', (_req, res) => {
 
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
-  if (audioObjectStore) {
-    await audioObjectStore.verifyReady();
-    audioObjectStoreVerified = true;
-    console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
-  }
   await refreshBusinessState();
 
   if (process.env.NODE_ENV !== "production") {

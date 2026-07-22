@@ -7,7 +7,6 @@ import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentLoginCard from '../components/TalentLoginCard';
 import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
-import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -29,10 +28,6 @@ function isTalentClaim(pathname: string) {
   return pathname === '/talent/claim';
 }
 
-function isTalentFileConnect(pathname: string) {
-  return pathname === '/talent/connect/files';
-}
-
 type TalentPerformerProfile = {
   performer_id: string;
   display_name: string;
@@ -49,8 +44,7 @@ export default function TalentApp() {
   const isAuthEntryRoute = isTalentLogin(pathname)
     || isTalentSignup(pathname)
     || isTalentInvite(pathname)
-    || isTalentClaim(pathname)
-    || isTalentFileConnect(pathname);
+    || isTalentClaim(pathname);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
@@ -268,10 +262,6 @@ export default function TalentApp() {
     return <LoadingState />;
   }
 
-  if (isTalentFileConnect(pathname)) {
-    return <TalentFileConnectCard />;
-  }
-
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
@@ -290,7 +280,7 @@ export default function TalentApp() {
   const scopeLabel = session.searchScope === 'setlist'
     ? 'Setlist source'
     : session.searchScope === 'catalog'
-      ? 'Open Catalog'
+      ? 'Open requests'
       : 'My Library';
 
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);

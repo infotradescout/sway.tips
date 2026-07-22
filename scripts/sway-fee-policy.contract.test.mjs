@@ -1,10 +1,8 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 
 const root = process.cwd();
-const require = createRequire(import.meta.url);
 const failures = [];
 
 const feePolicySource = readFileSync(join(root, 'src/server/fee-policy.ts'), 'utf8');
@@ -111,8 +109,7 @@ const cases = [
 console.log(JSON.stringify(cases.map((c) => resolveProposedPlatformFee(c))));
 `);
 
-  const tsxCli = require.resolve('tsx/cli');
-  const stdout = execFileSync(process.execPath, [tsxCli, tmpCheckFile], { cwd: root, encoding: 'utf8' });
+  const stdout = execFileSync(process.execPath, ['--import', 'tsx', tmpCheckFile], { cwd: root, encoding: 'utf8' });
   const results = JSON.parse(stdout.trim().split('\n').pop());
 
   const expectations = [

@@ -66,15 +66,6 @@ jobs:
       - name: Run Identity Ownership Durable Integration Test
         run: npm run test:integration:identity-ownership-durable
 
-      - name: Create Audio File Collaboration Disposable Proof Database
-        run: PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_audio_file_collaboration_proof_ci;"
-
-      - name: Run Audio File Collaboration Integration Proof
-        run: npm run test:integration:audio-file-collaboration
-        env:
-          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_audio_file_collaboration_proof_ci
-          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
-
       # Pro Mode (Phase 2 Slice 1A) disposable proofs. Each targets its own
       # freshly created, uniquely named database inside the same ephemeral
       # CI Postgres service -- the service container itself is discarded at
