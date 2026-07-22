@@ -4168,13 +4168,20 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
     return;
   }
 
-  const displayName = normalizePerformerDisplayName(req.body?.displayName);
-  const handle = normalizePerformerHandle(req.body?.handle);
+  const actorId = access.actor.actorId!;
+  const [existingPerformer] = await businessDb.select({
+    id: performers.id,
+    displayName: performers.displayName,
+    handle: performers.handle
+  }).from(performers).where(eq(performers.ownerUserId, actorId)).limit(1);
+  const displayName = existingPerformer?.displayName ?? normalizePerformerDisplayName(req.body?.displayName);
+  const handle = existingPerformer?.handle ?? normalizePerformerHandle(req.body?.handle);
   if (!displayName || !handle) return res.status(422).json({ error: 'Performer name and handle are required.' });
-  if (await performerHandleExists(businessDb, handle)) return res.status(409).json({ error: 'This handle is already taken.' });
+  if (!existingPerformer && await performerHandleExists(businessDb, handle)) {
+    return res.status(409).json({ error: 'This handle is already taken.' });
+  }
 
   try {
-    const actorId = access.actor.actorId!;
     const activation = await activateProModeWithPerformer(businessDb, {
       userId: actorId,
       actorUserId: actorId,
