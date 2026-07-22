@@ -66,6 +66,15 @@ for (const term of [
 if (service.includes("storageProvider: 'local_private_fs'")) {
   failures.push('Publishing service must never relabel provider-backed identities as local filesystem objects.');
 }
+const sealTransaction = service.slice(
+  service.indexOf('return db.transaction(async (tx) => {', service.indexOf('async function completeAndSealUpload')),
+  service.indexOf('async function createShareGrant')
+);
+const completedSessionWrite = sealTransaction.indexOf("uploadStatus: 'completed'");
+const immutableVersionWrite = sealTransaction.indexOf('tx.insert(audioProjectAssetVersions)');
+if (completedSessionWrite < 0 || immutableVersionWrite < 0 || completedSessionWrite > immutableVersionWrite) {
+  failures.push('The upload session must become completed before the verified-seal trigger accepts the immutable version row.');
+}
 
 if (!server.includes('await audioObjectStore.verifyReady()')
   || !server.includes('objectStorageVerified: audioObjectStoreVerified')

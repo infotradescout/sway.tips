@@ -416,6 +416,15 @@ export function createAudioPublishingService(config: {
         .where(eq(audioProjectAssetVersions.assetId, session.assetId!));
 
       const verifiedAt = new Date();
+      await tx
+        .update(audioUploadSessions)
+        .set({
+          uploadStatus: 'completed',
+          completedAt: verifiedAt,
+          updatedAt: verifiedAt
+        })
+        .where(eq(audioUploadSessions.id, session.id));
+
       const [version] = await tx.insert(audioProjectAssetVersions).values({
         projectId: session.projectId,
         performerId: input.performerId,
@@ -444,15 +453,6 @@ export function createAudioPublishingService(config: {
         originalPreserved: true,
         sealedAt: verifiedAt
       }).returning();
-
-      await tx
-        .update(audioUploadSessions)
-        .set({
-          uploadStatus: 'completed',
-          completedAt: verifiedAt,
-          updatedAt: verifiedAt
-        })
-        .where(eq(audioUploadSessions.id, session.id));
 
       await tx.insert(auditEvents).values({
         actorType: 'performer',
