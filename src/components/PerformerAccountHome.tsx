@@ -1,6 +1,4 @@
 import { ExternalLink, QrCode, Radio } from 'lucide-react';
-import PerformerAudioFiles from './PerformerAudioFiles';
-import PerformerFilePairing from './PerformerFilePairing';
 
 export default function PerformerAccountHome({
   performerHandle,
@@ -70,9 +68,6 @@ export default function PerformerAccountHome({
             Public page after handle is set
           </div>
         )}
-
-        <PerformerAudioFiles />
-        <PerformerFilePairing />
       </div>
     </section>
   );

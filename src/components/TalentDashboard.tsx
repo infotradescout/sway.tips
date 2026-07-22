@@ -43,6 +43,8 @@ import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
+import PerformerAudioFiles from './PerformerAudioFiles';
+import PerformerFilePairing from './PerformerFilePairing';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -71,11 +73,12 @@ interface TalentDashboardProps {
   performerEmailVerified?: boolean;
 }
 
-type InactivePerformerWorkspace = 'home' | 'room' | 'profile' | 'account';
+type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'profile' | 'account';
 
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'room', label: 'Room', icon: Radio },
+  { id: 'room', label: 'Live', icon: Radio },
+  { id: 'library', label: 'Library', icon: Music2 },
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'account', label: 'Account', icon: Settings }
 ] as const;
@@ -1708,7 +1711,7 @@ export default function TalentDashboard({
       <nav
         data-sway-performer-app-navigation="true"
         aria-label="Performer console sections"
-        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-4 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-5 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
           const selected = inactiveWorkspace === id;
@@ -1769,24 +1772,29 @@ export default function TalentDashboard({
         </div>
       ) : null}
 
-      {/* Account and music tools stay separate from the one-decision room start. */}
-      {inactiveWorkspace === 'account' ? (
+      {/* Library work stays separate from live-room operation and account administration. */}
+      {inactiveWorkspace === 'library' ? (
         <div className="order-2">
           <details
             open
-            data-sway-account-integrations="true"
+            data-sway-library-workspace="true"
             className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
           >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
-            <p className="mt-1 text-xs text-slate-500">Music sources, hardware bridges, and payouts.</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Library & files</p>
+            <p className="mt-1 text-xs text-slate-500">Music sources, immutable masters, and private collaborators.</p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
             Manage
           </span>
         </summary>
         <div className="mt-5 space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2" aria-label="File collaboration tools">
+        <PerformerAudioFiles />
+        <PerformerFilePairing />
+      </div>
+
       <MusicSourcesPanel
         providers={musicSourceCapabilities}
         linkedSourceCount={linkedSourceCount}
@@ -1905,47 +1913,57 @@ export default function TalentDashboard({
         </form>
       </details>
 
-      {/* 1c. Stripe payout connection is available before, during, and after a live room. */}
-      <div className="rounded-2xl p-4 border border-white/10 bg-slate-900 shadow-lg max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3 select-none">
-        <div className="min-w-0 flex items-start gap-3">
-          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300 shrink-0">
-            <CreditCard className="h-4 w-4" />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Get Paid</p>
-            {performerProfile?.payouts_enabled ? (
-              <p className="mt-0.5 text-[11px] text-emerald-300">Payouts active. Paid requests, tips, and boosts route to your bank automatically.</p>
-            ) : performerProfile?.charges_enabled ? (
-              <p className="mt-0.5 text-[11px] text-amber-300">Stripe is accepting charges, but payouts aren't enabled yet -- finish your Stripe setup.</p>
-            ) : performerProfile?.stripe_connected_account_id ? (
-              <p className="mt-0.5 text-[11px] text-slate-500">Stripe onboarding started but not finished yet.</p>
-            ) : (
-              <p className="mt-0.5 text-[11px] text-slate-500">Connect Stripe so paid requests, tips, and boosts pay out directly to you.</p>
-            )}
-            {stripeConnectError && (
-              <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p>
-            )}
-          </div>
-        </div>
-        {!performerProfile?.payouts_enabled && (
-          <button
-            type="button"
-            onClick={handleConnectStripe}
-            disabled={previewMode || stripeConnectStatus === 'submitting'}
-            className="shrink-0 px-4 py-2 rounded-lg text-xs font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {stripeConnectStatus === 'submitting'
-              ? 'Opening Stripe...'
-              : performerProfile?.stripe_connected_account_id
-                ? 'Finish Stripe setup'
-                : 'Connect Stripe'}
-          </button>
-        )}
-      </div>
-
         </div>
           </details>
         </div>
+      ) : null}
+
+      {inactiveWorkspace === 'account' ? (
+        <section
+          data-sway-account-workspace="true"
+          className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg"
+        >
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account</p>
+            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Money & access</h2>
+            <p className="mt-1 text-xs text-slate-500">Manage payout readiness without mixing it into your music library.</p>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950 p-4 select-none">
+            <div className="min-w-0 flex items-start gap-3">
+              <div className="shrink-0 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
+                <CreditCard className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
+                {performerProfile?.payouts_enabled ? (
+                  <p className="mt-0.5 text-[11px] text-emerald-300">Payouts active. Paid requests, tips, and boosts route to your bank automatically.</p>
+                ) : performerProfile?.charges_enabled ? (
+                  <p className="mt-0.5 text-[11px] text-amber-300">Stripe can accept charges, but payouts still need setup.</p>
+                ) : performerProfile?.stripe_connected_account_id ? (
+                  <p className="mt-0.5 text-[11px] text-slate-500">Stripe onboarding has started but is not finished.</p>
+                ) : (
+                  <p className="mt-0.5 text-[11px] text-slate-500">Connect Stripe before accepting paid requests, tips, or boosts.</p>
+                )}
+                {stripeConnectError ? <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
+              </div>
+            </div>
+            {!performerProfile?.payouts_enabled ? (
+              <button
+                type="button"
+                onClick={handleConnectStripe}
+                disabled={previewMode || stripeConnectStatus === 'submitting'}
+                className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {stripeConnectStatus === 'submitting'
+                  ? 'Opening Stripe...'
+                  : performerProfile?.stripe_connected_account_id
+                    ? 'Finish Stripe setup'
+                    : 'Connect Stripe'}
+              </button>
+            ) : null}
+          </div>
+        </section>
       ) : null}
 
       {inactiveWorkspace === 'home' ? (
