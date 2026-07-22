@@ -84,12 +84,14 @@ async function main() {
       partSizeBytes: 5 * 1024 * 1024
     });
 
-    await service.writeUploadPart({
-      uploadSessionId: session.id,
-      actorUserId: account.id,
-      partNumber: 1,
-      body
-    });
+    if (session.uploadStatus === 'initiated' || session.uploadStatus === 'uploading') {
+      await service.writeUploadPart({
+        uploadSessionId: session.id,
+        actorUserId: account.id,
+        partNumber: 1,
+        body
+      });
+    }
     const version = await service.completeAndSealUpload({
       uploadSessionId: session.id,
       actorUserId: account.id,
