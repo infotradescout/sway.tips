@@ -26,6 +26,8 @@ const server = read('server.ts');
 const renderBlueprint = read('render.yaml');
 const envExample = read('.env.example');
 const filesSurface = read('src/components/PerformerAudioFiles.tsx');
+const productionProof = read('scripts/sway-production-audio-proof.mjs');
+const packageJson = read('package.json');
 
 for (const term of [
   "export type AudioStorageProvider = 'local_private_fs' | 'r2'",
@@ -82,6 +84,19 @@ if (!filesSurface.includes("headers: { 'Content-Type': 'application/octet-stream
 if (!filesSurface.includes('aria-label="Upload master audio"')
   || filesSurface.includes('type="file"\n            className="hidden"')) {
   failures.push('The production master picker must remain keyboard-addressable instead of hiding the file input from interaction.');
+}
+for (const term of [
+  'await store.verifyReady()',
+  'await service.completeAndSealUpload',
+  'await service.downloadSharedOriginal',
+  'downloadedBody.equals(body)',
+  "outcome: 'verified'",
+  'exactBytesRecovered: true'
+]) {
+  if (!productionProof.includes(term)) failures.push(`Production audio proof is missing required evidence control: ${term}`);
+}
+if (!packageJson.includes('"proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs"')) {
+  failures.push('Package scripts must expose the fail-closed production audio proof command.');
 }
 
 for (const term of [
