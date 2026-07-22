@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Play } from 'lucide-react';
 
 export type PerformerRoomSetupData = {
@@ -10,32 +10,27 @@ export type PerformerRoomSetupData = {
   searchScope: 'library' | 'catalog';
 };
 
-const steps = ['Performer', 'Pricing', 'Requests', 'Review', 'Start'];
+const steps = ['Pricing', 'Requests', 'Review', 'Start'];
 
 export default function PerformerRoomSetup({
-  defaultPerformerName,
+  performerName,
+  talentRole,
   performerHandle,
   performerEmailVerified,
   onStartSession
 }: {
-  defaultPerformerName: string;
+  performerName: string;
+  talentRole: 'DJ' | 'Performer';
   performerHandle?: string | null;
   performerEmailVerified: boolean;
   onStartSession: (data: PerformerRoomSetupData) => void;
 }) {
   const [step, setStep] = useState(0);
-  const [name, setName] = useState(defaultPerformerName);
-  const [role, setRole] = useState<'DJ' | 'Performer'>('DJ');
   const [paymentsEnabled, setPaymentsEnabled] = useState(true);
   const [minimumTip, setMinimumTip] = useState(5);
   const [feeType, setFeeType] = useState<'talent' | 'patron'>('patron');
   const [searchScope, setSearchScope] = useState<'library' | 'catalog'>('library');
 
-  useEffect(() => {
-    if (!name.trim() && defaultPerformerName) setName(defaultPerformerName);
-  }, [defaultPerformerName, name]);
-
-  const canContinue = step !== 0 || Boolean(name.trim());
   const pricingSummary = paymentsEnabled
     ? `Paid · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
     : 'Free requests · direct tips stay paid';
@@ -44,8 +39,8 @@ export default function PerformerRoomSetup({
     : 'Customers can type any request; you approve or deny it';
 
   const submit = () => onStartSession({
-    talentName: name.trim(),
-    talentRole: role,
+    talentName: performerName,
+    talentRole,
     feeType,
     minimumTip: Math.max(5, minimumTip),
     paymentsEnabled,
@@ -59,10 +54,10 @@ export default function PerformerRoomSetup({
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Tonight&apos;s room</p>
           <h2 className="mt-1 font-display text-xl font-black uppercase text-white">{steps[step]}</h2>
         </div>
-        <p className="font-mono text-[10px] font-black uppercase tracking-widest text-slate-400">Step {step + 1} of 5</p>
+        <p className="font-mono text-[10px] font-black uppercase tracking-widest text-slate-400">Step {step + 1} of 4</p>
       </div>
 
-      <div className="mt-4 grid grid-cols-5 gap-1" aria-label="Room setup progress">
+      <div className="mt-4 grid grid-cols-4 gap-1" aria-label="Room setup progress">
         {steps.map((label, index) => (
           <div key={label} className="min-w-0">
             <div className={`h-1.5 rounded-full ${index <= step ? 'bg-fuchsia-500' : 'bg-slate-800'}`} />
@@ -74,20 +69,7 @@ export default function PerformerRoomSetup({
       <div className="mt-5 min-h-[18rem]">
         {step === 0 ? (
           <div className="space-y-4">
-            <p className="text-sm text-slate-400">Who is running this room tonight?</p>
-            <label className="block space-y-2">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-300">Performer name</span>
-              <input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="DJ Luna" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-base font-bold text-white outline-none focus:border-fuchsia-500" />
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {(['DJ', 'Performer'] as const).map((value) => (
-                <button key={value} type="button" onClick={() => setRole(value)} className={`min-h-14 rounded-xl border px-4 text-sm font-black ${role === value ? 'border-fuchsia-500 bg-fuchsia-500/15 text-white' : 'border-white/10 bg-slate-950 text-slate-400'}`}>{value}</button>
-              ))}
-            </div>
-            {performerHandle ? <p className="font-mono text-xs text-cyan-300">@{performerHandle}</p> : null}
-          </div>
-        ) : step === 1 ? (
-          <div className="space-y-4">
+            <p className="text-xs font-bold text-cyan-300">{performerName}{performerHandle ? ` · @${performerHandle}` : ''}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <button type="button" onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Paid requests</span><span className="mt-2 block text-xs text-slate-400">Requests and boosts start at ${minimumTip}. Direct tips remain available.</span></button>
@@ -104,16 +86,16 @@ export default function PerformerRoomSetup({
               </div>
             ) : null}
           </div>
-        ) : step === 2 ? (
+        ) : step === 1 ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">What can customers ask for?</p>
             <button type="button" onClick={() => setSearchScope('library')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'library' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">My synced library</span><span className="mt-2 block text-xs text-slate-400">Only show tracks you have synced to Sway.</span></button>
             <button type="button" onClick={() => setSearchScope('catalog')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'catalog' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Open requests</span><span className="mt-2 block text-xs text-slate-400">Customers type anything. Nothing enters the approved queue until you allow it.</span></button>
           </div>
-        ) : step === 3 ? (
+        ) : step === 2 ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-400">Check the exact rules before the room goes live.</p>
-            {[['Performer', `${name} · ${role}`], ['Pricing', pricingSummary], ['Requests', requestSummary]].map(([label, value]) => (
+            {[['Host', performerName], ['Pricing', pricingSummary], ['Requests', requestSummary]].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-white/10 bg-slate-950 p-4"><p className="text-[9px] font-black uppercase tracking-widest text-cyan-300">{label}</p><p className="mt-1 text-sm font-bold text-white">{value}</p></div>
             ))}
           </div>
@@ -129,10 +111,10 @@ export default function PerformerRoomSetup({
 
       <div className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-3">
         <button type="button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-bold text-slate-300 disabled:opacity-30"><ArrowLeft className="h-4 w-4" /> Back</button>
-        {step < 4 ? (
-          <button type="button" onClick={() => canContinue && setStep((current) => Math.min(4, current + 1))} disabled={!canContinue} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white disabled:bg-slate-800 disabled:text-slate-500">Next <ArrowRight className="h-4 w-4" /></button>
+        {step < 3 ? (
+          <button type="button" onClick={() => setStep((current) => Math.min(3, current + 1))} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white">Next <ArrowRight className="h-4 w-4" /></button>
         ) : (
-          <button type="button" onClick={submit} disabled={!performerEmailVerified || !name.trim()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-slate-950 disabled:bg-slate-800 disabled:text-slate-500"><Play className="h-4 w-4" /> Create room</button>
+          <button type="button" onClick={submit} disabled={!performerEmailVerified} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-slate-950 disabled:bg-slate-800 disabled:text-slate-500"><Play className="h-4 w-4" /> Create room</button>
         )}
       </div>
     </section>

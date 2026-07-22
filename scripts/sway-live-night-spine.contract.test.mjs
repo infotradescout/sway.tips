@@ -51,27 +51,33 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Request library',
   'data-sway-library-workspace="true"',
   'Synced catalogs and external music sources used for audience requests.',
-  'data-sway-original-audio-catalog="true"',
-  'Original audio catalog',
+  'data-sway-audio-catalog="true"',
+  'Audio catalog',
   'masters, beats, stems, spoken word, audiobooks, demos',
   'data-sway-account-workspace="true"',
   'Money & access',
   'Backers',
-  '<PerformerRoomSetup'
+  '<PerformerRoomSetup',
+  'performerName={welcomePerformerName}'
 ]);
 
 requireIncludes('PerformerRoomSetup', performerRoomSetup, [
   'data-sway-performer-room-setup="true"',
-  "const steps = ['Performer', 'Pricing', 'Requests', 'Review', 'Start']",
-  'Step {step + 1} of 5',
+  "const steps = ['Pricing', 'Requests', 'Review', 'Start']",
+  'Step {step + 1} of 4',
   'Create room',
-  'Performer name',
   'Paid requests',
   'Free requests',
   'My synced library',
   'Open requests',
   'Ready to go live',
-  'disabled={!performerEmailVerified || !name.trim()}'
+  'disabled={!performerEmailVerified}'
+]);
+
+requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSetup, [
+  'Who is running this room tonight?',
+  'Performer name',
+  "(['DJ', 'Performer'] as const)"
 ]);
 
 requireIncludes('Session start request scope', server, [

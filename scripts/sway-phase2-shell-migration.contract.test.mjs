@@ -121,7 +121,7 @@ for (const workspace of [
 for (const boundary of [
   'data-sway-performer-app-navigation="true"',
   'data-sway-library-workspace="true"',
-  'data-sway-original-audio-catalog="true"',
+  'data-sway-audio-catalog="true"',
   'data-sway-account-workspace="true"',
   'aria-label="Catalog audio tools"'
 ]) {

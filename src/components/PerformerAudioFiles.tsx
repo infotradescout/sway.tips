@@ -190,7 +190,7 @@ export default function PerformerAudioFiles() {
         if (!partResponse.ok) throw new Error(partData?.error || `Part ${index + 1} failed.`);
       }
 
-      setStatus('Sealing immutable original…');
+      setStatus('Sealing immutable source file…');
       const complete = await fetch(`/api/talent/audio/uploads/${startData.uploadSession.id}/complete`, {
         method: 'POST'
       });
@@ -319,7 +319,7 @@ export default function PerformerAudioFiles() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Files &amp; projects</p>
-          <p className="mt-1 text-xs text-slate-400">Immutable originals with SHA-256 seal. Private pairing is available; music distribution is not yet live.</p>
+          <p className="mt-1 text-xs text-slate-400">Immutable source files with SHA-256 seals. Private pairing is available; music distribution is not yet live.</p>
         </div>
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" /> : null}
       </div>
@@ -435,7 +435,7 @@ export default function PerformerAudioFiles() {
                   className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-cyan-500 px-3 text-xs font-black text-slate-950"
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
-                  Download original
+                  Download source file
                 </a>
               ) : null}
               <button type="button" onClick={() => loadReviews(file.grantId)} className="min-h-10 rounded-lg border border-white/10 px-3 text-xs font-bold text-white">
