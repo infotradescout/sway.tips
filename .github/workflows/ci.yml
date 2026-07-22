@@ -66,6 +66,11 @@ jobs:
       - name: Run Identity Ownership Durable Integration Test
         run: npm run test:integration:identity-ownership-durable
 
+      - name: Run Audio File Collaboration Integration Proof
+        run: npm run test:integration:audio-file-collaboration
+        env:
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
+
       # Pro Mode (Phase 2 Slice 1A) disposable proofs. Each targets its own
       # freshly created, uniquely named database inside the same ephemeral
       # CI Postgres service -- the service container itself is discarded at

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { FolderOpen, Loader2, Upload } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, Loader2, MessageSquare, Upload, UserRound } from 'lucide-react';
 
 async function sha256Hex(file: File) {
   const buffer = await file.arrayBuffer();
@@ -24,6 +24,29 @@ type Version = {
   byteSize: number;
   sha256: string;
 };
+type Connection = {
+  connectionId: string;
+  counterparty: { displayName: string; handle: string | null } | null;
+};
+type SharedFile = {
+  grantId: string;
+  connectionId: string;
+  projectTitle: string;
+  versionId: string;
+  originalFilename: string;
+  byteSize: number;
+  sha256: string;
+  canDownloadOriginal: boolean;
+  canComment: boolean;
+  canApprove: boolean;
+};
+type ReviewEvent = {
+  id: string;
+  eventType: string;
+  body: string | null;
+  timecodeMs: number | null;
+  createdAt: string;
+};
 
 export default function PerformerAudioFiles() {
   const [open, setOpen] = useState(false);
@@ -34,6 +57,12 @@ export default function PerformerAudioFiles() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState('');
+  const [sharedWithMe, setSharedWithMe] = useState<SharedFile[]>([]);
+  const [sharedByMe, setSharedByMe] = useState<SharedFile[]>([]);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [reviewsByGrant, setReviewsByGrant] = useState<Record<string, ReviewEvent[]>>({});
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -60,12 +89,36 @@ export default function PerformerAudioFiles() {
     setVersions(data.versions || []);
   };
 
+  const refreshCollaboration = async () => {
+    const [connectionsResponse, incomingResponse, outgoingResponse] = await Promise.all([
+      fetch('/api/talent/audio/pairing/connections', { cache: 'no-store' }),
+      fetch('/api/talent/audio/files/shared-with-me', { cache: 'no-store' }),
+      fetch('/api/talent/audio/files/shared-by-me', { cache: 'no-store' })
+    ]);
+    const [connectionsData, incomingData, outgoingData] = await Promise.all([
+      connectionsResponse.json().catch(() => ({})),
+      incomingResponse.json().catch(() => ({})),
+      outgoingResponse.json().catch(() => ({}))
+    ]);
+    if (!connectionsResponse.ok) throw new Error(connectionsData?.error || 'Could not load file connections.');
+    if (!incomingResponse.ok) throw new Error(incomingData?.error || 'Could not load files shared with you.');
+    if (!outgoingResponse.ok) throw new Error(outgoingData?.error || 'Could not load files you shared.');
+    const nextConnections: Connection[] = connectionsData.connections || [];
+    setConnections(nextConnections);
+    setSelectedConnectionId((current) => nextConnections.some((connection) => connection.connectionId === current)
+      ? current
+      : nextConnections[0]?.connectionId || '');
+    setSharedWithMe(incomingData.files || []);
+    setSharedByMe(outgoingData.files || []);
+  };
+
   const openPanel = async () => {
     setOpen(true);
     setStatus(null);
     setBusy(true);
     try {
       const projectId = await refreshProjects();
+      await refreshCollaboration();
       if (projectId) await refreshAssets(projectId);
       else setVersions([]);
       setStatus(null);
@@ -171,6 +224,83 @@ export default function PerformerAudioFiles() {
     }
   };
 
+  const shareWithConnection = async (versionId: string) => {
+    if (!selectedConnectionId) {
+      setStatus('Pair with another account before sharing a selected file.');
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/talent/audio/pairing/connections/${selectedConnectionId}/shares`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          versionId,
+          canDownloadOriginal: true,
+          canComment: true,
+          canApprove: true
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not share selected file.');
+      await refreshCollaboration();
+      setStatus(data.reused ? 'This version is already shared with that connection.' : 'Selected version shared for download, review, and approval.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not share selected file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadReviews = async (grantId: string) => {
+    const response = await fetch(`/api/talent/audio/file-grants/${grantId}/reviews`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Could not load review activity.');
+    setReviewsByGrant((current) => ({ ...current, [grantId]: data.events || [] }));
+  };
+
+  const sendReview = async (grantId: string, eventType: 'comment' | 'approved' | 'changes_requested') => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/talent/audio/file-grants/${grantId}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType, body: reviewDrafts[grantId] || undefined })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not record review.');
+      setReviewDrafts((current) => ({ ...current, [grantId]: '' }));
+      await loadReviews(grantId);
+      setStatus(eventType === 'approved' ? 'Approval recorded.' : 'Review note recorded.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not record review.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revokeGrant = async (grantId: string) => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`/api/talent/audio/file-grants/${grantId}/revoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Removed from Files & projects.' })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not revoke file access.');
+      await refreshCollaboration();
+      setStatus('Selected-file access revoked. Download and review replay are now denied.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not revoke file access.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) {
     return (
       <button
@@ -255,8 +385,127 @@ export default function PerformerAudioFiles() {
               disabled={busy}
               className="mt-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-black text-cyan-100"
             >
-              Create share token
+              Create one-time link
             </button>
+            <button
+              type="button"
+              onClick={() => shareWithConnection(version.id)}
+              disabled={busy || !selectedConnectionId}
+              className="ml-2 mt-2 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1.5 text-[11px] font-black text-fuchsia-100 disabled:opacity-50"
+            >
+              Share with connection
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 rounded-xl border border-white/10 bg-slate-900 p-3">
+        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400" htmlFor="sway-file-connection">
+          Selected connection
+        </label>
+        <select
+          id="sway-file-connection"
+          value={selectedConnectionId}
+          onChange={(event) => setSelectedConnectionId(event.target.value)}
+          className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white"
+        >
+          <option value="">Pair an account first</option>
+          {connections.map((connection) => (
+            <option key={connection.connectionId} value={connection.connectionId}>
+              {connection.counterparty?.displayName || 'Connected account'}
+              {connection.counterparty?.handle ? ` @${connection.counterparty.handle}` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        <div className="flex items-center gap-2 text-cyan-200">
+          <UserRound className="h-4 w-4" aria-hidden="true" />
+          <p className="text-[10px] font-black uppercase tracking-[0.24em]">Shared with me</p>
+        </div>
+        {sharedWithMe.length === 0 ? <p className="text-xs text-slate-500">No selected files shared with you.</p> : sharedWithMe.map((file) => (
+          <div key={file.grantId} className="rounded-xl border border-cyan-500/20 bg-slate-900 p-3">
+            <p className="text-sm font-bold text-white">{file.originalFilename}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{file.projectTitle} · {file.byteSize.toLocaleString()} bytes</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {file.canDownloadOriginal ? (
+                <a
+                  href={`/api/talent/audio/file-grants/${file.grantId}/download`}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-cyan-500 px-3 text-xs font-black text-slate-950"
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  Download original
+                </a>
+              ) : null}
+              <button type="button" onClick={() => loadReviews(file.grantId)} className="min-h-10 rounded-lg border border-white/10 px-3 text-xs font-bold text-white">
+                Review history
+              </button>
+              <button type="button" onClick={() => revokeGrant(file.grantId)} className="min-h-10 rounded-lg border border-rose-500/30 px-3 text-xs font-bold text-rose-200">
+                Remove access
+              </button>
+            </div>
+            {file.canComment ? (
+              <textarea
+                value={reviewDrafts[file.grantId] || ''}
+                onChange={(event) => setReviewDrafts((current) => ({ ...current, [file.grantId]: event.target.value }))}
+                placeholder="Leave a review note"
+                className="mt-3 min-h-20 w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-sm text-white"
+              />
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {file.canComment ? (
+                <button type="button" onClick={() => sendReview(file.grantId, 'comment')} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-cyan-500/30 px-3 text-xs font-bold text-cyan-100">
+                  <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                  Add note
+                </button>
+              ) : null}
+              {file.canComment ? (
+                <button type="button" onClick={() => sendReview(file.grantId, 'changes_requested')} className="min-h-10 rounded-lg border border-amber-500/30 px-3 text-xs font-bold text-amber-100">
+                  Request changes
+                </button>
+              ) : null}
+              {file.canApprove ? (
+                <button type="button" onClick={() => sendReview(file.grantId, 'approved')} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-500 px-3 text-xs font-black text-slate-950">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  Approve
+                </button>
+              ) : null}
+            </div>
+            {reviewsByGrant[file.grantId]?.length ? (
+              <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+                {reviewsByGrant[file.grantId].map((event) => (
+                  <p key={event.id} className="text-xs text-slate-300">
+                    <span className="font-bold text-white">{event.eventType.replace('_', ' ')}</span>
+                    {event.body ? ` · ${event.body}` : ''}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 space-y-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Shared by me</p>
+        {sharedByMe.length === 0 ? <p className="text-xs text-slate-500">No active selected-file shares.</p> : sharedByMe.map((file) => (
+          <div key={file.grantId} className="rounded-xl border border-white/10 bg-slate-900 p-3">
+            <p className="text-sm font-bold text-white">{file.originalFilename}</p>
+            <p className="mt-1 text-[11px] text-slate-400">Download, review, and approval access is active.</p>
+            <div className="mt-2 flex gap-2">
+              <button type="button" onClick={() => loadReviews(file.grantId)} className="min-h-10 rounded-lg border border-white/10 px-3 text-xs font-bold text-white">Review history</button>
+              <button type="button" onClick={() => revokeGrant(file.grantId)} className="min-h-10 rounded-lg border border-rose-500/30 px-3 text-xs font-bold text-rose-200">Revoke</button>
+            </div>
+            {reviewsByGrant[file.grantId]?.length ? (
+              <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+                {reviewsByGrant[file.grantId].map((event) => (
+                  <p key={event.id} className="text-xs text-slate-300">
+                    <span className="font-bold text-white">{event.eventType.replace('_', ' ')}</span>
+                    {event.body ? ` · ${event.body}` : ''}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>

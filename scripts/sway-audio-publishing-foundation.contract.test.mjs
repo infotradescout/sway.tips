@@ -619,6 +619,7 @@ if (contract && schema && migration) {
         }
       })
     };
+    revokeDb.transaction = async (operation) => operation(revokeDb);
     const revokeService = createAudioFilePairingService({ db: revokeDb });
     const revoked = await revokeService.revokeConnection({
       userId: 'universal-account-member',

@@ -169,6 +169,13 @@
       "when": 1784664371616,
       "tag": "0023_audio_publishing_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784698933509,
+      "tag": "0024_heavy_spectrum",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import type { SwayDb } from '../db/client';
 import {
   audioFileConnectionEvents,
   audioFileConnections,
+  audioFileAccessGrants,
   audioFilePairingTokens,
   auditEvents,
   performers,
@@ -402,54 +403,71 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
     connectionId: string;
     reason?: string | null;
   }) {
-    const [connection] = await db
-      .select()
-      .from(audioFileConnections)
-      .where(and(
-        eq(audioFileConnections.id, input.connectionId),
-        isNull(audioFileConnections.revokedAt)
-      ))
-      .limit(1);
-    if (!connection) {
-      throw Object.assign(new Error('Connection not found.'), { status: 404 });
-    }
-    if (connection.memberOneUserId !== input.userId && connection.memberTwoUserId !== input.userId) {
-      throw Object.assign(new Error('Only connection members can revoke.'), { status: 403 });
-    }
+    return db.transaction(async (tx) => {
+      const [connection] = await tx
+        .select()
+        .from(audioFileConnections)
+        .where(and(
+          eq(audioFileConnections.id, input.connectionId),
+          isNull(audioFileConnections.revokedAt)
+        ))
+        .limit(1);
+      if (!connection) {
+        throw Object.assign(new Error('Connection not found.'), { status: 404 });
+      }
+      if (connection.memberOneUserId !== input.userId && connection.memberTwoUserId !== input.userId) {
+        throw Object.assign(new Error('Only connection members can revoke.'), { status: 403 });
+      }
 
-    const [revoked] = await db
-      .update(audioFileConnections)
-      .set({
-        revokedAt: new Date(),
-        revokedByUserId: input.userId,
-        revocationReason: input.reason?.trim().slice(0, 240) || null,
-        updatedAt: new Date()
-      })
-      .where(and(
-        eq(audioFileConnections.id, input.connectionId),
-        isNull(audioFileConnections.revokedAt)
-      ))
-      .returning();
+      const revokedAt = new Date();
+      const revocationReason = input.reason?.trim().slice(0, 240) || null;
+      const [revoked] = await tx
+        .update(audioFileConnections)
+        .set({
+          revokedAt,
+          revokedByUserId: input.userId,
+          revocationReason,
+          updatedAt: revokedAt
+        })
+        .where(and(
+          eq(audioFileConnections.id, input.connectionId),
+          isNull(audioFileConnections.revokedAt)
+        ))
+        .returning();
+      if (!revoked) {
+        throw Object.assign(new Error('Connection not found.'), { status: 404 });
+      }
 
-    if (!revoked) {
-      throw Object.assign(new Error('Connection not found.'), { status: 404 });
-    }
+      await tx
+        .update(audioFileAccessGrants)
+        .set({
+          revokedAt,
+          revokedByUserId: input.userId,
+          revocationReason: revocationReason || 'File connection removed.'
+        })
+        .where(and(
+          eq(audioFileAccessGrants.connectionId, revoked.id),
+          isNull(audioFileAccessGrants.revokedAt)
+        ));
+      await tx.insert(audioFileConnectionEvents).values({
+        connectionId: revoked.id,
+        actorUserId: input.userId,
+        eventType: 'connection_removed',
+        metadata: { reason: revoked.revocationReason }
+      });
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.userId,
+        entityType: 'audio_file_connection',
+        entityId: revoked.id,
+        eventType: 'audio_file_pairing.connection_revoked',
+        previousStatus: null,
+        nextStatus: null,
+        metadata: { cascadedFileGrantRevocation: true }
+      });
 
-    await db.insert(audioFileConnectionEvents).values({
-      connectionId: revoked.id,
-      actorUserId: input.userId,
-      eventType: 'connection_removed',
-      metadata: { reason: revoked.revocationReason }
+      return { connectionId: revoked.id, revokedAt: revoked.revokedAt!.toISOString() };
     });
-
-    await writeAudit(db, {
-      actorId: input.userId,
-      entityType: 'audio_file_connection',
-      entityId: revoked.id,
-      eventType: 'audio_file_pairing.connection_revoked'
-    });
-
-    return { connectionId: revoked.id, revokedAt: revoked.revokedAt!.toISOString() };
   }
 
   return {

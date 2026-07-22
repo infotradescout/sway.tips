@@ -45,8 +45,8 @@ Owner bar: **Do not ship until the product is complete.**
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
 | Durable exact-original master storage | Live private R2 upload/seal/download and unauthenticated HTTP denial verified | Cross-account evidence command still needs production execution; separately controlled independent recovery remains unverified |
-| Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
-| Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
+| Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full two-account production journey remains unverified |
+| Selected-file sharing, review, and approval | Durable runtime and disposable integration cover grant, exact download, review, approval, revoke, replay denial, and audit | Production two-account proof remains required |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |
 | DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
 | Store status, corrections, failures, and takedowns | State machine only | Critical blocker |
