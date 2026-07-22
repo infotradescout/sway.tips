@@ -110,6 +110,7 @@ for (const workspace of [
   "{ id: 'home', label: 'Home'",
   "{ id: 'room', label: 'Live'",
   "{ id: 'library', label: 'Library'",
+  "{ id: 'catalog', label: 'Catalog'",
   "{ id: 'profile', label: 'Profile'",
   "{ id: 'account', label: 'Account'"
 ]) {
@@ -120,15 +121,16 @@ for (const workspace of [
 for (const boundary of [
   'data-sway-performer-app-navigation="true"',
   'data-sway-library-workspace="true"',
+  'data-sway-original-audio-catalog="true"',
   'data-sway-account-workspace="true"',
-  'aria-label="File collaboration tools"'
+  'aria-label="Catalog audio tools"'
 ]) {
   if (!performerDashboard.includes(boundary)) {
     failures.push(`Performer app is missing workspace boundary: ${boundary}`);
   }
 }
 if (!performerDashboard.includes('<PerformerAudioFiles />') || !performerDashboard.includes('<PerformerFilePairing />')) {
-  failures.push('Library workspace must own audio files and private pairing.');
+  failures.push('Catalog workspace must own audio files and private pairing.');
 }
 if (performerHome.includes('<PerformerAudioFiles />') || performerHome.includes('<PerformerFilePairing />')) {
   failures.push('Home must stay an overview instead of absorbing library workflows.');

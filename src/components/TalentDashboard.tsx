@@ -30,6 +30,7 @@ import {
   CreditCard,
   Link as LinkIcon,
   Music2,
+  AudioLines,
   ShieldCheck,
   Keyboard,
   Home,
@@ -73,12 +74,13 @@ interface TalentDashboardProps {
   performerEmailVerified?: boolean;
 }
 
-type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'profile' | 'account';
+type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'catalog' | 'profile' | 'account';
 
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'room', label: 'Live', icon: Radio },
   { id: 'library', label: 'Library', icon: Music2 },
+  { id: 'catalog', label: 'Catalog', icon: AudioLines },
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'account', label: 'Account', icon: Settings }
 ] as const;
@@ -1711,7 +1713,7 @@ export default function TalentDashboard({
       <nav
         data-sway-performer-app-navigation="true"
         aria-label="Performer console sections"
-        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-5 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur sm:grid-cols-6"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
           const selected = inactiveWorkspace === id;
@@ -1782,19 +1784,14 @@ export default function TalentDashboard({
           >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Library & files</p>
-            <p className="mt-1 text-xs text-slate-500">Music sources, immutable masters, and private collaborators.</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Request library</p>
+            <p className="mt-1 text-xs text-slate-500">Synced catalogs and external music sources used for audience requests.</p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
             Manage
           </span>
         </summary>
         <div className="mt-5 space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2" aria-label="File collaboration tools">
-        <PerformerAudioFiles />
-        <PerformerFilePairing />
-      </div>
-
       <MusicSourcesPanel
         providers={musicSourceCapabilities}
         linkedSourceCount={linkedSourceCount}
@@ -1916,6 +1913,28 @@ export default function TalentDashboard({
         </div>
           </details>
         </div>
+      ) : null}
+
+      {inactiveWorkspace === 'catalog' ? (
+        <section
+          data-sway-original-audio-catalog="true"
+          className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-fuchsia-500/20 bg-slate-900/70 p-5 shadow-lg"
+        >
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Original audio catalog</p>
+            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Your work, versioned and private</h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              Keep masters, beats, stems, spoken word, audiobooks, demos, and any other audio you own separate from request-library metadata.
+            </p>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2" aria-label="Catalog audio tools">
+            <PerformerAudioFiles />
+            <PerformerFilePairing />
+          </div>
+          <p className="mt-4 text-[10px] leading-relaxed text-slate-500">
+            Catalog files and collaboration records stay private. Uploading here does not publish, distribute, license, or sell the audio.
+          </p>
+        </section>
       ) : null}
 
       {inactiveWorkspace === 'account' ? (
