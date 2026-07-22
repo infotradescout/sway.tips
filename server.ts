@@ -6424,14 +6424,14 @@ app.get('/api/talent/audio/pairing/connections', async (req, res) => {
 
 app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (req, res) => {
   applyNoStoreHeaders(res);
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
-  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
   if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
 
   try {
     const revoked = await audioFilePairingService.revokeConnection({
-      userId: talentAccess.actor.actorId,
+      userId: accountAccess.actor.actorId,
       connectionId: String(req.params.connectionId || ''),
       reason: typeof req.body?.reason === 'string' ? req.body.reason : null
     });
