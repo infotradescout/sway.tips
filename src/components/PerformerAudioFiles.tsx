@@ -222,12 +222,13 @@ export default function PerformerAudioFiles() {
             <option key={project.id} value={project.id}>{project.title}</option>
           ))}
         </select>
-        <label className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-900 px-4 text-xs font-black text-white ${selectedProject ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+        <label className={`relative inline-flex min-h-11 items-center justify-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-slate-900 px-4 text-xs font-black text-white focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-400/40 ${selectedProject ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
           <Upload className="h-4 w-4" />
           Upload master
           <input
             type="file"
-            className="hidden"
+            aria-label="Upload master audio"
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
             disabled={!selectedProject || busy}
             onChange={(event) => uploadFile(event.target.files?.[0] ?? null)}
           />
