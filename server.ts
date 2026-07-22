@@ -6291,6 +6291,69 @@ app.post('/api/talent/audio/projects', async (req, res) => {
   }
 });
 
+app.get('/api/talent/audio/releases', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can manage releases.' });
+
+  try {
+    const workspace = await audioPublishingService.listReleaseWorkspace({
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json({ performer: { displayName: performerOwner.displayName }, ...workspace });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : 'Release drafts are temporarily unavailable.' });
+  }
+});
+
+app.post('/api/talent/audio/releases', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can create releases.' });
+
+  try {
+    const result = await audioPublishingService.createReleaseDraft({
+      clientReleaseId: typeof req.body?.clientReleaseId === 'string' ? req.body.clientReleaseId : '',
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      projectId: typeof req.body?.projectId === 'string' ? req.body.projectId : '',
+      masterAssetVersionId: typeof req.body?.masterAssetVersionId === 'string' ? req.body.masterAssetVersionId : '',
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      trackTitle: typeof req.body?.trackTitle === 'string' ? req.body.trackTitle : '',
+      versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
+      primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      releaseType: typeof req.body?.releaseType === 'string' ? req.body.releaseType : '',
+      upc: typeof req.body?.upc === 'string' ? req.body.upc : null,
+      isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
+      labelName: typeof req.body?.labelName === 'string' ? req.body.labelName : null,
+      pLine: typeof req.body?.pLine === 'string' ? req.body.pLine : null,
+      cLine: typeof req.body?.cLine === 'string' ? req.body.cLine : null,
+      originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
+      territories: Array.isArray(req.body?.territories)
+        ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string')
+        : null,
+      isExplicit: req.body?.isExplicit === true,
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null
+    });
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not create release draft.';
+    const status = /permission|required audio master|owned by this performer|another account/i.test(message) ? 403 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
 app.get('/api/talent/audio/projects/:projectId/assets', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);

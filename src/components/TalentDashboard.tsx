@@ -46,6 +46,7 @@ import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
+import PerformerReleaseDrafts from './PerformerReleaseDrafts';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -2073,6 +2074,7 @@ export default function TalentDashboard({
           <div className="mt-5" aria-label="Catalog audio tools">
             <PerformerAudioFiles />
           </div>
+          <PerformerReleaseDrafts />
           <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/50 p-4">
             <summary className="cursor-pointer list-none text-xs font-bold text-slate-400">Collaboration and file sharing</summary>
             <div className="mt-3"><PerformerFilePairing /></div>

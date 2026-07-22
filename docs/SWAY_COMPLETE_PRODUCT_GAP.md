@@ -47,7 +47,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Durable exact-original master storage | Live private R2 upload/seal/download and unauthenticated HTTP denial verified | Cross-account evidence command still needs production execution; separately controlled independent recovery remains unverified |
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full two-account production journey remains unverified |
 | Selected-file sharing, review, and approval | Durable runtime and disposable integration cover grant, exact download, review, approval, revoke, replay denial, and audit | Production two-account proof remains required |
-| Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |
+| Release metadata, artwork, credits, territories, ISRC, and UPC | Private single-master release drafts now have durable customer runtime for core metadata, territories, ISRC, and UPC | Artwork upload, full credits, rights readiness, editing/versioning, and production proof still block release readiness |
 | DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
 | Store status, corrections, failures, and takedowns | State machine only | Critical blocker |
 | Royalty statements and reconciliation | No distribution royalty ledger/runtime | Critical blocker |

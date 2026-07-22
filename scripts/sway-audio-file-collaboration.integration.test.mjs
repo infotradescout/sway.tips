@@ -10,6 +10,8 @@ import {
   audioFileAccessGrants,
   audioFileConnections,
   auditEvents,
+  musicRecordings,
+  musicReleases,
   performers,
   users
 } from '../src/db/schema.ts';
@@ -92,6 +94,60 @@ try {
     actorUserId: ownerId,
     performerId: performer.id
   });
+
+  const releaseId = randomUUID();
+  const releaseDraft = await publishing.createReleaseDraft({
+    clientReleaseId: releaseId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    projectId: project.id,
+    masterAssetVersionId: version.id,
+    title: 'Durable Release Proof',
+    trackTitle: 'Durable Release Proof',
+    primaryArtistName: 'Collaboration proof',
+    releaseType: 'single',
+    territories: ['US'],
+    languageCode: 'en'
+  });
+  assert.equal(releaseDraft.created, true);
+  assert.equal(releaseDraft.release.distributionMode, 'private');
+  assert.equal(releaseDraft.release.status, 'draft');
+  assert.equal(releaseDraft.recording.masterAssetVersionId, version.id);
+
+  const releaseReplay = await publishing.createReleaseDraft({
+    clientReleaseId: releaseId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    projectId: project.id,
+    masterAssetVersionId: version.id,
+    title: 'A retry must not duplicate this release',
+    trackTitle: 'A retry must not duplicate this recording',
+    primaryArtistName: 'Collaboration proof',
+    releaseType: 'single'
+  });
+  assert.equal(releaseReplay.created, false, 'Release creation must be idempotent by client release UUID.');
+  assert.equal((await db.select().from(musicReleases).where(eq(musicReleases.id, releaseId))).length, 1);
+  assert.equal((await db.select().from(musicRecordings).where(eq(musicRecordings.masterAssetVersionId, version.id))).length, 1);
+
+  await assert.rejects(
+    publishing.createReleaseDraft({
+      clientReleaseId: randomUUID(),
+      performerId: performer.id,
+      actorUserId: outsiderId,
+      projectId: project.id,
+      masterAssetVersionId: version.id,
+      title: 'Unauthorized release',
+      trackTitle: 'Unauthorized release',
+      primaryArtistName: 'Outsider',
+      releaseType: 'single'
+    }),
+    /Release management permission required/
+  );
+
+  const releaseWorkspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
+  assert.equal(releaseWorkspace.masters.length, 1);
+  assert.equal(releaseWorkspace.releases.length, 1);
+  assert.equal(releaseWorkspace.releases[0].recordings.length, 1);
 
   const [connection] = await db.insert(audioFileConnections).values({
     memberOneUserId: ownerId,
@@ -210,12 +266,14 @@ try {
     'audio_review.comment',
     'audio_review.approved',
     'audio_file_access.revoke',
-    'audio_file_pairing.connection_revoked'
+    'audio_file_pairing.connection_revoked',
+    'music_release.draft_create',
+    'music_recording.create'
   ]) {
     assert.ok(collaborationAudit.some((event) => event.eventType === eventType), `Missing audit event: ${eventType}`);
   }
 
-  console.log('Audio file collaboration integration passed: selected-version share, exact download, review, approval, revoke, cascade, replay denial, and audit are durable.');
+  console.log('Audio file collaboration integration passed: release draft idempotency, selected-version share, exact download, review, approval, revoke, cascade, replay denial, and audit are durable.');
 } finally {
   await db.$client.end();
   rmSync(objectRoot, { recursive: true, force: true });

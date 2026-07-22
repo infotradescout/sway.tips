@@ -41,9 +41,14 @@
         {
           "id": "release_metadata_identifiers",
           "label": "Release drafts, artwork, credits, territories, ISRC, and UPC",
-          "status": "schema_only",
-          "evidence": [],
-          "holdReason": "The durable model exists without a complete customer runtime and production evidence."
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/components/PerformerReleaseDrafts.tsx",
+            "src/server/audio-publishing-service.ts",
+            "scripts/sway-release-drafts.contract.test.mjs",
+            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+          ],
+          "holdReason": "Creators can create idempotent private release drafts from verified Catalog masters with core metadata, territories, ISRC, and UPC. Artwork upload, full credits, rights readiness, edit/version workflows, and production journey evidence remain incomplete; no store delivery is enabled."
         },
         {
           "id": "dsp_delivery",

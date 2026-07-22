@@ -9,16 +9,42 @@ import {
   audioShareGrants,
   audioUploadParts,
   audioUploadSessions,
-  auditEvents
+  auditEvents,
+  musicRecordings,
+  musicReleaseRecordings,
+  musicReleases
 } from '../db/schema';
 import { parseAudioStorageProvider, type AudioObjectIdentity, type AudioObjectStore } from './audio-object-storage';
 
 const DEFAULT_PART_SIZE = 5 * 1024 * 1024;
 const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RELEASE_TYPES = new Set(['single', 'ep', 'album', 'comedy_special', 'spoken_word', 'other']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function sha256Hex(value: string | Buffer) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function requiredReleaseText(value: string, label: string, maxLength = 200) {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${label} is required.`);
+  if (normalized.length > maxLength) throw new Error(`${label} must be ${maxLength} characters or fewer.`);
+  return normalized;
+}
+
+function optionalReleaseText(value: string | null | undefined, label: string, maxLength = 200) {
+  const normalized = value?.trim() || null;
+  if (normalized && normalized.length > maxLength) throw new Error(`${label} must be ${maxLength} characters or fewer.`);
+  return normalized;
+}
+
+function normalizeTerritories(values: string[] | null | undefined) {
+  const normalized = [...new Set((values ?? []).map((value) => value.trim().toUpperCase()).filter(Boolean))];
+  if (normalized.some((value) => !/^[A-Z]{2}$/.test(value))) {
+    throw new Error('Territories must use two-letter country codes.');
+  }
+  return normalized.length ? normalized : ['US'];
 }
 
 async function writeAudit(
@@ -68,6 +94,7 @@ export function createAudioPublishingService(config: {
     userId: string;
     needUpload?: boolean;
     needDownload?: boolean;
+    needManageRelease?: boolean;
     needManageAccess?: boolean;
   }) {
     const [grant] = await db
@@ -82,6 +109,7 @@ export function createAudioPublishingService(config: {
     if (!grant) return null;
     if (input.needUpload && !grant.canUploadVersions) return null;
     if (input.needDownload && !grant.canDownloadOriginals) return null;
+    if (input.needManageRelease && !grant.canManageRelease) return null;
     if (input.needManageAccess && !grant.canManageAccess) return null;
     return grant;
   }
@@ -604,6 +632,261 @@ export function createAudioPublishingService(config: {
     return { version, ...object };
   }
 
+  async function listReleaseWorkspace(input: { performerId: string; actorUserId: string }) {
+    const releases = await db
+      .select({
+        id: musicReleases.id,
+        projectId: musicReleases.projectId,
+        title: musicReleases.title,
+        primaryArtistName: musicReleases.primaryArtistName,
+        releaseType: musicReleases.releaseType,
+        distributionMode: musicReleases.distributionMode,
+        status: musicReleases.status,
+        upc: musicReleases.upc,
+        labelName: musicReleases.labelName,
+        pLine: musicReleases.pLine,
+        cLine: musicReleases.cLine,
+        originalReleaseDate: musicReleases.originalReleaseDate,
+        territories: musicReleases.territories,
+        createdAt: musicReleases.createdAt,
+        updatedAt: musicReleases.updatedAt
+      })
+      .from(musicReleases)
+      .where(eq(musicReleases.performerId, input.performerId))
+      .orderBy(desc(musicReleases.updatedAt));
+
+    const recordings = await db
+      .select({
+        releaseId: musicReleaseRecordings.releaseId,
+        recordingId: musicRecordings.id,
+        masterAssetVersionId: musicRecordings.masterAssetVersionId,
+        title: musicRecordings.title,
+        versionTitle: musicRecordings.versionTitle,
+        primaryArtistName: musicRecordings.primaryArtistName,
+        isrc: musicRecordings.isrc,
+        isExplicit: musicRecordings.isExplicit,
+        languageCode: musicRecordings.languageCode,
+        rightsStatus: musicRecordings.rightsStatus,
+        discNumber: musicReleaseRecordings.discNumber,
+        trackNumber: musicReleaseRecordings.trackNumber
+      })
+      .from(musicReleaseRecordings)
+      .innerJoin(musicRecordings, eq(musicRecordings.id, musicReleaseRecordings.recordingId))
+      .innerJoin(musicReleases, eq(musicReleases.id, musicReleaseRecordings.releaseId))
+      .where(eq(musicReleases.performerId, input.performerId))
+      .orderBy(asc(musicReleaseRecordings.discNumber), asc(musicReleaseRecordings.trackNumber));
+
+    const masterRows = await db
+      .select({
+        versionId: audioProjectAssetVersions.id,
+        assetId: audioProjectAssetVersions.assetId,
+        projectId: audioProjectAssetVersions.projectId,
+        projectTitle: audioProjects.title,
+        title: audioAssets.title,
+        originalFilename: audioProjectAssetVersions.originalFilename,
+        mimeType: audioProjectAssetVersions.mimeType,
+        versionNumber: audioProjectAssetVersions.versionNumber,
+        sha256: audioProjectAssetVersions.sha256,
+        sealedAt: audioProjectAssetVersions.sealedAt
+      })
+      .from(audioProjectAssetVersions)
+      .innerJoin(audioAssets, eq(audioAssets.id, audioProjectAssetVersions.assetId))
+      .innerJoin(audioProjects, eq(audioProjects.id, audioProjectAssetVersions.projectId))
+      .innerJoin(audioProjectAccessGrants, and(
+        eq(audioProjectAccessGrants.projectId, audioProjects.id),
+        eq(audioProjectAccessGrants.granteeUserId, input.actorUserId),
+        eq(audioProjectAccessGrants.canManageRelease, true),
+        isNull(audioProjectAccessGrants.revokedAt)
+      ))
+      .where(and(
+        eq(audioProjects.performerId, input.performerId),
+        eq(audioProjects.status, 'active'),
+        eq(audioAssets.status, 'active'),
+        eq(audioProjectAssetVersions.integrityStatus, 'verified'),
+        sql`${audioProjectAssetVersions.mimeType} like 'audio/%'`
+      ))
+      .orderBy(desc(audioProjectAssetVersions.versionNumber), desc(audioProjectAssetVersions.createdAt));
+
+    const seenAssets = new Set<string>();
+    const masters = masterRows.filter((row) => {
+      if (seenAssets.has(row.assetId)) return false;
+      seenAssets.add(row.assetId);
+      return true;
+    });
+
+    return {
+      masters,
+      releases: releases.map((release) => ({
+        ...release,
+        recordings: recordings.filter((recording) => recording.releaseId === release.id)
+      }))
+    };
+  }
+
+  async function createReleaseDraft(input: {
+    clientReleaseId: string;
+    performerId: string;
+    actorUserId: string;
+    projectId: string;
+    masterAssetVersionId: string;
+    title: string;
+    trackTitle: string;
+    versionTitle?: string | null;
+    primaryArtistName: string;
+    releaseType: string;
+    upc?: string | null;
+    isrc?: string | null;
+    labelName?: string | null;
+    pLine?: string | null;
+    cLine?: string | null;
+    originalReleaseDate?: string | null;
+    territories?: string[] | null;
+    isExplicit?: boolean;
+    languageCode?: string | null;
+  }) {
+    if (!UUID_PATTERN.test(input.clientReleaseId)) throw new Error('clientReleaseId must be a UUID.');
+    if (!RELEASE_TYPES.has(input.releaseType)) throw new Error('Release type is invalid.');
+
+    const title = requiredReleaseText(input.title, 'Release title');
+    const trackTitle = requiredReleaseText(input.trackTitle, 'Track title');
+    const primaryArtistName = requiredReleaseText(input.primaryArtistName, 'Primary artist');
+    const versionTitle = optionalReleaseText(input.versionTitle, 'Version title');
+    const labelName = optionalReleaseText(input.labelName, 'Label name');
+    const pLine = optionalReleaseText(input.pLine, 'P line');
+    const cLine = optionalReleaseText(input.cLine, 'C line');
+    const upc = optionalReleaseText(input.upc, 'UPC', 14);
+    const isrc = optionalReleaseText(input.isrc, 'ISRC', 12)?.toUpperCase() ?? null;
+    const languageCode = optionalReleaseText(input.languageCode, 'Language code', 3)?.toLowerCase() ?? null;
+    const originalReleaseDate = optionalReleaseText(input.originalReleaseDate, 'Original release date', 10);
+    const territories = normalizeTerritories(input.territories);
+
+    if (upc && !/^[0-9]{8,14}$/.test(upc)) throw new Error('UPC must contain 8 through 14 digits.');
+    if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) throw new Error('ISRC must use the 12-character ISRC format.');
+    if (languageCode && !/^[a-z]{2,3}$/.test(languageCode)) throw new Error('Language code must contain 2 or 3 letters.');
+    if (originalReleaseDate && !/^\d{4}-\d{2}-\d{2}$/.test(originalReleaseDate)) {
+      throw new Error('Original release date must use YYYY-MM-DD.');
+    }
+
+    const access = await requireProjectAccess({
+      projectId: input.projectId,
+      userId: input.actorUserId,
+      needManageRelease: true
+    });
+    if (!access) throw new Error('Release management permission required.');
+
+    const [master] = await db
+      .select({
+        id: audioProjectAssetVersions.id,
+        projectId: audioProjectAssetVersions.projectId,
+        performerId: audioProjectAssetVersions.performerId,
+        mimeType: audioProjectAssetVersions.mimeType,
+        integrityStatus: audioProjectAssetVersions.integrityStatus,
+        sha256: audioProjectAssetVersions.sha256
+      })
+      .from(audioProjectAssetVersions)
+      .where(and(
+        eq(audioProjectAssetVersions.id, input.masterAssetVersionId),
+        eq(audioProjectAssetVersions.projectId, input.projectId),
+        eq(audioProjectAssetVersions.performerId, input.performerId)
+      ))
+      .limit(1);
+    if (!master || master.integrityStatus !== 'verified' || !master.mimeType.startsWith('audio/')) {
+      throw new Error('A verified audio master owned by this performer is required.');
+    }
+
+    return db.transaction(async (tx) => {
+      const [release] = await tx
+        .insert(musicReleases)
+        .values({
+          id: input.clientReleaseId,
+          performerId: input.performerId,
+          projectId: input.projectId,
+          title,
+          primaryArtistName,
+          releaseType: input.releaseType,
+          distributionMode: 'private',
+          status: 'draft',
+          upc,
+          labelName,
+          pLine,
+          cLine,
+          originalReleaseDate,
+          territories,
+          metadata: {
+            draftSource: 'creator_catalog',
+            clientReleaseId: input.clientReleaseId,
+            deliveryEnabled: false
+          }
+        })
+        .onConflictDoNothing({ target: musicReleases.id })
+        .returning();
+
+      if (!release) {
+        const [existing] = await tx
+          .select()
+          .from(musicReleases)
+          .where(and(eq(musicReleases.id, input.clientReleaseId), eq(musicReleases.performerId, input.performerId)))
+          .limit(1);
+        if (!existing) throw new Error('Release idempotency key belongs to another account.');
+        const [existingRecording] = await tx
+          .select({ recording: musicRecordings })
+          .from(musicReleaseRecordings)
+          .innerJoin(musicRecordings, eq(musicRecordings.id, musicReleaseRecordings.recordingId))
+          .where(eq(musicReleaseRecordings.releaseId, existing.id))
+          .orderBy(asc(musicReleaseRecordings.trackNumber))
+          .limit(1);
+        return { release: existing, recording: existingRecording?.recording ?? null, created: false };
+      }
+
+      const [recording] = await tx.insert(musicRecordings).values({
+        performerId: input.performerId,
+        projectId: input.projectId,
+        masterAssetVersionId: master.id,
+        title: trackTitle,
+        versionTitle,
+        primaryArtistName,
+        isrc,
+        isExplicit: input.isExplicit === true,
+        languageCode,
+        originalReleaseDate,
+        rightsStatus: 'draft',
+        metadata: { masterSha256: master.sha256 }
+      }).returning();
+
+      await tx.insert(musicReleaseRecordings).values({
+        releaseId: release.id,
+        recordingId: recording.id,
+        discNumber: 1,
+        trackNumber: 1
+      });
+
+      await tx.insert(auditEvents).values([
+        {
+          actorType: 'performer',
+          actorId: input.actorUserId,
+          entityType: 'music_release',
+          entityId: release.id,
+          eventType: 'music_release.draft_create',
+          previousStatus: null,
+          nextStatus: 'draft',
+          metadata: { projectId: input.projectId, releaseType: input.releaseType, distributionMode: 'private' }
+        },
+        {
+          actorType: 'performer',
+          actorId: input.actorUserId,
+          entityType: 'music_recording',
+          entityId: recording.id,
+          eventType: 'music_recording.create',
+          previousStatus: null,
+          nextStatus: 'draft',
+          metadata: { releaseId: release.id, masterAssetVersionId: master.id, masterSha256: master.sha256 }
+        }
+      ]);
+
+      return { release, recording, created: true };
+    });
+  }
+
   return {
     createProject,
     listProjects,
@@ -613,6 +896,8 @@ export function createAudioPublishingService(config: {
     completeAndSealUpload,
     createShareGrant,
     openOwnedVersion,
+    listReleaseWorkspace,
+    createReleaseDraft,
     downloadSharedOriginal
   };
 }
