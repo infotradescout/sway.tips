@@ -101,6 +101,10 @@ if (!filesSurface.includes('aria-label="Upload master audio"')
   || filesSurface.includes('type="file"\n            className="hidden"')) {
   failures.push('The production master picker must remain keyboard-addressable instead of hiding the file input from interaction.');
 }
+if (!filesSurface.includes('const projectId = await refreshProjects();')
+  || !filesSurface.includes('if (projectId) await refreshAssets(projectId);')) {
+  failures.push('Opening Files & projects must load sealed versions for the automatically selected project.');
+}
 for (const term of [
   'await store.verifyReady()',
   'await service.completeAndSealUpload',

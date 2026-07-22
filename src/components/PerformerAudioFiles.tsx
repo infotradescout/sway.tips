@@ -44,8 +44,13 @@ export default function PerformerAudioFiles() {
     const response = await fetch('/api/talent/audio/projects', { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error || 'Could not load projects.');
-    setProjects(data.projects || []);
-    if (!selectedProjectId && data.projects?.[0]?.id) setSelectedProjectId(data.projects[0].id);
+    const nextProjects: Project[] = data.projects || [];
+    const nextSelectedProjectId = nextProjects.some((project) => project.id === selectedProjectId)
+      ? selectedProjectId
+      : nextProjects[0]?.id || '';
+    setProjects(nextProjects);
+    setSelectedProjectId(nextSelectedProjectId);
+    return nextSelectedProjectId;
   };
 
   const refreshAssets = async (projectId: string) => {
@@ -60,7 +65,9 @@ export default function PerformerAudioFiles() {
     setStatus(null);
     setBusy(true);
     try {
-      await refreshProjects();
+      const projectId = await refreshProjects();
+      if (projectId) await refreshAssets(projectId);
+      else setVersions([]);
       setStatus(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Audio files unavailable.');
