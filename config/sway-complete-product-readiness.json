@@ -17,9 +17,12 @@
         {
           "id": "durable_master_storage",
           "label": "Durable exact-original master storage and download",
-          "status": "blocked",
-          "evidence": [],
-          "holdReason": "Production object storage is not configured."
+          "status": "implemented_unverified",
+          "evidence": [
+            "scripts/sway-audio-durable-storage.integration.test.mjs",
+            "docs/runbooks/audio-master-vault.md"
+          ],
+          "holdReason": "The private R2 adapter and deterministic exact-byte restart evidence pass, but the live bucket, authenticated production journey, public-access denial, authorization denial, and independent recovery are not verified."
         },
         {
           "id": "project_collaboration",

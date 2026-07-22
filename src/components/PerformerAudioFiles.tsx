@@ -15,14 +15,6 @@ function chunkFile(file: File, partSize: number) {
   return parts;
 }
 
-async function blobToBase64(blob: Blob) {
-  const buffer = await blob.arrayBuffer();
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
 type Project = { id: string; title: string };
 type Version = {
   id: string;
@@ -126,13 +118,12 @@ export default function PerformerAudioFiles() {
       const parts = chunkFile(file, partSize);
       for (let index = 0; index < parts.length; index += 1) {
         setStatus(`Uploading part ${index + 1}/${parts.length}…`);
-        const contentBase64 = await blobToBase64(parts[index]);
         const partResponse = await fetch(
           `/api/talent/audio/uploads/${startData.uploadSession.id}/parts/${index + 1}`,
           {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contentBase64 })
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: parts[index]
           }
         );
         const partData = await partResponse.json().catch(() => ({}));
@@ -191,7 +182,7 @@ export default function PerformerAudioFiles() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Files &amp; projects</p>
-          <p className="mt-1 text-xs text-slate-400">Immutable originals with SHA-256 seal. Pairing QR and DistroKid are still offline.</p>
+          <p className="mt-1 text-xs text-slate-400">Immutable originals with SHA-256 seal. Private pairing is available; music distribution is not yet live.</p>
         </div>
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" /> : null}
       </div>

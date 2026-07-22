@@ -1,7 +1,7 @@
 # Sway Complete Product Gap Ledger
 
 Date: 2026-07-21  
-Branch baseline: `main` at `628c72b4`
+Branch baseline: `main` at `e1317bb1`
 Complete-product decision: **HOLD**
 
 The machine-readable source for the current decision is `config/sway-complete-product-readiness.json`. The fail-closed launch assertion is `npm run readiness:assert`.
@@ -23,7 +23,8 @@ Owner bar: **Do not ship until the product is complete.**
 - Production migration `0023_audio_publishing_foundation` is applied. The live migration ledger and required audio tables were inspected after the migration.
 - Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
 - Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
-- Production object storage is not configured. The authenticated Files & Projects surface reports this fail-closed.
+- The repository now uses a private Cloudflare R2 adapter for production masters; Render remains only the application host. The server verifies bucket access before accepting traffic and rejects local filesystem storage in production.
+- Deterministic storage evidence proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, and identity/traversal denial. It does not prove the live bucket, production authorization journey, or independent recovery.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
 ## Original Sway Pillar
@@ -42,7 +43,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
-| Durable exact-original master storage | Runtime supports private filesystem; production storage is not configured | Blocks upload and exact-download outcome |
+| Durable exact-original master storage | Private R2 runtime and deterministic exact-byte proof implemented | Live bucket, authenticated production flow, public/access denial, and independent recovery remain unverified |
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
 | Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |

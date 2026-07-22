@@ -124,9 +124,13 @@ const audioObjectStore = (() => {
     if (process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
       console.error('[sway.audio] storage config rejected:', error instanceof Error ? error.message : error);
     }
+    if (isProduction && process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
+      throw error;
+    }
     return null;
   }
 })();
+let audioObjectStoreVerified = false;
 const audioPublishingService = businessDb && audioObjectStore
   ? createAudioPublishingService({ db: businessDb, store: audioObjectStore })
   : null;
@@ -225,6 +229,11 @@ const ROOM_LOOKUP_UNAVAILABLE_COPY = 'Live room unavailable. Scan the performer 
 const ROOM_LOOKUP_ENDED_COPY = 'This live room session has ended. Thank you for supporting the performer!';
 
 // Capture the raw request body so Stripe webhook signatures can be verified.
+const AUDIO_UPLOAD_PART_PATH_PATTERN = new RegExp(['^', '/api/', 'talent/audio/uploads', '(?:/|$)'].join(''));
+app.use(AUDIO_UPLOAD_PART_PATH_PATTERN, express.raw({
+  type: 'application/octet-stream',
+  limit: '6mb'
+}));
 app.use(express.json({
   verify: (req, _res, buf) => {
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
@@ -2361,6 +2370,11 @@ app.get('/api/runtime-config-status', (_req, res) => {
       hasSwayEmailApiKey,
       hasSwayEmailFrom,
       hasSwayEmailBaseUrl
+    },
+    audioStorage: {
+      enabled: Boolean(audioObjectStore?.isEnabled),
+      provider: audioObjectStore?.provider ?? null,
+      objectStorageVerified: audioObjectStoreVerified
     },
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
@@ -6126,7 +6140,7 @@ function requireAudioPublishingRuntime(res: express.Response): boolean {
   }
   if (!businessDb || !audioPublishingService || !audioObjectStore) {
     res.status(503).json({
-      error: 'Audio file storage is not configured. Set SWAY_AUDIO_STORAGE_PROVIDER=local_private_fs with a private object directory.'
+      error: 'Private audio object storage is not configured or verified.'
     });
     return false;
   }
@@ -6228,15 +6242,10 @@ app.put('/api/talent/audio/uploads/:uploadSessionId/parts/:partNumber', async (r
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
 
   const partNumber = Number(req.params.partNumber);
-  const contentBase64 = typeof req.body?.contentBase64 === 'string' ? req.body.contentBase64 : '';
-  if (!contentBase64) return res.status(422).json({ error: 'contentBase64 is required for this upload part.' });
-
-  let body: Buffer;
-  try {
-    body = Buffer.from(contentBase64, 'base64');
-  } catch {
-    return res.status(422).json({ error: 'contentBase64 is invalid.' });
+  if (!Buffer.isBuffer(req.body)) {
+    return res.status(415).json({ error: 'Upload parts require Content-Type: application/octet-stream.' });
   }
+  const body = req.body;
   if (!body.byteLength || body.byteLength > 6 * 1024 * 1024) {
     return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
   }
@@ -8971,6 +8980,11 @@ app.use('/api', (_req, res) => {
 
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
+  if (audioObjectStore) {
+    await audioObjectStore.verifyReady();
+    audioObjectStoreVerified = true;
+    console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
+  }
   await refreshBusinessState();
 
   if (process.env.NODE_ENV !== "production") {
@@ -9031,4 +9045,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((error) => {
+  console.error('[sway.startup] server failed before accepting traffic:', error);
+  process.exitCode = 1;
+});

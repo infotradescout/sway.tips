@@ -703,6 +703,15 @@ if (contract && schema && migration) {
   }
 }
 
+const durableStorage = spawnSync(
+  process.execPath,
+  ['scripts/sway-audio-durable-storage.integration.test.mjs'],
+  { cwd: root, encoding: 'utf8' }
+);
+if (durableStorage.status !== 0) {
+  failures.push(`Durable audio storage contract failed:\n${durableStorage.stderr || durableStorage.stdout}`);
+}
+
 if (failures.length) {
   console.error('Audio publishing foundation contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
