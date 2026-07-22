@@ -1,7 +1,7 @@
 # Sway Complete Product Gap Ledger
 
 Date: 2026-07-21  
-Branch baseline: `main` at `628c72b4`
+Branch baseline: `main` at `e1317bb1`
 Complete-product decision: **HOLD**
 
 The machine-readable source for the current decision is `config/sway-complete-product-readiness.json`. The fail-closed launch assertion is `npm run readiness:assert`.
@@ -23,7 +23,8 @@ Owner bar: **Do not ship until the product is complete.**
 - Production migration `0023_audio_publishing_foundation` is applied. The live migration ledger and required audio tables were inspected after the migration.
 - Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
 - Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
-- Production object storage is not configured. The authenticated Files & Projects surface reports this fail-closed.
+- The repository now declares a Render persistent disk and the server rejects a configured production vault unless the mount is real. The live service has not been shown to have consumed that Blueprint.
+- Local deterministic storage evidence proves exact bytes after store reinitialization plus checksum, identity, and traversal denial. It does not prove a production restart or snapshot restore.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
 ## Original Sway Pillar
@@ -42,7 +43,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
-| Durable exact-original master storage | Runtime supports private filesystem; production storage is not configured | Blocks upload and exact-download outcome |
+| Durable exact-original master storage | Disk-backed runtime configuration and local exact-byte proof implemented | Live disk attachment, authenticated production flow, access denial, and snapshot restore remain unverified |
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full collaboration journey remains unverified |
 | Selected-file sharing, review, and approval | Partial foundation | Blocks collaboration replacement |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Durable model only | Blocks release creation outcome |

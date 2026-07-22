@@ -8,6 +8,10 @@ services:
     preDeployCommand: npm run db:migrate
     startCommand: npm run start
     healthCheckPath: /api/build-marker
+    disk:
+      name: sway-audio-originals
+      mountPath: /var/data/sway-audio
+      sizeGB: 10
     domains:
       - sway.tips
       - www.sway.tips
@@ -15,3 +19,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: SWAY_AUDIO_STORAGE_PROVIDER
+        value: local_private_fs
+      - key: SWAY_AUDIO_LOCAL_OBJECT_DIR
+        value: /var/data/sway-audio/objects
+      - key: SWAY_AUDIO_LOCAL_BUCKET
+        value: sway-audio-originals
+      - key: SWAY_AUDIO_LOCAL_DURABLE_MOUNT
+        value: "true"
+      - key: SWAY_AUDIO_LOCAL_MOUNT_PATH
+        value: /var/data/sway-audio

@@ -191,7 +191,7 @@ export default function PerformerAudioFiles() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Files &amp; projects</p>
-          <p className="mt-1 text-xs text-slate-400">Immutable originals with SHA-256 seal. Pairing QR and DistroKid are still offline.</p>
+          <p className="mt-1 text-xs text-slate-400">Immutable originals with SHA-256 seal. Private pairing is available; music distribution is not yet live.</p>
         </div>
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" /> : null}
       </div>

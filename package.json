@@ -27,6 +27,7 @@
     "test:integration:moderation-active-blocks": "node scripts/sway-moderation-active-blocks.integration.test.mjs",
     "test:integration:business-store-process-kill": "node scripts/sway-business-store-process-kill.integration.test.mjs",
     "test:integration:identity-ownership-durable": "node scripts/sway-identity-ownership-durable.integration.test.mjs",
+    "test:integration:audio-durable-storage": "node scripts/sway-audio-durable-storage.integration.test.mjs",
     "test:integration:performer-profile-migration": "node scripts/sway-performer-link-profile-migration.integration.test.mjs",
     "test:integration:fee-policy-brand-partner-cap": "node scripts/sway-fee-policy-brand-partner-cap.integration.test.mjs",
     "test:integration:performer-claim-code": "node scripts/sway-performer-claim-code.integration.test.mjs",

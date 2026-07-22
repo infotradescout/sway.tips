@@ -124,6 +124,9 @@ const audioObjectStore = (() => {
     if (process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
       console.error('[sway.audio] storage config rejected:', error instanceof Error ? error.message : error);
     }
+    if (isProduction && process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
+      throw error;
+    }
     return null;
   }
 })();
@@ -2361,6 +2364,10 @@ app.get('/api/runtime-config-status', (_req, res) => {
       hasSwayEmailApiKey,
       hasSwayEmailFrom,
       hasSwayEmailBaseUrl
+    },
+    audioStorage: {
+      enabled: Boolean(audioObjectStore?.isEnabled),
+      durableMountVerified: audioObjectStore?.durability === 'verified_mount'
     },
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
