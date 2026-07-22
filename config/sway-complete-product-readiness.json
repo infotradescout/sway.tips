@@ -31,8 +31,12 @@
           "id": "project_collaboration",
           "label": "Projects, private pairing, selected-file sharing, review, and approval",
           "status": "implemented_unverified",
-          "evidence": [],
-          "holdReason": "Pairing-token creation is production verified, but the full claim, share, review, approval, revoke, and exact-download journey is not."
+          "evidence": [
+            "src/server/audio-file-pairing-service.ts",
+            "src/server/audio-file-collaboration-service.ts",
+            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+          ],
+          "holdReason": "Pairing, selected immutable-version grants, exact authorized download, review, approval, grant/connection revocation, replay denial, and audit pass in a disposable durable integration. The complete two-account journey is not yet production verified."
         },
         {
           "id": "release_metadata_identifiers",

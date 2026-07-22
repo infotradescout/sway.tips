@@ -83,6 +83,7 @@ import {
 import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
 import { createAudioPublishingService } from "./src/server/audio-publishing-service";
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
+import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 
 dotenv.config({ path: ".env.local", override: false });
@@ -136,6 +137,9 @@ const audioPublishingService = businessDb && audioObjectStore
   : null;
 const audioFilePairingService = businessDb
   ? createAudioFilePairingService({ db: businessDb })
+  : null;
+const audioFileCollaborationService = businessDb && audioObjectStore
+  ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
   : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
@@ -6348,6 +6352,18 @@ function requireFilePairingRuntime(res: express.Response): boolean {
   return true;
 }
 
+function requireFileCollaborationRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.fileConnectionQrRoutes) {
+    res.status(503).json({ error: 'Private file collaboration routes are not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioFileCollaborationService || !audioObjectStore) {
+    res.status(503).json({ error: 'File collaboration requires durable database and private object storage.' });
+    return false;
+  }
+  return true;
+}
+
 app.post('/api/talent/audio/pairing/tokens', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
@@ -6429,6 +6445,157 @@ app.get('/api/talent/audio/pairing/connections', async (req, res) => {
 
   const connections = await audioFilePairingService.listConnections({ userId: talentAccess.actor.actorId });
   return res.json({ connections });
+});
+
+app.post('/api/talent/audio/pairing/connections/:connectionId/shares', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const result = await audioFileCollaborationService.shareVersion({
+      connectionId: String(req.params.connectionId || ''),
+      versionId: typeof req.body?.versionId === 'string' ? req.body.versionId : '',
+      grantedByUserId: talentAccess.actor.actorId,
+      canDownloadOriginal: req.body?.canDownloadOriginal !== false,
+      canComment: req.body?.canComment !== false,
+      canApprove: req.body?.canApprove !== false,
+      expiresAt: typeof req.body?.expiresAt === 'string' ? new Date(req.body.expiresAt) : null
+    });
+    return res.status(result.reused ? 200 : 201).json({
+      grantId: result.grant.id,
+      connectionId: result.grant.connectionId,
+      versionId: result.grant.assetVersionId,
+      granteeUserId: result.grant.granteeUserId,
+      canDownloadOriginal: result.grant.canDownloadOriginal,
+      canComment: result.grant.canComment,
+      canApprove: result.grant.canApprove,
+      expiresAt: result.grant.expiresAt,
+      reused: result.reused
+    });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 422;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to share selected file.' });
+  }
+});
+
+app.get('/api/talent/audio/files/shared-with-me', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  const files = await audioFileCollaborationService.listSharedWithMe({ userId: accountAccess.actor.actorId });
+  return res.json({ files });
+});
+
+app.get('/api/talent/audio/files/shared-by-me', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  const files = await audioFileCollaborationService.listSharedByMe({ userId: accountAccess.actor.actorId });
+  return res.json({ files });
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/download', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const downloaded = await audioFileCollaborationService.downloadGrantedOriginal({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', downloaded.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(downloaded.byteSize));
+    res.setHeader('Content-Disposition', `attachment; filename="${downloaded.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', downloaded.version.sha256);
+    downloaded.stream.pipe(res);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 403;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'File download denied.' });
+  }
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/reviews', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const events = await audioFileCollaborationService.listReviewEvents({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId
+    });
+    return res.json({ events });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 403;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Review access denied.' });
+  }
+});
+
+app.post('/api/talent/audio/file-grants/:grantId/reviews', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const event = await audioFileCollaborationService.addReviewEvent({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId,
+      eventType: req.body?.eventType,
+      body: req.body?.body,
+      timecodeMs: req.body?.timecodeMs,
+      supersedesEventId: req.body?.supersedesEventId
+    });
+    return res.status(201).json({ event });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 422;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to record review.' });
+  }
+});
+
+app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const revoked = await audioFileCollaborationService.revokeGrant({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : null
+    });
+    return res.json(revoked);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to revoke file access.' });
+  }
 });
 
 app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (req, res) => {

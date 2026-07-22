@@ -1,0 +1,4 @@
+ALTER TABLE "audio_file_access_grants" DROP CONSTRAINT "audio_file_access_grants_permission_required";--> statement-breakpoint
+ALTER TABLE "audio_file_access_grants" ADD COLUMN "can_comment" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "audio_file_access_grants" ADD COLUMN "can_approve" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "audio_file_access_grants" ADD CONSTRAINT "audio_file_access_grants_permission_required" CHECK ("audio_file_access_grants"."can_stream_preview" = true or "audio_file_access_grants"."can_download_original" = true or "audio_file_access_grants"."can_upload_new_version" = true or "audio_file_access_grants"."can_comment" = true or "audio_file_access_grants"."can_approve" = true);
