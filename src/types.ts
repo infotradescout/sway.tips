@@ -32,6 +32,7 @@ export interface BoostContribution {
   paymentId?: string | null;
   paymentIntentId?: string | null;
   paymentStatus?: string | null;
+  patronStatusReceiptHash?: string;
 }
 
 export interface RequestItem {
@@ -94,6 +95,9 @@ export interface RequestPreset {
 
 export interface GigSession {
   status: 'inactive' | 'active' | 'ending' | 'closed';
+  startedAt: string | null;
+  autoCloseoutAt: string | null;
+  closedAt: string | null;
   ownerActorUserId?: string | null;
   lastMutationActorUserId?: string | null;
   talentName: string;
@@ -200,8 +204,19 @@ export interface PublicRoomState {
 }
 
 export interface PatronRequestStatus {
-  actionType: RequestItem['type'];
+  actionType: RequestItem['type'] | 'boost';
   status: RequestItem['status'] | 'unavailable';
   title: string;
   submittedAt: string;
+}
+
+export interface PerformerRoomRecap {
+  gigId: string;
+  performerName: string;
+  startedAt: string | null;
+  closedAt: string | null;
+  capturedEarnings: number;
+  platformFees: number;
+  completedActions: number;
+  topRequest: string;
 }

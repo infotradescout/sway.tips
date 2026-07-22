@@ -63,6 +63,17 @@ for (const term of [
   if (!server.includes(term)) failures.push(`Server missing performer library behavior: ${term}`);
 }
 
+for (const term of [
+  'loadRequestableCatalogTracks',
+  "sourceLabel: 'Catalog'",
+  "sourceProvider: 'sway_catalog'",
+  "playbackBoundary: 'sway_stored_audio'",
+  "playbackBoundary: 'external_source_required'",
+  "sql`${audioAssets.metadata}->>'requestable' = 'true'`"
+]) {
+  if (!server.includes(term)) failures.push(`Catalog source is missing from the request-library path: ${term}`);
+}
+
 if (!patronView.includes('gig_id: gigId')) {
   failures.push('PatronView must send gig_id when searching performer availability.');
 }
@@ -75,6 +86,8 @@ for (const forbidden of ['Mr. Brightside', 'Dancing Queen', 'Bohemian Rhapsody']
 
 for (const term of [
   'Music people can request',
+  'Catalog is connected automatically.',
+  'Your owned or cleared audio stored in Sway.',
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
   'Advanced library connections',
   'Link Any Library Program',
@@ -90,18 +103,11 @@ for (const term of [
 }
 
 for (const term of [
+  'Catalog audio · stored in Sway',
   'External request music',
   'The performer plays this from Spotify, DJ software, or another external source.'
 ]) {
-  if (!patronView.includes(term)) failures.push(`Patron search must preserve the external-source boundary: ${term}`);
-}
-
-for (const retiredSurface of [
-  'Catalog is connected automatically.',
-  'Your owned or cleared audio stored in Sway.',
-  'data-sway-audio-catalog="true"'
-]) {
-  if (talentDashboard.includes(retiredSurface)) failures.push(`Library UI exposes retired audio scope: ${retiredSurface}`);
+  if (!patronView.includes(term)) failures.push(`Patron search must preserve the Catalog/external boundary: ${term}`);
 }
 
 for (const term of [

@@ -13,7 +13,7 @@ function requireIncludes(source, term, message) {
 for (const term of [
   'Scan',
   'sway to play',
-  'href="/faq"'
+  'href="/about"'
 ]) {
   requireIncludes(patronApp, term, `Patron recovery copy missing required term: ${term}`);
 }

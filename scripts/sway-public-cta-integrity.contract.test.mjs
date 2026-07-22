@@ -8,6 +8,8 @@ const failures = [];
 const allowedHrefPatterns = [
   /^\/$/,
   /^\/home$/,
+  /^\/account\/login$/,
+  /^\/account\/signup$/,
   /^\/talent\/login$/,
   /^\/talent\/signup$/,
   /^\/talent\/gigs$/,
@@ -15,6 +17,7 @@ const allowedHrefPatterns = [
   /^\/privacy$/,
   /^\/terms$/,
   /^\/support$/,
+  /^\/about$/,
   /^\/faq$/,
   /^\/privacy\/data-deletion$/,
   /^https:\/\/app\.sway\.tips\/$/
@@ -59,9 +62,9 @@ for (const anchor of anchors) {
 
 for (const requiredCta of [
   { text: 'SCAN', href: '/home' },
-  { text: 'Create account', href: '/talent/signup' },
-  { text: 'Login', href: '/talent/login' },
-  { text: 'sway to play', href: '/faq' }
+  { text: 'Create account', href: '/account/signup' },
+  { text: 'Login', href: '/account/login' },
+  { text: 'sway to play', href: '/about' }
 ]) {
   if (!anchors.some((anchor) => anchor.text === requiredCta.text && anchor.href === requiredCta.href)) {
     failures.push(`Public landing missing required CTA: ${requiredCta.text} -> ${requiredCta.href}`);

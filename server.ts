@@ -12,10 +12,10 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
 import { existsSync } from "fs";
 import sharp from "sharp";
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, gigAccessGrants, gigSessions, moderationEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -27,7 +27,7 @@ import { resolveProposedPlatformFee } from "./src/server/fee-policy";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
-import { applyProModeTransition, getProModeStatus, type ProModeTransitionResult } from "./src/server/pro-mode";
+import { activateProModeWithPerformer, getProModeStatus } from "./src/server/pro-mode";
 import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
@@ -36,6 +36,7 @@ import {
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
   normalizePerformerPhone,
+  ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_CLAIM_CODE_TTL_MS,
   PERFORMER_LOGIN_CHALLENGE_TYPE_ACCOUNT_INVITE,
   PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
@@ -74,12 +75,18 @@ import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-en
 import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
+  projectPatronBoostStatus,
   projectPatronRequestStatus
 } from "./src/server/patron-status-receipt";
 import {
   projectPublicRoomState,
   sanitizePatronMutationResponseBody
 } from "./src/server/public-room-state";
+import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
+import { createAudioPublishingService } from "./src/server/audio-publishing-service";
+import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
+import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
+import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -113,6 +120,29 @@ const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
+const audioObjectStore = (() => {
+  try {
+    return createConfiguredAudioObjectStore(process.env);
+  } catch (error) {
+    if (process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
+      console.error('[sway.audio] storage config rejected:', error instanceof Error ? error.message : error);
+    }
+    if (isProduction && process.env.SWAY_AUDIO_STORAGE_PROVIDER?.trim()) {
+      throw error;
+    }
+    return null;
+  }
+})();
+let audioObjectStoreVerified = false;
+const audioPublishingService = businessDb && audioObjectStore
+  ? createAudioPublishingService({ db: businessDb, store: audioObjectStore })
+  : null;
+const audioFilePairingService = businessDb
+  ? createAudioFilePairingService({ db: businessDb })
+  : null;
+const audioFileCollaborationService = businessDb && audioObjectStore
+  ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
+  : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -205,21 +235,16 @@ const ROOM_LOOKUP_UNAVAILABLE_COPY = 'Live room unavailable. Scan the performer 
 const ROOM_LOOKUP_ENDED_COPY = 'This live room session has ended. Thank you for supporting the performer!';
 
 // Capture the raw request body so Stripe webhook signatures can be verified.
+const AUDIO_UPLOAD_PART_PATH_PATTERN = new RegExp(['^', '/api/', 'talent/audio/uploads', '(?:/|$)'].join(''));
+app.use(AUDIO_UPLOAD_PART_PATH_PATTERN, express.raw({
+  type: 'application/octet-stream',
+  limit: '6mb'
+}));
 app.use(express.json({
   verify: (req, _res, buf) => {
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
   }
 }));
-
-// Product-scope tombstone: Sway is a live customer/performer room product.
-// Historical audio-distribution tables remain untouched for rollback safety,
-// but their API surface is intentionally unavailable.
-app.all(/^\/api\/talent\/audio(?:\/|$)/, (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  return res.status(410).json({
-    error: 'This retired product surface is not part of Sway.'
-  });
-});
 
 app.use(async (req, _res, next) => {
   try {
@@ -552,6 +577,23 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     });
   }
 
+  if (pathParts[0] === 'r' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && audioPublishingService) {
+    const release = await audioPublishingService.getPublicRelease({ releaseId: pathParts[1] });
+    if (!release) return defaultMetadata;
+    const dateCopy = release.status === 'published'
+      ? 'Out now.'
+      : release.scheduledReleaseAt
+        ? `Planned for ${new Date(release.scheduledReleaseAt).toLocaleDateString('en-US')}.`
+        : 'Release ready; destination delivery is not yet confirmed.';
+    return defaultShareMetadata(req, {
+      title: `${release.title} by ${release.primaryArtistName}`,
+      description: `${dateCopy} View the official credits and provider-confirmed availability on Sway.`,
+      url: release.releasePath,
+      image: release.artworkUrl || DEFAULT_SHARE_IMAGE_PATH,
+      imageAlt: `${release.title} release artwork`
+    });
+  }
+
   if (pathParts[0] === 'g' && pathParts[1] && UUID_PATTERN.test(pathParts[1])) {
     const [room] = await businessDb
       .select({
@@ -595,7 +637,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
   return defaultMetadata;
 }
 
-function renderStaticDocument(title: string, description: string, bodyHtml: string) {
+function renderStaticDocument(title: string, description: string, bodyHtml: string, eyebrow = 'Sway trust center') {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -661,6 +703,10 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
         margin: 24px 0 10px;
         font-size: 18px;
       }
+      h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
       p, li {
         color: var(--muted);
         font-size: 15px;
@@ -669,6 +715,93 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
       ul {
         margin: 0;
         padding-left: 20px;
+      }
+      ol {
+        margin: 0;
+        padding-left: 22px;
+      }
+      strong { color: var(--text); }
+      .hero-note {
+        margin: 0 0 18px;
+        padding: 16px 18px;
+        border: 1px solid rgba(53, 213, 154, 0.24);
+        border-radius: 14px;
+        background: rgba(53, 213, 154, 0.07);
+        color: #dffbf1;
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin: 14px 0 4px;
+      }
+      .card {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(4, 6, 12, 0.5);
+      }
+      .card p { margin: 0; font-size: 14px; }
+      .steps {
+        display: grid;
+        gap: 10px;
+        margin: 14px 0 4px;
+        padding: 0;
+        list-style: none;
+        counter-reset: sway-step;
+      }
+      .steps li {
+        position: relative;
+        min-height: 48px;
+        padding: 12px 14px 12px 50px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(4, 6, 12, 0.36);
+        counter-increment: sway-step;
+      }
+      .steps li::before {
+        content: counter(sway-step);
+        position: absolute;
+        left: 13px;
+        top: 12px;
+        display: grid;
+        width: 25px;
+        height: 25px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #06110d;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .plain-language {
+        margin-top: 20px;
+        padding: 16px 18px;
+        border-left: 3px solid #7c5cff;
+        border-radius: 0 12px 12px 0;
+        background: rgba(124, 92, 255, 0.09);
+      }
+      .plain-language p { margin: 0; }
+      .primary-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0 4px;
+      }
+      .primary-actions a {
+        display: inline-flex;
+        min-height: 42px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 16px;
+        border-radius: 11px;
+        background: var(--accent);
+        color: #06110d;
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
       }
       a {
         color: #9fe8cb;
@@ -679,11 +812,16 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
         flex-wrap: wrap;
         gap: 10px;
       }
+      @media (max-width: 640px) {
+        main { width: min(100% - 20px, 860px); padding-top: 24px; }
+        .panel { padding: 18px; }
+        .card-grid { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <span class="eyebrow">Sway trust center</span>
+      <span class="eyebrow">${eyebrow}</span>
       <h1>${title}</h1>
       <p class="lede">${description}</p>
       <section class="panel">
@@ -720,68 +858,143 @@ const supportPageHtml = renderStaticDocument(
   `
 );
 
-const faqPageHtml = renderStaticDocument(
-  'Sway FAQ',
-  'Quick answers, official links, and current support paths for Sway performers and audiences.',
+const aboutPageHtml = renderStaticDocument(
+  'Sway: the whole performer business, connected',
+  'One read on how Sway connects a performer’s public identity, live audience, music catalog, releases, distribution, payments, and control.',
   `
-    <p>Sway lets audiences scan into a live room, send requests, and support performers while the performer keeps control of the queue.</p>
-    <h2>How do I join a live room?</h2>
-    <p>Use <a href="/home">SCAN</a> from the public landing page or scan a performer’s Sway QR code at the venue.</p>
-    <h2>How do performers get started?</h2>
-    <p>Use <a href="/talent/signup">Create account</a> to start a performer account, or <a href="/talent/login">Login</a> if you already have access.</p>
-    <h2>Are paid requests guaranteed to play?</h2>
-    <p>No. A paid request is a submission for performer review. Performers control approvals, denials, queue order, and fulfillment. Payment behavior must match backend confirmation and processor state.</p>
-    <h2>Official links</h2>
+    <p class="hero-note"><strong>Sway is an operating system for independent performers.</strong> It gives an artist one public home, a live audience room, direct fan support, a private working Catalog, and a release-and-distribution workflow—without taking control of the performance or the creator’s work.</p>
+
+    <h2>The product in four connected parts</h2>
+    <div class="card-grid">
+      <article class="card"><h3>Your public page</h3><p>A shareable Sway profile for your story, image, featured media, social links, booking contact, support links, releases, and live-room entry. It is designed to replace a patchwork artist website and link page with one place that stays connected to the rest of your business.</p></article>
+      <article class="card"><h3>Your live room</h3><p>A performer-controlled room for real-world shows. People scan a QR code or open a room link, make requests, tip, boost approved queue items, and follow what happened from their own private status receipts.</p></article>
+      <article class="card"><h3>Your Catalog and collaborators</h3><p>Private, original-quality file storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
+      <article class="card"><h3>Your publishing and distribution</h3><p>The start of a DistroKid-replacement workflow inside the same account. Today, each release draft connects one verified master to one recording and adds artwork, metadata, credits, identifiers, territories, and reviewed rights evidence. Multi-recording EP and album assembly, provider-backed store delivery, royalty accounting, splits, payouts, pre-saves, and safe distributor cutover are not live.</p></article>
+    </div>
+
+    <h2>How Sway works for an audience member</h2>
+    <ol class="steps">
+      <li><strong>Join the correct room.</strong> Scan the performer’s Sway QR code or open their room link. A download is not required to use the web experience.</li>
+      <li><strong>Choose what you want to do.</strong> Send a music or custom request, leave a direct tip, or boost an already-approved request higher in the crowd signal.</li>
+      <li><strong>Review the amount and authorize payment.</strong> Sway does not treat a button tap as payment success. The screen waits for backend and payment-provider confirmation.</li>
+      <li><strong>Follow the outcome.</strong> A private receipt shows whether your request, tip, or boost is pending, approved, denied, fulfilled, captured, released, or refunded.</li>
+    </ol>
+    <div class="plain-language"><p><strong>A request is not a promise that something will be played.</strong> The performer keeps artistic and operational control. If an unresolved request is denied or the room closes, Sway releases or refunds the associated payment according to its confirmed processor state.</p></div>
+
+    <h2>How Sway works for a performer</h2>
+    <ol class="steps">
+      <li><strong>Create one Sway account.</strong> Any account can join rooms. Activating Pro Mode adds the performer workspace and public identity to that same account.</li>
+      <li><strong>Build your public presence.</strong> Set your handle, name, roles, location, biography, featured media, booking details, social accounts, and prioritized links. When you go live, the same page can route fans into your active room.</li>
+      <li><strong>Start and share a room.</strong> Configure the room, minimum support amount, request source, and operating mode; then share the durable QR or link.</li>
+      <li><strong>Run the crowd, not a second job.</strong> Pause or resume requests, manually review them, use open-call behavior, or use crowd autopilot for moderated requests. Approve, deny, order, fulfill, report, or remove items while Sway keeps payment state tied to the action.</li>
+      <li><strong>Close with a real recap.</strong> Ending a room shuts requests, resolves outstanding holds, calculates captured totals from durable records, and keeps the completed session in room history.</li>
+    </ol>
+
+    <h2>From a master file to a release</h2>
+    <ol class="steps">
+      <li><strong>Add the work to Catalog.</strong> Sway preserves the original, its checksum, versions, project ownership, and access permissions. Catalog files stay private unless the owner explicitly shares or exposes them for requests.</li>
+      <li><strong>Work with the right people.</strong> Connect collaborators, grant only the permissions they need, exchange files, comment at timecodes, request changes, record approvals, and revoke access.</li>
+      <li><strong>Build a one-recording release draft.</strong> Select one verified master and add artwork, release and recording titles, artist identity, UPC, ISRC, explicit flag, language, label, copyright lines, dates, territories, and recording credits. The current workspace does not yet add or reorder recordings for an EP or album.</li>
+      <li><strong>Clear the rights that apply.</strong> Every release readiness check requires independently verified master control, composition control, artwork control, and distribution authorization. Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence: creators must document them when the facts of the recording require them, but they are not universal requirements for every release.</li>
+      <li><strong>Prepare for delivery.</strong> A rights-cleared release becomes ready for a contracted delivery provider. When that integration is active, each destination will keep its own queued, submitted, accepted, live, correction, failure, or takedown state so “published” means provider-confirmed—not merely submitted.</li>
+    </ol>
+
+    <h2>Replacing an existing distributor</h2>
+    <p>Sway’s catalog-transfer design is built around continuity, not a blind re-upload. It will snapshot the source catalog; map artist identities, UPCs, ISRCs, exact metadata, artwork, assets, rights, and destination IDs; stage replacement deliveries; verify overlap and store matching; and only permit an old-provider takedown after every expected release and recording has immutable continuity evidence. A mismatch, rights problem, Content ID conflict, or failed track link must stop the cutover. This cutover is not enabled until provider execution and production continuity proof exist.</p>
+
+    <h2>Where the publishing product stands</h2>
+    <p><strong>Available in the product:</strong> durable original masters, projects, private collaborator connections, immutable file sharing and review, editable one-master and one-recording release drafts, artwork, identifiers, territories, recording credits, sealed rights declarations, independent rights review, readiness checks, public artist profiles, and eligible public release pages.</p>
+    <p><strong>Still required for the complete DistroKid replacement:</strong> multi-recording EP and album assembly with track add and reorder controls, a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed.</p>
+
+    <h2>Money, ownership, and control</h2>
+    <div class="card-grid">
+      <article class="card"><h3>Payments follow evidence</h3><p>Requests, tips, and boosts use idempotent backend actions and processor-confirmed states. Sway distinguishes authorization, capture, release, refund, failure, and payout readiness.</p></article>
+      <article class="card"><h3>Creators keep their rights</h3><p>Uploading work or preparing a release draft in Sway does not transfer a creator’s master or composition ownership to Sway. Collaborator terms and splits must be explicit, attributable, and accepted by the actual parties.</p></article>
+      <article class="card"><h3>Performers control the room</h3><p>Money does not buy approval authority. Paid boosts only apply to already-approved visible items, and moderation can block abusive or unsafe submissions.</p></article>
+      <article class="card"><h3>No false success</h3><p>Sway is designed to fail closed: no payment success before confirmation, no delivery success before provider evidence, no payout promise before identity and payout onboarding, and no catalog cutover on incomplete proof.</p></article>
+    </div>
+
+    <h2>What Sway is not</h2>
     <ul>
-      <li><a href="/">Sway public home</a></li>
-      <li><a href="/home">Audience scan entry</a></li>
-      <li><a href="/talent/signup">Create performer account</a></li>
-      <li><a href="/talent/login">Performer login</a></li>
-      <li><a href="/support">Support</a></li>
-      <li><a href="/privacy">Privacy</a></li>
-      <li><a href="/terms">Terms</a></li>
-      <li><a href="/legal/payments">Payment terms</a></li>
-      <li><a href="/legal/payouts">Payout terms</a></li>
-      <li><a href="/privacy/data-deletion">Data deletion</a></li>
+      <li>It is not a jukebox and does not take over the performer’s creative decisions.</li>
+      <li>It is not a guarantee that a paid request will be performed.</li>
+      <li>It is not a public dump of private Catalog files.</li>
+      <li>It is not a claim on creator copyrights.</li>
+      <li>It is not a “submitted means live” distributor or a “deployed means working” product.</li>
     </ul>
-    <h2>Social links</h2>
-    <p>Approved social profile URLs are not configured in this repository yet. When the official Sway social links are approved, this page is the public place to add them.</p>
-  `
+
+    <h2>Start where you are</h2>
+    <p>Fans can join a room immediately. Creators can use the same account as a fan, then activate Pro Mode when they are ready to build a profile, run rooms, manage Catalog, and publish.</p>
+    <div class="primary-actions">
+      <a href="/home">Scan or join a room</a>
+      <a href="/account/signup">Create a Sway account</a>
+      <a href="/account/login">Log in</a>
+    </div>
+  `,
+  'Sway to play'
 );
+
+// Keep the long-standing FAQ URL working while the landing-page explainer
+// moves to its truthful name. Both routes intentionally render one canonical
+// product explanation so old QR codes and bookmarks do not rot.
+const faqPageHtml = aboutPageHtml;
 
 const privacyPageHtml = renderStaticDocument(
   'Sway Privacy Policy',
-  'What Sway stores for performer accounts, live-room requests, payments, moderation, and support workflows.',
+  'What Sway stores for accounts, public profiles, live rooms, private Catalog work, release preparation, payments, safety, and support.',
   `
-    <p>Sway processes performer account data, live-room request data, payment-related records, moderation records, and support/deletion requests so the service can run and be audited.</p>
+    <p>Sway processes account and public-profile data, live-room activity, private Catalog and collaboration records, release-draft and rights-review records, payment-related records, moderation records, and support or deletion requests so the service can run, protect access, and maintain an auditable history.</p>
     <h2>Data Sway may store</h2>
     <ul>
-      <li>performer account profile and login records</li>
+      <li>account, login, Pro Mode, performer-profile, booking, social-link, and public-page records</li>
       <li>live-room session, queue, request, tip, and boost records</li>
+      <li>original master and supporting-file bytes, filenames, media types, byte counts, checksums, storage locations, versions, integrity results, and project ownership records</li>
+      <li>project membership, collaborator connections, selected-file access grants, comments, timecodes, change requests, approvals, revocations, and related audit events</li>
+      <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
+      <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
       <li>payment processor identifiers and related lifecycle status</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
       <li>limited device, route, and friction telemetry needed to keep the service working</li>
     </ul>
+    <h2>Private work and public pages</h2>
+    <p>Uploading a file does not make a private Catalog file public. Project files and release drafts are available to the owner and to collaborators or reviewers who receive applicable access. A grant can be revoked for future access, but revocation cannot retrieve a copy someone already downloaded or erase audit evidence that Sway must retain. Performer-profile fields and eligible release information that a performer deliberately publishes can be viewed by anyone with the public page.</p>
     <h2>Third-party services</h2>
-    <p>Sway may rely on payment, email, hosting, and database providers when configured. Those providers may process information required to deliver the service.</p>
+    <p>Sway may rely on payment, email, hosting, object-storage, and database providers when configured. Those providers may process information required to deliver the service. Provider-backed music delivery, royalty processing, collaborator payouts, pre-saves, and catalog cutover are not live; this policy does not imply that Sway currently sends a release to stores or a replacement distributor.</p>
     <h2>Deletion requests</h2>
-    <p>Use <a href="/privacy/data-deletion">the data deletion page</a> or submit the API request path from inside the app. Sway may retain records that must be preserved for payments, fraud prevention, disputes, moderation, legal obligations, or audit history.</p>
+    <p>Use <a href="/privacy/data-deletion">the data deletion page</a> or submit the API request path from inside the app. Sway may retain records that must be preserved for payments, fraud prevention, disputes, collaborator access history, rights evidence, moderation, legal obligations, or audit history. Creators should keep their own source-file backups; a deletion request and any required retention will be evaluated against the account, project, access, and legal records involved.</p>
   `
 );
 
 const termsPageHtml = renderStaticDocument(
   'Sway Terms',
-  'Core rules for live performer rooms, paid requests, tips, refunds, and account use.',
+  'Core rules for accounts, public pages, live rooms, private Catalog work, release drafts, payments, and platform use.',
   `
-    <p>Sway is a live-event request and tipping platform. Patrons use Sway to support real-world performers and DJs during live sessions.</p>
-    <h2>Service rules</h2>
+    <p>Sway connects a performer’s public page, live-event request and support room, private Catalog and collaborator work, and release preparation in one account. The current publishing runtime creates a draft with one verified master and one recording. It does not yet provide multi-recording EP or album assembly, provider-backed store delivery, royalty accounting, collaborator splits or payouts, true destination pre-saves, or distributor cutover.</p>
+    <h2>Accounts and public pages</h2>
+    <ul>
+      <li>account holders must provide accurate information, protect their login, and may not impersonate another person or publish content they are not authorized to use</li>
+      <li>performers control which profile and eligible release information they publish; public-page content can be viewed and shared by anyone</li>
+      <li>Sway may restrict content or accounts used for fraud, infringement, harassment, abuse, or attempts to bypass access and safety controls</li>
+    </ul>
+    <h2>Live-room rules</h2>
     <ul>
       <li>a paid request is a paid submission for performer review, not a guaranteed performance</li>
       <li>performers control queue order, approval, denial, and fulfillment decisions</li>
       <li>tips and support payments may be voluntary even when no song is approved</li>
       <li>abuse, fraud, harassment, and attempts to bypass safety controls may result in blocks or account action</li>
     </ul>
+    <h2>Catalog and collaborator rules</h2>
+    <ul>
+      <li>creators retain their ownership; uploading a master, supporting file, artwork, or rights document does not transfer copyright ownership to Sway</li>
+      <li>an uploader must have authority to store the material and to grant each collaborator or reviewer the access they select</li>
+      <li>granting access authorizes Sway to make the selected project or file available under that grant; revocation blocks future access but cannot retrieve copies already downloaded</li>
+      <li>integrity checks and version records help preserve evidence, but creators remain responsible for maintaining their own source-file backups</li>
+    </ul>
+    <h2>Release drafts and rights</h2>
+    <p>Each current release draft connects one verified master to one recording; there is no add-or-reorder workflow for an EP or album. Universal readiness requires independently verified master control, composition control, artwork control, and distribution authorization. Sample clearance, third-party beat licenses, cover licenses, performer consent, and AI disclosure are conditional evidence that creators must provide when their work requires it. A Sway declaration, reviewer decision, readiness result, or public release page is recordkeeping—not legal advice, a guarantee of ownership, or proof that a store accepted a release.</p>
+    <h2>Distribution limits</h2>
+    <p>Provider-backed delivery, store callbacks and corrections, royalties, splits, payouts, destination pre-saves, takedowns, and catalog cutover are not live. A draft marked ready or shown on a public page has not thereby been submitted, accepted, distributed, streamed, monetized, or migrated. Separate provider terms and disclosures will be required before Sway can transmit releases or money through those systems.</p>
     <h2>Money terms</h2>
     <p>Payment, refund, and payout behavior must match the live backend and processor state exactly. See the dedicated payment and payout terms below for the current operating rules.</p>
   `
@@ -859,6 +1072,9 @@ const systemRequestPresets = [
 function createInactiveSession(): GigSession {
   return {
     status: 'inactive',
+    startedAt: null,
+    autoCloseoutAt: null,
+    closedAt: null,
     ownerActorUserId: null,
     lastMutationActorUserId: null,
     talentName: "",
@@ -928,14 +1144,19 @@ function buildPatronRequestMutationResponse(input: {
 }
 
 function buildPatronBoostMutationResponse(input: {
+  request: RequestItem;
+  boost: BoostContribution;
   roomState: BackendState;
   gigId: string;
+  receipt: string;
   reconciled?: boolean;
 }) {
   return {
     success: true,
     ...(input.reconciled ? { reconciled: true } : {}),
-    state: projectPublicRoomState(input.roomState, input.gigId)
+    state: projectPublicRoomState(input.roomState, input.gigId),
+    patron_status: projectPatronBoostStatus(input.boost, input.request),
+    patron_status_receipt: input.receipt
   };
 }
 
@@ -1548,6 +1769,50 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   return { importedCount: normalizedTracks.length, removedCount };
 }
 
+async function loadRequestableCatalogTracks(executor: any, input: {
+  performerId: string;
+  query?: string;
+  limit?: number;
+}) {
+  const query = normalizeLibraryText(input.query, 160).toLowerCase();
+  const likeQuery = `%${query}%`;
+  const filters = [
+    eq(audioProjects.performerId, input.performerId),
+    eq(audioProjects.status, 'active'),
+    eq(audioAssets.status, 'active'),
+    inArray(audioAssets.assetKind, ['master_audio', 'mix', 'other']),
+    sql`${audioAssets.metadata}->>'requestable' = 'true'`
+  ];
+  if (query) {
+    filters.push(sql`lower(concat_ws(' ', ${audioAssets.title}, ${audioProjects.title}, ${audioProjectAssetVersions.originalFilename})) like ${likeQuery}`);
+  }
+
+  const rows = await executor
+    .select({
+      id: audioProjectAssetVersions.id,
+      assetId: audioAssets.id,
+      title: audioAssets.title,
+      projectTitle: audioProjects.title,
+      filename: audioProjectAssetVersions.originalFilename,
+      versionNumber: audioProjectAssetVersions.versionNumber,
+      durationMs: audioProjectAssetVersions.durationMs,
+      createdAt: audioProjectAssetVersions.createdAt
+    })
+    .from(audioProjectAssetVersions)
+    .innerJoin(audioAssets, eq(audioAssets.id, audioProjectAssetVersions.assetId))
+    .innerJoin(audioProjects, eq(audioProjects.id, audioProjectAssetVersions.projectId))
+    .where(and(...filters))
+    .orderBy(desc(audioProjectAssetVersions.versionNumber), desc(audioProjectAssetVersions.createdAt))
+    .limit(Math.max(1, Math.min(Number(input.limit) || 100, 250)));
+
+  const seenAssets = new Set<string>();
+  return rows.filter((row: { assetId: string }) => {
+    if (seenAssets.has(row.assetId)) return false;
+    seenAssets.add(row.assetId);
+    return true;
+  });
+}
+
 async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
   const [ownerRow] = await executor
     .select({ id: performers.id })
@@ -1925,6 +2190,29 @@ async function applyRequestTriage({
         const capture = await paymentService.captureAuthorization(paymentId);
         if (capture.status === 'captured' && paymentId === request.paymentId) {
           request.paymentStatus = 'captured';
+          continue;
+        }
+        if (capture.status !== 'captured') {
+          await paymentService.voidOrRefundMany(paymentIds);
+          request.status = 'denied';
+          request.paymentStatus = 'voided_or_refunded';
+          recalculateTotals(roomState);
+          await persistStateWithAudit({
+            roomState,
+            gigId: roomContext.gigId,
+            actor,
+            entityType: 'request',
+            entityId: request.id,
+            eventType: 'request.triage.approve_payment_failed',
+            previousStatus,
+            nextStatus: request.status,
+            metadata: { requestId: request.id, paymentId, captureStatus: capture.status }
+          });
+          return {
+            request,
+            state: prepareRoomState(roomState, roomContext.gigId),
+            paymentError: 'Payment could not be captured. The request was denied and its hold was released.'
+          };
         }
       }
     } else {
@@ -2203,9 +2491,15 @@ setInterval(async () => {
 
       if (elapsedTime >= 300000) {
         console.log("Post-gig timer expired. Releasing pending requests.");
-        executeAutoNuke(state);
+        await settleRoomCloseout(state, state.activeGigId || 'development-room');
         changed = true;
       }
+    }
+
+    if (state.session.status === 'active' && state.session.autoCloseoutAt && Date.now() >= new Date(state.session.autoCloseoutAt).getTime()) {
+      console.log('Room reached its automatic closeout deadline.');
+      await settleRoomCloseout(state, state.activeGigId || 'development-room');
+      changed = true;
     }
 
     if (state.session.isFeatured && state.session.featuredExpiresAt) {
@@ -2243,6 +2537,7 @@ setInterval(async () => {
     const roomSnapshot = await loadRoomState(trackedGigId);
     const roomState = roomSnapshot.state;
     let changed = false;
+    let closeoutReason: 'post_gig_timer' | 'maximum_room_duration' | null = null;
 
     if (roomState.session.status === 'ending' && roomState.session.endGigTimerStartedAt) {
       const startTimeStamp = new Date(roomState.session.endGigTimerStartedAt).getTime();
@@ -2250,9 +2545,17 @@ setInterval(async () => {
 
       if (elapsedTime >= 300000) {
         console.log("Post-gig timer expired. Releasing pending requests.");
-        executeAutoNuke(roomState);
+        await settleRoomCloseout(roomState, trackedGigId);
         changed = true;
+        closeoutReason = 'post_gig_timer';
       }
+    }
+
+    if (roomState.session.status === 'active' && roomState.session.autoCloseoutAt && Date.now() >= new Date(roomState.session.autoCloseoutAt).getTime()) {
+      console.log('Room reached its automatic closeout deadline.');
+      await settleRoomCloseout(roomState, trackedGigId);
+      changed = true;
+      closeoutReason = 'maximum_room_duration';
     }
 
     if (roomState.session.isFeatured && roomState.session.featuredExpiresAt) {
@@ -2278,22 +2581,63 @@ setInterval(async () => {
     }
 
     if (changed) {
-      await persistBusinessStateForRoom(roomState, trackedGigId);
+      if (closeoutReason) {
+        await persistStateWithAudit({
+          roomState,
+          gigId: trackedGigId,
+          actor: { actorId: roomState.session.ownerActorUserId || '00000000-0000-4000-8000-000000000111', actorType: 'system' },
+          entityType: 'gig_session',
+          entityId: trackedGigId,
+          eventType: 'session.auto_closeout',
+          previousStatus: closeoutReason === 'post_gig_timer' ? 'ending' : 'active',
+          nextStatus: 'closed',
+          metadata: { reason: closeoutReason }
+        });
+      } else {
+        await persistBusinessStateForRoom(roomState, trackedGigId);
+      }
     }
   }
 
   await refreshBusinessState();
 }, 10000); // Check every 10 seconds for tighter precision
 
+async function settleRoomCloseout(inputState: BackendState, gigId: string) {
+  const unresolved = inputState.requests.filter((request) => request.type === 'request' && request.status !== 'fulfilled');
+  const paymentIds = unresolved.flatMap((request) => [
+    request.paymentId,
+    ...request.boosts.map((boost) => boost.paymentId)
+  ]).filter((paymentId): paymentId is string => Boolean(paymentId));
+  await paymentService.voidOrRefundMany([...new Set(paymentIds)]);
+  for (const request of unresolved) {
+    if (request.paymentId) request.paymentStatus = 'voided_or_refunded';
+    for (const boost of request.boosts) {
+      if (boost.paymentId) boost.paymentStatus = 'voided_or_refunded';
+    }
+  }
+
+  executeAutoNuke(inputState);
+  if (paymentService.hasDurableStore && UUID_PATTERN.test(gigId)) {
+    const totals = await paymentService.aggregateCapturedTotals(gigId);
+    inputState.session.totals.totalTips = totals.capturedSubtotalCents / 100;
+    inputState.session.totals.accumulatedFees = totals.platformFeeCents / 100;
+    inputState.session.totals.totalCount = totals.capturedCount;
+    return totals;
+  }
+  return null;
+}
+
 function executeAutoNuke(inputState: BackendState) {
   inputState.requests = inputState.requests.map(req => {
-    if (req.status === 'hold') {
+    if (req.type === 'request' && req.status !== 'fulfilled') {
       return { ...req, status: 'denied' };
     }
     return req;
   });
   inputState.session.status = 'closed';
   inputState.session.endGigTimerStartedAt = null;
+  inputState.session.requestsOpen = false;
+  inputState.session.closedAt = new Date().toISOString();
 
   // Compute final totals
   recalculateTotals(inputState);
@@ -2351,6 +2695,11 @@ app.get('/api/runtime-config-status', (_req, res) => {
       hasSwayEmailApiKey,
       hasSwayEmailFrom,
       hasSwayEmailBaseUrl
+    },
+    audioStorage: {
+      enabled: Boolean(audioObjectStore?.isEnabled),
+      provider: audioObjectStore?.provider ?? null,
+      objectStorageVerified: audioObjectStoreVerified
     },
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
@@ -3603,6 +3952,181 @@ app.post('/api/talent/session/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/account/signup', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
+  }
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Account signup is temporarily unavailable.' });
+  }
+
+  const email = normalizePerformerLoginEmail(req.body?.email);
+  const displayName = normalizePerformerDisplayName(req.body?.displayName);
+  const password = normalizePerformerPassword(req.body?.password);
+  const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  if (!email || !displayName || !password) {
+    return res.status(422).json({ error: 'Name, email, and password are required.' });
+  }
+  if (req.body?.termsAccepted !== true) {
+    return res.status(422).json({ error: 'Terms acceptance is required.' });
+  }
+  const passwordValidation = validatePerformerPasswordStrength(password);
+  if (!passwordValidation.ok) return res.status(422).json({ error: passwordValidation.error });
+  if (password !== confirmPassword) return res.status(422).json({ error: 'Password confirmation does not match.' });
+  if (await performerSignupEmailExists(businessDb, email)) {
+    return res.status(409).json({ error: 'This email is already in use.' });
+  }
+
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimit = performerSignupRateLimiter.consume({ requesterIpHash, targetEmail: '__account_signup__' });
+  if (!rateLimit.allowed) return res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+
+  const passwordHash = await hashPerformerPassword(password);
+  const outcome = await businessDb.transaction(async (tx) => {
+    const [account] = await tx.insert(users).values({
+      email,
+      displayName,
+      passwordHash,
+      termsAcceptedAt: new Date(),
+      role: 'patron',
+      proModeStatus: 'disabled'
+    }).returning({ id: users.id });
+    const challenge = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: account.id,
+      targetEmail: email,
+      challengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
+      requesterIpHash,
+      executor: tx
+    });
+    await writeAuditEvent(tx, {
+      actorId: account.id,
+      actorType: 'account',
+      entityType: 'user',
+      entityId: account.id,
+      eventType: 'account.signup',
+      previousStatus: null,
+      nextStatus: 'unverified',
+      metadata: { proModeStatus: 'disabled' }
+    });
+    return { accountId: account.id, challengeId: challenge.challengeId, token: challenge.token };
+  });
+
+  const baseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const verificationLink = `${baseUrl}/api/account/verify-email/consume?token=${encodeURIComponent(outcome.token)}`;
+  const delivery = await performerLoginMailer.sendAccountVerificationLink({ toEmail: email, verificationLink });
+  if (!delivery.delivered) {
+    await businessDb.transaction(async (tx) => {
+      await tx.delete(performerLoginChallenges).where(eq(performerLoginChallenges.id, outcome.challengeId));
+      await tx.delete(users).where(eq(users.id, outcome.accountId));
+    });
+    return res.status(503).json({ error: 'Verification email could not be delivered. Please try again.' });
+  }
+
+  return res.status(202).json({
+    success: true,
+    message: 'Check your email to verify your Sway account.',
+    ...(delivery.provider === 'mock' ? { verificationLink } : {})
+  });
+});
+
+app.get('/api/account/verify-email/consume', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.redirect('/account/login?error=unavailable');
+  }
+  const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  if (!token) return res.redirect('/account/login?error=invalid');
+
+  const verified = await businessDb.transaction(async (tx) => {
+    const challenge = await performerLoginChallengeStore.consumeChallengeFromToken({
+      token,
+      expectedChallengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
+      executor: tx
+    });
+    if (!challenge?.actorUserId) return false;
+    const verifiedAt = new Date();
+    await tx.update(users).set({ emailVerifiedAt: verifiedAt, updatedAt: verifiedAt }).where(eq(users.id, challenge.actorUserId));
+    await writeAuditEvent(tx, {
+      actorId: challenge.actorUserId,
+      actorType: 'account',
+      entityType: 'user',
+      entityId: challenge.actorUserId,
+      eventType: 'account.verify_email',
+      previousStatus: 'unverified',
+      nextStatus: 'verified',
+      metadata: { verifiedAt: verifiedAt.toISOString() }
+    });
+    return true;
+  });
+  return res.redirect(verified ? '/account/login?verified=1' : '/account/login?error=invalid');
+});
+
+app.post('/api/account/login', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!businessDb || !performerSessionStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Account login is temporarily unavailable.' });
+  }
+  const email = normalizePerformerLoginEmail(req.body?.email);
+  const password = normalizePerformerPassword(req.body?.password);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const accountKey = email ?? '__invalid__';
+  const rateLimit = performerPasswordLoginRateLimiter.check({ requesterIpHash, accountKey });
+  if (!rateLimit.allowed) return res.status(429).json({ error: 'Too many failed sign-in attempts. Please try again later.' });
+
+  const [account] = email ? await businessDb.select({
+    id: users.id,
+    passwordHash: users.passwordHash,
+    emailVerifiedAt: users.emailVerifiedAt
+  }).from(users).where(eq(users.email, email)).limit(1) : [];
+  if (!account?.passwordHash || !password || !(await verifyPerformerPassword(password, account.passwordHash))) {
+    performerPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    return res.status(401).json({ error: 'Email or password is incorrect.' });
+  }
+  if (!account.emailVerifiedAt) return res.status(403).json({ error: 'Verify your email before logging in.' });
+
+  const issuedSession = await performerSessionStore.issueSession({ actorUserId: account.id, issuedBy: account.id });
+  performerPasswordLoginRateLimiter.reset({ requesterIpHash, accountKey });
+  res.cookie(performerSessionStore.cookieName, issuedSession.token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    expires: issuedSession.expiresAt
+  });
+  return res.json({ success: true, redirectPath: '/account' });
+});
+
+app.get('/api/account/session', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const access = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (access.allowed === false) return res.status(access.status).json({ error: access.reason });
+  if (!businessDb) return res.status(503).json({ error: 'Account access requires durable persistence.' });
+
+  const [account] = await businessDb.select({
+    id: users.id,
+    email: users.email,
+    displayName: users.displayName,
+    emailVerifiedAt: users.emailVerifiedAt,
+    proModeStatus: users.proModeStatus
+  }).from(users).where(eq(users.id, access.actor.actorId!)).limit(1);
+  const [performer] = await businessDb.select({
+    id: performers.id,
+    displayName: performers.displayName,
+    handle: performers.handle,
+    payoutsEnabled: performers.payoutsEnabled
+  }).from(performers).where(eq(performers.ownerUserId, access.actor.actorId!)).limit(1);
+  return res.json({ account, performer: performer ?? null });
+});
+
+app.post('/api/account/logout', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const token = performerSessionStore.readSessionTokenFromRequest(req);
+  if (token) await performerSessionStore.revokeSessionFromToken(token);
+  res.clearCookie(performerSessionStore.cookieName, { httpOnly: true, secure: isProduction, sameSite: 'lax', path: '/' });
+  return res.json({ success: true });
+});
+
 // Universal-account Pro Mode surface (Phase 2 Slice 1). Deliberately gated by
 // requireAuthenticatedAccountAccess, not requireTalentAccess -- a patron who
 // has never touched a performer route must still be able to read and
@@ -3644,20 +4168,27 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
     return;
   }
 
-  const actorId = access.actor.actorId!;
-  const transition: ProModeTransitionResult = await applyProModeTransition(businessDb, {
-    userId: actorId,
-    action: 'self_activate',
-    actorUserId: actorId,
-    reason: 'patron_self_activate'
-  });
+  const displayName = normalizePerformerDisplayName(req.body?.displayName);
+  const handle = normalizePerformerHandle(req.body?.handle);
+  if (!displayName || !handle) return res.status(422).json({ error: 'Performer name and handle are required.' });
+  if (await performerHandleExists(businessDb, handle)) return res.status(409).json({ error: 'This handle is already taken.' });
 
-  if (transition.allowed === false) {
-    res.status(409).json({ error: transition.reason });
-    return;
+  try {
+    const actorId = access.actor.actorId!;
+    const activation = await activateProModeWithPerformer(businessDb, {
+      userId: actorId,
+      actorUserId: actorId,
+      displayName,
+      handle
+    });
+    if (activation.allowed === false) return res.status(409).json({ error: activation.reason });
+    return res.json({ status: activation.nextStatus, changed: activation.changed, performer: activation.performer });
+  } catch (error) {
+    if (isUniqueConstraintViolation(error, 'idx_performers_handle') || isUniqueConstraintViolation(error, 'idx_performers_handle_lower')) {
+      return res.status(409).json({ error: 'This handle is already taken.' });
+    }
+    throw error;
   }
-
-  res.json({ status: transition.nextStatus, changed: transition.changed });
 });
 
 app.post('/api/talent/control-bridge/token', async (req, res) => {
@@ -5866,21 +6397,38 @@ app.get('/api/talent/library/tracks', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can view this library.' });
   }
 
-  const libraryRows = await businessDb
-    .select({
-      id: performerLibraryTracks.id,
-      title: performerLibraryTracks.title,
-      artist: performerLibraryTracks.artist,
-      album: performerLibraryTracks.album,
-      artworkUrl: performerLibraryTracks.artworkUrl,
-      sourceLabel: performerLibraryTracks.sourceLabel
-    })
-    .from(performerLibraryTracks)
-    .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
-    .orderBy(desc(performerLibraryTracks.updatedAt))
-    .limit(100);
+  const [libraryRows, catalogRows] = await Promise.all([
+    businessDb
+      .select({
+        id: performerLibraryTracks.id,
+        title: performerLibraryTracks.title,
+        artist: performerLibraryTracks.artist,
+        album: performerLibraryTracks.album,
+        artworkUrl: performerLibraryTracks.artworkUrl,
+        sourceLabel: performerLibraryTracks.sourceLabel
+      })
+      .from(performerLibraryTracks)
+      .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
+      .orderBy(desc(performerLibraryTracks.updatedAt))
+      .limit(100),
+    loadRequestableCatalogTracks(businessDb, { performerId: performerOwner.performerId, limit: 100 })
+  ]);
 
   return res.json({
+    catalog: {
+      category: 'sway_catalog',
+      label: 'Catalog audio',
+      playbackBoundary: 'sway_stored_audio',
+      tracks: catalogRows.map((row: any) => ({
+        id: `catalog:${row.id}`,
+        title: row.title || row.filename,
+        artist: performerOwner.displayName,
+        album: row.projectTitle,
+        artworkUrl: null,
+        sourceLabel: 'Catalog',
+        sourceKey: 'catalog'
+      }))
+    },
     external: {
       category: 'external_request_music',
       label: 'External request music',
@@ -6144,6 +6692,766 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
   }
 
   return res.json({ success: true, revoked: true });
+});
+
+function requireAudioPublishingRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.resumableUploadRoutes
+    || !AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.losslessObjectStorage
+    || !AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.privateDownloadAuthorization) {
+    res.status(503).json({ error: 'Audio publishing runtime is not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioPublishingService || !audioObjectStore) {
+    res.status(503).json({
+      error: 'Private audio object storage is not configured or verified.'
+    });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/talent/audio/projects', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can manage audio projects.' });
+
+  const projects = await audioPublishingService.listProjects({
+    performerId: performerOwner.performerId,
+    actorUserId: talentAccess.actor.actorId
+  });
+  return res.json({ projects });
+});
+
+app.post('/api/talent/audio/projects', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can create audio projects.' });
+
+  try {
+    const project = await audioPublishingService.createProject({
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      projectKind: req.body?.projectKind
+    });
+    return res.status(201).json({ project });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not create project.' });
+  }
+});
+
+app.get('/api/talent/audio/releases', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can manage releases.' });
+
+  try {
+    const workspace = await audioPublishingService.listReleaseWorkspace({
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json({ performer: { displayName: performerOwner.displayName }, ...workspace });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : 'Release drafts are temporarily unavailable.' });
+  }
+});
+
+app.post('/api/talent/audio/releases', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can create releases.' });
+
+  try {
+    const result = await audioPublishingService.createReleaseDraft({
+      clientReleaseId: typeof req.body?.clientReleaseId === 'string' ? req.body.clientReleaseId : '',
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      projectId: typeof req.body?.projectId === 'string' ? req.body.projectId : '',
+      masterAssetVersionId: typeof req.body?.masterAssetVersionId === 'string' ? req.body.masterAssetVersionId : '',
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      trackTitle: typeof req.body?.trackTitle === 'string' ? req.body.trackTitle : '',
+      versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
+      primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      releaseType: typeof req.body?.releaseType === 'string' ? req.body.releaseType : '',
+      upc: typeof req.body?.upc === 'string' ? req.body.upc : null,
+      isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
+      labelName: typeof req.body?.labelName === 'string' ? req.body.labelName : null,
+      pLine: typeof req.body?.pLine === 'string' ? req.body.pLine : null,
+      cLine: typeof req.body?.cLine === 'string' ? req.body.cLine : null,
+      originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
+      territories: Array.isArray(req.body?.territories)
+        ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string')
+        : null,
+      isExplicit: req.body?.isExplicit === true,
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null
+    });
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not create release draft.';
+    const status = /permission|required audio master|owned by this performer|another account/i.test(message) ? 403 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.patch('/api/talent/audio/releases/:releaseId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can edit releases.' });
+  try {
+    const result = await audioPublishingService.updateReleaseDraft({
+      releaseId: req.params.releaseId,
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      expectedUpdatedAt: typeof req.body?.expectedUpdatedAt === 'string' ? req.body.expectedUpdatedAt : null,
+      artworkAssetVersionId: typeof req.body?.artworkAssetVersionId === 'string' ? req.body.artworkAssetVersionId : null,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      trackTitle: typeof req.body?.trackTitle === 'string' ? req.body.trackTitle : '',
+      versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
+      primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      releaseType: typeof req.body?.releaseType === 'string' ? req.body.releaseType : '',
+      distributionMode: typeof req.body?.distributionMode === 'string' ? req.body.distributionMode : 'private',
+      upc: typeof req.body?.upc === 'string' ? req.body.upc : null,
+      isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
+      labelName: typeof req.body?.labelName === 'string' ? req.body.labelName : null,
+      pLine: typeof req.body?.pLine === 'string' ? req.body.pLine : null,
+      cLine: typeof req.body?.cLine === 'string' ? req.body.cLine : null,
+      originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
+      scheduledReleaseAt: typeof req.body?.scheduledReleaseAt === 'string' ? req.body.scheduledReleaseAt : null,
+      territories: Array.isArray(req.body?.territories) ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string') : null,
+      isExplicit: req.body?.isExplicit === true,
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not update release draft.';
+    const status = /permission|owner|not found/i.test(message) ? 403 : /another session/i.test(message) ? 409 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/releases/:releaseId/rights', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can declare release rights.' });
+  try {
+    const declaration = await audioPublishingService.createRightsDeclaration({
+      releaseId: req.params.releaseId,
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      declarationType: typeof req.body?.declarationType === 'string' ? req.body.declarationType : '',
+      termsDocumentAssetVersionId: typeof req.body?.termsDocumentAssetVersionId === 'string' ? req.body.termsDocumentAssetVersionId : '',
+      termsVersion: typeof req.body?.termsVersion === 'string' ? req.body.termsVersion : '',
+      declarationText: typeof req.body?.declarationText === 'string' ? req.body.declarationText : '',
+      evidenceNote: typeof req.body?.evidenceNote === 'string' ? req.body.evidenceNote : '',
+      recordingId: typeof req.body?.recordingId === 'string' ? req.body.recordingId : null
+    });
+    return res.status(201).json({ declaration });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not record rights evidence.';
+    return res.status(/permission|owner|not found/i.test(message) ? 403 : 422).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/projects/:projectId/release-reviewers', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const result = await audioPublishingService.grantReleaseReviewer({
+      projectId: req.params.projectId,
+      connectionId: typeof req.body?.connectionId === 'string' ? req.body.connectionId : '',
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.status(result.reused ? 200 : 201).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not add release reviewer.';
+    return res.status(/permission|connection required/i.test(message) ? 403 : 422).json({ error: message });
+  }
+});
+
+app.get('/api/talent/audio/rights/review-queue', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const declarations = await audioPublishingService.listRightsReviewQueue({ actorUserId: accountAccess.actor.actorId });
+    return res.json({ declarations });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : 'Rights review queue is temporarily unavailable.' });
+  }
+});
+
+app.get('/api/talent/audio/rights/:declarationId/document', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const opened = await audioPublishingService.openRightsReviewDocument({
+      declarationId: req.params.declarationId,
+      actorUserId: accountAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', opened.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(opened.byteSize));
+    res.setHeader('Content-Disposition', `attachment; filename="${opened.version.originalFilename.replace(/["\r\n]/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Sway-Asset-Sha256', opened.version.sha256);
+    opened.stream.pipe(res);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Rights evidence document access denied.';
+    return res.status(/not found/i.test(message) ? 404 : 403).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/rights/:declarationId/review', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const outcome = req.body?.outcome === 'verified' || req.body?.outcome === 'rejected' ? req.body.outcome : null;
+  if (!outcome) return res.status(422).json({ error: 'Rights review outcome must be verified or rejected.' });
+  try {
+    const event = await audioPublishingService.reviewRightsDeclaration({
+      declarationId: req.params.declarationId,
+      actorUserId: accountAccess.actor.actorId,
+      outcome,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.status(201).json({ event });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not review rights evidence.';
+    const status = /permission|independent|not found/i.test(message) ? 403 : /already has/i.test(message) ? 409 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/talent/audio/projects/:projectId/assets', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const payload = await audioPublishingService.listProjectAssets({
+      projectId: req.params.projectId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json(payload);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Project access denied.' });
+  }
+});
+
+app.post('/api/talent/audio/assets/:assetId/requestable', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId || !businessDb) return res.status(503).json({ error: 'Catalog access requires a durable database connection.' });
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can change request availability.' });
+
+  const [asset] = await businessDb
+    .select({ id: audioAssets.id, metadata: audioAssets.metadata })
+    .from(audioAssets)
+    .innerJoin(audioProjects, eq(audioProjects.id, audioAssets.projectId))
+    .where(and(
+      eq(audioAssets.id, req.params.assetId),
+      eq(audioProjects.performerId, performerOwner.performerId)
+    ))
+    .limit(1);
+  if (!asset) return res.status(404).json({ error: 'Catalog track not found.' });
+
+  const requestable = req.body?.requestable === true;
+  const metadata = asset.metadata && typeof asset.metadata === 'object' && !Array.isArray(asset.metadata)
+    ? asset.metadata as Record<string, unknown>
+    : {};
+  await businessDb
+    .update(audioAssets)
+    .set({ metadata: { ...metadata, requestable }, updatedAt: new Date() })
+    .where(eq(audioAssets.id, asset.id));
+
+  return res.json({ success: true, assetId: asset.id, requestable });
+});
+
+app.post('/api/talent/audio/projects/:projectId/uploads', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const session = await audioPublishingService.initiateUpload({
+      projectId: req.params.projectId,
+      actorUserId: talentAccess.actor.actorId,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      assetKind: typeof req.body?.assetKind === 'string' ? req.body.assetKind : 'master_audio',
+      originalFilename: typeof req.body?.originalFilename === 'string' ? req.body.originalFilename : 'upload.bin',
+      mimeType: typeof req.body?.mimeType === 'string' ? req.body.mimeType : 'application/octet-stream',
+      expectedByteSize: Number(req.body?.expectedByteSize),
+      expectedSha256: typeof req.body?.expectedSha256 === 'string' ? req.body.expectedSha256 : '',
+      idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : '',
+      partSizeBytes: req.body?.partSizeBytes != null ? Number(req.body.partSizeBytes) : undefined
+    });
+    if (!session.idempotencyKey) {
+      return res.status(422).json({ error: 'idempotencyKey is required.' });
+    }
+    return res.status(201).json({ uploadSession: session });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not start upload.' });
+  }
+});
+
+app.put('/api/talent/audio/uploads/:uploadSessionId/parts/:partNumber', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const partNumber = Number(req.params.partNumber);
+  if (!Buffer.isBuffer(req.body)) {
+    return res.status(415).json({ error: 'Upload parts require Content-Type: application/octet-stream.' });
+  }
+  const body = req.body;
+  if (!body.byteLength || body.byteLength > 6 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
+  }
+
+  try {
+    const written = await audioPublishingService.writeUploadPart({
+      uploadSessionId: req.params.uploadSessionId,
+      actorUserId: talentAccess.actor.actorId,
+      partNumber,
+      body
+    });
+    return res.json({ part: written });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not store upload part.' });
+  }
+});
+
+app.post('/api/talent/audio/uploads/:uploadSessionId/complete', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can seal uploads.' });
+
+  try {
+    const version = await audioPublishingService.completeAndSealUpload({
+      uploadSessionId: req.params.uploadSessionId,
+      actorUserId: talentAccess.actor.actorId,
+      performerId: performerOwner.performerId
+    });
+    return res.json({ version });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not seal upload.' });
+  }
+});
+
+app.post('/api/talent/audio/versions/:versionId/shares', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const result = await audioPublishingService.createShareGrant({
+      versionId: req.params.versionId,
+      actorUserId: talentAccess.actor.actorId,
+      maxUses: req.body?.maxUses != null ? Number(req.body.maxUses) : 5,
+      recipientLabel: typeof req.body?.recipientLabel === 'string' ? req.body.recipientLabel : null
+    });
+    return res.status(201).json({
+      shareGrantId: result.grant.id,
+      expiresAt: result.grant.expiresAt,
+      maxUses: result.grant.maxUses,
+      // Returned once. Client should keep it in memory / fragment transport only.
+      shareToken: result.rawToken
+    });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not create share grant.' });
+  }
+});
+
+app.get('/api/talent/audio/versions/:versionId/content', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const opened = await audioPublishingService.openOwnedVersion({
+      versionId: req.params.versionId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', opened.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(opened.byteSize));
+    res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', opened.version.sha256);
+    opened.stream.pipe(res);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Catalog audio access denied.' });
+  }
+});
+
+app.post('/api/talent/audio/shares/download', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const shareToken = typeof req.body?.shareToken === 'string' ? req.body.shareToken : '';
+  if (!shareToken) return res.status(422).json({ error: 'shareToken is required in the POST body.' });
+
+  try {
+    const downloaded = await audioPublishingService.downloadSharedOriginal({
+      rawToken: shareToken,
+      actorUserId: talentAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', downloaded.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(downloaded.byteSize));
+    res.setHeader('Content-Disposition', `attachment; filename="${downloaded.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', downloaded.version.sha256);
+    downloaded.stream.pipe(res);
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Share download denied.' });
+  }
+});
+
+function requireFilePairingRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.fileConnectionQrRoutes) {
+    res.status(503).json({ error: 'Private file-pairing QR routes are not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioFilePairingService) {
+    res.status(503).json({ error: 'File pairing requires durable database persistence.' });
+    return false;
+  }
+  return true;
+}
+
+function requireFileCollaborationRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.fileConnectionQrRoutes) {
+    res.status(503).json({ error: 'Private file collaboration routes are not enabled.' });
+    return false;
+  }
+  if (!businessDb || !audioFileCollaborationService || !audioObjectStore) {
+    res.status(503).json({ error: 'File collaboration requires durable database and private object storage.' });
+    return false;
+  }
+  return true;
+}
+
+app.post('/api/talent/audio/pairing/tokens', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  try {
+    const issued = await audioFilePairingService.createPairingToken({
+      createdByUserId: talentAccess.actor.actorId,
+      purpose: req.body?.purpose,
+      tokenHash: req.body?.tokenHash,
+      idempotencyKey: req.body?.idempotencyKey,
+      connectionLabel: req.body?.connectionLabel
+    });
+    return res.status(issued.reused ? 200 : 201).json(issued);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to create pairing QR.' });
+  }
+});
+
+app.post('/api/talent/audio/pairing/preview', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!rawToken) return res.status(422).json({ error: 'token is required in the POST body.' });
+
+  try {
+    const preview = await audioFilePairingService.previewPairingToken({
+      claimingUserId: accountAccess.actor.actorId,
+      rawToken
+    });
+    return res.json(preview);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 410;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to preview pairing QR.' });
+  }
+});
+
+app.post('/api/talent/audio/pairing/claim', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!rawToken) return res.status(422).json({ error: 'token is required in the POST body.' });
+
+  try {
+    const claimed = await audioFilePairingService.claimPairingToken({
+      claimingUserId: accountAccess.actor.actorId,
+      rawToken
+    });
+    return res.json(claimed);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 410;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to claim pairing QR.' });
+  }
+});
+
+app.get('/api/talent/audio/pairing/connections', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  const connections = await audioFilePairingService.listConnections({ userId: talentAccess.actor.actorId });
+  return res.json({ connections });
+});
+
+app.post('/api/talent/audio/pairing/connections/:connectionId/shares', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const result = await audioFileCollaborationService.shareVersion({
+      connectionId: String(req.params.connectionId || ''),
+      versionId: typeof req.body?.versionId === 'string' ? req.body.versionId : '',
+      grantedByUserId: talentAccess.actor.actorId,
+      canDownloadOriginal: req.body?.canDownloadOriginal !== false,
+      canComment: req.body?.canComment !== false,
+      canApprove: req.body?.canApprove !== false,
+      expiresAt: typeof req.body?.expiresAt === 'string' ? new Date(req.body.expiresAt) : null
+    });
+    return res.status(result.reused ? 200 : 201).json({
+      grantId: result.grant.id,
+      connectionId: result.grant.connectionId,
+      versionId: result.grant.assetVersionId,
+      granteeUserId: result.grant.granteeUserId,
+      canDownloadOriginal: result.grant.canDownloadOriginal,
+      canComment: result.grant.canComment,
+      canApprove: result.grant.canApprove,
+      expiresAt: result.grant.expiresAt,
+      reused: result.reused
+    });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 422;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to share selected file.' });
+  }
+});
+
+app.get('/api/talent/audio/files/shared-with-me', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const files = await audioFileCollaborationService.listSharedWithMe({ userId: accountAccess.actor.actorId });
+    return res.json({ files });
+  } catch (error) {
+    console.error('[sway.audio] failed to list files shared with account.', error);
+    return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
+  }
+});
+
+app.get('/api/talent/audio/files/shared-by-me', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const files = await audioFileCollaborationService.listSharedByMe({ userId: accountAccess.actor.actorId });
+    return res.json({ files });
+  } catch (error) {
+    console.error('[sway.audio] failed to list files shared by account.', error);
+    return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
+  }
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/download', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const downloaded = await audioFileCollaborationService.downloadGrantedOriginal({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', downloaded.version.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(downloaded.byteSize));
+    res.setHeader('Content-Disposition', `attachment; filename="${downloaded.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Asset-Sha256', downloaded.version.sha256);
+    downloaded.stream.pipe(res);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 403;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'File download denied.' });
+  }
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/reviews', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const events = await audioFileCollaborationService.listReviewEvents({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId
+    });
+    return res.json({ events });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 403;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Review access denied.' });
+  }
+});
+
+app.post('/api/talent/audio/file-grants/:grantId/reviews', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const event = await audioFileCollaborationService.addReviewEvent({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId,
+      eventType: req.body?.eventType,
+      body: req.body?.body,
+      timecodeMs: req.body?.timecodeMs,
+      supersedesEventId: req.body?.supersedesEventId
+    });
+    return res.status(201).json({ event });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 422;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to record review.' });
+  }
+});
+
+app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const revoked = await audioFileCollaborationService.revokeGrant({
+      grantId: String(req.params.grantId || ''),
+      userId: accountAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : null
+    });
+    return res.json(revoked);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to revoke file access.' });
+  }
+});
+
+app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+
+  try {
+    const revoked = await audioFilePairingService.revokeConnection({
+      userId: accountAccess.actor.actorId,
+      connectionId: String(req.params.connectionId || ''),
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : null
+    });
+    return res.json(revoked);
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number'
+      ? (error as { status: number }).status
+      : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Unable to revoke connection.' });
+  }
 });
 
 app.get('/api/talent/setlist', async (req, res) => {
@@ -6641,6 +7949,33 @@ app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
   }
 });
 
+app.get('/api/public/releases/:releaseId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const release = await audioPublishingService.getPublicRelease({ releaseId: req.params.releaseId });
+    if (!release) return res.status(404).json({ error: 'Public release not found.' });
+    return res.json({ release });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : 'Public release is temporarily unavailable.' });
+  }
+});
+
+app.get('/api/public/releases/:releaseId/artwork', async (req, res) => {
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId: req.params.releaseId });
+    res.setHeader('Content-Type', opened.version.mimeType);
+    res.setHeader('Content-Length', String(opened.byteSize));
+    res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.setHeader('X-Sway-Asset-Sha256', opened.version.sha256);
+    opened.stream.pipe(res);
+  } catch (error) {
+    return res.status(404).json({ error: error instanceof Error ? error.message : 'Public release artwork not found.' });
+  }
+});
+
 app.get('/api/public/performer/:handle', async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -6778,11 +8113,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           isPreview: true,
           claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'
         },
-        activeRoom: null
+        activeRoom: null,
+        releases: []
       });
     }
 
-    const [[activeRoom], linkRows, partnerState, [curatedPreview]] = await Promise.all([
+    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -6838,7 +8174,26 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           eq(performerProfilePreviews.isActive, true),
           or(isNull(performerProfilePreviews.claimedPerformerId), eq(performerProfilePreviews.claimedPerformerId, profile.performerId))
         ))
-        .limit(1)
+        .limit(1),
+      businessDb
+        .select({
+          id: musicReleases.id,
+          title: musicReleases.title,
+          primaryArtistName: musicReleases.primaryArtistName,
+          releaseType: musicReleases.releaseType,
+          status: musicReleases.status,
+          scheduledReleaseAt: musicReleases.scheduledReleaseAt,
+          publishedAt: musicReleases.publishedAt,
+          artworkAssetVersionId: musicReleases.artworkAssetVersionId
+        })
+        .from(musicReleases)
+        .where(and(
+          eq(musicReleases.performerId, profile.performerId),
+          ne(musicReleases.distributionMode, 'private'),
+          inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
+        ))
+        .orderBy(desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
+        .limit(12)
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -6883,6 +8238,9 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       phone: profile.bookingPhone,
       ownerEmailVerifiedAt: profile.ownerEmailVerifiedAt
     });
+    const verifiedPublicReleases = audioPublishingService
+      ? (await Promise.all(publicReleaseRows.map((release) => audioPublishingService!.getPublicRelease({ releaseId: release.id })))).filter((release) => release !== null)
+      : [];
 
     return res.json({
       performer: {
@@ -6921,7 +8279,18 @@ app.get('/api/public/performer/:handle', async (req, res) => {
             startedAt: activeRoom.startedAt,
             requestCount: activeRoomSummary?.requestCount ?? 0
           }
-        : null
+        : null,
+      releases: verifiedPublicReleases.map((release) => ({
+        id: release.id,
+        title: release.title,
+        primaryArtistName: release.primaryArtistName,
+        releaseType: release.releaseType,
+        status: release.status,
+        scheduledReleaseAt: release.scheduledReleaseAt,
+        publishedAt: release.publishedAt,
+        releasePath: release.releasePath,
+        artworkUrl: release.artworkUrl
+      }))
     });
   } catch (error) {
     console.error('Public performer profile lookup failed:', error);
@@ -7014,11 +8383,20 @@ app.post("/api/patron/request-status", async (req, res) => {
   const request = roomSnapshot.state.requests.find((candidate) =>
     matchesPatronStatusReceipt(receipt, candidate.patronStatusReceiptHash)
   );
-  if (!request) {
-    return res.status(404).json({ error: 'Patron request status not found.' });
+  if (request) {
+    return res.json({ patron_status: projectPatronRequestStatus(request) });
   }
 
-  return res.json({ patron_status: projectPatronRequestStatus(request) });
+  for (const candidate of roomSnapshot.state.requests) {
+    const boost = candidate.boosts.find((entry) =>
+      matchesPatronStatusReceipt(receipt, entry.patronStatusReceiptHash)
+    );
+    if (boost) {
+      return res.json({ patron_status: projectPatronBoostStatus(boost, candidate) });
+    }
+  }
+
+  return res.status(404).json({ error: 'Patron request status not found.' });
 });
 
 app.get("/api/talent/active-rooms", async (req, res) => {
@@ -7040,6 +8418,43 @@ app.get("/api/talent/active-rooms", async (req, res) => {
   }
 
   return res.json({ rooms: await listReadableActiveRooms(performerOwner.performerId) });
+});
+
+app.get('/api/talent/rooms/history', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!businessDb || !talentAccess.actor.actorId) return res.status(503).json({ error: 'Room history requires durable persistence.' });
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.json({ rooms: [] });
+  const rows = await businessDb.select({
+    gigId: gigSessions.id,
+    runtimeSessionState: gigSessions.runtimeSessionState,
+    startedAt: gigSessions.startedAt,
+    closedAt: gigSessions.manualCloseoutCompletedAt,
+    updatedAt: gigSessions.updatedAt
+  }).from(gigSessions).where(and(
+    eq(gigSessions.performerId, performerOwner.performerId),
+    eq(gigSessions.status, 'closed')
+  )).orderBy(desc(gigSessions.updatedAt)).limit(30);
+
+  const rooms = rows.map((row) => {
+    const session = row.runtimeSessionState && typeof row.runtimeSessionState === 'object'
+      ? row.runtimeSessionState as Partial<GigSession>
+      : {};
+    return {
+      gigId: row.gigId,
+      performerName: session.talentName || performerOwner.displayName,
+      startedAt: session.startedAt || row.startedAt?.toISOString() || null,
+      closedAt: session.closedAt || row.closedAt?.toISOString() || row.updatedAt.toISOString(),
+      capturedEarnings: Number(session.totals?.totalTips || 0),
+      platformFees: Number(session.totals?.accumulatedFees || 0),
+      completedActions: Number(session.totals?.totalCount || 0),
+      topRequest: session.totals?.topRequest || 'No fulfilled requests'
+    };
+  });
+  return res.json({ rooms });
 });
 
 app.get("/api/admin/active-rooms", async (req, res) => {
@@ -7100,6 +8515,9 @@ app.post("/api/session/start", async (req, res) => {
 
   roomState.session = {
     status: 'active',
+    startedAt: new Date().toISOString(),
+    autoCloseoutAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+    closedAt: null,
     ownerActorUserId: actor.actorId,
     lastMutationActorUserId: actor.actorId,
     talentName: talentName || "DJ Pro",
@@ -7227,18 +8645,8 @@ app.post("/api/session/closeout", async (req, res) => {
   if (!actor) return;
   const roomState = roomContext.state;
   const previousStatus = roomState.session.status;
-  executeAutoNuke(roomState);
+  const closeoutTotals = await settleRoomCloseout(roomState, roomContext.gigId);
   roomState.session.lastMutationActorUserId = actor.actorId;
-
-  // Closeout totals are sourced from captured payment records in the database,
-  // never from runtime arrays. Disabled provider mode reports zero captured funds.
-  let closeoutTotals: Awaited<ReturnType<typeof paymentService.aggregateCapturedTotals>> | null = null;
-  if (paymentService.hasDurableStore) {
-    closeoutTotals = await paymentService.aggregateCapturedTotals(roomContext.gigId);
-    roomState.session.totals.totalTips = closeoutTotals.capturedSubtotalCents / 100;
-    roomState.session.totals.accumulatedFees = closeoutTotals.platformFeeCents / 100;
-    roomState.session.totals.totalCount = closeoutTotals.capturedCount;
-  }
 
   await persistStateWithAudit({
     roomState,
@@ -7769,6 +9177,12 @@ app.post("/api/request/create", async (req, res) => {
         const capture = await paymentService.captureAuthorization(authorization.paymentId);
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
+        } else {
+          await paymentService.voidOrRefund(authorization.paymentId);
+          return res.status(502).json({
+            error: 'Payment could not be completed. The hold was released and no action was created.',
+            payment_status: 'capture_failed'
+          });
         }
       }
     }
@@ -7927,9 +9341,15 @@ app.post("/api/request/boost", async (req, res) => {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
       return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
+    const replayReceipt = issuePatronStatusReceipt();
+    existingBoost.patronStatusReceiptHash = replayReceipt.receiptHash;
+    await persistBusinessStateForRoom(roomState, durableGigId);
     const responseBody = buildPatronBoostMutationResponse({
+      request,
+      boost: existingBoost,
       roomState,
       gigId: durableGigId,
+      receipt: replayReceipt.receipt,
       reconciled: true
     });
     await idempotencyStore.completePendingAction({
@@ -7974,6 +9394,8 @@ app.post("/api/request/boost", async (req, res) => {
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
   };
+  const patronStatusReceipt = issuePatronStatusReceipt();
+  newBoost.patronStatusReceiptHash = patronStatusReceipt.receiptHash;
   const boostAttribution = paymentsEnabledForRoom
     ? await businessStore.resolveCampaignAttribution(durableGigId, normalizedCampaignCode)
     : { kind: 'creator_direct' as const };
@@ -8046,6 +9468,12 @@ app.post("/api/request/boost", async (req, res) => {
       const capture = await paymentService.captureAuthorization(authorization.paymentId);
       if (capture.status === 'captured') {
         newBoost.paymentStatus = 'captured';
+      } else {
+        await paymentService.voidOrRefund(authorization.paymentId);
+        return res.status(502).json({
+          error: 'Boost payment could not be completed. The hold was released and no boost was applied.',
+          payment_status: 'capture_failed'
+        });
       }
     }
   } else if (isProduction) {
@@ -8068,7 +9496,13 @@ app.post("/api/request/boost", async (req, res) => {
 
   recalculateTotals(roomState);
   await persistBusinessStateForRoom(roomState, durableGigId);
-  const responseBody = buildPatronBoostMutationResponse({ roomState, gigId: durableGigId });
+  const responseBody = buildPatronBoostMutationResponse({
+    request,
+    boost: newBoost,
+    roomState,
+    gigId: durableGigId,
+    receipt: patronStatusReceipt.receipt
+  });
   await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
@@ -8108,9 +9542,10 @@ app.post("/api/request/triage", async (req, res) => {
     actor,
     action: action === 'approve' ? 'approve' : 'deny'
   });
-  const responseBody = { success: true, ...result };
-  await completeDurableActorMutation({ reservation: durableMutation, status: 200, body: responseBody });
-  res.json(responseBody);
+  const responseStatus = result.paymentError ? 402 : 200;
+  const responseBody = { success: !result.paymentError, ...result };
+  await completeDurableActorMutation({ reservation: durableMutation, status: responseStatus, body: responseBody });
+  res.status(responseStatus).json(responseBody);
 });
 
 // Fulfillment Queue Action (Fulfill)
@@ -8439,6 +9874,10 @@ app.get('/faq', (_req, res) => {
   res.type('html').send(faqPageHtml);
 });
 
+app.get('/about', (_req, res) => {
+  res.type('html').send(aboutPageHtml);
+});
+
 app.get('/privacy', (_req, res) => {
   res.type('html').send(privacyPageHtml);
 });
@@ -8630,8 +10069,25 @@ app.post("/api/music/search", (req, res) => {
       )
       .limit(25);
 
+    const catalogRows = await loadRequestableCatalogTracks(businessDb, {
+      performerId: gigRow.performerId,
+      query,
+      limit: 25
+    });
+
     return res.json({
       results: [
+        ...catalogRows.map((row: any) => ({
+          id: `catalog:${row.id}`,
+          title: row.title || row.filename,
+          artist: 'Catalog',
+          albumArt,
+          description: row.projectTitle || 'Catalog',
+          source: 'Catalog',
+          sourceProvider: 'sway_catalog',
+          category: 'sway_catalog',
+          targetType: 'music'
+        })),
         ...libraryRows.map((row) => ({
           id: row.id,
           title: row.title,
@@ -8676,6 +10132,11 @@ app.use('/api', (_req, res) => {
 
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
+  if (audioObjectStore) {
+    await audioObjectStore.verifyReady();
+    audioObjectStoreVerified = true;
+    console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
+  }
   await refreshBusinessState();
 
   if (process.env.NODE_ENV !== "production") {

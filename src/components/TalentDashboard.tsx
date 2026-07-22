@@ -30,6 +30,7 @@ import {
   CreditCard,
   Link as LinkIcon,
   Music2,
+  AudioLines,
   ShieldCheck,
   Keyboard,
   Home,
@@ -43,6 +44,9 @@ import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
+import PerformerAudioFiles from './PerformerAudioFiles';
+import PerformerFilePairing from './PerformerFilePairing';
+import PerformerReleaseDrafts from './PerformerReleaseDrafts';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -71,20 +75,21 @@ interface TalentDashboardProps {
   performerEmailVerified?: boolean;
 }
 
-type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'profile' | 'account';
+type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'catalog' | 'profile' | 'account';
 
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'room', label: 'Live', icon: Radio },
   { id: 'library', label: 'Library', icon: Music2 },
+  { id: 'catalog', label: 'Catalog', icon: AudioLines },
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'account', label: 'Account', icon: Settings }
 ] as const;
 
 type MusicSourceCapability = {
-  providerKey: 'local_library' | 'spotify' | 'soundcloud';
+  providerKey: 'local_library' | 'spotify' | 'soundcloud' | 'sway_upload';
   displayName: string;
-  sourceMode: 'sync_key' | 'app_catalog' | 'oauth_provider';
+  sourceMode: 'sync_key' | 'app_catalog' | 'oauth_provider' | 'sway_owned_audio';
   authRequirement: 'none' | 'sync_key' | 'app_credentials' | 'oauth';
   connectionStatus: 'available' | 'configured' | 'not_configured' | 'not_connected';
   capabilities: {
@@ -151,6 +156,23 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
     audienceClaim: 'SoundCloud account link required',
     riskNote: 'SoundCloud access depends on OAuth, track permissions, attribution, and per-track availability.'
   },
+  {
+    providerKey: 'sway_upload',
+    displayName: 'Sway Audio',
+    sourceMode: 'sway_owned_audio',
+    authRequirement: 'none',
+    connectionStatus: 'not_connected',
+    capabilities: {
+      searchMetadata: false,
+      importLibrary: false,
+      openExternal: false,
+      playInSway: false,
+      requiresTrackAvailabilityCheck: true
+    },
+    performerActionLabel: 'Playable in Sway when licensed',
+    audienceClaim: 'Sway playback requires licensed audio',
+    riskNote: 'Sway playback needs provenance, license records, and playback audit before this can be enabled.'
+  }
 ];
 
 type HardwareActionId =
@@ -427,6 +449,7 @@ function MusicSourcesPanel({
 
   const sourceIcon = (providerKey: MusicSourceCapability['providerKey']) => {
     if (providerKey === 'local_library') return <ShieldCheck className="h-4 w-4" />;
+    if (providerKey === 'sway_upload') return <Music2 className="h-4 w-4" />;
     return <LinkIcon className="h-4 w-4" />;
   };
 
@@ -560,6 +583,7 @@ type RequestLibraryTrack = {
 };
 
 function RequestLibraryWorkspace({
+  catalogTracks,
   externalTracks,
   loading,
   error,
@@ -570,6 +594,7 @@ function RequestLibraryWorkspace({
   onSpotifyPlaylistImport,
   onOpenAdvanced
 }: {
+  catalogTracks: RequestLibraryTrack[];
   externalTracks: RequestLibraryTrack[];
   loading: boolean;
   error: string | null;
@@ -580,7 +605,7 @@ function RequestLibraryWorkspace({
   onSpotifyPlaylistImport: (event: React.FormEvent) => void;
   onOpenAdvanced: () => void;
 }) {
-  const totalTracks = externalTracks.length;
+  const totalTracks = catalogTracks.length + externalTracks.length;
 
   return (
     <section data-sway-library-workspace="true" className="mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg">
@@ -588,12 +613,16 @@ function RequestLibraryWorkspace({
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Library</p>
           <h2 className="mt-1 font-display text-xl font-black uppercase tracking-wide text-white">Music people can request</h2>
-          <p className="mt-1 text-xs text-slate-400">Imported playlists and synced DJ-library tracks appear here.</p>
+          <p className="mt-1 text-xs text-slate-400">Catalog is connected automatically. Imported playlists and DJ-library tracks appear here too.</p>
         </div>
         <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100">{totalTracks} tracks</span>
       </div>
 
-      <div className="mt-5" aria-label="Library sources">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2" aria-label="Library sources">
+        <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-4">
+          <div className="flex items-center justify-between gap-3"><p className="font-black text-white">Catalog audio</p><span className="text-sm font-black text-fuchsia-200">{catalogTracks.length}</span></div>
+          <p className="mt-1 text-xs text-slate-400">Your owned or cleared audio stored in Sway.</p>
+        </div>
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
           <div className="flex items-center justify-between gap-3"><p className="font-black text-white">External request music</p><span className="text-sm font-black text-cyan-200">{externalTracks.length}</span></div>
           <p className="mt-1 text-xs text-slate-400">Potentially copyrighted music played from Spotify, DJ software, or another external source.</p>
@@ -606,9 +635,12 @@ function RequestLibraryWorkspace({
         {!loading && !error && totalTracks === 0 ? (
           <div className="rounded-xl border border-dashed border-white/15 bg-slate-950/60 p-6 text-center">
             <p className="font-black text-white">Your request library is empty</p>
-            <p className="mt-2 text-sm text-slate-400">Import a playlist below or connect an existing DJ-library source.</p>
+            <p className="mt-2 text-sm text-slate-400">Upload music in Catalog and turn on “Allow requests,” or import a playlist below.</p>
           </div>
         ) : null}
+        {catalogTracks.length > 0 ? <div className="pt-2"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-300">Catalog audio · stored in Sway</p>{catalogTracks.slice(0, 30).map((track) => (
+          <div key={track.id} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 px-4 py-3"><div className="min-w-0"><p className="truncate text-sm font-black text-white">{track.title}</p><p className="truncate text-xs text-slate-400">{track.artist}{track.album ? ` · ${track.album}` : ''}</p></div><span className="shrink-0 rounded-full border border-fuchsia-500/20 px-2 py-1 text-[10px] font-bold text-fuchsia-200">Catalog</span></div>
+        ))}</div> : null}
         {externalTracks.length > 0 ? <div className="pt-3"><p className="mb-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">External request music</p><p className="mb-2 text-xs text-slate-500">Open or play these tracks from their external source.</p>{externalTracks.slice(0, 30).map((track) => (
           <div key={track.id} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3"><div className="min-w-0"><p className="truncate text-sm font-black text-white">{track.title}</p><p className="truncate text-xs text-slate-400">{track.artist}{track.album ? ` · ${track.album}` : ''}</p></div><span className="shrink-0 rounded-full border border-cyan-500/20 px-2 py-1 text-[10px] font-bold text-cyan-200">{track.sourceLabel}</span></div>
         ))}</div> : null}
@@ -809,6 +841,7 @@ export default function TalentDashboard({
   const [spotifyPlaylistUrl, setSpotifyPlaylistUrl] = useState('');
   const [spotifyImportStatus, setSpotifyImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [spotifyImportMessage, setSpotifyImportMessage] = useState<string | null>(null);
+  const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [requestLibraryStatus, setRequestLibraryStatus] = useState<'idle' | 'loading' | 'error'>('loading');
   const [requestLibraryError, setRequestLibraryError] = useState<string | null>(null);
@@ -983,6 +1016,7 @@ export default function TalentDashboard({
 
   const refreshRequestLibrary = async () => {
     if (previewMode) {
+      setCatalogLibraryTracks([]);
       setExternalLibraryTracks([]);
       setRequestLibraryStatus('idle');
       return;
@@ -992,6 +1026,7 @@ export default function TalentDashboard({
       const response = await fetch('/api/talent/library/tracks', { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not load your music.');
+      setCatalogLibraryTracks(Array.isArray(data?.catalog?.tracks) ? data.catalog.tracks : []);
       setExternalLibraryTracks(Array.isArray(data?.external?.tracks) ? data.external.tracks : []);
       setRequestLibraryError(null);
       setRequestLibraryStatus('idle');
@@ -1212,7 +1247,7 @@ export default function TalentDashboard({
   const requestScopeLabel = session.searchScope === 'setlist'
     ? 'Setlist source'
     : session.searchScope === 'catalog'
-      ? 'Open requests'
+      ? 'Open Catalog'
       : 'My Library';
   const isCrowdAutopilot = session.operatingMode === 'crowd_autopilot';
   const leadingApprovedRequest = liveLadderQueue[0] ?? null;
@@ -1801,7 +1836,7 @@ export default function TalentDashboard({
       <nav
         data-sway-performer-app-navigation="true"
         aria-label="Performer console sections"
-        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur sm:grid-cols-5"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur sm:grid-cols-6"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
           const selected = inactiveWorkspace === id;
@@ -1869,6 +1904,7 @@ export default function TalentDashboard({
       {inactiveWorkspace === 'library' && !showAdvancedLibrary ? (
         <div className="order-2">
           <RequestLibraryWorkspace
+            catalogTracks={catalogLibraryTracks}
             externalTracks={externalLibraryTracks}
             loading={requestLibraryStatus === 'loading'}
             error={requestLibraryError}
@@ -1893,7 +1929,7 @@ export default function TalentDashboard({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Request library</p>
-            <p className="mt-1 text-xs text-slate-500">Synced playlists and external music sources used for audience requests.</p>
+            <p className="mt-1 text-xs text-slate-500">Synced catalogs and external music sources used for audience requests.</p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
             Manage
@@ -2023,6 +2059,32 @@ export default function TalentDashboard({
         </div>
       ) : null}
 
+      {inactiveWorkspace === 'catalog' ? (
+        <section
+          data-sway-audio-catalog="true"
+          className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-fuchsia-500/20 bg-slate-900/70 p-5 shadow-lg"
+        >
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Audio catalog</p>
+            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Your music</h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              Upload masters, beats, mixes, spoken word, audiobooks, demos, and any other audio you own. Choose which tracks also appear in Library for requests.
+            </p>
+          </div>
+          <div className="mt-5" aria-label="Catalog audio tools">
+            <PerformerAudioFiles />
+          </div>
+          <PerformerReleaseDrafts />
+          <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/50 p-4">
+            <summary className="cursor-pointer list-none text-xs font-bold text-slate-400">Collaboration and file sharing</summary>
+            <div className="mt-3"><PerformerFilePairing /></div>
+          </details>
+          <p className="mt-4 text-[10px] leading-relaxed text-slate-500">
+            Catalog files stay private unless you explicitly allow requests or share a file. Uploading does not publish, distribute, license, or sell the audio.
+          </p>
+        </section>
+      ) : null}
+
       {inactiveWorkspace === 'account' ? (
         <section
           data-sway-account-workspace="true"
@@ -2078,6 +2140,7 @@ export default function TalentDashboard({
             performerHandle={performerProfile?.handle}
             stripeReady={Boolean(performerProfile?.payouts_enabled)}
             onStartRoom={() => setInactiveWorkspace('room')}
+            onOpenCatalog={() => setInactiveWorkspace('catalog')}
             onOpenLibrary={() => {
               setShowAdvancedLibrary(false);
               setInactiveWorkspace('library');

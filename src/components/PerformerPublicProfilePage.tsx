@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   BadgeCheck,
   Coins,
+  Disc3,
   Globe2,
   LockKeyhole,
   Mail,
@@ -67,9 +68,22 @@ type ActiveProfileRoom = {
   requestCount: number;
 };
 
+type PublicProfileRelease = {
+  id: string;
+  title: string;
+  primaryArtistName: string;
+  releaseType: string;
+  status: 'ready' | 'scheduled' | 'published';
+  scheduledReleaseAt: string | null;
+  publishedAt: string | null;
+  releasePath: string;
+  artworkUrl: string | null;
+};
+
 type ProfileResponse = {
   performer?: PublicPerformerProfile;
   activeRoom?: ActiveProfileRoom | null;
+  releases?: PublicProfileRelease[];
   error?: string;
 };
 
@@ -112,6 +126,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   captureCampaignCode();
   const [profile, setProfile] = useState<PublicPerformerProfile | null>(null);
   const [activeRoom, setActiveRoom] = useState<ActiveProfileRoom | null>(null);
+  const [releases, setReleases] = useState<PublicProfileRelease[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
@@ -183,6 +198,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               : 'claimed'
         });
         setActiveRoom(data.activeRoom || null);
+        setReleases(Array.isArray(data.releases) ? data.releases : []);
         setAvatarFailed(false);
         setStatus('ready');
         document.title = `${data.performer.stageName || (data.performer.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : data.performer.displayName)} on Sway`;
@@ -439,6 +455,16 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 {activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'}
               </span>
             </a>
+          ) : null}
+
+          {releases.length ? (
+            <section className="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/[0.06] p-4 text-left" aria-label="Releases">
+              <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200"><Disc3 className="h-4 w-4" /></span><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Music and releases</p><p className="mt-0.5 text-xs text-slate-500">Official release pages from this performer</p></div></div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">{releases.map((release) => <a key={release.id} href={release.releasePath} className="group flex min-h-24 items-center gap-3 rounded-xl border border-white/10 bg-slate-950/70 p-3 transition hover:border-violet-300/40">
+                {release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-200"><Disc3 className="h-6 w-6" /></span>}
+                <span className="min-w-0"><span className="block truncate text-sm font-black text-white group-hover:text-violet-100">{release.title}</span><span className="mt-1 block truncate text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-violet-300">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span>
+              </a>)}</div>
+            </section>
           ) : null}
 
           {profile.featuredMedia.length ? (

@@ -6,6 +6,9 @@ import PatronView from './components/PatronView';
 
 const emptySession: GigSession = {
   status: 'inactive',
+  startedAt: null,
+  autoCloseoutAt: null,
+  closedAt: null,
   talentName: '',
   talentRole: 'DJ',
   feeType: 'patron',

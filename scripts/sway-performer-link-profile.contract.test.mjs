@@ -550,7 +550,7 @@ for (const term of [
 
 for (const term of [
   'return <PerformerPublicProfilePage performerHandle={route.performerHandle} />',
-  "if (route.name === 'performer') return;",
+  "if (route.name !== 'patron-gig') return;",
   'PatronNoSessionRecovery'
 ]) requireIncludes(patronApp, term, 'Patron route separation');
 requireExcludes(patronApp, 'performerHandle={route.name', 'Patron route separation');

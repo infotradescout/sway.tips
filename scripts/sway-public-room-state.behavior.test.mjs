@@ -16,6 +16,7 @@ const {
 const {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
+  projectPatronBoostStatus,
   projectPatronRequestStatus
 } = await tsImport('../src/server/patron-status-receipt.ts', import.meta.url);
 
@@ -188,6 +189,12 @@ assert.deepEqual(pendingStatus, {
   submittedAt
 });
 assert.equal(projectPatronRequestStatus(hiddenRequest).status, 'unavailable');
+assert.deepEqual(projectPatronBoostStatus(approvedRequest.boosts[0], approvedRequest), {
+  actionType: 'boost',
+  status: 'fulfilled',
+  title: 'Public title',
+  submittedAt
+});
 
 const sanitizedReplay = sanitizePatronMutationResponseBody({
   success: true,

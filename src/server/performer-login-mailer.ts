@@ -146,6 +146,21 @@ export function createPerformerLoginMailer({
       });
     },
 
+    sendAccountVerificationLink({
+      toEmail,
+      verificationLink
+    }: {
+      toEmail: string;
+      verificationLink: string;
+    }) {
+      return deliverLink({
+        toEmail,
+        link: verificationLink,
+        subject: 'Verify your Sway account',
+        introLine: 'Verify your email to finish your Sway account. You can join rooms as a customer and activate Pro Mode later from the same account.'
+      });
+    },
+
     sendAccountInvitation({
       toEmail,
       invitationLink

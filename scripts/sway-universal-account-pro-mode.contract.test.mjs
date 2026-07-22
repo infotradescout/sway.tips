@@ -165,11 +165,15 @@ for (const forbidden of ['hasTalentRole', 'hasAdminRole', 'hasSupportRole']) {
 // resolving identity only from the session (never from the request body),
 // and performer signup wired to begin Pro Mode onboarding automatically.
 for (const term of [
+  "app.post('/api/account/signup'",
+  "app.post('/api/account/login'",
+  "app.get('/api/account/session'",
   "app.get('/api/account/pro-mode'",
   "app.post('/api/account/pro-mode/activate'",
   'accessControl.requireAuthenticatedAccountAccess(req)',
-  "action: 'self_activate'"
+  'activateProModeWithPerformer'
 ]) requireIncludes(server, term, 'Pro Mode account routes');
+requireIncludes(proMode, "onboardingStatus: 'gig_ready'", 'Pro Mode performer activation');
 
 const accountRoutesSource = (() => {
   const start = server.indexOf("app.get('/api/account/pro-mode'");

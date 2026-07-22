@@ -40,6 +40,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   "inactiveWorkspace === 'home'",
   "inactiveWorkspace === 'room'",
   "inactiveWorkspace === 'library'",
+  "inactiveWorkspace === 'catalog'",
   "inactiveWorkspace === 'profile'",
   "inactiveWorkspace === 'account'",
   "onStartRoom={() => setInactiveWorkspace('room')}",
@@ -49,7 +50,10 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Copy link',
   'Request library',
   'data-sway-library-workspace="true"',
-  'Synced playlists and external music sources used for audience requests.',
+  'Synced catalogs and external music sources used for audience requests.',
+  'data-sway-audio-catalog="true"',
+  'Audio catalog',
+  'masters, beats, mixes, spoken word, audiobooks, demos',
   'data-sway-account-workspace="true"',
   'Money & access',
   'Backers',
@@ -90,7 +94,7 @@ requireIncludes('PerformerRoomControls', performerRoomControls, [
   'data-sway-performer-room-controls="true"',
   'Request scope',
   "['library', 'Library']",
-  "['catalog', 'Open requests']"
+  "['catalog', 'Catalog']"
 ]);
 
 requireExcludes('PerformerRoomControls selectable request scopes', performerRoomControls, [
@@ -108,14 +112,6 @@ requireExcludes('TalentDashboard first-use/mobile path', talentDashboard, [
   'crowd autopilot rank clean requests into up next',
   'Pause, hide, or veto stays available as the safety brake',
   'Performance Meter'
-]);
-
-requireExcludes('TalentDashboard retired product scope', talentDashboard, [
-  "{ id: 'catalog', label: 'Catalog'",
-  "inactiveWorkspace === 'catalog'",
-  'Audio catalog',
-  '<PerformerAudioFiles',
-  '<PerformerFilePairing'
 ]);
 
 requireIncludes('PatronView', patronView, [

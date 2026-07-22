@@ -1,9 +1,9 @@
-export type MusicSourceProviderKey = 'local_library' | 'spotify' | 'soundcloud';
+export type MusicSourceProviderKey = 'local_library' | 'spotify' | 'soundcloud' | 'sway_upload';
 
 export type MusicSourceCapabilitySummary = {
   providerKey: MusicSourceProviderKey;
   displayName: string;
-  sourceMode: 'sync_key' | 'app_catalog' | 'oauth_provider';
+  sourceMode: 'sync_key' | 'app_catalog' | 'oauth_provider' | 'sway_owned_audio';
   authRequirement: 'none' | 'sync_key' | 'app_credentials' | 'oauth';
   connectionStatus: 'available' | 'configured' | 'not_configured' | 'not_connected';
   capabilities: {
@@ -74,6 +74,23 @@ export function getMusicSourceCapabilityCatalog({
       performerActionLabel: 'Connect SoundCloud',
       audienceClaim: 'SoundCloud account link required',
       riskNote: 'SoundCloud access depends on OAuth, track permissions, attribution, and per-track availability.'
+    },
+    {
+      providerKey: 'sway_upload',
+      displayName: 'Sway Audio',
+      sourceMode: 'sway_owned_audio',
+      authRequirement: 'none',
+      connectionStatus: 'not_connected',
+      capabilities: {
+        searchMetadata: false,
+        importLibrary: false,
+        openExternal: false,
+        playInSway: false,
+        requiresTrackAvailabilityCheck: true
+      },
+      performerActionLabel: 'Playable in Sway when licensed',
+      audienceClaim: 'Sway playback requires licensed audio',
+      riskNote: 'Sway playback needs provenance, license records, and playback audit before this can be enabled.'
     }
   ];
 }

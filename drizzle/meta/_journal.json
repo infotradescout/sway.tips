@@ -176,6 +176,13 @@
       "when": 1784698933509,
       "tag": "0024_heavy_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784739881387,
+      "tag": "0025_rights_review_least_privilege",
+      "breakpoints": true
     }
   ]
 }

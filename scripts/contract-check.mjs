@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import './sway-core-product-completion.contract.mjs';
 
 const root = process.cwd();
 

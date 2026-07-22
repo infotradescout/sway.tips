@@ -8,29 +8,42 @@ const packageJson = readFileSync(join(root, 'package.json'), 'utf8');
 const failures = [];
 
 for (const term of [
-  "const faqPageHtml = renderStaticDocument(",
+  "const aboutPageHtml = renderStaticDocument(",
+  "const faqPageHtml = aboutPageHtml;",
+  "app.get('/about'",
   "app.get('/faq'",
   "faqPath: '/faq'",
-  'Sway FAQ',
-  'Official links',
-  'Social links',
-  'Approved social profile URLs are not configured in this repository yet'
+  'Sway: the whole performer business, connected',
+  'Your public page',
+  'Your live room',
+  'Your Catalog and collaborators',
+  'Your publishing and distribution',
+  'Replacing an existing distributor',
+  'Where the publishing product stands',
+  'Still required for the complete DistroKid replacement',
+  'each release draft connects one verified master to one recording',
+  'does not yet add or reorder recordings for an EP or album',
+  'master control, composition control, artwork control, and distribution authorization',
+  'Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence',
+  'Multi-recording EP and album assembly',
+  'contracted DSP delivery provider',
+  'Money, ownership, and control'
 ]) {
   if (!server.includes(term)) failures.push(`FAQ surface missing server term: ${term}`);
 }
 
-if (!publicHtml.includes('<a class="tagline" href="/faq">sway to play</a>')) {
-  failures.push('Public landing sway to play tagline must route to /faq.');
+if (!publicHtml.includes('<a class="tagline" href="/about">sway to play</a>')) {
+  failures.push('Public landing sway to play tagline must route to /about.');
 }
 
-if (!publicHtml.includes('href="/faq"')) {
-  failures.push('Public landing must include a visible /faq link.');
+if (!publicHtml.includes('href="/about"')) {
+  failures.push('Public landing must include a visible /about link.');
 }
 
 // Scope the forbidden-link scan to the FAQ page template itself, not the
 // whole server.ts file -- unrelated features (like control-bridge search
 // deep links) may legitimately reference these hosts elsewhere.
-const faqTemplateStart = server.indexOf("const faqPageHtml = renderStaticDocument(");
+const faqTemplateStart = server.indexOf("const aboutPageHtml = renderStaticDocument(");
 const faqTemplateEnd = faqTemplateStart === -1 ? -1 : server.indexOf('\n);', faqTemplateStart);
 const faqTemplate = faqTemplateStart === -1 || faqTemplateEnd === -1
   ? server

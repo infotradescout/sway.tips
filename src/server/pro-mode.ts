@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
-import { proModeStatusEvents, users } from '../db/schema';
+import { performers, proModeStatusEvents, users } from '../db/schema';
 
 export type ProModeStatus = 'disabled' | 'onboarding' | 'active' | 'suspended' | 'revoked';
 export type ProModeAction = 'performer_signup' | 'self_activate';
@@ -108,5 +108,57 @@ export async function applyProModeTransition(
     });
 
     return transition;
+  });
+}
+
+export async function activateProModeWithPerformer(
+  db: SwayDb,
+  input: { userId: string; actorUserId: string; displayName: string; handle: string }
+) {
+  return db.transaction(async (tx) => {
+    const [account] = await tx
+      .select({ proModeStatus: users.proModeStatus, emailVerifiedAt: users.emailVerifiedAt })
+      .from(users)
+      .where(eq(users.id, input.userId))
+      .for('update')
+      .limit(1);
+    if (!account) return { allowed: false as const, reason: 'Account not found.' };
+    if (!account.emailVerifiedAt) return { allowed: false as const, reason: 'Verify your email before activating Pro Mode.' };
+
+    const transition = resolveProModeTransition({ currentStatus: account.proModeStatus, action: 'self_activate' });
+    if (transition.allowed === false) return transition;
+
+    const [existingPerformer] = await tx
+      .select({ id: performers.id, handle: performers.handle, displayName: performers.displayName })
+      .from(performers)
+      .where(eq(performers.ownerUserId, input.userId))
+      .limit(1);
+
+    const performer = existingPerformer ?? (await tx
+      .insert(performers)
+      .values({
+        ownerUserId: input.userId,
+        handle: input.handle,
+        displayName: input.displayName,
+        isActive: true,
+        onboardingStatus: 'gig_ready'
+      })
+      .returning({ id: performers.id, handle: performers.handle, displayName: performers.displayName }))[0];
+
+    if (transition.changed) {
+      await tx
+        .update(users)
+        .set({ proModeStatus: transition.nextStatus, proModeStatusChangedAt: new Date(), updatedAt: new Date() })
+        .where(eq(users.id, input.userId));
+      await tx.insert(proModeStatusEvents).values({
+        userId: input.userId,
+        previousStatus: account.proModeStatus,
+        nextStatus: transition.nextStatus,
+        reason: 'account_self_activate',
+        actorUserId: input.actorUserId
+      });
+    }
+
+    return { allowed: true as const, changed: transition.changed, nextStatus: transition.nextStatus, performer };
   });
 }

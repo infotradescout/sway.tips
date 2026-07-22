@@ -52,6 +52,7 @@ interface PatronViewProps {
   performers: PerformerProfile[];
   gigId?: string;
   patronRequestStatus?: PatronRequestStatus | null;
+  patronActivity?: PatronRequestStatus[];
   onCreateRequest: (data: {
     type: 'request' | 'tip';
     targetType: 'music' | 'custom' | 'straight_tip';
@@ -232,6 +233,7 @@ export default function PatronView({
   performers,
   gigId,
   patronRequestStatus = null,
+  patronActivity = [],
   onCreateRequest,
   onBoostRequest,
   onReconcilePendingAction,
@@ -343,6 +345,9 @@ export default function PatronView({
       if (patronRequestStatus.status === 'fulfilled') return { text: 'Your tip submission was received.', tone: 'cyan' };
       if (patronRequestStatus.status === 'denied') return { text: "Your tip wasn't completed.", tone: 'rose' };
       return { text: 'Your tip submission is pending confirmation.', tone: 'fuchsia' };
+    }
+    if (patronRequestStatus.actionType === 'boost') {
+      return { text: `Your boost for ${patronRequestStatus.title} is confirmed.`, tone: 'cyan' };
     }
     if (patronRequestStatus.status === 'fulfilled') return { text: 'Your last request was played!', tone: 'cyan' };
     if (patronRequestStatus.status === 'approved') return { text: 'Your last request was approved and is in the queue.', tone: 'fuchsia' };
@@ -1375,6 +1380,23 @@ export default function PatronView({
         </div>
       )}
 
+      {patronActivity.length > 1 ? (
+        <details className="rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3">
+          <summary className="cursor-pointer text-xs font-black uppercase tracking-wide text-slate-200">Your room activity ({patronActivity.length})</summary>
+          <div className="mt-3 space-y-2">
+            {patronActivity.map((activity, index) => (
+              <div key={`${activity.submittedAt}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-white">{activity.title}</p>
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">{activity.actionType}</p>
+                </div>
+                <span className="shrink-0 font-bold text-cyan-200">{activity.status === 'hold' ? 'Pending' : activity.status}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
       <div id="patron_action_panel">
         
         {/* TAB A: Dynamic Search & Selection (Music / Custom Menu) */}
@@ -1530,10 +1552,16 @@ export default function PatronView({
                     {!searchError && !isSearching && searchQuery.trim() && searchResults.length === 0 && (
                       <p className="text-xs text-slate-400 font-sans px-1">No matches found.</p>
                     )}
-                    {searchResults.length > 0 ? (
+                    {searchResults.some((song) => song.category === 'sway_catalog') ? (
+                      <div className="space-y-2 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-2">
+                        <p className="px-1 text-[10px] font-black uppercase tracking-wider text-fuchsia-200">Catalog audio · stored in Sway</p>
+                        {searchResults.filter((song) => song.category === 'sway_catalog').map(renderSearchResult)}
+                      </div>
+                    ) : null}
+                    {searchResults.some((song) => song.category !== 'sway_catalog') ? (
                       <div className="space-y-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-2">
                         <div className="px-1"><p className="text-[10px] font-black uppercase tracking-wider text-cyan-200">External request music</p><p className="mt-0.5 text-[9px] text-slate-500">The performer plays this from Spotify, DJ software, or another external source.</p></div>
-                        {searchResults.map(renderSearchResult)}
+                        {searchResults.filter((song) => song.category !== 'sway_catalog').map(renderSearchResult)}
                       </div>
                     ) : null}
                   </div>

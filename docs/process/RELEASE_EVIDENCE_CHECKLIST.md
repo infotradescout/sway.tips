@@ -81,10 +81,8 @@ Record exact output or attach the log location.
 
 - `npm run readiness:report` result:
 - `npm run readiness:assert` result:
-- Customer-side journey evidence:
-- Performer-side journey evidence:
-- Request/tip/boost/payment evidence:
-- Queue/status/closeout evidence:
+- DistroKid-replacement pillar evidence:
+- Original-Sway pillar evidence:
 - Cohesive one-account journey evidence:
 
 ## Known Risks
@@ -100,3 +98,4 @@ Record exact output or attach the log location.
 - Decision:
 - Date:
 - Conditions:
+
