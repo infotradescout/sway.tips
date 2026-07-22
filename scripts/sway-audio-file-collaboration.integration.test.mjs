@@ -427,6 +427,8 @@ try {
   assert.equal(publicRelease?.recordings[0].credits.length, 3);
   const publicArtwork = await publishing.openPublicReleaseArtwork({ releaseId });
   assert.deepEqual(await streamToBuffer(publicArtwork.stream), Buffer.from('verified artwork bytes'));
+  assert.equal(openOriginalCount, evidenceOpenCount + 1, 'Public artwork must open exactly one stored original.');
+  const collaborationDownloadBaseline = openOriginalCount;
 
   const collaboration = createAudioFileCollaborationService({ db, store: countedStore });
   await assert.rejects(
@@ -464,7 +466,7 @@ try {
     collaboration.downloadGrantedOriginal({ grantId: shared.grant.id, userId: outsiderId }),
     /File grant access denied/
   );
-  assert.equal(openOriginalCount, evidenceOpenCount, 'Denied download must not reach object storage.');
+  assert.equal(openOriginalCount, collaborationDownloadBaseline, 'Denied download must not reach object storage.');
 
   const comment = await collaboration.addReviewEvent({
     grantId: shared.grant.id,
@@ -491,7 +493,7 @@ try {
   assert.equal(downloaded.byteSize, body.byteLength);
   assert.deepEqual(await streamToBuffer(downloaded.stream), body);
   assert.equal(downloaded.version.sha256, sha256);
-  assert.equal(openOriginalCount, evidenceOpenCount + 1);
+  assert.equal(openOriginalCount, collaborationDownloadBaseline + 1);
 
   await collaboration.revokeGrant({ grantId: shared.grant.id, userId: ownerId, reason: 'Proof complete.' });
   assert.equal((await collaboration.listSharedByMe({ userId: ownerId })).length, 0);
@@ -507,7 +509,7 @@ try {
     }),
     /Active file grant required/
   );
-  assert.equal(openOriginalCount, evidenceOpenCount + 1, 'Revoked replay must fail before object storage.');
+  assert.equal(openOriginalCount, collaborationDownloadBaseline + 1, 'Revoked replay must fail before object storage.');
 
   const reshared = await collaboration.shareVersion({
     connectionId: connection.id,
@@ -527,7 +529,7 @@ try {
     .where(eq(audioFileAccessGrants.id, reshared.grant.id))
     .limit(1);
   assert.ok(cascadedGrant?.revokedAt, 'Connection revocation must cascade to active selected-file grants.');
-  assert.equal(openOriginalCount, evidenceOpenCount + 1);
+  assert.equal(openOriginalCount, collaborationDownloadBaseline + 1);
 
   const collaborationAudit = await db
     .select({ eventType: auditEvents.eventType, actorType: auditEvents.actorType })
