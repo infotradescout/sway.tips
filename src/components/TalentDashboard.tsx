@@ -1733,50 +1733,50 @@ export default function TalentDashboard({
 
       {/* 1. Header & Live Stand Indicators */}
       {inactiveWorkspace === 'room' ? (
-      <div className="order-2 flex flex-col justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900 p-6 glass-panel glow-fuchsia md:flex-row md:items-center">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 font-sans">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-400 opacity-75"></span>
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-fuchsia-500"></span>
-            </span>
-            <div className="w-12 h-12 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center text-fuchsia-400">
-              <Radio className="w-6 h-6" />
+        <div className="order-2 flex flex-col justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900 p-6 glass-panel glow-fuchsia md:flex-row md:items-center">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3 font-sans">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-400 opacity-75"></span>
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-fuchsia-500"></span>
+              </span>
+              <div className="w-12 h-12 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center text-fuchsia-400">
+                <Radio className="w-6 h-6" />
+              </div>
             </div>
-          </div>
-          <div className="font-sans">
-            <div className="flex items-center gap-2">
-              <h2 className="font-display text-lg font-bold text-white tracking-wide uppercase">
-                Start a Room
-              </h2>
-            </div>
-            <p className="text-xs text-slate-400 font-sans mt-0.5">
-              Choose tonight's request rules, then create a print-ready room link and QR.
-            </p>
-            {previewMode && (
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
-                Demo data only; no live tips are being collected.
+            <div className="font-sans">
+              <div className="flex items-center gap-2">
+                <h2 className="font-display text-lg font-bold text-white tracking-wide uppercase">
+                  Start a Room
+                </h2>
+              </div>
+              <p className="text-xs text-slate-400 font-sans mt-0.5">
+                Choose tonight's request rules, then create a print-ready room link and QR.
               </p>
-            )}
+              {previewMode && (
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">
+                  Demo data only; no live tips are being collected.
+                </p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
       ) : null}
 
       {inactiveWorkspace === 'profile' ? (
-      <div className="order-2">
-        <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
-      </div>
+        <div className="order-2">
+          <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
+        </div>
       ) : null}
 
       {/* Account and music tools stay separate from the one-decision room start. */}
       {inactiveWorkspace === 'account' ? (
-      <div className="order-2">
-      <details
-        open
-        data-sway-account-integrations="true"
-        className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
-      >
+        <div className="order-2">
+          <details
+            open
+            data-sway-account-integrations="true"
+            className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-4 shadow-lg"
+          >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account & integrations</p>
@@ -1944,8 +1944,8 @@ export default function TalentDashboard({
       </div>
 
         </div>
-      </details>
-      </div>
+          </details>
+        </div>
       ) : null}
 
       {inactiveWorkspace === 'home' ? (
@@ -1960,14 +1960,14 @@ export default function TalentDashboard({
       ) : null}
 
       {inactiveWorkspace === 'room' ? (
-          <div id="sway-start-room" className="order-3">
-            <PerformerRoomSetup
-              defaultPerformerName={welcomePerformerName}
-              performerHandle={performerProfile?.handle}
-              performerEmailVerified={performerEmailVerified}
-              onStartSession={onStartSession}
-            />
-          </div>
+        <div id="sway-start-room" className="order-3">
+          <PerformerRoomSetup
+            defaultPerformerName={welcomePerformerName}
+            performerHandle={performerProfile?.handle}
+            performerEmailVerified={performerEmailVerified}
+            onStartSession={onStartSession}
+          />
+        </div>
       ) : null}
 
     </div>
