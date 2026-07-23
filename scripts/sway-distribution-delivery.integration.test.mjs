@@ -132,6 +132,7 @@ try {
     primaryArtistName: 'Delivery Proof Artist',
     releaseType: 'single',
     distributionMode: 'sway_first',
+    scheduledReleaseAt: '2026-07-22T12:00:00Z',
     pLine: '℗ 2026 Delivery Proof Artist',
     cLine: '© 2026 Delivery Proof Artist',
     originalReleaseDate: '2026-07-22',
