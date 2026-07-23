@@ -332,6 +332,97 @@ export function createPerformerLoginChallengeStore({
       return found ?? null;
     },
 
+    /**
+     * Inspect a claim-code challenge without consuming it.
+     * Used to return distinct validation errors without logging the raw code.
+     */
+    async inspectClaimChallengeByToken({
+      token,
+      executor,
+      now = new Date()
+    }: {
+      token: string;
+      executor?: DbExecutor | null;
+      now?: Date;
+    }): Promise<
+      | { status: 'not_found' }
+      | { status: 'wrong_type' }
+      | {
+          status: 'expired' | 'consumed' | 'revoked' | 'valid';
+          id: string;
+          actorUserId: string | null;
+          challengeMetadata: unknown;
+          expiresAt: Date;
+          consumedAt: Date | null;
+          revokedAt: Date | null;
+        }
+    > {
+      const reader = executorOrDb(executor);
+      if (!reader || !token) return { status: 'not_found' };
+
+      const tokenHash = hashPerformerLoginToken(token);
+      const [found] = await reader
+        .select({
+          id: performerLoginChallenges.id,
+          actorUserId: performerLoginChallenges.actorUserId,
+          challengeType: performerLoginChallenges.challengeType,
+          challengeMetadata: performerLoginChallenges.challengeMetadata,
+          expiresAt: performerLoginChallenges.expiresAt,
+          consumedAt: performerLoginChallenges.consumedAt,
+          revokedAt: performerLoginChallenges.revokedAt
+        })
+        .from(performerLoginChallenges)
+        .where(eq(performerLoginChallenges.tokenHash, tokenHash))
+        .limit(1);
+
+      if (!found) return { status: 'not_found' };
+      if (found.challengeType !== PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE) {
+        return { status: 'wrong_type' };
+      }
+      if (found.consumedAt) {
+        return {
+          status: 'consumed',
+          id: found.id,
+          actorUserId: found.actorUserId,
+          challengeMetadata: found.challengeMetadata,
+          expiresAt: found.expiresAt,
+          consumedAt: found.consumedAt,
+          revokedAt: found.revokedAt
+        };
+      }
+      if (found.revokedAt) {
+        return {
+          status: 'revoked',
+          id: found.id,
+          actorUserId: found.actorUserId,
+          challengeMetadata: found.challengeMetadata,
+          expiresAt: found.expiresAt,
+          consumedAt: found.consumedAt,
+          revokedAt: found.revokedAt
+        };
+      }
+      if (!(found.expiresAt > now)) {
+        return {
+          status: 'expired',
+          id: found.id,
+          actorUserId: found.actorUserId,
+          challengeMetadata: found.challengeMetadata,
+          expiresAt: found.expiresAt,
+          consumedAt: found.consumedAt,
+          revokedAt: found.revokedAt
+        };
+      }
+      return {
+        status: 'valid',
+        id: found.id,
+        actorUserId: found.actorUserId,
+        challengeMetadata: found.challengeMetadata,
+        expiresAt: found.expiresAt,
+        consumedAt: found.consumedAt,
+        revokedAt: found.revokedAt
+      };
+    },
+
     async revokeChallengeById({
       challengeId,
       executor,
