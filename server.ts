@@ -7295,6 +7295,30 @@ app.post('/api/talent/audio/deliveries/:deliveryId/takedown', async (req, res) =
   }
 });
 
+app.post('/api/talent/audio/deliveries/:deliveryId/correction', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can request a correction.' });
+
+  try {
+    const result = await distributionDeliveryService.requestCorrection({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not request delivery correction.';
+    const status = /authority|permission/i.test(message) ? 403 : /not found/i.test(message) ? 404 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
 // Provider webhook ingestion. Signature verification is mandatory and the
 // delivery state transition is resolved only from the verified event body,
 // never from request input outside the signed payload. Kept reachable only
