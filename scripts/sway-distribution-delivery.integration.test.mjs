@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Client } from 'pg';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { eq, and } from 'drizzle-orm';
 import { createSwayDb } from '../src/db/client.ts';
@@ -23,6 +24,23 @@ if (process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
 }
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error('DATABASE_URL is required.');
+const parsedDatabaseUrl = new URL(databaseUrl);
+const databaseName = parsedDatabaseUrl.pathname.replace(/^\//, '');
+if (!['127.0.0.1', 'localhost', '::1'].includes(parsedDatabaseUrl.hostname)) {
+  throw new Error('Distribution delivery proof refuses non-local database hosts.');
+}
+if (!/^sway_distribution_delivery_proof_[a-z0-9_]+$/i.test(databaseName)) {
+  throw new Error('Distribution delivery proof requires a database named sway_distribution_delivery_proof_* .');
+}
+const proofDbClient = new Client({ connectionString: databaseUrl });
+await proofDbClient.connect();
+const proofDbTables = await proofDbClient.query(
+  `SELECT count(*)::int AS count FROM pg_tables WHERE schemaname = 'public'`
+);
+await proofDbClient.end();
+if (proofDbTables.rows[0].count !== 0) {
+  throw new Error('Distribution delivery proof database must be empty.');
+}
 
 const db = createSwayDb(databaseUrl);
 const objectRoot = mkdtempSync(join(tmpdir(), 'sway-distribution-delivery-'));
