@@ -869,7 +869,7 @@ const aboutPageHtml = renderStaticDocument(
       <article class="card"><h3>Your public page</h3><p>A shareable Sway profile for your story, image, featured media, social links, booking contact, support links, releases, and live-room entry. It is designed to replace a patchwork artist website and link page with one place that stays connected to the rest of your business.</p></article>
       <article class="card"><h3>Your live room</h3><p>A performer-controlled room for real-world shows. People scan a QR code or open a room link, make requests, tip, boost approved queue items, and follow what happened from their own private status receipts.</p></article>
       <article class="card"><h3>Your Catalog and collaborators</h3><p>Private, original-quality file storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
-      <article class="card"><h3>Your publishing and distribution</h3><p>The start of a DistroKid-replacement workflow inside the same account. Today, each release draft connects one verified master to one recording and adds artwork, metadata, credits, identifiers, territories, and reviewed rights evidence. Multi-recording EP and album assembly, provider-backed store delivery, royalty accounting, splits, payouts, pre-saves, and safe distributor cutover are not live.</p></article>
+      <article class="card"><h3>Your publishing and distribution</h3><p>The start of a DistroKid-replacement workflow inside the same account. The current release workspace assembles singles, EPs, and albums from verified masters, with an ordered track list, per-track metadata and credits, artwork, identifiers, territories, and reviewed rights evidence. It prepares a release but does not send it to stores: provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live.</p></article>
     </div>
 
     <h2>How Sway works for an audience member</h2>
@@ -894,7 +894,7 @@ const aboutPageHtml = renderStaticDocument(
     <ol class="steps">
       <li><strong>Add the work to Catalog.</strong> Sway preserves the original, its checksum, versions, project ownership, and access permissions. Catalog files stay private unless the owner explicitly shares or exposes them for requests.</li>
       <li><strong>Work with the right people.</strong> Connect collaborators, grant only the permissions they need, exchange files, comment at timecodes, request changes, record approvals, and revoke access.</li>
-      <li><strong>Build a one-recording release draft.</strong> Select one verified master and add artwork, release and recording titles, artist identity, UPC, ISRC, explicit flag, language, label, copyright lines, dates, territories, and recording credits. The current workspace does not yet add or reorder recordings for an EP or album.</li>
+      <li><strong>Build and order the release tracks.</strong> Start with one verified master, add another verified master for each additional track, and edit or reorder the track list. Add artwork, release and recording titles, artist identity, UPC, per-track ISRCs, explicit flags, languages, label, copyright lines, dates, territories, and recording credits. A single must keep one track; EP and album readiness requires at least two. Track structure locks when rights review starts so sealed evidence cannot silently drift.</li>
       <li><strong>Clear the rights that apply.</strong> Every release readiness check requires independently verified master control, composition control, artwork control, and distribution authorization. Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence: creators must document them when the facts of the recording require them, but they are not universal requirements for every release.</li>
       <li><strong>Prepare for delivery.</strong> A rights-cleared release becomes ready for a contracted delivery provider. When that integration is active, each destination will keep its own queued, submitted, accepted, live, correction, failure, or takedown state so “published” means provider-confirmed—not merely submitted.</li>
     </ol>
@@ -903,8 +903,8 @@ const aboutPageHtml = renderStaticDocument(
     <p>Sway’s catalog-transfer design is built around continuity, not a blind re-upload. It will snapshot the source catalog; map artist identities, UPCs, ISRCs, exact metadata, artwork, assets, rights, and destination IDs; stage replacement deliveries; verify overlap and store matching; and only permit an old-provider takedown after every expected release and recording has immutable continuity evidence. A mismatch, rights problem, Content ID conflict, or failed track link must stop the cutover. This cutover is not enabled until provider execution and production continuity proof exist.</p>
 
     <h2>Where the publishing product stands</h2>
-    <p><strong>Available in the product:</strong> durable original masters, projects, private collaborator connections, immutable file sharing and review, editable one-master and one-recording release drafts, artwork, identifiers, territories, recording credits, sealed rights declarations, independent rights review, readiness checks, public artist profiles, and eligible public release pages.</p>
-    <p><strong>Still required for the complete DistroKid replacement:</strong> multi-recording EP and album assembly with track add and reorder controls, a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed.</p>
+    <p><strong>Available in the product:</strong> durable original masters, projects, private collaborator connections, immutable file sharing and review, editable ordered multi-recording release drafts built from one verified master per track, artwork, identifiers, territories, per-track credits, sealed rights declarations, independent rights review, readiness checks, public artist profiles, and eligible public release pages.</p>
+    <p><strong>Still required for the complete DistroKid replacement:</strong> a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed.</p>
 
     <h2>Money, ownership, and control</h2>
     <div class="card-grid">
@@ -970,7 +970,7 @@ const termsPageHtml = renderStaticDocument(
   'Sway Terms',
   'Core rules for accounts, public pages, live rooms, private Catalog work, release drafts, payments, and platform use.',
   `
-    <p>Sway connects a performer’s public page, live-event request and support room, private Catalog and collaborator work, and release preparation in one account. The current publishing runtime creates a draft with one verified master and one recording. It does not yet provide multi-recording EP or album assembly, provider-backed store delivery, royalty accounting, collaborator splits or payouts, true destination pre-saves, or distributor cutover.</p>
+    <p>Sway connects a performer’s public page, live-event request and support room, private Catalog and collaborator work, and release preparation in one account. The current publishing runtime assembles ordered single, EP, and album drafts from verified masters. It does not yet provide provider-backed store delivery, royalty accounting, collaborator splits or payouts, true destination pre-saves, or distributor cutover.</p>
     <h2>Accounts and public pages</h2>
     <ul>
       <li>account holders must provide accurate information, protect their login, and may not impersonate another person or publish content they are not authorized to use</li>
@@ -992,7 +992,7 @@ const termsPageHtml = renderStaticDocument(
       <li>integrity checks and version records help preserve evidence, but creators remain responsible for maintaining their own source-file backups</li>
     </ul>
     <h2>Release drafts and rights</h2>
-    <p>Each current release draft connects one verified master to one recording; there is no add-or-reorder workflow for an EP or album. Universal readiness requires independently verified master control, composition control, artwork control, and distribution authorization. Sample clearance, third-party beat licenses, cover licenses, performer consent, and AI disclosure are conditional evidence that creators must provide when their work requires it. A Sway declaration, reviewer decision, readiness result, or public release page is recordkeeping—not legal advice, a guarantee of ownership, or proof that a store accepted a release.</p>
+    <p>Each recording in a release draft is bound to its own verified master, metadata, credits, and track order. Track-specific master and composition control must be independently verified for every recording; artwork control and distribution authorization apply to the release as a whole. Sample clearance, third-party beat licenses, cover licenses, performer consent, and AI disclosure are conditional evidence that creators must provide when their work requires it. Track structure locks when rights review begins. A Sway declaration, reviewer decision, readiness result, or public release page is recordkeeping—not legal advice, a guarantee of ownership, or proof that a store accepted a release.</p>
     <h2>Distribution limits</h2>
     <p>Provider-backed delivery, store callbacks and corrections, royalties, splits, payouts, destination pre-saves, takedowns, and catalog cutover are not live. A draft marked ready or shown on a public page has not thereby been submitted, accepted, distributed, streamed, monetized, or migrated. Separate provider terms and disclosures will be required before Sway can transmit releases or money through those systems.</p>
     <h2>Money terms</h2>
@@ -6857,6 +6857,145 @@ app.patch('/api/talent/audio/releases/:releaseId', async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not update release draft.';
     const status = /permission|owner|not found/i.test(message) ? 403 : /another session/i.test(message) ? 409 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/releases/:releaseId/recordings', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can add release tracks.' });
+  try {
+    const result = await audioPublishingService.addReleaseRecording({
+      releaseId: req.params.releaseId,
+      clientRecordingId: typeof req.body?.clientRecordingId === 'string' ? req.body.clientRecordingId : '',
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      expectedUpdatedAt: typeof req.body?.expectedUpdatedAt === 'string' ? req.body.expectedUpdatedAt : null,
+      masterAssetVersionId: typeof req.body?.masterAssetVersionId === 'string' ? req.body.masterAssetVersionId : '',
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
+      primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
+      isExplicit: req.body?.isExplicit === true,
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
+      originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+    });
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not add release track.';
+    const status = /permission|owner|another release or account|verified audio master/i.test(message)
+      ? 403
+      : /another session|already part|sealed/i.test(message)
+        ? 409
+        : /not found/i.test(message)
+          ? 404
+          : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.patch('/api/talent/audio/releases/:releaseId/recordings/:recordingId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can edit release tracks.' });
+  try {
+    const result = await audioPublishingService.updateReleaseRecording({
+      releaseId: req.params.releaseId,
+      recordingId: req.params.recordingId,
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      expectedUpdatedAt: typeof req.body?.expectedUpdatedAt === 'string' ? req.body.expectedUpdatedAt : null,
+      title: typeof req.body?.title === 'string' ? req.body.title : '',
+      versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
+      primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
+      isExplicit: req.body?.isExplicit === true,
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
+      originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not update release track.';
+    const status = /permission|owner/i.test(message)
+      ? 403
+      : /another session|sealed/i.test(message)
+        ? 409
+        : /not found/i.test(message)
+          ? 404
+          : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.put('/api/talent/audio/releases/:releaseId/recordings/order', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can reorder release tracks.' });
+  try {
+    const result = await audioPublishingService.reorderReleaseRecordings({
+      releaseId: req.params.releaseId,
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      expectedUpdatedAt: typeof req.body?.expectedUpdatedAt === 'string' ? req.body.expectedUpdatedAt : null,
+      recordingIds: Array.isArray(req.body?.recordingIds)
+        ? req.body.recordingIds.filter((value: unknown): value is string => typeof value === 'string')
+        : []
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not reorder release tracks.';
+    const status = /permission|owner/i.test(message)
+      ? 403
+      : /another session|sealed/i.test(message)
+        ? 409
+        : /not found/i.test(message)
+          ? 404
+          : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.delete('/api/talent/audio/releases/:releaseId/recordings/:recordingId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can remove release tracks.' });
+  try {
+    const result = await audioPublishingService.removeReleaseRecording({
+      releaseId: req.params.releaseId,
+      recordingId: req.params.recordingId,
+      performerId: performerOwner.performerId,
+      actorUserId: talentAccess.actor.actorId,
+      expectedUpdatedAt: typeof req.body?.expectedUpdatedAt === 'string' ? req.body.expectedUpdatedAt : null
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not remove release track.';
+    const status = /permission|owner/i.test(message)
+      ? 403
+      : /another session|sealed|rights evidence/i.test(message)
+        ? 409
+        : /not found/i.test(message)
+          ? 404
+          : 422;
     return res.status(status).json({ error: message });
   }
 });

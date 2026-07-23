@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { CheckCircle2, Disc3, FileCheck2, Loader2, Plus, Save, ShieldCheck, Trash2 } from 'lucide-react';
+import { CheckCircle2, Disc3, FileCheck2, Loader2, Plus, Save, ShieldCheck } from 'lucide-react';
+import PerformerReleaseTrackBuilder from './PerformerReleaseTrackBuilder';
 
-type ReleaseMaster = {
+export type ReleaseMaster = {
   versionId: string;
   projectId: string;
   projectTitle: string;
@@ -10,23 +11,28 @@ type ReleaseMaster = {
   versionNumber: number;
 };
 
-type ReleaseAsset = ReleaseMaster & { mimeType: string; assetKind: string; sha256: string };
+export type ReleaseAsset = ReleaseMaster & { mimeType: string; assetKind: string; sha256: string };
 
-type ReleaseCredit = { id?: string; displayName: string; role: string; sequence?: number };
+export type ReleaseCredit = { id?: string; displayName: string; role: string; sequence?: number };
 type FileConnection = { connectionId: string; counterparty: { displayName: string; handle: string | null } | null };
 
-type ReleaseRecording = {
+export type ReleaseRecording = {
   recordingId: string;
+  masterAssetVersionId: string | null;
   title: string;
   versionTitle: string | null;
+  primaryArtistName: string;
   isrc: string | null;
   isExplicit: boolean;
   languageCode: string | null;
+  originalReleaseDate: string | null;
   rightsStatus: string;
+  discNumber: number;
+  trackNumber: number;
   credits: ReleaseCredit[];
 };
 
-type ReleaseDraft = {
+export type ReleaseDraft = {
   id: string;
   projectId: string;
   title: string;
@@ -44,20 +50,20 @@ type ReleaseDraft = {
   territories: string[] | null;
   updatedAt: string;
   recordings: ReleaseRecording[];
-  declarations: Array<{ id: string; declarationType: string; outcome: string; termsVersion: string }>;
-  readiness: { ready: boolean; issues: string[]; verifiedRights: string[]; requiredRights: string[] };
+  declarations: Array<{ id: string; recordingId: string | null; declarationType: string; outcome: string; termsVersion: string }>;
+  readiness: {
+    ready: boolean;
+    issues: string[];
+    metadataIssues: string[];
+    rightsIssues: string[];
+    verifiedRights: string[];
+    requiredRights: string[];
+  };
 };
 
 function freshReleaseId() {
   return crypto.randomUUID();
 }
-
-const CREDIT_ROLES = [
-  ['primary_artist', 'Primary artist'], ['featured_artist', 'Featured artist'], ['songwriter', 'Songwriter'],
-  ['composer', 'Composer'], ['producer', 'Producer'], ['co_producer', 'Co-producer'],
-  ['engineer', 'Engineer'], ['mix_engineer', 'Mix engineer'], ['mastering_engineer', 'Mastering engineer'],
-  ['performer', 'Performer'], ['publisher', 'Publisher'], ['other', 'Other']
-];
 
 const RIGHTS_TYPES = [
   ['master_control', 'Master control'], ['composition_control', 'Composition control'],
@@ -66,6 +72,11 @@ const RIGHTS_TYPES = [
   ['performer_consent', 'Performer consent'], ['ai_disclosure', 'AI disclosure'],
   ['distribution_authorization', 'Distribution authorization']
 ];
+
+const RECORDING_SCOPED_RIGHTS = new Set([
+  'master_control', 'composition_control', 'sample_clearance', 'cover_license',
+  'beat_license', 'performer_consent', 'ai_disclosure'
+]);
 
 function localDateTimeValue(value: string | null) {
   if (!value) return '';
@@ -77,43 +88,39 @@ function localDateTimeValue(value: string | null) {
 
 function ReleaseEditor({
   release,
+  masters,
   artworks,
   rightsDocuments,
   connections,
   onSaved
 }: {
   release: ReleaseDraft;
+  masters: ReleaseMaster[];
   artworks: ReleaseAsset[];
   rightsDocuments: ReleaseAsset[];
   connections: FileConnection[];
   onSaved: () => Promise<void>;
 }) {
-  const recording = release.recordings[0];
+  const leadRecording = [...release.recordings]
+    .sort((a, b) => a.discNumber - b.discNumber || a.trackNumber - b.trackNumber)
+    .at(0);
   const [form, setForm] = useState({
     title: release.title,
     primaryArtistName: release.primaryArtistName,
-    trackTitle: recording?.title || release.title,
-    versionTitle: recording?.versionTitle || '',
     releaseType: release.releaseType,
     distributionMode: release.distributionMode,
     artworkAssetVersionId: release.artworkAssetVersionId || '',
     upc: release.upc || '',
-    isrc: recording?.isrc || '',
     labelName: release.labelName || '',
     pLine: release.pLine || '',
     cLine: release.cLine || '',
     originalReleaseDate: release.originalReleaseDate || '',
     scheduledReleaseAt: localDateTimeValue(release.scheduledReleaseAt),
-    territories: (release.territories || ['US']).join(', '),
-    languageCode: recording?.languageCode || 'en',
-    isExplicit: recording?.isExplicit === true
+    territories: (release.territories || ['US']).join(', ')
   });
-  const [credits, setCredits] = useState<ReleaseCredit[]>(recording?.credits?.length ? recording.credits : [
-    { displayName: release.primaryArtistName, role: 'primary_artist' },
-    { displayName: '', role: 'songwriter' }
-  ]);
   const [rights, setRights] = useState({
     declarationType: 'master_control',
+    recordingId: leadRecording?.recordingId || '',
     termsDocumentAssetVersionId: '',
     termsVersion: '1',
     declarationText: '',
@@ -122,6 +129,12 @@ function ReleaseEditor({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [reviewerConnectionId, setReviewerConnectionId] = useState('');
+
+  useEffect(() => {
+    if (!release.recordings.some((recording) => recording.recordingId === rights.recordingId)) {
+      setRights((current) => ({ ...current, recordingId: leadRecording?.recordingId || '' }));
+    }
+  }, [leadRecording?.recordingId, release.recordings, rights.recordingId]);
 
   const save = async () => {
     setBusy(true);
@@ -132,16 +145,23 @@ function ReleaseEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
+          trackTitle: leadRecording?.title || release.title,
+          versionTitle: leadRecording?.versionTitle || null,
+          isrc: leadRecording?.isrc || null,
+          isExplicit: leadRecording?.isExplicit === true,
+          languageCode: leadRecording?.languageCode || null,
+          credits: leadRecording?.credits.length
+            ? leadRecording.credits
+            : [{ displayName: leadRecording?.primaryArtistName || release.primaryArtistName, role: 'primary_artist' }],
           expectedUpdatedAt: release.updatedAt,
           artworkAssetVersionId: form.artworkAssetVersionId || null,
           scheduledReleaseAt: form.scheduledReleaseAt ? new Date(form.scheduledReleaseAt).toISOString() : null,
-          territories: form.territories.split(',').map((value) => value.trim()).filter(Boolean),
-          credits
+          territories: form.territories.split(',').map((value) => value.trim()).filter(Boolean)
         })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not save release details.');
-      setNotice('Release metadata, artwork, schedule, and credits saved as a new audited draft revision.');
+      setNotice('Release metadata, artwork, and schedule saved as a new audited draft revision.');
       await onSaved();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not save release details.');
@@ -157,7 +177,10 @@ function ReleaseEditor({
       const response = await fetch(`/api/talent/audio/releases/${release.id}/rights`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...rights, recordingId: recording?.recordingId || null })
+        body: JSON.stringify({
+          ...rights,
+          recordingId: RECORDING_SCOPED_RIGHTS.has(rights.declarationType) ? rights.recordingId : null
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not record rights declaration.');
@@ -193,37 +216,45 @@ function ReleaseEditor({
 
   return (
     <details className="mt-3 rounded-xl border border-white/10 bg-slate-950/70 p-3">
-      <summary className="cursor-pointer list-none text-xs font-black text-violet-200">Edit metadata, credits, artwork, and rights</summary>
+      <summary className="cursor-pointer list-none text-xs font-black text-violet-200">Edit release, tracks, artwork, and rights</summary>
       {notice ? <p className="mt-3 rounded-lg border border-white/10 bg-slate-900 p-3 text-xs text-slate-200">{notice}</p> : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="text-xs text-slate-400">Release title<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">Primary artist<input value={form.primaryArtistName} onChange={(event) => setForm({ ...form, primaryArtistName: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
-        <label className="text-xs text-slate-400">Track title<input value={form.trackTitle} onChange={(event) => setForm({ ...form, trackTitle: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
-        <label className="text-xs text-slate-400">Version title<input value={form.versionTitle} onChange={(event) => setForm({ ...form, versionTitle: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">Release type<select value={form.releaseType} onChange={(event) => setForm({ ...form, releaseType: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white"><option value="single">Single</option><option value="ep">EP</option><option value="album">Album</option><option value="comedy_special">Comedy special</option><option value="spoken_word">Spoken word</option><option value="other">Other</option></select></label>
         <label className="text-xs text-slate-400">Release mode<select value={form.distributionMode} onChange={(event) => setForm({ ...form, distributionMode: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white"><option value="private">Private</option><option value="sway_only">Sway only</option><option value="sway_first">Sway first</option><option value="everywhere">Everywhere</option></select></label>
         <label className="text-xs text-slate-400">Verified artwork<select value={form.artworkAssetVersionId} onChange={(event) => setForm({ ...form, artworkAssetVersionId: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white"><option value="">Select artwork</option>{artworks.filter((asset) => asset.projectId === release.projectId).map((asset) => <option key={asset.versionId} value={asset.versionId}>{asset.title || asset.originalFilename} · v{asset.versionNumber}</option>)}</select></label>
         <label className="text-xs text-slate-400">Scheduled release<input type="datetime-local" value={form.scheduledReleaseAt} onChange={(event) => setForm({ ...form, scheduledReleaseAt: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">UPC<input value={form.upc} onChange={(event) => setForm({ ...form, upc: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
-        <label className="text-xs text-slate-400">ISRC<input value={form.isrc} onChange={(event) => setForm({ ...form, isrc: event.target.value.toUpperCase() })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">Label<input value={form.labelName} onChange={(event) => setForm({ ...form, labelName: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">Territories<input value={form.territories} onChange={(event) => setForm({ ...form, territories: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">℗ line<input value={form.pLine} onChange={(event) => setForm({ ...form, pLine: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">© line<input value={form.cLine} onChange={(event) => setForm({ ...form, cLine: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
         <label className="text-xs text-slate-400">Original release date<input type="date" value={form.originalReleaseDate} onChange={(event) => setForm({ ...form, originalReleaseDate: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
-        <label className="text-xs text-slate-400">Language<input value={form.languageCode} onChange={(event) => setForm({ ...form, languageCode: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
       </div>
 
-      <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-3">
-        <div className="flex items-center justify-between"><p className="text-xs font-black text-white">Complete recording credits</p><button type="button" onClick={() => setCredits([...credits, { displayName: '', role: 'other' }])} className="rounded-lg border border-violet-500/30 px-2 py-1 text-[10px] font-bold text-violet-100">Add credit</button></div>
-        <div className="mt-2 space-y-2">{credits.map((credit, index) => <div key={`${index}:${credit.role}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px] gap-2"><input aria-label={`Credit ${index + 1} name`} value={credit.displayName} onChange={(event) => setCredits(credits.map((item, itemIndex) => itemIndex === index ? { ...item, displayName: event.target.value } : item))} placeholder="Legal or professional name" className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white" /><select aria-label={`Credit ${index + 1} role`} value={credit.role} onChange={(event) => setCredits(credits.map((item, itemIndex) => itemIndex === index ? { ...item, role: event.target.value } : item))} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-2 text-xs text-white">{CREDIT_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" aria-label={`Remove credit ${index + 1}`} onClick={() => setCredits(credits.filter((_, itemIndex) => itemIndex !== index))} className="grid min-h-10 place-items-center rounded-lg border border-rose-500/20 text-rose-200"><Trash2 className="h-4 w-4" /></button></div>)}</div>
-      </div>
       <button type="button" onClick={save} disabled={busy || release.status !== 'draft'} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-xs font-black text-white disabled:opacity-40"><Save className="h-4 w-4" />Save audited draft revision</button>
+
+      <PerformerReleaseTrackBuilder release={release} masters={masters} onSaved={onSaved} />
 
       <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
         <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-amber-200" /><p className="text-xs font-black text-white">Immutable rights evidence</p></div>
-        {rightsDocuments.some((asset) => asset.projectId === release.projectId) ? <div className="mt-3 grid gap-2 sm:grid-cols-2"><select value={rights.declarationType} onChange={(event) => setRights({ ...rights, declarationType: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white">{RIGHTS_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select value={rights.termsDocumentAssetVersionId} onChange={(event) => setRights({ ...rights, termsDocumentAssetVersionId: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white"><option value="">Select rights document</option>{rightsDocuments.filter((asset) => asset.projectId === release.projectId).map((asset) => <option key={asset.versionId} value={asset.versionId}>{asset.title || asset.originalFilename} · {asset.sha256.slice(0, 10)}…</option>)}</select><input value={rights.termsVersion} onChange={(event) => setRights({ ...rights, termsVersion: event.target.value })} placeholder="Document version" className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white" /><input value={rights.evidenceNote} onChange={(event) => setRights({ ...rights, evidenceNote: event.target.value })} placeholder="Where the authority or license came from" className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white" /><textarea value={rights.declarationText} onChange={(event) => setRights({ ...rights, declarationText: event.target.value })} placeholder="State exactly what rights you control or are authorized to distribute." className="min-h-24 rounded-lg border border-white/10 bg-slate-950 p-3 text-xs text-white sm:col-span-2" /></div> : <p className="mt-2 text-xs text-amber-100">Upload a PDF or text rights document to this Catalog project before declaring rights.</p>}
-        <button type="button" onClick={declareRights} disabled={busy || !rights.termsDocumentAssetVersionId || !rights.declarationText || !rights.evidenceNote} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-black text-amber-100 disabled:opacity-40"><FileCheck2 className="h-4 w-4" />Record immutable declaration</button>
+        {rightsDocuments.some((asset) => asset.projectId === release.projectId) ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <select value={rights.declarationType} onChange={(event) => setRights({ ...rights, declarationType: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white">{RIGHTS_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            {RECORDING_SCOPED_RIGHTS.has(rights.declarationType) ? (
+              <select value={rights.recordingId} onChange={(event) => setRights({ ...rights, recordingId: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white">
+                <option value="">Choose the recording this evidence covers</option>
+                {[...release.recordings].sort((a, b) => a.trackNumber - b.trackNumber).map((recording) => <option key={recording.recordingId} value={recording.recordingId}>Track {recording.trackNumber} · {recording.title}</option>)}
+              </select>
+            ) : <div className="grid min-h-10 place-items-center rounded-lg border border-white/10 bg-slate-950 px-3 text-[11px] text-slate-400">Applies to the whole release</div>}
+            <select value={rights.termsDocumentAssetVersionId} onChange={(event) => setRights({ ...rights, termsDocumentAssetVersionId: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white"><option value="">Select rights document</option>{rightsDocuments.filter((asset) => asset.projectId === release.projectId).map((asset) => <option key={asset.versionId} value={asset.versionId}>{asset.title || asset.originalFilename} · {asset.sha256.slice(0, 10)}…</option>)}</select>
+            <input value={rights.termsVersion} onChange={(event) => setRights({ ...rights, termsVersion: event.target.value })} placeholder="Document version" className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white" />
+            <input value={rights.evidenceNote} onChange={(event) => setRights({ ...rights, evidenceNote: event.target.value })} placeholder="Where the authority or license came from" className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white sm:col-span-2" />
+            <textarea value={rights.declarationText} onChange={(event) => setRights({ ...rights, declarationText: event.target.value })} placeholder="State exactly what rights you control or are authorized to distribute." className="min-h-24 rounded-lg border border-white/10 bg-slate-950 p-3 text-xs text-white sm:col-span-2" />
+          </div>
+        ) : <p className="mt-2 text-xs text-amber-100">Upload a PDF or text rights document to this Catalog project before declaring rights.</p>}
+        <button type="button" onClick={declareRights} disabled={busy || !rights.termsDocumentAssetVersionId || !rights.declarationText || !rights.evidenceNote || (RECORDING_SCOPED_RIGHTS.has(rights.declarationType) && !rights.recordingId)} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-black text-amber-100 disabled:opacity-40"><FileCheck2 className="h-4 w-4" />Record immutable declaration</button>
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <select value={reviewerConnectionId} onChange={(event) => setReviewerConnectionId(event.target.value)} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white"><option value="">Choose a connected independent reviewer</option>{connections.map((connection) => <option key={connection.connectionId} value={connection.connectionId}>{connection.counterparty?.displayName || 'Connected account'}{connection.counterparty?.handle ? ` @${connection.counterparty.handle}` : ''}</option>)}</select>
           <button type="button" onClick={addReviewer} disabled={busy || !reviewerConnectionId} className="min-h-10 rounded-lg border border-cyan-500/30 px-3 text-xs font-black text-cyan-100 disabled:opacity-40">Grant review access</button>
@@ -234,7 +265,10 @@ function ReleaseEditor({
       <div className={`mt-4 rounded-xl border p-3 ${release.readiness.ready ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-white/10 bg-slate-900/70'}`}>
         <div className="flex items-center gap-2">{release.readiness.ready ? <CheckCircle2 className="h-4 w-4 text-emerald-300" /> : <ShieldCheck className="h-4 w-4 text-slate-400" />}<p className="text-xs font-black text-white">{release.readiness.ready ? 'Release is delivery-ready' : `${release.readiness.issues.length} readiness item${release.readiness.issues.length === 1 ? '' : 's'} remaining`}</p></div>
         {!release.readiness.ready ? <ul className="mt-2 list-disc pl-5 text-[11px] leading-5 text-slate-400">{release.readiness.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
-        {release.declarations.length ? <div className="mt-3 flex flex-wrap gap-2">{release.declarations.map((declaration) => <span key={declaration.id} className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-300">{declaration.declarationType.replaceAll('_', ' ')} · {declaration.outcome}</span>)}</div> : null}
+        {release.declarations.length ? <div className="mt-3 flex flex-wrap gap-2">{release.declarations.map((declaration) => {
+          const recording = release.recordings.find((candidate) => candidate.recordingId === declaration.recordingId);
+          return <span key={declaration.id} className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-300">{recording ? `Track ${recording.trackNumber} · ` : 'Release · '}{declaration.declarationType.replaceAll('_', ' ')} · {declaration.outcome}</span>;
+        })}</div> : null}
       </div>
     </details>
   );
@@ -361,7 +395,7 @@ export default function PerformerReleaseDrafts() {
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-violet-300">Release drafts</p>
           <h3 className="mt-1 text-lg font-black text-white">Prepare a release from your Catalog</h3>
           <p className="mt-1 text-xs leading-relaxed text-slate-400">
-            Bind a sealed master to release metadata. Drafts stay private and are not sent to stores.
+            Assemble sealed masters into an ordered release. Drafts stay private and are not sent to stores.
           </p>
         </div>
         {loading || submitting ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-violet-300" aria-label="Working" /> : <Disc3 className="h-5 w-5 shrink-0 text-violet-300" aria-hidden="true" />}
@@ -425,9 +459,11 @@ export default function PerformerReleaseDrafts() {
                 <div><p className="font-black text-white">{release.title}</p><p className="mt-1 text-xs text-slate-400">{release.primaryArtistName} · {release.releaseType.replace('_', ' ')}</p></div>
                 <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-200">Private draft</span>
               </div>
-              {release.recordings.map((recording) => <p key={recording.recordingId} className="mt-2 text-xs text-slate-300">Track 1 · {recording.title}{recording.versionTitle ? ` (${recording.versionTitle})` : ''}</p>)}
+              {[...release.recordings]
+                .sort((a, b) => a.discNumber - b.discNumber || a.trackNumber - b.trackNumber)
+                .map((recording) => <p key={recording.recordingId} className="mt-2 text-xs text-slate-300">Track {recording.trackNumber} · {recording.title}{recording.versionTitle ? ` (${recording.versionTitle})` : ''}</p>)}
               <p className="mt-2 text-[10px] text-slate-500">Not delivered to stores. Rights review and provider-confirmed delivery remain separate required steps.</p>
-              <ReleaseEditor release={release} artworks={artworks} rightsDocuments={rightsDocuments} connections={connections} onSaved={refresh} />
+              <ReleaseEditor release={release} masters={masters} artworks={artworks} rightsDocuments={rightsDocuments} connections={connections} onSaved={refresh} />
             </article>
           ))}
         </div>

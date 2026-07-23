@@ -51,6 +51,20 @@
           "holdReason": "The release workspace now supports audited editing, artwork, full recording credits, territories, identifiers, optimistic revision checks, sealed rights declarations, independent review, and fail-closed readiness. Disposable PostgreSQL and production journey evidence are still required for this exact tree; no store delivery is enabled."
         },
         {
+          "id": "multi_recording_release_assembly",
+          "label": "Ordered multi-recording single, EP, and album assembly",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/components/PerformerReleaseTrackBuilder.tsx",
+            "src/components/PerformerReleaseDrafts.tsx",
+            "src/server/audio-publishing-service.ts",
+            "server.ts",
+            "scripts/sway-release-drafts.contract.test.mjs",
+            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+          ],
+          "holdReason": "Track add, per-track metadata and credits, reorder, remove, single/EP/album count validation, optimistic conflict denial, and rights-review locking are implemented. The exact disposable PostgreSQL journey and a production creator journey are not yet independently verified; provider-backed store delivery remains disabled."
+        },
+        {
           "id": "dsp_delivery",
           "label": "Contracted DSP delivery to selected stores",
           "status": "missing",

@@ -48,6 +48,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full two-account production journey remains unverified |
 | Selected-file sharing, review, and approval | Durable runtime and disposable integration cover grant, exact download, review, approval, revoke, replay denial, and audit | Production two-account proof remains required |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Audited editing, artwork, full recording credits, identifiers, territories, sealed rights declarations, independent review, and fail-closed readiness are implemented | Disposable PostgreSQL and production journey evidence are still required for this exact tree; store delivery remains disabled |
+| Ordered multi-recording single, EP, and album assembly | Track add, per-track metadata and credits, reorder, remove, track-count validation, optimistic conflict denial, and rights-review locking are implemented | **Implemented, unverified:** the exact disposable PostgreSQL journey and a production creator journey remain required; store delivery remains disabled |
 | DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
 | Store status, corrections, failures, and takedowns | State machine only | Critical blocker |
 | Royalty statements and reconciliation | No distribution royalty ledger/runtime | Critical blocker |
@@ -62,7 +63,7 @@ No contracted DSP delivery provider exists. No royalty ledger, collaborator dist
 1. Configure durable private production object storage and prove upload, seal, exact-download, restore, and access denial.
 2. Complete the project collaboration journey: connect, claim, share one immutable version, review, approve, revoke, and replay denial.
 3. Build the cohesive Music workspace around projects, releases, delivery, promotion, earnings, and catalog transfer.
-4. Build release readiness: metadata, identifiers, artwork, rights declarations, creator-deal evidence, and immutable approval.
+4. Prove release assembly and readiness end to end: ordered multi-recording metadata, identifiers, artwork, rights declarations, creator-deal evidence, and immutable approval.
 5. Contract with and integrate one external DSP delivery provider; prove sandbox then controlled production delivery.
 6. Build provider-backed status, correction, failure, takedown, and observability controls.
 7. Build a separate append-only royalty ledger, statement reconciliation, splits, KYC/tax, and payouts.
