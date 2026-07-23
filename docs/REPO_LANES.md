@@ -51,6 +51,15 @@ These lanes may run in parallel when they keep to their allowed files and do not
 | `payments` | Stripe/payment provider, idempotency, capture/void/refund/payout lifecycle. |
 | `app-store` | TestFlight/App Store package evidence, privacy/support/compliance docs. |
 
+## Future Product Lanes (Memo Only)
+
+These are locked product intent. They are **not** active parallel build lanes until Gawain opens them with scope, ledger boundaries, and an evidence bar.
+
+| Future lane | Memo | Rule |
+| --- | --- | --- |
+| `event-tickets` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Event ticket sales is a Sway lane. Docs/planning only until explicitly activated. Separate ledger and fee disclosure from live-room money, publishing, merch, and paid streams. Plan: `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md` (includes public feed repair; individuals sell without venue gate). |
+| `public-feed` | (same plan) | Truthful discovery for live rooms + upcoming ticketed shows. No fake inventory. May ship Phase B ahead of ticket MVP if Gawain sequences it that way. |
+
 ## Unsafe Lane Pairings
 
 These pairings must not run in parallel unless Gawain explicitly sequences and scopes them.

@@ -87,6 +87,8 @@ import { createAudioPublishingService } from "./src/server/audio-publishing-serv
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
+import { createSandboxDistributionAdapter } from "./src/server/distribution-adapter";
+import { createDistributionDeliveryService } from "./src/server/distribution-delivery-service";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -142,6 +144,16 @@ const audioFilePairingService = businessDb
   : null;
 const audioFileCollaborationService = businessDb && audioObjectStore
   ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
+  : null;
+// Only the sandbox adapter is ever registered here -- it never calls a real
+// distributor. No route may treat a sandbox delivery as provider-confirmed
+// distribution; see distributionDeliveryEngine in AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.
+const distributionSandboxSecret = process.env.SWAY_DISTRIBUTION_SANDBOX_WEBHOOK_SECRET?.trim();
+const distributionDeliveryService = businessDb && distributionSandboxSecret
+  ? createDistributionDeliveryService({
+      db: businessDb,
+      adapters: { sway_sandbox: createSandboxDistributionAdapter({ secret: distributionSandboxSecret }) }
+    })
   : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
@@ -415,12 +427,16 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
 
   if (profile) return profile;
 
-  const [existingPerformer] = await businessDb
+  // Unclaimed/incomplete does not mean private. Only suspended handles stay dark.
+  const [suspendedPerformer] = await businessDb
     .select({ id: performers.id })
     .from(performers)
-    .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+    .where(and(
+      sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+      eq(performers.onboardingStatus, 'suspended')
+    ))
     .limit(1);
-  if (existingPerformer) return null;
+  if (suspendedPerformer) return null;
 
   const [preview] = await businessDb
     .select({
@@ -6717,6 +6733,146 @@ function requireAudioPublishingRuntime(res: express.Response): boolean {
   return true;
 }
 
+// The delivery job engine (adapter contract, durable state machine, webhook
+// auth/replay defense) is fully implemented but stays unreachable until
+// distributionDeliveryEngine is enabled -- see AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.
+// Flipping this alone never claims a real DSP delivery: only the sandbox
+// adapter is ever registered, and the public release page's provider-confirmed
+// projection is untouched by this flag.
+function requireDistributionDeliveryRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.distributionDeliveryEngine) {
+    res.status(503).json({ error: 'Distribution delivery engine is not enabled.' });
+    return false;
+  }
+  if (!businessDb || !distributionDeliveryService) {
+    res.status(503).json({ error: 'Distribution delivery engine is not configured.' });
+    return false;
+  }
+  return true;
+}
+
+app.post('/api/talent/audio/releases/:releaseId/deliveries', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can start a distribution delivery.' });
+
+  try {
+    const delivery = await distributionDeliveryService.createDelivery({
+      releaseId: req.params.releaseId,
+      actorUserId: talentAccess.actor.actorId,
+      providerKey: typeof req.body?.providerKey === 'string' ? req.body.providerKey : '',
+      destinationKey: typeof req.body?.destinationKey === 'string' ? req.body.destinationKey : ''
+    });
+    return res.status(201).json({ delivery });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not create distribution delivery.';
+    const status = /authority|permission/i.test(message) ? 403 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/submit', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can submit a distribution delivery.' });
+
+  try {
+    const result = await distributionDeliveryService.submitDelivery({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not submit distribution delivery.';
+    const status = /authority|permission/i.test(message) ? 403 : /not found/i.test(message) ? 404 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/takedown', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can request a takedown.' });
+
+  try {
+    const result = await distributionDeliveryService.requestTakedown({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not request takedown.';
+    const status = /authority|permission/i.test(message) ? 403 : /not found/i.test(message) ? 404 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/correction', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can request a correction.' });
+
+  try {
+    const result = await distributionDeliveryService.requestCorrection({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not request delivery correction.';
+    const status = /authority|permission/i.test(message) ? 403 : /not found/i.test(message) ? 404 : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+// Provider webhook ingestion. Signature verification is mandatory and the
+// delivery state transition is resolved only from the verified event body,
+// never from request input outside the signed payload. Kept reachable only
+// while distributionDeliveryEngine is enabled; the sandbox adapter is the
+// only adapter ever registered, so no real DSP callback can reach this route.
+app.post('/api/distribution/webhook/:providerKey', async (req, res) => {
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+  const rawBodyText = (req as express.Request & { rawBody?: string }).rawBody;
+  if (typeof rawBodyText !== 'string') {
+    return res.status(400).json({ error: 'Raw request body unavailable for signature verification.' });
+  }
+  const signatureHeader = req.header('sway-distribution-signature') ?? undefined;
+  try {
+    const result = await distributionDeliveryService.ingestWebhook({
+      providerKey: req.params.providerKey,
+      rawBody: Buffer.from(rawBodyText, 'utf8'),
+      signatureHeader
+    });
+    return res.json({ received: true, ...result });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Distribution webhook processing failed.'
+    });
+  }
+});
+
 app.get('/api/talent/audio/projects', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
@@ -8098,8 +8254,12 @@ app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
 app.get('/api/public/releases/:releaseId', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const releaseId = parseDurableGigId(req.params.releaseId);
+  if (!releaseId) {
+    return res.status(400).json({ error: 'releaseId must be a valid UUID.' });
+  }
   try {
-    const release = await audioPublishingService.getPublicRelease({ releaseId: req.params.releaseId });
+    const release = await audioPublishingService.getPublicRelease({ releaseId });
     if (!release) return res.status(404).json({ error: 'Public release not found.' });
     return res.json({ release });
   } catch (error) {
@@ -8109,8 +8269,12 @@ app.get('/api/public/releases/:releaseId', async (req, res) => {
 
 app.get('/api/public/releases/:releaseId/artwork', async (req, res) => {
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  const releaseId = parseDurableGigId(req.params.releaseId);
+  if (!releaseId) {
+    return res.status(400).json({ error: 'releaseId must be a valid UUID.' });
+  }
   try {
-    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId: req.params.releaseId });
+    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId });
     res.setHeader('Content-Type', opened.version.mimeType);
     res.setHeader('Content-Length', String(opened.byteSize));
     res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);
@@ -8168,15 +8332,19 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       .limit(1);
 
     if (!profile) {
-      // Never fall back to a preview when a real performer row exists but is
-      // inactive or suspended. That keeps inactive/suspended handles dark.
-      const [existingPerformer] = await businessDb
+      // Unclaimed does not mean private. Curated previews stay public even when a
+      // linked performer row exists but is inactive / incomplete. Only a
+      // suspended performer hard-darks the handle (no preview fallback).
+      const [suspendedPerformer] = await businessDb
         .select({ id: performers.id })
         .from(performers)
-        .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+        .where(and(
+          sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+          eq(performers.onboardingStatus, 'suspended')
+        ))
         .limit(1);
 
-      if (existingPerformer) {
+      if (suspendedPerformer) {
         return res.status(404).json({ error: 'Performer profile not found.' });
       }
 
