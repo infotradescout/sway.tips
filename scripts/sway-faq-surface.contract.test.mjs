@@ -21,11 +21,13 @@ for (const term of [
   'Replacing an existing distributor',
   'Where the publishing product stands',
   'Still required for the complete DistroKid replacement',
-  'each release draft connects one verified master to one recording',
-  'does not yet add or reorder recordings for an EP or album',
+  'current release workspace assembles singles, EPs, and albums from verified masters',
+  'Build and order the release tracks',
+  'A single must keep one track; EP and album readiness requires at least two',
+  'Track structure locks when rights review starts',
+  'editable ordered multi-recording release drafts built from one verified master per track',
   'master control, composition control, artwork control, and distribution authorization',
   'Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence',
-  'Multi-recording EP and album assembly',
   'contracted DSP delivery provider',
   'Money, ownership, and control'
 ]) {
@@ -48,6 +50,16 @@ const faqTemplateEnd = faqTemplateStart === -1 ? -1 : server.indexOf('\n);', faq
 const faqTemplate = faqTemplateStart === -1 || faqTemplateEnd === -1
   ? server
   : server.slice(faqTemplateStart, faqTemplateEnd);
+
+for (const staleMultiTrackClaim of [
+  'each release draft connects one verified master to one recording',
+  'does not yet add or reorder recordings for an EP or album',
+  'Multi-recording EP and album assembly with track add and reorder controls'
+]) {
+  if (faqTemplate.includes(staleMultiTrackClaim)) {
+    failures.push(`About surface still presents implemented multi-track assembly as missing: ${staleMultiTrackClaim}`);
+  }
+}
 
 for (const forbidden of [
   'instagram.com/',

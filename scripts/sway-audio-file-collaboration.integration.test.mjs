@@ -192,6 +192,24 @@ try {
     mimeType: 'text/plain',
     body: rightsDocumentBody
   });
+  const secondMasterVersion = await sealSupportingFile({
+    title: 'second-track.wav',
+    assetKind: 'master_audio',
+    mimeType: 'audio/wav',
+    body: Buffer.from('RIFF second immutable album master')
+  });
+  const thirdMasterVersion = await sealSupportingFile({
+    title: 'third-track.wav',
+    assetKind: 'master_audio',
+    mimeType: 'audio/wav',
+    body: Buffer.from('RIFF third immutable album master')
+  });
+  const postRightsMasterVersion = await sealSupportingFile({
+    title: 'post-rights-track.wav',
+    assetKind: 'master_audio',
+    mimeType: 'audio/wav',
+    body: Buffer.from('RIFF unused master for sealed-release denial')
+  });
 
   const releaseId = randomUUID();
   const releaseDraft = await publishing.createReleaseDraft({
@@ -203,7 +221,7 @@ try {
     title: 'Durable Release Proof',
     trackTitle: 'Durable Release Proof',
     primaryArtistName: 'Collaboration proof',
-    releaseType: 'single',
+    releaseType: 'album',
     territories: ['US'],
     languageCode: 'en'
   });
@@ -226,7 +244,7 @@ try {
     title: 'Incomplete proposed edit',
     trackTitle: 'Incomplete proposed edit',
     primaryArtistName: 'Collaboration proof',
-    releaseType: 'single',
+    releaseType: 'album',
     distributionMode: 'private',
     territories: ['US'],
     languageCode: 'en',
@@ -260,7 +278,7 @@ try {
     title: 'Durable Release Proof',
     trackTitle: 'Durable Release Proof',
     primaryArtistName: 'Collaboration proof',
-    releaseType: 'single',
+    releaseType: 'album',
     distributionMode: 'sway_first',
     labelName: 'Independent proof',
     pLine: '℗ 2026 Collaboration proof',
@@ -278,18 +296,6 @@ try {
   assert.equal(editedRelease.release.artworkAssetVersionId, artworkVersion.id);
   assert.equal(editedRelease.credits.length, 3);
   assert.equal((await db.select().from(musicRecordingCredits).where(eq(musicRecordingCredits.recordingId, releaseDraft.recording.id))).length, 3);
-
-  releaseWorkspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
-  assert.equal(releaseWorkspace.releases[0].readiness.ready, false, 'Complete metadata must not bypass rights readiness.');
-  assert.deepEqual(
-    releaseWorkspace.releases[0].readiness.issues,
-    [
-      'Verified master control rights evidence is required.',
-      'Verified composition control rights evidence is required.',
-      'Verified artwork control rights evidence is required.',
-      'Verified distribution authorization rights evidence is required.'
-    ]
-  );
 
   await assert.rejects(
     publishing.updateReleaseDraft({
@@ -340,27 +346,195 @@ try {
     /Release management permission required/
   );
 
+  const secondRecordingId = randomUUID();
+  const secondRecordingInput = {
+    releaseId,
+    clientRecordingId: secondRecordingId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    expectedUpdatedAt: editedRelease.release.updatedAt.toISOString(),
+    masterAssetVersionId: secondMasterVersion.id,
+    title: 'Second Track',
+    primaryArtistName: 'Collaboration proof',
+    isrc: 'USAAA2600002',
+    languageCode: 'en',
+    originalReleaseDate: '2026-07-22',
+    credits: [
+      { displayName: 'Collaboration proof', role: 'primary_artist' },
+      { displayName: 'Second Track Writer', role: 'songwriter' }
+    ]
+  };
+  const addedSecond = await publishing.addReleaseRecording(secondRecordingInput);
+  assert.equal(addedSecond.created, true);
+  assert.equal(addedSecond.recording.id, secondRecordingId);
+  assert.equal(addedSecond.trackNumber, 2);
+
+  const replayedSecond = await publishing.addReleaseRecording(secondRecordingInput);
+  assert.equal(replayedSecond.created, false, 'A retried client recording UUID must not duplicate a track.');
+  assert.equal(replayedSecond.recording.id, secondRecordingId);
+  assert.equal(replayedSecond.trackNumber, 2);
+  assert.equal(
+    (await db.select().from(musicRecordings).where(eq(musicRecordings.id, secondRecordingId))).length,
+    1,
+    'A recording retry must leave exactly one durable recording.'
+  );
+
+  await assert.rejects(
+    publishing.addReleaseRecording({
+      ...secondRecordingInput,
+      clientRecordingId: randomUUID(),
+      expectedUpdatedAt: addedSecond.release.updatedAt.toISOString()
+    }),
+    /verified master is already part of the release/i
+  );
+
+  const thirdRecordingId = randomUUID();
+  const thirdRecordingInput = {
+    releaseId,
+    clientRecordingId: thirdRecordingId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    masterAssetVersionId: thirdMasterVersion.id,
+    title: 'Third Track',
+    primaryArtistName: 'Collaboration proof',
+    isrc: 'USAAA2600003',
+    languageCode: 'en',
+    originalReleaseDate: '2026-07-22',
+    credits: [
+      { displayName: 'Collaboration proof', role: 'primary_artist' },
+      { displayName: 'Third Track Composer', role: 'composer' }
+    ]
+  };
+  await assert.rejects(
+    publishing.addReleaseRecording({
+      ...thirdRecordingInput,
+      expectedUpdatedAt: editedRelease.release.updatedAt.toISOString()
+    }),
+    /changed in another session/
+  );
+  await assert.rejects(
+    publishing.addReleaseRecording({
+      ...thirdRecordingInput,
+      actorUserId: outsiderId,
+      expectedUpdatedAt: addedSecond.release.updatedAt.toISOString()
+    }),
+    /Release management permission required/
+  );
+  const addedThird = await publishing.addReleaseRecording({
+    ...thirdRecordingInput,
+    expectedUpdatedAt: addedSecond.release.updatedAt.toISOString()
+  });
+  assert.equal(addedThird.created, true);
+  assert.equal(addedThird.trackNumber, 3);
+
+  const updatedThird = await publishing.updateReleaseRecording({
+    releaseId,
+    recordingId: thirdRecordingId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    expectedUpdatedAt: addedThird.release.updatedAt.toISOString(),
+    title: 'Third Track Revised',
+    versionTitle: 'Album version',
+    primaryArtistName: 'Collaboration proof',
+    isrc: 'USAAA2600003',
+    isExplicit: true,
+    languageCode: 'en',
+    originalReleaseDate: '2026-07-22',
+    credits: [
+      { displayName: 'Collaboration proof', role: 'primary_artist' },
+      { displayName: 'Third Track Composer', role: 'composer' },
+      { displayName: 'Third Track Producer', role: 'producer' }
+    ]
+  });
+  assert.equal(updatedThird.recording.title, 'Third Track Revised');
+  assert.equal(updatedThird.recording.versionTitle, 'Album version');
+  assert.equal(updatedThird.recording.isExplicit, true);
+  assert.equal(updatedThird.credits.length, 3);
+  assert.equal(
+    (await db.select().from(musicRecordingCredits).where(eq(musicRecordingCredits.recordingId, thirdRecordingId))).length,
+    3,
+    'Per-track credit editing must replace the durable credit set.'
+  );
+
+  const reordered = await publishing.reorderReleaseRecordings({
+    releaseId,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    expectedUpdatedAt: updatedThird.release.updatedAt.toISOString(),
+    recordingIds: [thirdRecordingId, releaseDraft.recording.id, secondRecordingId]
+  });
+  assert.deepEqual(reordered.recordingIds, [thirdRecordingId, releaseDraft.recording.id, secondRecordingId]);
   releaseWorkspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
-  assert.equal(releaseWorkspace.masters.length, 1);
+  let mainRelease = releaseWorkspace.releases.find((candidate) => candidate.id === releaseId);
+  assert.deepEqual(
+    mainRelease?.recordings.map((recording) => [recording.recordingId, recording.trackNumber]),
+    [[thirdRecordingId, 1], [releaseDraft.recording.id, 2], [secondRecordingId, 3]],
+    'Reorder must persist one contiguous track order.'
+  );
+
+  const removedOriginal = await publishing.removeReleaseRecording({
+    releaseId,
+    recordingId: releaseDraft.recording.id,
+    performerId: performer.id,
+    actorUserId: ownerId,
+    expectedUpdatedAt: reordered.release.updatedAt.toISOString()
+  });
+  assert.equal(removedOriginal.removedRecordingId, releaseDraft.recording.id);
+  assert.deepEqual(removedOriginal.recordingIds, [thirdRecordingId, secondRecordingId]);
+  assert.equal(
+    (await db.select().from(musicRecordings).where(eq(musicRecordings.id, releaseDraft.recording.id))).length,
+    1,
+    'Removing a draft track from the manifest must preserve its durable recording row.'
+  );
+
+  releaseWorkspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
+  mainRelease = releaseWorkspace.releases.find((candidate) => candidate.id === releaseId);
+  assert.equal(releaseWorkspace.masters.length, 4);
   assert.equal(releaseWorkspace.artworks.length, 1);
   assert.equal(releaseWorkspace.rightsDocuments.length, 1);
   assert.equal(releaseWorkspace.releases.length, 1);
-  assert.equal(releaseWorkspace.releases[0].recordings.length, 1);
-  assert.equal(releaseWorkspace.releases[0].readiness.ready, false);
+  assert.equal(mainRelease?.recordings.length, 2);
+  assert.deepEqual(
+    mainRelease?.recordings.map((recording) => [recording.recordingId, recording.trackNumber]),
+    [[thirdRecordingId, 1], [secondRecordingId, 2]],
+    'Removing a middle track must renumber the remaining manifest contiguously.'
+  );
+  assert.equal(mainRelease?.readiness.ready, false, 'Complete multi-track metadata must not bypass rights readiness.');
+  assert.deepEqual(mainRelease?.readiness.metadataIssues, []);
+  assert.deepEqual(mainRelease?.readiness.rightsIssues, [
+    'Third Track Revised: verified master control rights evidence is required.',
+    'Third Track Revised: verified composition control rights evidence is required.',
+    'Second Track: verified master control rights evidence is required.',
+    'Second Track: verified composition control rights evidence is required.',
+    'Verified artwork control rights evidence is required for the release.',
+    'Verified distribution authorization rights evidence is required for the release.'
+  ]);
 
-  const requiredDeclarationTypes = ['master_control', 'composition_control', 'artwork_control', 'distribution_authorization'];
-  for (const [declarationIndex, declarationType] of requiredDeclarationTypes.entries()) {
+  const requiredDeclarations = [
+    { declarationType: 'master_control', recordingId: thirdRecordingId },
+    { declarationType: 'composition_control', recordingId: thirdRecordingId },
+    { declarationType: 'master_control', recordingId: secondRecordingId },
+    { declarationType: 'composition_control', recordingId: secondRecordingId },
+    { declarationType: 'artwork_control', recordingId: null },
+    { declarationType: 'distribution_authorization', recordingId: null }
+  ];
+  for (const [declarationIndex, requiredDeclaration] of requiredDeclarations.entries()) {
     const declaration = await publishing.createRightsDeclaration({
       releaseId,
       performerId: performer.id,
       actorUserId: ownerId,
-      declarationType,
+      declarationType: requiredDeclaration.declarationType,
       termsDocumentAssetVersionId: rightsDocumentVersion.id,
       termsVersion: '1',
-      declarationText: `Owner attests ${declarationType} for this release.`,
+      declarationText: `Owner attests ${requiredDeclaration.declarationType} for the declared scope.`,
       evidenceNote: 'Bound to the sealed proof document.',
-      recordingId: releaseDraft.recording.id
+      recordingId: requiredDeclaration.recordingId
     });
+    assert.equal(
+      declaration.recordingId,
+      requiredDeclaration.recordingId,
+      `${requiredDeclaration.declarationType} must retain its intended release or recording scope.`
+    );
     await assert.rejects(
       publishing.reviewRightsDeclaration({
         declarationId: declaration.id,
@@ -409,25 +583,119 @@ try {
       reason: 'Checked against the sealed source document.'
     });
     const reviewProgress = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
-    const finalRequiredDeclaration = declarationIndex === requiredDeclarationTypes.length - 1;
-    assert.equal(reviewProgress.releases[0].readiness.ready, finalRequiredDeclaration);
-    assert.equal(reviewProgress.releases[0].status, finalRequiredDeclaration ? 'ready' : 'rights_review');
+    const reviewedRelease = reviewProgress.releases.find((candidate) => candidate.id === releaseId);
+    const finalRequiredDeclaration = declarationIndex === requiredDeclarations.length - 1;
+    assert.equal(reviewedRelease?.readiness.ready, finalRequiredDeclaration);
+    assert.equal(reviewedRelease?.status, finalRequiredDeclaration ? 'ready' : 'rights_review');
   }
   releaseWorkspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
-  assert.equal(releaseWorkspace.releases[0].readiness.ready, true);
-  assert.equal(releaseWorkspace.releases[0].status, 'ready');
-  assert.equal(releaseWorkspace.releases[0].recordings[0].rightsStatus, 'cleared');
-  assert.equal((await db.select().from(musicRightsDeclarations)).length, 4);
-  assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 4);
+  mainRelease = releaseWorkspace.releases.find((candidate) => candidate.id === releaseId);
+  assert.equal(mainRelease?.readiness.ready, true);
+  assert.equal(mainRelease?.status, 'ready');
+  assert.deepEqual(mainRelease?.recordings.map((recording) => recording.rightsStatus), ['cleared', 'cleared']);
+  assert.equal((await db.select().from(musicRightsDeclarations)).length, 6);
+  assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 6);
   assert.equal((await publishing.listRightsReviewQueue({ actorUserId: reviewerId })).length, 0);
   const evidenceOpenCount = openOriginalCount;
-  assert.equal(evidenceOpenCount, 4, 'Each declaration review must open its exact sealed evidence once.');
+  assert.equal(evidenceOpenCount, 6, 'Each recording- or release-scoped declaration must open its exact sealed evidence once.');
   const publicRelease = await publishing.getPublicRelease({ releaseId });
   assert.equal(publicRelease?.status, 'ready');
-  assert.equal(publicRelease?.recordings[0].credits.length, 3);
+  assert.deepEqual(
+    publicRelease?.recordings.map((recording) => [recording.recordingId, recording.trackNumber, recording.title]),
+    [[thirdRecordingId, 1, 'Third Track Revised'], [secondRecordingId, 2, 'Second Track']],
+    'The public release must preserve the reviewed manifest order.'
+  );
+  assert.deepEqual(publicRelease?.recordings.map((recording) => recording.credits.length), [3, 2]);
   const publicArtwork = await publishing.openPublicReleaseArtwork({ releaseId });
   assert.deepEqual(await streamToBuffer(publicArtwork.stream), Buffer.from('verified artwork bytes'));
   assert.equal(openOriginalCount, evidenceOpenCount + 1, 'Public artwork must open exactly one stored original.');
+
+  const sealedUpdatedAt = mainRelease?.updatedAt;
+  assert.ok(sealedUpdatedAt, 'A ready multi-track release must retain its durable revision timestamp.');
+  await assert.rejects(
+    publishing.addReleaseRecording({
+      releaseId,
+      clientRecordingId: randomUUID(),
+      performerId: performer.id,
+      actorUserId: ownerId,
+      expectedUpdatedAt: sealedUpdatedAt.toISOString(),
+      masterAssetVersionId: postRightsMasterVersion.id,
+      title: 'Too Late To Add',
+      primaryArtistName: 'Collaboration proof',
+      languageCode: 'en',
+      credits: [
+        { displayName: 'Collaboration proof', role: 'primary_artist' },
+        { displayName: 'Late Writer', role: 'songwriter' }
+      ]
+    }),
+    /sealed after rights review starts/
+  );
+  await assert.rejects(
+    publishing.updateReleaseRecording({
+      releaseId,
+      recordingId: thirdRecordingId,
+      performerId: performer.id,
+      actorUserId: ownerId,
+      expectedUpdatedAt: sealedUpdatedAt.toISOString(),
+      title: 'Too Late To Edit',
+      primaryArtistName: 'Collaboration proof',
+      languageCode: 'en',
+      credits: [
+        { displayName: 'Collaboration proof', role: 'primary_artist' },
+        { displayName: 'Late Writer', role: 'songwriter' }
+      ]
+    }),
+    /sealed after rights review starts/
+  );
+  await assert.rejects(
+    publishing.reorderReleaseRecordings({
+      releaseId,
+      performerId: performer.id,
+      actorUserId: ownerId,
+      expectedUpdatedAt: sealedUpdatedAt.toISOString(),
+      recordingIds: [secondRecordingId, thirdRecordingId]
+    }),
+    /sealed after rights review starts/
+  );
+  await assert.rejects(
+    publishing.removeReleaseRecording({
+      releaseId,
+      recordingId: secondRecordingId,
+      performerId: performer.id,
+      actorUserId: ownerId,
+      expectedUpdatedAt: sealedUpdatedAt.toISOString()
+    }),
+    /sealed after rights review starts/
+  );
+
+  const oneTrackRelease = await publishing.createReleaseDraft({
+    clientReleaseId: randomUUID(),
+    performerId: performer.id,
+    actorUserId: ownerId,
+    projectId: project.id,
+    masterAssetVersionId: postRightsMasterVersion.id,
+    title: 'Final Track Guard',
+    trackTitle: 'Only Track',
+    primaryArtistName: 'Collaboration proof',
+    releaseType: 'single',
+    territories: ['US'],
+    languageCode: 'en'
+  });
+  await assert.rejects(
+    publishing.removeReleaseRecording({
+      releaseId: oneTrackRelease.release.id,
+      recordingId: oneTrackRelease.recording.id,
+      performerId: performer.id,
+      actorUserId: ownerId,
+      expectedUpdatedAt: oneTrackRelease.release.updatedAt.toISOString()
+    }),
+    /must keep at least one recording/
+  );
+  assert.equal(
+    (await db.select().from(musicRecordings).where(eq(musicRecordings.id, oneTrackRelease.recording.id))).length,
+    1,
+    'Final-track removal denial must leave the recording intact.'
+  );
   const collaborationDownloadBaseline = openOriginalCount;
 
   const collaboration = createAudioFileCollaborationService({ db, store: countedStore });
@@ -544,6 +812,10 @@ try {
     'music_release.draft_create',
     'music_recording.create',
     'music_release.draft_update',
+    'music_release.recording_add',
+    'music_release.recording_update',
+    'music_release.recordings_reorder',
+    'music_release.recording_remove',
     'audio_project.release_reviewer_grant',
     'music_rights_declaration.create',
     'music_rights_declaration.evidence_access',
@@ -551,6 +823,18 @@ try {
     'music_release.readiness_pass'
   ]) {
     assert.ok(collaborationAudit.some((event) => event.eventType === eventType), `Missing audit event: ${eventType}`);
+  }
+  for (const [eventType, expectedCount] of [
+    ['music_release.recording_add', 2],
+    ['music_release.recording_update', 1],
+    ['music_release.recordings_reorder', 1],
+    ['music_release.recording_remove', 1]
+  ]) {
+    assert.equal(
+      collaborationAudit.filter((event) => event.eventType === eventType).length,
+      expectedCount,
+      `${eventType} must be emitted exactly once per successful manifest mutation.`
+    );
   }
   for (const eventType of [
     'music_rights_declaration.evidence_access',
@@ -563,7 +847,7 @@ try {
     );
   }
 
-  console.log('Audio file collaboration integration passed: release draft idempotency/edit conflicts, artwork, credits, immutable independently-reviewed rights, readiness, selected-version share, exact download, review, approval, revoke, cascade, replay denial, and audit are durable.');
+  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, and exact audit behavior are durable.');
 } finally {
   await db.$client.end();
   rmSync(objectRoot, { recursive: true, force: true });

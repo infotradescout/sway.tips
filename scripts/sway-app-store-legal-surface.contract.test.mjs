@@ -51,9 +51,11 @@ const termsTemplate = termsTemplateStart === -1 || termsTemplateEnd === -1
   : server.slice(termsTemplateStart, termsTemplateEnd);
 
 for (const term of [
-  'a draft with one verified master and one recording',
-  'there is no add-or-reorder workflow for an EP or album',
-  'master control, composition control, artwork control, and distribution authorization',
+  'assembles ordered single, EP, and album drafts from verified masters',
+  'Each recording in a release draft is bound to its own verified master, metadata, credits, and track order',
+  'Track-specific master and composition control must be independently verified for every recording',
+  'artwork control and distribution authorization apply to the release as a whole',
+  'Track structure locks when rights review begins',
   'Sample clearance, third-party beat licenses, cover licenses, performer consent, and AI disclosure are conditional evidence',
   'revocation blocks future access but cannot retrieve copies already downloaded',
   'Provider-backed delivery, store callbacks and corrections, royalties, splits, payouts, destination pre-saves, takedowns, and catalog cutover are not live',

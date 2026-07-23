@@ -36,7 +36,12 @@ const RIGHTS_DECLARATION_TYPES = new Set([
   'beat_license', 'artwork_control', 'performer_consent', 'ai_disclosure',
   'distribution_authorization'
 ]);
-const BASE_REQUIRED_RIGHTS = ['master_control', 'composition_control', 'artwork_control', 'distribution_authorization'] as const;
+const REQUIRED_RECORDING_RIGHTS = ['master_control', 'composition_control'] as const;
+const REQUIRED_RELEASE_RIGHTS = ['artwork_control', 'distribution_authorization'] as const;
+const RECORDING_SCOPED_RIGHTS = new Set([
+  'master_control', 'composition_control', 'sample_clearance', 'cover_license',
+  'beat_license', 'performer_consent', 'ai_disclosure'
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function sha256Hex(value: string | Buffer) {
@@ -80,11 +85,58 @@ function normalizeCredits(values: Array<{ displayName?: string; role?: string }>
   return credits;
 }
 
+function normalizeRecordingDraft(input: {
+  title: string;
+  versionTitle?: string | null;
+  primaryArtistName: string;
+  isrc?: string | null;
+  isExplicit?: boolean;
+  languageCode?: string | null;
+  originalReleaseDate?: string | null;
+  credits?: Array<{ displayName?: string; role?: string }> | null;
+}) {
+  const title = requiredReleaseText(input.title, 'Track title');
+  const versionTitle = optionalReleaseText(input.versionTitle, 'Version title');
+  const primaryArtistName = requiredReleaseText(input.primaryArtistName, 'Primary artist');
+  const isrc = optionalReleaseText(input.isrc, 'ISRC', 12)?.toUpperCase() ?? null;
+  const languageCode = optionalReleaseText(input.languageCode, 'Language code', 3)?.toLowerCase() ?? null;
+  const originalReleaseDate = optionalReleaseText(input.originalReleaseDate, 'Original release date', 10);
+  const credits = normalizeCredits(input.credits);
+  if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) {
+    throw new Error('ISRC must use the 12-character ISRC format.');
+  }
+  if (languageCode && !/^[a-z]{2,3}$/.test(languageCode)) {
+    throw new Error('Language code must contain 2 or 3 letters.');
+  }
+  if (originalReleaseDate && !/^\d{4}-\d{2}-\d{2}$/.test(originalReleaseDate)) {
+    throw new Error('Original release date must use YYYY-MM-DD.');
+  }
+  return {
+    title,
+    versionTitle,
+    primaryArtistName,
+    isrc,
+    isExplicit: input.isExplicit === true,
+    languageCode,
+    originalReleaseDate,
+    credits
+  };
+}
+
+function assertExpectedReleaseVersion(current: Date, expectedUpdatedAt: string | null | undefined) {
+  if (!expectedUpdatedAt) throw new Error('expectedUpdatedAt is required for release track changes.');
+  const expected = new Date(expectedUpdatedAt);
+  if (Number.isNaN(expected.getTime()) || current.toISOString() !== expected.toISOString()) {
+    throw new Error('Release changed in another session. Reload before saving.');
+  }
+}
+
 function buildReleaseReadiness(input: {
   release: {
     artworkAssetVersionId: string | null;
     title: string;
     primaryArtistName: string;
+    releaseType: string;
     pLine: string | null;
     cLine: string | null;
     originalReleaseDate: string | null;
@@ -94,44 +146,64 @@ function buildReleaseReadiness(input: {
   };
   recordings: Array<{ recordingId: string; masterAssetVersionId: string | null; title: string; languageCode: string | null }>;
   credits: Array<{ recordingId: string; role: string }>;
-  declarations: Array<{ declarationType: string; outcome: string }>;
+  declarations: Array<{ recordingId: string | null; declarationType: string; outcome: string }>;
 }) {
-  const issues: string[] = [];
+  const metadataIssues: string[] = [];
+  const rightsIssues: string[] = [];
   const { release, recordings, credits, declarations } = input;
-  const latestDeclarationByType = new Map<string, { declarationType: string; outcome: string }>();
+  const latestDeclarationByScope = new Map<string, { recordingId: string | null; declarationType: string; outcome: string }>();
   for (const declaration of declarations) {
-    if (!latestDeclarationByType.has(declaration.declarationType)) {
-      latestDeclarationByType.set(declaration.declarationType, declaration);
+    const scopeKey = `${declaration.recordingId ?? 'release'}:${declaration.declarationType}`;
+    if (!latestDeclarationByScope.has(scopeKey)) {
+      latestDeclarationByScope.set(scopeKey, declaration);
     }
   }
-  if (!release.title.trim()) issues.push('Release title is required.');
-  if (!release.primaryArtistName.trim()) issues.push('Primary artist is required.');
-  if (!release.artworkAssetVersionId) issues.push('Verified release artwork is required.');
-  if (!release.pLine) issues.push('The ℗ sound-recording copyright line is required.');
-  if (!release.cLine) issues.push('The © artwork/release copyright line is required.');
-  if (!release.originalReleaseDate) issues.push('Original release date is required.');
-  if (!release.territories?.length) issues.push('At least one release territory is required.');
-  if (!recordings.length) issues.push('At least one recording is required.');
+  if (!release.title.trim()) metadataIssues.push('Release title is required.');
+  if (!release.primaryArtistName.trim()) metadataIssues.push('Primary artist is required.');
+  if (!release.artworkAssetVersionId) metadataIssues.push('Verified release artwork is required.');
+  if (!release.pLine) metadataIssues.push('The ℗ sound-recording copyright line is required.');
+  if (!release.cLine) metadataIssues.push('The © artwork/release copyright line is required.');
+  if (!release.originalReleaseDate) metadataIssues.push('Original release date is required.');
+  if (!release.territories?.length) metadataIssues.push('At least one release territory is required.');
+  if (!recordings.length) metadataIssues.push('At least one recording is required.');
+  if (release.releaseType === 'single' && recordings.length !== 1) {
+    metadataIssues.push('A single must contain exactly one recording.');
+  }
+  if (['ep', 'album'].includes(release.releaseType) && recordings.length < 2) {
+    metadataIssues.push(`${release.releaseType === 'ep' ? 'An EP' : 'An album'} must contain at least two recordings.`);
+  }
+  if (release.distributionMode !== 'private' && release.scheduledReleaseAt == null) {
+    metadataIssues.push('A scheduled release time is required for publication or distribution.');
+  }
   for (const recording of recordings) {
-    if (!recording.masterAssetVersionId) issues.push(`${recording.title}: verified master is required.`);
-    if (!recording.languageCode) issues.push(`${recording.title}: language code is required.`);
+    if (!recording.masterAssetVersionId) metadataIssues.push(`${recording.title}: verified master is required.`);
+    if (!recording.languageCode) metadataIssues.push(`${recording.title}: language code is required.`);
     const recordingCredits = credits.filter((credit) => credit.recordingId === recording.recordingId);
-    if (!recordingCredits.some((credit) => credit.role === 'primary_artist')) issues.push(`${recording.title}: primary artist credit is required.`);
-    if (!recordingCredits.some((credit) => ['songwriter', 'composer'].includes(credit.role))) issues.push(`${recording.title}: songwriter or composer credit is required.`);
-  }
-  if (release.distributionMode !== 'private' && !release.scheduledReleaseAt) {
-    issues.push('A scheduled release time is required for publication or distribution.');
-  }
-  for (const declarationType of BASE_REQUIRED_RIGHTS) {
-    if (latestDeclarationByType.get(declarationType)?.outcome !== 'verified') {
-      issues.push(`Verified ${declarationType.replaceAll('_', ' ')} rights evidence is required.`);
+    if (!recordingCredits.some((credit) => credit.role === 'primary_artist')) metadataIssues.push(`${recording.title}: primary artist credit is required.`);
+    if (!recordingCredits.some((credit) => ['songwriter', 'composer'].includes(credit.role))) metadataIssues.push(`${recording.title}: songwriter or composer credit is required.`);
+    for (const declarationType of REQUIRED_RECORDING_RIGHTS) {
+      if (latestDeclarationByScope.get(`${recording.recordingId}:${declarationType}`)?.outcome !== 'verified') {
+        rightsIssues.push(`${recording.title}: verified ${declarationType.replaceAll('_', ' ')} rights evidence is required.`);
+      }
     }
   }
+  for (const declarationType of REQUIRED_RELEASE_RIGHTS) {
+    if (latestDeclarationByScope.get(`release:${declarationType}`)?.outcome !== 'verified') {
+      rightsIssues.push(`Verified ${declarationType.replaceAll('_', ' ')} rights evidence is required for the release.`);
+    }
+  }
+  const issues = [...metadataIssues, ...rightsIssues];
+  const requiredRights = [
+    ...recordings.flatMap((recording) => REQUIRED_RECORDING_RIGHTS.map((type) => `${recording.recordingId}:${type}`)),
+    ...REQUIRED_RELEASE_RIGHTS.map((type) => `release:${type}`)
+  ];
   return {
     ready: issues.length === 0,
     issues,
-    verifiedRights: BASE_REQUIRED_RIGHTS.filter((type) => latestDeclarationByType.get(type)?.outcome === 'verified'),
-    requiredRights: [...BASE_REQUIRED_RIGHTS]
+    metadataIssues,
+    rightsIssues,
+    verifiedRights: requiredRights.filter((key) => latestDeclarationByScope.get(key)?.outcome === 'verified'),
+    requiredRights
   };
 }
 
@@ -761,6 +833,7 @@ export function createAudioPublishingService(config: {
         isrc: musicRecordings.isrc,
         isExplicit: musicRecordings.isExplicit,
         languageCode: musicRecordings.languageCode,
+        originalReleaseDate: musicRecordings.originalReleaseDate,
         rightsStatus: musicRecordings.rightsStatus,
         discNumber: musicReleaseRecordings.discNumber,
         trackNumber: musicReleaseRecordings.trackNumber
@@ -882,7 +955,11 @@ export function createAudioPublishingService(config: {
             const outcome = events.some((event) => event.eventType === 'revoked')
               ? 'revoked'
               : events.find((event) => event.eventType === 'verified' || event.eventType === 'rejected')?.eventType ?? 'declared';
-            return { declarationType: declaration.declarationType, outcome };
+            return {
+              recordingId: declaration.recordingId,
+              declarationType: declaration.declarationType,
+              outcome
+            };
           })
         })
       }))
@@ -1121,6 +1198,13 @@ export function createAudioPublishingService(config: {
       .orderBy(asc(musicReleaseRecordings.trackNumber))
       .limit(1);
     if (!releaseRecording) throw new Error('Release recording not found.');
+    const releaseRecordingLinks = await db
+      .select({ recordingId: musicReleaseRecordings.recordingId })
+      .from(musicReleaseRecordings)
+      .where(eq(musicReleaseRecordings.releaseId, release.id));
+    if (input.releaseType === 'single' && releaseRecordingLinks.length !== 1) {
+      throw new Error('A single must contain exactly one recording. Remove extra tracks before changing the release type to Single.');
+    }
 
     const artworkAssetVersionId = input.artworkAssetVersionId?.trim() || null;
     if (artworkAssetVersionId) {
@@ -1140,38 +1224,9 @@ export function createAudioPublishingService(config: {
       }
     }
 
-    // Draft edits are progressive: persist any structurally valid revision and
-    // report readiness for the proposed state. No declaration is assumed here,
-    // so metadata can be completed over time without making rights readiness
-    // appear green early.
-    const proposedReadiness = buildReleaseReadiness({
-      release: {
-        artworkAssetVersionId,
-        title,
-        primaryArtistName,
-        pLine,
-        cLine,
-        originalReleaseDate,
-        territories,
-        distributionMode: input.distributionMode,
-        scheduledReleaseAt
-      },
-      recordings: [{
-        recordingId: releaseRecording.recording.id,
-        masterAssetVersionId: releaseRecording.recording.masterAssetVersionId,
-        title: trackTitle,
-        languageCode
-      }],
-      credits: credits.map((credit) => ({
-        recordingId: releaseRecording.recording.id,
-        role: credit.role
-      })),
-      declarations: []
-    });
-
     const previousMetadataRevision = Number((release.metadata as any)?.metadataRevision ?? 1);
     const now = new Date(Math.max(Date.now(), release.updatedAt.getTime() + 1));
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const [updatedRelease] = await tx.update(musicReleases).set({
         artworkAssetVersionId,
         title,
@@ -1236,7 +1291,424 @@ export function createAudioPublishingService(config: {
           artworkAssetVersionId
         }
       });
-      return { release: updatedRelease, recording: updatedRecording, credits, readiness: proposedReadiness };
+      return { release: updatedRelease, recording: updatedRecording, credits };
+    });
+    const workspace = await listReleaseWorkspace({
+      performerId: input.performerId,
+      actorUserId: input.actorUserId
+    });
+    return {
+      ...result,
+      readiness: workspace.releases.find((candidate) => candidate.id === release.id)?.readiness ?? null
+    };
+  }
+
+  async function addReleaseRecording(input: {
+    releaseId: string;
+    clientRecordingId: string;
+    performerId: string;
+    actorUserId: string;
+    expectedUpdatedAt: string | null;
+    masterAssetVersionId: string;
+    title: string;
+    versionTitle?: string | null;
+    primaryArtistName: string;
+    isrc?: string | null;
+    isExplicit?: boolean;
+    languageCode?: string | null;
+    originalReleaseDate?: string | null;
+    credits?: Array<{ displayName?: string; role?: string }> | null;
+  }) {
+    if (!UUID_PATTERN.test(input.clientRecordingId)) throw new Error('clientRecordingId must be a UUID.');
+    const normalized = normalizeRecordingDraft(input);
+    const [existingRecording] = await db
+      .select({
+        recording: musicRecordings,
+        linkedReleaseId: musicReleaseRecordings.releaseId,
+        discNumber: musicReleaseRecordings.discNumber,
+        trackNumber: musicReleaseRecordings.trackNumber
+      })
+      .from(musicRecordings)
+      .leftJoin(musicReleaseRecordings, eq(musicReleaseRecordings.recordingId, musicRecordings.id))
+      .where(eq(musicRecordings.id, input.clientRecordingId))
+      .limit(1);
+    if (existingRecording) {
+      if (existingRecording.recording.performerId !== input.performerId || existingRecording.linkedReleaseId !== input.releaseId) {
+        throw new Error('Recording idempotency key belongs to another release or account.');
+      }
+      const [release] = await db.select().from(musicReleases).where(eq(musicReleases.id, input.releaseId)).limit(1);
+      return {
+        release,
+        recording: existingRecording.recording,
+        discNumber: existingRecording.discNumber,
+        trackNumber: existingRecording.trackNumber,
+        created: false
+      };
+    }
+
+    const [release] = await db.select().from(musicReleases).where(and(
+      eq(musicReleases.id, input.releaseId),
+      eq(musicReleases.performerId, input.performerId)
+    )).limit(1);
+    if (!release?.projectId) throw new Error('Release draft not found.');
+    if (release.status !== 'draft') throw new Error('Release tracks are sealed after rights review starts.');
+    if (release.releaseType === 'single') throw new Error('Change the release type from Single before adding another track.');
+    assertExpectedReleaseVersion(release.updatedAt, input.expectedUpdatedAt);
+    const access = await requireProjectAccess({
+      projectId: release.projectId,
+      userId: input.actorUserId,
+      needManageRelease: true
+    });
+    if (!access) throw new Error('Release management permission required.');
+    const [master] = await db
+      .select({
+        id: audioProjectAssetVersions.id,
+        projectId: audioProjectAssetVersions.projectId,
+        performerId: audioProjectAssetVersions.performerId,
+        mimeType: audioProjectAssetVersions.mimeType,
+        integrityStatus: audioProjectAssetVersions.integrityStatus,
+        sha256: audioProjectAssetVersions.sha256
+      })
+      .from(audioProjectAssetVersions)
+      .where(and(
+        eq(audioProjectAssetVersions.id, input.masterAssetVersionId),
+        eq(audioProjectAssetVersions.projectId, release.projectId),
+        eq(audioProjectAssetVersions.performerId, input.performerId)
+      ))
+      .limit(1);
+    if (!master || master.integrityStatus !== 'verified' || !master.mimeType.startsWith('audio/')) {
+      throw new Error('A verified audio master from this release project is required.');
+    }
+    const [duplicateMaster] = await db
+      .select({ recordingId: musicRecordings.id })
+      .from(musicReleaseRecordings)
+      .innerJoin(musicRecordings, eq(musicRecordings.id, musicReleaseRecordings.recordingId))
+      .where(and(
+        eq(musicReleaseRecordings.releaseId, release.id),
+        eq(musicRecordings.masterAssetVersionId, master.id)
+      ))
+      .limit(1);
+    if (duplicateMaster) throw new Error('This verified master is already part of the release.');
+
+    const previousMetadataRevision = Number((release.metadata as any)?.metadataRevision ?? 1);
+    const now = new Date(Math.max(Date.now(), release.updatedAt.getTime() + 1));
+    return db.transaction(async (tx) => {
+      const [updatedRelease] = await tx.update(musicReleases).set({
+        metadata: {
+          ...((release.metadata as Record<string, unknown> | null) ?? {}),
+          metadataRevision: previousMetadataRevision + 1,
+          lastEditedByUserId: input.actorUserId,
+          deliveryEnabled: false
+        },
+        updatedAt: now
+      }).where(and(
+        eq(musicReleases.id, release.id),
+        eq(musicReleases.status, 'draft'),
+        sql`coalesce((${musicReleases.metadata}->>'metadataRevision')::integer, 1) = ${previousMetadataRevision}`
+      )).returning();
+      if (!updatedRelease) throw new Error('Release changed in another session. Reload before saving.');
+
+      const existingLinks = await tx
+        .select({ trackNumber: musicReleaseRecordings.trackNumber })
+        .from(musicReleaseRecordings)
+        .where(eq(musicReleaseRecordings.releaseId, release.id))
+        .orderBy(desc(musicReleaseRecordings.trackNumber));
+      const trackNumber = (existingLinks[0]?.trackNumber ?? 0) + 1;
+      const [recording] = await tx.insert(musicRecordings).values({
+        id: input.clientRecordingId,
+        performerId: input.performerId,
+        projectId: release.projectId,
+        masterAssetVersionId: master.id,
+        title: normalized.title,
+        versionTitle: normalized.versionTitle,
+        primaryArtistName: normalized.primaryArtistName,
+        isrc: normalized.isrc,
+        isExplicit: normalized.isExplicit,
+        languageCode: normalized.languageCode,
+        originalReleaseDate: normalized.originalReleaseDate,
+        rightsStatus: 'draft',
+        metadata: { masterSha256: master.sha256 }
+      }).returning();
+      await tx.insert(musicReleaseRecordings).values({
+        releaseId: release.id,
+        recordingId: recording.id,
+        discNumber: 1,
+        trackNumber
+      });
+      await tx.insert(musicRecordingCredits).values(normalized.credits.map((credit) => ({
+        recordingId: recording.id,
+        displayName: credit.displayName,
+        role: credit.role,
+        sequence: credit.sequence
+      })));
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.actorUserId,
+        entityType: 'music_release',
+        entityId: release.id,
+        eventType: 'music_release.recording_add',
+        previousStatus: 'draft',
+        nextStatus: 'draft',
+        metadata: {
+          recordingId: recording.id,
+          masterAssetVersionId: master.id,
+          masterSha256: master.sha256,
+          trackNumber,
+          metadataRevision: previousMetadataRevision + 1
+        }
+      });
+      return { release: updatedRelease, recording, discNumber: 1, trackNumber, created: true };
+    });
+  }
+
+  async function updateReleaseRecording(input: {
+    releaseId: string;
+    recordingId: string;
+    performerId: string;
+    actorUserId: string;
+    expectedUpdatedAt: string | null;
+    title: string;
+    versionTitle?: string | null;
+    primaryArtistName: string;
+    isrc?: string | null;
+    isExplicit?: boolean;
+    languageCode?: string | null;
+    originalReleaseDate?: string | null;
+    credits?: Array<{ displayName?: string; role?: string }> | null;
+  }) {
+    const normalized = normalizeRecordingDraft(input);
+    const [row] = await db
+      .select({ release: musicReleases, recording: musicRecordings })
+      .from(musicReleaseRecordings)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicReleaseRecordings.releaseId))
+      .innerJoin(musicRecordings, eq(musicRecordings.id, musicReleaseRecordings.recordingId))
+      .where(and(
+        eq(musicReleaseRecordings.releaseId, input.releaseId),
+        eq(musicReleaseRecordings.recordingId, input.recordingId),
+        eq(musicReleases.performerId, input.performerId),
+        eq(musicRecordings.performerId, input.performerId)
+      ))
+      .limit(1);
+    if (!row?.release.projectId) throw new Error('Release recording not found.');
+    if (row.release.status !== 'draft') throw new Error('Release tracks are sealed after rights review starts.');
+    assertExpectedReleaseVersion(row.release.updatedAt, input.expectedUpdatedAt);
+    const access = await requireProjectAccess({
+      projectId: row.release.projectId,
+      userId: input.actorUserId,
+      needManageRelease: true
+    });
+    if (!access) throw new Error('Release management permission required.');
+
+    const previousMetadataRevision = Number((row.release.metadata as any)?.metadataRevision ?? 1);
+    const now = new Date(Math.max(Date.now(), row.release.updatedAt.getTime() + 1));
+    return db.transaction(async (tx) => {
+      const [updatedRelease] = await tx.update(musicReleases).set({
+        metadata: {
+          ...((row.release.metadata as Record<string, unknown> | null) ?? {}),
+          metadataRevision: previousMetadataRevision + 1,
+          lastEditedByUserId: input.actorUserId,
+          deliveryEnabled: false
+        },
+        updatedAt: now
+      }).where(and(
+        eq(musicReleases.id, row.release.id),
+        eq(musicReleases.status, 'draft'),
+        sql`coalesce((${musicReleases.metadata}->>'metadataRevision')::integer, 1) = ${previousMetadataRevision}`
+      )).returning();
+      if (!updatedRelease) throw new Error('Release changed in another session. Reload before saving.');
+
+      const [recording] = await tx.update(musicRecordings).set({
+        title: normalized.title,
+        versionTitle: normalized.versionTitle,
+        primaryArtistName: normalized.primaryArtistName,
+        isrc: normalized.isrc,
+        isExplicit: normalized.isExplicit,
+        languageCode: normalized.languageCode,
+        originalReleaseDate: normalized.originalReleaseDate,
+        rightsStatus: 'draft',
+        updatedAt: now
+      }).where(and(
+        eq(musicRecordings.id, row.recording.id),
+        eq(musicRecordings.performerId, input.performerId)
+      )).returning();
+      await tx.delete(musicRecordingCredits).where(eq(musicRecordingCredits.recordingId, recording.id));
+      await tx.insert(musicRecordingCredits).values(normalized.credits.map((credit) => ({
+        recordingId: recording.id,
+        displayName: credit.displayName,
+        role: credit.role,
+        sequence: credit.sequence
+      })));
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.actorUserId,
+        entityType: 'music_release',
+        entityId: row.release.id,
+        eventType: 'music_release.recording_update',
+        previousStatus: 'draft',
+        nextStatus: 'draft',
+        metadata: {
+          recordingId: recording.id,
+          creditCount: normalized.credits.length,
+          metadataRevision: previousMetadataRevision + 1
+        }
+      });
+      return { release: updatedRelease, recording, credits: normalized.credits };
+    });
+  }
+
+  async function reorderReleaseRecordings(input: {
+    releaseId: string;
+    performerId: string;
+    actorUserId: string;
+    expectedUpdatedAt: string | null;
+    recordingIds: string[];
+  }) {
+    if (!input.recordingIds.length || input.recordingIds.length > 500) {
+      throw new Error('Track order must contain between 1 and 500 recordings.');
+    }
+    if (new Set(input.recordingIds).size !== input.recordingIds.length) {
+      throw new Error('Track order cannot contain duplicate recordings.');
+    }
+    const [release] = await db.select().from(musicReleases).where(and(
+      eq(musicReleases.id, input.releaseId),
+      eq(musicReleases.performerId, input.performerId)
+    )).limit(1);
+    if (!release?.projectId) throw new Error('Release draft not found.');
+    if (release.status !== 'draft') throw new Error('Release tracks are sealed after rights review starts.');
+    assertExpectedReleaseVersion(release.updatedAt, input.expectedUpdatedAt);
+    const access = await requireProjectAccess({ projectId: release.projectId, userId: input.actorUserId, needManageRelease: true });
+    if (!access) throw new Error('Release management permission required.');
+    const currentLinks = await db
+      .select({ recordingId: musicReleaseRecordings.recordingId })
+      .from(musicReleaseRecordings)
+      .where(eq(musicReleaseRecordings.releaseId, release.id));
+    const currentIds = new Set(currentLinks.map((link) => link.recordingId));
+    if (currentIds.size !== input.recordingIds.length || input.recordingIds.some((id) => !currentIds.has(id))) {
+      throw new Error('Track order must contain every recording in this release exactly once.');
+    }
+
+    const previousMetadataRevision = Number((release.metadata as any)?.metadataRevision ?? 1);
+    const now = new Date(Math.max(Date.now(), release.updatedAt.getTime() + 1));
+    return db.transaction(async (tx) => {
+      const [updatedRelease] = await tx.update(musicReleases).set({
+        metadata: {
+          ...((release.metadata as Record<string, unknown> | null) ?? {}),
+          metadataRevision: previousMetadataRevision + 1,
+          lastEditedByUserId: input.actorUserId,
+          deliveryEnabled: false
+        },
+        updatedAt: now
+      }).where(and(
+        eq(musicReleases.id, release.id),
+        eq(musicReleases.status, 'draft'),
+        sql`coalesce((${musicReleases.metadata}->>'metadataRevision')::integer, 1) = ${previousMetadataRevision}`
+      )).returning();
+      if (!updatedRelease) throw new Error('Release changed in another session. Reload before saving.');
+      await tx.update(musicReleaseRecordings).set({
+        trackNumber: sql`${musicReleaseRecordings.trackNumber} + 10000`
+      }).where(eq(musicReleaseRecordings.releaseId, release.id));
+      for (const [index, recordingId] of input.recordingIds.entries()) {
+        await tx.update(musicReleaseRecordings).set({ discNumber: 1, trackNumber: index + 1 }).where(and(
+          eq(musicReleaseRecordings.releaseId, release.id),
+          eq(musicReleaseRecordings.recordingId, recordingId)
+        ));
+      }
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.actorUserId,
+        entityType: 'music_release',
+        entityId: release.id,
+        eventType: 'music_release.recordings_reorder',
+        previousStatus: 'draft',
+        nextStatus: 'draft',
+        metadata: { recordingIds: input.recordingIds, metadataRevision: previousMetadataRevision + 1 }
+      });
+      return { release: updatedRelease, recordingIds: input.recordingIds };
+    });
+  }
+
+  async function removeReleaseRecording(input: {
+    releaseId: string;
+    recordingId: string;
+    performerId: string;
+    actorUserId: string;
+    expectedUpdatedAt: string | null;
+  }) {
+    const [row] = await db
+      .select({ release: musicReleases, recording: musicRecordings })
+      .from(musicReleaseRecordings)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicReleaseRecordings.releaseId))
+      .innerJoin(musicRecordings, eq(musicRecordings.id, musicReleaseRecordings.recordingId))
+      .where(and(
+        eq(musicReleaseRecordings.releaseId, input.releaseId),
+        eq(musicReleaseRecordings.recordingId, input.recordingId),
+        eq(musicReleases.performerId, input.performerId),
+        eq(musicRecordings.performerId, input.performerId)
+      ))
+      .limit(1);
+    if (!row?.release.projectId) throw new Error('Release recording not found.');
+    if (row.release.status !== 'draft') throw new Error('Release tracks are sealed after rights review starts.');
+    assertExpectedReleaseVersion(row.release.updatedAt, input.expectedUpdatedAt);
+    const access = await requireProjectAccess({ projectId: row.release.projectId, userId: input.actorUserId, needManageRelease: true });
+    if (!access) throw new Error('Release management permission required.');
+    const links = await db
+      .select({ recordingId: musicReleaseRecordings.recordingId, trackNumber: musicReleaseRecordings.trackNumber })
+      .from(musicReleaseRecordings)
+      .where(eq(musicReleaseRecordings.releaseId, row.release.id))
+      .orderBy(asc(musicReleaseRecordings.trackNumber));
+    if (links.length <= 1) throw new Error('A release must keep at least one recording.');
+    const [declaration] = await db.select({ id: musicRightsDeclarations.id }).from(musicRightsDeclarations).where(and(
+      eq(musicRightsDeclarations.releaseId, row.release.id),
+      eq(musicRightsDeclarations.recordingId, row.recording.id)
+    )).limit(1);
+    if (declaration) throw new Error('A recording with sealed rights evidence cannot be removed.');
+
+    const previousMetadataRevision = Number((row.release.metadata as any)?.metadataRevision ?? 1);
+    const now = new Date(Math.max(Date.now(), row.release.updatedAt.getTime() + 1));
+    const remainingIds = links.filter((link) => link.recordingId !== row.recording.id).map((link) => link.recordingId);
+    return db.transaction(async (tx) => {
+      const [updatedRelease] = await tx.update(musicReleases).set({
+        metadata: {
+          ...((row.release.metadata as Record<string, unknown> | null) ?? {}),
+          metadataRevision: previousMetadataRevision + 1,
+          lastEditedByUserId: input.actorUserId,
+          deliveryEnabled: false
+        },
+        updatedAt: now
+      }).where(and(
+        eq(musicReleases.id, row.release.id),
+        eq(musicReleases.status, 'draft'),
+        sql`coalesce((${musicReleases.metadata}->>'metadataRevision')::integer, 1) = ${previousMetadataRevision}`
+      )).returning();
+      if (!updatedRelease) throw new Error('Release changed in another session. Reload before saving.');
+      await tx.delete(musicReleaseRecordings).where(and(
+        eq(musicReleaseRecordings.releaseId, row.release.id),
+        eq(musicReleaseRecordings.recordingId, row.recording.id)
+      ));
+      await tx.update(musicReleaseRecordings).set({
+        trackNumber: sql`${musicReleaseRecordings.trackNumber} + 10000`
+      }).where(eq(musicReleaseRecordings.releaseId, row.release.id));
+      for (const [index, recordingId] of remainingIds.entries()) {
+        await tx.update(musicReleaseRecordings).set({ discNumber: 1, trackNumber: index + 1 }).where(and(
+          eq(musicReleaseRecordings.releaseId, row.release.id),
+          eq(musicReleaseRecordings.recordingId, recordingId)
+        ));
+      }
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.actorUserId,
+        entityType: 'music_release',
+        entityId: row.release.id,
+        eventType: 'music_release.recording_remove',
+        previousStatus: 'draft',
+        nextStatus: 'draft',
+        metadata: {
+          recordingId: row.recording.id,
+          remainingRecordingIds: remainingIds,
+          metadataRevision: previousMetadataRevision + 1
+        }
+      });
+      return { release: updatedRelease, removedRecordingId: row.recording.id, recordingIds: remainingIds };
     });
   }
 
@@ -1266,10 +1738,7 @@ export function createAudioPublishingService(config: {
     if (release.status === 'draft') {
       const workspace = await listReleaseWorkspace({ performerId: input.performerId, actorUserId: input.actorUserId });
       const current = workspace.releases.find((candidate) => candidate.id === release.id);
-      const requiredRightsIssues = new Set(BASE_REQUIRED_RIGHTS.map(
-        (type) => `Verified ${type.replaceAll('_', ' ')} rights evidence is required.`
-      ));
-      const metadataIssues = current?.readiness.issues.filter((issue) => !requiredRightsIssues.has(issue))
+      const metadataIssues = current?.readiness.metadataIssues
         ?? ['Release readiness could not be evaluated.'];
       if (metadataIssues.length) {
         throw new Error(`Complete release metadata before rights review: ${metadataIssues.join(' ')}`);
@@ -1293,7 +1762,11 @@ export function createAudioPublishingService(config: {
     if (!document || document.integrityStatus !== 'verified' || document.assetKind !== 'document') {
       throw new Error('A verified rights document from this release project is required.');
     }
-    const recordingId = input.recordingId?.trim() || null;
+    const requestedRecordingId = input.recordingId?.trim() || null;
+    if (RECORDING_SCOPED_RIGHTS.has(declarationType) && !requestedRecordingId) {
+      throw new Error(`${declarationType.replaceAll('_', ' ')} evidence must identify the recording it covers.`);
+    }
+    const recordingId = RECORDING_SCOPED_RIGHTS.has(declarationType) ? requestedRecordingId : null;
     if (recordingId) {
       const [link] = await db.select().from(musicReleaseRecordings).where(and(
         eq(musicReleaseRecordings.releaseId, release.id), eq(musicReleaseRecordings.recordingId, recordingId)
@@ -1711,6 +2184,10 @@ export function createAudioPublishingService(config: {
     listReleaseWorkspace,
     createReleaseDraft,
     updateReleaseDraft,
+    addReleaseRecording,
+    updateReleaseRecording,
+    reorderReleaseRecordings,
+    removeReleaseRecording,
     createRightsDeclaration,
     openRightsReviewDocument,
     reviewRightsDeclaration,
