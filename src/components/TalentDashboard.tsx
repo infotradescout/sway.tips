@@ -47,6 +47,10 @@ import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
+import {
+  resolvePublicProfileHeroName,
+  resolvePublicProfilePageKindLabel
+} from '../server/public-profile';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -67,6 +71,9 @@ interface TalentDashboardProps {
     performer_id: string;
     display_name: string;
     handle: string | null;
+    stage_name: string | null;
+    primary_role: string | null;
+    specialties: string[];
     owner_user_id: string;
     charges_enabled?: boolean;
     payouts_enabled?: boolean;
@@ -815,8 +822,18 @@ export default function TalentDashboard({
   performerEmailVerified = true
 }: TalentDashboardProps) {
   const writableGigId = selectedGigId ?? activeGigId;
-  const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
-  const welcomePerformerName = defaultPerformerName || session.talentName || 'Performer';
+  const defaultPerformerName = performerProfile
+    ? resolvePublicProfileHeroName({
+        handle: performerProfile.handle,
+        stageName: performerProfile.stage_name,
+        displayName: performerProfile.display_name
+      })
+    : '';
+  const welcomePerformerName = defaultPerformerName || session.talentName || 'Sway account';
+  const performerRoleLabel = resolvePublicProfilePageKindLabel({
+    primaryRole: performerProfile?.primary_role,
+    specialties: performerProfile?.specialties
+  });
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>('home');
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
@@ -2138,6 +2155,7 @@ export default function TalentDashboard({
           <PerformerAccountHome
             displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
+            roleLabel={performerRoleLabel}
             stripeReady={Boolean(performerProfile?.payouts_enabled)}
             onStartRoom={() => setInactiveWorkspace('room')}
             onOpenCatalog={() => setInactiveWorkspace('catalog')}

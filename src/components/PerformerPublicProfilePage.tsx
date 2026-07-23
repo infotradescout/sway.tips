@@ -17,6 +17,10 @@ import { motion } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
 import { captureCampaignCode } from '../shells/campaignAttribution';
+import {
+  resolvePublicProfileHeroName,
+  resolvePublicProfilePageKindLabel
+} from '../server/public-profile';
 
 type PublicProfileLink = {
   label: string;
@@ -38,6 +42,7 @@ type PublicProfileMedia = {
 type PublicPerformerProfile = {
   displayName: string;
   stageName: string | null;
+  primaryRole: string | null;
   handle: string | null;
   bio: string | null;
   headline: string | null;
@@ -201,7 +206,11 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
         setReleases(Array.isArray(data.releases) ? data.releases : []);
         setAvatarFailed(false);
         setStatus('ready');
-        document.title = `${data.performer.stageName || (data.performer.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : data.performer.displayName)} on Sway`;
+        document.title = `${resolvePublicProfileHeroName({
+          handle: data.performer.handle,
+          stageName: data.performer.stageName,
+          displayName: data.performer.displayName
+        })} on Sway`;
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
@@ -232,8 +241,16 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const handleShare = async () => {
     if (!profile) return;
     const shareData = {
-      title: `${profile.displayName} on Sway`,
-      text: profile.headline || `Visit ${profile.displayName}'s public Sway page.`,
+      title: `${resolvePublicProfileHeroName({
+        handle: profile.handle,
+        stageName: profile.stageName,
+        displayName: profile.displayName
+      })} on Sway`,
+      text: profile.headline || `Visit ${resolvePublicProfileHeroName({
+        handle: profile.handle,
+        stageName: profile.stageName,
+        displayName: profile.displayName
+      })}'s public Sway page.`,
       url: profileUrl
     };
 
@@ -285,9 +302,19 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const telephoneHref = profile.booking.phone
     ? `tel:${profile.booking.phone.replace(/[^\d+]/g, '')}`
     : null;
-  const stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName);
-  const hasDistinctDisplayName = stageName.trim().toLowerCase() !== profile.displayName.trim().toLowerCase();
+  const publicHeroName = resolvePublicProfileHeroName({
+    handle: profile.handle,
+    stageName: profile.stageName,
+    displayName: profile.displayName
+  });
+  const tipLabel = publicHeroName;
+  const pageKindLabel = resolvePublicProfilePageKindLabel({
+    primaryRole: profile.primaryRole,
+    specialties: profile.specialties,
+    isPreview: profile.isPreview
+  });
   const publicAvatarUrl = profile.avatarUrl || (profile.handle ? CURATED_PUBLIC_AVATAR_FALLBACKS[profile.handle.toLowerCase()] || null : null);
+  const avatarSeed = profile.handle || profile.displayName;
 
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-[#05060a] text-slate-100">
@@ -321,19 +348,19 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               {publicAvatarUrl && !avatarFailed ? (
                 <img
                   src={publicAvatarUrl}
-                  alt={`${profile.displayName} profile`}
+                  alt={`${publicHeroName} profile`}
                   onError={() => setAvatarFailed(true)}
                   className="relative h-28 w-28 rounded-[1.75rem] border border-white/15 object-cover shadow-2xl sm:h-32 sm:w-32"
                 />
               ) : (
                 <div className="relative flex h-28 w-28 items-center justify-center rounded-[1.75rem] border border-white/15 bg-gradient-to-br from-fuchsia-500/25 to-cyan-400/15 font-display text-3xl font-black text-white shadow-2xl sm:h-32 sm:w-32">
-                  {profileInitials(profile.displayName)}
+                  {profileInitials(avatarSeed)}
                 </div>
               )}
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Public performer page</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">{pageKindLabel}</p>
               {profile.isPreview ? (
                 <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-cyan-100">
                   {profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}
@@ -345,10 +372,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 </span>
               ) : null}
             </div>
-            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{stageName}</h1>
-            {hasDistinctDisplayName ? <p className="mt-1 text-sm font-bold text-slate-400">{profile.displayName}</p> : null}
+            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{publicHeroName}</h1>
             <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
-              {profile.handle ? <span>@{profile.handle}</span> : null}
               {profile.city ? (
                 <span className="inline-flex items-center gap-1">
                   <MapPin className="h-3 w-3" />
@@ -385,7 +410,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.08] px-4 py-3 text-sm font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
             >
               <Coins className="h-4 w-4" />
-              Tip {stageName}
+              Tip {tipLabel}
             </button>
             {tipMessage ? (
               <p id="public-profile-tip-message" role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-amber-100/90">
@@ -398,8 +423,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-left" aria-label="Tip this performer">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {stageName}</p>
-                <p className="mt-2 text-sm font-bold text-white">Scan to tip {stageName}, or pay directly here.</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {tipLabel}</p>
+                <p className="mt-2 text-sm font-bold text-white">Scan to tip {tipLabel}, or pay directly here.</p>
                 <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileTipUrl}</p>
                 <button
                   type="button"
@@ -449,7 +474,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-100">
                   <Radio className="h-3.5 w-3.5" /> Live now
                 </span>
-                <span className="mt-1 block text-sm font-black text-white">Join the {activeRoom.talentRole || 'performer'} room</span>
+                <span className="mt-1 block text-sm font-black text-white">Join the {activeRoom.talentRole || pageKindLabel} room</span>
               </span>
               <span className="shrink-0 text-xs font-bold text-fuchsia-100">
                 {activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'}

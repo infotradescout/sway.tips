@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import {
   escapePublicProfileMetadataAttribute,
+  labelForPublicPerformerPrimaryRole,
+  mergePublicProfileMetadata,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
+  normalizePublicProfilePrimaryRole,
   normalizePublicProfileSpecialties,
   normalizePublicProfileUrl,
+  resolvePublicProfileHeroName,
+  resolvePublicProfilePageKindLabel,
   resolveVerifiedPublicBookingContact
 } from '../src/server/public-profile';
 import {
@@ -85,6 +90,57 @@ for (const reservedHandle of RESERVED_PERFORMER_HANDLES) {
 }
 assert.equal(normalizePerformerHandle('CoreyMack'), 'CoreyMack');
 assert.equal(normalizePerformerHandle('coreymack'), 'coreymack');
+
+assert.equal(normalizePublicProfilePrimaryRole(' DJ '), 'dj');
+assert.equal(normalizePublicProfilePrimaryRole('Host / MC'), 'host');
+assert.equal(normalizePublicProfilePrimaryRole('mc'), 'host');
+assert.equal(normalizePublicProfilePrimaryRole('other performer'), 'other');
+assert.equal(normalizePublicProfilePrimaryRole('lawyer'), null);
+assert.equal(labelForPublicPerformerPrimaryRole('host'), 'Host / MC');
+assert.equal(labelForPublicPerformerPrimaryRole('other'), 'Other');
+assert.equal(
+  resolvePublicProfileHeroName({ handle: 'coreymack', stageName: 'Corey Mack', displayName: 'Legal Name' }),
+  '@coreymack'
+);
+assert.equal(
+  resolvePublicProfileHeroName({ handle: null, stageName: 'Corey Mack', displayName: 'Legal Name' }),
+  'Corey Mack'
+);
+assert.equal(
+  resolvePublicProfileHeroName({ handle: null, stageName: null, displayName: 'Legal Name' }),
+  'Legal Name'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: 'dj', specialties: ['Open format'], isPreview: false }),
+  'DJ'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: ['Beatbox'], isPreview: false }),
+  'Beatbox'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: [], isPreview: false }),
+  'Sway page'
+);
+assert.deepEqual(
+  mergePublicProfileMetadata(
+    { analyticsTag: 'keep-me', nested: { preserved: true }, stageName: 'Old name' },
+    { stageName: 'New name', primaryRole: 'musician' }
+  ),
+  {
+    analyticsTag: 'keep-me',
+    nested: { preserved: true },
+    stageName: 'New name',
+    primaryRole: 'musician'
+  }
+);
+assert.deepEqual(
+  mergePublicProfileMetadata(
+    { analyticsTag: 'keep-me', stageName: 'Old name', primaryRole: 'dj' },
+    { stageName: null, primaryRole: 'host' }
+  ),
+  { analyticsTag: 'keep-me', primaryRole: 'host' }
+);
 
 assert.deepEqual(
   normalizePublicProfileSpecialties(['DJ', 'Beatbox', 'DJ', ' Comedy ', '', ...Array(10).fill('Extra')]),
