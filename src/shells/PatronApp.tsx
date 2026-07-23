@@ -35,8 +35,8 @@ type PatronRoute =
 
 function resolvePatronRoute(pathname: string): PatronRoute {
   const parts = pathname.split('/').filter(Boolean);
-  if (pathname === '/account/login') return { name: 'account-login' };
-  if (pathname === '/account/signup') return { name: 'account-signup' };
+  if (pathname === '/account/login' || pathname === '/login') return { name: 'account-login' };
+  if (pathname === '/account/signup' || pathname === '/signup') return { name: 'account-signup' };
   if (pathname === '/account/reviews') return { name: 'account-rights-review' };
   if (pathname === '/account') return { name: 'account-home' };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };

@@ -29,6 +29,14 @@ import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap"
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
 import { activateProModeWithPerformer, getProModeStatus } from "./src/server/pro-mode";
 import {
+  activateClaimedPerformerAndProMode,
+  assertPerformerClaimableByHandoff,
+  claimCodeFingerprint,
+  mapClaimInspectionToClientError,
+  readClaimPerformerId,
+  transferPerformerOwnership
+} from "./src/server/account-claim";
+import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
   hashPerformerLoginRequesterIp,
@@ -3001,7 +3009,11 @@ app.post('/api/talent/claim/accept', async (req, res) => {
       const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
         ? metadata.performerId
         : null;
-      if (!performerId) return null;
+      if (!performerId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+        throw err;
+      }
 
       const [account] = await tx
         .select({
@@ -3017,7 +3029,11 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         ))
         .limit(1);
 
-      if (!account) return null;
+      if (!account) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'profile_already_claimed';
+        throw err;
+      }
 
       // The one deliberate difference from the invite-accept flow: no
       // "already has a password" guard. Whatever the artist submits here
@@ -3037,7 +3053,28 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         .where(eq(users.id, account.userId))
         .returning({ id: users.id });
 
-      if (!updatedUser) return null;
+      if (!updatedUser) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+        throw err;
+      }
+
+      const claimable = await assertPerformerClaimableByHandoff(tx, {
+        performerId: account.performerId,
+        handoffUserId: account.userId
+      });
+      if (claimable.ok === false) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = claimable.code;
+        throw err;
+      }
+
+      const proMode = await activateClaimedPerformerAndProMode(tx, {
+        userId: account.userId,
+        performerId: account.performerId,
+        completedAt,
+        reason: 'performer_claim_redeem'
+      });
 
       const issuedSession = await performerSessionStore.issueSession({
         actorUserId: account.userId,
@@ -3056,11 +3093,13 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         metadata: {
           performerId: account.performerId,
           accountTermsAcceptedAt: completedAt.toISOString(),
-          wasHandoff
+          wasHandoff,
+          proModeActivated: proMode.proModeActivated,
+          claimCodeFingerprint: claimCodeFingerprint(token)
         }
       });
 
-      return { issuedSession };
+      return { issuedSession, performerId: account.performerId };
     });
 
     if (!outcome) {
@@ -3076,6 +3115,13 @@ app.post('/api/talent/claim/accept', async (req, res) => {
     });
     return res.status(200).json({ success: true, redirectPath: '/talent' });
   } catch (error) {
+    const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+      ? String((error as { claimCode?: string }).claimCode || '')
+      : '';
+    if (claimFailCode) {
+      const mapped = mapClaimInspectionToClientError(claimFailCode);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
     console.warn('Performer claim acceptance failed.', {
       path: req.path,
       ip: req.ip || null,
@@ -3956,11 +4002,222 @@ app.post('/api/talent/session/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/account/claim/peek', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const token = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerClaimPeekRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__account_claim_peek__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    const mapped = mapClaimInspectionToClientError('rate_limited');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+  if (!token) {
+    const mapped = mapClaimInspectionToClientError('not_found');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  try {
+    const inspection = await performerLoginChallengeStore.inspectClaimChallengeByToken({ token });
+    if (inspection.status !== 'valid') {
+      const mapped = mapClaimInspectionToClientError(inspection.status);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    const performerId = readClaimPerformerId(inspection.challengeMetadata);
+    if (!performerId || !inspection.actorUserId) {
+      const mapped = mapClaimInspectionToClientError('not_found');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    const [performer] = await businessDb
+      .select({
+        handle: performers.handle,
+        displayName: performers.displayName,
+        ownerUserId: performers.ownerUserId,
+        onboardingStatus: performers.onboardingStatus
+      })
+      .from(performers)
+      .where(eq(performers.id, performerId))
+      .limit(1);
+
+    if (!performer) {
+      const mapped = mapClaimInspectionToClientError('not_found');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    if (performer.onboardingStatus === 'suspended') {
+      const mapped = mapClaimInspectionToClientError('unavailable');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    if (performer.ownerUserId !== inspection.actorUserId) {
+      const mapped = mapClaimInspectionToClientError('profile_already_claimed');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    return res.status(200).json({
+      displayName: performer.displayName,
+      handle: performer.handle,
+      claimType: 'performer_profile',
+      enablesProMode: true
+    });
+  } catch (error) {
+    console.warn('Account claim peek failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+});
+
+app.post('/api/account/claim/attach', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const access = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (access.allowed === false) {
+    return res.status(access.status).json({ error: access.reason });
+  }
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const token = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__account_claim_attach__'
+  });
+  if (!rateLimitResult.allowed) {
+    const mapped = mapClaimInspectionToClientError('rate_limited');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+  if (!token) {
+    const mapped = mapClaimInspectionToClientError('not_found');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const currentUserId = access.actor.actorId!;
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const claim = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+        executor: tx
+      });
+      if (!claim?.actorUserId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'already_used';
+        throw err;
+      }
+
+      const performerId = readClaimPerformerId(claim.challengeMetadata);
+      if (!performerId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+        throw err;
+      }
+
+      const transfer = await transferPerformerOwnership(tx, {
+        performerId,
+        fromUserId: claim.actorUserId,
+        toUserId: currentUserId
+      });
+      if (transfer.ok === false) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = transfer.code;
+        throw err;
+      }
+
+      const completedAt = new Date();
+      const [account] = await tx
+        .select({ emailVerifiedAt: users.emailVerifiedAt, displayName: users.displayName })
+        .from(users)
+        .where(eq(users.id, currentUserId))
+        .for('update')
+        .limit(1);
+      if (!account?.emailVerifiedAt) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+        throw err;
+      }
+
+      const [performer] = await tx
+        .select({ displayName: performers.displayName, handle: performers.handle })
+        .from(performers)
+        .where(eq(performers.id, performerId))
+        .limit(1);
+
+      const proMode = await activateClaimedPerformerAndProMode(tx, {
+        userId: currentUserId,
+        performerId,
+        completedAt,
+        reason: 'account_claim_attach'
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: currentUserId,
+        actorType: 'account',
+        entityType: 'performer_login_challenge',
+        entityId: claim.id,
+        eventType: 'account.claim.attach',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          performerId,
+          handoffUserId: claim.actorUserId,
+          proModeActivated: proMode.proModeActivated,
+          claimCodeFingerprint: claimCodeFingerprint(token)
+        }
+      });
+
+      return {
+        performerId,
+        displayName: performer?.displayName || 'Performer',
+        handle: performer?.handle || null
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile claimed. Pro Mode is active on this account.',
+      performer: {
+        id: outcome.performerId,
+        displayName: outcome.displayName,
+        handle: outcome.handle
+      },
+      redirectPath: '/talent'
+    });
+  } catch (error) {
+    const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+      ? String((error as { claimCode?: string }).claimCode || '')
+      : '';
+    if (claimFailCode) {
+      const mapped = mapClaimInspectionToClientError(claimFailCode);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    console.warn('Account claim attach failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({ error: 'Unable to claim this profile right now.' });
+  }
+});
+
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
-  if (isProduction && !hasPerformerLoginEmailConfig) {
-    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
-  }
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
     return res.status(503).json({ error: 'Account signup is temporarily unavailable.' });
   }
@@ -3969,6 +4226,7 @@ app.post('/api/account/signup', async (req, res) => {
   const displayName = normalizePerformerDisplayName(req.body?.displayName);
   const password = normalizePerformerPassword(req.body?.password);
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
   if (!email || !displayName || !password) {
     return res.status(422).json({ error: 'Name, email, and password are required.' });
   }
@@ -3978,13 +4236,159 @@ app.post('/api/account/signup', async (req, res) => {
   const passwordValidation = validatePerformerPasswordStrength(password);
   if (!passwordValidation.ok) return res.status(422).json({ error: passwordValidation.error });
   if (password !== confirmPassword) return res.status(422).json({ error: 'Password confirmation does not match.' });
-  if (await performerSignupEmailExists(businessDb, email)) {
-    return res.status(409).json({ error: 'This email is already in use.' });
-  }
 
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const rateLimit = performerSignupRateLimiter.consume({ requesterIpHash, targetEmail: '__account_signup__' });
   if (!rateLimit.allowed) return res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+
+  // Claim-code signup: redeem onto the pre-created handoff account (one Sway account).
+  if (claimCode) {
+    if (!performerSessionStore.hasDurableStore) {
+      return res.status(503).json({ error: 'Account signup is temporarily unavailable.' });
+    }
+
+    const passwordHash = await hashPerformerPassword(password);
+    try {
+      const outcome = await businessDb.transaction(async (tx) => {
+        const claim = await performerLoginChallengeStore.consumeChallengeFromToken({
+          token: claimCode,
+          expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+          executor: tx
+        });
+        if (!claim?.actorUserId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'already_used';
+          throw err;
+        }
+
+        const performerId = readClaimPerformerId(claim.challengeMetadata);
+        if (!performerId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+          throw err;
+        }
+
+        const claimable = await assertPerformerClaimableByHandoff(tx, {
+          performerId,
+          handoffUserId: claim.actorUserId
+        });
+        if (claimable.ok === false) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = claimable.code;
+          throw err;
+        }
+
+        const [emailOwner] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, email))
+          .limit(1);
+        if (emailOwner && emailOwner.id !== claim.actorUserId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'email_in_use';
+          throw err;
+        }
+
+        const completedAt = new Date();
+        const [updatedUser] = await tx
+          .update(users)
+          .set({
+            email,
+            displayName,
+            passwordHash,
+            emailVerifiedAt: completedAt,
+            termsAcceptedAt: completedAt,
+            updatedAt: completedAt
+          })
+          .where(eq(users.id, claim.actorUserId))
+          .returning({ id: users.id });
+        if (!updatedUser) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+          throw err;
+        }
+
+        await tx
+          .update(performers)
+          .set({
+            displayName,
+            updatedAt: completedAt
+          })
+          .where(eq(performers.id, performerId));
+
+        const proMode = await activateClaimedPerformerAndProMode(tx, {
+          userId: claim.actorUserId,
+          performerId,
+          completedAt,
+          reason: 'account_signup_claim_redeem'
+        });
+
+        const issuedSession = await performerSessionStore.issueSession({
+          actorUserId: claim.actorUserId,
+          issuedBy: claim.actorUserId,
+          executor: tx
+        });
+
+        await writeAuditEvent(tx, {
+          actorId: claim.actorUserId,
+          actorType: 'account',
+          entityType: 'performer_login_challenge',
+          entityId: claim.id,
+          eventType: 'account.signup.claim',
+          previousStatus: 'pending',
+          nextStatus: 'consumed',
+          metadata: {
+            performerId,
+            proModeActivated: proMode.proModeActivated,
+            claimCodeFingerprint: claimCodeFingerprint(claimCode)
+          }
+        });
+
+        return {
+          issuedSession,
+          performerId,
+          displayName: claimable.displayName
+        };
+      });
+
+      res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax',
+        path: '/',
+        expires: outcome.issuedSession.expiresAt
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Account created. Performer profile claimed and Pro Mode activated.',
+        redirectPath: '/talent'
+      });
+    } catch (error) {
+      const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+        ? String((error as { claimCode?: string }).claimCode || '')
+        : '';
+      if (claimFailCode === 'email_in_use') {
+        return res.status(409).json({ error: 'This email is already in use.' });
+      }
+      if (claimFailCode) {
+        const mapped = mapClaimInspectionToClientError(claimFailCode);
+        return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+      }
+      console.warn('Account signup with claim failed.', {
+        path: req.path,
+        ip: req.ip || null,
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      return res.status(500).json({ error: 'Unable to create account with that claim code right now.' });
+    }
+  }
+
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
+  }
+  if (await performerSignupEmailExists(businessDb, email)) {
+    return res.status(409).json({ error: 'This email is already in use.' });
+  }
 
   const passwordHash = await hashPerformerPassword(password);
   const outcome = await businessDb.transaction(async (tx) => {
@@ -4073,6 +4477,7 @@ app.post('/api/account/login', async (req, res) => {
   }
   const email = normalizePerformerLoginEmail(req.body?.email);
   const password = normalizePerformerPassword(req.body?.password);
+  const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = email ?? '__invalid__';
   const rateLimit = performerPasswordLoginRateLimiter.check({ requesterIpHash, accountKey });
@@ -4098,7 +4503,10 @@ app.post('/api/account/login', async (req, res) => {
     path: '/',
     expires: issuedSession.expiresAt
   });
-  return res.json({ success: true, redirectPath: '/account' });
+  const redirectPath = claimCode
+    ? `/account?claim=${encodeURIComponent(claimCode)}`
+    : '/account';
+  return res.json({ success: true, redirectPath });
 });
 
 app.get('/api/account/session', async (req, res) => {
@@ -5203,7 +5611,7 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   });
 
   const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  const claimLink = `${appBaseUrl}/talent/signup?code=${encodeURIComponent(issued.token)}`;
+  const claimLink = `${appBaseUrl}/signup?claim=${encodeURIComponent(issued.token)}`;
 
   return res.status(201).json({ success: true, userId, performerId, wasNewPerformer, claimLink });
 });
