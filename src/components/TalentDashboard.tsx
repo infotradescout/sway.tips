@@ -1545,8 +1545,8 @@ export default function TalentDashboard({
                 <Radio className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <p className="truncate font-display text-base font-black uppercase tracking-wide text-white">
-                  {session.talentName || welcomePerformerName}
+                <p className="truncate font-display text-base font-black tracking-wide text-white">
+                  {welcomePerformerName}
                 </p>
                 <p className="truncate text-[11px] font-bold text-slate-400">
                   {session.status === 'ending' ? `Ending room - closeout ${timeLeft}` : `${session.talentRole} live room`}
@@ -2172,7 +2172,6 @@ export default function TalentDashboard({
           <PerformerRoomSetup
             performerName={welcomePerformerName}
             talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
-            performerHandle={performerProfile?.handle}
             performerEmailVerified={performerEmailVerified}
             onStartSession={onStartSession}
           />

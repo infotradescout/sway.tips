@@ -409,7 +409,7 @@ export default function TalentApp() {
               <div className="space-y-4 text-sm">
                 <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
-                  <p className="mt-1 font-bold text-white">{session.status === 'inactive' ? performerIdentityName : (session.talentName || performerIdentityName)}</p>
+                  <p className="mt-1 font-bold text-white">{performerIdentityName}</p>
                   <p className="text-xs text-slate-400">
                     {session.status === 'inactive'
                       ? `Ready to start a live room · ${performerRoleLabel}`

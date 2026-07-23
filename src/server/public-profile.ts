@@ -48,8 +48,9 @@ export function normalizePublicProfilePrimaryRole(value: unknown): PublicPerform
 }
 
 export function labelForPublicPerformerPrimaryRole(roleId: string | null | undefined) {
-  if (!roleId) return null;
-  const found = PUBLIC_PERFORMER_PRIMARY_ROLES.find((role) => role.id === roleId);
+  const normalizedRoleId = normalizePublicProfilePrimaryRole(roleId);
+  if (!normalizedRoleId) return null;
+  const found = PUBLIC_PERFORMER_PRIMARY_ROLES.find((role) => role.id === normalizedRoleId);
   return found?.label ?? null;
 }
 
@@ -74,7 +75,11 @@ export function resolvePublicProfilePageKindLabel(input: {
   const roleLabel = labelForPublicPerformerPrimaryRole(input.primaryRole);
   if (roleLabel) return roleLabel;
   const specialty = Array.isArray(input.specialties)
-    ? input.specialties.find((item) => typeof item === 'string' && item.trim())
+    ? input.specialties.find((item) => (
+        typeof item === 'string'
+        && item.trim()
+        && !['performer', 'other performer'].includes(item.trim().toLowerCase())
+      ))
     : null;
   if (specialty) return specialty.trim();
   return input.isPreview ? 'Unclaimed public page' : 'Sway page';

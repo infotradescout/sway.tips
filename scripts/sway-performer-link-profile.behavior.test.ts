@@ -97,6 +97,7 @@ assert.equal(normalizePublicProfilePrimaryRole('mc'), 'host');
 assert.equal(normalizePublicProfilePrimaryRole('other performer'), 'other');
 assert.equal(normalizePublicProfilePrimaryRole('lawyer'), null);
 assert.equal(labelForPublicPerformerPrimaryRole('host'), 'Host / MC');
+assert.equal(labelForPublicPerformerPrimaryRole('Host / MC'), 'Host / MC');
 assert.equal(labelForPublicPerformerPrimaryRole('other'), 'Other');
 assert.equal(
   resolvePublicProfileHeroName({ handle: 'coreymack', stageName: 'Corey Mack', displayName: 'Legal Name' }),
@@ -120,6 +121,10 @@ assert.equal(
 );
 assert.equal(
   resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: [], isPreview: false }),
+  'Sway page'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: ['Performer'], isPreview: false }),
   'Sway page'
 );
 assert.deepEqual(
