@@ -415,12 +415,16 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
 
   if (profile) return profile;
 
-  const [existingPerformer] = await businessDb
+  // Unclaimed/incomplete does not mean private. Only suspended handles stay dark.
+  const [suspendedPerformer] = await businessDb
     .select({ id: performers.id })
     .from(performers)
-    .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+    .where(and(
+      sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+      eq(performers.onboardingStatus, 'suspended')
+    ))
     .limit(1);
-  if (existingPerformer) return null;
+  if (suspendedPerformer) return null;
 
   const [preview] = await businessDb
     .select({
@@ -8168,15 +8172,19 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       .limit(1);
 
     if (!profile) {
-      // Never fall back to a preview when a real performer row exists but is
-      // inactive or suspended. That keeps inactive/suspended handles dark.
-      const [existingPerformer] = await businessDb
+      // Unclaimed does not mean private. Curated previews stay public even when a
+      // linked performer row exists but is inactive / incomplete. Only a
+      // suspended performer hard-darks the handle (no preview fallback).
+      const [suspendedPerformer] = await businessDb
         .select({ id: performers.id })
         .from(performers)
-        .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`)
+        .where(and(
+          sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+          eq(performers.onboardingStatus, 'suspended')
+        ))
         .limit(1);
 
-      if (existingPerformer) {
+      if (suspendedPerformer) {
         return res.status(404).json({ error: 'Performer profile not found.' });
       }
 

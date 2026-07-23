@@ -105,8 +105,8 @@ for (const term of [
   'Performing since 1992',
   'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
-  "title: 'Kita P x Corey Mack in New Orleans'",
-  'www.youtube.com/watch?v=--7MMybc6Vw',
+  'Corey Mack\'s Opening set for Theo Von\'s 1st Netflix Special',
+  'www.youtube.com/watch?v=_KzoiR1RgrU',
   'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');
@@ -446,8 +446,12 @@ for (const term of [
   'eq(performers.isActive, true)',
   "notInArray(performers.onboardingStatus, ['suspended'])",
   'performerProfilePreviews',
-  'existingPerformer'
+  'suspendedPerformer',
+  "eq(performers.onboardingStatus, 'suspended')",
+  // Unclaimed/incomplete performer rows must not hide an active curated preview.
+  'Unclaimed/incomplete does not mean private'
 ]) requireIncludes(shareProfileLookup, term, 'Share profile lookup');
+requireExcludes(shareProfileLookup, 'existingPerformer', 'Share profile lookup');
 
 const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
 for (const term of [
@@ -477,9 +481,12 @@ for (const term of [
   'booking: publicBooking',
   'partnerState?.isEffective',
   'performerProfilePreviews',
-  'existingPerformer',
+  'suspendedPerformer',
+  "eq(performers.onboardingStatus, 'suspended')",
+  'Unclaimed does not mean private',
   "claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'"
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
+requireExcludes(publicPerformerRoute, 'existingPerformer', 'Public performer route');
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
 for (const forbidden of [
   'performerId: profile.performerId',
@@ -498,8 +505,9 @@ for (const term of [
   'profile.booking.email',
   'profile.booking.verificationRequired',
   'profile.isPreview',
-  'Unclaimed · ready to review',
-  'Prepared for the performer',
+  'Unclaimed · still public',
+  'Public page · unclaimed',
+  'public even before the performer claims it',
   'Featured performance',
   'media.embedUrl',
   'allowFullScreen',
