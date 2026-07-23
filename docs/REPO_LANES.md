@@ -53,12 +53,13 @@ These lanes may run in parallel when they keep to their allowed files and do not
 
 ## Future Product Lanes (Memo Only)
 
-These are locked product intent. They are **not** active parallel build lanes until Gawain opens them with scope, ledger boundaries, and an evidence bar.
+Unless explicitly labeled exploratory, these are locked product intent. They are **not** active parallel build lanes until Gawain opens them with scope, ledger boundaries, and an evidence bar.
 
 | Future lane | Memo | Rule |
 | --- | --- | --- |
 | `event-tickets` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Event ticket sales is a Sway lane. Docs/planning only until explicitly activated. Separate ledger and fee disclosure from live-room money, publishing, merch, and paid streams. Plan: `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md` (includes public feed repair; individuals sell without venue gate). |
 | `public-feed` | (same plan) | Truthful discovery for live rooms + upcoming ticketed shows. No fake inventory. May ship Phase B ahead of ticket MVP if Gawain sequences it that way. |
+| `sway.dio` | Exploratory concept note only | Possible Sway online radio for streaming digital independent originals. Cool direction, but **not locked in stone**, not scoped, and not authorized for build yet. |
 
 ## Unsafe Lane Pairings
 
