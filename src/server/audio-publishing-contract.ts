@@ -328,6 +328,13 @@ export const AUDIO_PUBLISHING_RUNTIME_CAPABILITIES = {
   privateDownloadAuthorization: true,
   creatorDealExecution: false,
   swayPlayback: false,
+  // The provider-pluggable delivery job engine (adapter contract, durable
+  // state machine, idempotent submission, webhook auth/replay defense) is
+  // implemented and only ever registers the in-process sandbox adapter.
+  // This stays false until a real contracted distribution provider is
+  // wired in -- flipping it does not, by itself, make externalDspDelivery
+  // true, and no route may claim a sandbox delivery as a real DSP status.
+  distributionDeliveryEngine: false,
   externalDspDelivery: false,
   directSales: false,
   royaltyAccounting: false
