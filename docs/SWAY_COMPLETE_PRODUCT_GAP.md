@@ -50,7 +50,7 @@ Owner bar: **Do not ship until the product is complete.**
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Audited editing, artwork, full recording credits, identifiers, territories, sealed rights declarations, independent review, and fail-closed readiness are implemented | Disposable PostgreSQL and production journey evidence are still required for this exact tree; store delivery remains disabled |
 | Ordered multi-recording single, EP, and album assembly | Track add, per-track metadata and credits, reorder, remove, track-count validation, optimistic conflict denial, and rights-review locking are implemented | **Implemented, unverified:** the exact disposable PostgreSQL journey and a production creator journey remain required; store delivery remains disabled |
 | DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
-| Store status, corrections, failures, and takedowns | State machine only | Critical blocker |
+| Store status, corrections, failures, and takedowns | Implemented runtime + durability; no provider execution proof | Critical blocker |
 | Royalty statements and reconciliation | No distribution royalty ledger/runtime | Critical blocker |
 | Collaborator splits, KYC/tax, and payouts | No distribution split/payout runtime | Critical blocker |
 | Promotion and pre-save pages | Stable public release pages and profile release cards are implemented | Provider-backed destination links, true pre-saves, and destination updates remain missing |

@@ -233,6 +233,56 @@ export function createDistributionDeliveryService(config: {
     });
   }
 
+  async function requestCorrection(input: { deliveryId: string; actorUserId: string; reason: string }) {
+    const reason = input.reason.trim();
+    if (!reason) throw new Error('Correction reason is required.');
+    return db.transaction(async (tx) => {
+      const [delivery] = await tx
+        .select()
+        .from(musicDistributionDeliveries)
+        .where(eq(musicDistributionDeliveries.id, input.deliveryId))
+        .for('update')
+        .limit(1);
+      if (!delivery) throw new Error('Delivery not found.');
+      if (delivery.deliveryStatus === 'correction_pending') {
+        return { delivery, alreadyRequested: true };
+      }
+      if (!['accepted', 'live'].includes(delivery.deliveryStatus)) {
+        throw new Error(`Delivery in status "${delivery.deliveryStatus}" cannot be sent for correction.`);
+      }
+      const transitionPayloadSha256 = delivery.metadataFingerprint ??
+        requireAdapter(delivery.providerKey).buildMetadataFingerprint(
+          (await loadReleasePayload(tx, {
+            releaseId: delivery.releaseId,
+            providerKey: delivery.providerKey,
+            destinationKey: delivery.destinationKey
+          })).payload
+        );
+      await setSessionConfig(tx, 'sway.actor_user_id', input.actorUserId);
+      await setSessionConfig(tx, 'sway.delivery_transition_reason', reason);
+      await setSessionConfig(tx, 'sway.delivery_transition_idempotency_key', `correction-request:${delivery.id}`);
+      await setSessionConfig(tx, 'sway.delivery_transition_payload_sha256', transitionPayloadSha256);
+      const [updated] = await tx.update(musicDistributionDeliveries)
+        .set({
+          deliveryStatus: 'correction_pending',
+          lastError: reason
+        })
+        .where(eq(musicDistributionDeliveries.id, delivery.id))
+        .returning();
+      await tx.insert(auditEvents).values({
+        actorType: 'performer',
+        actorId: input.actorUserId,
+        entityType: 'music_distribution_delivery',
+        entityId: delivery.id,
+        eventType: 'music_distribution_delivery.correction_requested',
+        previousStatus: delivery.deliveryStatus,
+        nextStatus: 'correction_pending',
+        metadata: { reason }
+      });
+      return { delivery: updated, alreadyRequested: false };
+    });
+  }
+
   /**
    * Verifies the provider's signature, then persists the webhook event and
    * (if it maps to a new delivery status) applies the transition in the
@@ -328,6 +378,7 @@ export function createDistributionDeliveryService(config: {
     createDelivery,
     submitDelivery,
     requestTakedown,
+    requestCorrection,
     ingestWebhook,
     getDelivery
   };

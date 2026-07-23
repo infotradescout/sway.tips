@@ -304,6 +304,55 @@ try {
     'A replayed providerEventId must never be recorded twice.'
   );
 
+  await assert.rejects(
+    deliveryService.requestCorrection({
+      deliveryId: failingDelivery.id,
+      actorUserId: ownerId,
+      reason: 'Draft delivery cannot be corrected.'
+    }),
+    /cannot be sent for correction/i
+  );
+
+  const correctionDelivery = await deliveryService.createDelivery({
+    releaseId,
+    actorUserId: ownerId,
+    providerKey: 'sway_sandbox',
+    destinationKey: 'youtube_music'
+  });
+  const correctionSubmitted = await deliveryService.submitDelivery({
+    deliveryId: correctionDelivery.id,
+    actorUserId: ownerId
+  });
+  const correctionAccepted = {
+    providerEventId: 'evt-accepted-correction',
+    providerReleaseId: correctionSubmitted.delivery.providerReleaseId,
+    destinationKey: 'youtube_music',
+    status: 'accepted',
+    destinationReleaseId: 'yt-music-track-1',
+    error: null
+  };
+  const signedCorrectionAccepted = baseAdapter.signWebhookEvent(correctionAccepted);
+  await deliveryService.ingestWebhook({
+    providerKey: 'sway_sandbox',
+    rawBody: signedCorrectionAccepted.rawBody,
+    signatureHeader: signedCorrectionAccepted.signatureHeader
+  });
+
+  const correction = await deliveryService.requestCorrection({
+    deliveryId: correctionDelivery.id,
+    actorUserId: ownerId,
+    reason: 'Release metadata needs a late adjustment.'
+  });
+  assert.equal(correction.delivery.deliveryStatus, 'correction_pending');
+  assert.equal(correction.alreadyRequested, false);
+  const correctionReplay = await deliveryService.requestCorrection({
+    deliveryId: correctionDelivery.id,
+    actorUserId: ownerId,
+    reason: 'Release metadata needs a late adjustment.'
+  });
+  assert.equal(correctionReplay.alreadyRequested, true);
+  assert.equal(correctionReplay.delivery.deliveryStatus, 'correction_pending');
+
   // Tampered signature must be rejected before any DB write.
   await assert.rejects(
     deliveryService.ingestWebhook({
