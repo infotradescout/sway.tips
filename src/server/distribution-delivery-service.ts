@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import {
   auditEvents,
+  audioProjectAccessGrants,
   musicDistributionDeliveries,
   musicDistributionDeliveryEvents,
   musicReleaseRecordings,
@@ -22,6 +23,13 @@ function sha256Hex(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function hasDuplicateKeyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const cause = error.cause instanceof Error ? error.cause : null;
+  const message = `${error.message}\n${cause?.message ?? ''}`;
+  return /duplicate key value/i.test(message);
+}
+
 async function setSessionConfig(tx: SwayTx, key: string, value: string): Promise<void> {
   await tx.execute(sql`select set_config(${key}, ${value}, true)`);
 }
@@ -36,6 +44,24 @@ export function createDistributionDeliveryService(config: {
     const adapter = adapters[providerKey];
     if (!adapter) throw new Error(`No distribution adapter is registered for provider "${providerKey}".`);
     return adapter;
+  }
+
+  async function requireReleaseManagementAuthority(tx: SwayTx, releaseId: string, actorUserId: string) {
+    const [grant] = await tx
+      .select({ authority: audioProjectAccessGrants.id })
+      .from(musicReleases)
+      .innerJoin(audioProjectAccessGrants, and(
+        eq(audioProjectAccessGrants.projectId, musicReleases.projectId),
+        eq(audioProjectAccessGrants.granteeUserId, actorUserId),
+        eq(audioProjectAccessGrants.canManageRelease, true),
+        isNull(audioProjectAccessGrants.revokedAt),
+        or(isNull(audioProjectAccessGrants.expiresAt), gt(audioProjectAccessGrants.expiresAt, new Date()))
+      ))
+      .where(eq(musicReleases.id, releaseId))
+      .limit(1);
+    if (!grant) {
+      throw new Error('Distribution delivery creation requires active release-management authority.');
+    }
   }
 
   async function loadReleasePayload(tx: SwayTx, input: {
@@ -90,6 +116,7 @@ export function createDistributionDeliveryService(config: {
   }) {
     requireAdapter(input.providerKey);
     return db.transaction(async (tx) => {
+      await requireReleaseManagementAuthority(tx, input.releaseId, input.actorUserId);
       await setSessionConfig(tx, 'sway.actor_user_id', input.actorUserId);
       const [delivery] = await tx.insert(musicDistributionDeliveries).values({
         releaseId: input.releaseId,
@@ -281,7 +308,7 @@ export function createDistributionDeliveryService(config: {
         return { processed: true, duplicate: false };
       });
     } catch (error) {
-      if (error instanceof Error && /duplicate key value/i.test(error.message)) {
+      if (hasDuplicateKeyError(error)) {
         return { processed: false, duplicate: true };
       }
       throw error;
