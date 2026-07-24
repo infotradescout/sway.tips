@@ -8,6 +8,13 @@ These rules are mandatory for Codex, Gemini/Objector, and Merlin/Orchestrator wo
 
 No task is complete because an agent says it is complete. No deployment is successful merely because it deployed. Independent evidence must support the requested outcome.
 
+## Release control (read before merging to main)
+
+- Merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md`.
+- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Do not turn it Off to wait for Actions.
+- GitHub Actions CI is advisory until billing works; it must not block Render auto-deploy.
+- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up).
+
 ## Council Roles
 
 ```text

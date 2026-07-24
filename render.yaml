@@ -3,6 +3,9 @@ services:
     name: sway-tips-web
     runtime: node
     branch: main
+    # main is the release channel: Render auto-deploys on commit.
+    # Do NOT use checksPass while Production Deploy Drift Guard observes catch-up (deadlock).
+    # GitHub Actions is not required for production deploy.
     autoDeployTrigger: commit
     buildCommand: npm ci && npm run build
     preDeployCommand: npm run db:migrate
