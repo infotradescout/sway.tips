@@ -15,13 +15,11 @@ const steps = ['Pricing', 'Requests', 'Review', 'Start'];
 export default function PerformerRoomSetup({
   performerName,
   talentRole,
-  performerHandle,
   performerEmailVerified,
   onStartSession
 }: {
   performerName: string;
   talentRole: 'DJ' | 'Performer';
-  performerHandle?: string | null;
   performerEmailVerified: boolean;
   onStartSession: (data: PerformerRoomSetupData) => void;
 }) {
@@ -69,7 +67,7 @@ export default function PerformerRoomSetup({
       <div className="mt-5 min-h-[18rem]">
         {step === 0 ? (
           <div className="space-y-4">
-            <p className="text-xs font-bold text-cyan-300">{performerName}{performerHandle ? ` · @${performerHandle}` : ''}</p>
+            <p className="text-xs font-bold text-cyan-300">{performerName}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <button type="button" onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Paid requests</span><span className="mt-2 block text-xs text-slate-400">Requests and boosts start at ${minimumTip}. Direct tips remain available.</span></button>

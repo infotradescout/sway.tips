@@ -9,6 +9,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
 
 type LinkDraft = {
   key: string;
@@ -20,6 +21,8 @@ type LinkDraft = {
 };
 
 type ProfileForm = {
+  primaryRole: string;
+  stageName: string;
   headline: string;
   specialties: string;
   bio: string;
@@ -37,6 +40,8 @@ type ProfileForm = {
 };
 
 const EMPTY_FORM: ProfileForm = {
+  primaryRole: '',
+  stageName: '',
   headline: '',
   specialties: '',
   bio: '',
@@ -131,6 +136,8 @@ export default function PerformerPublicProfileEditor({
 
         const profile = data.profile;
         setForm({
+          primaryRole: text(profile.primaryRole),
+          stageName: text(profile.stageName),
           headline: text(profile.headline),
           specialties: Array.isArray(profile.specialties) ? profile.specialties.join(', ') : '',
           bio: text(profile.bio),
@@ -234,6 +241,8 @@ export default function PerformerPublicProfileEditor({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          primaryRole: form.primaryRole || null,
+          stageName: form.stageName,
           headline: form.headline,
           specialties,
           bio: form.bio,
@@ -387,12 +396,32 @@ export default function PerformerPublicProfileEditor({
         <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1.5 sm:col-span-2">
+              <span className={fieldLabel()}>What kind of performer are you?</span>
+              <select
+                className={fieldClass()}
+                required
+                value={form.primaryRole}
+                onChange={(event) => setForm((current) => ({ ...current, primaryRole: event.target.value }))}
+              >
+                <option value="">Choose one</option>
+                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => (
+                  <option key={role.id} value={role.id}>{role.label}</option>
+                ))}
+              </select>
+              <span className="block text-[11px] leading-5 text-slate-500">This appears at the top of your public page instead of a generic “performer” label.</span>
+            </label>
+            <label className="space-y-1.5 sm:col-span-2">
+              <span className={fieldLabel()}>Stage name — optional</span>
+              <input className={fieldClass()} maxLength={80} value={form.stageName} onChange={(event) => setForm((current) => ({ ...current, stageName: event.target.value }))} placeholder="Only if different from your @handle" />
+              <span className="block text-[11px] leading-5 text-slate-500">Your @handle is the main public name. Stage name is a fallback when no handle is set.</span>
+            </label>
+            <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Headline</span>
               <input className={fieldClass()} maxLength={140} value={form.headline} onChange={(event) => setForm((current) => ({ ...current, headline: event.target.value }))} placeholder="What should someone know about you first?" />
             </label>
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Specialties — separate with commas, up to 8</span>
-              <input className={fieldClass()} value={form.specialties} onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))} placeholder="DJ, Beatbox, Comedy, MC, Event host" />
+              <input className={fieldClass()} value={form.specialties} onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))} placeholder="Open format, beatbox, wedding MC, late-night sets" />
               {specialties.length ? (
                 <span className="flex flex-wrap gap-1.5 pt-1">
                   {specialties.map((specialty) => <span key={specialty} className="rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-bold text-slate-300">{specialty}</span>)}

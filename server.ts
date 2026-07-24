@@ -69,10 +69,12 @@ import { createConfiguredStripeConnectService } from "./src/server/stripe-connec
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
+  mergePublicProfileMetadata,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
+  normalizePublicProfilePrimaryRole,
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
   normalizePublicProfileUrl,
@@ -518,7 +520,8 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
 
   const headline = profile.headline || profile.bio || `Discover @${profile.handle} on Sway.`;
   const headlineLines = wrapShareCardText(headline);
-  const nameFontSize = profile.displayName.length > 25 ? 60 : profile.displayName.length > 18 ? 74 : 92;
+  const heroName = `@${profile.handle}`;
+  const nameFontSize = heroName.length > 28 ? 54 : heroName.length > 20 ? 68 : 86;
   const overlay = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
@@ -532,10 +535,9 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
     </defs>
     <rect width="${width}" height="${height}" fill="url(#shade)"/>
     <rect x="92" y="105" width="104" height="7" rx="3.5" fill="url(#accent)"/>
-    <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PERFORMER PROFILE</text>
-    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="${nameFontSize}" font-weight="800">${escapeShareCardText(profile.displayName)}</text>
-    <text x="96" y="402" fill="#55d9ff" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700">@${escapeShareCardText(profile.handle)}</text>
-    ${headlineLines.map((line, index) => `<text x="96" y="${510 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
+    <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PUBLIC PAGE</text>
+    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="${nameFontSize}" font-weight="800">${escapeShareCardText(heroName)}</text>
+    ${headlineLines.map((line, index) => `<text x="96" y="${470 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
     <text x="96" y="800" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">sway to play</text>
     <text x="96" y="846" fill="#aab0c8" font-family="Arial, Helvetica, sans-serif" font-size="25">app.sway.tips/${escapeShareCardText(profile.handle)}</text>
   </svg>`);
@@ -575,7 +577,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
 
     if (!profile) return defaultMetadata;
 
-    const title = `${profile.displayName} on Sway`;
+    const title = `@${profile.handle} on Sway`;
     const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
     const locationCopy = profile.city ? ` in ${profile.city}` : '';
     const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
@@ -585,7 +587,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       description,
       url: `/p/${profile.handle}`,
       image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
-      imageAlt: `${profile.displayName} Sway performer profile`
+      imageAlt: `@${profile.handle} Sway public page`
     });
   }
 
@@ -1422,6 +1424,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         performer_id: performers.id,
         display_name: performers.displayName,
         handle: performers.handle,
+        profile_metadata: performerPublicProfiles.metadata,
+        specialties: performerPublicProfiles.specialties,
+        preview_metadata: performerProfilePreviews.metadata,
+        preview_specialties: performerProfilePreviews.specialties,
         owner_user_id: performers.ownerUserId,
         email_verified_at: users.emailVerifiedAt,
         charges_enabled: performers.chargesEnabled,
@@ -1430,10 +1436,34 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
-    return performerRow ?? null;
+    if (!performerRow) return null;
+    const profileStageName = performerRow.profile_metadata && typeof performerRow.profile_metadata === 'object'
+      ? normalizePublicProfileText((performerRow.profile_metadata as Record<string, unknown>).stageName, 80)
+      : null;
+    const previewStageName = performerRow.preview_metadata && typeof performerRow.preview_metadata === 'object'
+      ? normalizePublicProfileText((performerRow.preview_metadata as Record<string, unknown>).stageName, 80)
+      : null;
+    return {
+      performer_id: performerRow.performer_id,
+      display_name: performerRow.display_name,
+      handle: performerRow.handle,
+      stage_name: profileStageName || previewStageName,
+      primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)
+        || resolvePublicPrimaryRole(performerRow.preview_metadata),
+      specialties: performerRow.specialties?.length
+        ? performerRow.specialties
+        : performerRow.preview_specialties ?? [],
+      owner_user_id: performerRow.owner_user_id,
+      email_verified_at: performerRow.email_verified_at,
+      charges_enabled: performerRow.charges_enabled,
+      payouts_enabled: performerRow.payouts_enabled,
+      stripe_connected_account_id: performerRow.stripe_connected_account_id
+    };
   } catch (error) {
     console.warn('Unable to resolve authenticated performer profile for /api/state.', {
       actorUserId: actor.actorId,
@@ -1651,13 +1681,12 @@ function resolvePublicStageName(input: {
   const metadataStageName = input.metadata && typeof input.metadata === 'object'
     ? normalizePublicProfileText((input.metadata as Record<string, unknown>).stageName, 80)
     : null;
-  if (metadataStageName) return metadataStageName;
+  return metadataStageName;
+}
 
-  // DJ3X is the performer-facing name already established by the public
-  // handle and headline. Keep it ahead of the legal/display name until the
-  // owner supplies an explicit stageName in their public profile metadata.
-  if (input.handle?.trim().toLowerCase() === 'dj3x') return 'DJ3X';
-  return input.displayName || input.handle || 'Performer';
+function resolvePublicPrimaryRole(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  return normalizePublicProfilePrimaryRole((metadata as Record<string, unknown>).primaryRole);
 }
 
 function normalizeLibrarySourceKey(value: unknown) {
@@ -6391,6 +6420,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
         youtubeUrl: performerPublicProfiles.youtubeUrl,
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
         websiteUrl: performerPublicProfiles.websiteUrl,
+        metadata: performerPublicProfiles.metadata,
         updatedAt: performerPublicProfiles.updatedAt
       })
       .from(performerPublicProfiles)
@@ -6412,6 +6442,10 @@ app.get('/api/talent/profile/public', async (req, res) => {
     loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
   ]);
 
+  const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
+    ? profileRow.metadata as Record<string, unknown>
+    : null;
+
   return res.json({
     profile: {
       performerId: performerOwner.performerId,
@@ -6419,6 +6453,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
       headline: profileRow?.headline ?? null,
+      stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
+      primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -6551,6 +6587,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
+  const stageNameProvided = req.body?.stageName !== undefined;
+  const stageName = normalizePublicProfileText(req.body?.stageName, 80);
+  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -6567,6 +6606,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
+  }
+  if (!primaryRole) {
+    return res.status(422).json({ error: 'Choose your primary role.' });
   }
 
   const invalidUrlField = [
@@ -6596,6 +6638,16 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const savedLinks = await businessDb.transaction(async (tx) => {
     const now = new Date();
+    const [existingProfile] = await tx
+      .select({ metadata: performerPublicProfiles.metadata })
+      .from(performerPublicProfiles)
+      .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .limit(1);
+
+    const nextMetadata = mergePublicProfileMetadata(existingProfile?.metadata, {
+      ...(stageNameProvided ? { stageName } : {}),
+      primaryRole
+    });
 
     await tx
       .update(performers)
@@ -6618,6 +6670,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         youtubeUrl,
         soundcloudUrl,
         websiteUrl,
+        metadata: nextMetadata,
         updatedAt: now
       })
       .onConflictDoUpdate({
@@ -6635,6 +6688,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
           youtubeUrl,
           soundcloudUrl,
           websiteUrl,
+          metadata: nextMetadata,
           updatedAt: now
         }
       });
@@ -6668,11 +6722,12 @@ app.post('/api/talent/profile/public', async (req, res) => {
         specialtyCount: specialties?.length ?? 0,
         hasBookingEmail: Boolean(bookingEmail),
         hasBookingPhone: Boolean(bookingPhone),
-        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null
+        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null,
+        primaryRole: primaryRole || null
       }
     });
 
-    return tx
+    const links = await tx
       .select({
         id: performerProfileLinks.id,
         label: performerProfileLinks.label,
@@ -6685,6 +6740,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
       .from(performerProfileLinks)
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
+
+    return { links, metadata: nextMetadata };
   });
 
   return res.status(202).json({
@@ -6695,6 +6752,13 @@ app.post('/api/talent/profile/public', async (req, res) => {
       displayName: performerOwner.displayName,
       bio,
       headline,
+      stageName: normalizePublicProfileText(
+        savedLinks.metadata && typeof savedLinks.metadata === 'object'
+          ? (savedLinks.metadata as Record<string, unknown>).stageName
+          : null,
+        80
+      ),
+      primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
       specialties: specialties ?? [],
       city,
       avatarUrl,
@@ -6710,7 +6774,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         soundcloud: soundcloudUrl,
         website: websiteUrl
       },
-      links: savedLinks
+      links: savedLinks.links
     }
   });
 });
@@ -8645,6 +8709,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
             headline: preview.headline,
             metadata: preview.metadata
           }),
+          primaryRole: resolvePublicPrimaryRole(preview.metadata),
           handle: preview.handle,
           bio: preview.bio,
           headline: preview.headline,
@@ -8808,6 +8873,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       performer: {
         displayName: profile.displayName,
         stageName,
+        primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,

@@ -4,6 +4,7 @@ import PerformerRoomHistory from './PerformerRoomHistory';
 export default function PerformerAccountHome({
   performerHandle,
   displayName,
+  roleLabel,
   stripeReady,
   onStartRoom,
   onOpenCatalog,
@@ -11,6 +12,7 @@ export default function PerformerAccountHome({
 }: {
   performerHandle?: string | null;
   displayName: string;
+  roleLabel: string;
   stripeReady: boolean;
   onStartRoom: () => void;
   onOpenCatalog: () => void;
@@ -26,8 +28,8 @@ export default function PerformerAccountHome({
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your Sway</p>
-          <h2 className="mt-1 font-display text-xl font-black uppercase text-white">{displayName}</h2>
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">{roleLabel}</p>
+          <h2 className="mt-1 font-display text-xl font-black text-white">{displayName}</h2>
           <p className="mt-2 text-sm text-slate-400">
             Your music is ready here whenever you sign in. Start a room only when you want a live crowd queue.
           </p>
