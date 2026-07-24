@@ -3,7 +3,10 @@ services:
     name: sway-tips-web
     runtime: node
     branch: main
-    autoDeployTrigger: commit
+    # Off = no deploy on merge. checksPass is unsafe while Production Deploy Drift Guard
+    # is a required-looking check that waits for production (deadlock).
+    # Approved path: Render Manual Deploy / deploy hook after CI `validate` is green.
+    autoDeployTrigger: "off"
     buildCommand: npm ci && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm run start
