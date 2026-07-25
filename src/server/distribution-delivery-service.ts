@@ -156,10 +156,23 @@ export function createDistributionDeliveryService(config: {
         destinationKey: delivery.destinationKey
       });
 
-      if (delivery.deliveryStatus === 'draft') {
+      const retryAttemptToken = delivery.deliveryStatus === 'failed'
+        ? delivery.updatedAt.toISOString()
+        : null;
+      if (delivery.deliveryStatus === 'draft' || retryAttemptToken) {
         await setSessionConfig(tx, 'sway.actor_user_id', input.actorUserId);
-        await setSessionConfig(tx, 'sway.delivery_transition_reason', 'Queued for provider submission');
-        await setSessionConfig(tx, 'sway.delivery_transition_idempotency_key', `queue:${delivery.id}`);
+        await setSessionConfig(
+          tx,
+          'sway.delivery_transition_reason',
+          retryAttemptToken ? 'Retrying failed provider submission' : 'Queued for provider submission'
+        );
+        await setSessionConfig(
+          tx,
+          'sway.delivery_transition_idempotency_key',
+          retryAttemptToken
+            ? `retry-queue:${delivery.id}:${retryAttemptToken}`
+            : `queue:${delivery.id}`
+        );
         await tx.update(musicDistributionDeliveries)
           .set({ deliveryStatus: 'queued' })
           .where(eq(musicDistributionDeliveries.id, delivery.id));
@@ -170,13 +183,20 @@ export function createDistributionDeliveryService(config: {
 
       await setSessionConfig(tx, 'sway.actor_user_id', input.actorUserId);
       await setSessionConfig(tx, 'sway.delivery_transition_reason', 'Submitted to provider');
-      await setSessionConfig(tx, 'sway.delivery_transition_idempotency_key', `submit:${delivery.id}`);
+      await setSessionConfig(
+        tx,
+        'sway.delivery_transition_idempotency_key',
+        retryAttemptToken
+          ? `retry-submit:${delivery.id}:${retryAttemptToken}`
+          : `submit:${delivery.id}`
+      );
       await setSessionConfig(tx, 'sway.delivery_transition_payload_sha256', metadataFingerprint);
       const [updated] = await tx.update(musicDistributionDeliveries)
         .set({
           deliveryStatus: 'submitted',
           providerReleaseId: submission.providerReleaseId,
-          metadataFingerprint
+          metadataFingerprint,
+          lastError: null
         })
         .where(eq(musicDistributionDeliveries.id, delivery.id))
         .returning();

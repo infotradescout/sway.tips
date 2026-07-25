@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from 'pg';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { eq, and } from 'drizzle-orm';
+import { asc, eq, and } from 'drizzle-orm';
 import { createSwayDb } from '../src/db/client.ts';
 import {
   audioFileConnections,
@@ -49,7 +49,11 @@ async function eventsFor(deliveryId) {
   return db
     .select()
     .from(musicDistributionDeliveryEvents)
-    .where(eq(musicDistributionDeliveryEvents.deliveryId, deliveryId));
+    .where(eq(musicDistributionDeliveryEvents.deliveryId, deliveryId))
+    .orderBy(
+      asc(musicDistributionDeliveryEvents.createdAt),
+      asc(musicDistributionDeliveryEvents.id)
+    );
 }
 
 try {
@@ -308,6 +312,102 @@ try {
     deliveryService.submitDelivery({ deliveryId: delivery.id, actorUserId: outsiderId }),
     /release-management authority/i,
     'An idempotent replay must not disclose another performer’s delivery.'
+  );
+
+  // Signed provider failure -> authorized retry. The migration permits
+  // submitted -> failed -> queued -> submitted, but never failed -> submitted,
+  // so the service must persist the retry queue transition before calling the
+  // adapter and then clear the previous failure only on successful submission.
+  const retryDelivery = await deliveryService.createDelivery({
+    releaseId,
+    actorUserId: ownerId,
+    providerKey: 'sway_sandbox',
+    destinationKey: 'amazon_music'
+  });
+  const retryInitialSubmit = await deliveryService.submitDelivery({
+    deliveryId: retryDelivery.id,
+    actorUserId: ownerId
+  });
+  assert.equal(submitCount, 2);
+  const retryFailedEvent = {
+    providerEventId: 'evt-failed-before-retry',
+    providerReleaseId: retryInitialSubmit.delivery.providerReleaseId,
+    destinationKey: 'amazon_music',
+    status: 'failed',
+    destinationReleaseId: null,
+    error: 'Provider rejected metadata.'
+  };
+  const signedRetryFailure = baseAdapter.signWebhookEvent(retryFailedEvent);
+  await deliveryService.ingestWebhook({
+    providerKey: 'sway_sandbox',
+    rawBody: signedRetryFailure.rawBody,
+    signatureHeader: signedRetryFailure.signatureHeader
+  });
+  const [failedBeforeRetry] = await db
+    .select()
+    .from(musicDistributionDeliveries)
+    .where(eq(musicDistributionDeliveries.id, retryDelivery.id));
+  assert.equal(failedBeforeRetry.deliveryStatus, 'failed');
+  assert.equal(failedBeforeRetry.lastError, 'Provider rejected metadata.');
+
+  await assert.rejects(
+    deliveryService.submitDelivery({ deliveryId: retryDelivery.id, actorUserId: reviewerId }),
+    /release-management authority/i
+  );
+  assert.equal(submitCount, 2, 'A review-only actor must not invoke the retry adapter.');
+
+  const retrySubmitted = await deliveryService.submitDelivery({
+    deliveryId: retryDelivery.id,
+    actorUserId: ownerId
+  });
+  assert.equal(retrySubmitted.alreadySubmitted, false);
+  assert.equal(retrySubmitted.delivery.deliveryStatus, 'submitted');
+  assert.equal(retrySubmitted.delivery.lastError, null, 'A successful retry must clear the prior provider failure.');
+  assert.notEqual(
+    retrySubmitted.delivery.providerReleaseId,
+    retryInitialSubmit.delivery.providerReleaseId,
+    'A retry response must persist the provider release ID returned by that attempt.'
+  );
+  assert.equal(submitCount, 3);
+  const retryReplay = await deliveryService.submitDelivery({
+    deliveryId: retryDelivery.id,
+    actorUserId: ownerId
+  });
+  assert.equal(retryReplay.alreadySubmitted, true);
+  assert.equal(submitCount, 3, 'A committed retry must remain idempotent.');
+
+  const retryEvents = await eventsFor(retryDelivery.id);
+  const retryTransitions = retryEvents
+    .filter((event) => event.eventType === 'status_changed')
+    .map((event) => `${event.previousStatus}->${event.nextStatus}`);
+  const transitionCount = (transition) =>
+    retryTransitions.filter((candidate) => candidate === transition).length;
+  assert.equal(transitionCount('draft->queued'), 1);
+  assert.equal(transitionCount('queued->submitted'), 2);
+  assert.equal(transitionCount('submitted->failed'), 1);
+  assert.equal(transitionCount('failed->queued'), 1);
+  assert.equal(retryTransitions.length, 5);
+  const retryQueueEvent = retryEvents.find((event) =>
+    event.eventType === 'status_changed'
+    && event.previousStatus === 'failed'
+    && event.nextStatus === 'queued'
+  );
+  assert.match(
+    retryQueueEvent?.idempotencyKey ?? '',
+    new RegExp(`^retry-queue:${retryDelivery.id}:`),
+    'The failed retry must carry attempt-specific queue idempotency context.'
+  );
+  const retrySubmitEvent = retryEvents.find((event) =>
+    event.eventType === 'status_changed'
+    && event.previousStatus === 'queued'
+    && event.nextStatus === 'submitted'
+    && event.idempotencyKey.startsWith(`retry-submit:${retryDelivery.id}:`)
+  );
+  assert.ok(retrySubmitEvent, 'The retry submission must use a distinct attempt-specific event key.');
+  assert.equal(
+    retrySubmitEvent.idempotencyKey.slice(`retry-submit:${retryDelivery.id}:`.length),
+    retryQueueEvent.idempotencyKey.slice(`retry-queue:${retryDelivery.id}:`.length),
+    'Retry queue and submit transitions must share the same deterministic attempt token.'
   );
 
   // Partial external failure: an adapter that throws on submit must leave the
