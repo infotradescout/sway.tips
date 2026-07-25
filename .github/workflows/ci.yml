@@ -75,6 +75,15 @@ jobs:
           DATABASE_URL: postgres://sway:sway@localhost:5432/sway_audio_file_collaboration_proof_ci
           SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
 
+      - name: Create Distribution Delivery Disposable Proof Database
+        run: PGPASSWORD=sway psql -h localhost -U sway -d sway_tips -c "CREATE DATABASE sway_distribution_delivery_proof_ci;"
+
+      - name: Run Distribution Delivery Integration Proof
+        run: npm run test:integration:distribution-delivery
+        env:
+          DATABASE_URL: postgres://sway:sway@localhost:5432/sway_distribution_delivery_proof_ci
+          SWAY_DISPOSABLE_MIGRATION_PROOF: '1'
+
       # Pro Mode (Phase 2 Slice 1A) disposable proofs. Each targets its own
       # freshly created, uniquely named database inside the same ephemeral
       # CI Postgres service -- the service container itself is discarded at

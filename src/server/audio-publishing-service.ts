@@ -38,6 +38,13 @@ const RIGHTS_DECLARATION_TYPES = new Set([
 ]);
 const REQUIRED_RECORDING_RIGHTS = ['master_control', 'composition_control'] as const;
 const REQUIRED_RELEASE_RIGHTS = ['artwork_control', 'distribution_authorization'] as const;
+// No real distribution provider is contracted yet. This allowlist is
+// deliberately separate from the delivery engine's registered adapters
+// (see distribution-delivery-service.ts / server.ts) so a sandbox-only
+// delivery -- however far it advances through the state machine in a
+// test or dev environment -- can never be projected on the public release
+// page as a provider-confirmed DSP status.
+const REAL_DISTRIBUTION_PROVIDER_KEYS = new Set<string>([]);
 const RECORDING_SCOPED_RIGHTS = new Set([
   'master_control', 'composition_control', 'sample_clearance', 'cover_license',
   'beat_license', 'performer_consent', 'ai_disclosure'
@@ -887,6 +894,34 @@ export function createAudioPublishingService(config: {
       .where(eq(musicReleases.performerId, input.performerId))
       .orderBy(asc(musicRightsDeclarationEvents.createdAt));
 
+    // Performer-facing delivery visibility. This intentionally includes
+    // sandbox-provider rows (unlike getPublicRelease's patron-facing
+    // projection, which filters them out) -- the performer owns the release
+    // and needs the truthful full delivery-job state, including the fact
+    // that a delivery is sandbox-only and not yet a real DSP submission.
+    const deliveries = await db
+      .select({
+        id: musicDistributionDeliveries.id,
+        releaseId: musicDistributionDeliveries.releaseId,
+        providerKey: musicDistributionDeliveries.providerKey,
+        destinationKey: musicDistributionDeliveries.destinationKey,
+        deliveryStatus: musicDistributionDeliveries.deliveryStatus,
+        providerReleaseId: musicDistributionDeliveries.providerReleaseId,
+        destinationReleaseId: musicDistributionDeliveries.destinationReleaseId,
+        lastError: musicDistributionDeliveries.lastError,
+        submittedAt: musicDistributionDeliveries.submittedAt,
+        acceptedAt: musicDistributionDeliveries.acceptedAt,
+        liveAt: musicDistributionDeliveries.liveAt,
+        takedownRequestedAt: musicDistributionDeliveries.takedownRequestedAt,
+        takenDownAt: musicDistributionDeliveries.takenDownAt,
+        createdAt: musicDistributionDeliveries.createdAt,
+        updatedAt: musicDistributionDeliveries.updatedAt
+      })
+      .from(musicDistributionDeliveries)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicDistributionDeliveries.releaseId))
+      .where(eq(musicReleases.performerId, input.performerId))
+      .orderBy(desc(musicDistributionDeliveries.updatedAt));
+
     const masterRows = await db
       .select({
         versionId: audioProjectAssetVersions.id,
@@ -946,6 +981,13 @@ export function createAudioPublishingService(config: {
             : events.find((event) => event.eventType === 'verified' || event.eventType === 'rejected')?.eventType ?? 'declared';
           return { ...declaration, outcome, events };
         }),
+        deliveries: deliveries.filter((delivery) => delivery.releaseId === release.id).map((delivery) => ({
+          ...delivery,
+          // Truthful performer-facing label: a sandbox delivery must never
+          // read as a real DSP confirmation, however far its state machine
+          // has advanced. See REAL_DISTRIBUTION_PROVIDER_KEYS.
+          isSandbox: !REAL_DISTRIBUTION_PROVIDER_KEYS.has(delivery.providerKey)
+        })),
         readiness: buildReleaseReadiness({
           release,
           recordings: recordings.filter((recording) => recording.releaseId === release.id),
@@ -2135,13 +2177,19 @@ export function createAudioPublishingService(config: {
       .innerJoin(musicReleaseRecordings, eq(musicReleaseRecordings.recordingId, musicRecordingCredits.recordingId))
       .where(eq(musicReleaseRecordings.releaseId, release.id))
       .orderBy(asc(musicRecordingCredits.sequence));
-    const destinations = await db.select({
+    const allDestinations = await db.select({
+      providerKey: musicDistributionDeliveries.providerKey,
       destinationKey: musicDistributionDeliveries.destinationKey,
       deliveryStatus: musicDistributionDeliveries.deliveryStatus,
       liveAt: musicDistributionDeliveries.liveAt
     }).from(musicDistributionDeliveries)
       .where(eq(musicDistributionDeliveries.releaseId, release.id))
       .orderBy(asc(musicDistributionDeliveries.destinationKey));
+    // Sandbox/test-provider deliveries are excluded from the public projection
+    // entirely -- see REAL_DISTRIBUTION_PROVIDER_KEYS.
+    const destinations = allDestinations
+      .filter((destination) => REAL_DISTRIBUTION_PROVIDER_KEYS.has(destination.providerKey))
+      .map(({ providerKey: _providerKey, ...destination }) => destination);
     const providerConfirmedLive = destinations.some((destination) => destination.deliveryStatus === 'live' && destination.liveAt);
     return {
       ...release,
