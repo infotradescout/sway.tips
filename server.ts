@@ -8726,12 +8726,8 @@ app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
 app.get('/api/public/releases/:releaseId', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
-  const releaseId = parseDurableGigId(req.params.releaseId);
-  if (!releaseId) {
-    return res.status(400).json({ error: 'releaseId must be a valid UUID.' });
-  }
   try {
-    const release = await audioPublishingService.getPublicRelease({ releaseId });
+    const release = await audioPublishingService.getPublicRelease({ releaseId: req.params.releaseId });
     if (!release) return res.status(404).json({ error: 'Public release not found.' });
     return res.json({ release });
   } catch (error) {
@@ -8741,12 +8737,8 @@ app.get('/api/public/releases/:releaseId', async (req, res) => {
 
 app.get('/api/public/releases/:releaseId/artwork', async (req, res) => {
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
-  const releaseId = parseDurableGigId(req.params.releaseId);
-  if (!releaseId) {
-    return res.status(400).json({ error: 'releaseId must be a valid UUID.' });
-  }
   try {
-    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId });
+    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId: req.params.releaseId });
     res.setHeader('Content-Type', opened.version.mimeType);
     res.setHeader('Content-Length', String(opened.byteSize));
     res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);

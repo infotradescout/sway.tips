@@ -244,6 +244,24 @@ try {
   assert.equal(createdEvents[0].eventType, 'delivery_created');
   assert.equal(createdEvents[0].actorUserId, ownerId);
 
+  // Every mutation must re-check release-management authority before either
+  // calling the adapter or returning an idempotent replay. Owning some other
+  // performer account, or holding review-only access, is not enough.
+  await assert.rejects(
+    deliveryService.submitDelivery({ deliveryId: delivery.id, actorUserId: reviewerId }),
+    /release-management authority/i
+  );
+  await assert.rejects(
+    deliveryService.submitDelivery({ deliveryId: delivery.id, actorUserId: outsiderId }),
+    /release-management authority/i
+  );
+  assert.equal(submitCount, 0, 'Denied submit attempts must not call the provider.');
+  const [draftAfterDeniedSubmit] = await db
+    .select()
+    .from(musicDistributionDeliveries)
+    .where(eq(musicDistributionDeliveries.id, delivery.id));
+  assert.equal(draftAfterDeniedSubmit.deliveryStatus, 'draft');
+
   // --- Performer visibility proof ---
   // The delivery job engine is useless to a performer if only the service
   // layer can see it. listReleaseWorkspace is what actually backs the
@@ -286,6 +304,11 @@ try {
   assert.equal(resubmitted.alreadySubmitted, true);
   assert.equal(submitCount, 1, 'A retried submit must never call the provider a second time.');
   assert.equal((await eventsFor(delivery.id)).length, 3, 'A retried submit must not record extra events.');
+  await assert.rejects(
+    deliveryService.submitDelivery({ deliveryId: delivery.id, actorUserId: outsiderId }),
+    /release-management authority/i,
+    'An idempotent replay must not disclose another performer’s delivery.'
+  );
 
   // Partial external failure: an adapter that throws on submit must leave the
   // delivery exactly where it started, with no partial transition applied.
@@ -392,6 +415,14 @@ try {
     signatureHeader: signedCorrectionAccepted.signatureHeader
   });
 
+  await assert.rejects(
+    deliveryService.requestCorrection({
+      deliveryId: correctionDelivery.id,
+      actorUserId: reviewerId,
+      reason: 'Review-only access cannot request a correction.'
+    }),
+    /release-management authority/i
+  );
   const correction = await deliveryService.requestCorrection({
     deliveryId: correctionDelivery.id,
     actorUserId: ownerId,
@@ -445,6 +476,14 @@ try {
   assert.deepEqual(publicRelease?.destinations, [], 'Sandbox deliveries must never appear in the public release projection.');
 
   // Takedown: manual request, then provider confirmation.
+  await assert.rejects(
+    deliveryService.requestTakedown({
+      deliveryId: delivery.id,
+      actorUserId: outsiderId,
+      reason: 'Another performer cannot request this takedown.'
+    }),
+    /release-management authority/i
+  );
   const takedownRequested = await deliveryService.requestTakedown({
     deliveryId: delivery.id,
     actorUserId: ownerId,

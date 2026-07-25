@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
 import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
@@ -16,55 +16,6 @@ type ActorRole = 'patron' | 'performer' | 'admin' | 'support' | null;
 type GuardResult =
   | { allowed: true; actor: SwayActor; role: ActorRole }
   | { allowed: false; status: number; reason: string };
-
-const GIG_MUTATION_ACCESS_LEVELS = new Set([
-  'owner',
-  'admin',
-  'manager',
-  'cohost',
-  'host',
-  'editor',
-  'moderator'
-]);
-
-const GIG_VIEW_ACCESS_LEVELS = new Set([
-  'viewer',
-  ...GIG_MUTATION_ACCESS_LEVELS
-]);
-
-function normalizeAccessLevel(accessLevel: string) {
-  return accessLevel.trim().toLowerCase();
-}
-
-function isValidAccessLevelForMutation(accessLevel: string) {
-  return GIG_MUTATION_ACCESS_LEVELS.has(normalizeAccessLevel(accessLevel));
-}
-
-function isValidAccessLevelForView(accessLevel: string) {
-  return GIG_VIEW_ACCESS_LEVELS.has(normalizeAccessLevel(accessLevel));
-}
-
-async function hasValidGigGrant(
-  db: SwayDb,
-  actorId: string,
-  gigId: string,
-  requiredAccess: (accessLevel: string) => boolean
-) {
-  const accessRows = await db
-    .select({ accessLevel: gigAccessGrants.accessLevel })
-    .from(gigAccessGrants)
-    .where(and(
-      eq(gigAccessGrants.gigId, gigId),
-      eq(gigAccessGrants.userId, actorId),
-      or(
-        isNull(gigAccessGrants.expiresAt),
-        gt(gigAccessGrants.expiresAt, new Date())
-      )
-    ))
-    .limit(20);
-
-  return accessRows.some((row) => requiredAccess(row.accessLevel));
-}
 
 export type AccessControl = {
   hydrateRequestActor: (req: Request) => Promise<SwayActor>;
@@ -504,7 +455,14 @@ async function hasTalentRole(db: SwayDb, actorId: string) {
     .limit(1);
 
   if (membershipRows.length > 0) return true;
-  return false;
+
+  const accessRows = await db
+    .select({ id: gigAccessGrants.id })
+    .from(gigAccessGrants)
+    .where(eq(gigAccessGrants.userId, actorId))
+    .limit(1);
+
+  return accessRows.length > 0;
 }
 
 export function createAccessControl({
@@ -591,7 +549,7 @@ export function createAccessControl({
       if (await hasTalentRole(db, actor.actorId)) {
         return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
       }
-      return { allowed: false, status: 403, reason: 'Performer membership required.' };
+      return { allowed: false, status: 403, reason: 'Performer membership or gig access grant required.' };
     },
 
     async requireAdminAccess(req) {
@@ -715,9 +673,16 @@ export function createAccessControl({
         return { allowed: true, actor, role };
       }
 
-      const hasGrant = await hasValidGigGrant(db, actor.actorId, gigId, isValidAccessLevelForMutation);
+      const grantRows = await db
+        .select({ id: gigAccessGrants.id })
+        .from(gigAccessGrants)
+        .where(and(
+          eq(gigAccessGrants.gigId, gigId),
+          eq(gigAccessGrants.userId, actor.actorId)
+        ))
+        .limit(1);
 
-      if (hasGrant) {
+      if (grantRows.length > 0) {
         return { allowed: true, actor, role };
       }
 
@@ -741,54 +706,6 @@ export function createAccessControl({
         );
       }
       if (await hasTalentRole(db, actor.actorId)) {
-        return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
-      }
-
-      const routeGigId = typeof req.params?.gigId === 'string' ? req.params.gigId : null;
-      if (!routeGigId || !UUID_PATTERN.test(routeGigId)) {
-        return { allowed: false, status: 403, reason: 'A valid room ID is required for overlay access.' };
-      }
-
-      const performerMembership = await db
-        .select({ performerId: gigSessions.performerId })
-        .from(gigSessions)
-        .where(eq(gigSessions.id, routeGigId))
-        .limit(1);
-
-      if (!performerMembership.length) {
-        return { allowed: false, status: 404, reason: 'The room selected for overlay access was not found.' };
-      }
-
-      const roomPerformerId = performerMembership[0].performerId;
-
-      const ownerRows = await db
-        .select({ id: performers.id })
-        .from(performers)
-        .where(and(
-          eq(performers.id, roomPerformerId),
-          eq(performers.ownerUserId, actor.actorId)
-        ))
-        .limit(1);
-
-      if (ownerRows.length > 0) {
-        return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
-      }
-
-      const memberRows = await db
-        .select({ id: performerMemberships.id })
-        .from(performerMemberships)
-        .where(and(
-          eq(performerMemberships.performerId, roomPerformerId),
-          eq(performerMemberships.userId, actor.actorId)
-        ))
-        .limit(1);
-
-      if (memberRows.length > 0) {
-        return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
-      }
-
-      const hasGrant = await hasValidGigGrant(db, actor.actorId, routeGigId, isValidAccessLevelForView);
-      if (hasGrant) {
         return { allowed: true, actor, role: await getActorRole(db, actor.actorId) };
       }
       return { allowed: false, status: 403, reason: 'Performer membership or gig access grant required to open overlay.' };

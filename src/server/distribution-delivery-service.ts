@@ -141,6 +141,7 @@ export function createDistributionDeliveryService(config: {
         .for('update')
         .limit(1);
       if (!delivery) throw new Error('Delivery not found.');
+      await requireReleaseManagementAuthority(tx, delivery.releaseId, input.actorUserId);
       if (TERMINAL_OR_IN_FLIGHT_STATUSES.has(delivery.deliveryStatus)) {
         return { delivery, alreadySubmitted: true };
       }
@@ -206,6 +207,7 @@ export function createDistributionDeliveryService(config: {
         .for('update')
         .limit(1);
       if (!delivery) throw new Error('Delivery not found.');
+      await requireReleaseManagementAuthority(tx, delivery.releaseId, input.actorUserId);
       if (delivery.deliveryStatus === 'takedown_requested' || delivery.deliveryStatus === 'taken_down') {
         return { delivery, alreadyRequested: true };
       }
@@ -244,6 +246,7 @@ export function createDistributionDeliveryService(config: {
         .for('update')
         .limit(1);
       if (!delivery) throw new Error('Delivery not found.');
+      await requireReleaseManagementAuthority(tx, delivery.releaseId, input.actorUserId);
       if (delivery.deliveryStatus === 'correction_pending') {
         return { delivery, alreadyRequested: true };
       }
@@ -365,22 +368,12 @@ export function createDistributionDeliveryService(config: {
     }
   }
 
-  async function getDelivery(input: { deliveryId: string }) {
-    const [delivery] = await db
-      .select()
-      .from(musicDistributionDeliveries)
-      .where(eq(musicDistributionDeliveries.id, input.deliveryId))
-      .limit(1);
-    return delivery ?? null;
-  }
-
   return {
     createDelivery,
     submitDelivery,
     requestTakedown,
     requestCorrection,
-    ingestWebhook,
-    getDelivery
+    ingestWebhook
   };
 }
 

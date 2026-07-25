@@ -5,11 +5,6 @@ import { clientPendingActions, idempotencyKeys } from '../db/schema';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_TTL_HOURS = 48;
-const PENDING_ACTION_REPLAY = Object.freeze({
-  kind: 'replay',
-  status: 202,
-  body: { success: true, pending: true }
-} as const);
 
 export type DurableActionInput = {
   clientRequestId: string;
@@ -76,7 +71,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
     if (record.firstResponseStatus && record.firstResponseBody) {
       return { kind: 'replay', status: record.firstResponseStatus, body: record.firstResponseBody };
     }
-    return { ...PENDING_ACTION_REPLAY };
+    return { kind: 'new' };
   }
 
   async function reservePendingAction(input: DurableActionInput): Promise<IdempotencyReplay> {
@@ -103,27 +98,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
       if (record.firstResponseStatus && record.firstResponseBody) {
         return { kind: 'replay', status: record.firstResponseStatus, body: record.firstResponseBody };
       }
-      return { ...PENDING_ACTION_REPLAY };
-    }
-
-    const inserted = await db.insert(idempotencyKeys).values({
-      idempotencyKey: input.idempotencyKey,
-      patronDeviceIdHash: input.patronDeviceIdHash,
-      actorId: null,
-      sessionId: null,
-      gigId: input.gigId,
-      actionType: input.actionType,
-      amountCents: input.amountCents,
-      currency: input.currency,
-      targetEntityType: input.targetEntityType ?? null,
-      targetEntityId: input.targetEntityId ?? null,
-      payloadHash: input.payloadHash,
-      intentFingerprint: input.intentFingerprint,
-      expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000)
-    }).onConflictDoNothing().returning({ id: idempotencyKeys.id });
-
-    if (!inserted.length) {
-      return loadDurableActionRecord(input.idempotencyKey, input.intentFingerprint);
+      return { kind: 'new' };
     }
 
     await db.insert(clientPendingActions).values({
@@ -148,6 +123,22 @@ export function createIdempotencyStore(databaseUrl?: string) {
         lastError: null
       }
     });
+
+    await db.insert(idempotencyKeys).values({
+      idempotencyKey: input.idempotencyKey,
+      patronDeviceIdHash: input.patronDeviceIdHash,
+      actorId: null,
+      sessionId: null,
+      gigId: input.gigId,
+      actionType: input.actionType,
+      amountCents: input.amountCents,
+      currency: input.currency,
+      targetEntityType: input.targetEntityType ?? null,
+      targetEntityId: input.targetEntityId ?? null,
+      payloadHash: input.payloadHash,
+      intentFingerprint: input.intentFingerprint,
+      expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000)
+    }).onConflictDoNothing();
 
     return { kind: 'new' };
   }
@@ -176,7 +167,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
       if (record.firstResponseStatus && record.firstResponseBody) {
         return { kind: 'replay', status: record.firstResponseStatus, body: record.firstResponseBody };
       }
-      return { ...PENDING_ACTION_REPLAY };
+      return { kind: 'new' };
     }
 
     const inserted = await db.insert(idempotencyKeys).values({
@@ -196,7 +187,9 @@ export function createIdempotencyStore(databaseUrl?: string) {
     }).onConflictDoNothing().returning({ id: idempotencyKeys.id });
 
     if (!inserted.length) {
-      return loadDurableActionRecord(input.idempotencyKey, input.intentFingerprint);
+      const replay = await loadDurableActionRecord(input.idempotencyKey, input.intentFingerprint);
+      if (replay.kind === 'new') return { kind: 'replay', status: 202, body: { success: true, pending: true } };
+      return replay;
     }
 
     return { kind: 'new' };
