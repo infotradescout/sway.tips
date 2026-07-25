@@ -894,6 +894,34 @@ export function createAudioPublishingService(config: {
       .where(eq(musicReleases.performerId, input.performerId))
       .orderBy(asc(musicRightsDeclarationEvents.createdAt));
 
+    // Performer-facing delivery visibility. This intentionally includes
+    // sandbox-provider rows (unlike getPublicRelease's patron-facing
+    // projection, which filters them out) -- the performer owns the release
+    // and needs the truthful full delivery-job state, including the fact
+    // that a delivery is sandbox-only and not yet a real DSP submission.
+    const deliveries = await db
+      .select({
+        id: musicDistributionDeliveries.id,
+        releaseId: musicDistributionDeliveries.releaseId,
+        providerKey: musicDistributionDeliveries.providerKey,
+        destinationKey: musicDistributionDeliveries.destinationKey,
+        deliveryStatus: musicDistributionDeliveries.deliveryStatus,
+        providerReleaseId: musicDistributionDeliveries.providerReleaseId,
+        destinationReleaseId: musicDistributionDeliveries.destinationReleaseId,
+        lastError: musicDistributionDeliveries.lastError,
+        submittedAt: musicDistributionDeliveries.submittedAt,
+        acceptedAt: musicDistributionDeliveries.acceptedAt,
+        liveAt: musicDistributionDeliveries.liveAt,
+        takedownRequestedAt: musicDistributionDeliveries.takedownRequestedAt,
+        takenDownAt: musicDistributionDeliveries.takenDownAt,
+        createdAt: musicDistributionDeliveries.createdAt,
+        updatedAt: musicDistributionDeliveries.updatedAt
+      })
+      .from(musicDistributionDeliveries)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicDistributionDeliveries.releaseId))
+      .where(eq(musicReleases.performerId, input.performerId))
+      .orderBy(desc(musicDistributionDeliveries.updatedAt));
+
     const masterRows = await db
       .select({
         versionId: audioProjectAssetVersions.id,
@@ -953,6 +981,13 @@ export function createAudioPublishingService(config: {
             : events.find((event) => event.eventType === 'verified' || event.eventType === 'rejected')?.eventType ?? 'declared';
           return { ...declaration, outcome, events };
         }),
+        deliveries: deliveries.filter((delivery) => delivery.releaseId === release.id).map((delivery) => ({
+          ...delivery,
+          // Truthful performer-facing label: a sandbox delivery must never
+          // read as a real DSP confirmation, however far its state machine
+          // has advanced. See REAL_DISTRIBUTION_PROVIDER_KEYS.
+          isSandbox: !REAL_DISTRIBUTION_PROVIDER_KEYS.has(delivery.providerKey)
+        })),
         readiness: buildReleaseReadiness({
           release,
           recordings: recordings.filter((recording) => recording.releaseId === release.id),

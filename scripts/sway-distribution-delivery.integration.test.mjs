@@ -244,6 +244,27 @@ try {
   assert.equal(createdEvents[0].eventType, 'delivery_created');
   assert.equal(createdEvents[0].actorUserId, ownerId);
 
+  // --- Performer visibility proof ---
+  // The delivery job engine is useless to a performer if only the service
+  // layer can see it. listReleaseWorkspace is what actually backs the
+  // performer's own console (GET /api/talent/audio/releases), so this reads
+  // it exactly as the performer would see it -- not the internal delivery
+  // service/table directly.
+  async function findDeliveryAsSeenByPerformer(deliveryId) {
+    const workspace = await publishing.listReleaseWorkspace({ performerId: performer.id, actorUserId: ownerId });
+    const release = workspace.releases.find((candidate) => candidate.id === releaseId);
+    assert.ok(release, 'Performer workspace must still include the release owning this delivery.');
+    const found = release.deliveries.find((candidate) => candidate.id === deliveryId);
+    assert.ok(found, `Performer workspace must surface delivery ${deliveryId}.`);
+    return found;
+  }
+
+  const draftAsSeenByPerformer = await findDeliveryAsSeenByPerformer(delivery.id);
+  assert.equal(draftAsSeenByPerformer.deliveryStatus, 'draft');
+  assert.equal(draftAsSeenByPerformer.providerKey, 'sway_sandbox');
+  assert.equal(draftAsSeenByPerformer.destinationKey, 'spotify');
+  assert.equal(draftAsSeenByPerformer.isSandbox, true, 'A sandbox delivery must be labeled as sandbox to the performer, never as a real DSP delivery.');
+
   // Submission drives draft -> queued -> submitted and calls the adapter exactly once.
   const submitted = await deliveryService.submitDelivery({ deliveryId: delivery.id, actorUserId: ownerId });
   assert.equal(submitted.alreadySubmitted, false);
@@ -251,6 +272,12 @@ try {
   assert.match(submitted.delivery.metadataFingerprint, /^[0-9a-f]{64}$/);
   assert.ok(submitted.delivery.providerReleaseId?.startsWith(`sandbox-${releaseId}-`));
   assert.equal(submitCount, 1);
+
+  // Fulfillment status proof: the performer's own workspace view must reflect
+  // the submitted state immediately, without querying the delivery service directly.
+  const submittedAsSeenByPerformer = await findDeliveryAsSeenByPerformer(delivery.id);
+  assert.equal(submittedAsSeenByPerformer.deliveryStatus, 'submitted');
+  assert.equal(submittedAsSeenByPerformer.providerReleaseId, submitted.delivery.providerReleaseId);
   const afterSubmitEvents = await eventsFor(delivery.id);
   assert.equal(afterSubmitEvents.length, 3, 'delivery_created + queued status_changed + submitted status_changed.');
 
@@ -303,6 +330,15 @@ try {
   assert.equal(afterAccepted.deliveryStatus, 'accepted');
   assert.equal(afterAccepted.destinationReleaseId, 'spotify-track-abc');
   assert.ok(afterAccepted.acceptedAt);
+
+  // Provider-confirmed acceptance must reach the performer's own view, not
+  // just the internal table -- this is the "fulfillment status" leg of the
+  // job-creation -> performer-visibility -> fulfillment-status -> confirmation
+  // lifecycle.
+  const acceptedAsSeenByPerformer = await findDeliveryAsSeenByPerformer(delivery.id);
+  assert.equal(acceptedAsSeenByPerformer.deliveryStatus, 'accepted');
+  assert.equal(acceptedAsSeenByPerformer.destinationReleaseId, 'spotify-track-abc');
+  assert.ok(acceptedAsSeenByPerformer.acceptedAt, 'Performer view must carry the accepted timestamp.');
 
   // Replay: same event, same signature -- must be a no-op, not a second transition.
   const replayIngest = await deliveryService.ingestWebhook({
@@ -392,6 +428,16 @@ try {
   const [afterLive] = await db.select().from(musicDistributionDeliveries).where(eq(musicDistributionDeliveries.id, delivery.id));
   assert.equal(afterLive.deliveryStatus, 'live');
   assert.ok(afterLive.liveAt);
+
+  // Confirmation proof: the performer's own workspace view must reflect the
+  // provider's live confirmation -- this is the end of the lifecycle the
+  // performer actually watches (job creation -> visibility -> fulfillment
+  // status -> confirmation), completed end to end without ever reading the
+  // internal delivery table directly.
+  const liveAsSeenByPerformer = await findDeliveryAsSeenByPerformer(delivery.id);
+  assert.equal(liveAsSeenByPerformer.deliveryStatus, 'live');
+  assert.ok(liveAsSeenByPerformer.liveAt, 'Performer view must carry the live-confirmation timestamp.');
+  assert.equal(liveAsSeenByPerformer.isSandbox, true, 'Even a live-confirmed sandbox delivery must stay labeled sandbox to the performer.');
 
   // Truthful public projection: a sandbox-only delivery, however far it
   // advances, must never be surfaced as a real provider-confirmed status.
