@@ -89,6 +89,11 @@ Sway is the creator’s account for live audience money **and** audio collaborat
 - `/talent/connect/files` (private pairing; foundation spec only today)
 - Publishing/project routes when runtime lands
 
+### Public profile law
+- Curated `/p/:handle` pages stay **public when unclaimed**. Unclaimed ≠ unpublished.
+- Claim locks booking/tipping to the verified owner; it does not gate page visibility.
+- Only **suspended** handles go dark (no curated-preview fallback).
+
 ## Current Product State
 
 - Live-night loop: implemented and locally QA’d; Stripe publishable/secret/webhook present on Render in **test** mode as of 2026-07-21.

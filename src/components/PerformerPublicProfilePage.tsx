@@ -271,7 +271,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           </h1>
           <p className="mt-3 text-sm leading-6 text-slate-400">
             {status === 'not-found'
-              ? 'This performer page is not published right now.'
+              ? 'No public Sway page was found for this link.'
               : 'Sway could not load this page. Try again in a moment.'}
           </p>
           <a href="/" className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-white hover:border-fuchsia-400/40">
@@ -333,10 +333,10 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">{profile.isPreview ? 'Working profile preview' : 'Public performer page'}</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">Public performer page</p>
               {profile.isPreview ? (
                 <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-cyan-100">
-                  {profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · ready to review'}
+                  {profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}
                 </span>
               ) : null}
               {profile.partner.active ? (
@@ -371,9 +371,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
 
           {profile.isPreview ? (
             <div className="mt-6 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.06] px-4 py-4 text-left">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Prepared for the performer</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Public page · unclaimed</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                This is a review-ready Sway page. It is not claimed yet, and direct booking contact stays locked until the owner verifies the account.
+                This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.
               </p>
             </div>
           ) : null}
