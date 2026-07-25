@@ -17,7 +17,10 @@ import {
 import { createLocalAudioObjectStore } from '../src/server/audio-object-storage-local.ts';
 import { createAudioPublishingService } from '../src/server/audio-publishing-service.ts';
 import { createSandboxDistributionAdapter } from '../src/server/distribution-adapter.ts';
-import { createDistributionDeliveryService } from '../src/server/distribution-delivery-service.ts';
+import {
+  classifyDistributionWebhookFailure,
+  createDistributionDeliveryService
+} from '../src/server/distribution-delivery-service.ts';
 
 if (process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
   throw new Error('Distribution delivery integration requires SWAY_DISPOSABLE_MIGRATION_PROOF=1.');
@@ -442,6 +445,42 @@ try {
     destinationReleaseId: 'spotify-track-abc',
     error: null
   };
+
+  // A validly signed but semantically impossible transition is a provider
+  // request error, not a storage outage. It must remain a non-retryable 4xx
+  // and roll back before the provider event is persisted.
+  const invalidLiveEvent = {
+    ...acceptedEvent,
+    providerEventId: 'evt-live-before-accepted',
+    status: 'live'
+  };
+  const signedInvalidLive = baseAdapter.signWebhookEvent(invalidLiveEvent);
+  let invalidTransitionFailure;
+  try {
+    await deliveryService.ingestWebhook({
+      providerKey: 'sway_sandbox',
+      rawBody: signedInvalidLive.rawBody,
+      signatureHeader: signedInvalidLive.signatureHeader
+    });
+  } catch (error) {
+    invalidTransitionFailure = classifyDistributionWebhookFailure(error);
+  }
+  assert.equal(invalidTransitionFailure?.statusCode, 409);
+  assert.equal(invalidTransitionFailure?.retryable, false);
+  const [afterInvalidTransition] = await db
+    .select()
+    .from(musicDistributionDeliveries)
+    .where(eq(musicDistributionDeliveries.id, delivery.id));
+  assert.equal(afterInvalidTransition.deliveryStatus, 'submitted');
+  assert.equal(
+    (await db.select().from(musicDistributionDeliveryEvents).where(and(
+      eq(musicDistributionDeliveryEvents.deliveryId, delivery.id),
+      eq(musicDistributionDeliveryEvents.providerEventId, invalidLiveEvent.providerEventId)
+    ))).length,
+    0,
+    'A semantically invalid webhook must not persist its provider event.'
+  );
+
   const signedAccepted = baseAdapter.signWebhookEvent(acceptedEvent);
   const firstIngest = await deliveryService.ingestWebhook({
     providerKey: 'sway_sandbox',
@@ -539,14 +578,18 @@ try {
   assert.equal(correctionReplay.delivery.deliveryStatus, 'correction_pending');
 
   // Tampered signature must be rejected before any DB write.
-  await assert.rejects(
-    deliveryService.ingestWebhook({
+  let invalidSignatureFailure;
+  try {
+    await deliveryService.ingestWebhook({
       providerKey: 'sway_sandbox',
       rawBody: signedAccepted.rawBody,
       signatureHeader: `${signedAccepted.signatureHeader.slice(0, -1)}${signedAccepted.signatureHeader.at(-1) === '0' ? '1' : '0'}`
-    }),
-    /signature verification failed/i
-  );
+    });
+  } catch (error) {
+    invalidSignatureFailure = classifyDistributionWebhookFailure(error);
+  }
+  assert.equal(invalidSignatureFailure?.statusCode, 400);
+  assert.equal(invalidSignatureFailure?.retryable, false);
 
   // Live confirmation.
   const liveEvent = { ...acceptedEvent, providerEventId: 'evt-live-1', status: 'live' };

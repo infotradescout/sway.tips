@@ -29,6 +29,12 @@ if (!/adapters:\s*\{\s*sway_sandbox:/.test(server)) {
 if (!server.includes("req.header('sway-distribution-signature')")) {
   failures.push('Distribution webhook route must read a signature header before trusting the body.');
 }
+if (!server.includes('classifyDistributionWebhookFailure(error)')) {
+  failures.push('Distribution webhook route must use typed failure classification instead of mapping every error to 400.');
+}
+if (!server.includes("res.setHeader('Retry-After', '30')")) {
+  failures.push('Retryable distribution webhook failures must advertise a Retry-After response.');
+}
 for (const disclosure of [
   'It prepares a release but does not send it to stores',
   'provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live'
@@ -41,6 +47,10 @@ for (const disclosure of [
 const behaviorProgram = `
   import assert from 'node:assert/strict';
   import { createSandboxDistributionAdapter } from './src/server/distribution-adapter.ts';
+  import {
+    classifyDistributionWebhookFailure,
+    createDistributionDeliveryService
+  } from './src/server/distribution-delivery-service.ts';
 
   const adapter = createSandboxDistributionAdapter({ secret: 'contract-test-secret' });
   assert.equal(adapter.providerKey, 'sway_sandbox');
@@ -118,6 +128,56 @@ const behaviorProgram = `
   expectThrow('missing providerEventId must be rejected', () => {
     adapter.parseWebhookEvent(Buffer.from(JSON.stringify({ ...event, providerEventId: undefined })));
   });
+
+  const captureFailure = async (operation) => {
+    try {
+      await operation();
+    } catch (error) {
+      return classifyDistributionWebhookFailure(error);
+    }
+    throw new Error('Expected operation to fail.');
+  };
+
+  let transactionCalls = 0;
+  const invalidSignatureService = createDistributionDeliveryService({
+    db: {
+      async transaction() {
+        transactionCalls += 1;
+        throw new Error('Transaction must not run for an invalid signature.');
+      }
+    },
+    adapters: { sway_sandbox: adapter }
+  });
+  const invalidSignatureFailure = await captureFailure(() => invalidSignatureService.ingestWebhook({
+    providerKey: 'sway_sandbox',
+    rawBody,
+    signatureHeader: 'invalid-signature'
+  }));
+  assert.equal(invalidSignatureFailure.statusCode, 400, 'An invalid signature must remain a 400 response.');
+  assert.equal(invalidSignatureFailure.retryable, false, 'An invalid signature must not be marked retryable.');
+  assert.equal(transactionCalls, 0, 'An invalid signature must be rejected before storage is touched.');
+
+  const storageFailureService = createDistributionDeliveryService({
+    db: {
+      async transaction() {
+        transactionCalls += 1;
+        throw new Error('Simulated storage outage.');
+      }
+    },
+    adapters: { sway_sandbox: adapter }
+  });
+  const storageFailure = await captureFailure(() => storageFailureService.ingestWebhook({
+    providerKey: 'sway_sandbox',
+    rawBody,
+    signatureHeader
+  }));
+  assert.equal(storageFailure.statusCode, 503, 'A storage failure must produce a retryable 5xx response.');
+  assert.equal(storageFailure.retryable, true, 'A storage failure must be marked retryable.');
+  assert.equal(
+    storageFailure.message,
+    'Distribution webhook processing is temporarily unavailable.',
+    'A storage failure response must not leak internal error details.'
+  );
 `;
 
 const behavior = spawnSync(

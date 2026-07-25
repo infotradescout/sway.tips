@@ -98,7 +98,10 @@ import { createAudioFilePairingService } from "./src/server/audio-file-pairing-s
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 import { createSandboxDistributionAdapter } from "./src/server/distribution-adapter";
-import { createDistributionDeliveryService } from "./src/server/distribution-delivery-service";
+import {
+  classifyDistributionWebhookFailure,
+  createDistributionDeliveryService
+} from "./src/server/distribution-delivery-service";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -7339,9 +7342,15 @@ app.post('/api/distribution/webhook/:providerKey', async (req, res) => {
     });
     return res.json({ received: true, ...result });
   } catch (error) {
-    return res.status(400).json({
-      error: error instanceof Error ? error.message : 'Distribution webhook processing failed.'
-    });
+    const failure = classifyDistributionWebhookFailure(error);
+    if (failure.retryable) {
+      res.setHeader('Retry-After', '30');
+      console.error('Distribution webhook processing failed after request validation.', {
+        providerKey: req.params.providerKey,
+        error
+      });
+    }
+    return res.status(failure.statusCode).json({ error: failure.message });
   }
 });
 

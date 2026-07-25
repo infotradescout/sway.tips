@@ -11,11 +11,68 @@ import {
   musicReleases,
   musicRecordings
 } from '../db/schema';
-import type { DistributionAdapter, DistributionReleasePayload } from './distribution-adapter';
+import type {
+  DistributionAdapter,
+  DistributionReleasePayload,
+  DistributionWebhookEvent
+} from './distribution-adapter';
 
 const TERMINAL_OR_IN_FLIGHT_STATUSES = new Set([
   'submitted', 'accepted', 'live', 'correction_pending', 'takedown_requested', 'taken_down'
 ]);
+
+const WEBHOOK_ALLOWED_NEXT_STATUSES: Readonly<Record<string, ReadonlySet<DistributionWebhookEvent['status']>>> = {
+  draft: new Set(['failed']),
+  queued: new Set(['failed']),
+  submitted: new Set(['accepted', 'correction_pending', 'failed']),
+  accepted: new Set(['live', 'correction_pending', 'failed']),
+  live: new Set(['correction_pending']),
+  correction_pending: new Set(['failed']),
+  takedown_requested: new Set(['taken_down', 'failed']),
+  failed: new Set(['correction_pending'])
+};
+
+export type DistributionWebhookRequestErrorCode =
+  | 'unknown_provider'
+  | 'invalid_signature'
+  | 'invalid_payload'
+  | 'unknown_delivery'
+  | 'invalid_transition';
+
+export class DistributionWebhookRequestError extends Error {
+  readonly code: DistributionWebhookRequestErrorCode;
+  readonly statusCode: 400 | 404 | 409;
+
+  constructor(
+    code: DistributionWebhookRequestErrorCode,
+    message: string,
+    statusCode: 400 | 404 | 409 = 400
+  ) {
+    super(message);
+    this.name = 'DistributionWebhookRequestError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+export function classifyDistributionWebhookFailure(error: unknown): {
+  statusCode: 400 | 404 | 409 | 503;
+  message: string;
+  retryable: boolean;
+} {
+  if (error instanceof DistributionWebhookRequestError) {
+    return {
+      statusCode: error.statusCode,
+      message: error.message,
+      retryable: false
+    };
+  }
+  return {
+    statusCode: 503,
+    message: 'Distribution webhook processing is temporarily unavailable.',
+    retryable: true
+  };
+}
 
 type SwayTx = Parameters<Parameters<SwayDb['transaction']>[0]>[0];
 
@@ -43,6 +100,17 @@ export function createDistributionDeliveryService(config: {
   function requireAdapter(providerKey: string): DistributionAdapter {
     const adapter = adapters[providerKey];
     if (!adapter) throw new Error(`No distribution adapter is registered for provider "${providerKey}".`);
+    return adapter;
+  }
+
+  function requireWebhookAdapter(providerKey: string): DistributionAdapter {
+    const adapter = adapters[providerKey];
+    if (!adapter) {
+      throw new DistributionWebhookRequestError(
+        'unknown_provider',
+        `No distribution webhook adapter is registered for provider "${providerKey}".`
+      );
+    }
     return adapter;
   }
 
@@ -320,11 +388,31 @@ export function createDistributionDeliveryService(config: {
     rawBody: Buffer;
     signatureHeader: string | undefined;
   }): Promise<{ processed: boolean; duplicate: boolean }> {
-    const adapter = requireAdapter(input.providerKey);
-    if (!adapter.verifyWebhookSignature(input.rawBody, input.signatureHeader)) {
-      throw new Error('Distribution webhook signature verification failed.');
+    const adapter = requireWebhookAdapter(input.providerKey);
+    let signatureValid = false;
+    try {
+      signatureValid = adapter.verifyWebhookSignature(input.rawBody, input.signatureHeader);
+    } catch {
+      throw new DistributionWebhookRequestError(
+        'invalid_signature',
+        'Distribution webhook signature verification failed.'
+      );
     }
-    const event = adapter.parseWebhookEvent(input.rawBody);
+    if (!signatureValid) {
+      throw new DistributionWebhookRequestError(
+        'invalid_signature',
+        'Distribution webhook signature verification failed.'
+      );
+    }
+    let event: DistributionWebhookEvent;
+    try {
+      event = adapter.parseWebhookEvent(input.rawBody);
+    } catch {
+      throw new DistributionWebhookRequestError(
+        'invalid_payload',
+        'Distribution webhook payload is invalid.'
+      );
+    }
     const payloadSha256 = sha256Hex(input.rawBody);
 
     try {
@@ -339,7 +427,13 @@ export function createDistributionDeliveryService(config: {
           ))
           .for('update')
           .limit(1);
-        if (!delivery) throw new Error('Distribution webhook references an unknown delivery.');
+        if (!delivery) {
+          throw new DistributionWebhookRequestError(
+            'unknown_delivery',
+            'Distribution webhook references an unknown delivery.',
+            404
+          );
+        }
 
         const [createdEvent] = await tx
           .select({ actorUserId: musicDistributionDeliveryEvents.actorUserId })
@@ -350,6 +444,17 @@ export function createDistributionDeliveryService(config: {
           ))
           .limit(1);
         if (!createdEvent?.actorUserId) throw new Error('Delivery is missing its originating actor.');
+
+        if (
+          delivery.deliveryStatus !== event.status &&
+          !WEBHOOK_ALLOWED_NEXT_STATUSES[delivery.deliveryStatus]?.has(event.status)
+        ) {
+          throw new DistributionWebhookRequestError(
+            'invalid_transition',
+            `Distribution webhook cannot transition delivery from "${delivery.deliveryStatus}" to "${event.status}".`,
+            409
+          );
+        }
 
         await setSessionConfig(tx, 'sway.provider_webhook_verified', 'true');
         await setSessionConfig(tx, 'sway.provider_webhook_provider_key', input.providerKey);
