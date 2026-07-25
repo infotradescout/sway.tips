@@ -6,6 +6,7 @@ const root = process.cwd();
 const failures = [];
 
 const feePolicySource = readFileSync(join(root, 'src/server/fee-policy.ts'), 'utf8');
+const normalizedFeePolicySource = feePolicySource.replace(/\r\n/g, '\n');
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const serviceSource = readFileSync(join(root, 'src/server/payment-service.ts'), 'utf8');
 const storeSource = readFileSync(join(root, 'src/server/business-store.ts'), 'utf8');
@@ -51,7 +52,7 @@ requireIncludes(feePolicySource, 'proposedPlatformFeeCents:', 'resolveProposedPl
 requireIncludes(feePolicySource, 'CREATOR_DIRECT_TIER_THRESHOLD_CENTS = 500', 'Creator-direct tier threshold must be the fixed $5 breakpoint.');
 requireIncludes(feePolicySource, 'CREATOR_DIRECT_PCT_BELOW_THRESHOLD = 0.20', 'Creator-direct rate below the threshold must be 20%.');
 requireIncludes(feePolicySource, 'CREATOR_DIRECT_FLAT_CENTS_AT_OR_ABOVE = 100', 'Creator-direct flat rate at/above the threshold must be $1.');
-requireIncludes(feePolicySource, "input.attribution.kind === 'sway_promoted'\n    ? Math.round(input.subtotalCents * input.attribution.commissionBps / 10000)", 'Promoted commission must be computed from the campaign-supplied commissionBps, never a hardcoded rate.');
+requireIncludes(normalizedFeePolicySource, "input.attribution.kind === 'sway_promoted'\n    ? Math.round(input.subtotalCents * input.attribution.commissionBps / 10000)", 'Promoted commission must be computed from the campaign-supplied commissionBps, never a hardcoded rate.');
 if (/commissionBps\s*=\s*\d/.test(feePolicySource)) {
   failures.push('fee-policy.ts must not hardcode a promoted commissionBps value.');
 }
