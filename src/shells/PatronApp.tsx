@@ -25,6 +25,9 @@ import type { PatronRequestStatus } from '../types';
 import { AccountHome, AccountLogin, AccountSignup } from '../components/AccountAccess';
 import PublicReleasePage from '../components/PublicReleasePage';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
+import TicketOrderReturnPage from '../components/TicketOrderReturnPage';
+import TicketPassPage from '../components/TicketPassPage';
+import TicketWalletPage from '../components/TicketWalletPage';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -32,6 +35,9 @@ type PatronRoute =
   | { name: 'event'; eventId: string }
   | { name: 'discover' }
   | { name: 'release'; releaseId: string }
+  | { name: 'ticket-wallet' }
+  | { name: 'ticket-order-return'; orderId: string }
+  | { name: 'ticket-pass'; ticketId: string }
   | { name: 'account-home' }
   | { name: 'account-rights-review' }
   | { name: 'account-login' }
@@ -43,6 +49,11 @@ function resolvePatronRoute(pathname: string): PatronRoute {
   if (pathname === '/account/signup' || pathname === '/signup') return { name: 'account-signup' };
   if (pathname === '/account/reviews') return { name: 'account-rights-review' };
   if (pathname === '/account') return { name: 'account-home' };
+  if (pathname === '/tickets') return { name: 'ticket-wallet' };
+  if (parts[0] === 'tickets' && parts[1] === 'orders' && parts[2] && parts[3] === 'return') {
+    return { name: 'ticket-order-return', orderId: parts[2] };
+  }
+  if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket-pass', ticketId: parts[1] };
   if (pathname === '/discover') return { name: 'discover' };
   if (parts[0] === 'p' && parts[1]) return { name: 'performer', performerHandle: parts[1] };
   if (parts[0] === 'e' && parts[1]) return { name: 'event', eventId: parts[1] };
@@ -408,6 +419,9 @@ export default function PatronApp() {
   if (route.name === 'event') return <PublicEventPage eventId={route.eventId} />;
   if (route.name === 'discover') return <PublicDiscoverPage />;
   if (route.name === 'release') return <PublicReleasePage releaseId={route.releaseId} />;
+  if (route.name === 'ticket-wallet') return <TicketWalletPage />;
+  if (route.name === 'ticket-order-return') return <TicketOrderReturnPage orderId={route.orderId} />;
+  if (route.name === 'ticket-pass') return <TicketPassPage ticketId={route.ticketId} />;
   if (route.name === 'account-login') return <AccountLogin />;
   if (route.name === 'account-signup') return <AccountSignup />;
   if (route.name === 'account-rights-review') return <PerformerRightsReviewQueue backHref="/account" backLabel="Back to account" />;

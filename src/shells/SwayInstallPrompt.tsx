@@ -30,9 +30,20 @@ export default function SwayInstallPrompt() {
     // login/signup: a fixed-position install nag interrupts and visually overlaps
     // the room-setup form before a performer has created a single room, i.e.
     // before they've gotten any value from the app yet.
+    const accountNext = new URLSearchParams(window.location.search).get('next') || '';
+    const ticketCheckoutRecovery = (
+      pathname === '/account/login'
+      || pathname === '/account/signup'
+    ) && (
+      accountNext.startsWith('/e/')
+      || accountNext.startsWith('/tickets')
+    );
     return pathname.startsWith('/overlay')
       || pathname.startsWith('/admin')
-      || pathname.startsWith('/talent');
+      || pathname.startsWith('/talent')
+      || pathname.startsWith('/tickets')
+      || pathname.startsWith('/e/')
+      || ticketCheckoutRecovery;
   });
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {

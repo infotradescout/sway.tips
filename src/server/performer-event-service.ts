@@ -10,6 +10,7 @@ import {
 
 export type PerformerEventStatus = 'draft' | 'published' | 'cancelled';
 export type PerformerEventVisibility = 'public' | 'unlisted';
+export type PerformerEventTicketingMode = 'external' | 'native_ga';
 export const PUBLIC_EVENT_EXTERNAL_TICKET_LABELS = [
   'Get tickets',
   'RSVP',
@@ -24,6 +25,7 @@ export type PerformerEventDto = {
   title: string;
   description: string | null;
   startsAt: string;
+  doorOpensAt: string | null;
   endsAt: string | null;
   timeZone: string;
   locationName: string | null;
@@ -31,6 +33,7 @@ export type PerformerEventDto = {
   city: string | null;
   locationIsTba: boolean;
   coverImageUrl: string | null;
+  ticketingMode: PerformerEventTicketingMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -55,6 +58,7 @@ export type PublicPerformerEventDto = {
   title: string;
   description: string | null;
   startsAt: string;
+  doorOpensAt: string | null;
   endsAt: string | null;
   timeZone: string;
   locationName: string | null;
@@ -62,6 +66,7 @@ export type PublicPerformerEventDto = {
   city: string | null;
   locationIsTba: boolean;
   coverImageUrl: string | null;
+  ticketingMode: PerformerEventTicketingMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -81,6 +86,7 @@ export type CreatePerformerEventInput = {
   title: string;
   description?: string | null;
   startsAt: string;
+  doorOpensAt?: string | null;
   endsAt?: string | null;
   timeZone: string;
   locationName?: string | null;
@@ -88,6 +94,7 @@ export type CreatePerformerEventInput = {
   city?: string | null;
   locationIsTba?: boolean;
   coverImageUrl?: string | null;
+  ticketingMode?: PerformerEventTicketingMode;
   externalTicketUrl?: string | null;
   externalTicketLabel?: string | null;
   visibility?: PerformerEventVisibility;
@@ -101,6 +108,7 @@ export type UpdatePerformerEventInput = {
   title?: string;
   description?: string | null;
   startsAt?: string;
+  doorOpensAt?: string | null;
   endsAt?: string | null;
   timeZone?: string;
   locationName?: string | null;
@@ -338,6 +346,16 @@ function normalizeVisibility(value: unknown): PerformerEventVisibility {
   return serviceError(422, 'invalid_visibility', 'Visibility must be public or unlisted.');
 }
 
+function normalizeTicketingMode(value: unknown): PerformerEventTicketingMode {
+  if (value === undefined || value === null || value === '') return 'external';
+  if (value === 'external' || value === 'native_ga') return value;
+  return serviceError(
+    422,
+    'invalid_ticketing_mode',
+    'Ticketing mode must be external or native_ga.'
+  );
+}
+
 function normalizeLocationIsTba(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   if (typeof value !== 'boolean') {
@@ -361,6 +379,7 @@ function normalizeEventValues(input: {
   title: unknown;
   description: unknown;
   startsAt: unknown;
+  doorOpensAt: unknown;
   endsAt: unknown;
   timeZone: unknown;
   locationName: unknown;
@@ -368,15 +387,53 @@ function normalizeEventValues(input: {
   city: unknown;
   locationIsTba: unknown;
   coverImageUrl: unknown;
+  ticketingMode: unknown;
   externalTicketUrl: unknown;
   externalTicketLabel: unknown;
   visibility: unknown;
 }) {
   const startsAt = parseDateTime(input.startsAt, 'Event start time');
+  const doorOpensAt = parseOptionalDateTime(input.doorOpensAt, 'Door-open time');
   const endsAt = parseOptionalDateTime(input.endsAt, 'Event end time');
   assertDateOrder(startsAt, endsAt);
+  const ticketingMode = normalizeTicketingMode(input.ticketingMode);
+  if (ticketingMode === 'native_ga' && !doorOpensAt) {
+    serviceError(
+      422,
+      'native_ticket_door_time_required',
+      'A native ticket event requires a separate door-open time.'
+    );
+  }
+  if (doorOpensAt && doorOpensAt.getTime() > startsAt.getTime()) {
+    serviceError(
+      422,
+      'event_door_after_start',
+      'Door-open time must be at or before the event start time.'
+    );
+  }
+  if (ticketingMode === 'external' && doorOpensAt) {
+    serviceError(
+      422,
+      'external_event_door_time_not_supported',
+      'Door-open time is currently reserved for native Sway ticket events.'
+    );
+  }
+  if (ticketingMode === 'native_ga' && !endsAt) {
+    serviceError(
+      422,
+      'native_ticket_event_end_required',
+      'A native ticket event requires an end time for automatic refund settlement.'
+    );
+  }
 
   const externalTicketUrl = normalizeSafeHttpsUrl(input.externalTicketUrl, 'External ticket URL');
+  if (ticketingMode === 'native_ga' && externalTicketUrl) {
+    serviceError(
+      422,
+      'native_ticket_external_url_conflict',
+      'A native Sway ticket event cannot also use an external ticket URL.'
+    );
+  }
   const requestedExternalTicketLabel = normalizeOptionalText(
     input.externalTicketLabel,
     'External ticket label',
@@ -400,6 +457,7 @@ function normalizeEventValues(input: {
     title: normalizeRequiredText(input.title, 'Event title', MAX_EVENT_TITLE_LENGTH),
     description: normalizeDescription(input.description),
     startsAt,
+    doorOpensAt,
     endsAt,
     timeZone: normalizeTimeZone(input.timeZone),
     locationName: normalizeOptionalText(input.locationName, 'Location name', MAX_LOCATION_NAME_LENGTH),
@@ -407,6 +465,7 @@ function normalizeEventValues(input: {
     city: normalizeOptionalText(input.city, 'City', MAX_CITY_LENGTH),
     locationIsTba: normalizeLocationIsTba(input.locationIsTba),
     coverImageUrl: normalizeSafeHttpsUrl(input.coverImageUrl, 'Cover image URL'),
+    ticketingMode,
     externalTicketUrl,
     externalTicketLabel: externalTicketUrl ? externalTicketLabel : null,
     visibility: normalizeVisibility(input.visibility)
@@ -464,6 +523,7 @@ function sameIdempotentCreate(event: EventRow, normalized: ReturnType<typeof nor
   return event.title === normalized.title
     && event.description === normalized.description
     && event.startsAt.getTime() === normalized.startsAt.getTime()
+    && (event.doorOpensAt?.getTime() ?? null) === (normalized.doorOpensAt?.getTime() ?? null)
     && (event.endsAt?.getTime() ?? null) === (normalized.endsAt?.getTime() ?? null)
     && event.timeZone === normalized.timeZone
     && event.locationName === normalized.locationName
@@ -471,6 +531,7 @@ function sameIdempotentCreate(event: EventRow, normalized: ReturnType<typeof nor
     && event.city === normalized.city
     && event.locationIsTba === normalized.locationIsTba
     && event.coverImageUrl === normalized.coverImageUrl
+    && (event.ticketingMode ?? 'external') === normalized.ticketingMode
     && event.externalTicketUrl === normalized.externalTicketUrl
     && event.externalTicketLabel === normalized.externalTicketLabel
     && event.visibility === normalized.visibility;
@@ -484,6 +545,7 @@ export function serializePerformerEvent(event: EventRow): PerformerEventDto {
     title: event.title,
     description: event.description,
     startsAt: event.startsAt.toISOString(),
+    doorOpensAt: event.doorOpensAt?.toISOString() ?? null,
     endsAt: event.endsAt?.toISOString() ?? null,
     timeZone: event.timeZone,
     locationName: event.locationName,
@@ -491,6 +553,7 @@ export function serializePerformerEvent(event: EventRow): PerformerEventDto {
     city: event.city,
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl,
+    ticketingMode: event.ticketingMode ?? 'external',
     externalTicketUrl: event.externalTicketUrl,
     externalTicketLabel: event.externalTicketLabel,
     visibility: event.visibility,
@@ -510,6 +573,7 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
     title: row.event.title,
     description: row.event.description,
     startsAt: row.event.startsAt.toISOString(),
+    doorOpensAt: row.event.doorOpensAt?.toISOString() ?? null,
     endsAt: row.event.endsAt?.toISOString() ?? null,
     timeZone: row.event.timeZone,
     locationName: row.event.locationIsTba ? null : row.event.locationName,
@@ -517,6 +581,7 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
     city: row.event.locationIsTba ? null : row.event.city,
     locationIsTba: row.event.locationIsTba,
     coverImageUrl: row.event.coverImageUrl,
+    ticketingMode: row.event.ticketingMode ?? 'external',
     externalTicketUrl: cancelled ? null : row.event.externalTicketUrl,
     externalTicketLabel: cancelled ? null : row.event.externalTicketLabel,
     visibility: row.event.visibility,
@@ -577,12 +642,14 @@ export function createPerformerEventService(db: SwayDb) {
     const normalized = normalizeEventValues({
       ...input,
       description: input.description,
+      doorOpensAt: input.doorOpensAt,
       endsAt: input.endsAt,
       locationName: input.locationName,
       locationAddress: input.locationAddress,
       city: input.city,
       locationIsTba: input.locationIsTba,
       coverImageUrl: input.coverImageUrl,
+      ticketingMode: input.ticketingMode,
       externalTicketUrl: input.externalTicketUrl,
       externalTicketLabel: input.externalTicketLabel,
       visibility: input.visibility
@@ -672,6 +739,7 @@ export function createPerformerEventService(db: SwayDb) {
       'title',
       'description',
       'startsAt',
+      'doorOpensAt',
       'endsAt',
       'timeZone',
       'locationName',
@@ -696,6 +764,16 @@ export function createPerformerEventService(db: SwayDb) {
       }
       if (
         current.status === 'published'
+        && (current.ticketingMode ?? 'external') === 'native_ga'
+      ) {
+        serviceError(
+          409,
+          'published_native_ticket_event_locked',
+          'Published native ticket event details are sealed to preserve the sale, admission, and refund terms accepted by buyers.'
+        );
+      }
+      if (
+        current.status === 'published'
         && (current.endsAt ?? current.startsAt).getTime() <= Date.now()
       ) {
         serviceError(409, 'event_already_ended', 'A completed published event cannot be edited.');
@@ -706,6 +784,9 @@ export function createPerformerEventService(db: SwayDb) {
         title: input.title ?? current.title,
         description: input.description !== undefined ? input.description : current.description,
         startsAt: input.startsAt ?? current.startsAt.toISOString(),
+        doorOpensAt: input.doorOpensAt !== undefined
+          ? input.doorOpensAt
+          : current.doorOpensAt?.toISOString() ?? null,
         endsAt: input.endsAt !== undefined
           ? input.endsAt
           : current.endsAt?.toISOString() ?? null,
@@ -715,6 +796,7 @@ export function createPerformerEventService(db: SwayDb) {
         city: input.city !== undefined ? input.city : current.city,
         locationIsTba: input.locationIsTba ?? current.locationIsTba,
         coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
+        ticketingMode: current.ticketingMode ?? 'external',
         externalTicketUrl: input.externalTicketUrl !== undefined
           ? input.externalTicketUrl
           : current.externalTicketUrl,
@@ -723,7 +805,11 @@ export function createPerformerEventService(db: SwayDb) {
           : current.externalTicketLabel,
         visibility: input.visibility ?? current.visibility
       });
-      if (current.status === 'published' && !normalized.externalTicketUrl) {
+      if (
+        current.status === 'published'
+        && (current.ticketingMode ?? 'external') === 'external'
+        && !normalized.externalTicketUrl
+      ) {
         serviceError(
           422,
           'external_ticket_url_required',
@@ -792,6 +878,13 @@ export function createPerformerEventService(db: SwayDb) {
       if (current.status === 'cancelled') {
         serviceError(409, 'event_cancelled', 'A cancelled event cannot be published.');
       }
+      if ((current.ticketingMode ?? 'external') === 'native_ga') {
+        serviceError(
+          409,
+          'native_ticket_publish_requires_ticket_service',
+          'Native ticket events must be published through the ticket ledger service.'
+        );
+      }
       assertExpectedUpdatedAt(current.updatedAt, expectedUpdatedAt);
 
       const now = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
@@ -854,6 +947,13 @@ export function createPerformerEventService(db: SwayDb) {
       }
       if (current.status !== 'published') {
         serviceError(409, 'event_not_published', 'Only a published event can be cancelled.');
+      }
+      if ((current.ticketingMode ?? 'external') === 'native_ga') {
+        serviceError(
+          409,
+          'native_ticket_cancel_requires_ticket_service',
+          'Native ticket events must be cancelled through the ticket ledger service.'
+        );
       }
       const cancellationDeadline = current.endsAt ?? current.startsAt;
       if (cancellationDeadline.getTime() <= Date.now()) {
@@ -958,8 +1058,18 @@ export function createPerformerEventService(db: SwayDb) {
     return rows.map((row) => serializePublicEvent(row as PublicEventRow));
   }
 
+  async function getOwnedEvent(input: {
+    eventId: string;
+    performerId: string;
+    actorUserId: string;
+  }): Promise<PerformerEventDto> {
+    await requireOwnedPerformer(db, input.performerId, input.actorUserId);
+    return serializePerformerEvent(await loadOwnedEvent(db, input.eventId, input.performerId));
+  }
+
   return {
     listOwnedEvents,
+    getOwnedEvent,
     createEvent,
     updateEvent,
     publishEvent,

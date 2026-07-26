@@ -10,12 +10,16 @@ import {
   Share2,
   Ticket
 } from 'lucide-react';
+import EventTicketPurchaseCard, {
+  type NativeAdmissionOffer
+} from './EventTicketPurchaseCard';
 
 export type PublicEventDto = {
   id: string;
   title: string;
   description: string | null;
   startsAt: string;
+  doorOpensAt: string | null;
   endsAt: string | null;
   timeZone: string;
   location: {
@@ -29,6 +33,7 @@ export type PublicEventDto = {
     url: string;
     label: string | null;
   } | null;
+  nativeTicket: NativeAdmissionOffer | null;
   status: string;
   visibility: string;
   cancellationReason?: string | null;
@@ -101,6 +106,19 @@ export function formatEventTime(event: Pick<PublicEventDto, 'startsAt' | 'endsAt
   return `${time.format(startsAt)} – ${endDateTime.format(endsAt)}`;
 }
 
+export function formatEventSchedule(
+  event: Pick<PublicEventDto, 'startsAt' | 'doorOpensAt' | 'endsAt' | 'timeZone'>
+) {
+  const doorOpensAt = validDate(event.doorOpensAt);
+  if (!doorOpensAt) return formatEventTime(event);
+  const doorTime = eventFormatter(event, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short'
+  }).format(doorOpensAt);
+  return `Doors ${doorTime} · Show ${formatEventTime(event)}`;
+}
+
 export function eventLocationLabel(event: Pick<PublicEventDto, 'location'>) {
   if (event.location.isTba) return 'Location TBA';
   return [event.location.name, event.location.city].filter(Boolean).join(' · ') || 'Location not listed';
@@ -126,6 +144,13 @@ export function externalTicketRedirectPath(eventId: string) {
 
 function externalTicketCtaLabel(label: string | null | undefined) {
   return label === 'RSVP' || label === 'View details' ? label : 'Get tickets';
+}
+
+function formatUsd(cents: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(Math.max(0, cents) / 100);
 }
 
 export function PublicEventCard({
@@ -183,7 +208,7 @@ export function PublicEventCard({
           ) : null}
           <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-slate-400">
             <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{formatEventTime(event)}</span>
+            <span>{formatEventSchedule(event)}</span>
           </p>
           <p className="mt-1 flex items-start gap-2 text-xs leading-5 text-slate-400">
             <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -209,6 +234,17 @@ export function PublicEventCard({
           >
             {externalTicketCtaLabel(event.externalTicket.label)}
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        ) : event.nativeTicket && !cancelled && !started ? (
+          <a
+            href={eventPath}
+            className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-xs font-black text-white transition hover:bg-fuchsia-500"
+          >
+            {event.nativeTicket.salesStatus === 'on_sale' && event.nativeTicket.remainingCount > 0
+              ? `Tickets · ${formatUsd(event.nativeTicket.unitAllInPriceCents)} before tax`
+              : event.nativeTicket.salesStatus === 'sold_out' || event.nativeTicket.remainingCount <= 0
+                ? 'Sold out'
+                : 'Ticket details'}
           </a>
         ) : null}
         {cancelled ? (
@@ -383,7 +419,10 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                 <div>
                   <p className="font-black">This event has been cancelled.</p>
                   <p className="mt-1 text-xs leading-5 text-rose-100/80">
-                    {event.cancellationReason || 'Ticket checkout is unavailable.'} Contact the external ticket provider for its refund and support policies.
+                    {event.cancellationReason || 'Ticket checkout is unavailable.'}{' '}
+                    {event.nativeTicket
+                      ? 'Sway queues full refunds for native tickets that were not checked in.'
+                      : 'Contact the external ticket provider for its refund and support policies.'}
                   </p>
                 </div>
               </div>
@@ -405,7 +444,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                 <Clock className="mt-0.5 h-4 w-4 shrink-0 text-fuchsia-200" aria-hidden="true" />
                 <div>
                   <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500">When</p>
-                  <p className="mt-1 text-sm font-bold text-white">{formatEventTime(event)}</p>
+                  <p className="mt-1 text-sm font-bold text-white">{formatEventSchedule(event)}</p>
                 </div>
               </div>
               <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
@@ -441,13 +480,20 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   refunds, and support are handled under the external ticket provider&apos;s policies.
                 </p>
               </div>
+            ) : event.nativeTicket && !cancelled && !started ? (
+              <EventTicketPurchaseCard
+                className="mt-7"
+                eventId={event.id}
+                eventTitle={event.title}
+                offer={event.nativeTicket}
+              />
             ) : !cancelled && !started ? (
               <div className="mt-7 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm text-amber-100">
-                No external ticket link is available for this event right now.
+                No ticket checkout is available for this event right now.
               </div>
             ) : started && !cancelled ? (
               <div className="mt-7 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-300">
-                {ended ? 'This event has ended.' : 'This event has started.'} Sway no longer opens its external ticket link.
+                {ended ? 'This event has ended.' : 'This event has started.'} Ticket checkout is closed.
               </div>
             ) : null}
           </div>

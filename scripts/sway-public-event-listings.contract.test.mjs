@@ -41,7 +41,7 @@ if (!migrationName) {
 const migration = migrationName ? read(`drizzle/${migrationName}`) : '';
 
 const eventSchemaStart = schema.indexOf("export const performerEvents = pgTable('performer_events'");
-const eventSchemaEnd = schema.indexOf('export const gigSessions', eventSchemaStart);
+const eventSchemaEnd = schema.indexOf('// Native paid GA tickets', eventSchemaStart);
 const eventSchema = eventSchemaStart >= 0 && eventSchemaEnd > eventSchemaStart
   ? schema.slice(eventSchemaStart, eventSchemaEnd)
   : '';
@@ -130,7 +130,8 @@ requireTerms(service, 'Event service', [
   'if (!current.externalTicketUrl)',
   "'external_ticket_url_required'",
   'Add a public HTTPS ticket or RSVP link before publishing.',
-  "current.status === 'published' && !normalized.externalTicketUrl",
+  "(current.ticketingMode ?? 'external') === 'external'",
+  '!normalized.externalTicketUrl',
   "'published_event_must_remain_active'",
   'const cancellationDeadline = current.endsAt ?? current.startsAt',
   "'event_already_ended'",
@@ -188,10 +189,10 @@ requireTerms(server, 'Public event API', [
   "res.setHeader('Referrer-Policy', 'no-referrer')",
   'return res.redirect(302, safeDestination)',
   'performerEventService.listPublicEvents({ limit: eventLimit })',
-  'events: publicEvents.map(toPublicEventResponse)',
+  'events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))',
   'performerEventService.listPublicEvents({',
   'performerId: publicProfilePerformerId',
-  'events: publicEventRows.map(toPublicEventResponse)'
+  'events: await Promise.all(publicEventRows.map(toPublicEventResponseWithTicket))'
 ]);
 
 requireTerms(server, 'Public event response', [
@@ -216,16 +217,19 @@ requireTerms(server, 'Public event shell and share metadata', [
   "'noindex, nofollow'"
 ]);
 
-for (const routeSource of [
-  server.slice(
-    server.indexOf("app.get('/api/talent/events'"),
-    server.indexOf("app.get('/api/talent/profile/public'")
-  )
-]) {
-  const ownerGateCount = routeSource.match(/requirePerformerEventOwner\(req, res\)/g)?.length ?? 0;
-  if (ownerGateCount !== 5) {
-    failures.push(`All five performer event routes must use the performer-owner gate (found ${ownerGateCount}).`);
-  }
+const performerEventRouteSource = server.slice(
+  server.indexOf("app.get('/api/talent/events'"),
+  server.indexOf("app.get('/api/talent/profile/public'")
+);
+const performerEventRouteCount = performerEventRouteSource
+  .match(/app\.(?:get|post|put|patch|delete)\('\/api\/talent\/events(?:\/[^']*)?'/g)?.length ?? 0;
+const ownerGateCount = performerEventRouteSource
+  .match(/requirePerformerEventOwner\(req, res\)/g)?.length ?? 0;
+if (performerEventRouteCount < 9 || ownerGateCount !== performerEventRouteCount) {
+  failures.push(
+    `Every performer event route must use the performer-owner gate `
+      + `(routes ${performerEventRouteCount}, gates ${ownerGateCount}).`
+  );
 }
 
 const feedRoute = server.slice(
@@ -245,7 +249,7 @@ requireTerms(manager, 'Performer event manager', [
   '`/api/talent/events/${encodeURIComponent(event.id)}/publish`',
   '`/api/talent/events/${encodeURIComponent(event.id)}/cancel`',
   'Sway is not selling this ticket or verifying the provider.',
-  'checkout and refund',
+  'Sway links customers to another provider.',
   "const EXTERNAL_TICKET_LABELS = ['Get tickets', 'RSVP', 'View details']",
   'does not cancel tickets, issue refunds',
   'externalProviderConfirmed',
@@ -266,7 +270,7 @@ requireTerms(eventPage, 'Public event page', [
   'return `/api/public/events/${encodeURIComponent(eventId)}/ticket`',
   'You are leaving Sway.',
   'handled under the external ticket provider',
-  'No external ticket link is available for this event right now.',
+  'No ticket checkout is available for this event right now.',
   'function externalTicketCtaLabel',
   'opens in a new tab',
   'isEventCancelled'
@@ -299,13 +303,7 @@ const eventRuntime = [
 forbidPatterns(eventRuntime, 'Activated event-listing runtime', [
   /\bvenueId\b/,
   /\bvenueAccount\b/,
-  /\bhostUserId\b/,
-  /\bticketOrderId\b/,
-  /\bpaymentIntentId\b/,
-  /\bstripePayment\b/,
-  /\bremainingInventory\b/,
-  /\bavailableQuantity\b/,
-  /\badmissionToken\b/
+  /\bhostUserId\b/
 ]);
 
 requireTerms(laneRegistry, 'Repository lane registry', [
@@ -313,21 +311,21 @@ requireTerms(laneRegistry, 'Repository lane registry', [
   'The `public-event-listings` slice was activated on 2026-07-26.',
   'Performer is the only seller-side product actor.',
   'Sway does not sell the external ticket',
-  'Native ticket orders, payments, inventory, admission, settlement, and transfers remain'
+  '| `event-tickets-native-ga` |'
 ]);
 requireTerms(eventPlan, 'Event listing plan', [
-  '**Status:** Performer-owned external event listings activated; native ticket sales and settlement remain future work.',
+  '**Status:** External listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.',
   'Performer is the only seller-side product actor.',
-  'Sway does **not** currently sell tickets, control capacity, confirm inventory, issue admission, or settle ticket money.',
+  'The merged external-listing product does **not** sell tickets.',
   'A direct `/e/:eventId` page may preserve a truthful previously published event record',
   'External ticket URLs must be safe HTTPS handoffs.',
   'No location or venue field creates a venue actor, account, dashboard, or authority boundary.'
 ]);
 requireTerms(laneMemo, 'Event lane memo', [
-  '**Status:** External event listings activated for performers; native ticket sales remain a locked future lane.',
+  '**Status:** External event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.',
   'The performer remains the seller-side product actor',
   'An external link is a handoff only.',
-  'No schema, route, UI, or marketing copy may claim that Sway sells tickets'
+  'No marketing or readiness record may call native sales production-ready'
 ]);
 
 if (failures.length) {

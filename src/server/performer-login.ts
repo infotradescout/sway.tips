@@ -50,6 +50,7 @@ export const RESERVED_PERFORMER_HANDLES = new Set([
   'sway',
   'talent',
   'terms',
+  'tickets',
   'www'
 ]);
 

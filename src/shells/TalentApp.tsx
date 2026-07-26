@@ -9,6 +9,7 @@ import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
+import PerformerEventDoorPage from '../components/PerformerEventDoorPage';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
@@ -42,6 +43,11 @@ function isTalentRightsReview(pathname: string) {
   return pathname === '/talent/releases/review';
 }
 
+function talentEventDoorId(pathname: string) {
+  const match = /^\/talent\/events\/([0-9a-f-]{36})\/door$/i.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 type TalentPerformerProfile = {
   performer_id: string;
   display_name: string;
@@ -58,12 +64,14 @@ type TalentPerformerProfile = {
 
 export default function TalentApp() {
   const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
+  const eventDoorId = talentEventDoorId(pathname);
   const isAuthEntryRoute = isTalentLogin(pathname)
     || isTalentSignup(pathname)
     || isTalentInvite(pathname)
     || isTalentClaim(pathname)
     || isTalentFileConnect(pathname)
-    || isTalentRightsReview(pathname);
+    || isTalentRightsReview(pathname)
+    || Boolean(eventDoorId);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
@@ -290,6 +298,10 @@ export default function TalentApp() {
 
   if (isTalentRightsReview(pathname)) {
     return <PerformerRightsReviewQueue />;
+  }
+
+  if (eventDoorId) {
+    return <PerformerEventDoorPage eventId={eventDoorId} />;
   }
 
   if (isLoading) return <LoadingState />;

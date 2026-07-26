@@ -50,6 +50,7 @@ These lanes may run in parallel when they keep to their allowed files and do not
 | `moderation` | Reporting, blocking, hiding, removing, moderation audit behavior. |
 | `payments` | Stripe/payment provider, idempotency, capture/void/refund/payout lifecycle. |
 | `public-event-listings` | Performer-owned event listings, public discovery, and safe handoff to external HTTPS ticket providers. No native ticket money. |
+| `event-tickets-native-ga` | Feature-gated one-ticket paid-GA checkout, separate ticket ledger, rotating admission pass, durable post-check-in performer transfer, and refund-only unused-ticket settlement. |
 | `app-store` | TestFlight/App Store package evidence, privacy/support/compliance docs. |
 
 ## Activated Event-Listing Slice
@@ -70,15 +71,16 @@ This slice is listing and discovery only:
 - Sway does not sell the external ticket, control external capacity, confirm external inventory, issue admission proof, process a refund, or settle money.
 - Ownership guards, suspended-performer hiding, public-state filtering, idempotency, and transactional mutation audit evidence are required. Anonymous reads must not create unbounded audit rows.
 - External CTA copy is closed to truthful handoff labels. Cancelling the Sway listing does not cancel or refund an external order.
-- Native ticket orders, payments, inventory, admission, settlement, and transfers remain in the future `event-tickets` money lane.
+- Native ticket money remains isolated from this external-listing lane. The authorized `event-tickets-native-ga` lane owns its separate records and feature gate.
 
 ## Future Product Lanes
 
-Unless explicitly labeled exploratory, these are locked product intent. They are **not** active parallel build lanes until Gawain opens them with scope, ledger boundaries, and an evidence bar. Activating external event listings did not activate native ticket money.
+Unless explicitly labeled exploratory, these are locked product intents. Credits, forfeitures, buyer transfers, multi-ticket orders, and resale remain closed until separately activated.
 
 | Future lane | Memo | Rule |
 | --- | --- | --- |
-| `event-tickets` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Native Sway ticket sales remain future work. They require a separate order/payment/settlement ledger and fee disclosure from live-room money, publishing, merch, and paid streams. External HTTPS event handoff is not native ticketing. |
+| `event-ticket-alternate-settlement` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Seller-scoped credit and disclosed no-show forfeiture remain future work after refund-only paid GA is proven. |
+| `event-ticket-holder-transfer` | `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md` | Face-value holder transfer/resale remains future work. No open scalping market. |
 | `public-feed` | (same plan) | Truthful discovery for live rooms + performer-published upcoming events. No fake inventory and no claim that external tickets remain available. |
 | `sway.dio` | Exploratory concept note only | Possible Sway online radio for streaming digital independent originals. Cool direction, but **not locked in stone**, not scoped, and not authorized for build yet. |
 
