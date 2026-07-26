@@ -9113,22 +9113,6 @@ app.post('/api/library/sync', async (req, res) => {
   }
 });
 
-function rawStripeEventHasNativeTicketMarker(rawBody: string) {
-  try {
-    const payload = JSON.parse(rawBody) as {
-      data?: { object?: { metadata?: Record<string, unknown> } };
-    };
-    const metadata = payload.data?.object?.metadata;
-    return metadata?.sway_ticket_lane === 'native_ga'
-      || (
-        typeof metadata?.sway_ticket_order_id === 'string'
-        && UUID_PATTERN.test(metadata.sway_ticket_order_id)
-      );
-  } catch {
-    return false;
-  }
-}
-
 // A separate endpoint supports a dedicated Stripe ticket-webhook signing
 // secret. The shared endpoint below also multiplexes ticket events when both
 // payment lanes use the same endpoint/secret.
@@ -9203,7 +9187,7 @@ app.post("/api/payment/webhook", async (req, res) => {
   );
   if (
     eventTicketService
-    && (sharedTicketWebhookSecret || rawStripeEventHasNativeTicketMarker(rawBody))
+    && sharedTicketWebhookSecret
   ) {
     try {
       const ticketResult = await eventTicketService.ingestVerifiedWebhook({

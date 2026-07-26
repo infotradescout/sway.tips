@@ -442,6 +442,25 @@ requireTerms(webhookIngestion, 'Verified webhook persistence', [
   'processorEvent.payloadSha256 !== payloadSha256',
   "'ticket_webhook_payload_conflict'"
 ]);
+requireTerms(server, 'Shared versus dedicated ticket webhook routing', [
+  'const sharedTicketWebhookSecret = Boolean(',
+  'eventTicketService',
+  '&& sharedTicketWebhookSecret'
+]);
+forbidPatterns(server, 'Shared versus dedicated ticket webhook routing', [
+  /rawStripeEventHasNativeTicketMarker/,
+  /sharedTicketWebhookSecret\s*\|\|/
+]);
+requireTerms(doorPage, 'Door check-in UUID fallback', [
+  'new Uint8Array(16)',
+  'globalThis.crypto.getRandomValues(bytes)',
+  'bytes[6] = (bytes[6] & 0x0f) | 0x40',
+  'bytes[8] = (bytes[8] & 0x3f) | 0x80',
+  "hex.slice(0, 4).join('')"
+]);
+forbidPatterns(doorPage, 'Door check-in UUID fallback', [
+  /return `checkin-\$\{Date\.now\(\)\}/
+]);
 
 // Buyer routes must derive identity from the authenticated account. Performer
 // and door routes must use the owner gate and then repeat ownership checks in
