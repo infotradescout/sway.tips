@@ -34,7 +34,8 @@ import {
   ShieldCheck,
   Keyboard,
   Home,
-  UserRound
+  UserRound,
+  CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
@@ -44,6 +45,7 @@ import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
+import PerformerEventsManager from './PerformerEventsManager';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
@@ -1912,8 +1914,28 @@ export default function TalentDashboard({
       ) : null}
 
       {inactiveWorkspace === 'profile' ? (
-        <div className="order-2">
+        <div className="order-2 space-y-4">
+          <nav
+            aria-label="Profile workspace sections"
+            className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2"
+          >
+            <a
+              href="#sway-public-profile-editor"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-black text-cyan-100 transition hover:border-cyan-200/40"
+            >
+              <UserRound className="h-4 w-4" aria-hidden="true" />
+              Profile details
+            </a>
+            <a
+              href="#sway-events-manager"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 text-xs font-black text-fuchsia-100 transition hover:border-fuchsia-200/40"
+            >
+              <CalendarDays className="h-4 w-4" aria-hidden="true" />
+              Shows &amp; events
+            </a>
+          </nav>
           <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
+          <PerformerEventsManager previewMode={previewMode} />
         </div>
       ) : null}
 

@@ -183,6 +183,13 @@
       "when": 1784739881387,
       "tag": "0025_rights_review_least_privilege",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785073739733,
+      "tag": "0026_brave_maggott",
+      "breakpoints": true
     }
   ]
 }

@@ -1,12 +1,15 @@
-# Sway Plan: Event Tickets + Public Feed
+# Sway Plan: External Event Listings + Future Native Tickets
 
-**Status:** Planning only — not active build.  
-**Date:** 2026-07-23  
-**Locked lane memo:** `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md`  
+**Status:** Performer-owned external event listings activated; native ticket sales and settlement remain future work.
+**Date:** 2026-07-23
+**External-listing slice activated:** 2026-07-26
+**Locked lane memo:** `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md`
 **Owner direction:**
 
 - Event ticket sales is a Sway lane.
-- You do **not** need to be a venue to sell tickets.
+- The current slice lists performer events and hands customers to an external HTTPS ticket provider.
+- Performer is the only seller-side product actor. Location details do not create another account type or role.
+- Sway does **not** currently sell tickets, control capacity, confirm inventory, issue admission, or settle ticket money.
 - Handle fraud and the real money/admission risks — without Ticketmaster-scale bloat.
 - Simpler processes. No fluff tools. Power in the individual’s hands.
 - Public feed needs work and is part of this plan.
@@ -16,9 +19,40 @@
 
 ---
 
-## 1. Product Lock
+## 0. Activated Slice: External Event Listings
 
-Sway helps an **individual creator** sell tickets to a real show, get paid **when the door accepts the ticket or when they lawfully settle a no-show under disclosed terms**, and let buyers prove entry or transfer a seat — then helps the public **find what’s live or coming up** without a fake marketplace.
+The activated slice is deliberately narrow:
+
+```text
+Performer creates event
+→ performer publishes event
+→ event appears on the performer profile, /e/:eventId, and /discover
+→ customer follows the performer-supplied HTTPS ticket URL
+```
+
+Required truth:
+
+- Every event belongs to one performer.
+- Only that performer’s authorized account can mutate it.
+- Repeated creates with the same client request ID resolve idempotently.
+- Performer profiles and the discovery feed show only published, public, future events owned by active, non-suspended performers.
+- A direct `/e/:eventId` page may preserve a truthful previously published event record after it is unlisted, cancelled, or past; it must expose the real current status and disable stale handoffs.
+- External ticket URLs must be safe HTTPS handoffs.
+- External CTAs use the closed labels `Get tickets`, `RSVP`, or `View details`; performer copy cannot imply Sway inventory, checkout, or guaranteed admission.
+- Cancelling changes the Sway listing only. The performer must separately handle external-provider cancellation, buyer communication, and refunds.
+- A completed published event cannot be edited or rewritten as cancelled. If no end time is supplied, the event start closes the mutation window.
+- An edit to an active published event cannot move its effective end (or start when no end is set) into the past.
+- Anonymous event reads do not append unbounded audit rows. State mutations remain transactionally audited; future view/click analytics must be bounded and abuse-resistant.
+- The event page and discovery feed must not claim Sway inventory, ticket availability, external purchase completion, admission, refund, or settlement.
+- No location or venue field creates a venue actor, account, dashboard, or authority boundary.
+
+Native checkout, orders, capacity, inventory, ticket issuance, QR admission, refunds, credits, forfeits, seller settlement, and the transfer market are not part of this activated slice.
+
+---
+
+## 1. Future Native-Ticket Product Lock
+
+The future native lane would let a performer sell tickets to a real show, receive funds when admission is accepted or a lawful disclosed settlement applies, and let buyers prove entry or transfer a ticket. Everything in this section is target behavior, not current external-listing behavior.
 
 ```text
 Creator lists a show (discloses no-show settle options)
@@ -58,18 +92,18 @@ One-sentence lock:
 
 | Rule | Decision |
 | --- | --- |
-| Seller identity | Any verified Sway creator account (performer / host), not venue-gated |
-| Venue | Optional field (name / address / “TBA” / private location details after purchase) |
-| Co-hosts | Later slice — v1 is one seller of record |
+| Seller identity | Verified Sway performer account |
+| Location | Optional event field (name / address / “TBA” / private details after purchase) |
+| Collaborators | Later capability — v1 retains one performer seller of record |
 | Unclaimed preview profiles | Cannot sell tickets until claimed + payout-ready |
 
-Venue is context, not permission.
+Location is context, not permission. It never creates another product actor.
 
 ---
 
-## 3. What We Build (Lean Core)
+## 3. Future Native Ticketing Target
 
-### Ticket sales — must-have loop
+### Native ticket sales — future must-have loop
 
 1. **Create event** — title, when, where (optional detail), capacity, price, cover image optional. Seller sets **no-show settle policy** shown at checkout: refund, credit, and/or you-agreed (forfeit) — at least one path; default recommended = refund.
 2. **Publish** — public event page + share link; optional appearance on public feed when eligible.
@@ -82,14 +116,14 @@ Venue is context, not permission.
 
 ### Public feed — must-have loop
 
-Today: `/api/public/feed` returns **active live rooms only**, and there is **no first-class public feed UI** wired as a product surface.
+Activated external-listing target: `/api/public/feed` returns active live rooms plus eligible performer-published upcoming events, and `/discover` renders that truthful inventory. This does not claim external ticket availability.
 
 Target feed is a **truthful discovery strip**, not a social network:
 
 | Card type | Source of truth | CTA |
 | --- | --- | --- |
 | Live now | Active gig / room registry | Enter room / tip-request |
-| Upcoming tickets | Published ticketed events with remaining inventory | Buy tickets / event page |
+| Upcoming events | Eligible performer-published events | Event page / external ticket handoff |
 | Creator presence (optional later) | Claimed public profiles with live or upcoming activity | Profile |
 
 Empty state tells the truth (“No live rooms or upcoming shows right now”) — never pads with fake acts.
@@ -102,7 +136,7 @@ Do **not** build in v1:
 
 - Full Ticketmaster: bots arms race, dynamic pricing suites, seat maps for arenas, season packages, fan clubs, “insights dashboards,” promo-code empires, multi-tier CRM.
 - Open scalping exchange (bids, markups above face, stub dumps, speculative bots).
-- Venue operator OS / box-office staffing suites.
+- Location-operator OS / box-office staffing suites.
 - Social feed, likes, comments, follows-as-ranking, algorithmic “For You.”
 - Fake featured inventory or paid placement before real inventory exists.
 - Merch bundles, paid streams, or DistroKid tools bolted onto tickets.
@@ -137,7 +171,7 @@ Lean ≠ naïve. These are in-scope even for a simple product:
 | Fee stacking | Ticket fees disclosed on ticket terms only; never reuse live-room tip/request/boost payment rows as ticket proof |
 | Stale holds | After grace window, apply event **default settle policy** to every remaining escrow ticket |
 
-### Escrow + seller settle (owner lock)
+### Future escrow + seller settle (owner lock)
 
 Truth: **customer has paid; ticket seller has not been paid yet** until QR accept or a disclosed **you agreed** forfeit.
 
@@ -228,7 +262,7 @@ Public landing / discover
 - Hide suspended / inactive sellers.
 - Hide events that are draft, cancelled, or past. Sold-out primary may still show if transfers are available.
 - No ranking ads in v1.
-- Cards show: name, city/venue line if present, time, avatar, clear CTA — no dashboard chrome.
+- Cards show: name, city/location line if present, time, avatar, clear CTA — no dashboard chrome.
 
 ### Feed ↔ tickets coupling
 
@@ -238,9 +272,9 @@ Public landing / discover
 
 ---
 
-## 8. Build Phases (When Activated)
+## 8. Build Phases
 
-Do not start code until Gawain opens the lane. Suggested order:
+The external-listing slice is activated. Native money phases remain gated until Gawain opens them with a separate ledger and evidence bar.
 
 ### Phase A — Doctrine + contracts (docs only → then contracts)
 
@@ -250,14 +284,15 @@ Do not start code until Gawain opens the lane. Suggested order:
 - Public feed contract: response shape for `rooms[]` + `events[]`, empty/error honesty.
 - Explicit non-claims in readiness / revenue docs.
 
-### Phase B — Public feed repair (can ship before full ticketing)
+### Phase B — External listings + public feed (activated)
 
-- Wire a real public discover/feed UI to `/api/public/feed`.
+- Persist performer-owned external event listings.
+- Expose eligible events on the performer profile, `/e/:eventId`, `/api/public/feed`, and `/discover`.
+- Hand customers only to normalized HTTPS ticket URLs.
 - Harden empty, loading, and 503 states.
-- Keep rooms-only until events exist; design the card list so event cards drop in without a rewrite.
-- Evidence: contract tests + production smoke that feed never invents performers.
+- Evidence: contract tests + behavior tests + production smoke that the feed never invents performers, events, inventory, or sale state.
 
-### Phase C — Ticket MVP (individual seller + escrow + settle)
+### Phase C — Native Ticket MVP (future; not activated)
 
 - Create / edit / publish / cancel event with disclosed settle policy.
 - Checkout → escrowed ticket issuance + receipt email (copy: held until entry; seller settle options).
@@ -268,7 +303,7 @@ Do not start code until Gawain opens the lane. Suggested order:
 - Payout-ready gate for sellers.
 - Chargeback/dispute path while escrowed proven in contracts.
 
-### Phase D — Feed + tickets + transfers together
+### Phase D — Native tickets + transfers (future)
 
 - Upcoming events on feed + event page share cards.
 - Sold-out primary with **transfers available** on event/feed cards.
@@ -280,7 +315,7 @@ Do not start code until Gawain opens the lane. Suggested order:
 - Gift transfer (no money).
 - List at or below face (still no markup).
 - Simple promo code (one code, not a campaign suite).
-- Co-host payout split (only with clear ledger rules).
+- Collaborator payout split (only with clear ledger rules and no new product actor).
 
 ---
 
@@ -306,7 +341,7 @@ We are winning when:
 5. Can’t-attend buyers list at face; new buyer swaps escrow; old QR dies.
 6. Chargeback/refund/credit/forfeit state is explainable from Sway records; pre-accept disputes stay the cheap path.
 7. Public feed shows only real live rooms and real upcoming shows — and still feels useful when the list is short.
-8. No one needs a venue account, seat map, or “promoter toolkit” to participate.
+8. No location-specific account, seat map, or “promoter toolkit” is required.
 
 
 ---

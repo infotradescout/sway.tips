@@ -97,6 +97,14 @@ import { createAudioPublishingService } from "./src/server/audio-publishing-serv
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
+import {
+  createPerformerEventService,
+  EventServiceError,
+  isPublicEventExternalTicketLabel,
+  normalizePublicEventHttpsUrl,
+  type PerformerEventDto,
+  type PublicPerformerEventDto
+} from "./src/server/performer-event-service";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -152,6 +160,9 @@ const audioFilePairingService = businessDb
   : null;
 const audioFileCollaborationService = businessDb && audioObjectStore
   ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
+  : null;
+const performerEventService = businessDb
+  ? createPerformerEventService(businessDb)
   : null;
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
@@ -299,6 +310,7 @@ function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
   if (urlPath.startsWith('/admin')) return 'admin';
   if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
   if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
+  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover') return 'patron';
   return 'patron';
 }
 
@@ -316,6 +328,7 @@ type ShareMetadata = {
   url: string;
   image: string;
   imageAlt: string;
+  robots?: 'noindex, nofollow';
 };
 
 type PublicShareProfile = {
@@ -369,9 +382,13 @@ function renderShareMetaTags(metadata: ShareMetadata) {
   const url = escapePublicProfileMetadataAttribute(metadata.url);
   const image = escapePublicProfileMetadataAttribute(metadata.image);
   const imageAlt = escapePublicProfileMetadataAttribute(metadata.imageAlt);
+  const robots = metadata.robots
+    ? `<meta name="robots" content="${escapePublicProfileMetadataAttribute(metadata.robots)}" />`
+    : '';
 
   return [
     '<meta name="sway-share-meta" content="server-rendered" />',
+    robots,
     `<title>${title}</title>`,
     `<meta name="description" content="${description}" />`,
     '<meta property="og:type" content="website" />',
@@ -396,7 +413,7 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   const metaTags = renderShareMetaTags(metadata);
   const withoutExisting = html
     .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
-    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
+    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
 
   return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
 }
@@ -588,6 +605,40 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       url: `/p/${profile.handle}`,
       image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
       imageAlt: `@${profile.handle} Sway public page`
+    });
+  }
+
+  if (pathParts[0] === 'e' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && performerEventService) {
+    const event = await performerEventService.getPublicEvent(pathParts[1]);
+    if (!event) return defaultMetadata;
+
+    const eventDate = new Date(event.startsAt);
+    const dateCopy = Number.isNaN(eventDate.getTime())
+      ? 'View event details.'
+      : `Happening ${eventDate.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+          timeZone: event.timeZone
+        })}.`;
+    const locationCopy = event.locationIsTba
+      ? ' Location to be announced.'
+      : event.locationName || event.city
+        ? ` ${[event.locationName, event.city].filter(Boolean).join(' · ')}.`
+        : '';
+    const cancellationCopy = event.status === 'cancelled' ? ' This event has been cancelled.' : '';
+
+    return defaultShareMetadata(req, {
+      title: `${event.title} on Sway`,
+      description: `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim(),
+      url: `/e/${event.id}`,
+      image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      imageAlt: `${event.title} event artwork`,
+      robots: event.visibility === 'unlisted'
+        || event.status === 'cancelled'
+        || eventDate.getTime() <= Date.now()
+        ? 'noindex, nofollow'
+        : undefined
     });
   }
 
@@ -1670,6 +1721,66 @@ function toPublicSocialLinks(row: {
     soundcloud: normalizePublicProfileUrl(row.soundcloudUrl),
     website: normalizePublicProfileUrl(row.websiteUrl)
   };
+}
+
+function toOwnedEventResponse(event: PerformerEventDto) {
+  return {
+    ...event,
+    eventPath: event.status === 'published' || event.status === 'cancelled'
+      ? `/e/${event.id}`
+      : null
+  };
+}
+
+function toPublicEventResponse(event: PublicPerformerEventDto) {
+  const externalTicketIsOpen = event.status === 'published'
+    && Boolean(event.externalTicketUrl)
+    && new Date(event.startsAt).getTime() > Date.now();
+  return {
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    timeZone: event.timeZone,
+    location: {
+      name: event.locationName,
+      address: event.locationIsTba ? null : event.locationAddress,
+      city: event.city,
+      isTba: event.locationIsTba
+    },
+    coverImageUrl: event.coverImageUrl,
+    externalTicket: externalTicketIsOpen && event.externalTicketUrl
+      ? {
+          url: event.externalTicketUrl,
+          label: isPublicEventExternalTicketLabel(event.externalTicketLabel)
+            ? event.externalTicketLabel
+            : 'Get tickets'
+        }
+      : null,
+    status: event.status,
+    visibility: event.visibility,
+    publishedAt: event.publishedAt,
+    cancelledAt: event.cancelledAt,
+    cancellationReason: event.cancellationReason,
+    eventPath: `/e/${event.id}`,
+    performer: {
+      displayName: event.performer.displayName,
+      handle: event.performer.handle,
+      performerPath: event.performer.handle ? `/p/${event.performer.handle}` : null,
+      avatarUrl: normalizePublicProfileUrl(event.performer.avatarUrl),
+      headline: event.performer.headline,
+      city: event.performer.city
+    }
+  };
+}
+
+function respondToEventServiceError(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof EventServiceError) {
+    return res.status(error.status).json({ error: error.message, code: error.code });
+  }
+  console.error(fallback, error);
+  return res.status(500).json({ error: fallback });
 }
 
 function resolvePublicStageName(input: {
@@ -6390,6 +6501,159 @@ app.post("/api/analytics/shell", async (req, res) => {
   }
 });
 
+type PerformerEventOwnerContext = {
+  actorUserId: string;
+  performerId: string;
+};
+
+async function requirePerformerEventOwner(
+  req: express.Request,
+  res: express.Response
+): Promise<PerformerEventOwnerContext | null> {
+  applyNoStoreHeaders(res);
+  try {
+    const talentAccess = await accessControl.requireTalentAccess(req);
+    if (talentAccess.allowed === false) {
+      res.status(talentAccess.status).json({ error: talentAccess.reason });
+      return null;
+    }
+    if (!talentAccess.actor.actorId || !businessDb || !performerEventService) {
+      res.status(503).json({ error: 'Performer events require a durable database connection.' });
+      return null;
+    }
+
+    const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+    if (!performerOwner) {
+      res.status(403).json({ error: 'Only the performer owner can manage these events.' });
+      return null;
+    }
+
+    return {
+      actorUserId: talentAccess.actor.actorId,
+      performerId: performerOwner.performerId
+    };
+  } catch (error) {
+    console.error('Performer event owner lookup failed:', error);
+    res.status(503).json({ error: 'Performer event access is temporarily unavailable.' });
+    return null;
+  }
+}
+
+app.get('/api/talent/events', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const events = await performerEventService.listOwnedEvents({
+      ...owner,
+      limit: Number(req.query.limit) || 50
+    });
+    return res.json({ events: events.map(toOwnedEventResponse) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to load performer events.');
+  }
+});
+
+app.post('/api/talent/events', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const result = await performerEventService.createEvent({
+      ...owner,
+      clientRequestId: req.body?.clientRequestId,
+      title: req.body?.title,
+      description: req.body?.description,
+      startsAt: req.body?.startsAt,
+      endsAt: req.body?.endsAt,
+      timeZone: req.body?.timeZone,
+      locationName: req.body?.locationName,
+      locationAddress: req.body?.locationAddress,
+      city: req.body?.city,
+      locationIsTba: req.body?.locationIsTba,
+      coverImageUrl: req.body?.coverImageUrl,
+      externalTicketUrl: req.body?.externalTicketUrl,
+      externalTicketLabel: req.body?.externalTicketLabel,
+      visibility: req.body?.visibility
+    });
+    return res.status(result.created ? 201 : 200).json({
+      event: toOwnedEventResponse(result.event),
+      idempotentReplay: !result.created
+    });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to create performer event.');
+  }
+});
+
+app.patch('/api/talent/events/:eventId', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  const optionalFields = [
+    'title',
+    'description',
+    'startsAt',
+    'endsAt',
+    'timeZone',
+    'locationName',
+    'locationAddress',
+    'city',
+    'locationIsTba',
+    'coverImageUrl',
+    'externalTicketUrl',
+    'externalTicketLabel',
+    'visibility'
+  ] as const;
+  const changes = Object.fromEntries(optionalFields
+    .filter((field) => Object.prototype.hasOwnProperty.call(req.body ?? {}, field))
+    .map((field) => [field, req.body[field]]));
+
+  try {
+    const event = await performerEventService.updateEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt,
+      ...changes
+    });
+    return res.json({ event: toOwnedEventResponse(event) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to update performer event.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/publish', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const event = await performerEventService.publishEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt
+    });
+    return res.json({ event: toOwnedEventResponse(event) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to publish performer event.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const event = await performerEventService.cancelEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt,
+      cancellationReason: req.body?.cancellationReason
+    });
+    return res.json({ event: toOwnedEventResponse(event) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to cancel performer event.');
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -8476,46 +8740,96 @@ app.get("/api/state", async (req, res) => {
   });
 });
 
+app.get('/api/public/events/:eventId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!UUID_PATTERN.test(req.params.eventId)) {
+    return res.status(404).json({ error: 'Public event not found.' });
+  }
+  if (!performerEventService) {
+    return res.status(503).json({ error: 'Public events are temporarily unavailable.' });
+  }
+
+  try {
+    const event = await performerEventService.getPublicEvent(req.params.eventId);
+    if (!event) return res.status(404).json({ error: 'Public event not found.' });
+    return res.json({ event: toPublicEventResponse(event) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to load this event right now.');
+  }
+});
+
+app.get('/api/public/events/:eventId/ticket', async (req, res) => {
+  applyNoStoreHeaders(res);
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  if (!UUID_PATTERN.test(req.params.eventId)) {
+    return res.status(404).json({ error: 'Public event not found.' });
+  }
+  if (!performerEventService) {
+    return res.status(503).json({ error: 'Public events are temporarily unavailable.' });
+  }
+
+  try {
+    const event = await performerEventService.getPublicEvent(req.params.eventId);
+    if (!event || event.status !== 'published' || !event.externalTicketUrl) {
+      return res.status(404).json({ error: 'External ticket link not available.' });
+    }
+    if (new Date(event.startsAt).getTime() <= Date.now()) {
+      return res.status(410).json({ error: 'This event has already started.' });
+    }
+
+    const safeDestination = normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External ticket URL');
+    if (!safeDestination) {
+      return res.status(422).json({ error: 'External ticket link is not safe to open.' });
+    }
+
+    return res.redirect(302, safeDestination);
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to open the external ticket link.');
+  }
+});
+
 app.get('/api/public/feed', async (_req, res) => {
   applyNoStoreHeaders(res);
 
   try {
     const activeRooms = await listReadableActiveRooms();
-    if (!activeRooms.length) {
-      return res.json({ rooms: [] });
-    }
-
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
+    const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
     const selectedRooms = activeRooms.slice(0, roomLimit);
 
-    if (!businessDb) {
+    if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
     const gigIds = selectedRooms.map((room) => room.gigId);
-    const details = await businessDb
-      .select({
-        gigId: gigSessions.id,
-        performerName: performers.displayName,
-        performerHandle: performers.handle,
-        headline: performerPublicProfiles.headline,
-        city: performerPublicProfiles.city,
-        avatarUrl: performerPublicProfiles.avatarUrl,
-        facebookUrl: performerPublicProfiles.facebookUrl,
-        instagramUrl: performerPublicProfiles.instagramUrl,
-        tiktokUrl: performerPublicProfiles.tiktokUrl,
-        youtubeUrl: performerPublicProfiles.youtubeUrl,
-        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-        websiteUrl: performerPublicProfiles.websiteUrl
-      })
-      .from(gigSessions)
-      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(and(
-        inArray(gigSessions.id, gigIds),
-        eq(performers.isActive, true),
-        notInArray(performers.onboardingStatus, ['suspended'])
-      ));
+    const [details, publicEvents] = await Promise.all([
+      gigIds.length
+        ? businessDb
+            .select({
+              gigId: gigSessions.id,
+              performerName: performers.displayName,
+              performerHandle: performers.handle,
+              headline: performerPublicProfiles.headline,
+              city: performerPublicProfiles.city,
+              avatarUrl: performerPublicProfiles.avatarUrl,
+              facebookUrl: performerPublicProfiles.facebookUrl,
+              instagramUrl: performerPublicProfiles.instagramUrl,
+              tiktokUrl: performerPublicProfiles.tiktokUrl,
+              youtubeUrl: performerPublicProfiles.youtubeUrl,
+              soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+              websiteUrl: performerPublicProfiles.websiteUrl
+            })
+            .from(gigSessions)
+            .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+            .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+            .where(and(
+              inArray(gigSessions.id, gigIds),
+              eq(performers.isActive, true),
+              notInArray(performers.onboardingStatus, ['suspended'])
+            ))
+        : Promise.resolve([]),
+      performerEventService.listPublicEvents({ limit: eventLimit })
+    ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
 
@@ -8547,7 +8861,8 @@ app.get('/api/public/feed', async (_req, res) => {
             })
           }
         };
-      })
+      }),
+      events: publicEvents.map(toPublicEventResponse)
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -8741,11 +9056,13 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'
         },
         activeRoom: null,
-        releases: []
+        releases: [],
+        events: []
       });
     }
 
-    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows] = await Promise.all([
+    const publicProfilePerformerId = profile.performerId;
+    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows, publicEventRows] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -8820,7 +9137,10 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
         ))
         .orderBy(desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
-        .limit(12)
+        .limit(12),
+      performerEventService
+        ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
+        : Promise.resolve([])
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -8918,7 +9238,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         publishedAt: release.publishedAt,
         releasePath: release.releasePath,
         artworkUrl: release.artworkUrl
-      }))
+      })),
+      events: publicEventRows.map(toPublicEventResponse)
     });
   } catch (error) {
     console.error('Public performer profile lookup failed:', error);

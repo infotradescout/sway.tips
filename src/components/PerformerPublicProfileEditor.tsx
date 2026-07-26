@@ -322,7 +322,11 @@ export default function PerformerPublicProfileEditor({
   };
 
   return (
-    <section data-sway-public-profile-editor="true" className="mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10">
+    <section
+      id="sway-public-profile-editor"
+      data-sway-public-profile-editor="true"
+      className="mx-auto w-full max-w-3xl scroll-mt-24 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10"
+    >
       <div className="border-b border-white/10 bg-gradient-to-r from-cyan-500/10 via-fuchsia-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
