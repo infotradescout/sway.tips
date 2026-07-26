@@ -1212,7 +1212,13 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         if (owner.event.cancellationReason !== reason) {
           serviceError(409, 'event_already_cancelled', 'This event was already cancelled with a different reason.');
         }
-        return { event: owner.event, offer: serializeOwnerOffer(offer), refundsQueued: 0 };
+        return {
+          event: owner.event,
+          offer: serializeOwnerOffer(offer),
+          refundsQueued: 0,
+          admittedTicketsPreserved: 0,
+          disputedTicketsPreserved: 0
+        };
       }
       if (owner.event.status !== 'published' || offer.status === 'cancelled') {
         serviceError(409, 'native_ticket_cancel_state_invalid', 'Only a published native ticket event can be cancelled.');
@@ -1231,23 +1237,29 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
           inArray(ticketOrders.status, RESERVED_ORDER_STATUSES)
         ))
         .for('update', { of: ticketOrders });
-      const cancellationLocked = orderRows.some(({ order, ticket }) => (
-        order.status === 'disputed'
-        || Boolean(ticket?.admissionAcceptedAt)
-        || (
-          ticket
-          && ['release_pending', 'released', 'disputed'].includes(ticket.status)
-        )
-      ));
-      if (cancellationLocked) {
-        serviceError(
-          409,
-          'native_ticket_cancellation_locked',
-          'This event can no longer be cancelled after an admission or while ticket settlement is disputed.'
-        );
-      }
       let refundsQueued = 0;
+      let admittedTicketsPreserved = 0;
+      let disputedTicketsPreserved = 0;
       for (const row of orderRows) {
+        const isDisputed = (
+          row.order.status === 'disputed'
+          || row.ticket?.status === 'disputed'
+        );
+        if (isDisputed) {
+          disputedTicketsPreserved += 1;
+          continue;
+        }
+        const isAdmitted = Boolean(
+          row.ticket?.admissionAcceptedAt
+          || (
+            row.ticket
+            && ['release_pending', 'released'].includes(row.ticket.status)
+          )
+        );
+        if (isAdmitted) {
+          admittedTicketsPreserved += 1;
+          continue;
+        }
         if (
           row.ticket
           && row.order.chargedTotalCents
@@ -1340,13 +1352,19 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
           eventId: input.eventId,
           performerId: input.performerId,
           cancellationReason: reason,
-          refundsQueued
+          refundsQueued,
+          admittedTicketsPreserved,
+          disputedTicketsPreserved,
+          admittedSettlementPolicy: 'continue_without_clawback',
+          disputedSettlementPolicy: 'controlled_support'
         }
       });
       return {
         event: cancelledEvent,
         offer: serializeOwnerOffer(cancelledOffer),
-        refundsQueued
+        refundsQueued,
+        admittedTicketsPreserved,
+        disputedTicketsPreserved
       };
     });
   }
@@ -3322,6 +3340,12 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         }
         const disputeWon = ['won', 'warning_closed'].includes(envelope.status ?? '');
         const disputeLost = envelope.status === 'lost';
+        const cancelledUnusedRefundRequired = (
+          disputeWon
+          && !row.ticket.admissionAcceptedAt
+          && !row.ticket.refundedAt
+          && (row.event.status === 'cancelled' || row.offer.status === 'cancelled')
+        );
         let restoredTicketStatus: TicketStatus | null = null;
         let restoredOrderStatus: OrderRow['status'] | null = null;
         if (disputeWon) {
@@ -3331,7 +3355,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
               ? row.ticket.releasedAt
                 ? 'released'
                 : 'release_pending'
-              : row.ticket.refundPendingAt
+              : cancelledUnusedRefundRequired || row.ticket.refundPendingAt
                 ? 'refund_pending'
                 : 'held';
           restoredOrderStatus = restoredTicketStatus === 'refunded'
@@ -3365,6 +3389,24 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
               eq(eventTickets.id, row.ticket.id),
               eq(eventTickets.status, 'disputed')
             ));
+          if (cancelledUnusedRefundRequired) {
+            if (!row.order.chargedTotalCents || !row.order.processorPaymentIntentId) {
+              throw new RetryableOperationError(
+                'Cancelled disputed ticket is missing captured-payment evidence for its refund.'
+              );
+            }
+            await enqueueOperation(tx, {
+              orderId: row.order.id,
+              ticketId: row.ticket.id,
+              operationType: 'create_buyer_refund',
+              amountCents: row.order.chargedTotalCents,
+              requestPayload: {
+                reason: 'dispute_won_after_seller_event_cancellation',
+                paymentIntentId: row.order.processorPaymentIntentId
+              },
+              now
+            });
+          }
         }
         if (disputeWon || disputeLost) {
           const closureType = disputeWon ? 'dispute_won' as const : 'dispute_lost' as const;
@@ -3427,7 +3469,11 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
             disputeStatus: envelope.status,
             disputeReason: envelope.disputeReason,
             amountCents: envelope.amountCents,
-            resolution: disputeWon ? 'restored' : 'controlled_support'
+            resolution: cancelledUnusedRefundRequired
+              ? 'refund_queued_after_cancellation'
+              : disputeWon
+                ? 'restored'
+                : 'controlled_support'
           }
         });
       });
