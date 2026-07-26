@@ -1,8 +1,8 @@
-# Sway Tips
+# Sway
 
-Sway is a simple live-room app where audiences tip performers or DJs and pay for song requests from their phones.
+Sway connects performers and customers through public performer pages, scheduled events, live rooms, and paid Request, Tip, and Boost actions.
 
-This repo is moving from prototype behavior toward a production-ready web app and eventual App Store wrapper. The current implementation includes separated audience, performer, and overlay routes, with the persistent database, real payment processor flow, moderation controls, and App Store review package tracked in the roadmap docs.
+This repository contains separate audience, performer, overlay, and internal-admin surfaces backed by PostgreSQL. Event listings currently hand customers to performer-supplied external HTTPS ticket or RSVP pages; Sway does not yet sell or issue event tickets.
 
 ## Routes
 
@@ -11,6 +11,9 @@ This repo is moving from prototype behavior toward a production-ready web app an
 - `/talent/gigs/:gigId`
 - `/g/:gigId`
 - `/p/:performerHandle`
+- `/e/:eventId`
+- `/discover`
+- `/r/:releaseId`
 - `/overlay/:gigId`
 - `/admin` internal-only
 
@@ -63,7 +66,7 @@ Sway is now intended to behave like an installable browser app, not just a websi
 
 ## Production Gaps
 
-Do not submit this app for public App Store review until the launch gate is complete. Production business writes are blocked until a persistent store is configured, checkout is not wired to a real payment processor, and legal/support URLs must be published before review.
+Do not treat repository implementation as production proof. The readiness register remains the authority for live-payment, payout, App Store, publishing, and event evidence. Native ticket checkout, inventory, admission, refunds, and seller settlement are not implemented.
 
 ## Domain Routing Strategy
 
@@ -72,6 +75,7 @@ Do not submit this app for public App Store review until the launch gate is comp
 - App route families remain:
 	- `/g/*` patron shell
 	- `/p/*` patron shell
+	- `/e/*`, `/r/*`, and `/discover` patron shell
 	- `/talent/*` talent shell
 	- `/overlay/*` overlay shell
 	- `/admin/*` admin shell (internal-only and auth/role gated)

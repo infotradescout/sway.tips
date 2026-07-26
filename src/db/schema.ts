@@ -97,6 +97,8 @@ export const pendingActionStatusEnum = pgEnum('pending_action_status', [
 ]);
 export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'active', 'paused', 'ended']);
 export const attributionSourceEnum = pgEnum('attribution_source', ['creator_direct', 'sway_promoted']);
+export const performerEventStatusEnum = pgEnum('performer_event_status', ['draft', 'published', 'cancelled']);
+export const performerEventVisibilityEnum = pgEnum('performer_event_visibility', ['public', 'unlisted']);
 
 // Phase 2 Slice 1: every account (patron or performer) is the same `users`
 // row. Pro Mode is an activatable state on that row, not a separate account
@@ -317,6 +319,90 @@ export const performerMemberships = pgTable('performer_memberships', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   performerUserIdx: uniqueIndex('performer_memberships_performer_user_idx').on(table.performerId, table.userId)
+}));
+
+// A scheduled performer event exists independently from a live Sway room.
+// Venue/location values are event context only; they never create a venue
+// account, role, or authority boundary.
+export const performerEvents = pgTable('performer_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id, { onDelete: 'cascade' }),
+  clientRequestId: uuid('client_request_id').notNull(),
+  createdByActorUserId: uuid('created_by_actor_user_id').notNull().references(() => users.id),
+  lastMutationActorUserId: uuid('last_mutation_actor_user_id').notNull().references(() => users.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  endsAt: timestamp('ends_at', { withTimezone: true }),
+  timeZone: text('time_zone').notNull(),
+  locationName: text('location_name'),
+  locationAddress: text('location_address'),
+  city: text('city'),
+  locationIsTba: boolean('location_is_tba').notNull().default(false),
+  coverImageUrl: text('cover_image_url'),
+  externalTicketUrl: text('external_ticket_url'),
+  externalTicketLabel: text('external_ticket_label'),
+  visibility: performerEventVisibilityEnum('visibility').notNull().default('unlisted'),
+  status: performerEventStatusEnum('status').notNull().default('draft'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancellationReason: text('cancellation_reason'),
+  ...timestamps
+}, (table) => ({
+  performerClientRequestIdx: uniqueIndex('performer_events_performer_client_request_idx').on(
+    table.performerId,
+    table.clientRequestId
+  ),
+  performerStatusStartIdx: index('performer_events_performer_status_start_idx').on(
+    table.performerId,
+    table.status,
+    table.startsAt
+  ),
+  publicStatusVisibilityStartIdx: index('performer_events_public_status_visibility_start_idx').on(
+    table.status,
+    table.visibility,
+    table.startsAt
+  ),
+  endsAfterStarts: check(
+    'performer_events_ends_after_starts',
+    sql`${table.endsAt} IS NULL OR ${table.endsAt} > ${table.startsAt}`
+  ),
+  publishedHasTimestamp: check(
+    'performer_events_published_has_timestamp',
+    sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`
+  ),
+  publishedHasExternalTicket: check(
+    'performer_events_published_has_external_ticket',
+    sql`${table.status} <> 'published' OR ${table.externalTicketUrl} IS NOT NULL`
+  ),
+  cancelledHasTimestamp: check(
+    'performer_events_cancelled_has_timestamp',
+    sql`${table.status} <> 'cancelled' OR ${table.cancelledAt} IS NOT NULL`
+  ),
+  cancelledWasPublished: check(
+    'performer_events_cancelled_was_published',
+    sql`${table.status} <> 'cancelled' OR ${table.publishedAt} IS NOT NULL`
+  ),
+  cancelledHasReason: check(
+    'performer_events_cancelled_has_reason',
+    sql`${table.status} <> 'cancelled' OR (${table.cancellationReason} IS NOT NULL AND length(trim(${table.cancellationReason})) > 0)`
+  ),
+  coverImageUsesHttps: check(
+    'performer_events_cover_image_uses_https',
+    sql`${table.coverImageUrl} IS NULL OR ${table.coverImageUrl} ~* '^https://[^[:space:]]+$'`
+  ),
+  externalTicketUsesHttps: check(
+    'performer_events_external_ticket_uses_https',
+    sql`${table.externalTicketUrl} IS NULL OR ${table.externalTicketUrl} ~* '^https://[^[:space:]]+$'`
+  ),
+  externalTicketShape: check(
+    'performer_events_external_ticket_shape',
+    sql`(${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL) OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} IS NOT NULL)`
+  ),
+  externalTicketLabelAllowed: check(
+    'performer_events_external_ticket_label_allowed',
+    sql`${table.externalTicketLabel} IS NULL OR ${table.externalTicketLabel} IN ('Get tickets', 'RSVP', 'View details')`
+  )
 }));
 
 export const gigSessions = pgTable('gig_sessions', {

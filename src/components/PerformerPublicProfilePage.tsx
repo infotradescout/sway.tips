@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   BadgeCheck,
+  CalendarDays,
   Coins,
   Disc3,
   Globe2,
@@ -21,6 +22,7 @@ import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
+import { PublicEventCard, type PublicEventDto } from './PublicEventPage';
 
 type PublicProfileLink = {
   label: string;
@@ -88,6 +90,7 @@ type PublicProfileRelease = {
 type ProfileResponse = {
   performer?: PublicPerformerProfile;
   activeRoom?: ActiveProfileRoom | null;
+  events?: PublicEventDto[];
   releases?: PublicProfileRelease[];
   error?: string;
 };
@@ -131,6 +134,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   captureCampaignCode();
   const [profile, setProfile] = useState<PublicPerformerProfile | null>(null);
   const [activeRoom, setActiveRoom] = useState<ActiveProfileRoom | null>(null);
+  const [events, setEvents] = useState<PublicEventDto[]>([]);
   const [releases, setReleases] = useState<PublicProfileRelease[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
@@ -203,6 +207,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               : 'claimed'
         });
         setActiveRoom(data.activeRoom || null);
+        setEvents(Array.isArray(data.events) ? data.events : []);
         setReleases(Array.isArray(data.releases) ? data.releases : []);
         setAvatarFailed(false);
         setStatus('ready');
@@ -326,14 +331,22 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <a href="/" aria-label="Sway home" className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] font-display text-lg font-black text-white backdrop-blur hover:border-fuchsia-400/40">
             S
           </a>
-          <button
-            type="button"
-            onClick={handleShare}
-            className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-slate-200 backdrop-blur transition hover:border-cyan-300/40 hover:text-white"
-          >
-            <Share2 className="h-3.5 w-3.5" />
-            {shareMessage || 'Share'}
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href="/discover"
+              className="inline-flex min-h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-slate-200 backdrop-blur transition hover:border-fuchsia-300/40 hover:text-white"
+            >
+              Discover shows
+            </a>
+            <button
+              type="button"
+              onClick={handleShare}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-slate-200 backdrop-blur transition hover:border-cyan-300/40 hover:text-white"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              {shareMessage || 'Share'}
+            </button>
+          </div>
         </header>
 
         <motion.section
@@ -482,6 +495,27 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             </a>
           ) : null}
 
+          {events.length ? (
+            <section className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.05] p-4 text-left" aria-label="Upcoming shows">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
+                  <CalendarDays className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Upcoming shows</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Events from this performer</p>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3">
+                {events.map((event) => (
+                  <div key={event.id}>
+                    <PublicEventCard event={event} showExternalPolicy />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {releases.length ? (
             <section className="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/[0.06] p-4 text-left" aria-label="Releases">
               <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200"><Disc3 className="h-4 w-4" /></span><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Music and releases</p><p className="mt-0.5 text-xs text-slate-500">Official release pages from this performer</p></div></div>
@@ -599,6 +633,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-slate-600">
             <Sparkles className="h-3.5 w-3.5" /> sway to play
           </div>
+          <a href="/discover" className="mt-3 block text-xs font-bold text-slate-400 transition hover:text-cyan-200">
+            Discover live rooms and shows
+          </a>
           <a href="/talent/signup" className="mt-3 block text-xs font-bold text-slate-500 transition hover:text-fuchsia-200">
             Create your own free Sway page
           </a>
