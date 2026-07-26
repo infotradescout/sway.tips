@@ -863,16 +863,23 @@ async function runServiceProof(
     'select updated_at from performer_events where id = $1',
     [ids.disputeEvent]
   );
-  await expectServiceError(
-    () => service.cancelNativeEvent({
-      eventId: ids.disputeEvent,
-      performerId: ids.performer,
-      actorUserId: ids.owner,
-      expectedUpdatedAt: new Date(disputeEventVersion.rows[0]!.updated_at).toISOString(),
-      cancellationReason: 'The event cannot proceed while support resolves the disputed ticket.'
-    }),
-    'native_ticket_cancellation_locked',
-    409
+  const disputeCancellation = await service.cancelNativeEvent({
+    eventId: ids.disputeEvent,
+    performerId: ids.performer,
+    actorUserId: ids.owner,
+    expectedUpdatedAt: new Date(disputeEventVersion.rows[0]!.updated_at).toISOString(),
+    cancellationReason: 'The event cannot proceed while support resolves the disputed ticket.'
+  });
+  assert.equal(disputeCancellation.refundsQueued, 0);
+  assert.equal(disputeCancellation.admittedTicketsPreserved, 0);
+  assert.equal(disputeCancellation.disputedTicketsPreserved, 1);
+  assert.equal(
+    (await service.getBuyerOrder({
+      orderId: disputeCheckout.orderId,
+      buyerUserId: ids.buyerTwo
+    })).status,
+    'disputed',
+    'Event cancellation must remain truthful while the disputed ticket stays in controlled support.'
   );
   const disputeClosed = await sendEnvelope(service, webhookEnvelope({
     providerEventId: 'evt_service_dispute_closed_6',
@@ -904,23 +911,8 @@ async function runServiceProof(
       orderId: disputeCheckout.orderId,
       buyerUserId: ids.buyerTwo
     })).status,
-    'paid',
-    'A won dispute must restore the unused paid ticket before any later cancellation.'
-  );
-  const disputeCancellation = await service.cancelNativeEvent({
-    eventId: ids.disputeEvent,
-    performerId: ids.performer,
-    actorUserId: ids.owner,
-    expectedUpdatedAt: new Date(disputeEventVersion.rows[0]!.updated_at).toISOString(),
-    cancellationReason: 'The event cannot proceed after support resolved the dispute.'
-  });
-  assert.equal(disputeCancellation.refundsQueued, 1);
-  assert.equal(
-    (await service.getBuyerOrder({
-      orderId: disputeCheckout.orderId,
-      buyerUserId: ids.buyerTwo
-    })).status,
-    'refund_pending'
+    'refund_pending',
+    'A won dispute on an unused ticket for a cancelled event must queue the buyer refund.'
   );
 
   const cancelEventVersion = await database.query<{ updated_at: Date }>(
@@ -1028,17 +1020,16 @@ async function runServiceProof(
     'select updated_at from performer_events where id = $1',
     [ids.manualEvent]
   );
-  await expectServiceError(
-    () => service.cancelNativeEvent({
-      eventId: ids.manualEvent,
-      performerId: ids.performer,
-      actorUserId: ids.owner,
-      expectedUpdatedAt: new Date(manualEventVersion.rows[0]!.updated_at).toISOString(),
-      cancellationReason: 'The remainder of the event cannot continue.'
-    }),
-    'native_ticket_cancellation_locked',
-    409
-  );
+  const mixedCancellation = await service.cancelNativeEvent({
+    eventId: ids.manualEvent,
+    performerId: ids.performer,
+    actorUserId: ids.owner,
+    expectedUpdatedAt: new Date(manualEventVersion.rows[0]!.updated_at).toISOString(),
+    cancellationReason: 'The remainder of the event cannot continue.'
+  });
+  assert.equal(mixedCancellation.refundsQueued, 1);
+  assert.equal(mixedCancellation.admittedTicketsPreserved, 1);
+  assert.equal(mixedCancellation.disputedTicketsPreserved, 0);
   assert.equal(
     await scalarCount(
       database,
@@ -1048,18 +1039,18 @@ async function runServiceProof(
       [manualCheckout.orderId]
     ),
     1,
-    'A refused cancellation must preserve the admitted ticket for settlement.'
+    'Cancellation must preserve the admitted ticket for settlement without clawback.'
   );
   assert.equal(
     await scalarCount(
       database,
       `select count(*)::int as count
          from event_tickets
-        where order_id = $1 and status = 'held'`,
+        where order_id = $1 and status = 'refund_pending'`,
       [manualUnusedCheckout.orderId]
     ),
     1,
-    'A refused cancellation must not partially mutate unused tickets.'
+    'Cancellation must queue every unused paid ticket for a buyer refund.'
   );
 
   for (const orderId of [qrCheckout.orderId, manualCheckout.orderId]) {
@@ -1076,7 +1067,7 @@ async function runServiceProof(
   }
   await service.runDueOperations({ limit: 10, workerId: 'service-transfer-worker' });
   assert.equal(fake.transferCalls.length, 2);
-  assert.equal(fake.refundCalls.length, 2);
+  assert.equal(fake.refundCalls.length, 3);
   assert.equal(
     await scalarCount(
       database,
@@ -1093,7 +1084,7 @@ async function runServiceProof(
 
   currentNow = new Date(eventEndsAt.getTime() + 61 * 60_000);
   const maintenance = await service.runMaintenance({ limit: 20 });
-  assert.equal(maintenance.noShowRefundsQueued, 2);
+  assert.equal(maintenance.noShowRefundsQueued, 1);
   await service.runDueOperations({ limit: 10, workerId: 'service-no-show-worker' });
   const noShowOrder = await service.getBuyerOrder({
     orderId: noShowCheckout.orderId,
