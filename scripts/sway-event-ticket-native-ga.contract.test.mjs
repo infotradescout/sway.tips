@@ -185,6 +185,11 @@ requireTerms(ticketService, 'Native ticket runtime gate', [
 requirePatterns(ticketService, 'Native ticket public-sale policy gate', [
   /salesStatus:\s*salesStatus === 'on_sale'[\s\S]*!capability\.salesAvailable[\s\S]*!activeOfferPolicy[\s\S]*!activeSeller[\s\S]*\?\s*'closed'/
 ]);
+requireTerms(ticketService, 'Native ticket capability timing policy', [
+  'reservationMinutes: runtimeConfig.reservationMinutes',
+  'refundGraceMinutes: runtimeConfig.refundGraceMinutes',
+  'supportEmail: runtimeConfig.supportEmail'
+]);
 
 // External ticket handoffs and Sway-native inventory are mutually exclusive.
 requireTerms(schema, 'Event ticketing modes', [
@@ -197,10 +202,47 @@ requireTerms(schema, 'Event ticketing modes', [
   "doorOpensAt: timestamp('door_opens_at'"
 ]);
 requireTerms(eventService, 'Event mode validation', [
+  "const doorOpensAt = parseOptionalDateTime(input.doorOpensAt, 'Door-open time')",
+  "if (ticketingMode === 'native_ga' && !doorOpensAt)",
+  "'native_ticket_door_time_required'",
+  'if (doorOpensAt && doorOpensAt.getTime() > startsAt.getTime())',
+  "'event_door_after_start'",
   "if (ticketingMode === 'native_ga' && !endsAt)",
   "if (ticketingMode === 'native_ga' && externalTicketUrl)",
   "'native_ticket_external_url_conflict'"
 ]);
+requireTerms(ticketService, 'Explicit native admission window', [
+  'if (!event.doorOpensAt)',
+  'const opensAt = event.doorOpensAt',
+  'admissionOpensAt: event.event.doorOpensAt!.toISOString()',
+  '!owner.event.doorOpensAt',
+  'owner.event.doorOpensAt.getTime() <= now.getTime()',
+  "'event_door_not_future'",
+  "'native_ticket_event_window_invalid'"
+]);
+const createEventRoute = routeBlock(server, 'post', '/api/talent/events');
+const updateEventRoute = routeBlock(server, 'patch', '/api/talent/events/:eventId');
+requireTerms(createEventRoute, 'Native event create door field', [
+  'doorOpensAt: req.body?.doorOpensAt'
+]);
+requireTerms(updateEventRoute, 'Native event update door field', [
+  "'doorOpensAt'",
+  'Object.prototype.hasOwnProperty.call(req.body ?? {}, field)'
+]);
+requireTerms(server, 'Public event door projection', [
+  'doorOpensAt: event.doorOpensAt'
+]);
+for (const [label, source] of [
+  ['Performer event service', eventService],
+  ['Native ticket service', ticketService],
+  ['Server ticket routes', server]
+]) {
+  forbidPatterns(source, `${label} admission timing`, [
+    /\bNATIVE_TICKET_ADMISSION_LEAD_MINUTES\b/,
+    /\badmissionLeadMinutes\b/,
+    /startsAt\.getTime\(\)\s*-\s*(?:120|2\s*\*\s*60)\s*\*\s*60_000/
+  ]);
+}
 requireTerms(migration, 'Event mode database protection', [
   'CREATE TYPE "public"."performer_event_ticketing_mode" AS ENUM(\'external\', \'native_ga\')',
   'CONSTRAINT "performer_events_ticketing_mode_exclusive"',
@@ -245,8 +287,16 @@ requireTerms(schema, 'Native event ticket schema', [
   "'event_ticket_offers_seller_terms_valid'",
   "'ticket_orders_one_ticket_only'",
   "'ticket_orders_offer_buyer_active_idx'",
+  "'ticket_orders_balance_transaction_idx'",
   "'ticket_orders_usd_only'",
   "'ticket_orders_automatic_platform_charge'",
+  "'ticket_orders_final_charge_coherent'",
+  "'ticket_orders_charged_state_coherent'",
+  "processorBalanceTransactionId: text('processor_balance_transaction_id')",
+  "processorFeeCents: integer('processor_fee_cents')",
+  "processorNetCents: integer('processor_net_cents')",
+  "'processor_fee_recorded'",
+  "'processor_fee_expense'",
   "'event_tickets_admission_key_idx'",
   "'ticket_payment_operations_idempotency_idx'",
   "'ticket_payment_operations_order_type_idx'",
@@ -266,6 +316,14 @@ requireTerms(migration, 'Native ticket migration', [
   'CREATE TABLE "ticket_admission_events"',
   'CREATE UNIQUE INDEX "ticket_orders_buyer_request_idx"',
   'CREATE UNIQUE INDEX "ticket_orders_offer_buyer_active_idx"',
+  'CREATE UNIQUE INDEX "ticket_orders_balance_transaction_idx"',
+  '"processor_balance_transaction_id" text',
+  '"processor_fee_cents" integer',
+  '"processor_net_cents" integer',
+  'CONSTRAINT "ticket_orders_final_charge_coherent"',
+  'CONSTRAINT "ticket_orders_charged_state_coherent"',
+  "'processor_fee_expense'",
+  "'processor_fee_recorded'",
   'CREATE UNIQUE INDEX "ticket_payment_operations_idempotency_idx"',
   'CREATE UNIQUE INDEX "ticket_payment_operations_order_type_idx"',
   'CREATE UNIQUE INDEX "ticket_ledger_entries_idempotency_idx"',
@@ -329,6 +387,29 @@ requireTerms(ticketService, 'Durable ticket payment orchestration', [
   'destinationAccountId: offer.sellerStripeAccountIdSnapshot',
   'sourceChargeId: row.order.processorChargeId',
   'await runSpecificOperation(created.operationId'
+]);
+requireTerms(stripeProvider, 'Stripe capture balance evidence', [
+  "extractCaptureBalanceEvidence",
+  "{ expand: ['latest_charge.balance_transaction'] }",
+  'balanceTransactionId',
+  'processingFeeCents',
+  'netCents',
+  'Stripe ticket capture currency must be coherent USD across the PaymentIntent, Charge, and balance transaction.',
+  'Stripe ticket capture amounts must match across the PaymentIntent, Charge, and balance transaction.',
+  'Stripe capture balance transaction net must equal its amount less its processing fee.',
+  'Stripe capture balance transaction source must match the latest Charge.'
+]);
+requireTerms(ticketService, 'Exact captured cash and processor fee evidence', [
+  'Stripe balance-transaction fee evidence is not yet available.',
+  'processorBalanceTransactionId: input.balanceTransactionId',
+  'processorFeeCents: input.processingFeeCents',
+  'processorNetCents: input.netCents',
+  '`stripe:balance-transaction:${input.balanceTransactionId}`',
+  "account: 'platform_cash'",
+  'amountCents: input.netCents',
+  "entryType: 'processor_fee_recorded'",
+  "account: 'processor_fee_expense'",
+  'amountCents: input.processingFeeCents'
 ]);
 requireTerms(ticketService, 'Hosted checkout redirect safety', [
   'function normalizeHostedCheckoutUrl',
@@ -457,11 +538,26 @@ requireTerms(cancelRoute, 'Native/external cancellation routing', [
   'eventTicketService.cancelNativeEvent',
   'performerEventService.cancelEvent'
 ]);
-requireTerms(ticketService, 'Native cancellation settlement guard', [
-  'const cancellationLocked = orderRows.some',
-  "order.status === 'disputed'",
-  'Boolean(ticket?.admissionAcceptedAt)',
-  "'native_ticket_cancellation_locked'"
+requireTerms(ticketService, 'Native mixed cancellation settlement', [
+  'let admittedTicketsPreserved = 0',
+  'let disputedTicketsPreserved = 0',
+  'disputedTicketsPreserved += 1',
+  'admittedTicketsPreserved += 1',
+  ".set({ status: 'refund_pending', refundPendingAt: now, updatedAt: now })",
+  "inArray(ticketOrders.status, ['checkout_pending', 'checkout_open'])",
+  "operationType: 'expire_checkout'",
+  "reason: 'seller_event_cancellation'",
+  'eq(performerEvents.status, \'published\')',
+  'eq(eventTicketOffers.id, offer.id)',
+  "admittedSettlementPolicy: 'continue_without_clawback'",
+  "disputedSettlementPolicy: 'controlled_support'",
+  'cancelledUnusedRefundRequired',
+  "reason: 'dispute_won_after_seller_event_cancellation'",
+  "'refund_queued_after_cancellation'"
+]);
+forbidPatterns(ticketService, 'Native mixed cancellation settlement', [
+  /\bnative_ticket_cancellation_locked\b/,
+  /\bconst cancellationLocked\b/
 ]);
 
 const paymentWebhookRoute = routeBlock(server, 'post', '/api/payment/webhook');
@@ -505,6 +601,14 @@ requireTerms(doorPage, 'Door fail-closed behavior', [
   'No second admission or transfer was recorded.',
   'This confirms admission, not completion of a bank payout.'
 ]);
+requireTerms(doorPage, 'Door boundary refresh behavior', [
+  'window.setInterval(refreshWhenUsable, 15_000)',
+  'new Date(door.admissionWindow.opensAt).getTime()',
+  'new Date(door.admissionWindow.closesAt).getTime()',
+  'window.setTimeout(refreshWhenUsable',
+  "document.addEventListener('visibilitychange', refreshWhenUsable)",
+  "window.addEventListener('online', refreshWhenUsable)"
+]);
 
 // Settlement language must not imply regulated escrow, credit, resale, or a
 // completed refund/transfer before processor confirmation.
@@ -524,15 +628,25 @@ requireTerms(server, 'Published native ticket terms', [
   'Each native order and offer stores its accepted text, version, and hash as an immutable snapshot.'
 ]);
 requireTerms(purchaseCard, 'Buyer ticket settlement copy', [
+  'one ticket before applicable government tax',
+  'Stripe will show any applicable government tax before payment.',
   'Your payment is held by Sway.',
   'does not transfer the performer share until your ticket is checked in',
   'queues a full refund',
   'refund if this ticket remains unaccepted'
 ]);
 requireTerms(eventManager, 'Seller ticket settlement copy', [
+  'before applicable government tax',
   'refund-only policy',
-  'queues full refunds for tickets that were not checked in',
-  'Refunds may remain pending while the payment processor completes them'
+  'queues full refunds for eligible unused tickets',
+  'Admitted tickets keep their recorded settlement',
+  'disputed payments remain under support review',
+  'refunds may remain pending while the payment processor completes them'
+]);
+requireTerms(publicEventPage, 'Public mixed-cancellation copy', [
+  'full refunds for eligible unused native tickets',
+  'Admitted tickets keep their recorded settlement',
+  'disputed payments remain under support review'
 ]);
 requireTerms(orderReturnPage, 'Ticket issuance confirmation copy', [
   'Backend confirmed',
@@ -547,7 +661,45 @@ requireTerms(ticketPassPage, 'Ticket refund and rotating-pass copy', [
 ]);
 requireTerms(ticketWalletPage, 'Authenticated ticket wallet', [
   "fetch('/api/account/tickets'",
-  'Tickets appear here only after Sway confirms payment.'
+  'Tickets appear here only after Sway confirms payment.',
+  'settlementStatus',
+  "ticket.settlementStatus === 'released'",
+  "'Transfer pending'"
+]);
+requireTerms(ticketPassPage, 'Raw ticket settlement state', [
+  'settlementStatus',
+  "ticket.settlementStatus === 'released'",
+  'the performer transfer is pending processor confirmation'
+]);
+requireTerms(ticketService, 'Raw ticket settlement projection', [
+  'settlementStatus: row.ticket.status'
+]);
+
+const supportPageRoute = routeBlock(server, 'get', '/support');
+const supportContactRoute = routeBlock(server, 'get', '/api/support/contact');
+requireTerms(server, 'Monitored ticket support document', [
+  'function renderSupportPageHtml',
+  'const supportEmail = nativeTicketRuntimeConfig.supportEmail',
+  'Email the monitored Sway support channel.',
+  'href="mailto:',
+  'Native ticket sales remain disabled while this contact is missing.'
+]);
+requireTerms(supportPageRoute, 'Ticket support reference context', [
+  'req.query.orderId',
+  'req.query.ticketId',
+  'renderSupportPageHtml(reference)'
+]);
+requireTerms(supportContactRoute, 'Ticket support capability endpoint', [
+  'nativeTicketRuntimeConfig.supportEmail',
+  "supportPath: '/support'"
+]);
+requireTerms(orderReturnPage, 'Order-scoped ticket support', [
+  '/support?',
+  'orderId: order.id'
+]);
+requireTerms(ticketPassPage, 'Pass-scoped ticket support', [
+  '/support?',
+  'ticketId: ticket.id'
 ]);
 
 if (failures.length) {
