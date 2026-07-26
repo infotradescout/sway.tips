@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowRight, CheckCircle2, LogOut, QrCode, Radio, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowRight, CheckCircle2, LogOut, QrCode, Radio, ShieldCheck, Ticket, UserRound } from 'lucide-react';
 import AppBackdrop from './AppBackdrop';
 
 type AccountSession = {
@@ -35,6 +35,21 @@ async function accountJson(path: string, body?: Record<string, unknown>) {
 function readClaimFromLocation() {
   const params = new URLSearchParams(window.location.search);
   return (params.get('claim') || params.get('code') || '').trim();
+}
+
+function readSafeAccountNextFromLocation() {
+  const raw = new URLSearchParams(window.location.search).get('next')?.trim() || '';
+  if (!raw || raw.length > 1_024 || !raw.startsWith('/') || raw.startsWith('//')) return '';
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.origin !== window.location.origin) return '';
+    const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
+      || parsed.pathname === '/tickets'
+      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname);
+    return allowed ? `${parsed.pathname}${parsed.search}` : '';
+  } catch {
+    return '';
+  }
 }
 
 function AccessFrame({ children }: { children: ReactNode }) {
@@ -105,6 +120,7 @@ function ClaimCodeField(props: {
 export function AccountLogin() {
   const params = new URLSearchParams(window.location.search);
   const initialClaim = readClaimFromLocation();
+  const accountNext = readSafeAccountNextFromLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [claimCode, setClaimCode] = useState(initialClaim);
@@ -119,7 +135,8 @@ export function AccountLogin() {
       const data = await accountJson('/api/account/login', {
         email,
         password,
-        claimCode: claimCode.trim() || undefined
+        claimCode: claimCode.trim() || undefined,
+        next: accountNext || undefined
       });
       window.location.assign(data.redirectPath || '/account');
     } catch (error) {
@@ -129,9 +146,10 @@ export function AccountLogin() {
     }
   };
 
-  const signupHref = claimCode.trim()
-    ? `/account/signup?claim=${encodeURIComponent(claimCode.trim())}`
-    : '/account/signup';
+  const signupParams = new URLSearchParams();
+  if (claimCode.trim()) signupParams.set('claim', claimCode.trim());
+  if (accountNext) signupParams.set('next', accountNext);
+  const signupHref = `/account/signup${signupParams.size ? `?${signupParams.toString()}` : ''}`;
 
   return (
     <AccessFrame>
@@ -159,6 +177,7 @@ export function AccountLogin() {
 
 export function AccountSignup() {
   const initialClaim = readClaimFromLocation();
+  const accountNext = readSafeAccountNextFromLocation();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -206,9 +225,12 @@ export function AccountSignup() {
   }, [initialClaim, validateClaim]);
 
   const loginHref = useMemo(() => {
+    const params = new URLSearchParams();
     const trimmed = claimCode.trim();
-    return trimmed ? `/account/login?claim=${encodeURIComponent(trimmed)}` : '/account/login';
-  }, [claimCode]);
+    if (trimmed) params.set('claim', trimmed);
+    if (accountNext) params.set('next', accountNext);
+    return `/account/login${params.size ? `?${params.toString()}` : ''}`;
+  }, [accountNext, claimCode]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -246,7 +268,8 @@ export function AccountSignup() {
         password,
         confirmPassword,
         termsAccepted,
-        claimCode: trimmedClaim || undefined
+        claimCode: trimmedClaim || undefined,
+        next: accountNext || undefined
       });
       if (typeof data.redirectPath === 'string' && data.redirectPath) {
         window.location.assign(data.redirectPath);
@@ -432,6 +455,7 @@ export function AccountHome() {
       ) : null}
       <div className="mt-5 grid gap-3">
         <a href="/home" className="flex min-h-14 items-center justify-between rounded-xl bg-fuchsia-600 px-4 text-sm font-black"><span className="inline-flex items-center gap-2"><QrCode className="h-4 w-4" /> Join or scan a room</span><ArrowRight className="h-4 w-4" /></a>
+        <a href="/tickets" className="flex min-h-14 items-center justify-between rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-4 text-sm font-black text-fuchsia-100"><span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4" /> My tickets</span><ArrowRight className="h-4 w-4" /></a>
         <a href="/account/reviews" className="flex min-h-14 items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100"><span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Review release rights</span><ArrowRight className="h-4 w-4" /></a>
         {session?.performer ? (
           <a href="/talent" className="flex min-h-14 items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100"><span className="inline-flex items-center gap-2"><Radio className="h-4 w-4" /> Open performer console</span><ArrowRight className="h-4 w-4" /></a>

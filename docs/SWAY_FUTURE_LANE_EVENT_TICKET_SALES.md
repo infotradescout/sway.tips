@@ -1,15 +1,16 @@
 # Event Listings And Future Native Ticket Sales
 
-**Status:** External event listings activated for performers; native ticket sales remain a locked future lane.
+**Status:** External event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.
 **Date locked:** 2026-07-23
 **External-listing slice activated:** 2026-07-26
+**Native paid-GA slice activated:** 2026-07-26
 **Owner direction:** Events belong in Sway, but listing an event and selling a ticket are separate capabilities with separate evidence bars.
 
 ## Intent
 
 The activated slice lets a performer publish an event on their Sway profile and hand a customer off to a performer-supplied HTTPS ticket URL. Sway does not process that external purchase, claim inventory, issue admission proof, or report external sales.
 
-Native Sway ticket sales remain a future product lane — not a side feature bolted onto live-room tips/requests/boosts, and not a silent add-on to audio publishing or merch. The performer remains the seller-side product actor; a venue is descriptive event context, not an account type, role, or permission boundary.
+Native Sway ticket sales are a separate money lane — not a side feature bolted onto live-room tips/requests/boosts, and not a silent add-on to audio publishing or merch. The performer remains the seller-side product actor; a venue is descriptive event context, not an account type, role, or permission boundary.
 
 ## Lane Boundary
 
@@ -22,7 +23,32 @@ Native Sway ticket sales remain a future product lane — not a side feature bol
 
 External handoff labels are limited to `Get tickets`, `RSVP`, or `View details`. Cancelling in Sway only changes the listing; performers remain responsible for external-provider cancellation, buyer communication, and refunds. Completed events remain historical records rather than being rewritten as cancelled.
 
-The future native lane must use its own order, ticket, payment, settlement, and audit records. Live-room payment records must never be reused as proof of ticket sales. Ticket fees must never silently stack onto tips, requests, boosts, publishing downloads, or merch.
+The native lane must use its own order, ticket, payment, settlement, and audit records. Live-room payment records must never be reused as proof of ticket sales. Ticket fees must never silently stack onto tips, requests, boosts, publishing downloads, or merch.
+
+## Activated Native Paid-GA Slice
+
+The authorized first native slice is deliberately smaller than the complete target:
+
+```text
+verified performer configures one paid general-admission offer
+→ authenticated customer buys one ticket through Stripe-hosted Checkout
+→ Stripe confirms an automatic-capture platform charge
+→ Sway issues a rotating single-use admission pass
+→ performer accepts the pass online
+→ a durable outbox transfers the performer share
+```
+
+If the ticket is not accepted, the v1 policy is refund-only:
+
+- performer cancellation queues a full refund for every unused ticket;
+- an unused ticket is queued for a full refund after event end plus the disclosed grace window;
+- refund, transfer, and ticket issuance copy stays pending until backend/provider evidence exists.
+
+This slice does **not** implement credits, forfeiture, resale, paid transfers, guest checkout, multiple tickets per order, reserved seating, venue accounts, or offline admission. Those stay closed until the single-ticket charge → hold → admit → transfer/refund loop is independently proven.
+
+“Held by Sway” describes the product behavior. The product must not call ordinary platform-balance retention a bank, trust, protected, or regulated escrow. Stripe funds segregation is a separate provider capability and may not be implied when it is not enabled.
+
+Production sales remain disabled unless the server has an explicit fee policy, tax posture, admission-signing secret, app URL, Stripe configuration, and the feature flag. Legal/tax review and a controlled low-value production proof are still required before enabling that flag.
 
 ## Relationship To Current Product
 
@@ -30,26 +56,28 @@ The future native lane must use its own order, ticket, payment, settlement, and 
 - The activated event-listing loop is: performer profile → published event → external HTTPS ticket provider.
 - An external link is a handoff only. Sway does not know whether inventory remains or whether a customer completes a purchase.
 - Publishing / collaboration remains its own pillar (see `SWAY_COMPLETE_PRODUCT_GAP.md` and `SWAY_AUDIO_PUBLISHING_FOUNDATION.md`).
-- Native ticket sales remains a separate future revenue lane beside merch and paid streams in the audio publishing foundation fee doctrine.
+- Native ticket sales remains a separate, production-gated revenue lane beside merch and paid streams in the audio publishing foundation fee doctrine.
 
 ## Activation Rules
 
-The performer-owned external-listing slice is activated. It may not expand into native sale or admission behavior without a new explicit authorization.
+The performer-owned external-listing slice and the first native paid-GA implementation slice are activated. Native production sales are not.
 
-Do not start native paid-ticket implementation until Gawain explicitly opens that money lane with:
+The implementation must keep:
 
-1. Scope and non-goals
-2. Separate payment/ledger contract from live-room money
-3. Fee language and Partner Terms snapshot for ticket sales
-4. Evidence bar (contracts + production proof) before any public claim
+1. paid-GA v1 scope and explicit non-goals;
+2. separate payment, order, ticket, ledger, webhook, and outbox records;
+3. immutable seller and buyer terms/fee snapshots;
+4. prominent mandatory-fee-inclusive price display before applicable government tax;
+5. signed-webhook, concurrency, crash-recovery, refund, and transfer evidence;
+6. a fail-closed production feature gate.
 
-Until then, native ticketing remains docs and planning only. No schema, route, UI, or marketing copy may claim that Sway sells tickets, controls capacity, confirms a purchase, issues admission, holds funds, settles sellers, or operates a transfer market.
+No marketing or readiness record may call native sales production-ready until a controlled charge, admission transfer, cancellation refund, no-show refund, and reconciliation packet all pass.
 
 ## Planning Doc
 
 Active plan (tickets + public feed): `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md`
 
-Owner locks already captured there:
+Long-term owner locks already captured there (future scope, not active v1):
 
 - Performers are the only seller-side product actor; location details are event context, not a separate role.
 - Fraud, refunds, chargebacks, inventory, and admission proof remain in scope.

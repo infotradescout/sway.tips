@@ -1,21 +1,20 @@
 # Sway Plan: External Event Listings + Future Native Tickets
 
-**Status:** Performer-owned external event listings activated; native ticket sales and settlement remain future work.
+**Status:** External listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.
 **Date:** 2026-07-23
 **External-listing slice activated:** 2026-07-26
+**Native paid-GA v1 slice activated:** 2026-07-26
 **Locked lane memo:** `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md`
 **Owner direction:**
 
 - Event ticket sales is a Sway lane.
-- The current slice lists performer events and hands customers to an external HTTPS ticket provider.
+- External-mode events hand customers to an external HTTPS ticket provider; native-mode events use the isolated paid-GA v1 lane below.
 - Performer is the only seller-side product actor. Location details do not create another account type or role.
-- Sway does **not** currently sell tickets, control capacity, confirm inventory, issue admission, or settle ticket money.
+- The merged external-listing product does **not** sell tickets. The authorized native paid-GA slice must remain disabled in production until its configuration and proof gates pass.
 - Handle fraud and the real money/admission risks — without Ticketmaster-scale bloat.
 - Simpler processes. No fluff tools. Power in the individual’s hands.
 - Public feed needs work and is part of this plan.
-- **Ticket money is escrowed until QR accept (check-in).** The customer has already paid; the ticket seller has **not** been paid yet.
-- After the show (or when settling a held ticket), the **seller** chooses: **refund**, **credit**, or **“sorry — you agreed”** (forfeit to seller under disclosed terms).
-- Buyers who can’t go can hit **Sell ticket** — it lists on Sway’s official transfer market; a new buyer swaps into the escrow seat and the original buyer gets their money back (lean face-value transfer — see §5b).
+- The long-term owner target includes credits, disclosed forfeiture, and face-value holder transfer. Those remain future scope; the active v1 is refund-only and must not expose those controls or claims.
 
 ---
 
@@ -46,11 +45,28 @@ Required truth:
 - The event page and discovery feed must not claim Sway inventory, ticket availability, external purchase completion, admission, refund, or settlement.
 - No location or venue field creates a venue actor, account, dashboard, or authority boundary.
 
-Native checkout, orders, capacity, inventory, ticket issuance, QR admission, refunds, credits, forfeits, seller settlement, and the transfer market are not part of this activated slice.
+Native checkout, orders, capacity, inventory, ticket issuance, QR admission, refunds, credits, forfeits, seller settlement, and the transfer market are not part of the external-listing slice. The first six plus refund-only settlement are now an isolated native implementation lane; credits, forfeits, and transfers remain future slices.
+
+### Native paid-GA v1 scope
+
+The active native implementation slice is:
+
+- one authenticated customer;
+- one ticket per order;
+- USD paid general admission;
+- prominent pretax ticket price including every mandatory Sway fee, with applicable government tax disclosed before payment;
+- automatic platform charge through Stripe-hosted Checkout;
+- performer share not transferred until an online, owner-authorized QR acceptance;
+- durable outbox for charge, refund, and seller-transfer reconciliation;
+- full refund for performer cancellation or an unused ticket after the disclosed grace window;
+- immutable seller/buyer terms and fee snapshots;
+- no venue actor.
+
+Production sales stay disabled until fee, tax, Stripe, URL, QR-secret, legal, and evidence gates are complete. Product copy says funds are held by Sway and not yet transferred; it does not claim a bank, trust, protected, or regulated escrow account.
 
 ---
 
-## 1. Future Native-Ticket Product Lock
+## 1. Long-Term Native-Ticket Product Lock (Not v1)
 
 The future native lane would let a performer sell tickets to a real show, receive funds when admission is accepted or a lawful disclosed settlement applies, and let buyers prove entry or transfer a ticket. Everything in this section is target behavior, not current external-listing behavior.
 
@@ -292,18 +308,23 @@ The external-listing slice is activated. Native money phases remain gated until 
 - Harden empty, loading, and 503 states.
 - Evidence: contract tests + behavior tests + production smoke that the feed never invents performers, events, inventory, or sale state.
 
-### Phase C — Native Ticket MVP (future; not activated)
+### Phase C1 — Native paid-GA core (activated; production gated)
 
-- Create / edit / publish / cancel event with disclosed settle policy.
-- Checkout → escrowed ticket issuance + receipt email (copy: held until entry; seller settle options).
-- Seller door QR accept → per-ticket release.
-- Seller settle UI: refund / credit / you agreed (gated by disclosure).
-- Close window job: apply default settle policy to remaining holds.
-- Buyer “my ticket” page: held / listed / accepted + **Sell ticket** button.
+- Configure, publish, and cancel one paid-GA offer with immutable refund-only terms.
+- Authenticated one-ticket order → automatic platform capture → backend-confirmed ticket issuance.
+- Seller door QR accept → durable per-ticket performer transfer operation.
+- Cancel or close window → durable full-refund operation for each unused ticket.
+- Buyer ticket wallet and rotating pass.
 - Payout-ready gate for sellers.
-- Chargeback/dispute path while escrowed proven in contracts.
+- Signed webhook, dispute, idempotency, concurrency, and reconciliation evidence.
 
-### Phase D — Native tickets + transfers (future)
+### Phase C2 — Alternate settlement (future)
+
+- Seller credit with a redeemable seller-scoped liability ledger.
+- Disclosed no-show forfeiture.
+- Any partial/multi-ticket order behavior.
+
+### Phase D — Native ticket holder transfers (future)
 
 - Upcoming events on feed + event page share cards.
 - Sold-out primary with **transfers available** on event/feed cards.

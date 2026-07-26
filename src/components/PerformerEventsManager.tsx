@@ -3,6 +3,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  DoorOpen,
   Edit3,
   ExternalLink,
   Loader2,
@@ -13,11 +14,36 @@ import {
   XCircle
 } from 'lucide-react';
 
+type TicketingMode = 'external' | 'native_ga';
+
+type NativeTicketSummary = {
+  capacity: number | null;
+  faceValueCents: number | null;
+  mandatoryFeeCents: number | null;
+  unitAllInPriceCents: number | null;
+  remainingCount: number | null;
+  salesStatus: string | null;
+};
+
+type NativeTicketCapability = {
+  salesAvailable: boolean;
+  reasonCodes: string[];
+  feeBps: number | null;
+  feeFixedCents: number | null;
+  taxMode: 'stripe_automatic' | 'not_required' | null;
+  reservationMinutes: number | null;
+  refundGraceMinutes: number | null;
+  termsVersion: string;
+  termsHash: string;
+  supportEmail: string | null;
+};
+
 type ManagedEvent = {
   id: string;
   title: string;
   description: string | null;
   startsAt: string;
+  doorOpensAt: string | null;
   endsAt: string | null;
   timeZone: string;
   locationName: string | null;
@@ -25,8 +51,10 @@ type ManagedEvent = {
   city: string | null;
   locationIsTba: boolean;
   coverImageUrl: string | null;
+  ticketingMode: TicketingMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
+  nativeTicket: NativeTicketSummary | null;
   visibility: 'public' | 'unlisted';
   status: string;
   eventPath: string | null;
@@ -40,6 +68,7 @@ type EventFormState = {
   title: string;
   description: string;
   startsAt: string;
+  doorOpensAt: string;
   endsAt: string;
   timeZone: string;
   locationName: string;
@@ -47,8 +76,12 @@ type EventFormState = {
   city: string;
   locationIsTba: boolean;
   coverImageUrl: string;
+  ticketingMode: TicketingMode;
   externalTicketUrl: string;
   externalTicketLabel: string;
+  nativeCapacity: string;
+  nativeFaceValueUsd: string;
+  nativeTermsAccepted: boolean;
   visibility: 'public' | 'unlisted';
 };
 
@@ -79,6 +112,7 @@ function emptyForm(): EventFormState {
     title: '',
     description: '',
     startsAt: '',
+    doorOpensAt: '',
     endsAt: '',
     timeZone: detectedTimeZone(),
     locationName: '',
@@ -86,8 +120,12 @@ function emptyForm(): EventFormState {
     city: '',
     locationIsTba: false,
     coverImageUrl: '',
+    ticketingMode: 'external',
     externalTicketUrl: '',
     externalTicketLabel: 'Get tickets',
+    nativeCapacity: '',
+    nativeFaceValueUsd: '',
+    nativeTermsAccepted: false,
     visibility: 'public'
   };
 }
@@ -96,15 +134,36 @@ function text(value: unknown) {
   return typeof value === 'string' ? value : '';
 }
 
+function nullableInteger(value: unknown) {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+}
+
+function normalizeNativeTicket(value: any): NativeTicketSummary | null {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    capacity: nullableInteger(value.capacity),
+    faceValueCents: nullableInteger(value.faceValueCents),
+    mandatoryFeeCents: nullableInteger(value.mandatoryFeeCents),
+    unitAllInPriceCents: nullableInteger(value.unitAllInPriceCents ?? value.totalPriceCents),
+    remainingCount: nullableInteger(value.remainingCount ?? value.availableCount),
+    salesStatus: text(value.salesStatus) || null
+  };
+}
+
 function normalizeManagedEvent(value: any): ManagedEvent | null {
   if (!value || typeof value !== 'object' || typeof value.id !== 'string') return null;
   const nestedLocation = value.location && typeof value.location === 'object' ? value.location : {};
   const nestedTicket = value.externalTicket && typeof value.externalTicket === 'object' ? value.externalTicket : {};
+  const nativeTicket = normalizeNativeTicket(value.nativeTicket ?? value.ticketOffer);
+  const ticketingMode: TicketingMode = value.ticketingMode === 'native_ga' || nativeTicket
+    ? 'native_ga'
+    : 'external';
   return {
     id: value.id,
     title: text(value.title),
     description: text(value.description) || null,
     startsAt: text(value.startsAt),
+    doorOpensAt: text(value.doorOpensAt) || null,
     endsAt: text(value.endsAt) || null,
     timeZone: text(value.timeZone) || detectedTimeZone(),
     locationName: text(value.locationName ?? nestedLocation.name) || null,
@@ -112,8 +171,10 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
     city: text(value.city ?? nestedLocation.city) || null,
     locationIsTba: value.locationIsTba === true || nestedLocation.isTba === true,
     coverImageUrl: text(value.coverImageUrl) || null,
+    ticketingMode,
     externalTicketUrl: text(value.externalTicketUrl ?? nestedTicket.url) || null,
     externalTicketLabel: text(value.externalTicketLabel ?? nestedTicket.label) || null,
+    nativeTicket,
     visibility: value.visibility === 'unlisted' ? 'unlisted' : 'public',
     status: text(value.status) || 'draft',
     eventPath: text(value.eventPath) || null,
@@ -223,6 +284,7 @@ function editForm(event: ManagedEvent): EventFormState {
     title: event.title,
     description: event.description || '',
     startsAt: localInputFromIso(event.startsAt, event.timeZone),
+    doorOpensAt: localInputFromIso(event.doorOpensAt, event.timeZone),
     endsAt: localInputFromIso(event.endsAt, event.timeZone),
     timeZone: event.timeZone,
     locationName: event.locationName || '',
@@ -230,18 +292,72 @@ function editForm(event: ManagedEvent): EventFormState {
     city: event.city || '',
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl || '',
+    ticketingMode: event.ticketingMode,
     externalTicketUrl: event.externalTicketUrl || '',
     externalTicketLabel: event.externalTicketLabel || 'Get tickets',
+    nativeCapacity: event.nativeTicket?.capacity === null || event.nativeTicket?.capacity === undefined
+      ? ''
+      : String(event.nativeTicket.capacity),
+    nativeFaceValueUsd: event.nativeTicket?.faceValueCents === null
+      || event.nativeTicket?.faceValueCents === undefined
+      ? ''
+      : (event.nativeTicket.faceValueCents / 100).toFixed(2),
+    nativeTermsAccepted: false,
     visibility: event.visibility
   };
 }
 
-function eventDateLabel(event: ManagedEvent) {
-  const date = new Date(event.startsAt);
+function usdInputToCents(value: string) {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) throw new Error('Enter the ticket face value in USD, using no more than two decimal places.');
+  const dollars = Number(match[1]);
+  const cents = Number((match[2] || '').padEnd(2, '0'));
+  const total = dollars * 100 + cents;
+  if (!Number.isSafeInteger(total) || total < 100) {
+    throw new Error('Native ticket face value must be at least $1.00 USD.');
+  }
+  return total;
+}
+
+function positiveCapacity(value: string) {
+  if (!/^\d+$/.test(value.trim())) throw new Error('Enter a whole-number native ticket capacity.');
+  const capacity = Number(value);
+  if (!Number.isSafeInteger(capacity) || capacity < 1) {
+    throw new Error('Native ticket capacity must be at least 1.');
+  }
+  return capacity;
+}
+
+function formatUsd(cents: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(cents / 100);
+}
+
+function salesStatusLabel(value: string | null) {
+  if (!value) return null;
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function durationLabel(minutes: number) {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} ${days === 1 ? 'day' : 'days'}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  }
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+function dateTimeLabel(value: string, timeZone: string) {
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Date unavailable';
   try {
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: event.timeZone,
+      timeZone,
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -253,6 +369,10 @@ function eventDateLabel(event: ManagedEvent) {
   } catch {
     return date.toLocaleString();
   }
+}
+
+function eventDateLabel(event: ManagedEvent) {
+  return dateTimeLabel(event.startsAt, event.timeZone);
 }
 
 function fieldClass() {
@@ -268,6 +388,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [nativeCapability, setNativeCapability] = useState<NativeTicketCapability | null>(null);
   const [form, setForm] = useState<EventFormState>(() => emptyForm());
   const [formOpen, setFormOpen] = useState(false);
   const [cancelDraft, setCancelDraft] = useState<{
@@ -284,6 +405,43 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       const response = await fetch('/api/talent/events', { cache: 'no-store', signal });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || 'Unable to load your events.');
+      const capabilityResponse = await fetch('/api/talent/events/native-ticket-capability', {
+        cache: 'no-store',
+        signal
+      });
+      const capabilityData = await capabilityResponse.json().catch(() => null);
+      const capability = capabilityData?.capability;
+      setNativeCapability(
+        capabilityResponse.ok && capability && typeof capability === 'object'
+          ? {
+              salesAvailable: capability.salesAvailable === true,
+              reasonCodes: Array.isArray(capability.reasonCodes)
+                ? capability.reasonCodes.filter((value: unknown): value is string => typeof value === 'string')
+                : [],
+              feeBps: nullableInteger(capability.feeBps),
+              feeFixedCents: nullableInteger(capability.feeFixedCents),
+              taxMode: capability.taxMode === 'stripe_automatic' || capability.taxMode === 'not_required'
+                ? capability.taxMode
+                : null,
+              reservationMinutes: nullableInteger(capability.reservationMinutes),
+              refundGraceMinutes: nullableInteger(capability.refundGraceMinutes),
+              termsVersion: text(capability.termsVersion),
+              termsHash: text(capability.termsHash),
+              supportEmail: text(capability.supportEmail) || null
+            }
+          : {
+              salesAvailable: false,
+              reasonCodes: ['native_ticket_readiness_unavailable'],
+              feeBps: null,
+              feeFixedCents: null,
+              taxMode: null,
+              reservationMinutes: null,
+              refundGraceMinutes: null,
+              termsVersion: '',
+              termsHash: '',
+              supportEmail: null
+            }
+      );
       const normalized = Array.isArray(data?.events)
         ? data.events.map(normalizeManagedEvent).filter((event): event is ManagedEvent => Boolean(event))
         : [];
@@ -314,6 +472,35 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       return leftUpcoming ? leftStart - rightStart : rightStart - leftStart;
     });
   }, [events]);
+  const editingNativeTicket = form.eventId
+    ? events.find((event) => event.id === form.eventId)?.nativeTicket ?? null
+    : null;
+  const nativePriceQuote = useMemo(() => {
+    if (
+      form.ticketingMode !== 'native_ga'
+      || nativeCapability?.feeBps === null
+      || nativeCapability?.feeBps === undefined
+      || nativeCapability.feeFixedCents === null
+    ) return null;
+    try {
+      const faceValueCents = usdInputToCents(form.nativeFaceValueUsd);
+      const mandatoryFeeCents = Math.ceil(
+        faceValueCents * nativeCapability.feeBps / 10_000
+      ) + nativeCapability.feeFixedCents;
+      return {
+        faceValueCents,
+        mandatoryFeeCents,
+        totalPriceCents: faceValueCents + mandatoryFeeCents
+      };
+    } catch {
+      return null;
+    }
+  }, [
+    form.ticketingMode,
+    form.nativeFaceValueUsd,
+    nativeCapability?.feeBps,
+    nativeCapability?.feeFixedCents
+  ]);
 
   const resetForm = (clearMessage = true) => {
     setForm(emptyForm());
@@ -342,18 +529,46 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
 
     try {
       const startsAt = isoFromZonedLocal(form.startsAt, form.timeZone.trim());
+      const doorOpensAt = form.ticketingMode === 'native_ga'
+        ? isoFromZonedLocal(form.doorOpensAt, form.timeZone.trim())
+        : null;
       const endsAt = form.endsAt ? isoFromZonedLocal(form.endsAt, form.timeZone.trim()) : null;
+      if (form.ticketingMode === 'native_ga' && !endsAt) {
+        throw new Error('Native paid admission requires an event end time.');
+      }
+      if (
+        form.ticketingMode === 'native_ga'
+        && !form.eventId
+        && nativeCapability?.salesAvailable !== true
+      ) {
+        throw new Error('Native ticket sales are not ready for this performer. Choose an external ticket link.');
+      }
       if (endsAt && new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
         throw new Error('Event end time must be after the start time.');
+      }
+      if (doorOpensAt && new Date(doorOpensAt).getTime() > new Date(startsAt).getTime()) {
+        throw new Error('Door-open time must be at or before the show start time.');
+      }
+
+      const nativeConfig = form.ticketingMode === 'native_ga'
+        ? {
+            capacity: positiveCapacity(form.nativeCapacity),
+            faceValueCents: usdInputToCents(form.nativeFaceValueUsd)
+          }
+        : null;
+      if (nativeConfig && !form.nativeTermsAccepted) {
+        throw new Error('Accept the native ticket seller terms before saving this setup.');
       }
 
       const body = {
         ...(form.eventId
           ? { expectedUpdatedAt: form.expectedUpdatedAt }
           : { clientRequestId: form.clientRequestId }),
+        ...(!form.eventId ? { ticketingMode: form.ticketingMode } : {}),
         title: form.title,
         description: form.description,
         startsAt,
+        doorOpensAt,
         endsAt,
         timeZone: form.timeZone.trim(),
         locationName: form.locationName,
@@ -361,8 +576,10 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         city: form.city,
         locationIsTba: form.locationIsTba,
         coverImageUrl: form.coverImageUrl,
-        externalTicketUrl: form.externalTicketUrl,
-        externalTicketLabel: form.externalTicketUrl.trim() ? form.externalTicketLabel : '',
+        externalTicketUrl: form.ticketingMode === 'external' ? form.externalTicketUrl : '',
+        externalTicketLabel: form.ticketingMode === 'external' && form.externalTicketUrl.trim()
+          ? form.externalTicketLabel
+          : '',
         visibility: form.visibility
       };
 
@@ -381,7 +598,49 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || 'Unable to save this event.');
 
-      setMessage(form.eventId ? 'Event changes saved.' : 'Event draft created.');
+      const savedEvent = normalizeManagedEvent(data?.event);
+      const savedEventId = savedEvent?.id || form.eventId;
+      if (nativeConfig) {
+        if (!savedEventId) {
+          throw new Error('Event draft saved, but its native ticket setup could not be linked. Reload and try again.');
+        }
+        const ticketingResponse = await fetch(
+          `/api/talent/events/${encodeURIComponent(savedEventId)}/ticketing`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              capacity: nativeConfig.capacity,
+              faceValueCents: nativeConfig.faceValueCents,
+              termsAccepted: true
+            })
+          }
+        );
+        const ticketingData = await ticketingResponse.json().catch(() => null);
+        if (!ticketingResponse.ok) {
+          setForm((current) => ({
+            ...current,
+            eventId: savedEventId,
+            expectedUpdatedAt: savedEvent?.updatedAt || current.expectedUpdatedAt,
+            clientRequestId: clientRequestId()
+          }));
+          throw new Error(
+            `Event draft saved, but native ticket setup did not save. ${
+              ticketingData?.error || 'Review the ticket details and try again.'
+            }`
+          );
+        }
+      }
+
+      setMessage(
+        nativeConfig
+          ? form.eventId
+            ? 'Event and native ticket setup saved.'
+            : 'Event draft and native ticket setup saved. Review it before publishing.'
+          : form.eventId
+            ? 'Event changes saved.'
+            : 'Event draft created.'
+      );
       setFormOpen(false);
       resetForm(false);
       await loadEvents();
@@ -427,7 +686,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setMessage('Add a clear cancellation reason before cancelling this event.');
       return;
     }
-    if (!cancelDraft.externalProviderConfirmed) {
+    if (event.ticketingMode === 'external' && !cancelDraft.externalProviderConfirmed) {
       setMessage('Confirm that you will handle external-provider cancellation duties before continuing.');
       return;
     }
@@ -450,7 +709,11 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || 'Unable to cancel this event.');
       setCancelDraft(null);
-      setMessage('Sway listing cancelled. Its external ticket action is no longer public.');
+      setMessage(
+        event.ticketingMode === 'native_ga'
+          ? 'Event cancelled. Eligible unused native tickets are queued for refund. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and processor confirmation may remain pending.'
+          : 'Sway listing cancelled. Its external ticket action is no longer public.'
+      );
       await loadEvents();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to cancel this event.');
@@ -471,8 +734,8 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Shows and events</p>
             <h3 className="mt-2 font-display text-xl font-black text-white">Put upcoming shows on your public page</h3>
             <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">
-              Add a real date and location, then add an external ticket or RSVP destination before publishing.
-              Sway lists the event; checkout and refund policies remain with the external site.
+              Add a real date and location, then choose an external ticket destination or native Sway
+              general admission. Each event stays a performer-to-customer offer.
             </p>
           </div>
           <button
@@ -545,7 +808,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             </label>
 
             <label className="space-y-1.5">
-              <span className={fieldLabel()}>Starts</span>
+              <span className={fieldLabel()}>
+                {form.ticketingMode === 'native_ga' ? 'Show starts' : 'Starts'}
+              </span>
               <input
                 required
                 type="datetime-local"
@@ -554,9 +819,27 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                 onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))}
               />
             </label>
+            {form.ticketingMode === 'native_ga' ? (
+              <label className="space-y-1.5">
+                <span className={fieldLabel()}>Doors open — check-in begins</span>
+                <input
+                  required
+                  type="datetime-local"
+                  className={fieldClass()}
+                  value={form.doorOpensAt}
+                  onChange={(event) => setForm((current) => ({ ...current, doorOpensAt: event.target.value }))}
+                />
+                <span className="block text-[11px] leading-5 text-slate-500">
+                  Sway will not reveal admission credentials or accept a ticket before this time.
+                </span>
+              </label>
+            ) : null}
             <label className="space-y-1.5">
-              <span className={fieldLabel()}>Ends — optional</span>
+              <span className={fieldLabel()}>
+                Ends {form.ticketingMode === 'native_ga' ? '— required for native tickets' : '— optional'}
+              </span>
               <input
+                required={form.ticketingMode === 'native_ga'}
                 type="datetime-local"
                 className={fieldClass()}
                 value={form.endsAt}
@@ -633,37 +916,221 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               />
             </label>
 
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className={fieldLabel()}>External ticket or RSVP URL — required to publish</span>
-              <input
-                type="url"
-                inputMode="url"
-                className={fieldClass()}
-                value={form.externalTicketUrl}
-                onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
-                placeholder="https://secure-ticket-site.example/..."
-              />
-              <span className="block text-[11px] leading-5 text-slate-500">
-                Sway provides an external handoff to this destination. Sway is not selling this ticket or verifying the provider.
-              </span>
-            </label>
+            <div className="space-y-2 sm:col-span-2">
+              <span className={fieldLabel()}>Ticketing</span>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
+                  form.ticketingMode === 'external'
+                    ? 'border-fuchsia-300/35 bg-fuchsia-500/10 text-white'
+                    : 'border-white/10 bg-slate-950 text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="ticketingMode"
+                    value="external"
+                    disabled={Boolean(form.eventId)}
+                    checked={form.ticketingMode === 'external'}
+                    onChange={() => setForm((current) => ({
+                      ...current,
+                      ticketingMode: 'external',
+                      nativeTermsAccepted: false
+                    }))}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    <strong className="block font-black">External ticket or RSVP</strong>
+                    Sway links customers to another provider.
+                  </span>
+                </label>
+                <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
+                  form.ticketingMode === 'native_ga'
+                    ? 'border-cyan-300/35 bg-cyan-500/10 text-white'
+                    : 'border-white/10 bg-slate-950 text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="ticketingMode"
+                    value="native_ga"
+                    disabled={Boolean(form.eventId) || nativeCapability?.salesAvailable !== true}
+                    checked={form.ticketingMode === 'native_ga'}
+                    onChange={() => setForm((current) => ({
+                      ...current,
+                      ticketingMode: 'native_ga',
+                      nativeTermsAccepted: false
+                    }))}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    <strong className="block font-black">Native Sway paid GA</strong>
+                    One general-admission ticket per customer checkout.
+                  </span>
+                </label>
+              </div>
+              {!form.eventId && nativeCapability?.salesAvailable !== true ? (
+                <span className="block text-[11px] leading-5 text-amber-200">
+                  Native sales stay unavailable until Sway’s payment, tax, admission, and performer payout
+                  readiness checks all pass. You can create an external-ticket event now.
+                </span>
+              ) : null}
+              {form.eventId ? (
+                <span className="block text-[11px] leading-5 text-slate-500">
+                  Ticketing mode is locked after the event draft is created.
+                </span>
+              ) : null}
+            </div>
 
-            <label className="space-y-1.5">
-              <span className={fieldLabel()}>Ticket button label</span>
-              <select
-                className={fieldClass()}
-                value={form.externalTicketLabel}
-                onChange={(event) => setForm((current) => ({
-                  ...current,
-                  externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
-                    ? event.target.value
-                    : 'Get tickets'
-                }))}
-                disabled={!form.externalTicketUrl.trim()}
-              >
-                {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
-              </select>
-            </label>
+            {form.ticketingMode === 'external' ? (
+              <>
+                <label className="space-y-1.5 sm:col-span-2">
+                  <span className={fieldLabel()}>External ticket or RSVP URL — required to publish</span>
+                  <input
+                    type="url"
+                    inputMode="url"
+                    className={fieldClass()}
+                    value={form.externalTicketUrl}
+                    onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
+                    placeholder="https://secure-ticket-site.example/..."
+                  />
+                  <span className="block text-[11px] leading-5 text-slate-500">
+                    Sway provides an external handoff to this destination. Sway is not selling this ticket or verifying the provider.
+                  </span>
+                </label>
+
+                <label className="space-y-1.5">
+                  <span className={fieldLabel()}>Ticket button label</span>
+                  <select
+                    className={fieldClass()}
+                    value={form.externalTicketLabel}
+                    onChange={(event) => setForm((current) => ({
+                      ...current,
+                      externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
+                        ? event.target.value
+                        : 'Get tickets'
+                    }))}
+                    disabled={!form.externalTicketUrl.trim()}
+                  >
+                    {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="space-y-1.5">
+                  <span className={fieldLabel()}>GA capacity</span>
+                  <input
+                    required
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    step={1}
+                    className={fieldClass()}
+                    value={form.nativeCapacity}
+                    onChange={(event) => setForm((current) => ({ ...current, nativeCapacity: event.target.value }))}
+                    placeholder="150"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className={fieldLabel()}>Face value — USD</span>
+                  <input
+                    required
+                    type="number"
+                    inputMode="decimal"
+                    min="1"
+                    step="0.01"
+                    className={fieldClass()}
+                    value={form.nativeFaceValueUsd}
+                    onChange={(event) => setForm((current) => ({ ...current, nativeFaceValueUsd: event.target.value }))}
+                    placeholder="20.00"
+                  />
+                </label>
+
+                {nativePriceQuote || (
+                  editingNativeTicket?.unitAllInPriceCents !== null
+                  && editingNativeTicket?.unitAllInPriceCents !== undefined
+                ) ? (
+                    <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/[0.07] p-4 sm:col-span-2">
+                      <p className={fieldLabel()}>Customer ticket price and performer share</p>
+                      <p className="mt-1 text-2xl font-black text-white">
+                        {formatUsd(
+                          nativePriceQuote?.totalPriceCents
+                            ?? editingNativeTicket!.unitAllInPriceCents!
+                        )}
+                        <span className="ml-2 text-xs font-bold text-slate-400">
+                          before applicable government tax
+                        </span>
+                      </p>
+                      <p className="mt-2 text-xs leading-5 text-cyan-50/75">
+                        Performer share after valid check-in:{' '}
+                        <strong className="text-white">
+                          {formatUsd(
+                            nativePriceQuote?.faceValueCents
+                              ?? editingNativeTicket?.faceValueCents
+                              ?? 0
+                          )}
+                        </strong>
+                        {nativePriceQuote ? (
+                          <> · Mandatory Sway fee: {formatUsd(nativePriceQuote.mandatoryFeeCents)}</>
+                        ) : null}
+                      </p>
+                    </div>
+                  ) : null}
+
+                {nativeCapability?.reservationMinutes !== null
+                  && nativeCapability?.reservationMinutes !== undefined
+                  && nativeCapability.refundGraceMinutes !== null ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-slate-300 sm:col-span-2">
+                      <p className={fieldLabel()}>Checkout and unused-ticket timing</p>
+                      <p className="mt-2">
+                        New hosted checkouts stop {durationLabel(nativeCapability.reservationMinutes)} before
+                        show start. Each started checkout reserves one ticket for up to{' '}
+                        {durationLabel(nativeCapability.reservationMinutes)}. A ticket still unaccepted when
+                        the {durationLabel(nativeCapability.refundGraceMinutes)} post-event admission window
+                        ends is queued for a full refund.
+                      </p>
+                    </div>
+                  ) : null}
+
+                <label className="flex items-start gap-3 rounded-xl border border-cyan-300/20 bg-cyan-500/[0.06] p-4 text-xs leading-5 text-slate-200 sm:col-span-2">
+                  <input
+                    required
+                    type="checkbox"
+                    checked={form.nativeTermsAccepted}
+                    onChange={(event) => setForm((current) => ({
+                      ...current,
+                      nativeTermsAccepted: event.target.checked
+                    }))}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span>
+                    <strong className="block font-black text-white">I accept the native ticket seller terms.</strong>
+                    I am the performer selling admission and have authority to offer it. Sway charges the
+                    customer and holds the performer share until a valid ticket is accepted at check-in.
+                    Cancelled events and unaccepted tickets follow Sway’s refund-only policy. Identity, tax,
+                    and payout requirements must be complete before publishing.{' '}
+                    <a
+                      href="/legal/tickets"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-black text-cyan-100 underline underline-offset-2"
+                    >
+                      Read the full ticket terms
+                    </a>.
+                    {nativeCapability?.termsVersion ? (
+                      <span className="mt-1 block text-[10px] text-slate-500">
+                        Terms {nativeCapability.termsVersion}
+                        {nativeCapability.termsHash
+                          ? ` · ${nativeCapability.termsHash.slice(0, 12)}`
+                          : ''}
+                        {nativeCapability.supportEmail
+                          ? ` · Support ${nativeCapability.supportEmail}`
+                          : ''}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              </>
+            )}
+
             <label className="space-y-1.5">
               <span className={fieldLabel()}>Visibility</span>
               <select
@@ -679,6 +1146,16 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               </select>
             </label>
           </fieldset>
+
+          {message ? (
+            <div
+              id="sway-event-form-message"
+              role="alert"
+              className="rounded-xl border border-rose-400/25 bg-rose-500/10 p-3 text-xs leading-5 text-rose-100"
+            >
+              {message}
+            </div>
+          ) : null}
 
           <button
             type="submit"
@@ -724,8 +1201,12 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               const cancelled = event.status === 'cancelled' || event.status === 'canceled';
               const published = event.status === 'published';
               const started = new Date(event.startsAt).getTime() <= Date.now();
+              const admissionStarted = new Date(event.doorOpensAt || event.startsAt).getTime() <= Date.now();
               const cancellationClosedAt = new Date(event.endsAt || event.startsAt).getTime();
               const cancellationClosed = cancellationClosedAt <= Date.now();
+              const ticketingReady = event.ticketingMode === 'native_ga'
+                ? Boolean(event.nativeTicket)
+                : Boolean(event.externalTicketUrl);
               const coverFailed = Boolean(
                 event.coverImageUrl && failedCoverImages.has(event.coverImageUrl)
               );
@@ -757,16 +1238,47 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                           {event.status}
                         </span>
                         <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{event.visibility}</span>
+                        <span className="rounded-full border border-cyan-300/20 bg-cyan-500/[0.06] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-cyan-100">
+                          {event.ticketingMode === 'native_ga' ? 'Sway paid GA' : 'External tickets'}
+                        </span>
                       </div>
                       <h5 className="mt-2 text-base font-black text-white">{event.title}</h5>
                       <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-slate-400">
                         <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        {eventDateLabel(event)}
+                        {event.ticketingMode === 'native_ga' ? 'Show ' : ''}{eventDateLabel(event)}
                       </p>
+                      {event.ticketingMode === 'native_ga' && event.doorOpensAt ? (
+                        <p className="mt-1 flex items-start gap-2 text-xs leading-5 text-cyan-100/75">
+                          <DoorOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          Doors {dateTimeLabel(event.doorOpensAt, event.timeZone)}
+                        </p>
+                      ) : null}
                       <p className="mt-1 flex items-start gap-2 text-xs leading-5 text-slate-500">
                         <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         {event.locationIsTba ? 'Location TBA' : [event.locationName, event.city].filter(Boolean).join(' · ') || 'No public location'}
                       </p>
+                      {event.ticketingMode === 'native_ga' && event.nativeTicket ? (
+                        <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-cyan-300/15 bg-cyan-500/[0.05] px-3 py-2">
+                          {event.nativeTicket.unitAllInPriceCents !== null ? (
+                            <span className="text-sm font-black text-white">
+                              {formatUsd(event.nativeTicket.unitAllInPriceCents)} before tax
+                            </span>
+                          ) : null}
+                          {event.nativeTicket.remainingCount !== null ? (
+                            <span className="text-[11px] font-bold text-cyan-100">
+                              {event.nativeTicket.remainingCount}
+                              {event.nativeTicket.capacity !== null
+                                ? ` of ${event.nativeTicket.capacity}`
+                                : ''} available
+                            </span>
+                          ) : null}
+                          {salesStatusLabel(event.nativeTicket.salesStatus) ? (
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                              {salesStatusLabel(event.nativeTicket.salesStatus)}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -774,7 +1286,18 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     <button
                       type="button"
                       onClick={() => openEditEvent(event)}
-                      disabled={previewMode || actionPending || cancelled || (published && cancellationClosed)}
+                      disabled={
+                        previewMode
+                        || actionPending
+                        || cancelled
+                        || (published && cancellationClosed)
+                        || (published && event.ticketingMode === 'native_ga')
+                      }
+                      title={
+                        published && event.ticketingMode === 'native_ga'
+                          ? 'Published native ticket details are sealed to preserve buyer terms'
+                          : 'Edit event'
+                      }
                       className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 text-xs font-black text-slate-200 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -784,13 +1307,23 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       <button
                         type="button"
                         onClick={() => void publishEvent(event)}
-                        disabled={previewMode || actionPending || !event.externalTicketUrl || started}
+                        disabled={
+                          previewMode
+                          || actionPending
+                          || !ticketingReady
+                          || started
+                          || (event.ticketingMode === 'native_ga' && admissionStarted)
+                        }
                         title={
-                          started
+                          event.ticketingMode === 'native_ga' && admissionStarted
+                            ? 'Native ticket events must publish before the disclosed door-open time'
+                            : started
                             ? 'Only a future event can be published'
-                            : event.externalTicketUrl
+                            : ticketingReady
                               ? 'Publish event'
-                              : 'Add an external ticket or RSVP URL before publishing'
+                              : event.ticketingMode === 'native_ga'
+                                ? 'Save native capacity, price, and seller terms before publishing'
+                                : 'Add an external ticket or RSVP URL before publishing'
                         }
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 text-xs font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -819,6 +1352,15 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         Test ticket link
                       </a>
                     ) : null}
+                    {event.ticketingMode === 'native_ga' && published && !cancelled ? (
+                      <a
+                        href={`/talent/events/${encodeURIComponent(event.id)}/door`}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 text-xs font-black text-amber-100"
+                      >
+                        <DoorOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                        Door
+                      </a>
+                    ) : null}
                     {published && !cancelled && !cancellationClosed ? (
                       <button
                         type="button"
@@ -836,9 +1378,11 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     ) : null}
                   </div>
 
-                  {!published && !cancelled && !event.externalTicketUrl ? (
+                  {!published && !cancelled && !ticketingReady ? (
                     <p className="mt-2 text-[11px] leading-5 text-amber-200/80">
-                      Add a public HTTPS ticket or RSVP link before publishing.
+                      {event.ticketingMode === 'native_ga'
+                        ? 'Save native capacity, face value, and seller terms before publishing.'
+                        : 'Add a public HTTPS ticket or RSVP link before publishing.'}
                     </p>
                   ) : null}
 
@@ -859,24 +1403,27 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         />
                       </label>
                       <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-3 text-xs leading-5 text-amber-100">
-                        Cancelling here only changes the Sway listing. It does not cancel tickets, issue refunds,
-                        or notify buyers through the external provider.
+                        {event.ticketingMode === 'native_ga'
+                          ? 'When you confirm, Sway stops native ticket sales and queues full refunds for eligible unused tickets. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and refunds may remain pending while the payment processor completes them.'
+                          : 'Cancelling here only changes the Sway listing. It does not cancel tickets, issue refunds, or notify buyers through the external provider.'}
                       </div>
-                      <label className="mt-3 flex items-start gap-3 text-xs leading-5 text-slate-300">
-                        <input
-                          type="checkbox"
-                          checked={cancelDraft.externalProviderConfirmed}
-                          onChange={(inputEvent) => setCancelDraft({
-                            ...cancelDraft,
-                            externalProviderConfirmed: inputEvent.target.checked
-                          })}
-                          className="mt-1 h-4 w-4 shrink-0"
-                        />
-                        <span>
-                          I understand and will handle cancellation, buyer communication, and any refunds with
-                          the external provider.
-                        </span>
-                      </label>
+                      {event.ticketingMode === 'external' ? (
+                        <label className="mt-3 flex items-start gap-3 text-xs leading-5 text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={cancelDraft.externalProviderConfirmed}
+                            onChange={(inputEvent) => setCancelDraft({
+                              ...cancelDraft,
+                              externalProviderConfirmed: inputEvent.target.checked
+                            })}
+                            className="mt-1 h-4 w-4 shrink-0"
+                          />
+                          <span>
+                            I understand and will handle cancellation, buyer communication, and any refunds with
+                            the external provider.
+                          </span>
+                        </label>
+                      ) : null}
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         <button
                           type="button"
@@ -891,7 +1438,10 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                           disabled={
                             actionPending
                             || !cancelDraft.reason.trim()
-                            || !cancelDraft.externalProviderConfirmed
+                            || (
+                              event.ticketingMode === 'external'
+                              && !cancelDraft.externalProviderConfirmed
+                            )
                           }
                           className="min-h-11 rounded-xl bg-rose-500 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
                         >

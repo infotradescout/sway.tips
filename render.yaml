@@ -18,6 +18,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Native ticket money remains explicitly closed in production until the
+      # versioned approval, legal, finance, support, and live-proof gates pass.
+      - key: SWAY_NATIVE_TICKETS_ENABLED
+        value: "false"
       - key: SWAY_AUDIO_STORAGE_PROVIDER
         value: r2
       - key: SWAY_AUDIO_R2_BUCKET

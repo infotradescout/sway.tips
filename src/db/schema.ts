@@ -99,6 +99,85 @@ export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'active', 
 export const attributionSourceEnum = pgEnum('attribution_source', ['creator_direct', 'sway_promoted']);
 export const performerEventStatusEnum = pgEnum('performer_event_status', ['draft', 'published', 'cancelled']);
 export const performerEventVisibilityEnum = pgEnum('performer_event_visibility', ['public', 'unlisted']);
+export const performerEventTicketingModeEnum = pgEnum('performer_event_ticketing_mode', [
+  'external',
+  'native_ga'
+]);
+export const eventTicketOfferStatusEnum = pgEnum('event_ticket_offer_status', [
+  'draft',
+  'on_sale',
+  'sales_closed',
+  'cancelled'
+]);
+export const ticketSettlementPolicyEnum = pgEnum('ticket_settlement_policy', ['refund_only']);
+export const ticketTaxModeEnum = pgEnum('ticket_tax_mode', ['stripe_automatic', 'not_required']);
+export const ticketPaymentProcessorEnum = pgEnum('ticket_payment_processor', ['stripe']);
+export const ticketChargeAccountEnum = pgEnum('ticket_charge_account', ['platform']);
+export const ticketOrderStatusEnum = pgEnum('ticket_order_status', [
+  'checkout_pending',
+  'checkout_open',
+  'payment_processing',
+  'paid',
+  'payment_failed',
+  'expired',
+  'refund_pending',
+  'refunded',
+  'disputed',
+  'voided'
+]);
+export const eventTicketStatusEnum = pgEnum('event_ticket_status', [
+  'held',
+  'release_pending',
+  'released',
+  'refund_pending',
+  'refunded',
+  'disputed',
+  'voided'
+]);
+export const ticketLedgerEntryTypeEnum = pgEnum('ticket_ledger_entry_type', [
+  'charge_captured',
+  'funds_held',
+  'seller_transfer_succeeded',
+  'buyer_refund_succeeded',
+  'dispute_opened',
+  'dispute_won',
+  'dispute_lost',
+  'charge_voided',
+  'processor_adjustment',
+  'processor_fee_recorded'
+]);
+export const ticketLedgerAccountEnum = pgEnum('ticket_ledger_account', [
+  'platform_cash',
+  'ticket_funds_held',
+  'ticket_tax_payable',
+  'performer_payable',
+  'platform_fee_revenue',
+  'processor_fee_expense',
+  'buyer_refunds',
+  'processor_disputes'
+]);
+export const ticketLedgerDirectionEnum = pgEnum('ticket_ledger_direction', ['debit', 'credit']);
+export const ticketProcessorEventStatusEnum = pgEnum('ticket_processor_event_status', [
+  'pending',
+  'processing',
+  'processed',
+  'ignored',
+  'retryable_failed',
+  'terminal_failed'
+]);
+export const ticketPaymentOperationTypeEnum = pgEnum('ticket_payment_operation_type', [
+  'create_checkout',
+  'expire_checkout',
+  'create_seller_transfer',
+  'create_buyer_refund'
+]);
+export const ticketPaymentOperationStatusEnum = pgEnum('ticket_payment_operation_status', [
+  'pending',
+  'leased',
+  'retryable_failed',
+  'succeeded',
+  'terminal_failed'
+]);
 
 // Phase 2 Slice 1: every account (patron or performer) is the same `users`
 // row. Pro Mode is an activatable state on that row, not a separate account
@@ -333,6 +412,7 @@ export const performerEvents = pgTable('performer_events', {
   title: text('title').notNull(),
   description: text('description'),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  doorOpensAt: timestamp('door_opens_at', { withTimezone: true }),
   endsAt: timestamp('ends_at', { withTimezone: true }),
   timeZone: text('time_zone').notNull(),
   locationName: text('location_name'),
@@ -340,6 +420,7 @@ export const performerEvents = pgTable('performer_events', {
   city: text('city'),
   locationIsTba: boolean('location_is_tba').notNull().default(false),
   coverImageUrl: text('cover_image_url'),
+  ticketingMode: performerEventTicketingModeEnum('ticketing_mode').notNull().default('external'),
   externalTicketUrl: text('external_ticket_url'),
   externalTicketLabel: text('external_ticket_label'),
   visibility: performerEventVisibilityEnum('visibility').notNull().default('unlisted'),
@@ -353,6 +434,7 @@ export const performerEvents = pgTable('performer_events', {
     table.performerId,
     table.clientRequestId
   ),
+  idPerformerIdx: uniqueIndex('performer_events_id_performer_idx').on(table.id, table.performerId),
   performerStatusStartIdx: index('performer_events_performer_status_start_idx').on(
     table.performerId,
     table.status,
@@ -367,13 +449,21 @@ export const performerEvents = pgTable('performer_events', {
     'performer_events_ends_after_starts',
     sql`${table.endsAt} IS NULL OR ${table.endsAt} > ${table.startsAt}`
   ),
+  nativeDoorRequired: check(
+    'performer_events_native_door_required',
+    sql`${table.ticketingMode} <> 'native_ga' OR ${table.doorOpensAt} IS NOT NULL`
+  ),
+  doorNotAfterStart: check(
+    'performer_events_door_not_after_start',
+    sql`${table.doorOpensAt} IS NULL OR ${table.doorOpensAt} <= ${table.startsAt}`
+  ),
   publishedHasTimestamp: check(
     'performer_events_published_has_timestamp',
     sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`
   ),
   publishedHasExternalTicket: check(
     'performer_events_published_has_external_ticket',
-    sql`${table.status} <> 'published' OR ${table.externalTicketUrl} IS NOT NULL`
+    sql`${table.status} <> 'published' OR ${table.ticketingMode} = 'native_ga' OR ${table.externalTicketUrl} IS NOT NULL`
   ),
   cancelledHasTimestamp: check(
     'performer_events_cancelled_has_timestamp',
@@ -399,10 +489,444 @@ export const performerEvents = pgTable('performer_events', {
     'performer_events_external_ticket_shape',
     sql`(${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL) OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} IS NOT NULL)`
   ),
+  ticketingModeExclusive: check(
+    'performer_events_ticketing_mode_exclusive',
+    sql`${table.ticketingMode} = 'external' OR (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)`
+  ),
   externalTicketLabelAllowed: check(
     'performer_events_external_ticket_label_allowed',
     sql`${table.externalTicketLabel} IS NULL OR ${table.externalTicketLabel} IN ('Get tickets', 'RSVP', 'View details')`
   )
+}));
+
+// Native paid GA tickets use a separate platform-charge/held-funds ledger.
+// None of these rows cascade: financial and admission evidence must survive
+// account, performer, event, and order cleanup attempts.
+export const eventTicketOffers = pgTable('event_ticket_offers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventId: uuid('event_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  status: eventTicketOfferStatusEnum('status').notNull().default('draft'),
+  capacity: integer('capacity').notNull(),
+  faceValueCents: integer('face_value_cents').notNull(),
+  mandatoryFeeBps: integer('mandatory_fee_bps').notNull(),
+  mandatoryFeeFixedCents: integer('mandatory_fee_fixed_cents').notNull(),
+  mandatoryFeeCents: integer('mandatory_fee_cents').notNull(),
+  advertisedTotalCents: integer('advertised_total_cents').notNull(),
+  sellerTransferAmountCents: integer('seller_transfer_amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  taxMode: ticketTaxModeEnum('tax_mode').notNull(),
+  stripeTaxCode: text('stripe_tax_code'),
+  settlementPolicy: ticketSettlementPolicyEnum('settlement_policy').notNull().default('refund_only'),
+  checkoutReservationMinutes: integer('checkout_reservation_minutes').notNull(),
+  refundGraceMinutes: integer('refund_grace_minutes').notNull(),
+  salesOpenAt: timestamp('sales_open_at', { withTimezone: true }).notNull(),
+  salesCloseAt: timestamp('sales_close_at', { withTimezone: true }).notNull(),
+  sellerStripeAccountIdSnapshot: text('seller_stripe_account_id_snapshot').notNull(),
+  sellerPaymentAccountStatusSnapshot: paymentAccountStatusEnum('seller_payment_account_status_snapshot').notNull(),
+  sellerKycStatusSnapshot: kycStatusEnum('seller_kyc_status_snapshot').notNull(),
+  sellerChargesEnabledSnapshot: boolean('seller_charges_enabled_snapshot').notNull(),
+  sellerPayoutsEnabledSnapshot: boolean('seller_payouts_enabled_snapshot').notNull(),
+  payoutReadinessCheckedAt: timestamp('payout_readiness_checked_at', { withTimezone: true }).notNull(),
+  sellerTermsVersion: text('seller_terms_version').notNull(),
+  sellerTermsHash: text('seller_terms_hash').notNull(),
+  sellerTermsText: text('seller_terms_text').notNull(),
+  sellerTermsSnapshot: jsonb('seller_terms_snapshot').notNull(),
+  sellerTermsAcceptedByUserId: uuid('seller_terms_accepted_by_user_id').notNull().references(() => users.id),
+  sellerTermsAcceptedAt: timestamp('seller_terms_accepted_at', { withTimezone: true }).notNull(),
+  createdByActorUserId: uuid('created_by_actor_user_id').notNull().references(() => users.id),
+  lastMutationActorUserId: uuid('last_mutation_actor_user_id').notNull().references(() => users.id),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+  salesClosedAt: timestamp('sales_closed_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  eventIdx: uniqueIndex('event_ticket_offers_event_idx').on(table.eventId),
+  idEventPerformerIdx: uniqueIndex('event_ticket_offers_identity_idx').on(table.id, table.eventId, table.performerId),
+  performerStatusIdx: index('event_ticket_offers_performer_status_idx').on(table.performerId, table.status),
+  salesWindowIdx: index('event_ticket_offers_sales_window_idx').on(table.status, table.salesOpenAt, table.salesCloseAt),
+  eventPerformerFk: foreignKey({
+    columns: [table.eventId, table.performerId],
+    foreignColumns: [performerEvents.id, performerEvents.performerId],
+    name: 'event_ticket_offers_event_performer_fk'
+  }),
+  capacityValid: check('event_ticket_offers_capacity_valid', sql`${table.capacity} > 0 and ${table.capacity} <= 100000`),
+  priceValid: check('event_ticket_offers_price_valid', sql`
+    ${table.faceValueCents} >= 100
+    and ${table.mandatoryFeeBps} between 0 and 5000
+    and ${table.mandatoryFeeFixedCents} between 0 and 10000
+    and ${table.mandatoryFeeCents} = (
+      ((${table.faceValueCents}::bigint * ${table.mandatoryFeeBps}) + 9999) / 10000
+    ) + ${table.mandatoryFeeFixedCents}
+    and ${table.advertisedTotalCents} = ${table.faceValueCents} + ${table.mandatoryFeeCents}
+    and ${table.advertisedTotalCents} <= 1000000
+    and ${table.sellerTransferAmountCents} = ${table.faceValueCents}
+  `),
+  usdOnly: check('event_ticket_offers_usd_only', sql`${table.currency} = 'USD'`),
+  taxModeCoherent: check('event_ticket_offers_tax_mode_coherent', sql`
+    (${table.taxMode} = 'stripe_automatic' and ${table.stripeTaxCode} is not null and length(trim(${table.stripeTaxCode})) > 0)
+    or (${table.taxMode} = 'not_required' and ${table.stripeTaxCode} is null)
+  `),
+  salesWindowValid: check('event_ticket_offers_sales_window_valid', sql`${table.salesCloseAt} > ${table.salesOpenAt}`),
+  policyBounds: check('event_ticket_offers_policy_bounds', sql`
+    ${table.checkoutReservationMinutes} between 31 and 60
+    and ${table.refundGraceMinutes} between 60 and 10080
+  `),
+  payoutReady: check('event_ticket_offers_payout_ready', sql`
+    ${table.sellerPaymentAccountStatusSnapshot} = 'payouts_enabled'
+    and ${table.sellerKycStatusSnapshot} in ('not_required', 'verified')
+    and ${table.sellerChargesEnabledSnapshot} = true
+    and ${table.sellerPayoutsEnabledSnapshot} = true
+    and length(trim(${table.sellerStripeAccountIdSnapshot})) > 0
+  `),
+  sellerTermsValid: check('event_ticket_offers_seller_terms_valid', sql`
+    length(trim(${table.sellerTermsVersion})) > 0
+    and ${table.sellerTermsHash} ~ '^[0-9a-f]{64}$'
+    and length(trim(${table.sellerTermsText})) > 0
+    and jsonb_typeof(${table.sellerTermsSnapshot}) = 'object'
+    and ${table.sellerTermsSnapshot} <> '{}'::jsonb
+  `),
+  stateTimestamps: check('event_ticket_offers_state_timestamps', sql`
+    (${table.status} <> 'on_sale' or ${table.activatedAt} is not null)
+    and (${table.status} <> 'sales_closed' or ${table.salesClosedAt} is not null)
+    and (${table.status} <> 'cancelled' or ${table.cancelledAt} is not null)
+  `)
+}));
+
+export const ticketOrders = pgTable('ticket_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  offerId: uuid('offer_id').notNull(),
+  eventId: uuid('event_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  buyerUserId: uuid('buyer_user_id').notNull().references(() => users.id),
+  clientRequestId: uuid('client_request_id').notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  quantity: integer('quantity').notNull().default(1),
+  faceValueCents: integer('face_value_cents').notNull(),
+  mandatoryFeeCents: integer('mandatory_fee_cents').notNull(),
+  advertisedTotalCents: integer('advertised_total_cents').notNull(),
+  taxTotalCents: integer('tax_total_cents'),
+  chargedTotalCents: integer('charged_total_cents'),
+  sellerTransferAmountCents: integer('seller_transfer_amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  taxModeSnapshot: ticketTaxModeEnum('tax_mode_snapshot').notNull(),
+  stripeTaxCodeSnapshot: text('stripe_tax_code_snapshot'),
+  buyerTermsVersion: text('buyer_terms_version').notNull(),
+  buyerTermsHash: text('buyer_terms_hash').notNull(),
+  buyerTermsText: text('buyer_terms_text').notNull(),
+  buyerTermsSnapshot: jsonb('buyer_terms_snapshot').notNull(),
+  buyerTermsAcceptedAt: timestamp('buyer_terms_accepted_at', { withTimezone: true }).notNull(),
+  status: ticketOrderStatusEnum('status').notNull().default('checkout_pending'),
+  processor: ticketPaymentProcessorEnum('processor').notNull().default('stripe'),
+  chargeAccount: ticketChargeAccountEnum('charge_account').notNull().default('platform'),
+  captureMode: captureModeEnum('capture_mode').notNull().default('automatic'),
+  processorCheckoutSessionId: text('processor_checkout_session_id'),
+  processorPaymentIntentId: text('processor_payment_intent_id'),
+  processorChargeId: text('processor_charge_id'),
+  processorBalanceTransactionId: text('processor_balance_transaction_id'),
+  processorFeeCents: integer('processor_fee_cents'),
+  processorNetCents: integer('processor_net_cents'),
+  checkoutExpiresAt: timestamp('checkout_expires_at', { withTimezone: true }),
+  chargedAt: timestamp('charged_at', { withTimezone: true }),
+  paymentFailedAt: timestamp('payment_failed_at', { withTimezone: true }),
+  expiredAt: timestamp('expired_at', { withTimezone: true }),
+  refundPendingAt: timestamp('refund_pending_at', { withTimezone: true }),
+  refundedAt: timestamp('refunded_at', { withTimezone: true }),
+  disputedAt: timestamp('disputed_at', { withTimezone: true }),
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  buyerRequestIdx: uniqueIndex('ticket_orders_buyer_request_idx').on(table.buyerUserId, table.clientRequestId),
+  offerBuyerActiveIdx: uniqueIndex('ticket_orders_offer_buyer_active_idx')
+    .on(table.offerId, table.buyerUserId)
+    .where(sql`
+      ${table.status} in ('checkout_pending', 'checkout_open', 'payment_processing', 'paid', 'disputed')
+      and not (${table.status} = 'disputed' and ${table.refundedAt} is not null)
+    `),
+  identityIdx: uniqueIndex('ticket_orders_identity_idx').on(table.id, table.offerId, table.eventId, table.performerId),
+  checkoutSessionIdx: uniqueIndex('ticket_orders_checkout_session_idx').on(table.processorCheckoutSessionId).where(sql`${table.processorCheckoutSessionId} is not null`),
+  paymentIntentIdx: uniqueIndex('ticket_orders_payment_intent_idx').on(table.processorPaymentIntentId).where(sql`${table.processorPaymentIntentId} is not null`),
+  chargeIdx: uniqueIndex('ticket_orders_charge_idx').on(table.processorChargeId).where(sql`${table.processorChargeId} is not null`),
+  balanceTransactionIdx: uniqueIndex('ticket_orders_balance_transaction_idx')
+    .on(table.processorBalanceTransactionId)
+    .where(sql`${table.processorBalanceTransactionId} is not null`),
+  offerStatusIdx: index('ticket_orders_offer_status_idx').on(table.offerId, table.status),
+  buyerCreatedIdx: index('ticket_orders_buyer_created_idx').on(table.buyerUserId, table.createdAt),
+  offerFk: foreignKey({
+    columns: [table.offerId, table.eventId, table.performerId],
+    foreignColumns: [eventTicketOffers.id, eventTicketOffers.eventId, eventTicketOffers.performerId],
+    name: 'ticket_orders_offer_fk'
+  }),
+  oneTicketOnly: check('ticket_orders_one_ticket_only', sql`${table.quantity} = 1`),
+  priceValid: check('ticket_orders_price_valid', sql`
+    ${table.faceValueCents} >= 100
+    and ${table.mandatoryFeeCents} >= 0
+    and ${table.advertisedTotalCents} = ${table.faceValueCents} + ${table.mandatoryFeeCents}
+    and ${table.sellerTransferAmountCents} = ${table.faceValueCents}
+    and ${table.advertisedTotalCents} <= 1000000
+  `),
+  finalChargeCoherent: check('ticket_orders_final_charge_coherent', sql`
+    (
+      ${table.taxTotalCents} is null
+      and ${table.chargedTotalCents} is null
+      and ${table.processorBalanceTransactionId} is null
+      and ${table.processorFeeCents} is null
+      and ${table.processorNetCents} is null
+    )
+    or (
+      ${table.taxTotalCents} is not null
+      and ${table.taxTotalCents} >= 0
+      and ${table.chargedTotalCents} = ${table.advertisedTotalCents} + ${table.taxTotalCents}
+      and ${table.processorBalanceTransactionId} is not null
+      and length(trim(${table.processorBalanceTransactionId})) > 0
+      and ${table.processorFeeCents} is not null
+      and ${table.processorFeeCents} >= 0
+      and ${table.processorNetCents} is not null
+      and ${table.processorNetCents} = ${table.chargedTotalCents} - ${table.processorFeeCents}
+      and ${table.processorNetCents} > 0
+    )
+  `),
+  usdOnly: check('ticket_orders_usd_only', sql`${table.currency} = 'USD'`),
+  automaticPlatformCharge: check('ticket_orders_automatic_platform_charge', sql`${table.captureMode} = 'automatic'`),
+  requestFingerprintValid: check('ticket_orders_request_fingerprint_valid', sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`),
+  buyerTermsValid: check('ticket_orders_buyer_terms_valid', sql`
+    length(trim(${table.buyerTermsVersion})) > 0
+    and ${table.buyerTermsHash} ~ '^[0-9a-f]{64}$'
+    and length(trim(${table.buyerTermsText})) > 0
+    and jsonb_typeof(${table.buyerTermsSnapshot}) = 'object'
+    and ${table.buyerTermsSnapshot} <> '{}'::jsonb
+  `),
+  chargedStateCoherent: check('ticket_orders_charged_state_coherent', sql`
+    ${table.status} not in ('paid', 'refund_pending', 'refunded', 'disputed')
+    or (
+      ${table.chargedAt} is not null
+      and ${table.processorPaymentIntentId} is not null
+      and ${table.processorChargeId} is not null
+      and ${table.taxTotalCents} is not null
+      and ${table.chargedTotalCents} is not null
+      and ${table.processorBalanceTransactionId} is not null
+      and ${table.processorFeeCents} is not null
+      and ${table.processorNetCents} is not null
+    )
+  `),
+  stateTimestamps: check('ticket_orders_state_timestamps', sql`
+    (${table.status} <> 'checkout_open' or (${table.processorCheckoutSessionId} is not null and ${table.checkoutExpiresAt} is not null))
+    and (${table.status} <> 'payment_failed' or ${table.paymentFailedAt} is not null)
+    and (${table.status} <> 'expired' or ${table.expiredAt} is not null)
+    and (${table.status} <> 'refund_pending' or ${table.refundPendingAt} is not null)
+    and (${table.status} <> 'refunded' or (${table.refundPendingAt} is not null and ${table.refundedAt} is not null))
+    and (${table.status} <> 'disputed' or ${table.disputedAt} is not null)
+    and (${table.status} <> 'voided' or ${table.voidedAt} is not null)
+  `)
+}));
+
+export const eventTickets = pgTable('event_tickets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orderId: uuid('order_id').notNull(),
+  offerId: uuid('offer_id').notNull(),
+  eventId: uuid('event_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  buyerUserId: uuid('buyer_user_id').notNull().references(() => users.id),
+  status: eventTicketStatusEnum('status').notNull().default('held'),
+  admissionCredentialVersion: integer('admission_credential_version').notNull().default(1),
+  admissionCredentialHash: text('admission_credential_hash').notNull(),
+  admissionAcceptedAt: timestamp('admission_accepted_at', { withTimezone: true }),
+  admissionAcceptedByUserId: uuid('admission_accepted_by_user_id').references(() => users.id),
+  admissionIdempotencyKey: text('admission_idempotency_key'),
+  admissionEvidenceHash: text('admission_evidence_hash'),
+  releasePendingAt: timestamp('release_pending_at', { withTimezone: true }),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  refundPendingAt: timestamp('refund_pending_at', { withTimezone: true }),
+  refundedAt: timestamp('refunded_at', { withTimezone: true }),
+  disputedAt: timestamp('disputed_at', { withTimezone: true }),
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  orderIdx: uniqueIndex('event_tickets_order_idx').on(table.orderId),
+  identityIdx: uniqueIndex('event_tickets_identity_idx').on(table.id, table.orderId, table.offerId, table.eventId, table.performerId),
+  admissionKeyIdx: uniqueIndex('event_tickets_admission_key_idx').on(table.admissionIdempotencyKey).where(sql`${table.admissionIdempotencyKey} is not null`),
+  eventStatusIdx: index('event_tickets_event_status_idx').on(table.eventId, table.status),
+  buyerCreatedIdx: index('event_tickets_buyer_created_idx').on(table.buyerUserId, table.createdAt),
+  orderFk: foreignKey({
+    columns: [table.orderId, table.offerId, table.eventId, table.performerId],
+    foreignColumns: [ticketOrders.id, ticketOrders.offerId, ticketOrders.eventId, ticketOrders.performerId],
+    name: 'event_tickets_order_fk'
+  }),
+  credentialValid: check('event_tickets_credential_valid', sql`
+    ${table.admissionCredentialVersion} > 0 and ${table.admissionCredentialHash} ~ '^[0-9a-f]{64}$'
+  `),
+  admissionEvidenceCoherent: check('event_tickets_admission_evidence_coherent', sql`
+    (
+      ${table.admissionAcceptedAt} is null
+      and ${table.admissionAcceptedByUserId} is null
+      and ${table.admissionIdempotencyKey} is null
+      and ${table.admissionEvidenceHash} is null
+    ) or (
+      ${table.admissionAcceptedAt} is not null
+      and ${table.admissionAcceptedByUserId} is not null
+      and ${table.admissionIdempotencyKey} is not null
+      and ${table.admissionEvidenceHash} ~ '^[0-9a-f]{64}$'
+    )
+  `),
+  stateEvidence: check('event_tickets_state_evidence', sql`
+    (${table.status} not in ('release_pending', 'released') or ${table.admissionAcceptedAt} is not null)
+    and (${table.status} not in ('held', 'refund_pending', 'refunded', 'voided') or ${table.admissionAcceptedAt} is null)
+  `),
+  stateTimestamps: check('event_tickets_state_timestamps', sql`
+    (${table.status} <> 'release_pending' or ${table.releasePendingAt} is not null)
+    and (${table.status} <> 'released' or (${table.releasePendingAt} is not null and ${table.releasedAt} is not null))
+    and (${table.status} <> 'refund_pending' or ${table.refundPendingAt} is not null)
+    and (${table.status} <> 'refunded' or (${table.refundPendingAt} is not null and ${table.refundedAt} is not null))
+    and (${table.status} <> 'disputed' or ${table.disputedAt} is not null)
+    and (${table.status} <> 'voided' or ${table.voidedAt} is not null)
+  `)
+}));
+
+export const ticketPaymentOperations = pgTable('ticket_payment_operations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orderId: uuid('order_id').notNull().references(() => ticketOrders.id),
+  ticketId: uuid('ticket_id').references(() => eventTickets.id),
+  operationType: ticketPaymentOperationTypeEnum('operation_type').notNull(),
+  status: ticketPaymentOperationStatusEnum('status').notNull().default('pending'),
+  processor: ticketPaymentProcessorEnum('processor').notNull().default('stripe'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  amountCents: integer('amount_cents'),
+  currency: text('currency').notNull().default('USD'),
+  requestPayload: jsonb('request_payload').notNull(),
+  processorObjectId: text('processor_object_id'),
+  resultPayload: jsonb('result_payload'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(12),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  idempotencyIdx: uniqueIndex('ticket_payment_operations_idempotency_idx').on(table.idempotencyKey),
+  orderTypeIdx: uniqueIndex('ticket_payment_operations_order_type_idx').on(table.orderId, table.operationType),
+  processorObjectIdx: uniqueIndex('ticket_payment_operations_processor_object_idx').on(table.processorObjectId).where(sql`${table.processorObjectId} is not null`),
+  claimIdx: index('ticket_payment_operations_claim_idx').on(table.status, table.availableAt, table.leaseExpiresAt),
+  ticketTypeIdx: index('ticket_payment_operations_ticket_type_idx').on(table.ticketId, table.operationType),
+  usdOnly: check('ticket_payment_operations_usd_only', sql`${table.currency} = 'USD'`),
+  requestPayloadValid: check('ticket_payment_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object'`),
+  attemptsValid: check('ticket_payment_operations_attempts_valid', sql`
+    ${table.attemptCount} >= 0 and ${table.maxAttempts} > 0
+  `),
+  leaseCoherent: check('ticket_payment_operations_lease_coherent', sql`
+    (${table.status} = 'leased' and ${table.leaseOwner} is not null and ${table.leaseExpiresAt} is not null)
+    or (${table.status} <> 'leased' and ${table.leaseOwner} is null and ${table.leaseExpiresAt} is null)
+  `),
+  ticketRequired: check('ticket_payment_operations_ticket_required', sql`
+    (${table.operationType} in ('create_checkout', 'expire_checkout') and ${table.ticketId} is null)
+    or (${table.operationType} in ('create_seller_transfer', 'create_buyer_refund') and ${table.ticketId} is not null)
+  `),
+  amountValid: check('ticket_payment_operations_amount_valid', sql`
+    (${table.operationType} = 'expire_checkout' and ${table.amountCents} is null)
+    or (${table.operationType} <> 'expire_checkout' and ${table.amountCents} is not null and ${table.amountCents} > 0)
+  `),
+  completionCoherent: check('ticket_payment_operations_completion_coherent', sql`
+    (${table.status} not in ('succeeded', 'terminal_failed') and ${table.completedAt} is null)
+    or (${table.status} in ('succeeded', 'terminal_failed') and ${table.completedAt} is not null)
+  `)
+}));
+
+// Append-only by contract; the migration must install UPDATE/DELETE guards.
+export const ticketLedgerEntries = pgTable('ticket_ledger_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orderId: uuid('order_id').notNull().references(() => ticketOrders.id),
+  ticketId: uuid('ticket_id').references(() => eventTickets.id),
+  paymentOperationId: uuid('payment_operation_id').references(() => ticketPaymentOperations.id),
+  entryType: ticketLedgerEntryTypeEnum('entry_type').notNull(),
+  account: ticketLedgerAccountEnum('account').notNull(),
+  direction: ticketLedgerDirectionEnum('direction').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  transactionKey: text('transaction_key').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  processorReference: text('processor_reference'),
+  metadata: jsonb('metadata'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  idempotencyIdx: uniqueIndex('ticket_ledger_entries_idempotency_idx').on(table.idempotencyKey),
+  transactionIdx: index('ticket_ledger_entries_transaction_idx').on(table.transactionKey),
+  orderOccurredIdx: index('ticket_ledger_entries_order_occurred_idx').on(table.orderId, table.occurredAt),
+  ticketOccurredIdx: index('ticket_ledger_entries_ticket_occurred_idx').on(table.ticketId, table.occurredAt),
+  amountValid: check('ticket_ledger_entries_amount_valid', sql`${table.amountCents} > 0`),
+  usdOnly: check('ticket_ledger_entries_usd_only', sql`${table.currency} = 'USD'`),
+  keysValid: check('ticket_ledger_entries_keys_valid', sql`
+    length(trim(${table.transactionKey})) > 0 and length(trim(${table.idempotencyKey})) > 0
+  `)
+}));
+
+export const ticketProcessorEvents = pgTable('ticket_processor_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  processor: ticketPaymentProcessorEnum('processor').notNull().default('stripe'),
+  processorEventId: text('processor_event_id').notNull(),
+  eventType: text('event_type').notNull(),
+  payloadSha256: text('payload_sha256').notNull(),
+  payload: jsonb('payload').notNull(),
+  livemode: boolean('livemode').notNull(),
+  orderId: uuid('order_id').references(() => ticketOrders.id),
+  ticketId: uuid('ticket_id').references(() => eventTickets.id),
+  paymentOperationId: uuid('payment_operation_id').references(() => ticketPaymentOperations.id),
+  status: ticketProcessorEventStatusEnum('status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  processingStartedAt: timestamp('processing_started_at', { withTimezone: true }),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  processorEventIdx: uniqueIndex('ticket_processor_events_event_idx').on(table.processor, table.processorEventId),
+  reconcileIdx: index('ticket_processor_events_reconcile_idx').on(table.status, table.nextAttemptAt),
+  orderReceivedIdx: index('ticket_processor_events_order_received_idx').on(table.orderId, table.receivedAt),
+  payloadHashValid: check('ticket_processor_events_payload_hash_valid', sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`),
+  payloadValid: check('ticket_processor_events_payload_valid', sql`jsonb_typeof(${table.payload}) = 'object'`),
+  attemptsValid: check('ticket_processor_events_attempts_valid', sql`${table.attemptCount} >= 0`),
+  processedStateCoherent: check('ticket_processor_events_processed_state', sql`
+    (${table.status} in ('processed', 'ignored') and ${table.processedAt} is not null)
+    or (${table.status} not in ('processed', 'ignored') and ${table.processedAt} is null)
+  `)
+}));
+
+// Only successful admissions are durable here. Rejected scans must not create
+// an alternate admission state or consume the ticket.
+export const ticketAdmissionEvents = pgTable('ticket_admission_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  ticketId: uuid('ticket_id').notNull(),
+  orderId: uuid('order_id').notNull(),
+  offerId: uuid('offer_id').notNull(),
+  eventId: uuid('event_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  acceptedByUserId: uuid('accepted_by_user_id').notNull().references(() => users.id),
+  clientRequestId: uuid('client_request_id').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  admissionCredentialVersion: integer('admission_credential_version').notNull(),
+  presentedCredentialHash: text('presented_credential_hash').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  ticketIdx: uniqueIndex('ticket_admission_events_ticket_idx').on(table.ticketId),
+  idempotencyIdx: uniqueIndex('ticket_admission_events_idempotency_idx').on(table.idempotencyKey),
+  actorRequestIdx: uniqueIndex('ticket_admission_events_actor_request_idx').on(table.acceptedByUserId, table.clientRequestId),
+  eventAcceptedIdx: index('ticket_admission_events_event_accepted_idx').on(table.eventId, table.acceptedAt),
+  ticketFk: foreignKey({
+    columns: [table.ticketId, table.orderId, table.offerId, table.eventId, table.performerId],
+    foreignColumns: [eventTickets.id, eventTickets.orderId, eventTickets.offerId, eventTickets.eventId, eventTickets.performerId],
+    name: 'ticket_admission_events_ticket_fk'
+  }),
+  credentialValid: check('ticket_admission_events_credential_valid', sql`
+    ${table.admissionCredentialVersion} > 0 and ${table.presentedCredentialHash} ~ '^[0-9a-f]{64}$'
+  `),
+  evidenceValid: check('ticket_admission_events_evidence_valid', sql`
+    jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb
+  `),
+  idempotencyValid: check('ticket_admission_events_idempotency_valid', sql`length(trim(${table.idempotencyKey})) > 0`)
 }));
 
 export const gigSessions = pgTable('gig_sessions', {

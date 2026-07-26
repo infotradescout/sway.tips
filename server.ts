@@ -105,6 +105,18 @@ import {
   type PerformerEventDto,
   type PublicPerformerEventDto
 } from "./src/server/performer-event-service";
+import {
+  createEventTicketService,
+  EventTicketServiceError
+} from "./src/server/event-ticket-service";
+import {
+  NATIVE_TICKET_BUYER_TERMS_HASH,
+  NATIVE_TICKET_BUYER_TERMS_TEXT,
+  NATIVE_TICKET_SELLER_TERMS_HASH,
+  NATIVE_TICKET_SELLER_TERMS_TEXT,
+  NATIVE_TICKET_TERMS_VERSION,
+  resolveNativeTicketRuntimeConfig
+} from "./src/server/event-ticket-contract";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -164,6 +176,22 @@ const audioFileCollaborationService = businessDb && audioObjectStore
 const performerEventService = businessDb
   ? createPerformerEventService(businessDb)
   : null;
+const nativeTicketRuntimeConfig = resolveNativeTicketRuntimeConfig(process.env, isProduction);
+const eventTicketService = businessDb
+  ? createEventTicketService({
+      db: businessDb,
+      runtimeConfig: nativeTicketRuntimeConfig
+    })
+  : null;
+if (
+  process.env.SWAY_NATIVE_TICKETS_ENABLED?.trim().toLowerCase() === 'true'
+  && !nativeTicketRuntimeConfig.salesEnabled
+) {
+  console.warn(
+    '[sway.tickets] native ticket sales remain disabled:',
+    nativeTicketRuntimeConfig.disabledReasons.join(', ')
+  );
+}
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -702,6 +730,22 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
   return defaultMetadata;
 }
 
+function escapeStaticDocumentText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderExactTicketTerms(value: string) {
+  return value
+    .split('\n')
+    .map((paragraph) => `<p>${escapeStaticDocumentText(paragraph)}</p>`)
+    .join('');
+}
+
 function renderStaticDocument(title: string, description: string, bodyHtml: string, eyebrow = 'Sway trust center') {
   return `<!doctype html>
 <html lang="en">
@@ -898,6 +942,7 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
           <a href="/privacy/data-deletion">Data deletion</a>
           <a href="/legal/payments">Payment terms</a>
           <a href="/legal/payouts">Payout terms</a>
+          <a href="/legal/tickets">Ticket terms</a>
         </div>
       </section>
     </main>
@@ -905,23 +950,46 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
 </html>`;
 }
 
-const supportPageHtml = renderStaticDocument(
-  'Sway Support',
-  'How to reach Sway support, report a problem, and request safety or account help.',
-  `
-    <p>Sway support is for safety issues, payment issues, performer account problems, and live-room failures.</p>
-    <h2>Use Sway support for</h2>
-    <ul>
-      <li>reporting harassment, unsafe behavior, or abusive requests</li>
-      <li>requesting help with a performer account or live room</li>
-      <li>questioning a payment, refund, or missing request status</li>
-      <li>starting a data deletion request</li>
-    </ul>
-    <h2>Current contact path</h2>
-    <p>Use the in-app safety controls first when they are available. If you cannot access the app, use the published support route from this page and the data deletion route below.</p>
-    <p>Support and review teams should verify the linked policies and live backend status before launch claims are made.</p>
-  `
-);
+function renderSupportPageHtml(reference: { type: 'order' | 'ticket'; id: string } | null = null) {
+  const supportEmail = nativeTicketRuntimeConfig.supportEmail;
+  const referenceLabel = reference
+    ? `${reference.type === 'order' ? 'Order' : 'Ticket'} ${reference.id}`
+    : null;
+  const subject = referenceLabel ? `Sway ticket support — ${referenceLabel}` : 'Sway support request';
+  const body = [
+    referenceLabel ? `${referenceLabel}\n` : '',
+    'Describe what happened, the outcome you expected, and any processor receipt or event details that can help Sway investigate.'
+  ].join('');
+  const contactHtml = supportEmail
+    ? `
+      <p>Email the monitored Sway support channel. Include the account email used in Sway, but never send a password, full card number, bank account number, or admission QR.</p>
+      ${referenceLabel ? `<p><strong>Reference:</strong> <code>${escapeStaticDocumentText(referenceLabel)}</code></p>` : ''}
+      <div class="primary-actions">
+        <a href="mailto:${escapeStaticDocumentText(supportEmail)}?subject=${encodeURIComponent(subject)}&amp;body=${encodeURIComponent(body)}">Email ${escapeStaticDocumentText(supportEmail)}</a>
+      </div>
+    `
+    : `
+      <p><strong>The monitored support contact is temporarily unavailable.</strong> Native ticket sales remain disabled while this contact is missing. If you already hold a ticket, keep its ticket or order reference and try this page again.</p>
+    `;
+
+  return renderStaticDocument(
+    'Sway Support',
+    'How to reach Sway support, report a problem, and request safety or account help.',
+    `
+      <p>Sway support is for safety issues, payment issues, performer account problems, ticket and refund questions, and live-room failures.</p>
+      <h2>Use Sway support for</h2>
+      <ul>
+        <li>reporting harassment, unsafe behavior, or abusive requests</li>
+        <li>requesting help with a performer account or live room</li>
+        <li>questioning a payment, ticket, dispute, refund, or missing request status</li>
+        <li>starting a data deletion request</li>
+      </ul>
+      <h2>Contact Sway</h2>
+      ${contactHtml}
+      <p>Use in-app safety controls first when they are available. Use the data deletion route below for deletion requests.</p>
+    `
+  );
+}
 
 const aboutPageHtml = renderStaticDocument(
   'Sway: the whole performer business, connected',
@@ -1018,6 +1086,7 @@ const privacyPageHtml = renderStaticDocument(
       <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
       <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
       <li>payment processor identifiers and related lifecycle status</li>
+      <li>native ticket offer, order, price-and-terms snapshot, admission, refund, performer-transfer, and reconciliation records when native ticket sales are enabled</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
       <li>limited device, route, and friction telemetry needed to keep the service working</li>
@@ -1061,7 +1130,7 @@ const termsPageHtml = renderStaticDocument(
     <h2>Distribution limits</h2>
     <p>Provider-backed delivery, store callbacks and corrections, royalties, splits, payouts, destination pre-saves, takedowns, and catalog cutover are not live. A draft marked ready or shown on a public page has not thereby been submitted, accepted, distributed, streamed, monetized, or migrated. Separate provider terms and disclosures will be required before Sway can transmit releases or money through those systems.</p>
     <h2>Money terms</h2>
-    <p>Payment, refund, and payout behavior must match the live backend and processor state exactly. See the dedicated payment and payout terms below for the current operating rules.</p>
+    <p>Payment, refund, payout, and native ticket behavior must match the live backend and processor state exactly. See the dedicated payment, payout, and ticket terms below for the current operating rules.</p>
   `
 );
 
@@ -1091,6 +1160,22 @@ const payoutTermsPageHtml = renderStaticDocument(
       <li>unverified performers must not be shown payout promises that the processor cannot support</li>
     </ul>
     <p>Current payout terms must stay aligned with the configured payment provider and KYC state.</p>
+  `
+);
+
+const ticketTermsPageHtml = renderStaticDocument(
+  'Sway Native Ticket Terms',
+  'How native general-admission prices, payment holds, admission, performer transfers, cancellation, and refunds work when ticket sales are enabled.',
+  `
+    <p><strong>Current terms version:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_TERMS_VERSION)}</code></p>
+    <p><strong>Buyer terms SHA-256:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_BUYER_TERMS_HASH)}</code><br />
+    <strong>Seller terms SHA-256:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_SELLER_TERMS_HASH)}</code></p>
+    <p><strong>Native Sway ticket sales are available only when the production ticket gate is enabled.</strong> An external event link is not a Sway ticket sale.</p>
+    <h2>Exact buyer terms</h2>
+    <div class="plain-language">${renderExactTicketTerms(NATIVE_TICKET_BUYER_TERMS_TEXT)}</div>
+    <h2>Exact performer-seller terms</h2>
+    <div class="plain-language">${renderExactTicketTerms(NATIVE_TICKET_SELLER_TERMS_TEXT)}</div>
+    <p>The version and hashes above identify the exact text shown here. Each native order and offer stores its accepted text, version, and hash as an immutable snapshot.</p>
   `
 );
 
@@ -1732,6 +1817,43 @@ function toOwnedEventResponse(event: PerformerEventDto) {
   };
 }
 
+async function toOwnedEventResponseWithTicket(
+  event: PerformerEventDto,
+  owner: PerformerEventOwnerContext
+) {
+  if (event.ticketingMode !== 'native_ga' || !eventTicketService) {
+    return {
+      ...toOwnedEventResponse(event),
+      ticketOffer: null,
+      nativeTicket: null
+    };
+  }
+
+  const [offer, publicProjection] = await Promise.all([
+    eventTicketService.getOwnerTicketOffer({
+      eventId: event.id,
+      performerId: owner.performerId,
+      actorUserId: owner.actorUserId
+    }),
+    eventTicketService.getPublicOfferProjection({ eventId: event.id })
+  ]);
+  const ticketOffer = offer
+    ? {
+        ...offer,
+        unitAllInPriceCents: offer.advertisedTotalCents,
+        remainingCount: publicProjection?.remainingCount ?? offer.capacity,
+        salesStatus: publicProjection?.salesStatus
+          ?? (offer.status === 'draft' ? 'scheduled' : offer.status)
+      }
+    : null;
+
+  return {
+    ...toOwnedEventResponse(event),
+    ticketOffer,
+    nativeTicket: ticketOffer
+  };
+}
+
 function toPublicEventResponse(event: PublicPerformerEventDto) {
   const externalTicketIsOpen = event.status === 'published'
     && Boolean(event.externalTicketUrl)
@@ -1741,6 +1863,7 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
     title: event.title,
     description: event.description,
     startsAt: event.startsAt,
+    doorOpensAt: event.doorOpensAt,
     endsAt: event.endsAt,
     timeZone: event.timeZone,
     location: {
@@ -1750,6 +1873,7 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
       isTba: event.locationIsTba
     },
     coverImageUrl: event.coverImageUrl,
+    ticketingMode: event.ticketingMode,
     externalTicket: externalTicketIsOpen && event.externalTicketUrl
       ? {
           url: event.externalTicketUrl,
@@ -1775,9 +1899,35 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
   };
 }
 
+async function toPublicEventResponseWithTicket(event: PublicPerformerEventDto) {
+  const nativeTicket = event.ticketingMode === 'native_ga' && eventTicketService
+    ? await eventTicketService.getPublicOfferProjection({ eventId: event.id })
+    : null;
+  return {
+    ...toPublicEventResponse(event),
+    nativeTicket
+  };
+}
+
 function respondToEventServiceError(res: express.Response, error: unknown, fallback: string) {
   if (error instanceof EventServiceError) {
     return res.status(error.status).json({ error: error.message, code: error.code });
+  }
+  console.error(fallback, error);
+  return res.status(500).json({ error: fallback });
+}
+
+function respondToEventTicketServiceError(
+  res: express.Response,
+  error: unknown,
+  fallback: string
+) {
+  if (error instanceof EventTicketServiceError) {
+    return res.status(error.status).json({
+      error: error.message,
+      code: error.code,
+      retryable: error.retryable
+    });
   }
   console.error(fallback, error);
   return res.status(500).json({ error: fallback });
@@ -4356,6 +4506,24 @@ app.post('/api/account/claim/attach', async (req, res) => {
   }
 });
 
+function normalizeSafeAccountNextPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 1_024 || !raw.startsWith('/') || raw.startsWith('//')) return null;
+
+  try {
+    const parsed = new URL(raw, 'https://app.sway.tips');
+    if (parsed.origin !== 'https://app.sway.tips') return null;
+    const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
+      || parsed.pathname === '/tickets'
+      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname);
+    if (!allowed) return null;
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
+
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
@@ -4367,6 +4535,7 @@ app.post('/api/account/signup', async (req, res) => {
   const password = normalizePerformerPassword(req.body?.password);
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
   const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
   if (!email || !displayName || !password) {
     return res.status(422).json({ error: 'Name, email, and password are required.' });
   }
@@ -4545,6 +4714,7 @@ app.post('/api/account/signup', async (req, res) => {
       targetEmail: email,
       challengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
       requesterIpHash,
+      challengeMetadata: accountNextPath ? { accountNextPath } : null,
       executor: tx
     });
     await writeAuditEvent(tx, {
@@ -4592,7 +4762,7 @@ app.get('/api/account/verify-email/consume', async (req, res) => {
       expectedChallengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
       executor: tx
     });
-    if (!challenge?.actorUserId) return false;
+    if (!challenge?.actorUserId) return { ok: false as const, nextPath: null };
     const verifiedAt = new Date();
     await tx.update(users).set({ emailVerifiedAt: verifiedAt, updatedAt: verifiedAt }).where(eq(users.id, challenge.actorUserId));
     await writeAuditEvent(tx, {
@@ -4605,9 +4775,20 @@ app.get('/api/account/verify-email/consume', async (req, res) => {
       nextStatus: 'verified',
       metadata: { verifiedAt: verifiedAt.toISOString() }
     });
-    return true;
+    const rawNextPath = challenge.challengeMetadata
+      && typeof challenge.challengeMetadata === 'object'
+      && 'accountNextPath' in challenge.challengeMetadata
+      ? (challenge.challengeMetadata as { accountNextPath?: unknown }).accountNextPath
+      : null;
+    return {
+      ok: true as const,
+      nextPath: normalizeSafeAccountNextPath(rawNextPath)
+    };
   });
-  return res.redirect(verified ? '/account/login?verified=1' : '/account/login?error=invalid');
+  if (!verified.ok) return res.redirect('/account/login?error=invalid');
+  const verifiedQuery = new URLSearchParams({ verified: '1' });
+  if (verified.nextPath) verifiedQuery.set('next', verified.nextPath);
+  return res.redirect(`/account/login?${verifiedQuery.toString()}`);
 });
 
 app.post('/api/account/login', async (req, res) => {
@@ -4618,6 +4799,7 @@ app.post('/api/account/login', async (req, res) => {
   const email = normalizePerformerLoginEmail(req.body?.email);
   const password = normalizePerformerPassword(req.body?.password);
   const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = email ?? '__invalid__';
   const rateLimit = performerPasswordLoginRateLimiter.check({ requesterIpHash, accountKey });
@@ -4645,7 +4827,7 @@ app.post('/api/account/login', async (req, res) => {
   });
   const redirectPath = claimCode
     ? `/account?claim=${encodeURIComponent(claimCode)}`
-    : '/account';
+    : accountNextPath || '/account';
   return res.json({ success: true, redirectPath });
 });
 
@@ -6501,6 +6683,105 @@ app.post("/api/analytics/shell", async (req, res) => {
   }
 });
 
+type TicketBuyerContext = {
+  buyerUserId: string;
+};
+
+async function requireTicketBuyer(
+  req: express.Request,
+  res: express.Response
+): Promise<TicketBuyerContext | null> {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) {
+    res.status(accountAccess.status).json({ error: accountAccess.reason });
+    return null;
+  }
+  if (!accountAccess.actor.actorId) {
+    res.status(401).json({ error: 'Sway account resolution required.' });
+    return null;
+  }
+  if (!businessDb || !eventTicketService) {
+    res.status(503).json({ error: 'Ticket accounts require durable persistence.' });
+    return null;
+  }
+  return { buyerUserId: accountAccess.actor.actorId };
+}
+
+app.post('/api/account/ticket-orders', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const checkout = await eventTicketService.createCheckoutOrder({
+      ...buyer,
+      eventId: req.body?.eventId,
+      clientRequestId: req.body?.clientRequestId,
+      termsAccepted: req.body?.termsAccepted
+    });
+    return res.status(checkout.ticketId ? 200 : 201).json(checkout);
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to start ticket checkout.');
+  }
+});
+
+app.get('/api/account/ticket-orders', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const orders = await eventTicketService.listBuyerOrders({
+      ...buyer,
+      limit: Number(req.query.limit) || 10
+    });
+    return res.json({ orders });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket orders.');
+  }
+});
+
+app.get('/api/account/ticket-orders/:orderId', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const order = await eventTicketService.getBuyerOrder({
+      ...buyer,
+      orderId: req.params.orderId
+    });
+    return res.json({ order });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket order.');
+  }
+});
+
+app.get('/api/account/tickets', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const tickets = await eventTicketService.listBuyerTickets(buyer);
+    return res.json({ tickets });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load tickets.');
+  }
+});
+
+app.get('/api/account/tickets/:ticketId', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const ticket = await eventTicketService.getBuyerTicketPass({
+      ...buyer,
+      ticketId: req.params.ticketId
+    });
+    return res.json({ ticket });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket pass.');
+  }
+});
+
 type PerformerEventOwnerContext = {
   actorUserId: string;
   performerId: string;
@@ -6548,9 +6829,28 @@ app.get('/api/talent/events', async (req, res) => {
       ...owner,
       limit: Number(req.query.limit) || 50
     });
-    return res.json({ events: events.map(toOwnedEventResponse) });
+    const eventResponses = await Promise.all(
+      events.map((event) => toOwnedEventResponseWithTicket(event, owner))
+    );
+    return res.json({ events: eventResponses });
   } catch (error) {
     return respondToEventServiceError(res, error, 'Unable to load performer events.');
+  }
+});
+
+app.get('/api/talent/events/native-ticket-capability', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const capability = await eventTicketService.getOwnerNativeTicketSalesCapability(owner);
+    return res.json({ capability });
+  } catch (error) {
+    return respondToEventTicketServiceError(
+      res,
+      error,
+      'Unable to load native ticket readiness.'
+    );
   }
 });
 
@@ -6559,12 +6859,24 @@ app.post('/api/talent/events', async (req, res) => {
   if (!owner || !performerEventService) return;
 
   try {
+    if (req.body?.ticketingMode === 'native_ga') {
+      const capability = eventTicketService
+        ? await eventTicketService.getOwnerNativeTicketSalesCapability(owner)
+        : null;
+      if (!capability?.salesAvailable) {
+        return res.status(503).json({
+          error: 'Native ticket event creation is disabled until its payment, tax, and admission configuration is complete.',
+          code: 'native_ticket_sales_disabled'
+        });
+      }
+    }
     const result = await performerEventService.createEvent({
       ...owner,
       clientRequestId: req.body?.clientRequestId,
       title: req.body?.title,
       description: req.body?.description,
       startsAt: req.body?.startsAt,
+      doorOpensAt: req.body?.doorOpensAt,
       endsAt: req.body?.endsAt,
       timeZone: req.body?.timeZone,
       locationName: req.body?.locationName,
@@ -6572,12 +6884,13 @@ app.post('/api/talent/events', async (req, res) => {
       city: req.body?.city,
       locationIsTba: req.body?.locationIsTba,
       coverImageUrl: req.body?.coverImageUrl,
+      ticketingMode: req.body?.ticketingMode,
       externalTicketUrl: req.body?.externalTicketUrl,
       externalTicketLabel: req.body?.externalTicketLabel,
       visibility: req.body?.visibility
     });
     return res.status(result.created ? 201 : 200).json({
-      event: toOwnedEventResponse(result.event),
+      event: await toOwnedEventResponseWithTicket(result.event, owner),
       idempotentReplay: !result.created
     });
   } catch (error) {
@@ -6593,6 +6906,7 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
     'title',
     'description',
     'startsAt',
+    'doorOpensAt',
     'endsAt',
     'timeZone',
     'locationName',
@@ -6615,9 +6929,95 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
       expectedUpdatedAt: req.body?.expectedUpdatedAt,
       ...changes
     });
-    return res.json({ event: toOwnedEventResponse(event) });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
   } catch (error) {
     return respondToEventServiceError(res, error, 'Unable to update performer event.');
+  }
+});
+
+app.get('/api/talent/events/:eventId/ticketing', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService || !eventTicketService) return;
+
+  try {
+    const event = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (event.ticketingMode !== 'native_ga') {
+      return res.status(409).json({
+        error: 'This event uses an external ticket or RSVP destination.',
+        code: 'native_ticket_mode_required'
+      });
+    }
+    const eventResponse = await toOwnedEventResponseWithTicket(event, owner);
+    return res.json({
+      ticketOffer: eventResponse.ticketOffer,
+      nativeTicket: eventResponse.nativeTicket
+    });
+  } catch (error) {
+    if (error instanceof EventServiceError) {
+      return respondToEventServiceError(res, error, 'Unable to load native ticket setup.');
+    }
+    return respondToEventTicketServiceError(res, error, 'Unable to load native ticket setup.');
+  }
+});
+
+app.put('/api/talent/events/:eventId/ticketing', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const ticketOffer = await eventTicketService.updateOwnerTicketOffer({
+      ...owner,
+      eventId: req.params.eventId,
+      capacity: req.body?.capacity,
+      faceValueCents: req.body?.faceValueCents,
+      termsAccepted: req.body?.termsAccepted
+    });
+    return res.json({
+      ticketOffer: {
+        ...ticketOffer,
+        unitAllInPriceCents: ticketOffer.advertisedTotalCents,
+        remainingCount: ticketOffer.capacity,
+        salesStatus: 'scheduled'
+      }
+    });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to save native ticket setup.');
+  }
+});
+
+app.get('/api/talent/events/:eventId/door', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const door = await eventTicketService.getDoorSummary({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    return res.json({ door });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load the ticket door.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/check-ins', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const result = await eventTicketService.checkIn({
+      ...owner,
+      eventId: req.params.eventId,
+      clientRequestId: req.body?.clientRequestId,
+      qrToken: req.body?.qrToken,
+      manualCode: req.body?.manualCode
+    });
+    return res.json(result);
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to check in this ticket.');
   }
 });
 
@@ -6626,13 +7026,35 @@ app.post('/api/talent/events/:eventId/publish', async (req, res) => {
   if (!owner || !performerEventService) return;
 
   try {
+    const current = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (current.ticketingMode === 'native_ga') {
+      if (!eventTicketService) {
+        return res.status(503).json({ error: 'Native ticket publishing is temporarily unavailable.' });
+      }
+      await eventTicketService.publishNativeEvent({
+        ...owner,
+        eventId: req.params.eventId,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt
+      });
+      const event = await performerEventService.getOwnedEvent({
+        ...owner,
+        eventId: req.params.eventId
+      });
+      return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+    }
     const event = await performerEventService.publishEvent({
       ...owner,
       eventId: req.params.eventId,
       expectedUpdatedAt: req.body?.expectedUpdatedAt
     });
-    return res.json({ event: toOwnedEventResponse(event) });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
   } catch (error) {
+    if (error instanceof EventTicketServiceError) {
+      return respondToEventTicketServiceError(res, error, 'Unable to publish performer event.');
+    }
     return respondToEventServiceError(res, error, 'Unable to publish performer event.');
   }
 });
@@ -6642,14 +7064,40 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
   if (!owner || !performerEventService) return;
 
   try {
+    const current = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (current.ticketingMode === 'native_ga') {
+      if (!eventTicketService) {
+        return res.status(503).json({ error: 'Native ticket cancellation is temporarily unavailable.' });
+      }
+      const result = await eventTicketService.cancelNativeEvent({
+        ...owner,
+        eventId: req.params.eventId,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt,
+        cancellationReason: req.body?.cancellationReason
+      });
+      const event = await performerEventService.getOwnedEvent({
+        ...owner,
+        eventId: req.params.eventId
+      });
+      return res.json({
+        event: await toOwnedEventResponseWithTicket(event, owner),
+        refundsQueued: result.refundsQueued
+      });
+    }
     const event = await performerEventService.cancelEvent({
       ...owner,
       eventId: req.params.eventId,
       expectedUpdatedAt: req.body?.expectedUpdatedAt,
       cancellationReason: req.body?.cancellationReason
     });
-    return res.json({ event: toOwnedEventResponse(event) });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
   } catch (error) {
+    if (error instanceof EventTicketServiceError) {
+      return respondToEventTicketServiceError(res, error, 'Unable to cancel performer event.');
+    }
     return respondToEventServiceError(res, error, 'Unable to cancel performer event.');
   }
 });
@@ -8665,6 +9113,45 @@ app.post('/api/library/sync', async (req, res) => {
   }
 });
 
+function rawStripeEventHasNativeTicketMarker(rawBody: string) {
+  try {
+    const payload = JSON.parse(rawBody) as {
+      data?: { object?: { metadata?: Record<string, unknown> } };
+    };
+    const metadata = payload.data?.object?.metadata;
+    return metadata?.sway_ticket_lane === 'native_ga'
+      || (
+        typeof metadata?.sway_ticket_order_id === 'string'
+        && UUID_PATTERN.test(metadata.sway_ticket_order_id)
+      );
+  } catch {
+    return false;
+  }
+}
+
+// A separate endpoint supports a dedicated Stripe ticket-webhook signing
+// secret. The shared endpoint below also multiplexes ticket events when both
+// payment lanes use the same endpoint/secret.
+app.post('/api/payment/ticket-webhook', async (req, res) => {
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
+  if (typeof rawBody !== 'string') {
+    return res.status(400).json({ error: 'Raw request body unavailable for signature verification.' });
+  }
+  if (!eventTicketService) {
+    return res.status(503).json({ error: 'Native ticket webhook processing is unavailable.' });
+  }
+
+  try {
+    const result = await eventTicketService.ingestVerifiedWebhook({
+      rawBody,
+      signatureHeader: req.header('stripe-signature') ?? null
+    });
+    return res.json({ received: true, result });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Ticket webhook processing failed.');
+  }
+});
+
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
@@ -8701,6 +9188,33 @@ app.post("/api/payment/webhook", async (req, res) => {
       return res.status(400).json({
         error: error instanceof Error ? error.message : 'Connect webhook processing failed.'
       });
+    }
+  }
+
+  const ticketWebhookSecret = (
+    process.env.STRIPE_TICKET_WEBHOOK_SECRET
+    || process.env.STRIPE_WEBHOOK_SECRET
+    || ''
+  ).trim();
+  const sharedTicketWebhookSecret = Boolean(
+    ticketWebhookSecret
+    && webhookSecret
+    && ticketWebhookSecret === webhookSecret.trim()
+  );
+  if (
+    eventTicketService
+    && (sharedTicketWebhookSecret || rawStripeEventHasNativeTicketMarker(rawBody))
+  ) {
+    try {
+      const ticketResult = await eventTicketService.ingestVerifiedWebhook({
+        rawBody,
+        signatureHeader
+      });
+      if (ticketResult.status !== 'not_ticket') {
+        return res.json({ received: true, result: ticketResult });
+      }
+    } catch (error) {
+      return respondToEventTicketServiceError(res, error, 'Ticket webhook processing failed.');
     }
   }
 
@@ -8752,7 +9266,7 @@ app.get('/api/public/events/:eventId', async (req, res) => {
   try {
     const event = await performerEventService.getPublicEvent(req.params.eventId);
     if (!event) return res.status(404).json({ error: 'Public event not found.' });
-    return res.json({ event: toPublicEventResponse(event) });
+    return res.json({ event: await toPublicEventResponseWithTicket(event) });
   } catch (error) {
     return respondToEventServiceError(res, error, 'Unable to load this event right now.');
   }
@@ -8862,7 +9376,7 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
-      events: publicEvents.map(toPublicEventResponse)
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -9239,7 +9753,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         releasePath: release.releasePath,
         artworkUrl: release.artworkUrl
       })),
-      events: publicEventRows.map(toPublicEventResponse)
+      events: await Promise.all(publicEventRows.map(toPublicEventResponseWithTicket))
     });
   } catch (error) {
     console.error('Public performer profile lookup failed:', error);
@@ -10815,8 +11329,19 @@ app.get('/api/moderation/placeholders', (_req, res) => {
   });
 });
 
-app.get('/support', (_req, res) => {
-  res.type('html').send(supportPageHtml);
+app.get('/support', (req, res) => {
+  const orderId = typeof req.query.orderId === 'string' && UUID_PATTERN.test(req.query.orderId)
+    ? req.query.orderId
+    : null;
+  const ticketId = typeof req.query.ticketId === 'string' && UUID_PATTERN.test(req.query.ticketId)
+    ? req.query.ticketId
+    : null;
+  const reference = orderId
+    ? { type: 'order' as const, id: orderId }
+    : ticketId
+      ? { type: 'ticket' as const, id: ticketId }
+      : null;
+  res.type('html').send(renderSupportPageHtml(reference));
 });
 
 app.get('/faq', (_req, res) => {
@@ -10843,21 +11368,29 @@ app.get('/legal/payouts', (_req, res) => {
   res.type('html').send(payoutTermsPageHtml);
 });
 
+app.get('/legal/tickets', (_req, res) => {
+  res.type('html').send(ticketTermsPageHtml);
+});
+
 app.get('/privacy/data-deletion', (_req, res) => {
   res.type('html').send(dataDeletionPageHtml);
 });
 
 app.get('/api/support/contact', (_req, res) => {
   return res.json({
-    success: true,
-    message: 'Support options are published on the Sway support page.',
+    success: Boolean(nativeTicketRuntimeConfig.supportEmail),
+    message: nativeTicketRuntimeConfig.supportEmail
+      ? 'The monitored Sway support contact is available.'
+      : 'The monitored Sway support contact is temporarily unavailable.',
+    supportEmail: nativeTicketRuntimeConfig.supportEmail,
     supportPath: '/support',
     faqPath: '/faq',
     privacyPolicyPath: '/privacy',
     termsPath: '/terms',
     dataDeletionPath: '/privacy/data-deletion',
     paymentTermsPath: '/legal/payments',
-    payoutTermsPath: '/legal/payouts'
+    payoutTermsPath: '/legal/payouts',
+    ticketTermsPath: '/legal/tickets'
   });
 });
 
@@ -11079,6 +11612,31 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API route not found.' });
 });
 
+function startEventTicketWorker() {
+  if (!eventTicketService) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await eventTicketService.runMaintenance({ limit: 100 });
+      await eventTicketService.runDueOperations({ limit: 50 });
+    } catch (error) {
+      console.error(
+        '[sway.tickets] durable worker iteration failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, 15_000);
+  timer.unref();
+}
+
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
   if (audioObjectStore) {
@@ -11087,6 +11645,7 @@ async function startServer() {
     console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
   }
   await refreshBusinessState();
+  startEventTicketWorker();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

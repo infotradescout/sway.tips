@@ -139,6 +139,34 @@
           "holdReason": "Creator home, website-replacement public profile, live-room entry, and verified public release cards are implemented. The complete production journey is not yet recorded in this gate."
         },
         {
+          "id": "performer_events_and_discovery",
+          "label": "Performer-owned event listings and public discovery",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/components/PerformerEventsManager.tsx",
+            "src/components/PublicEventPage.tsx",
+            "src/server/performer-event-service.ts",
+            "scripts/sway-public-event-listings.contract.test.mjs"
+          ],
+          "holdReason": "Performer-owned event drafts, publishing, truthful cancellation, public event pages, profile listings, discovery, and safe external ticket handoff are implemented. A current production performer-to-customer event journey is not yet recorded."
+        },
+        {
+          "id": "native_general_admission_tickets",
+          "label": "Native paid general-admission tickets",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/server/event-ticket-service.ts",
+            "src/server/event-ticket-stripe-provider.ts",
+            "src/components/EventTicketPurchaseCard.tsx",
+            "src/components/TicketPassPage.tsx",
+            "src/components/PerformerEventDoorPage.tsx",
+            "scripts/sway-event-ticket-native-ga.contract.test.mjs",
+            "scripts/sway-event-ticket-migration.integration.test.ts",
+            "scripts/sway-event-ticket-service.integration.test.ts"
+          ],
+          "holdReason": "The isolated order, inventory, processor-event, ledger, rotating admission, refund-only unused-ticket, and post-check-in transfer paths are implemented behind a fail-closed gate. Production sales remain explicitly disabled. GO requires live Stripe and browser evidence, monitored buyer communication/support, production processor-fee/refund/dispute net-cash reconciliation, dispute and post-transfer reversal/reserve policy, tax/legal approval, and a clean-environment release gate."
+        },
+        {
           "id": "live_room_core",
           "label": "Live room, QR, requests, tips, boosts, and queue control",
           "status": "implemented_unverified",

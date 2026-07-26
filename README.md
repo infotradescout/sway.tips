@@ -2,7 +2,7 @@
 
 Sway connects performers and customers through public performer pages, scheduled events, live rooms, and paid Request, Tip, and Boost actions.
 
-This repository contains separate audience, performer, overlay, and internal-admin surfaces backed by PostgreSQL. Event listings currently hand customers to performer-supplied external HTTPS ticket or RSVP pages; Sway does not yet sell or issue event tickets.
+This repository contains separate audience, performer, overlay, and internal-admin surfaces backed by PostgreSQL. Events can use a performer-supplied external HTTPS ticket/RSVP page or the feature-gated native paid-GA lane. Native sales are disabled by default and must not be presented as production-ready until the fee, tax, Stripe, admission, refund, transfer, legal, and production-evidence gates are complete.
 
 ## Routes
 
@@ -13,6 +13,9 @@ This repository contains separate audience, performer, overlay, and internal-adm
 - `/p/:performerHandle`
 - `/e/:eventId`
 - `/discover`
+- `/tickets`
+- `/tickets/:ticketId`
+- `/talent/events/:eventId/door`
 - `/r/:releaseId`
 - `/overlay/:gigId`
 - `/admin` internal-only
@@ -54,6 +57,7 @@ That starts a localhost endpoint at `http://127.0.0.1:4314/ingest` so any DJ app
 - `https://app.sway.tips/privacy/data-deletion`
 - `https://app.sway.tips/legal/payments`
 - `https://app.sway.tips/legal/payouts`
+- `https://app.sway.tips/legal/tickets`
 
 ## Installable App Behavior
 
@@ -66,7 +70,7 @@ Sway is now intended to behave like an installable browser app, not just a websi
 
 ## Production Gaps
 
-Do not treat repository implementation as production proof. The readiness register remains the authority for live-payment, payout, App Store, publishing, and event evidence. Native ticket checkout, inventory, admission, refunds, and seller settlement are not implemented.
+Do not treat repository implementation as production proof. The readiness register remains the authority for live-payment, payout, App Store, publishing, and event evidence. The native paid-GA code path implements isolated inventory, hosted checkout, backend-confirmed issuance, rotating admission, refund-only unused-ticket settlement, and post-check-in performer transfers, but it is disabled by default and remains unverified in production.
 
 ## Domain Routing Strategy
 
