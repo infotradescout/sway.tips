@@ -31,6 +31,8 @@ type NativeTicketCapability = {
   feeBps: number | null;
   feeFixedCents: number | null;
   taxMode: 'stripe_automatic' | 'not_required' | null;
+  reservationMinutes: number | null;
+  refundGraceMinutes: number | null;
   termsVersion: string;
   termsHash: string;
   supportEmail: string | null;
@@ -338,6 +340,18 @@ function salesStatusLabel(value: string | null) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function durationLabel(minutes: number) {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} ${days === 1 ? 'day' : 'days'}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  }
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
 function dateTimeLabel(value: string, timeZone: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Date unavailable';
@@ -409,6 +423,8 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               taxMode: capability.taxMode === 'stripe_automatic' || capability.taxMode === 'not_required'
                 ? capability.taxMode
                 : null,
+              reservationMinutes: nullableInteger(capability.reservationMinutes),
+              refundGraceMinutes: nullableInteger(capability.refundGraceMinutes),
               termsVersion: text(capability.termsVersion),
               termsHash: text(capability.termsHash),
               supportEmail: text(capability.supportEmail) || null
@@ -419,6 +435,8 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               feeBps: null,
               feeFixedCents: null,
               taxMode: null,
+              reservationMinutes: null,
+              refundGraceMinutes: null,
               termsVersion: '',
               termsHash: '',
               supportEmail: null
@@ -693,7 +711,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setCancelDraft(null);
       setMessage(
         event.ticketingMode === 'native_ga'
-          ? 'Event cancelled. Sway has queued refunds for native tickets; payment processing may remain pending.'
+          ? 'Event cancelled. Eligible unused native tickets are queued for refund. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and processor confirmation may remain pending.'
           : 'Sway listing cancelled. Its external ticket action is no longer public.'
       );
       await loadEvents();
@@ -1057,6 +1075,21 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     </div>
                   ) : null}
 
+                {nativeCapability?.reservationMinutes !== null
+                  && nativeCapability?.reservationMinutes !== undefined
+                  && nativeCapability.refundGraceMinutes !== null ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-slate-300 sm:col-span-2">
+                      <p className={fieldLabel()}>Checkout and unused-ticket timing</p>
+                      <p className="mt-2">
+                        New hosted checkouts stop {durationLabel(nativeCapability.reservationMinutes)} before
+                        show start. Each started checkout reserves one ticket for up to{' '}
+                        {durationLabel(nativeCapability.reservationMinutes)}. A ticket still unaccepted when
+                        the {durationLabel(nativeCapability.refundGraceMinutes)} post-event admission window
+                        ends is queued for a full refund.
+                      </p>
+                    </div>
+                  ) : null}
+
                 <label className="flex items-start gap-3 rounded-xl border border-cyan-300/20 bg-cyan-500/[0.06] p-4 text-xs leading-5 text-slate-200 sm:col-span-2">
                   <input
                     required
@@ -1371,7 +1404,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       </label>
                       <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-3 text-xs leading-5 text-amber-100">
                         {event.ticketingMode === 'native_ga'
-                          ? 'When you confirm, Sway stops native ticket sales and queues full refunds for tickets that were not checked in. Refunds may remain pending while the payment processor completes them; cancellation is unavailable after any admission.'
+                          ? 'When you confirm, Sway stops native ticket sales and queues full refunds for eligible unused tickets. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and refunds may remain pending while the payment processor completes them.'
                           : 'Cancelling here only changes the Sway listing. It does not cancel tickets, issue refunds, or notify buyers through the external provider.'}
                       </div>
                       {event.ticketingMode === 'external' ? (
