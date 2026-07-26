@@ -421,7 +421,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   <p className="mt-1 text-xs leading-5 text-rose-100/80">
                     {event.cancellationReason || 'Ticket checkout is unavailable.'}{' '}
                     {event.nativeTicket
-                      ? 'Sway queues full refunds for native tickets that were not checked in.'
+                      ? 'Sway queues full refunds for eligible unused native tickets. Admitted tickets keep their recorded settlement, and disputed payments remain under support review.'
                       : 'Contact the external ticket provider for its refund and support policies.'}
                   </p>
                 </div>
