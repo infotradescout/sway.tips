@@ -7,10 +7,15 @@
 # `npm run test:contracts` fails on completely correct code.
 #
 # That is why the suite can pass in a long-lived working copy and fail in a
-# newly created worktree, a fresh clone, or a CI runner off the very same
-# commit. Observed while validating the DSP delivery merge: sway-fee-policy
-# failed on a fresh checkout and passed after normalizing to LF, with
-# fee-policy.ts byte-identical between the two.
+# newly created worktree or a fresh clone off the very same commit. Observed
+# while validating the DSP delivery merge: sway-fee-policy failed on a fresh
+# checkout and passed after normalizing to LF, with fee-policy.ts
+# byte-identical between the two.
+#
+# Scope: this affects checkouts where core.autocrlf converts on checkout --
+# in practice Windows. The current CI job runs on ubuntu-latest, where files
+# are already LF, so this is not what makes CI red. It does protect any
+# Windows runner or contributor, and it makes local results match CI.
 #
 # 3e61b27 fixed this for scripts/sway-seed-performer-previews.mjs by pinning
 # that one file. The pin was never extended, and the same fragility has since
