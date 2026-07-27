@@ -21,9 +21,28 @@ Scope note: this pass verified repository state only. No live production route w
 
 - **P1-1 (forbidden terminology).** Rescanned `src/` and `shells/`: `checkout` 44 to 87 matches, `preview` 36 to 101. Two caveats before treating that as regression — the original scan's exact scope is not recorded here, so the counts may not be like-for-like; and the audit conditioned this risk on *"if production copy contract forbids these terms."* Sway has since shipped genuine checkout surfaces (Stripe-backed native GA ticket sales, `origin/main` #144 through #146), so `checkout` may no longer be forbidden vocabulary at all. This needs a lexicon policy decision first, then a rescan. Do not treat the raw count as a defect until the contract is restated.
 
-### Could not be verified from this workstation
+### P0-1: the smoke harness is stale, and the recorded failures no longer reproduce
 
-- **P0-1 (demo leakage in demo-off smoke).** `node scripts/demo-preview-smoke.mjs` was re-run on 2026-07-26 and aborted during server startup: `ECONNREFUSED` against Postgres on `127.0.0.1:5432`. The script spawns a local server and drives Playwright against it, so it needs a local database; none is running and the repo ships no compose file or documented local DB setup. The run produced no surface checks. **This failure is closed, not counted as evidence in either direction** — it neither confirms nor clears the blocker.
+Corrects the first pass, which reported P0-1 as blocked on a missing local Postgres. That was only the first error, not the blocker. The server has a no-DB path (`server.ts:152` sets `businessDb` to `null` when `DATABASE_URL` is unset), and `dotenv` is loaded with `override: false`, so running the smoke with `DATABASE_URL=""` gets past startup. A database is not required to exercise these surfaces — the demo fixtures are client-side (`src/demo-mode.tsx`), not database rows.
+
+**The actual blocker is a routing mismatch.** `scripts/demo-preview-smoke.mjs` drives the apex host (`http://sway.tips:3000/`) expecting the public landing shell. `server.ts:324` now redirects `sway.tips` and `www.sway.tips` with a 308 to a hardcoded `https://app.sway.tips` (`CANONICAL_APP_ORIGIN`, no port, no environment gate), so Chromium leaves the local test server for the production HTTPS origin and fails with `ERR_CONNECTION_REFUSED`. The canonical host moved to `app.sway.tips`; the smoke script still encodes the pre-redirect model and cannot pass as written in any local environment.
+
+**Measured directly instead**, using the June audit's own method — Playwright rendered text, not raw HTML, since these are SPA shells — against a demo-off server (`VITE_SWAY_DEMO_MODE=false`) on the canonical host:
+
+| Surface | Status | Rendered result |
+| --- | ---: | --- |
+| `/` | 200 | Real landing copy. Clean. |
+| `/home` | 200 | `SCAN / sway to play`. Clean. |
+| `/g/00000000-...` | 200 | `ROOM NOT FOUND`. Clean. |
+| `/talent/gigs` | 401 | `Session needed`. Proves nothing. |
+| `/admin` | 401 | `Session needed`. Proves nothing. |
+| `/overlay/00000000-...` | 401 | `Session needed`. Proves nothing. |
+
+Zero of six surfaces showed `Demo data`, `preview-only data`, `demo preview state`, `DEMO PREVIEW DATA`, or `Preview data only`. **Both of the specific failures this audit recorded under P0-1 — demo-off `/home` and the demo-off patron gig route — now render clean.**
+
+Scope limits, stated plainly: this was local, not production, so it says nothing about P0-2. The three protected surfaces returned 401 and were never rendered, so they are untested rather than clean. And the smoke harness itself remains unrunnable until it is realigned to the canonical host, so this is a manual measurement, not a restored automated gate.
+
+**To actually close P0-1:** realign `scripts/demo-preview-smoke.mjs` to the current canonical routing — apex checks should assert the 308 to `CANONICAL_APP_ORIGIN` rather than expecting landing content, and the content checks should target `app.sway.tips` — then re-run it with an authenticated session so the talent, admin, and overlay surfaces are genuinely exercised.
 - **P0-2 (live routes serving demo/preview content) and P1-2 (admin live truth).** Both are live-production assertions and were not re-checked. Demo machinery is still present in the tree (`src/demo-mode.tsx` plus demo strings in `PatronView.tsx`, `TalentDashboard.tsx`, `PatronApp.tsx`, `TalentApp.tsx`, `OverlayApp.tsx`), but code presence is not proof of production leakage, and its absence would not be proof of a clean route either.
 - The five unchecked boxes under **Manual Smoke Checklist** are all live or production checks and remain unchecked.
 
@@ -33,9 +52,10 @@ The June 11 findings describe a surface set that the July product rebuild change
 
 ### To close this audit
 
-1. Stand up a local Postgres (or document the intended local DB path) and re-run `scripts/demo-preview-smoke.mjs` to a full demo-off pass.
-2. Restate the forbidden-term contract now that checkout is a real product surface, then rescan.
-3. Re-verify P0-2, P1-2, and the manual checklist from an environment with production access.
+1. Realign `scripts/demo-preview-smoke.mjs` to the canonical `app.sway.tips` host and re-run it to a full demo-off pass, with a session so the protected surfaces actually render. No Postgres is needed — run it with `DATABASE_URL=""`.
+2. Decide whether the unconditional apex redirect at `server.ts:324` is intended for every environment. It hardcodes a production origin with no environment gate, which is what makes local apex routing untestable.
+3. Restate the forbidden-term contract now that checkout is a real product surface, then rescan.
+4. Re-verify P0-2, P1-2, and the manual checklist from an environment with production access.
 
 ## Executive Summary (2026-06-11)
 
