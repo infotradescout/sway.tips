@@ -17,9 +17,21 @@ Scope note: this pass verified repository state only. No live production route w
 
 - **P0-3 (deployment freshness) and P2-1 (build marker).** `server.ts:271-272` sets `x-sway-build` and `x-commit-sha` on responses; `server.ts:2697` serves `GET /api/build-marker`. Corroborated independently by `docs/SWAY_PRODUCTION_SURFACE_MAP.md`, which on 2026-06-14 observed both headers and marker JSON returning a commit SHA and build timestamp on the apex, `www`, `app`, and Render origin endpoints. Fixed between 2026-06-11 and 2026-06-14.
 
-### Not resolved, and moved the wrong way
+### P1-1 (forbidden terminology) is resolved — the finding was a grep artifact
 
-- **P1-1 (forbidden terminology).** Rescanned `src/` and `shells/`: `checkout` 44 to 87 matches, `preview` 36 to 101. Two caveats before treating that as regression — the original scan's exact scope is not recorded here, so the counts may not be like-for-like; and the audit conditioned this risk on *"if production copy contract forbids these terms."* Sway has since shipped genuine checkout surfaces (Stripe-backed native GA ticket sales, `origin/main` #144 through #146), so `checkout` may no longer be forbidden vocabulary at all. This needs a lexicon policy decision first, then a rescan. Do not treat the raw count as a defect until the contract is restated.
+This does not need a policy decision. The policy already exists and is enforced: `scripts/sway-surface-terminology.contract.test.mjs` bans the standalone *visible* words `checkout` / `check out` / `check-out`, and `preview` on the Public Entry surface. **It passes.**
+
+The June finding counted raw `grep` hits, which is not what the contract measures. The contract uses word-boundary anchors specifically so code identifiers do not trip it — `checkoutPayload` and `initiateCheckout` are explicitly called out as allowed in its own header comment. Of 377 raw `checkout` matches across `src/` and `shells/` on current `main`, 244 are code identifiers. The remainder are not visible copy violations, or the contract would fail.
+
+An earlier draft of this revisit reported "44 to 87" and called it movement in the wrong direction. That comparison was invalid: the 87 was measured on `feat/dsp-delivery-job-engine`, 23 commits behind `main`, before the native ticket lane landed. Raw counts across different trees say nothing. Treat the contract, not a grep, as the answer.
+
+### Not verified: CI has not actually run since 2026-07-23
+
+Every `validate` run since **2026-07-23T23:33** completes in roughly 2 seconds with `runner_name: ""` and **zero steps executed**. The job is never assigned a runner. This is an infrastructure or quota condition, not a test failure — Actions is enabled on the repo with `allowed_actions: all`, and the billing endpoints need scopes unavailable here, so the precise cause is unconfirmed.
+
+For contrast, the 2026-07-22 failure ran 23 steps on a real runner for 132 seconds and failed legitimately at "Audio File Collaboration Integration Proof". The last genuinely verified run was 2026-07-23T21:21 on `main`.
+
+**Consequence:** every merge to `main` since 2026-07-23 landed with no CI verification — release control (#141), public event listings (#143), and the native GA ticket sales lane (#144 through #146), which is payment-touching. A red check on any PR since that date carries no information about that PR. This should be treated as a live gap in the evidence chain, not a stale CI annoyance.
 
 ### P0-1: the smoke harness is stale, and the recorded failures no longer reproduce
 
