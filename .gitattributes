@@ -1,8 +1,24 @@
-# scripts/sway-performer-link-profile.contract.test.mjs reads this file and
-# slices it using markers that embed a literal "\n" (e.g. "  {\n    handle:
-# 'drewmaze'"). On a Windows checkout with core.autocrlf=true, this file
-# would otherwise be materialized with CRLF line endings, silently breaking
-# those literal-newline marker matches and failing the contract test even
-# though nothing about the actual content changed. Force LF on checkout so
-# the contract test's assumptions hold regardless of the checkout platform.
-scripts/sway-seed-performer-previews.mjs text eol=lf
+# Force LF in the working tree for every text file.
+#
+# Many contract tests assert against source files using multi-line string
+# literals that embed "\n", or locate a region by slicing between two
+# multi-line boundary markers. On a Windows checkout with core.autocrlf=true
+# those sources materialize CRLF, the literals cannot match, and
+# `npm run test:contracts` fails on completely correct code.
+#
+# That is why the suite can pass in a long-lived working copy and fail in a
+# newly created worktree, a fresh clone, or a CI runner off the very same
+# commit. Observed while validating the DSP delivery merge: sway-fee-policy
+# failed on a fresh checkout and passed after normalizing to LF, with
+# fee-policy.ts byte-identical between the two.
+#
+# 3e61b27 fixed this for scripts/sway-seed-performer-previews.mjs by pinning
+# that one file. The pin was never extended, and the same fragility has since
+# reappeared in at least sway-fee-policy, sway-universal-account-pro-mode,
+# sway-active-room-registry, and sway-event-ticket-native-ga. Enumerating
+# affected files does not hold -- every new contract test that matches a
+# multi-line literal reintroduces the bug. Pin globally instead.
+#
+# `text=auto` lets git detect binary files, so .png/.jpg are left alone.
+# There are no .bat/.cmd files in this repo that would require CRLF.
+* text=auto eol=lf
