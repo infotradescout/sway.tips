@@ -46,9 +46,22 @@ Scope limits, stated plainly: this was local, not production, so it says nothing
 
 1. **Apex routing.** The first check drives `sway.tips` and dies on the 308, so no later check ever executes. This alone makes the whole script a no-op.
 2. **Stale content expectations.** `/home` expects `Live room` and `No live records yet`; it renders `SCAN / sway to play`. The patron gig route expects the same plus `Room status`; it renders `ROOM NOT FOUND`. The July rebuild changed these empty states. The talent, admin, and overlay expectations (`Sway actor resolution required`, `Session needed`, `Sign in to continue`) still match exactly.
-3. **The demo-on half cannot pass.** With `VITE_SWAY_DEMO_MODE=true`, every surface renders identically to demo-off — no `Demo data`, no `Aria Neon`, no `Midnight City`. The browser never requests `/sway-demo-fixtures.json`, though the file exists and the server serves it `200`. So demo mode is not activating in the client. Root cause not established; an attempt to read `import.meta.env` from an injected inline script was invalid, because such a script bypasses Vite's env transform. This needs its own diagnosis.
+3. **The demo-on half cannot pass.** With `VITE_SWAY_DEMO_MODE=true`, every surface renders identically to demo-off — no `Demo data`, no `Aria Neon`, no `Midnight City`.
 
-Point 3 matters beyond the harness: the entire premise of this script is a demo-on/demo-off comparison. If demo mode no longer produces demo data, then the June P0-1 and P0-2 findings describe a fixture system that may since have been removed or disabled, and "demo leakage" may no longer be a reachable failure mode at all. That would make these blockers obsolete rather than fixed — a different claim, and one that needs the point-3 diagnosis before anyone asserts it.
+### Why demo mode is inert (root-caused 2026-07-27)
+
+The flag and the fixtures both work. Importing the module through Vite's own module graph, `isDemoModeEnabled()` returns `true` and `loadDemoBackendState()` returns a populated object (`session`, `requests`, `performers`). The fixture file exists and the server serves it `200`. Demo mode is still imported by all five shells; nothing was deleted.
+
+It cannot reach a screen for two independent reasons:
+
+1. **Guard ordering in `src/shells/shared.tsx:163`.** `useSwayState` early-returns on `if (!statePath)` *before* the `isDemoModeEnabled()` branch at line 170. `PatronApp.tsx:192` sets `statePath = routeGigId ? ... : null`, and `OverlayApp.tsx:81` does the same, so every non-gig route — `/home` and the overlay included — returns at line 167 and never reaches demo loading.
+2. **`src/demo-mode.tsx:79` hardcodes `activeGigId: null`.** The patron gig route is the one surface that does reach the demo branch, because a valid UUID gives it a `statePath`. But the demo state it loads carries no active gig, so it cannot match `routeGigId` and the route renders `ROOM NOT FOUND`. The fixture reinforces this: its session id is `demo_session_001`, while every demo route and the smoke script use `00000000-0000-4000-8000-000000000001`.
+
+Together these make demo data unreachable on every surface, which is exactly the measured result.
+
+**This is very likely the desired state, not a defect.** The June P0 was "production app routes expose demo data as the primary app experience." Demo data can no longer render anywhere. So P0-1 and P0-2 look **obsolete rather than fixed** — the failure mode was removed by making the fixture path unreachable, and `demo-preview-smoke.mjs` was simply left behind as an artifact of the era when it worked.
+
+That framing needs an owner decision, because the two options are opposites: either **formally retire** demo mode and delete or rewrite the smoke script that exists to test it, or **repair** the two defects above and restore a working demo-on/demo-off comparison. Repairing it would reintroduce renderable demo data, which is what the original P0 objected to. Nothing here should be treated as closed until that call is made.
 
 **To actually close P0-1:** diagnose why demo mode no longer activates; realign the apex checks to assert the 308 to `CANONICAL_APP_ORIGIN` instead of expecting landing content; update the `/home` and patron-gig expectations to the current empty states; and re-run with an authenticated session so the talent, admin, and overlay surfaces are genuinely exercised rather than passing on a 401 wall.
 - **P0-2 (live routes serving demo/preview content) and P1-2 (admin live truth).** Both are live-production assertions and were not re-checked. Demo machinery is still present in the tree (`src/demo-mode.tsx` plus demo strings in `PatronView.tsx`, `TalentDashboard.tsx`, `PatronApp.tsx`, `TalentApp.tsx`, `OverlayApp.tsx`), but code presence is not proof of production leakage, and its absence would not be proof of a clean route either.
