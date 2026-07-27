@@ -25,13 +25,21 @@ The June finding counted raw `grep` hits, which is not what the contract measure
 
 An earlier draft of this revisit reported "44 to 87" and called it movement in the wrong direction. That comparison was invalid: the 87 was measured on `feat/dsp-delivery-job-engine`, 23 commits behind `main`, before the native ticket lane landed. Raw counts across different trees say nothing. Treat the contract, not a grep, as the answer.
 
-### Not verified: CI has not actually run since 2026-07-23
+### GitHub Actions is not the verification path — the red checks are vestigial
 
-Every `validate` run since **2026-07-23T23:33** completes in roughly 2 seconds with `runner_name: ""` and **zero steps executed**. The job is never assigned a runner. This is an infrastructure or quota condition, not a test failure — Actions is enabled on the repo with `allowed_actions: all`, and the billing endpoints need scopes unavailable here, so the precise cause is unconfirmed.
+Owner-confirmed 2026-07-27: this project does not use GitHub Actions. Verification is run locally.
 
-For contrast, the 2026-07-22 failure ran 23 steps on a real runner for 132 seconds and failed legitimately at "Audio File Collaboration Integration Proof". The last genuinely verified run was 2026-07-23T21:21 on `main`.
+Two workflow files are still present (`.github/workflows/ci.yml` and `production-deploy-drift-guard.yml`). They fire on every push and report failure, which is the expected consequence of not running Actions, not a broken gate. TradeScout retired its own Actions the same way on 2026-07-26 (#216, "Retire GitHub Actions from TradeScout"): all eight workflow files deleted, decision recorded in `.github/README.md`. Sway has not had that cleanup applied.
 
-**Consequence:** every merge to `main` since 2026-07-23 landed with no CI verification — release control (#141), public event listings (#143), and the native GA ticket sales lane (#144 through #146), which is payment-touching. A red check on any PR since that date carries no information about that PR. This should be treated as a live gap in the evidence chain, not a stale CI annoyance.
+**How to read a red check on a sway PR: it carries no information.** It is identical on a docs-only change and on a payment change. Do not treat it as a signal in either direction, and do not treat the absence of green as an evidence gap. The evidence is `npm run test:contracts` run locally.
+
+An earlier draft of this section framed the observation below as a live gap in the evidence chain and recommended checking Actions billing. That was wrong: it assumed Actions was the intended verification path. The mechanical observations are kept only because they explain why the checks look alarming.
+
+#### Mechanical detail (retained, no longer treated as a finding)
+
+Every `validate` run since **2026-07-23T23:33** completes in roughly 2 seconds with `runner_name: ""` and zero steps executed — never assigned a runner. Before that date runs did execute: the 2026-07-22 failure ran 23 steps on a real runner for 132 seconds and failed legitimately at "Audio File Collaboration Integration Proof". So the changeover is visible in the run history, and it lines up with the decision to stop using Actions.
+
+The only action item here is cleanup: delete the two leftover workflow files so sway stops emitting a permanently red check that means nothing, matching what TradeScout already did.
 
 ### P0-1: the smoke harness is stale, and the recorded failures no longer reproduce
 
