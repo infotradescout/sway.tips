@@ -1,12 +1,43 @@
 # Sway Production Readiness Audit
 
 Date: 2026-06-11
+Revisited: 2026-07-26
 
 ## Decision
 
 NOT READY
 
-## Executive Summary
+Revisit 2026-07-26: **verdict unchanged.** One of three P0 blockers is verifiably fixed. The other two were neither disproven nor re-proven — they cannot be exercised from a workstation without production or local database access. Readiness requires positive proof, so unverified blockers hold the verdict at `NOT READY`. This is a fail-closed result, not a finding that the app is broken.
+
+## Revisit 2026-07-26
+
+Scope note: this pass verified repository state only. No live production route was checked and no production claim below is new.
+
+### Verifiably resolved
+
+- **P0-3 (deployment freshness) and P2-1 (build marker).** `server.ts:271-272` sets `x-sway-build` and `x-commit-sha` on responses; `server.ts:2697` serves `GET /api/build-marker`. Corroborated independently by `docs/SWAY_PRODUCTION_SURFACE_MAP.md`, which on 2026-06-14 observed both headers and marker JSON returning a commit SHA and build timestamp on the apex, `www`, `app`, and Render origin endpoints. Fixed between 2026-06-11 and 2026-06-14.
+
+### Not resolved, and moved the wrong way
+
+- **P1-1 (forbidden terminology).** Rescanned `src/` and `shells/`: `checkout` 44 to 87 matches, `preview` 36 to 101. Two caveats before treating that as regression — the original scan's exact scope is not recorded here, so the counts may not be like-for-like; and the audit conditioned this risk on *"if production copy contract forbids these terms."* Sway has since shipped genuine checkout surfaces (Stripe-backed native GA ticket sales, `origin/main` #144 through #146), so `checkout` may no longer be forbidden vocabulary at all. This needs a lexicon policy decision first, then a rescan. Do not treat the raw count as a defect until the contract is restated.
+
+### Could not be verified from this workstation
+
+- **P0-1 (demo leakage in demo-off smoke).** `node scripts/demo-preview-smoke.mjs` was re-run on 2026-07-26 and aborted during server startup: `ECONNREFUSED` against Postgres on `127.0.0.1:5432`. The script spawns a local server and drives Playwright against it, so it needs a local database; none is running and the repo ships no compose file or documented local DB setup. The run produced no surface checks. **This failure is closed, not counted as evidence in either direction** — it neither confirms nor clears the blocker.
+- **P0-2 (live routes serving demo/preview content) and P1-2 (admin live truth).** Both are live-production assertions and were not re-checked. Demo machinery is still present in the tree (`src/demo-mode.tsx` plus demo strings in `PatronView.tsx`, `TalentDashboard.tsx`, `PatronApp.tsx`, `TalentApp.tsx`, `OverlayApp.tsx`), but code presence is not proof of production leakage, and its absence would not be proof of a clean route either.
+- The five unchecked boxes under **Manual Smoke Checklist** are all live or production checks and remain unchecked.
+
+### Staleness warning
+
+The June 11 findings describe a surface set that the July product rebuild changed substantially — the restore to the customer-performer live room (`0b37ea8`), catalog and release preparation (`9ad0aa1`, `5d9c2ff`), release control (#141), public event listings (#143), and native GA ticket sales (#144 through #146). File paths cited as evidence still exist, but the flows around them do not match this audit. Treat the specifics below as a June snapshot. A clean readiness verdict needs a fresh audit against current production, not a line-by-line rebuttal of this one.
+
+### To close this audit
+
+1. Stand up a local Postgres (or document the intended local DB path) and re-run `scripts/demo-preview-smoke.mjs` to a full demo-off pass.
+2. Restate the forbidden-term contract now that checkout is a real product surface, then rescan.
+3. Re-verify P0-2, P1-2, and the manual checklist from an environment with production access.
+
+## Executive Summary (2026-06-11)
 
 Contract and build gates are green, but launch-readiness fails on user-visible truth.
 
