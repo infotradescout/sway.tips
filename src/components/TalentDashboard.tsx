@@ -34,7 +34,8 @@ import {
   ShieldCheck,
   Keyboard,
   Home,
-  UserRound
+  UserRound,
+  CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
@@ -44,9 +45,14 @@ import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
+import PerformerEventsManager from './PerformerEventsManager';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
+import {
+  resolvePublicProfileHeroName,
+  resolvePublicProfilePageKindLabel
+} from '../server/public-profile';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -67,6 +73,9 @@ interface TalentDashboardProps {
     performer_id: string;
     display_name: string;
     handle: string | null;
+    stage_name: string | null;
+    primary_role: string | null;
+    specialties: string[];
     owner_user_id: string;
     charges_enabled?: boolean;
     payouts_enabled?: boolean;
@@ -815,8 +824,18 @@ export default function TalentDashboard({
   performerEmailVerified = true
 }: TalentDashboardProps) {
   const writableGigId = selectedGigId ?? activeGigId;
-  const defaultPerformerName = performerProfile?.display_name?.trim() || performerProfile?.handle?.trim() || '';
-  const welcomePerformerName = defaultPerformerName || session.talentName || 'Performer';
+  const defaultPerformerName = performerProfile
+    ? resolvePublicProfileHeroName({
+        handle: performerProfile.handle,
+        stageName: performerProfile.stage_name,
+        displayName: performerProfile.display_name
+      })
+    : '';
+  const welcomePerformerName = defaultPerformerName || session.talentName || 'Sway account';
+  const performerRoleLabel = resolvePublicProfilePageKindLabel({
+    primaryRole: performerProfile?.primary_role,
+    specialties: performerProfile?.specialties
+  });
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
   const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>('home');
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
@@ -1528,8 +1547,8 @@ export default function TalentDashboard({
                 <Radio className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <p className="truncate font-display text-base font-black uppercase tracking-wide text-white">
-                  {session.talentName || welcomePerformerName}
+                <p className="truncate font-display text-base font-black tracking-wide text-white">
+                  {welcomePerformerName}
                 </p>
                 <p className="truncate text-[11px] font-bold text-slate-400">
                   {session.status === 'ending' ? `Ending room - closeout ${timeLeft}` : `${session.talentRole} live room`}
@@ -1895,8 +1914,28 @@ export default function TalentDashboard({
       ) : null}
 
       {inactiveWorkspace === 'profile' ? (
-        <div className="order-2">
+        <div className="order-2 space-y-4">
+          <nav
+            aria-label="Profile workspace sections"
+            className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2"
+          >
+            <a
+              href="#sway-public-profile-editor"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-black text-cyan-100 transition hover:border-cyan-200/40"
+            >
+              <UserRound className="h-4 w-4" aria-hidden="true" />
+              Profile details
+            </a>
+            <a
+              href="#sway-events-manager"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 text-xs font-black text-fuchsia-100 transition hover:border-fuchsia-200/40"
+            >
+              <CalendarDays className="h-4 w-4" aria-hidden="true" />
+              Shows &amp; events
+            </a>
+          </nav>
           <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
+          <PerformerEventsManager previewMode={previewMode} />
         </div>
       ) : null}
 
@@ -2138,6 +2177,7 @@ export default function TalentDashboard({
           <PerformerAccountHome
             displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
+            roleLabel={performerRoleLabel}
             stripeReady={Boolean(performerProfile?.payouts_enabled)}
             onStartRoom={() => setInactiveWorkspace('room')}
             onOpenCatalog={() => setInactiveWorkspace('catalog')}
@@ -2154,7 +2194,6 @@ export default function TalentDashboard({
           <PerformerRoomSetup
             performerName={welcomePerformerName}
             talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
-            performerHandle={performerProfile?.handle}
             performerEmailVerified={performerEmailVerified}
             onStartSession={onStartSession}
           />

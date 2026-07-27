@@ -29,6 +29,14 @@ import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap"
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
 import { activateProModeWithPerformer, getProModeStatus } from "./src/server/pro-mode";
 import {
+  activateClaimedPerformerAndProMode,
+  assertPerformerClaimableByHandoff,
+  claimCodeFingerprint,
+  mapClaimInspectionToClientError,
+  readClaimPerformerId,
+  transferPerformerOwnership
+} from "./src/server/account-claim";
+import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
   hashPerformerLoginRequesterIp,
@@ -61,10 +69,12 @@ import { createConfiguredStripeConnectService } from "./src/server/stripe-connec
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
+  mergePublicProfileMetadata,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
+  normalizePublicProfilePrimaryRole,
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
   normalizePublicProfileUrl,
@@ -89,6 +99,26 @@ import { createAudioFileCollaborationService } from "./src/server/audio-file-col
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 import { createSandboxDistributionAdapter } from "./src/server/distribution-adapter";
 import { createDistributionDeliveryService } from "./src/server/distribution-delivery-service";
+import {
+  createPerformerEventService,
+  EventServiceError,
+  isPublicEventExternalTicketLabel,
+  normalizePublicEventHttpsUrl,
+  type PerformerEventDto,
+  type PublicPerformerEventDto
+} from "./src/server/performer-event-service";
+import {
+  createEventTicketService,
+  EventTicketServiceError
+} from "./src/server/event-ticket-service";
+import {
+  NATIVE_TICKET_BUYER_TERMS_HASH,
+  NATIVE_TICKET_BUYER_TERMS_TEXT,
+  NATIVE_TICKET_SELLER_TERMS_HASH,
+  NATIVE_TICKET_SELLER_TERMS_TEXT,
+  NATIVE_TICKET_TERMS_VERSION,
+  resolveNativeTicketRuntimeConfig
+} from "./src/server/event-ticket-contract";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
@@ -155,6 +185,25 @@ const distributionDeliveryService = businessDb && distributionSandboxSecret
       adapters: { sway_sandbox: createSandboxDistributionAdapter({ secret: distributionSandboxSecret }) }
     })
   : null;
+const performerEventService = businessDb
+  ? createPerformerEventService(businessDb)
+  : null;
+const nativeTicketRuntimeConfig = resolveNativeTicketRuntimeConfig(process.env, isProduction);
+const eventTicketService = businessDb
+  ? createEventTicketService({
+      db: businessDb,
+      runtimeConfig: nativeTicketRuntimeConfig
+    })
+  : null;
+if (
+  process.env.SWAY_NATIVE_TICKETS_ENABLED?.trim().toLowerCase() === 'true'
+  && !nativeTicketRuntimeConfig.salesEnabled
+) {
+  console.warn(
+    '[sway.tickets] native ticket sales remain disabled:',
+    nativeTicketRuntimeConfig.disabledReasons.join(', ')
+  );
+}
 const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -301,6 +350,7 @@ function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
   if (urlPath.startsWith('/admin')) return 'admin';
   if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
   if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
+  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover') return 'patron';
   return 'patron';
 }
 
@@ -318,6 +368,7 @@ type ShareMetadata = {
   url: string;
   image: string;
   imageAlt: string;
+  robots?: 'noindex, nofollow';
 };
 
 type PublicShareProfile = {
@@ -371,9 +422,13 @@ function renderShareMetaTags(metadata: ShareMetadata) {
   const url = escapePublicProfileMetadataAttribute(metadata.url);
   const image = escapePublicProfileMetadataAttribute(metadata.image);
   const imageAlt = escapePublicProfileMetadataAttribute(metadata.imageAlt);
+  const robots = metadata.robots
+    ? `<meta name="robots" content="${escapePublicProfileMetadataAttribute(metadata.robots)}" />`
+    : '';
 
   return [
     '<meta name="sway-share-meta" content="server-rendered" />',
+    robots,
     `<title>${title}</title>`,
     `<meta name="description" content="${description}" />`,
     '<meta property="og:type" content="website" />',
@@ -398,7 +453,7 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   const metaTags = renderShareMetaTags(metadata);
   const withoutExisting = html
     .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
-    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
+    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
 
   return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
 }
@@ -522,7 +577,8 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
 
   const headline = profile.headline || profile.bio || `Discover @${profile.handle} on Sway.`;
   const headlineLines = wrapShareCardText(headline);
-  const nameFontSize = profile.displayName.length > 25 ? 60 : profile.displayName.length > 18 ? 74 : 92;
+  const heroName = `@${profile.handle}`;
+  const nameFontSize = heroName.length > 28 ? 54 : heroName.length > 20 ? 68 : 86;
   const overlay = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
@@ -536,10 +592,9 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
     </defs>
     <rect width="${width}" height="${height}" fill="url(#shade)"/>
     <rect x="92" y="105" width="104" height="7" rx="3.5" fill="url(#accent)"/>
-    <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PERFORMER PROFILE</text>
-    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="${nameFontSize}" font-weight="800">${escapeShareCardText(profile.displayName)}</text>
-    <text x="96" y="402" fill="#55d9ff" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700">@${escapeShareCardText(profile.handle)}</text>
-    ${headlineLines.map((line, index) => `<text x="96" y="${510 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
+    <text x="92" y="170" fill="#f4a6ff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" letter-spacing="4">SWAY • PUBLIC PAGE</text>
+    <text x="92" y="340" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="${nameFontSize}" font-weight="800">${escapeShareCardText(heroName)}</text>
+    ${headlineLines.map((line, index) => `<text x="96" y="${470 + index * 58}" fill="#e6e8f5" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="500">${escapeShareCardText(line)}</text>`).join('')}
     <text x="96" y="800" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">sway to play</text>
     <text x="96" y="846" fill="#aab0c8" font-family="Arial, Helvetica, sans-serif" font-size="25">app.sway.tips/${escapeShareCardText(profile.handle)}</text>
   </svg>`);
@@ -579,7 +634,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
 
     if (!profile) return defaultMetadata;
 
-    const title = `${profile.displayName} on Sway`;
+    const title = `@${profile.handle} on Sway`;
     const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
     const locationCopy = profile.city ? ` in ${profile.city}` : '';
     const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
@@ -589,7 +644,41 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       description,
       url: `/p/${profile.handle}`,
       image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
-      imageAlt: `${profile.displayName} Sway performer profile`
+      imageAlt: `@${profile.handle} Sway public page`
+    });
+  }
+
+  if (pathParts[0] === 'e' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && performerEventService) {
+    const event = await performerEventService.getPublicEvent(pathParts[1]);
+    if (!event) return defaultMetadata;
+
+    const eventDate = new Date(event.startsAt);
+    const dateCopy = Number.isNaN(eventDate.getTime())
+      ? 'View event details.'
+      : `Happening ${eventDate.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+          timeZone: event.timeZone
+        })}.`;
+    const locationCopy = event.locationIsTba
+      ? ' Location to be announced.'
+      : event.locationName || event.city
+        ? ` ${[event.locationName, event.city].filter(Boolean).join(' · ')}.`
+        : '';
+    const cancellationCopy = event.status === 'cancelled' ? ' This event has been cancelled.' : '';
+
+    return defaultShareMetadata(req, {
+      title: `${event.title} on Sway`,
+      description: `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim(),
+      url: `/e/${event.id}`,
+      image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+      imageAlt: `${event.title} event artwork`,
+      robots: event.visibility === 'unlisted'
+        || event.status === 'cancelled'
+        || eventDate.getTime() <= Date.now()
+        ? 'noindex, nofollow'
+        : undefined
     });
   }
 
@@ -651,6 +740,22 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
   }
 
   return defaultMetadata;
+}
+
+function escapeStaticDocumentText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderExactTicketTerms(value: string) {
+  return value
+    .split('\n')
+    .map((paragraph) => `<p>${escapeStaticDocumentText(paragraph)}</p>`)
+    .join('');
 }
 
 function renderStaticDocument(title: string, description: string, bodyHtml: string, eyebrow = 'Sway trust center') {
@@ -849,6 +954,7 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
           <a href="/privacy/data-deletion">Data deletion</a>
           <a href="/legal/payments">Payment terms</a>
           <a href="/legal/payouts">Payout terms</a>
+          <a href="/legal/tickets">Ticket terms</a>
         </div>
       </section>
     </main>
@@ -856,23 +962,46 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
 </html>`;
 }
 
-const supportPageHtml = renderStaticDocument(
-  'Sway Support',
-  'How to reach Sway support, report a problem, and request safety or account help.',
-  `
-    <p>Sway support is for safety issues, payment issues, performer account problems, and live-room failures.</p>
-    <h2>Use Sway support for</h2>
-    <ul>
-      <li>reporting harassment, unsafe behavior, or abusive requests</li>
-      <li>requesting help with a performer account or live room</li>
-      <li>questioning a payment, refund, or missing request status</li>
-      <li>starting a data deletion request</li>
-    </ul>
-    <h2>Current contact path</h2>
-    <p>Use the in-app safety controls first when they are available. If you cannot access the app, use the published support route from this page and the data deletion route below.</p>
-    <p>Support and review teams should verify the linked policies and live backend status before launch claims are made.</p>
-  `
-);
+function renderSupportPageHtml(reference: { type: 'order' | 'ticket'; id: string } | null = null) {
+  const supportEmail = nativeTicketRuntimeConfig.supportEmail;
+  const referenceLabel = reference
+    ? `${reference.type === 'order' ? 'Order' : 'Ticket'} ${reference.id}`
+    : null;
+  const subject = referenceLabel ? `Sway ticket support — ${referenceLabel}` : 'Sway support request';
+  const body = [
+    referenceLabel ? `${referenceLabel}\n` : '',
+    'Describe what happened, the outcome you expected, and any processor receipt or event details that can help Sway investigate.'
+  ].join('');
+  const contactHtml = supportEmail
+    ? `
+      <p>Email the monitored Sway support channel. Include the account email used in Sway, but never send a password, full card number, bank account number, or admission QR.</p>
+      ${referenceLabel ? `<p><strong>Reference:</strong> <code>${escapeStaticDocumentText(referenceLabel)}</code></p>` : ''}
+      <div class="primary-actions">
+        <a href="mailto:${escapeStaticDocumentText(supportEmail)}?subject=${encodeURIComponent(subject)}&amp;body=${encodeURIComponent(body)}">Email ${escapeStaticDocumentText(supportEmail)}</a>
+      </div>
+    `
+    : `
+      <p><strong>The monitored support contact is temporarily unavailable.</strong> Native ticket sales remain disabled while this contact is missing. If you already hold a ticket, keep its ticket or order reference and try this page again.</p>
+    `;
+
+  return renderStaticDocument(
+    'Sway Support',
+    'How to reach Sway support, report a problem, and request safety or account help.',
+    `
+      <p>Sway support is for safety issues, payment issues, performer account problems, ticket and refund questions, and live-room failures.</p>
+      <h2>Use Sway support for</h2>
+      <ul>
+        <li>reporting harassment, unsafe behavior, or abusive requests</li>
+        <li>requesting help with a performer account or live room</li>
+        <li>questioning a payment, ticket, dispute, refund, or missing request status</li>
+        <li>starting a data deletion request</li>
+      </ul>
+      <h2>Contact Sway</h2>
+      ${contactHtml}
+      <p>Use in-app safety controls first when they are available. Use the data deletion route below for deletion requests.</p>
+    `
+  );
+}
 
 const aboutPageHtml = renderStaticDocument(
   'Sway: the whole performer business, connected',
@@ -969,6 +1098,7 @@ const privacyPageHtml = renderStaticDocument(
       <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
       <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
       <li>payment processor identifiers and related lifecycle status</li>
+      <li>native ticket offer, order, price-and-terms snapshot, admission, refund, performer-transfer, and reconciliation records when native ticket sales are enabled</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
       <li>limited device, route, and friction telemetry needed to keep the service working</li>
@@ -1012,7 +1142,7 @@ const termsPageHtml = renderStaticDocument(
     <h2>Distribution limits</h2>
     <p>Provider-backed delivery, store callbacks and corrections, royalties, splits, payouts, destination pre-saves, takedowns, and catalog cutover are not live. A draft marked ready or shown on a public page has not thereby been submitted, accepted, distributed, streamed, monetized, or migrated. Separate provider terms and disclosures will be required before Sway can transmit releases or money through those systems.</p>
     <h2>Money terms</h2>
-    <p>Payment, refund, and payout behavior must match the live backend and processor state exactly. See the dedicated payment and payout terms below for the current operating rules.</p>
+    <p>Payment, refund, payout, and native ticket behavior must match the live backend and processor state exactly. See the dedicated payment, payout, and ticket terms below for the current operating rules.</p>
   `
 );
 
@@ -1042,6 +1172,22 @@ const payoutTermsPageHtml = renderStaticDocument(
       <li>unverified performers must not be shown payout promises that the processor cannot support</li>
     </ul>
     <p>Current payout terms must stay aligned with the configured payment provider and KYC state.</p>
+  `
+);
+
+const ticketTermsPageHtml = renderStaticDocument(
+  'Sway Native Ticket Terms',
+  'How native general-admission prices, payment holds, admission, performer transfers, cancellation, and refunds work when ticket sales are enabled.',
+  `
+    <p><strong>Current terms version:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_TERMS_VERSION)}</code></p>
+    <p><strong>Buyer terms SHA-256:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_BUYER_TERMS_HASH)}</code><br />
+    <strong>Seller terms SHA-256:</strong> <code>${escapeStaticDocumentText(NATIVE_TICKET_SELLER_TERMS_HASH)}</code></p>
+    <p><strong>Native Sway ticket sales are available only when the production ticket gate is enabled.</strong> An external event link is not a Sway ticket sale.</p>
+    <h2>Exact buyer terms</h2>
+    <div class="plain-language">${renderExactTicketTerms(NATIVE_TICKET_BUYER_TERMS_TEXT)}</div>
+    <h2>Exact performer-seller terms</h2>
+    <div class="plain-language">${renderExactTicketTerms(NATIVE_TICKET_SELLER_TERMS_TEXT)}</div>
+    <p>The version and hashes above identify the exact text shown here. Each native order and offer stores its accepted text, version, and hash as an immutable snapshot.</p>
   `
 );
 
@@ -1426,6 +1572,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         performer_id: performers.id,
         display_name: performers.displayName,
         handle: performers.handle,
+        profile_metadata: performerPublicProfiles.metadata,
+        specialties: performerPublicProfiles.specialties,
+        preview_metadata: performerProfilePreviews.metadata,
+        preview_specialties: performerProfilePreviews.specialties,
         owner_user_id: performers.ownerUserId,
         email_verified_at: users.emailVerifiedAt,
         charges_enabled: performers.chargesEnabled,
@@ -1434,10 +1584,34 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
-    return performerRow ?? null;
+    if (!performerRow) return null;
+    const profileStageName = performerRow.profile_metadata && typeof performerRow.profile_metadata === 'object'
+      ? normalizePublicProfileText((performerRow.profile_metadata as Record<string, unknown>).stageName, 80)
+      : null;
+    const previewStageName = performerRow.preview_metadata && typeof performerRow.preview_metadata === 'object'
+      ? normalizePublicProfileText((performerRow.preview_metadata as Record<string, unknown>).stageName, 80)
+      : null;
+    return {
+      performer_id: performerRow.performer_id,
+      display_name: performerRow.display_name,
+      handle: performerRow.handle,
+      stage_name: profileStageName || previewStageName,
+      primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)
+        || resolvePublicPrimaryRole(performerRow.preview_metadata),
+      specialties: performerRow.specialties?.length
+        ? performerRow.specialties
+        : performerRow.preview_specialties ?? [],
+      owner_user_id: performerRow.owner_user_id,
+      email_verified_at: performerRow.email_verified_at,
+      charges_enabled: performerRow.charges_enabled,
+      payouts_enabled: performerRow.payouts_enabled,
+      stripe_connected_account_id: performerRow.stripe_connected_account_id
+    };
   } catch (error) {
     console.warn('Unable to resolve authenticated performer profile for /api/state.', {
       actorUserId: actor.actorId,
@@ -1646,6 +1820,131 @@ function toPublicSocialLinks(row: {
   };
 }
 
+function toOwnedEventResponse(event: PerformerEventDto) {
+  return {
+    ...event,
+    eventPath: event.status === 'published' || event.status === 'cancelled'
+      ? `/e/${event.id}`
+      : null
+  };
+}
+
+async function toOwnedEventResponseWithTicket(
+  event: PerformerEventDto,
+  owner: PerformerEventOwnerContext
+) {
+  if (event.ticketingMode !== 'native_ga' || !eventTicketService) {
+    return {
+      ...toOwnedEventResponse(event),
+      ticketOffer: null,
+      nativeTicket: null
+    };
+  }
+
+  const [offer, publicProjection] = await Promise.all([
+    eventTicketService.getOwnerTicketOffer({
+      eventId: event.id,
+      performerId: owner.performerId,
+      actorUserId: owner.actorUserId
+    }),
+    eventTicketService.getPublicOfferProjection({ eventId: event.id })
+  ]);
+  const ticketOffer = offer
+    ? {
+        ...offer,
+        unitAllInPriceCents: offer.advertisedTotalCents,
+        remainingCount: publicProjection?.remainingCount ?? offer.capacity,
+        salesStatus: publicProjection?.salesStatus
+          ?? (offer.status === 'draft' ? 'scheduled' : offer.status)
+      }
+    : null;
+
+  return {
+    ...toOwnedEventResponse(event),
+    ticketOffer,
+    nativeTicket: ticketOffer
+  };
+}
+
+function toPublicEventResponse(event: PublicPerformerEventDto) {
+  const externalTicketIsOpen = event.status === 'published'
+    && Boolean(event.externalTicketUrl)
+    && new Date(event.startsAt).getTime() > Date.now();
+  return {
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    startsAt: event.startsAt,
+    doorOpensAt: event.doorOpensAt,
+    endsAt: event.endsAt,
+    timeZone: event.timeZone,
+    location: {
+      name: event.locationName,
+      address: event.locationIsTba ? null : event.locationAddress,
+      city: event.city,
+      isTba: event.locationIsTba
+    },
+    coverImageUrl: event.coverImageUrl,
+    ticketingMode: event.ticketingMode,
+    externalTicket: externalTicketIsOpen && event.externalTicketUrl
+      ? {
+          url: event.externalTicketUrl,
+          label: isPublicEventExternalTicketLabel(event.externalTicketLabel)
+            ? event.externalTicketLabel
+            : 'Get tickets'
+        }
+      : null,
+    status: event.status,
+    visibility: event.visibility,
+    publishedAt: event.publishedAt,
+    cancelledAt: event.cancelledAt,
+    cancellationReason: event.cancellationReason,
+    eventPath: `/e/${event.id}`,
+    performer: {
+      displayName: event.performer.displayName,
+      handle: event.performer.handle,
+      performerPath: event.performer.handle ? `/p/${event.performer.handle}` : null,
+      avatarUrl: normalizePublicProfileUrl(event.performer.avatarUrl),
+      headline: event.performer.headline,
+      city: event.performer.city
+    }
+  };
+}
+
+async function toPublicEventResponseWithTicket(event: PublicPerformerEventDto) {
+  const nativeTicket = event.ticketingMode === 'native_ga' && eventTicketService
+    ? await eventTicketService.getPublicOfferProjection({ eventId: event.id })
+    : null;
+  return {
+    ...toPublicEventResponse(event),
+    nativeTicket
+  };
+}
+
+function respondToEventServiceError(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof EventServiceError) {
+    return res.status(error.status).json({ error: error.message, code: error.code });
+  }
+  console.error(fallback, error);
+  return res.status(500).json({ error: fallback });
+}
+
+function respondToEventTicketServiceError(
+  res: express.Response,
+  error: unknown,
+  fallback: string
+) {
+  if (error instanceof EventTicketServiceError) {
+    return res.status(error.status).json({
+      error: error.message,
+      code: error.code,
+      retryable: error.retryable
+    });
+  }
+  console.error(fallback, error);
+  return res.status(500).json({ error: fallback });
+}
+
 function resolvePublicStageName(input: {
   displayName: string | null;
   handle: string | null;
@@ -1655,13 +1954,12 @@ function resolvePublicStageName(input: {
   const metadataStageName = input.metadata && typeof input.metadata === 'object'
     ? normalizePublicProfileText((input.metadata as Record<string, unknown>).stageName, 80)
     : null;
-  if (metadataStageName) return metadataStageName;
+  return metadataStageName;
+}
 
-  // DJ3X is the performer-facing name already established by the public
-  // handle and headline. Keep it ahead of the legal/display name until the
-  // owner supplies an explicit stageName in their public profile metadata.
-  if (input.handle?.trim().toLowerCase() === 'dj3x') return 'DJ3X';
-  return input.displayName || input.handle || 'Performer';
+function resolvePublicPrimaryRole(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  return normalizePublicProfilePrimaryRole((metadata as Record<string, unknown>).primaryRole);
 }
 
 function normalizeLibrarySourceKey(value: unknown) {
@@ -3013,7 +3311,11 @@ app.post('/api/talent/claim/accept', async (req, res) => {
       const performerId = typeof metadata.performerId === 'string' && UUID_PATTERN.test(metadata.performerId)
         ? metadata.performerId
         : null;
-      if (!performerId) return null;
+      if (!performerId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+        throw err;
+      }
 
       const [account] = await tx
         .select({
@@ -3029,7 +3331,11 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         ))
         .limit(1);
 
-      if (!account) return null;
+      if (!account) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'profile_already_claimed';
+        throw err;
+      }
 
       // The one deliberate difference from the invite-accept flow: no
       // "already has a password" guard. Whatever the artist submits here
@@ -3049,7 +3355,28 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         .where(eq(users.id, account.userId))
         .returning({ id: users.id });
 
-      if (!updatedUser) return null;
+      if (!updatedUser) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+        throw err;
+      }
+
+      const claimable = await assertPerformerClaimableByHandoff(tx, {
+        performerId: account.performerId,
+        handoffUserId: account.userId
+      });
+      if (claimable.ok === false) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = claimable.code;
+        throw err;
+      }
+
+      const proMode = await activateClaimedPerformerAndProMode(tx, {
+        userId: account.userId,
+        performerId: account.performerId,
+        completedAt,
+        reason: 'performer_claim_redeem'
+      });
 
       const issuedSession = await performerSessionStore.issueSession({
         actorUserId: account.userId,
@@ -3068,11 +3395,13 @@ app.post('/api/talent/claim/accept', async (req, res) => {
         metadata: {
           performerId: account.performerId,
           accountTermsAcceptedAt: completedAt.toISOString(),
-          wasHandoff
+          wasHandoff,
+          proModeActivated: proMode.proModeActivated,
+          claimCodeFingerprint: claimCodeFingerprint(token)
         }
       });
 
-      return { issuedSession };
+      return { issuedSession, performerId: account.performerId };
     });
 
     if (!outcome) {
@@ -3088,6 +3417,13 @@ app.post('/api/talent/claim/accept', async (req, res) => {
     });
     return res.status(200).json({ success: true, redirectPath: '/talent' });
   } catch (error) {
+    const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+      ? String((error as { claimCode?: string }).claimCode || '')
+      : '';
+    if (claimFailCode) {
+      const mapped = mapClaimInspectionToClientError(claimFailCode);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
     console.warn('Performer claim acceptance failed.', {
       path: req.path,
       ip: req.ip || null,
@@ -3968,11 +4304,240 @@ app.post('/api/talent/session/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/account/claim/peek', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const token = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerClaimPeekRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__account_claim_peek__'
+  });
+
+  if (!rateLimitResult.allowed) {
+    const mapped = mapClaimInspectionToClientError('rate_limited');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+  if (!token) {
+    const mapped = mapClaimInspectionToClientError('not_found');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  try {
+    const inspection = await performerLoginChallengeStore.inspectClaimChallengeByToken({ token });
+    if (inspection.status !== 'valid') {
+      const mapped = mapClaimInspectionToClientError(inspection.status);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    const performerId = readClaimPerformerId(inspection.challengeMetadata);
+    if (!performerId || !inspection.actorUserId) {
+      const mapped = mapClaimInspectionToClientError('not_found');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    const [performer] = await businessDb
+      .select({
+        handle: performers.handle,
+        displayName: performers.displayName,
+        ownerUserId: performers.ownerUserId,
+        onboardingStatus: performers.onboardingStatus
+      })
+      .from(performers)
+      .where(eq(performers.id, performerId))
+      .limit(1);
+
+    if (!performer) {
+      const mapped = mapClaimInspectionToClientError('not_found');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    if (performer.onboardingStatus === 'suspended') {
+      const mapped = mapClaimInspectionToClientError('unavailable');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    if (performer.ownerUserId !== inspection.actorUserId) {
+      const mapped = mapClaimInspectionToClientError('profile_already_claimed');
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+
+    return res.status(200).json({
+      displayName: performer.displayName,
+      handle: performer.handle,
+      claimType: 'performer_profile',
+      enablesProMode: true
+    });
+  } catch (error) {
+    console.warn('Account claim peek failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+});
+
+app.post('/api/account/claim/attach', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const access = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (access.allowed === false) {
+    return res.status(access.status).json({ error: access.reason });
+  }
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    const mapped = mapClaimInspectionToClientError('unavailable');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const token = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimitResult = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: '__account_claim_attach__'
+  });
+  if (!rateLimitResult.allowed) {
+    const mapped = mapClaimInspectionToClientError('rate_limited');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+  if (!token) {
+    const mapped = mapClaimInspectionToClientError('not_found');
+    return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+
+  const currentUserId = access.actor.actorId!;
+
+  try {
+    const outcome = await businessDb.transaction(async (tx) => {
+      const claim = await performerLoginChallengeStore.consumeChallengeFromToken({
+        token,
+        expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+        executor: tx
+      });
+      if (!claim?.actorUserId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'already_used';
+        throw err;
+      }
+
+      const performerId = readClaimPerformerId(claim.challengeMetadata);
+      if (!performerId) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+        throw err;
+      }
+
+      const transfer = await transferPerformerOwnership(tx, {
+        performerId,
+        fromUserId: claim.actorUserId,
+        toUserId: currentUserId
+      });
+      if (transfer.ok === false) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = transfer.code;
+        throw err;
+      }
+
+      const completedAt = new Date();
+      const [account] = await tx
+        .select({ emailVerifiedAt: users.emailVerifiedAt, displayName: users.displayName })
+        .from(users)
+        .where(eq(users.id, currentUserId))
+        .for('update')
+        .limit(1);
+      if (!account?.emailVerifiedAt) {
+        const err = new Error('claim_redeem_failed');
+        (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+        throw err;
+      }
+
+      const [performer] = await tx
+        .select({ displayName: performers.displayName, handle: performers.handle })
+        .from(performers)
+        .where(eq(performers.id, performerId))
+        .limit(1);
+
+      const proMode = await activateClaimedPerformerAndProMode(tx, {
+        userId: currentUserId,
+        performerId,
+        completedAt,
+        reason: 'account_claim_attach'
+      });
+
+      await writeAuditEvent(tx, {
+        actorId: currentUserId,
+        actorType: 'account',
+        entityType: 'performer_login_challenge',
+        entityId: claim.id,
+        eventType: 'account.claim.attach',
+        previousStatus: 'pending',
+        nextStatus: 'consumed',
+        metadata: {
+          performerId,
+          handoffUserId: claim.actorUserId,
+          proModeActivated: proMode.proModeActivated,
+          claimCodeFingerprint: claimCodeFingerprint(token)
+        }
+      });
+
+      return {
+        performerId,
+        displayName: performer?.displayName || 'Performer',
+        handle: performer?.handle || null
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile claimed. Pro Mode is active on this account.',
+      performer: {
+        id: outcome.performerId,
+        displayName: outcome.displayName,
+        handle: outcome.handle
+      },
+      redirectPath: '/talent'
+    });
+  } catch (error) {
+    const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+      ? String((error as { claimCode?: string }).claimCode || '')
+      : '';
+    if (claimFailCode) {
+      const mapped = mapClaimInspectionToClientError(claimFailCode);
+      return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    }
+    console.warn('Account claim attach failed.', {
+      path: req.path,
+      ip: req.ip || null,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({ error: 'Unable to claim this profile right now.' });
+  }
+});
+
+function normalizeSafeAccountNextPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 1_024 || !raw.startsWith('/') || raw.startsWith('//')) return null;
+
+  try {
+    const parsed = new URL(raw, 'https://app.sway.tips');
+    if (parsed.origin !== 'https://app.sway.tips') return null;
+    const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
+      || parsed.pathname === '/tickets'
+      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname);
+    if (!allowed) return null;
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
+
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
-  if (isProduction && !hasPerformerLoginEmailConfig) {
-    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
-  }
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
     return res.status(503).json({ error: 'Account signup is temporarily unavailable.' });
   }
@@ -3981,6 +4546,8 @@ app.post('/api/account/signup', async (req, res) => {
   const displayName = normalizePerformerDisplayName(req.body?.displayName);
   const password = normalizePerformerPassword(req.body?.password);
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
+  const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
   if (!email || !displayName || !password) {
     return res.status(422).json({ error: 'Name, email, and password are required.' });
   }
@@ -3990,13 +4557,159 @@ app.post('/api/account/signup', async (req, res) => {
   const passwordValidation = validatePerformerPasswordStrength(password);
   if (!passwordValidation.ok) return res.status(422).json({ error: passwordValidation.error });
   if (password !== confirmPassword) return res.status(422).json({ error: 'Password confirmation does not match.' });
-  if (await performerSignupEmailExists(businessDb, email)) {
-    return res.status(409).json({ error: 'This email is already in use.' });
-  }
 
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const rateLimit = performerSignupRateLimiter.consume({ requesterIpHash, targetEmail: '__account_signup__' });
   if (!rateLimit.allowed) return res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+
+  // Claim-code signup: redeem onto the pre-created handoff account (one Sway account).
+  if (claimCode) {
+    if (!performerSessionStore.hasDurableStore) {
+      return res.status(503).json({ error: 'Account signup is temporarily unavailable.' });
+    }
+
+    const passwordHash = await hashPerformerPassword(password);
+    try {
+      const outcome = await businessDb.transaction(async (tx) => {
+        const claim = await performerLoginChallengeStore.consumeChallengeFromToken({
+          token: claimCode,
+          expectedChallengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_CLAIM_CODE,
+          executor: tx
+        });
+        if (!claim?.actorUserId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'already_used';
+          throw err;
+        }
+
+        const performerId = readClaimPerformerId(claim.challengeMetadata);
+        if (!performerId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'not_recognized';
+          throw err;
+        }
+
+        const claimable = await assertPerformerClaimableByHandoff(tx, {
+          performerId,
+          handoffUserId: claim.actorUserId
+        });
+        if (claimable.ok === false) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = claimable.code;
+          throw err;
+        }
+
+        const [emailOwner] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, email))
+          .limit(1);
+        if (emailOwner && emailOwner.id !== claim.actorUserId) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'email_in_use';
+          throw err;
+        }
+
+        const completedAt = new Date();
+        const [updatedUser] = await tx
+          .update(users)
+          .set({
+            email,
+            displayName,
+            passwordHash,
+            emailVerifiedAt: completedAt,
+            termsAcceptedAt: completedAt,
+            updatedAt: completedAt
+          })
+          .where(eq(users.id, claim.actorUserId))
+          .returning({ id: users.id });
+        if (!updatedUser) {
+          const err = new Error('claim_redeem_failed');
+          (err as Error & { claimCode?: string }).claimCode = 'unavailable';
+          throw err;
+        }
+
+        await tx
+          .update(performers)
+          .set({
+            displayName,
+            updatedAt: completedAt
+          })
+          .where(eq(performers.id, performerId));
+
+        const proMode = await activateClaimedPerformerAndProMode(tx, {
+          userId: claim.actorUserId,
+          performerId,
+          completedAt,
+          reason: 'account_signup_claim_redeem'
+        });
+
+        const issuedSession = await performerSessionStore.issueSession({
+          actorUserId: claim.actorUserId,
+          issuedBy: claim.actorUserId,
+          executor: tx
+        });
+
+        await writeAuditEvent(tx, {
+          actorId: claim.actorUserId,
+          actorType: 'account',
+          entityType: 'performer_login_challenge',
+          entityId: claim.id,
+          eventType: 'account.signup.claim',
+          previousStatus: 'pending',
+          nextStatus: 'consumed',
+          metadata: {
+            performerId,
+            proModeActivated: proMode.proModeActivated,
+            claimCodeFingerprint: claimCodeFingerprint(claimCode)
+          }
+        });
+
+        return {
+          issuedSession,
+          performerId,
+          displayName: claimable.displayName
+        };
+      });
+
+      res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax',
+        path: '/',
+        expires: outcome.issuedSession.expiresAt
+      });
+      return res.status(200).json({
+        success: true,
+        message: 'Account created. Performer profile claimed and Pro Mode activated.',
+        redirectPath: '/talent'
+      });
+    } catch (error) {
+      const claimFailCode = error && typeof error === 'object' && 'claimCode' in error
+        ? String((error as { claimCode?: string }).claimCode || '')
+        : '';
+      if (claimFailCode === 'email_in_use') {
+        return res.status(409).json({ error: 'This email is already in use.' });
+      }
+      if (claimFailCode) {
+        const mapped = mapClaimInspectionToClientError(claimFailCode);
+        return res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+      }
+      console.warn('Account signup with claim failed.', {
+        path: req.path,
+        ip: req.ip || null,
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      return res.status(500).json({ error: 'Unable to create account with that claim code right now.' });
+    }
+  }
+
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
+  }
+  if (await performerSignupEmailExists(businessDb, email)) {
+    return res.status(409).json({ error: 'This email is already in use.' });
+  }
 
   const passwordHash = await hashPerformerPassword(password);
   const outcome = await businessDb.transaction(async (tx) => {
@@ -4013,6 +4726,7 @@ app.post('/api/account/signup', async (req, res) => {
       targetEmail: email,
       challengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
       requesterIpHash,
+      challengeMetadata: accountNextPath ? { accountNextPath } : null,
       executor: tx
     });
     await writeAuditEvent(tx, {
@@ -4060,7 +4774,7 @@ app.get('/api/account/verify-email/consume', async (req, res) => {
       expectedChallengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
       executor: tx
     });
-    if (!challenge?.actorUserId) return false;
+    if (!challenge?.actorUserId) return { ok: false as const, nextPath: null };
     const verifiedAt = new Date();
     await tx.update(users).set({ emailVerifiedAt: verifiedAt, updatedAt: verifiedAt }).where(eq(users.id, challenge.actorUserId));
     await writeAuditEvent(tx, {
@@ -4073,9 +4787,20 @@ app.get('/api/account/verify-email/consume', async (req, res) => {
       nextStatus: 'verified',
       metadata: { verifiedAt: verifiedAt.toISOString() }
     });
-    return true;
+    const rawNextPath = challenge.challengeMetadata
+      && typeof challenge.challengeMetadata === 'object'
+      && 'accountNextPath' in challenge.challengeMetadata
+      ? (challenge.challengeMetadata as { accountNextPath?: unknown }).accountNextPath
+      : null;
+    return {
+      ok: true as const,
+      nextPath: normalizeSafeAccountNextPath(rawNextPath)
+    };
   });
-  return res.redirect(verified ? '/account/login?verified=1' : '/account/login?error=invalid');
+  if (!verified.ok) return res.redirect('/account/login?error=invalid');
+  const verifiedQuery = new URLSearchParams({ verified: '1' });
+  if (verified.nextPath) verifiedQuery.set('next', verified.nextPath);
+  return res.redirect(`/account/login?${verifiedQuery.toString()}`);
 });
 
 app.post('/api/account/login', async (req, res) => {
@@ -4085,6 +4810,8 @@ app.post('/api/account/login', async (req, res) => {
   }
   const email = normalizePerformerLoginEmail(req.body?.email);
   const password = normalizePerformerPassword(req.body?.password);
+  const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
+  const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = email ?? '__invalid__';
   const rateLimit = performerPasswordLoginRateLimiter.check({ requesterIpHash, accountKey });
@@ -4110,7 +4837,10 @@ app.post('/api/account/login', async (req, res) => {
     path: '/',
     expires: issuedSession.expiresAt
   });
-  return res.json({ success: true, redirectPath: '/account' });
+  const redirectPath = claimCode
+    ? `/account?claim=${encodeURIComponent(claimCode)}`
+    : accountNextPath || '/account';
+  return res.json({ success: true, redirectPath });
 });
 
 app.get('/api/account/session', async (req, res) => {
@@ -5215,7 +5945,7 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   });
 
   const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  const claimLink = `${appBaseUrl}/talent/signup?code=${encodeURIComponent(issued.token)}`;
+  const claimLink = `${appBaseUrl}/signup?claim=${encodeURIComponent(issued.token)}`;
 
   return res.status(201).json({ success: true, userId, performerId, wasNewPerformer, claimLink });
 });
@@ -5965,6 +6695,425 @@ app.post("/api/analytics/shell", async (req, res) => {
   }
 });
 
+type TicketBuyerContext = {
+  buyerUserId: string;
+};
+
+async function requireTicketBuyer(
+  req: express.Request,
+  res: express.Response
+): Promise<TicketBuyerContext | null> {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) {
+    res.status(accountAccess.status).json({ error: accountAccess.reason });
+    return null;
+  }
+  if (!accountAccess.actor.actorId) {
+    res.status(401).json({ error: 'Sway account resolution required.' });
+    return null;
+  }
+  if (!businessDb || !eventTicketService) {
+    res.status(503).json({ error: 'Ticket accounts require durable persistence.' });
+    return null;
+  }
+  return { buyerUserId: accountAccess.actor.actorId };
+}
+
+app.post('/api/account/ticket-orders', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const checkout = await eventTicketService.createCheckoutOrder({
+      ...buyer,
+      eventId: req.body?.eventId,
+      clientRequestId: req.body?.clientRequestId,
+      termsAccepted: req.body?.termsAccepted
+    });
+    return res.status(checkout.ticketId ? 200 : 201).json(checkout);
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to start ticket checkout.');
+  }
+});
+
+app.get('/api/account/ticket-orders', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const orders = await eventTicketService.listBuyerOrders({
+      ...buyer,
+      limit: Number(req.query.limit) || 10
+    });
+    return res.json({ orders });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket orders.');
+  }
+});
+
+app.get('/api/account/ticket-orders/:orderId', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const order = await eventTicketService.getBuyerOrder({
+      ...buyer,
+      orderId: req.params.orderId
+    });
+    return res.json({ order });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket order.');
+  }
+});
+
+app.get('/api/account/tickets', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const tickets = await eventTicketService.listBuyerTickets(buyer);
+    return res.json({ tickets });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load tickets.');
+  }
+});
+
+app.get('/api/account/tickets/:ticketId', async (req, res) => {
+  const buyer = await requireTicketBuyer(req, res);
+  if (!buyer || !eventTicketService) return;
+
+  try {
+    const ticket = await eventTicketService.getBuyerTicketPass({
+      ...buyer,
+      ticketId: req.params.ticketId
+    });
+    return res.json({ ticket });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load ticket pass.');
+  }
+});
+
+type PerformerEventOwnerContext = {
+  actorUserId: string;
+  performerId: string;
+};
+
+async function requirePerformerEventOwner(
+  req: express.Request,
+  res: express.Response
+): Promise<PerformerEventOwnerContext | null> {
+  applyNoStoreHeaders(res);
+  try {
+    const talentAccess = await accessControl.requireTalentAccess(req);
+    if (talentAccess.allowed === false) {
+      res.status(talentAccess.status).json({ error: talentAccess.reason });
+      return null;
+    }
+    if (!talentAccess.actor.actorId || !businessDb || !performerEventService) {
+      res.status(503).json({ error: 'Performer events require a durable database connection.' });
+      return null;
+    }
+
+    const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+    if (!performerOwner) {
+      res.status(403).json({ error: 'Only the performer owner can manage these events.' });
+      return null;
+    }
+
+    return {
+      actorUserId: talentAccess.actor.actorId,
+      performerId: performerOwner.performerId
+    };
+  } catch (error) {
+    console.error('Performer event owner lookup failed:', error);
+    res.status(503).json({ error: 'Performer event access is temporarily unavailable.' });
+    return null;
+  }
+}
+
+app.get('/api/talent/events', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const events = await performerEventService.listOwnedEvents({
+      ...owner,
+      limit: Number(req.query.limit) || 50
+    });
+    const eventResponses = await Promise.all(
+      events.map((event) => toOwnedEventResponseWithTicket(event, owner))
+    );
+    return res.json({ events: eventResponses });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to load performer events.');
+  }
+});
+
+app.get('/api/talent/events/native-ticket-capability', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const capability = await eventTicketService.getOwnerNativeTicketSalesCapability(owner);
+    return res.json({ capability });
+  } catch (error) {
+    return respondToEventTicketServiceError(
+      res,
+      error,
+      'Unable to load native ticket readiness.'
+    );
+  }
+});
+
+app.post('/api/talent/events', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    if (req.body?.ticketingMode === 'native_ga') {
+      const capability = eventTicketService
+        ? await eventTicketService.getOwnerNativeTicketSalesCapability(owner)
+        : null;
+      if (!capability?.salesAvailable) {
+        return res.status(503).json({
+          error: 'Native ticket event creation is disabled until its payment, tax, and admission configuration is complete.',
+          code: 'native_ticket_sales_disabled'
+        });
+      }
+    }
+    const result = await performerEventService.createEvent({
+      ...owner,
+      clientRequestId: req.body?.clientRequestId,
+      title: req.body?.title,
+      description: req.body?.description,
+      startsAt: req.body?.startsAt,
+      doorOpensAt: req.body?.doorOpensAt,
+      endsAt: req.body?.endsAt,
+      timeZone: req.body?.timeZone,
+      locationName: req.body?.locationName,
+      locationAddress: req.body?.locationAddress,
+      city: req.body?.city,
+      locationIsTba: req.body?.locationIsTba,
+      coverImageUrl: req.body?.coverImageUrl,
+      ticketingMode: req.body?.ticketingMode,
+      externalTicketUrl: req.body?.externalTicketUrl,
+      externalTicketLabel: req.body?.externalTicketLabel,
+      visibility: req.body?.visibility
+    });
+    return res.status(result.created ? 201 : 200).json({
+      event: await toOwnedEventResponseWithTicket(result.event, owner),
+      idempotentReplay: !result.created
+    });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to create performer event.');
+  }
+});
+
+app.patch('/api/talent/events/:eventId', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  const optionalFields = [
+    'title',
+    'description',
+    'startsAt',
+    'doorOpensAt',
+    'endsAt',
+    'timeZone',
+    'locationName',
+    'locationAddress',
+    'city',
+    'locationIsTba',
+    'coverImageUrl',
+    'externalTicketUrl',
+    'externalTicketLabel',
+    'visibility'
+  ] as const;
+  const changes = Object.fromEntries(optionalFields
+    .filter((field) => Object.prototype.hasOwnProperty.call(req.body ?? {}, field))
+    .map((field) => [field, req.body[field]]));
+
+  try {
+    const event = await performerEventService.updateEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt,
+      ...changes
+    });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to update performer event.');
+  }
+});
+
+app.get('/api/talent/events/:eventId/ticketing', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService || !eventTicketService) return;
+
+  try {
+    const event = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (event.ticketingMode !== 'native_ga') {
+      return res.status(409).json({
+        error: 'This event uses an external ticket or RSVP destination.',
+        code: 'native_ticket_mode_required'
+      });
+    }
+    const eventResponse = await toOwnedEventResponseWithTicket(event, owner);
+    return res.json({
+      ticketOffer: eventResponse.ticketOffer,
+      nativeTicket: eventResponse.nativeTicket
+    });
+  } catch (error) {
+    if (error instanceof EventServiceError) {
+      return respondToEventServiceError(res, error, 'Unable to load native ticket setup.');
+    }
+    return respondToEventTicketServiceError(res, error, 'Unable to load native ticket setup.');
+  }
+});
+
+app.put('/api/talent/events/:eventId/ticketing', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const ticketOffer = await eventTicketService.updateOwnerTicketOffer({
+      ...owner,
+      eventId: req.params.eventId,
+      capacity: req.body?.capacity,
+      faceValueCents: req.body?.faceValueCents,
+      termsAccepted: req.body?.termsAccepted
+    });
+    return res.json({
+      ticketOffer: {
+        ...ticketOffer,
+        unitAllInPriceCents: ticketOffer.advertisedTotalCents,
+        remainingCount: ticketOffer.capacity,
+        salesStatus: 'scheduled'
+      }
+    });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to save native ticket setup.');
+  }
+});
+
+app.get('/api/talent/events/:eventId/door', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const door = await eventTicketService.getDoorSummary({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    return res.json({ door });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to load the ticket door.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/check-ins', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !eventTicketService) return;
+
+  try {
+    const result = await eventTicketService.checkIn({
+      ...owner,
+      eventId: req.params.eventId,
+      clientRequestId: req.body?.clientRequestId,
+      qrToken: req.body?.qrToken,
+      manualCode: req.body?.manualCode
+    });
+    return res.json(result);
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Unable to check in this ticket.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/publish', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const current = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (current.ticketingMode === 'native_ga') {
+      if (!eventTicketService) {
+        return res.status(503).json({ error: 'Native ticket publishing is temporarily unavailable.' });
+      }
+      await eventTicketService.publishNativeEvent({
+        ...owner,
+        eventId: req.params.eventId,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt
+      });
+      const event = await performerEventService.getOwnedEvent({
+        ...owner,
+        eventId: req.params.eventId
+      });
+      return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+    }
+    const event = await performerEventService.publishEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt
+    });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+  } catch (error) {
+    if (error instanceof EventTicketServiceError) {
+      return respondToEventTicketServiceError(res, error, 'Unable to publish performer event.');
+    }
+    return respondToEventServiceError(res, error, 'Unable to publish performer event.');
+  }
+});
+
+app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
+  const owner = await requirePerformerEventOwner(req, res);
+  if (!owner || !performerEventService) return;
+
+  try {
+    const current = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    if (current.ticketingMode === 'native_ga') {
+      if (!eventTicketService) {
+        return res.status(503).json({ error: 'Native ticket cancellation is temporarily unavailable.' });
+      }
+      const result = await eventTicketService.cancelNativeEvent({
+        ...owner,
+        eventId: req.params.eventId,
+        expectedUpdatedAt: req.body?.expectedUpdatedAt,
+        cancellationReason: req.body?.cancellationReason
+      });
+      const event = await performerEventService.getOwnedEvent({
+        ...owner,
+        eventId: req.params.eventId
+      });
+      return res.json({
+        event: await toOwnedEventResponseWithTicket(event, owner),
+        refundsQueued: result.refundsQueued
+      });
+    }
+    const event = await performerEventService.cancelEvent({
+      ...owner,
+      eventId: req.params.eventId,
+      expectedUpdatedAt: req.body?.expectedUpdatedAt,
+      cancellationReason: req.body?.cancellationReason
+    });
+    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+  } catch (error) {
+    if (error instanceof EventTicketServiceError) {
+      return respondToEventTicketServiceError(res, error, 'Unable to cancel performer event.');
+    }
+    return respondToEventServiceError(res, error, 'Unable to cancel performer event.');
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -5995,6 +7144,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
         youtubeUrl: performerPublicProfiles.youtubeUrl,
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
         websiteUrl: performerPublicProfiles.websiteUrl,
+        metadata: performerPublicProfiles.metadata,
         updatedAt: performerPublicProfiles.updatedAt
       })
       .from(performerPublicProfiles)
@@ -6016,6 +7166,10 @@ app.get('/api/talent/profile/public', async (req, res) => {
     loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
   ]);
 
+  const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
+    ? profileRow.metadata as Record<string, unknown>
+    : null;
+
   return res.json({
     profile: {
       performerId: performerOwner.performerId,
@@ -6023,6 +7177,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
       headline: profileRow?.headline ?? null,
+      stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
+      primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -6155,6 +7311,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
+  const stageNameProvided = req.body?.stageName !== undefined;
+  const stageName = normalizePublicProfileText(req.body?.stageName, 80);
+  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -6171,6 +7330,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
+  }
+  if (!primaryRole) {
+    return res.status(422).json({ error: 'Choose your primary role.' });
   }
 
   const invalidUrlField = [
@@ -6200,6 +7362,16 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const savedLinks = await businessDb.transaction(async (tx) => {
     const now = new Date();
+    const [existingProfile] = await tx
+      .select({ metadata: performerPublicProfiles.metadata })
+      .from(performerPublicProfiles)
+      .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .limit(1);
+
+    const nextMetadata = mergePublicProfileMetadata(existingProfile?.metadata, {
+      ...(stageNameProvided ? { stageName } : {}),
+      primaryRole
+    });
 
     await tx
       .update(performers)
@@ -6222,6 +7394,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         youtubeUrl,
         soundcloudUrl,
         websiteUrl,
+        metadata: nextMetadata,
         updatedAt: now
       })
       .onConflictDoUpdate({
@@ -6239,6 +7412,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
           youtubeUrl,
           soundcloudUrl,
           websiteUrl,
+          metadata: nextMetadata,
           updatedAt: now
         }
       });
@@ -6272,11 +7446,12 @@ app.post('/api/talent/profile/public', async (req, res) => {
         specialtyCount: specialties?.length ?? 0,
         hasBookingEmail: Boolean(bookingEmail),
         hasBookingPhone: Boolean(bookingPhone),
-        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null
+        linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null,
+        primaryRole: primaryRole || null
       }
     });
 
-    return tx
+    const links = await tx
       .select({
         id: performerProfileLinks.id,
         label: performerProfileLinks.label,
@@ -6289,6 +7464,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
       .from(performerProfileLinks)
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
+
+    return { links, metadata: nextMetadata };
   });
 
   return res.status(202).json({
@@ -6299,6 +7476,13 @@ app.post('/api/talent/profile/public', async (req, res) => {
       displayName: performerOwner.displayName,
       bio,
       headline,
+      stageName: normalizePublicProfileText(
+        savedLinks.metadata && typeof savedLinks.metadata === 'object'
+          ? (savedLinks.metadata as Record<string, unknown>).stageName
+          : null,
+        80
+      ),
+      primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
       specialties: specialties ?? [],
       city,
       avatarUrl,
@@ -6314,7 +7498,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         soundcloud: soundcloudUrl,
         website: websiteUrl
       },
-      links: savedLinks
+      links: savedLinks.links
     }
   });
 });
@@ -8081,6 +9265,29 @@ app.post('/api/library/sync', async (req, res) => {
   }
 });
 
+// A separate endpoint supports a dedicated Stripe ticket-webhook signing
+// secret. The shared endpoint below also multiplexes ticket events when both
+// payment lanes use the same endpoint/secret.
+app.post('/api/payment/ticket-webhook', async (req, res) => {
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
+  if (typeof rawBody !== 'string') {
+    return res.status(400).json({ error: 'Raw request body unavailable for signature verification.' });
+  }
+  if (!eventTicketService) {
+    return res.status(503).json({ error: 'Native ticket webhook processing is unavailable.' });
+  }
+
+  try {
+    const result = await eventTicketService.ingestVerifiedWebhook({
+      rawBody,
+      signatureHeader: req.header('stripe-signature') ?? null
+    });
+    return res.json({ received: true, result });
+  } catch (error) {
+    return respondToEventTicketServiceError(res, error, 'Ticket webhook processing failed.');
+  }
+});
+
 // Stripe webhook ingestion. Signature verification is mandatory and the payment
 // is resolved from the verified PaymentIntent id, never from request input.
 app.post("/api/payment/webhook", async (req, res) => {
@@ -8120,6 +9327,33 @@ app.post("/api/payment/webhook", async (req, res) => {
     }
   }
 
+  const ticketWebhookSecret = (
+    process.env.STRIPE_TICKET_WEBHOOK_SECRET
+    || process.env.STRIPE_WEBHOOK_SECRET
+    || ''
+  ).trim();
+  const sharedTicketWebhookSecret = Boolean(
+    ticketWebhookSecret
+    && webhookSecret
+    && ticketWebhookSecret === webhookSecret.trim()
+  );
+  if (
+    eventTicketService
+    && sharedTicketWebhookSecret
+  ) {
+    try {
+      const ticketResult = await eventTicketService.ingestVerifiedWebhook({
+        rawBody,
+        signatureHeader
+      });
+      if (ticketResult.status !== 'not_ticket') {
+        return res.json({ received: true, result: ticketResult });
+      }
+    } catch (error) {
+      return respondToEventTicketServiceError(res, error, 'Ticket webhook processing failed.');
+    }
+  }
+
   if (!paymentWebhookService) {
     return res.status(503).json({ error: "Payment provider is not configured." });
   }
@@ -8156,46 +9390,96 @@ app.get("/api/state", async (req, res) => {
   });
 });
 
+app.get('/api/public/events/:eventId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!UUID_PATTERN.test(req.params.eventId)) {
+    return res.status(404).json({ error: 'Public event not found.' });
+  }
+  if (!performerEventService) {
+    return res.status(503).json({ error: 'Public events are temporarily unavailable.' });
+  }
+
+  try {
+    const event = await performerEventService.getPublicEvent(req.params.eventId);
+    if (!event) return res.status(404).json({ error: 'Public event not found.' });
+    return res.json({ event: await toPublicEventResponseWithTicket(event) });
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to load this event right now.');
+  }
+});
+
+app.get('/api/public/events/:eventId/ticket', async (req, res) => {
+  applyNoStoreHeaders(res);
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  if (!UUID_PATTERN.test(req.params.eventId)) {
+    return res.status(404).json({ error: 'Public event not found.' });
+  }
+  if (!performerEventService) {
+    return res.status(503).json({ error: 'Public events are temporarily unavailable.' });
+  }
+
+  try {
+    const event = await performerEventService.getPublicEvent(req.params.eventId);
+    if (!event || event.status !== 'published' || !event.externalTicketUrl) {
+      return res.status(404).json({ error: 'External ticket link not available.' });
+    }
+    if (new Date(event.startsAt).getTime() <= Date.now()) {
+      return res.status(410).json({ error: 'This event has already started.' });
+    }
+
+    const safeDestination = normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External ticket URL');
+    if (!safeDestination) {
+      return res.status(422).json({ error: 'External ticket link is not safe to open.' });
+    }
+
+    return res.redirect(302, safeDestination);
+  } catch (error) {
+    return respondToEventServiceError(res, error, 'Unable to open the external ticket link.');
+  }
+});
+
 app.get('/api/public/feed', async (_req, res) => {
   applyNoStoreHeaders(res);
 
   try {
     const activeRooms = await listReadableActiveRooms();
-    if (!activeRooms.length) {
-      return res.json({ rooms: [] });
-    }
-
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
+    const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
     const selectedRooms = activeRooms.slice(0, roomLimit);
 
-    if (!businessDb) {
+    if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
     const gigIds = selectedRooms.map((room) => room.gigId);
-    const details = await businessDb
-      .select({
-        gigId: gigSessions.id,
-        performerName: performers.displayName,
-        performerHandle: performers.handle,
-        headline: performerPublicProfiles.headline,
-        city: performerPublicProfiles.city,
-        avatarUrl: performerPublicProfiles.avatarUrl,
-        facebookUrl: performerPublicProfiles.facebookUrl,
-        instagramUrl: performerPublicProfiles.instagramUrl,
-        tiktokUrl: performerPublicProfiles.tiktokUrl,
-        youtubeUrl: performerPublicProfiles.youtubeUrl,
-        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-        websiteUrl: performerPublicProfiles.websiteUrl
-      })
-      .from(gigSessions)
-      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(and(
-        inArray(gigSessions.id, gigIds),
-        eq(performers.isActive, true),
-        notInArray(performers.onboardingStatus, ['suspended'])
-      ));
+    const [details, publicEvents] = await Promise.all([
+      gigIds.length
+        ? businessDb
+            .select({
+              gigId: gigSessions.id,
+              performerName: performers.displayName,
+              performerHandle: performers.handle,
+              headline: performerPublicProfiles.headline,
+              city: performerPublicProfiles.city,
+              avatarUrl: performerPublicProfiles.avatarUrl,
+              facebookUrl: performerPublicProfiles.facebookUrl,
+              instagramUrl: performerPublicProfiles.instagramUrl,
+              tiktokUrl: performerPublicProfiles.tiktokUrl,
+              youtubeUrl: performerPublicProfiles.youtubeUrl,
+              soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+              websiteUrl: performerPublicProfiles.websiteUrl
+            })
+            .from(gigSessions)
+            .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+            .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+            .where(and(
+              inArray(gigSessions.id, gigIds),
+              eq(performers.isActive, true),
+              notInArray(performers.onboardingStatus, ['suspended'])
+            ))
+        : Promise.resolve([]),
+      performerEventService.listPublicEvents({ limit: eventLimit })
+    ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
 
@@ -8227,7 +9511,8 @@ app.get('/api/public/feed', async (_req, res) => {
             })
           }
         };
-      })
+      }),
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -8397,6 +9682,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
             headline: preview.headline,
             metadata: preview.metadata
           }),
+          primaryRole: resolvePublicPrimaryRole(preview.metadata),
           handle: preview.handle,
           bio: preview.bio,
           headline: preview.headline,
@@ -8428,11 +9714,13 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'
         },
         activeRoom: null,
-        releases: []
+        releases: [],
+        events: []
       });
     }
 
-    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows] = await Promise.all([
+    const publicProfilePerformerId = profile.performerId;
+    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows, publicEventRows] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -8507,7 +9795,10 @@ app.get('/api/public/performer/:handle', async (req, res) => {
           inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
         ))
         .orderBy(desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
-        .limit(12)
+        .limit(12),
+      performerEventService
+        ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
+        : Promise.resolve([])
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -8560,6 +9851,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       performer: {
         displayName: profile.displayName,
         stageName,
+        primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,
@@ -8604,7 +9896,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         publishedAt: release.publishedAt,
         releasePath: release.releasePath,
         artworkUrl: release.artworkUrl
-      }))
+      })),
+      events: await Promise.all(publicEventRows.map(toPublicEventResponseWithTicket))
     });
   } catch (error) {
     console.error('Public performer profile lookup failed:', error);
@@ -10180,8 +11473,19 @@ app.get('/api/moderation/placeholders', (_req, res) => {
   });
 });
 
-app.get('/support', (_req, res) => {
-  res.type('html').send(supportPageHtml);
+app.get('/support', (req, res) => {
+  const orderId = typeof req.query.orderId === 'string' && UUID_PATTERN.test(req.query.orderId)
+    ? req.query.orderId
+    : null;
+  const ticketId = typeof req.query.ticketId === 'string' && UUID_PATTERN.test(req.query.ticketId)
+    ? req.query.ticketId
+    : null;
+  const reference = orderId
+    ? { type: 'order' as const, id: orderId }
+    : ticketId
+      ? { type: 'ticket' as const, id: ticketId }
+      : null;
+  res.type('html').send(renderSupportPageHtml(reference));
 });
 
 app.get('/faq', (_req, res) => {
@@ -10208,21 +11512,29 @@ app.get('/legal/payouts', (_req, res) => {
   res.type('html').send(payoutTermsPageHtml);
 });
 
+app.get('/legal/tickets', (_req, res) => {
+  res.type('html').send(ticketTermsPageHtml);
+});
+
 app.get('/privacy/data-deletion', (_req, res) => {
   res.type('html').send(dataDeletionPageHtml);
 });
 
 app.get('/api/support/contact', (_req, res) => {
   return res.json({
-    success: true,
-    message: 'Support options are published on the Sway support page.',
+    success: Boolean(nativeTicketRuntimeConfig.supportEmail),
+    message: nativeTicketRuntimeConfig.supportEmail
+      ? 'The monitored Sway support contact is available.'
+      : 'The monitored Sway support contact is temporarily unavailable.',
+    supportEmail: nativeTicketRuntimeConfig.supportEmail,
     supportPath: '/support',
     faqPath: '/faq',
     privacyPolicyPath: '/privacy',
     termsPath: '/terms',
     dataDeletionPath: '/privacy/data-deletion',
     paymentTermsPath: '/legal/payments',
-    payoutTermsPath: '/legal/payouts'
+    payoutTermsPath: '/legal/payouts',
+    ticketTermsPath: '/legal/tickets'
   });
 });
 
@@ -10444,6 +11756,31 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API route not found.' });
 });
 
+function startEventTicketWorker() {
+  if (!eventTicketService) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await eventTicketService.runMaintenance({ limit: 100 });
+      await eventTicketService.runDueOperations({ limit: 50 });
+    } catch (error) {
+      console.error(
+        '[sway.tickets] durable worker iteration failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, 15_000);
+  timer.unref();
+}
+
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
   if (audioObjectStore) {
@@ -10452,6 +11789,7 @@ async function startServer() {
     console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
   }
   await refreshBusinessState();
+  startEventTicketWorker();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

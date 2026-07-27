@@ -3,6 +3,108 @@ export const PUBLIC_PROFILE_MAX_FEATURED_MEDIA = 4;
 
 const SUPPRESSED_PUBLIC_PROFILE_DOMAINS = ['djthreeex.com'];
 
+export const PUBLIC_PERFORMER_PRIMARY_ROLES = [
+  { id: 'dj', label: 'DJ' },
+  { id: 'musician', label: 'Musician' },
+  { id: 'comedian', label: 'Comedian' },
+  { id: 'host', label: 'Host / MC' },
+  { id: 'creator', label: 'Creator' },
+  { id: 'dancer', label: 'Dancer' },
+  { id: 'magician', label: 'Magician' },
+  { id: 'speaker', label: 'Speaker' },
+  { id: 'producer', label: 'Producer' },
+  { id: 'other', label: 'Other' }
+] as const;
+
+export type PublicPerformerPrimaryRoleId = typeof PUBLIC_PERFORMER_PRIMARY_ROLES[number]['id'];
+
+const PUBLIC_PERFORMER_PRIMARY_ROLE_IDS = new Set(
+  PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => role.id)
+);
+
+export function normalizePublicProfilePrimaryRole(value: unknown): PublicPerformerPrimaryRoleId | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
+  const aliases: Record<string, PublicPerformerPrimaryRoleId> = {
+    dj: 'dj',
+    musician: 'musician',
+    comedian: 'comedian',
+    host: 'host',
+    mc: 'host',
+    host_mc: 'host',
+    creator: 'creator',
+    dancer: 'dancer',
+    magician: 'magician',
+    speaker: 'speaker',
+    producer: 'producer',
+    other: 'other',
+    other_performer: 'other'
+  };
+  const mapped = aliases[normalized];
+  if (mapped) return mapped;
+  return PUBLIC_PERFORMER_PRIMARY_ROLE_IDS.has(normalized as PublicPerformerPrimaryRoleId)
+    ? normalized as PublicPerformerPrimaryRoleId
+    : null;
+}
+
+export function labelForPublicPerformerPrimaryRole(roleId: string | null | undefined) {
+  const normalizedRoleId = normalizePublicProfilePrimaryRole(roleId);
+  if (!normalizedRoleId) return null;
+  const found = PUBLIC_PERFORMER_PRIMARY_ROLES.find((role) => role.id === normalizedRoleId);
+  return found?.label ?? null;
+}
+
+export function resolvePublicProfileHeroName(input: {
+  handle: string | null | undefined;
+  stageName: string | null | undefined;
+  displayName: string | null | undefined;
+}) {
+  const handle = typeof input.handle === 'string' ? input.handle.trim() : '';
+  if (handle) return `@${handle}`;
+  const stageName = typeof input.stageName === 'string' ? input.stageName.trim() : '';
+  if (stageName) return stageName;
+  const displayName = typeof input.displayName === 'string' ? input.displayName.trim() : '';
+  return displayName || 'Sway page';
+}
+
+export function resolvePublicProfilePageKindLabel(input: {
+  primaryRole: string | null | undefined;
+  specialties?: string[] | null;
+  isPreview?: boolean;
+}) {
+  const roleLabel = labelForPublicPerformerPrimaryRole(input.primaryRole);
+  if (roleLabel) return roleLabel;
+  const specialty = Array.isArray(input.specialties)
+    ? input.specialties.find((item) => (
+        typeof item === 'string'
+        && item.trim()
+        && !['performer', 'other performer'].includes(item.trim().toLowerCase())
+      ))
+    : null;
+  if (specialty) return specialty.trim();
+  return input.isPreview ? 'Unclaimed public page' : 'Sway page';
+}
+
+export function mergePublicProfileMetadata(
+  existing: unknown,
+  updates: { stageName?: string | null; primaryRole?: string | null }
+) {
+  const merged = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? { ...(existing as Record<string, unknown>) }
+    : {};
+
+  if (updates.stageName !== undefined) {
+    if (updates.stageName) merged.stageName = updates.stageName;
+    else delete merged.stageName;
+  }
+  if (updates.primaryRole !== undefined) {
+    if (updates.primaryRole) merged.primaryRole = updates.primaryRole;
+    else delete merged.primaryRole;
+  }
+
+  return Object.keys(merged).length ? merged : null;
+}
+
 export const PUBLIC_PROFILE_LINK_KINDS = [
   'booking',
   'brand',

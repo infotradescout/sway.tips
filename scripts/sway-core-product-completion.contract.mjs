@@ -37,7 +37,7 @@ for (const term of [
 for (const term of ['activateProModeWithPerformer', "onboardingStatus: 'gig_ready'", 'isActive: true']) {
   requireTerm(proMode, term, 'Same-account Pro Mode activation');
 }
-for (const term of ['Create your Sway account', 'Join or scan a room', 'Activate Pro Mode', 'Open performer console']) {
+for (const term of ['Create your Sway account', 'Join or scan a room', 'Activate Pro Mode', 'Open performer console', 'Claim code (optional)']) {
   requireTerm(account, term, 'Universal account UI');
 }
 for (const term of ["'/account/reviews'", "name: 'account-rights-review'", 'backHref="/account"']) {

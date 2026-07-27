@@ -36,6 +36,8 @@ const requiredFiles = [
   'src/server/performer-login.ts',
   'src/components/PerformerPublicProfilePage.tsx',
   'src/components/PerformerPublicProfileEditor.tsx',
+  'src/components/PerformerAccountHome.tsx',
+  'src/components/TalentDashboard.tsx',
   'src/components/TalentInviteAcceptCard.tsx',
   'src/shells/PatronApp.tsx',
   'src/shells/AdminAccountsPage.tsx',
@@ -61,6 +63,8 @@ const paymentService = read('src/server/payment-service.ts');
 const performerLogin = read('src/server/performer-login.ts');
 const publicPage = read('src/components/PerformerPublicProfilePage.tsx');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
+const accountHome = read('src/components/PerformerAccountHome.tsx');
+const talentDashboard = read('src/components/TalentDashboard.tsx');
 const inviteCard = read('src/components/TalentInviteAcceptCard.tsx');
 const patronApp = read('src/shells/PatronApp.tsx');
 const sharedShell = read('src/shells/shared.tsx');
@@ -516,11 +520,13 @@ for (const term of [
   'Sway tip QR code',
   'Copy tip link',
   'Pay through Sway',
-  'Scan to tip {stageName}',
+  'Scan to tip {tipLabel}',
   'profileTipUrl',
   'const [tipOpen, setTipOpen] = useState(false)',
-  "stageName = profile.stageName || (profile.handle?.toLowerCase() === 'dj3x' ? 'DJ3X' : profile.displayName)",
-  'Tip {stageName}',
+  'resolvePublicProfileHeroName',
+  'resolvePublicProfilePageKindLabel',
+  'Tip {tipLabel}',
+  'primaryRole: string | null',
   'stageName: string | null',
   'canonicalHandle',
   'Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.',
@@ -528,6 +534,9 @@ for (const term of [
   'claims and verifies the profile',
   'Create your own free Sway page'
 ]) requireIncludes(publicPage, term, 'Standalone public page');
+requireExcludes(publicPage, 'Public performer page', 'Standalone public page must not use a generic performer eyebrow');
+requireExcludes(publicPage, "profile.handle?.toLowerCase() === 'dj3x'", 'Standalone public page must use canonical handle-first resolution');
+requireExcludes(publicPage, 'publicHeroName !== profile.displayName', 'Standalone public page must not show a second display name');
 for (const forbidden of ['performerId', 'entitlementId', 'termsHash', 'grantedAt']) {
   requireExcludes(publicPage, forbidden, 'Standalone public page');
 }
@@ -540,6 +549,46 @@ for (const term of [
   'accepted: true',
   'Accept exact Brand Partner terms'
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
+for (const term of [
+  'What kind of performer are you?',
+  'PUBLIC_PERFORMER_PRIMARY_ROLES',
+  'primaryRole: form.primaryRole || null',
+  'Stage name — optional',
+  'Your @handle is the main public name'
+]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
+
+for (const term of [
+  'mergePublicProfileMetadata',
+  'primaryRole',
+  'stageName',
+  'profile_metadata: performerPublicProfiles.metadata',
+  'preview_metadata: performerProfilePreviews.metadata',
+  'primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)',
+  'stage_name: profileStageName || previewStageName',
+  '.leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))',
+  '.leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))',
+  ': performerRow.preview_specialties ?? []',
+  "return res.status(422).json({ error: 'Choose your primary role.' })"
+]) requireIncludes(server, term, 'Profile identity API and console state');
+
+for (const term of [
+  'resolvePublicProfileHeroName',
+  'resolvePublicProfilePageKindLabel',
+  'performerProfile?.primary_role',
+  'performerProfile?.specialties',
+  '{performerRoleLabel} Console'
+]) requireIncludes(talentApp, term, 'Handle-first performer console');
+requireExcludes(talentApp, "performerProfile?.display_name?.trim()\n    || performerProfile?.handle?.trim()", 'Performer console identity');
+
+for (const term of [
+  'resolvePublicProfileHeroName',
+  'resolvePublicProfilePageKindLabel',
+  'roleLabel={performerRoleLabel}'
+]) requireIncludes(talentDashboard, term, 'Handle-first performer dashboard');
+for (const term of [
+  '{roleLabel}',
+  '{displayName}'
+]) requireIncludes(accountHome, term, 'Handle-first performer home');
 
 for (const term of [
   'includePreviews: false',

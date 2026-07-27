@@ -8,6 +8,7 @@ const failures = [];
 const allowedHrefPatterns = [
   /^\/$/,
   /^\/home$/,
+  /^\/discover$/,
   /^\/account\/login$/,
   /^\/account\/signup$/,
   /^\/talent\/login$/,
@@ -62,6 +63,7 @@ for (const anchor of anchors) {
 
 for (const requiredCta of [
   { text: 'SCAN', href: '/home' },
+  { text: 'Discover shows', href: '/discover' },
   { text: 'Create account', href: '/account/signup' },
   { text: 'Login', href: '/account/login' },
   { text: 'sway to play', href: '/about' }

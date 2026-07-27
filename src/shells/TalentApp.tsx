@@ -9,10 +9,15 @@ import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
+import PerformerEventDoorPage from '../components/PerformerEventDoorPage';
 import VictoryScreen from '../components/VictoryScreen';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
 import { LoadingState, postJson, useSwayState } from './shared';
+import {
+  resolvePublicProfileHeroName,
+  resolvePublicProfilePageKindLabel
+} from '../server/public-profile';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -38,10 +43,18 @@ function isTalentRightsReview(pathname: string) {
   return pathname === '/talent/releases/review';
 }
 
+function talentEventDoorId(pathname: string) {
+  const match = /^\/talent\/events\/([0-9a-f-]{36})\/door$/i.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 type TalentPerformerProfile = {
   performer_id: string;
   display_name: string;
   handle: string | null;
+  stage_name: string | null;
+  primary_role: string | null;
+  specialties: string[];
   owner_user_id: string;
   email_verified_at: string | null;
   charges_enabled: boolean;
@@ -51,12 +64,14 @@ type TalentPerformerProfile = {
 
 export default function TalentApp() {
   const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
+  const eventDoorId = talentEventDoorId(pathname);
   const isAuthEntryRoute = isTalentLogin(pathname)
     || isTalentSignup(pathname)
     || isTalentInvite(pathname)
     || isTalentClaim(pathname)
     || isTalentFileConnect(pathname)
-    || isTalentRightsReview(pathname);
+    || isTalentRightsReview(pathname)
+    || Boolean(eventDoorId);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
@@ -154,10 +169,13 @@ export default function TalentApp() {
   const handleStartSession = async (setupData: PerformerRoomSetupData) => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const performerIdentityName =
-        performerProfile?.display_name?.trim()
-        || performerProfile?.handle?.trim()
-        || '';
+      const performerIdentityName = performerProfile
+        ? resolvePublicProfileHeroName({
+            handle: performerProfile.handle,
+            stageName: performerProfile.stage_name,
+            displayName: performerProfile.display_name
+          })
+        : '';
       const data = await postJson('/api/session/start', {
         ...setupData,
         talentName: setupData.talentName.trim() || performerIdentityName
@@ -282,15 +300,25 @@ export default function TalentApp() {
     return <PerformerRightsReviewQueue />;
   }
 
+  if (eventDoorId) {
+    return <PerformerEventDoorPage eventId={eventDoorId} />;
+  }
+
   if (isLoading) return <LoadingState />;
 
   const { session, requests } = bState;
   const { activeGigId } = bState;
-  const performerIdentityName =
-    performerProfile?.display_name?.trim()
-    || performerProfile?.handle?.trim()
-    || session.talentName
-    || 'Unassigned performer';
+  const performerIdentityName = performerProfile
+    ? resolvePublicProfileHeroName({
+        handle: performerProfile.handle,
+        stageName: performerProfile.stage_name,
+        displayName: performerProfile.display_name
+      })
+    : session.talentName || 'Sway account';
+  const performerRoleLabel = resolvePublicProfilePageKindLabel({
+    primaryRole: performerProfile?.primary_role,
+    specialties: performerProfile?.specialties
+  });
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
   const approvedCount = requests.filter((request) => request.status === 'approved' && !request.hidden && !request.removed).length;
   const selectedRoomRoute = selectedGigId ?? activeGigId;
@@ -344,7 +372,7 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Performer Console</span>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">{performerRoleLabel} Console</span>
               <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
@@ -355,7 +383,7 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? 'Performer console' : "Tonight's room"}
+            title={session.status === 'inactive' ? `${performerRoleLabel} console` : "Tonight's room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
             primaryLabel={session.status === 'inactive'
               ? 'Choose one workspace at a time'
@@ -393,10 +421,10 @@ export default function TalentApp() {
               <div className="space-y-4 text-sm">
                 <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
-                  <p className="mt-1 font-bold text-white">{session.status === 'inactive' ? performerIdentityName : (session.talentName || performerIdentityName)}</p>
+                  <p className="mt-1 font-bold text-white">{performerIdentityName}</p>
                   <p className="text-xs text-slate-400">
                     {session.status === 'inactive'
-                      ? `Ready to start live room${performerProfile?.handle ? ` @${performerProfile.handle}` : ''}`
+                      ? `Ready to start a live room · ${performerRoleLabel}`
                       : `${session.status} / ${session.talentRole}`}
                   </p>
                 </div>

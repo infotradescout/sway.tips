@@ -8,7 +8,7 @@ sway.tips
 
 ## Repo Doctrine
 
-Sway is a live-gig monetization product for performers, DJs, bartenders, street performers, venues, and patrons.
+Sway is a two-sided performer-and-customer product for live-gig monetization, public performer profiles, event discovery, and creator publishing workflows.
 
 The first production loop is:
 
@@ -49,16 +49,39 @@ These lanes may run in parallel when they keep to their allowed files and do not
 | `overlay-surface` | Overlay display shell and overlay-only client behavior. |
 | `moderation` | Reporting, blocking, hiding, removing, moderation audit behavior. |
 | `payments` | Stripe/payment provider, idempotency, capture/void/refund/payout lifecycle. |
+| `public-event-listings` | Performer-owned event listings, public discovery, and safe handoff to external HTTPS ticket providers. No native ticket money. |
+| `event-tickets-native-ga` | Feature-gated one-ticket paid-GA checkout, separate ticket ledger, rotating admission pass, durable post-check-in performer transfer, and refund-only unused-ticket settlement. |
 | `app-store` | TestFlight/App Store package evidence, privacy/support/compliance docs. |
 
-## Future Product Lanes (Memo Only)
+## Activated Event-Listing Slice
 
-Unless explicitly labeled exploratory, these are locked product intent. They are **not** active parallel build lanes until Gawain opens them with scope, ledger boundaries, and an evidence bar.
+The `public-event-listings` slice was activated on 2026-07-26.
+
+```text
+Performer creates an event
+→ performer publishes it
+→ Sway shows it on the performer profile, public event page, and discovery feed
+→ customer follows the performer-supplied HTTPS ticket link
+```
+
+This slice is listing and discovery only:
+
+- Performer is the only seller-side product actor.
+- Location details are event content, not a separate account, role, or permission boundary.
+- Sway does not sell the external ticket, control external capacity, confirm external inventory, issue admission proof, process a refund, or settle money.
+- Ownership guards, suspended-performer hiding, public-state filtering, idempotency, and transactional mutation audit evidence are required. Anonymous reads must not create unbounded audit rows.
+- External CTA copy is closed to truthful handoff labels. Cancelling the Sway listing does not cancel or refund an external order.
+- Native ticket money remains isolated from this external-listing lane. The authorized `event-tickets-native-ga` lane owns its separate records and feature gate.
+
+## Future Product Lanes
+
+Unless explicitly labeled exploratory, these are locked product intents. Credits, forfeitures, buyer transfers, multi-ticket orders, and resale remain closed until separately activated.
 
 | Future lane | Memo | Rule |
 | --- | --- | --- |
-| `event-tickets` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Event ticket sales is a Sway lane. Docs/planning only until explicitly activated. Separate ledger and fee disclosure from live-room money, publishing, merch, and paid streams. Plan: `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md` (includes public feed repair; individuals sell without venue gate). |
-| `public-feed` | (same plan) | Truthful discovery for live rooms + upcoming ticketed shows. No fake inventory. May ship Phase B ahead of ticket MVP if Gawain sequences it that way. |
+| `event-ticket-alternate-settlement` | `docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md` | Seller-scoped credit and disclosed no-show forfeiture remain future work after refund-only paid GA is proven. |
+| `event-ticket-holder-transfer` | `docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md` | Face-value holder transfer/resale remains future work. No open scalping market. |
+| `public-feed` | (same plan) | Truthful discovery for live rooms + performer-published upcoming events. No fake inventory and no claim that external tickets remain available. |
 | `sway.dio` | Exploratory concept note only | Possible Sway online radio for streaming digital independent originals. Cool direction, but **not locked in stone**, not scoped, and not authorized for build yet. |
 
 ## Unsafe Lane Pairings

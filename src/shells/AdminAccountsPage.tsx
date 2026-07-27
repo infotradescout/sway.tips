@@ -9,7 +9,8 @@ import { StatusBanner } from '../components/TalentAuthStatus';
 
 function claimCodeFromLink(claimLink: string) {
   try {
-    return new URL(claimLink, 'https://app.sway.tips').searchParams.get('code')?.trim() || claimLink;
+    const params = new URL(claimLink, 'https://app.sway.tips').searchParams;
+    return params.get('claim')?.trim() || params.get('code')?.trim() || claimLink;
   } catch {
     return claimLink;
   }
