@@ -1,18 +1,29 @@
 # Sway Production Surface Map
 
 Date: 2026-06-14
+Status updated: 2026-07-26
 
 ## Decision
 
-AUDIT HOLD - SURFACE MAP COMPLETE
+AUDIT ARTIFACT - FREEZE LIFTED 2026-07-26
 
-This document is an audit artifact only. It makes no production readiness claim, no App Store readiness claim, and no feature-completion claim.
+This supersedes `AUDIT HOLD - SURFACE MAP COMPLETE` (2026-06-14).
 
-Product work remains frozen until the P0/P1 backlog below is accepted and sequenced.
+This document is an audit artifact only. It makes no production readiness claim, no App Store readiness claim, and no feature-completion claim. That limit still stands.
 
-## Current Production Truth
+Product work is no longer frozen. The freeze ended in practice well before it was recorded here: `origin/main` has carried continuous merged feature work since 2026-07-21, including the product restore to the customer-performer live room (`0b37ea8`), catalog and release preparation (`9ad0aa1`, `5d9c2ff`), release control (#141), public event listings (#143), and production-gated native GA ticket sales (#144, #145, #146).
 
-Intended current production commit:
+### Backlog carry-forward
+
+The P0/P1/P2/P3 backlog below was **superseded, not certified complete**. The July product rebuild changed the surfaces this map inventoried, so the June findings describe a shape the app has since moved past. No one has re-run this audit against current production, and this lift does not assert that any individual P0 or P1 item was fixed. Treat the backlog as open and unverified until a fresh surface-map pass replaces it.
+
+Narrower evidence gates are unaffected by this lift. The audio master-storage `HOLD` in `docs/qa-packets/2026-07-22-audio-production-evidence.md` remains in force.
+
+Everything below is the 2026-06-14 record, retained as history. The commits, marker timestamps, routes, and screenshots it names are historical.
+
+## Production Truth At Audit Time (historical)
+
+Intended production commit as of 2026-06-14:
 
 ```text
 df1d44a9dd34ce871247e1262b061cc515b060e0
