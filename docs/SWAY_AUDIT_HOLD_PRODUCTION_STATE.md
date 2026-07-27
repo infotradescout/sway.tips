@@ -1,16 +1,23 @@
 # Sway Audit Hold Production State
 
 Date: 2026-06-14
+Status updated: 2026-07-26
 
 ## Decision
 
-AUDIT HOLD - PRODUCTION STATE RECONCILED
+HOLD LIFTED - 2026-07-26
 
-Product work should remain paused until the next audit slice maps the live surfaces and produces a prioritized fix backlog.
+This supersedes `AUDIT HOLD - PRODUCTION STATE RECONCILED` (2026-06-14).
 
-## Production Truth
+The hold set one exit condition: an audit slice mapping the live surfaces and producing a prioritized fix backlog. That slice was delivered as `docs/SWAY_PRODUCTION_SURFACE_MAP.md` — route inventory, live route behavior, metadata/header/accessibility findings, and a P0/P1/P2/P3 backlog. The exit condition is met and product work is not paused.
 
-Current intended production commit:
+This lift covers the blanket product-work freeze only. It is not a readiness claim, and it does not clear any narrower evidence gate. The audio master-storage `HOLD` in `docs/qa-packets/2026-07-22-audio-production-evidence.md` remains in force on its own terms.
+
+Everything below is the 2026-06-14 record, retained as history. The production commits it names are historical and no longer describe current production.
+
+## Production Truth At Audit Time (historical)
+
+Intended production commit as of 2026-06-14:
 
 ```text
 df1d44a9dd34ce871247e1262b061cc515b060e0
@@ -68,15 +75,17 @@ https://app.sway.tips/api/build-marker
 https://sway-tips.onrender.com/api/build-marker
 ```
 
-## Current Hold
+## Original Hold Terms (satisfied 2026-07-26)
 
-The production-state drift concern is resolved, but the app should remain in audit/freeze mode. The next slice should not be feature work or another narrow copy patch.
+Recorded 2026-06-14: the production-state drift concern is resolved, but the app should remain in audit/freeze mode. The next slice should not be feature work or another narrow copy patch.
 
 Next slice:
 
 ```text
 audit/production-state-and-surface-map
 ```
+
+Delivered as `docs/SWAY_PRODUCTION_SURFACE_MAP.md`.
 
 Required output:
 
