@@ -433,7 +433,7 @@ export default function App() {
         title="Admin access"
         body="This area is for internal Sway operations. Sign in with an authorized admin account to continue."
         actions={
-          <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/admin/login">
+          <a className="rounded-xl bg-fuchsia-600 px-4 py-3 text-center text-sm font-black text-white hover:bg-fuchsia-500" href="/admin">
             Admin login
           </a>
         }

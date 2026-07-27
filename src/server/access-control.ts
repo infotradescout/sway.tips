@@ -60,7 +60,11 @@ function isPublicTalentLoginEntryRoute(req: Request) {
 }
 
 function isPublicAdminLoginEntryRoute(req: Request) {
-  return req.method === 'GET' && req.path === '/admin/login';
+  return (
+    req.method === 'GET' &&
+    (req.path === '/admin/login' ||
+      req.path === '/admin')
+  );
 }
 
 function escapeHtml(input: string) {
@@ -76,7 +80,7 @@ function renderProtectedRouteRecovery(status: number, reason: string, shell?: st
   const signInHref = shell === 'talent' || shell === 'overlay'
     ? '/talent/login'
     : shell === 'admin'
-      ? '/admin/login'
+      ? '/admin'
       : null;
   return `<!doctype html>
 <html lang="en">

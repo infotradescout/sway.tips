@@ -641,7 +641,7 @@ export default function AdminAccountsPage() {
           </div>
           <h1 className="font-display text-xl font-black uppercase tracking-wide text-white">Session needed</h1>
           <p className="mt-2 text-sm leading-6 text-slate-400">
-            Sign in as an admin to manage accounts. <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/admin/login">Sign in</a>
+            Sign in as an admin to manage accounts. <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/admin">Sign in</a>
           </p>
         </div>
       </div>

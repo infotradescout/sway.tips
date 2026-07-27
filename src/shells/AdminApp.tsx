@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import SplitViewShell from '../components/SplitViewShell';
+import AdminAccountsPage from './AdminAccountsPage';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
 import {
@@ -35,6 +36,14 @@ export default function AdminApp() {
       </div>
     </div>
   );
+
+  const currentPath = window.location.pathname;
+  const isAccountsRoute =
+    currentPath === '/admin/accounts' || currentPath.startsWith('/admin/accounts/');
+
+  if (isAccountsRoute) {
+    return <AdminAccountsPage />;
+  }
 
   useEffect(() => {
     if (demoMode) {
