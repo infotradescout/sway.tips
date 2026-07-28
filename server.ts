@@ -357,6 +357,8 @@ type ShareMetadata = {
   image: string;
   imageAlt: string;
   robots?: 'noindex, nofollow';
+  structuredData?: Record<string, unknown>;
+  discoveryHtml?: string;
 };
 
 type PublicShareProfile = {
@@ -366,6 +368,14 @@ type PublicShareProfile = {
   headline: string | null;
   city: string | null;
   avatarUrl: string | null;
+  specialties: string[] | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  tiktokUrl: string | null;
+  youtubeUrl: string | null;
+  soundcloudUrl: string | null;
+  websiteUrl: string | null;
+  updatedAt: Date;
 };
 
 const DEFAULT_SHARE_TITLE = 'Sway | Live Crowd Requests';
@@ -398,7 +408,8 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
   return {
     title: overrides.title || DEFAULT_SHARE_TITLE,
     description: overrides.description || DEFAULT_SHARE_DESCRIPTION,
-    url: absoluteShareUrl(req, overrides.url || req.originalUrl || '/'),
+    // Canonicals must never preserve campaign, claim, or other query tokens.
+    url: absoluteShareUrl(req, overrides.url || req.path || '/'),
     image: absoluteShareUrl(req, overrides.image || DEFAULT_SHARE_IMAGE_PATH),
     imageAlt: overrides.imageAlt || 'Sway neon live request preview'
   };
@@ -413,12 +424,16 @@ function renderShareMetaTags(metadata: ShareMetadata) {
   const robots = metadata.robots
     ? `<meta name="robots" content="${escapePublicProfileMetadataAttribute(metadata.robots)}" />`
     : '';
+  const structuredData = metadata.structuredData
+    ? `<script type="application/ld+json">${JSON.stringify(metadata.structuredData).replace(/</g, '\\u003c')}</script>`
+    : '';
 
   return [
     '<meta name="sway-share-meta" content="server-rendered" />',
     robots,
     `<title>${title}</title>`,
     `<meta name="description" content="${description}" />`,
+    `<link rel="canonical" href="${url}" />`,
     '<meta property="og:type" content="website" />',
     '<meta property="og:site_name" content="Sway" />',
     `<meta property="og:title" content="${title}" />`,
@@ -433,7 +448,8 @@ function renderShareMetaTags(metadata: ShareMetadata) {
     '<meta name="twitter:card" content="summary_large_image" />',
     `<meta name="twitter:title" content="${title}" />`,
     `<meta name="twitter:description" content="${description}" />`,
-    `<meta name="twitter:image" content="${image}" />`
+    `<meta name="twitter:image" content="${image}" />`,
+    structuredData
   ].join('\n    ');
 }
 
@@ -441,9 +457,16 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   const metaTags = renderShareMetaTags(metadata);
   const withoutExisting = html
     .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
-    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
+    .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '')
+    .replace(/\s*<link\s+rel=["']canonical["'][^>]*>/gi, '')
+    .replace(/\s*<script\s+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, '');
 
-  return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
+  const withMetadata = withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
+  if (!metadata.discoveryHtml) return withMetadata;
+  return withMetadata.replace(
+    /<div\s+id=["']root["']\s*><\/div>/i,
+    `<div id="root">${metadata.discoveryHtml}</div>`
+  );
 }
 
 async function findPublicShareProfile(rawHandle: string): Promise<PublicShareProfile | null> {
@@ -457,7 +480,15 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
       bio: performers.bio,
       headline: performerPublicProfiles.headline,
       city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      specialties: performerPublicProfiles.specialties,
+      facebookUrl: performerPublicProfiles.facebookUrl,
+      instagramUrl: performerPublicProfiles.instagramUrl,
+      tiktokUrl: performerPublicProfiles.tiktokUrl,
+      youtubeUrl: performerPublicProfiles.youtubeUrl,
+      soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+      websiteUrl: performerPublicProfiles.websiteUrl,
+      updatedAt: sql<Date>`coalesce(${performerPublicProfiles.updatedAt}, ${performers.updatedAt})`
     })
     .from(performers)
     .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
@@ -488,7 +519,15 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
       bio: performerProfilePreviews.bio,
       headline: performerProfilePreviews.headline,
       city: performerProfilePreviews.city,
-      avatarUrl: performerProfilePreviews.avatarUrl
+      avatarUrl: performerProfilePreviews.avatarUrl,
+      specialties: performerProfilePreviews.specialties,
+      facebookUrl: performerProfilePreviews.facebookUrl,
+      instagramUrl: performerProfilePreviews.instagramUrl,
+      tiktokUrl: performerProfilePreviews.tiktokUrl,
+      youtubeUrl: performerProfilePreviews.youtubeUrl,
+      soundcloudUrl: performerProfilePreviews.soundcloudUrl,
+      websiteUrl: performerProfilePreviews.websiteUrl,
+      updatedAt: performerProfilePreviews.updatedAt
     })
     .from(performerProfilePreviews)
     .where(and(
@@ -498,6 +537,74 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
     .limit(1);
 
   return preview || null;
+}
+
+function publicProfileSameAs(profile: PublicShareProfile) {
+  return [
+    profile.websiteUrl,
+    profile.facebookUrl,
+    profile.instagramUrl,
+    profile.tiktokUrl,
+    profile.youtubeUrl,
+    profile.soundcloudUrl
+  ].filter((url): url is string => Boolean(normalizePublicProfileUrl(url)));
+}
+
+function renderProfileDiscoveryHtml(profile: PublicShareProfile, description: string) {
+  const specialties = (profile.specialties || []).filter(Boolean);
+  const location = profile.city ? `<p>Based in ${escapeStaticDocumentText(profile.city)}.</p>` : '';
+  const specialtyCopy = specialties.length
+    ? `<p>Known for ${specialties.map(escapeStaticDocumentText).join(', ')}.</p>`
+    : '';
+  const socialLinks = publicProfileSameAs(profile)
+    .map((url) => `<li><a href="${escapePublicProfileMetadataAttribute(url)}" rel="me">${escapeStaticDocumentText(new URL(url).hostname.replace(/^www\./, ''))}</a></li>`)
+    .join('');
+
+  return `<main data-sway-discovery-summary="performer-profile">
+    <article>
+      <p>Sway performer profile</p>
+      <h1>${escapeStaticDocumentText(profile.displayName)}</h1>
+      <p>@${escapeStaticDocumentText(profile.handle)}</p>
+      <p>${escapeStaticDocumentText(description)}</p>
+      ${location}
+      ${specialtyCopy}
+      ${socialLinks ? `<nav aria-label="Official performer links"><ul>${socialLinks}</ul></nav>` : ''}
+      <p><a href="/discover">Discover public shows on Sway</a></p>
+    </article>
+  </main>`;
+}
+
+function buildProfileStructuredData(req: express.Request, profile: PublicShareProfile, description: string) {
+  const canonicalUrl = absoluteShareUrl(req, `/p/${profile.handle}`);
+  const sameAs = publicProfileSameAs(profile);
+  const mainEntity: Record<string, unknown> = {
+    '@id': `${canonicalUrl}#performer`,
+    '@type': 'Person',
+    name: profile.displayName,
+    alternateName: `@${profile.handle}`,
+    description,
+    url: canonicalUrl
+  };
+  if (profile.avatarUrl) mainEntity.image = absoluteShareUrl(req, profile.avatarUrl);
+  if (sameAs.length) mainEntity.sameAs = sameAs;
+  if (profile.specialties?.length) mainEntity.knowsAbout = profile.specialties;
+  if (profile.city) {
+    mainEntity.homeLocation = {
+      '@type': 'Place',
+      name: profile.city
+    };
+  }
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'ProfilePage',
+    '@id': `${canonicalUrl}#profile`,
+    url: canonicalUrl,
+    name: `${profile.displayName} on Sway`,
+    description,
+    dateModified: profile.updatedAt.toISOString(),
+    mainEntity
+  };
 }
 
 function escapeShareCardText(value: string) {
@@ -632,7 +739,9 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       description,
       url: `/p/${profile.handle}`,
       image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
-      imageAlt: `@${profile.handle} Sway public page`
+      imageAlt: `@${profile.handle} Sway public page`,
+      structuredData: buildProfileStructuredData(req, profile, description),
+      discoveryHtml: renderProfileDiscoveryHtml(profile, description)
     });
   }
 
@@ -11411,6 +11520,153 @@ async function handleDataDeletionRequest(req: express.Request, res: express.Resp
 
 app.post('/api/privacy/data-deletion', handleDataDeletionRequest);
 app.post('/api/privacy/data-deletion-placeholder', handleDataDeletionRequest);
+
+type PublicDiscoveryProfile = {
+  handle: string;
+  displayName: string;
+  headline: string | null;
+  bio: string | null;
+  city: string | null;
+  specialties: string[] | null;
+  updatedAt: Date;
+};
+
+async function listPublicDiscoveryProfiles(): Promise<PublicDiscoveryProfile[]> {
+  if (!businessDb) return [];
+
+  const [claimedProfiles, previewProfiles] = await Promise.all([
+    businessDb
+      .select({
+        handle: performers.handle,
+        displayName: performers.displayName,
+        headline: performerPublicProfiles.headline,
+        bio: performers.bio,
+        city: performerPublicProfiles.city,
+        specialties: performerPublicProfiles.specialties,
+        updatedAt: sql<Date>`coalesce(${performerPublicProfiles.updatedAt}, ${performers.updatedAt})`
+      })
+      .from(performers)
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(and(
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['suspended']),
+        sql`${performers.handle} is not null`
+      )),
+    businessDb
+      .select({
+        handle: performerProfilePreviews.handle,
+        displayName: performerProfilePreviews.displayName,
+        headline: performerProfilePreviews.headline,
+        bio: performerProfilePreviews.bio,
+        city: performerProfilePreviews.city,
+        specialties: performerProfilePreviews.specialties,
+        updatedAt: performerProfilePreviews.updatedAt
+      })
+      .from(performerProfilePreviews)
+      .where(and(
+        eq(performerProfilePreviews.isActive, true),
+        isNull(performerProfilePreviews.claimedPerformerId)
+      ))
+  ]);
+
+  return [...claimedProfiles, ...previewProfiles]
+    .filter((profile): profile is PublicDiscoveryProfile => Boolean(profile.handle))
+    .sort((a, b) => a.handle.localeCompare(b.handle));
+}
+
+app.get('/robots.txt', (req, res) => {
+  const origin = resolveRequestOrigin(req);
+  res
+    .type('text/plain')
+    .set('Cache-Control', 'public, max-age=3600')
+    .send([
+      'User-agent: *',
+      'Allow: /',
+      'Allow: /api/public/',
+      'Disallow: /admin',
+      'Disallow: /api/',
+      'Disallow: /talent/',
+      'Disallow: /operator/',
+      `Sitemap: ${origin}/sitemap.xml`
+    ].join('\n'));
+});
+
+app.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    const origin = resolveRequestOrigin(req);
+    const profiles = await listPublicDiscoveryProfiles();
+    const staticPaths = ['/', '/about', '/faq', '/discover', '/support'];
+    const urls = [
+      ...staticPaths.map((pathname) => ({
+        location: `${origin}${pathname}`,
+        lastModified: null as Date | null
+      })),
+      ...profiles.map((profile) => ({
+        location: `${origin}/p/${encodeURIComponent(profile.handle)}`,
+        lastModified: profile.updatedAt
+      }))
+    ];
+    const body = urls.map((url) => [
+      '  <url>',
+      `    <loc>${escapeStaticDocumentText(url.location)}</loc>`,
+      ...(url.lastModified ? [`    <lastmod>${url.lastModified.toISOString()}</lastmod>`] : []),
+      '  </url>'
+    ].join('\n')).join('\n');
+
+    res
+      .type('application/xml')
+      .set('Cache-Control', 'public, max-age=900')
+      .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/llms.txt', async (req, res, next) => {
+  try {
+    const origin = resolveRequestOrigin(req);
+    const profiles = await listPublicDiscoveryProfiles();
+    const profileLines = profiles.flatMap((profile) => {
+      const description = profile.headline || profile.bio || `Public Sway profile for ${profile.displayName}.`;
+      const facts = [
+        profile.city ? `Location: ${profile.city}.` : '',
+        profile.specialties?.length ? `Specialties: ${profile.specialties.join(', ')}.` : ''
+      ].filter(Boolean).join(' ');
+      return [
+        `- [${profile.displayName}](${origin}/p/${encodeURIComponent(profile.handle)}): ${description}${facts ? ` ${facts}` : ''}`
+      ];
+    });
+
+    res
+      .type('text/plain')
+      .set('Cache-Control', 'public, max-age=900')
+      .send([
+        '# Sway',
+        '',
+        '> Sway is a performer-owned platform for public profiles, live audience requests, tips, boosts, event listings, native ticketing, and music publishing workflows.',
+        '',
+        'Sway has two product sides: performers who operate their work and audiences who interact with them. Public performer pages are canonical at /p/{handle}. Payments and ticket availability must be confirmed on the relevant live page; this file does not claim a performer is currently live or selling tickets.',
+        '',
+        '## Primary pages',
+        `- [About Sway](${origin}/about): Product scope, audiences, and performer capabilities.`,
+        `- [Discover](${origin}/discover): Currently published public shows.`,
+        `- [FAQ](${origin}/faq): Product and trust answers.`,
+        `- [Ticket terms](${origin}/legal/tickets): Native ticket responsibilities and terms.`,
+        '',
+        '## Public performer profiles',
+        ...profileLines,
+        '',
+        '## Machine-readable sources',
+        `- [Sitemap](${origin}/sitemap.xml)`,
+        `- Public performer JSON: ${origin}/api/public/performer/{handle}`,
+        `- Public event JSON: ${origin}/api/public/events/{eventId}`,
+        '',
+        'Only use facts present on the linked public page or API response. Do not infer booking availability, live-room status, event inventory, ownership, or endorsements.'
+      ].join('\n'));
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Truthful request helper only. This is not a licensed music-catalog integration.
 app.post("/api/music/search", (req, res) => {
