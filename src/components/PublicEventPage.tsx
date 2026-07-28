@@ -13,6 +13,7 @@ import {
 import EventTicketPurchaseCard, {
   type NativeAdmissionOffer
 } from './EventTicketPurchaseCard';
+import { sendAcquisitionEvent } from '../shells/frictionClient';
 
 export type PublicEventDto = {
   id: string;
@@ -321,6 +322,10 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
         await navigator.clipboard.writeText(url);
         setShareMessage('Event link copied');
       }
+      sendAcquisitionEvent('public_event_shared', {
+        shell: 'patron', surface: 'public-event', route_family: 'public-event',
+        has_route_context: true, has_session_context: false, build_commit: 'unknown'
+      });
       window.setTimeout(() => setShareMessage(null), 1800);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;

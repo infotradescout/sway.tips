@@ -18,6 +18,7 @@ import { motion } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
 import { captureCampaignCode } from '../shells/campaignAttribution';
+import { sendAcquisitionEvent } from '../shells/frictionClient';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
@@ -262,9 +263,17 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     try {
       if (navigator.share) {
         await navigator.share(shareData);
+        sendAcquisitionEvent('public_profile_shared', {
+          shell: 'patron', surface: 'public-profile', route_family: 'performer-profile',
+          has_route_context: true, has_session_context: false, build_commit: 'unknown'
+        });
         return;
       }
       await navigator.clipboard.writeText(profileUrl);
+      sendAcquisitionEvent('public_profile_shared', {
+        shell: 'patron', surface: 'public-profile', route_family: 'performer-profile',
+        has_route_context: true, has_session_context: false, build_commit: 'unknown'
+      });
       setShareMessage('Link copied');
       window.setTimeout(() => setShareMessage(null), 1800);
     } catch {
@@ -636,7 +645,14 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           <a href="/discover" className="mt-3 block text-xs font-bold text-slate-400 transition hover:text-cyan-200">
             Discover live rooms and shows
           </a>
-          <a href="/talent/signup" className="mt-3 block text-xs font-bold text-slate-500 transition hover:text-fuchsia-200">
+          <a
+            href="/talent/signup"
+            onClick={() => sendAcquisitionEvent('guest_to_performer_started', {
+              shell: 'patron', surface: 'public-profile', route_family: 'performer-profile',
+              has_route_context: true, has_session_context: false, build_commit: 'unknown'
+            })}
+            className="mt-3 block text-xs font-bold text-slate-500 transition hover:text-fuchsia-200"
+          >
             Create your own free Sway page
           </a>
         </footer>

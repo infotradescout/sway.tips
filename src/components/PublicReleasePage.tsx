@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, Disc3, Loader2, Share2 } from 'lucide-react';
+import { sendAcquisitionEvent } from '../shells/frictionClient';
 
 type PublicRelease = {
   id: string;
@@ -55,6 +56,10 @@ export default function PublicReleasePage({ releaseId }: { releaseId: string }) 
     try {
       if (navigator.share) await navigator.share({ title: release.title, text: `${release.title} by ${release.primaryArtistName}`, url });
       else await navigator.clipboard.writeText(url);
+      sendAcquisitionEvent('public_release_shared', {
+        shell: 'patron', surface: 'public-release', route_family: 'public-release',
+        has_route_context: true, has_session_context: false, build_commit: 'unknown'
+      });
       setMessage(navigator.share ? 'Share opened.' : 'Release link copied.');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
