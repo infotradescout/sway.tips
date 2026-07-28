@@ -73,10 +73,15 @@
         },
         {
           "id": "delivery_lifecycle",
-          "label": "Store status, corrections, failures, and takedowns",
-          "status": "schema_only",
-          "evidence": [],
-          "holdReason": "Lifecycle contracts exist without provider-backed execution evidence."
+          "label": "Store status, correction-request intake, failures, and takedowns",
+          "status": "implemented_unverified",
+          "evidence": [
+            "src/server/distribution-delivery-service.ts",
+            "scripts/sway-distribution-delivery.contract.test.mjs",
+            "scripts/sway-distribution-delivery.integration.test.mjs",
+            "scripts/sway-distribution-delivery-authority.integration.test.mjs"
+          ],
+          "holdReason": "A fail-closed sandbox lifecycle implements durable submission, signed webhook transitions, correction-request intake, failures, and takedowns. Correction transmission and resubmission are not implemented. No contracted provider is registered, no real store delivery occurs, and production producer/receiver evidence is missing."
         },
         {
           "id": "royalty_statements",

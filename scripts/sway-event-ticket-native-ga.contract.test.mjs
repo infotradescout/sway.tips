@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
-const read = (path) => readFileSync(join(root, path), 'utf8');
+// Source-boundary checks use newline-delimited sentinels. Normalize Windows
+// checkouts so CRLF cannot hide the signed Stripe webhook implementation.
+const read = (path) => readFileSync(join(root, path), 'utf8').replace(/\r\n/g, '\n');
 const failures = [];
 
 function requireTerms(source, label, terms) {

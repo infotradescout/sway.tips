@@ -328,6 +328,9 @@ export const AUDIO_PUBLISHING_RUNTIME_CAPABILITIES = {
   privateDownloadAuthorization: true,
   creatorDealExecution: false,
   swayPlayback: false,
+  // The durable delivery lifecycle exists only behind an unreachable,
+  // sandbox-only runtime. It is not contracted DSP delivery.
+  distributionDeliveryEngine: false,
   externalDspDelivery: false,
   directSales: false,
   royaltyAccounting: false

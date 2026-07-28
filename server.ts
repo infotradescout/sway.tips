@@ -97,6 +97,11 @@ import { createAudioPublishingService } from "./src/server/audio-publishing-serv
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
+import { createSandboxDistributionAdapter } from "./src/server/distribution-adapter";
+import {
+  classifyDistributionWebhookFailure,
+  createDistributionDeliveryService
+} from "./src/server/distribution-delivery-service";
 import {
   createPerformerEventService,
   EventServiceError,
@@ -172,6 +177,15 @@ const audioFilePairingService = businessDb
   : null;
 const audioFileCollaborationService = businessDb && audioObjectStore
   ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
+  : null;
+// Sandbox is the sole registered adapter. This runtime performs no real
+// provider network call and cannot be presented as store delivery.
+const distributionSandboxSecret = process.env.SWAY_DISTRIBUTION_SANDBOX_WEBHOOK_SECRET?.trim();
+const distributionDeliveryService = businessDb && distributionSandboxSecret
+  ? createDistributionDeliveryService({
+      db: businessDb,
+      adapters: { sway_sandbox: createSandboxDistributionAdapter({ secret: distributionSandboxSecret }) }
+    })
   : null;
 const performerEventService = businessDb
   ? createPerformerEventService(businessDb)
@@ -7904,6 +7918,136 @@ function requireAudioPublishingRuntime(res: express.Response): boolean {
   }
   return true;
 }
+
+function requireDistributionDeliveryRuntime(res: express.Response): boolean {
+  if (!AUDIO_PUBLISHING_RUNTIME_CAPABILITIES.distributionDeliveryEngine) {
+    res.status(503).json({ error: 'Sandbox distribution delivery engine is not enabled.' });
+    return false;
+  }
+  if (!businessDb || !distributionDeliveryService) {
+    res.status(503).json({ error: 'Sandbox distribution delivery engine is not configured.' });
+    return false;
+  }
+  return true;
+}
+
+function distributionMutationStatus(message: string): number {
+  return /not found or unavailable/i.test(message) ? 404 : 422;
+}
+
+app.post('/api/talent/audio/releases/:releaseId/deliveries', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  try {
+    const delivery = await distributionDeliveryService.createDelivery({
+      releaseId: req.params.releaseId,
+      actorUserId: talentAccess.actor.actorId,
+      providerKey: typeof req.body?.providerKey === 'string' ? req.body.providerKey : '',
+      destinationKey: typeof req.body?.destinationKey === 'string' ? req.body.destinationKey : ''
+    });
+    return res.status(201).json({
+      delivery: { ...delivery, isSandbox: true },
+      notice: 'Authorized release managers can test this sandbox lifecycle. It does not send music to stores.'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not create sandbox distribution delivery.';
+    return res.status(distributionMutationStatus(message)).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/submit', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  try {
+    const result = await distributionDeliveryService.submitDelivery({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId
+    });
+    return res.json({ ...result, isSandbox: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not submit sandbox distribution delivery.';
+    return res.status(distributionMutationStatus(message)).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/takedown', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  try {
+    const result = await distributionDeliveryService.requestTakedown({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.json({ ...result, isSandbox: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not request sandbox takedown.';
+    return res.status(distributionMutationStatus(message)).json({ error: message });
+  }
+});
+
+app.post('/api/talent/audio/deliveries/:deliveryId/correction', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+
+  try {
+    const result = await distributionDeliveryService.requestCorrection({
+      deliveryId: req.params.deliveryId,
+      actorUserId: talentAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : ''
+    });
+    return res.json({
+      ...result,
+      isSandbox: true,
+      notice: 'This records correction-request intake only. Provider transmission and resubmission are not implemented.'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not request sandbox delivery correction.';
+    return res.status(distributionMutationStatus(message)).json({ error: message });
+  }
+});
+
+app.post('/api/distribution/webhook/:providerKey', async (req, res) => {
+  if (!requireDistributionDeliveryRuntime(res) || !distributionDeliveryService) return;
+  const rawBodyText = (req as express.Request & { rawBody?: string }).rawBody;
+  if (typeof rawBodyText !== 'string') {
+    return res.status(400).json({ error: 'Raw request body unavailable for signature verification.' });
+  }
+  const signatureHeader = req.header('sway-distribution-signature') ?? undefined;
+  try {
+    const result = await distributionDeliveryService.ingestWebhook({
+      providerKey: req.params.providerKey,
+      rawBody: Buffer.from(rawBodyText, 'utf8'),
+      signatureHeader
+    });
+    return res.json({ received: true, sandbox: true, ...result });
+  } catch (error) {
+    const failure = classifyDistributionWebhookFailure(error);
+    if (failure.retryable) {
+      res.setHeader('Retry-After', '30');
+      console.error('Sandbox distribution webhook processing failed after request validation.', {
+        providerKey: req.params.providerKey,
+        error
+      });
+    }
+    return res.status(failure.statusCode).json({ error: failure.message });
+  }
+});
 
 app.get('/api/talent/audio/projects', async (req, res) => {
   applyNoStoreHeaders(res);

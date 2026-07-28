@@ -27,6 +27,9 @@ const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RELEASE_TYPES = new Set(['single', 'ep', 'album', 'comedy_special', 'spoken_word', 'other']);
 const DISTRIBUTION_MODES = new Set(['private', 'sway_only', 'sway_first', 'everywhere']);
+// Intentionally empty until a separately reviewed contracted provider exists.
+// Sandbox delivery rows must never become public store-status evidence.
+const REAL_DISTRIBUTION_PROVIDER_KEYS = new Set<string>();
 const CREDIT_ROLES = new Set([
   'primary_artist', 'featured_artist', 'songwriter', 'composer', 'producer', 'co_producer',
   'engineer', 'mix_engineer', 'mastering_engineer', 'performer', 'publisher', 'other'
@@ -887,6 +890,29 @@ export function createAudioPublishingService(config: {
       .where(eq(musicReleases.performerId, input.performerId))
       .orderBy(asc(musicRightsDeclarationEvents.createdAt));
 
+    const deliveries = await db
+      .select({
+        id: musicDistributionDeliveries.id,
+        releaseId: musicDistributionDeliveries.releaseId,
+        providerKey: musicDistributionDeliveries.providerKey,
+        destinationKey: musicDistributionDeliveries.destinationKey,
+        deliveryStatus: musicDistributionDeliveries.deliveryStatus,
+        providerReleaseId: musicDistributionDeliveries.providerReleaseId,
+        destinationReleaseId: musicDistributionDeliveries.destinationReleaseId,
+        lastError: musicDistributionDeliveries.lastError,
+        submittedAt: musicDistributionDeliveries.submittedAt,
+        acceptedAt: musicDistributionDeliveries.acceptedAt,
+        liveAt: musicDistributionDeliveries.liveAt,
+        takedownRequestedAt: musicDistributionDeliveries.takedownRequestedAt,
+        takenDownAt: musicDistributionDeliveries.takenDownAt,
+        createdAt: musicDistributionDeliveries.createdAt,
+        updatedAt: musicDistributionDeliveries.updatedAt
+      })
+      .from(musicDistributionDeliveries)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicDistributionDeliveries.releaseId))
+      .where(eq(musicReleases.performerId, input.performerId))
+      .orderBy(desc(musicDistributionDeliveries.updatedAt));
+
     const masterRows = await db
       .select({
         versionId: audioProjectAssetVersions.id,
@@ -946,6 +972,12 @@ export function createAudioPublishingService(config: {
             : events.find((event) => event.eventType === 'verified' || event.eventType === 'rejected')?.eventType ?? 'declared';
           return { ...declaration, outcome, events };
         }),
+        deliveries: deliveries
+          .filter((delivery) => delivery.releaseId === release.id)
+          .map((delivery) => ({
+            ...delivery,
+            isSandbox: !REAL_DISTRIBUTION_PROVIDER_KEYS.has(delivery.providerKey)
+          })),
         readiness: buildReleaseReadiness({
           release,
           recordings: recordings.filter((recording) => recording.releaseId === release.id),
@@ -2135,13 +2167,17 @@ export function createAudioPublishingService(config: {
       .innerJoin(musicReleaseRecordings, eq(musicReleaseRecordings.recordingId, musicRecordingCredits.recordingId))
       .where(eq(musicReleaseRecordings.releaseId, release.id))
       .orderBy(asc(musicRecordingCredits.sequence));
-    const destinations = await db.select({
+    const allDestinations = await db.select({
+      providerKey: musicDistributionDeliveries.providerKey,
       destinationKey: musicDistributionDeliveries.destinationKey,
       deliveryStatus: musicDistributionDeliveries.deliveryStatus,
       liveAt: musicDistributionDeliveries.liveAt
     }).from(musicDistributionDeliveries)
       .where(eq(musicDistributionDeliveries.releaseId, release.id))
       .orderBy(asc(musicDistributionDeliveries.destinationKey));
+    const destinations = allDestinations
+      .filter((destination) => REAL_DISTRIBUTION_PROVIDER_KEYS.has(destination.providerKey))
+      .map(({ providerKey: _providerKey, ...destination }) => destination);
     const providerConfirmedLive = destinations.some((destination) => destination.deliveryStatus === 'live' && destination.liveAt);
     return {
       ...release,
