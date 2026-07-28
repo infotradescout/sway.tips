@@ -10,7 +10,7 @@ const failures = [];
 
 for (const term of [
   'type ShareMetadata',
-  'DEFAULT_SHARE_IMAGE_PATH = \'/social-preview.png?v=1\'',
+  'DEFAULT_SHARE_IMAGE_PATH = \'/sway-social-preview-v3.png?v=3\'',
   'function injectShareMetadata',
   'function resolveShareMetadata',
   'function findPublicShareProfile',
@@ -39,7 +39,7 @@ for (const term of [
 }
 
 for (const term of [
-  'https://app.sway.tips/social-&#112;review.png?v=1',
+  'https://app.sway.tips/sway-social-&#112;review-v3.png?v=3',
   'og:image:width" content="1672"',
   'og:image:height" content="941"',
   'twitter:image" content="https://app.sway.tips/social-&#112;review.png?v=1"'
