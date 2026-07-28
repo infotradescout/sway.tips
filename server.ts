@@ -11423,10 +11423,26 @@ app.get('/sitemap.xml', async (_req, res) => {
     const [profileRows, previewRows, eventRows, releaseRows] = await Promise.all([
       businessDb.select({ handle: performers.handle })
         .from(performers)
-        .where(and(eq(performers.isActive, true), notInArray(performers.onboardingStatus, ['suspended']))),
+        .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+        .where(and(
+          eq(performers.isActive, true),
+          notInArray(performers.onboardingStatus, ['suspended']),
+          sql`(
+            nullif(trim(${performers.bio}), '') is not null
+            or nullif(trim(${performerPublicProfiles.headline}), '') is not null
+            or nullif(trim(${performerPublicProfiles.avatarUrl}), '') is not null
+          )`
+        )),
       businessDb.select({ handle: performerProfilePreviews.handle })
         .from(performerProfilePreviews)
-        .where(eq(performerProfilePreviews.isActive, true)),
+        .where(and(
+          eq(performerProfilePreviews.isActive, true),
+          sql`(
+            nullif(trim(${performerProfilePreviews.bio}), '') is not null
+            or nullif(trim(${performerProfilePreviews.headline}), '') is not null
+            or nullif(trim(${performerProfilePreviews.avatarUrl}), '') is not null
+          )`
+        )),
       businessDb.select({ id: performerEvents.id })
         .from(performerEvents)
         .where(and(eq(performerEvents.status, 'published'), eq(performerEvents.visibility, 'public'), gt(performerEvents.startsAt, new Date()))),
