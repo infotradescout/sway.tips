@@ -368,11 +368,11 @@ type PublicShareProfile = {
   avatarUrl: string | null;
 };
 
-const DEFAULT_SHARE_TITLE = 'Sway | Live Crowd Requests';
-const DEFAULT_SHARE_DESCRIPTION = 'Scan into a live Sway room to request, tip, boost, and follow the queue in real time.';
-const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=1';
-const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
-const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
+const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
+const DEFAULT_SHARE_DESCRIPTION = 'Sway gives performers one place for public profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.';
+const DEFAULT_SHARE_IMAGE_PATH = '/sway-social-preview-v3.png?v=3';
+const DEFAULT_SHARE_IMAGE_WIDTH = 1200;
+const DEFAULT_SHARE_IMAGE_HEIGHT = 630;
 
 function resolveRequestOrigin(req: express.Request) {
   const configuredBaseUrl = (process.env.SWAY_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');
@@ -400,7 +400,7 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
     description: overrides.description || DEFAULT_SHARE_DESCRIPTION,
     url: absoluteShareUrl(req, overrides.url || req.originalUrl || '/'),
     image: absoluteShareUrl(req, overrides.image || DEFAULT_SHARE_IMAGE_PATH),
-    imageAlt: overrides.imageAlt || 'Sway neon live request preview'
+    imageAlt: overrides.imageAlt || 'Sway — profiles, releases, events, tickets, live rooms, Requests, Tips, and Boosts'
   };
 }
 
