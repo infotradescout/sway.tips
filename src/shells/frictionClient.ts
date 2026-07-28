@@ -15,14 +15,19 @@ const ALLOWED_EVENTS = [
   'room_entry_recovery_viewed',
   'share_link_copied',
   'request_started',
-  'boost_started'
+  'boost_started',
+  'performer_profile_claim_started',
+  'guest_to_performer_started',
+  'public_profile_shared',
+  'public_event_shared',
+  'public_release_shared'
 ] as const;
 
 type ShellFrictionEvent = (typeof ALLOWED_EVENTS)[number];
 
 type ShellFrictionPayload = {
   shell: 'patron' | 'talent';
-  surface: 'recovery-view' | 'room-entry' | 'share-kit';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release';
   route_family: string;
   has_route_context: boolean;
   has_session_context: boolean;
@@ -42,7 +47,7 @@ function hasOnlyAllowedPayloadKeys(payload: Record<string, unknown>) {
 function isValidPayload(payload: Record<string, unknown>): payload is ShellFrictionPayload {
   return (
     (payload.shell === 'patron' || payload.shell === 'talent') &&
-    (payload.surface === 'recovery-view' || payload.surface === 'room-entry' || payload.surface === 'share-kit') &&
+    (payload.surface === 'recovery-view' || payload.surface === 'room-entry' || payload.surface === 'share-kit' || payload.surface === 'public-profile' || payload.surface === 'public-event' || payload.surface === 'public-release') &&
     typeof payload.route_family === 'string' &&
     typeof payload.has_route_context === 'boolean' &&
     typeof payload.has_session_context === 'boolean' &&
@@ -100,4 +105,11 @@ export function sendRequestStarted(payload: Record<string, unknown>) {
 
 export function sendBoostStarted(payload: Record<string, unknown>) {
   sendFrictionEvent('boost_started', payload);
+}
+
+export function sendAcquisitionEvent(
+  event: 'performer_profile_claim_started' | 'guest_to_performer_started' | 'public_profile_shared' | 'public_event_shared' | 'public_release_shared',
+  payload: Record<string, unknown>
+) {
+  sendFrictionEvent(event, payload);
 }
