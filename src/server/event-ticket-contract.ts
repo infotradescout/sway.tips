@@ -50,6 +50,50 @@ export const NATIVE_TICKET_BUYER_TERMS_HASH = createHash('sha256')
 // New runtime configuration only enables `stripe_automatic`.
 export type NativeTicketTaxMode = 'stripe_automatic' | 'not_required';
 
+export type NativeTicketPerformanceLocation = {
+  line1: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: 'US';
+};
+
+export function resolveNativeTicketPerformanceLocation(input: {
+  locationAddress: string | null;
+  city: string | null;
+  locationIsTba: boolean;
+}): NativeTicketPerformanceLocation | null {
+  if (input.locationIsTba) return null;
+  const address = input.locationAddress?.trim().replace(/\s+/g, ' ') ?? '';
+  const cityRegion = input.city?.trim().replace(/\s+/g, ' ') ?? '';
+  if (!address || !cityRegion) return null;
+
+  const fullAddressMatch = address.match(
+    /^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i
+  );
+  if (fullAddressMatch) {
+    return {
+      line1: fullAddressMatch[1].trim(),
+      city: fullAddressMatch[2].trim(),
+      state: fullAddressMatch[3].toUpperCase(),
+      postalCode: fullAddressMatch[4],
+      country: 'US'
+    };
+  }
+
+  const cityRegionMatch = cityRegion.match(
+    /^(.+?)(?:,\s*|\s+)([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i
+  );
+  if (!cityRegionMatch) return null;
+  return {
+    line1: address,
+    city: cityRegionMatch[1].trim(),
+    state: cityRegionMatch[2].toUpperCase(),
+    postalCode: cityRegionMatch[3],
+    country: 'US'
+  };
+}
+
 export type NativeTicketRuntimeConfig = {
   salesEnabled: boolean;
   disabledReasons: string[];
