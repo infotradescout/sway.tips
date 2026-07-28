@@ -14,6 +14,7 @@ const behaviorProgram = String.raw`
     buildNativeTicketBuyerTermsSnapshot,
     buildNativeTicketSellerTermsSnapshot,
     calculateNativeTicketPrice,
+    resolveNativeTicketPerformanceLocation,
     resolveNativeTicketRuntimeConfig
   } from './src/server/event-ticket-contract.ts';
 
@@ -302,6 +303,34 @@ const behaviorProgram = String.raw`
     taxMode: 'stripe_automatic',
     refundGraceMinutes: 1_440
   });
+
+  assert.deepEqual(resolveNativeTicketPerformanceLocation({
+    locationAddress: '100 Test Way',
+    city: 'Chicago, IL 60601',
+    locationIsTba: false
+  }), {
+    line1: '100 Test Way',
+    city: 'Chicago',
+    state: 'IL',
+    postalCode: '60601',
+    country: 'US'
+  });
+  assert.deepEqual(resolveNativeTicketPerformanceLocation({
+    locationAddress: '100 Test Way, Chicago, IL 60601',
+    city: 'Chicago',
+    locationIsTba: false
+  }), {
+    line1: '100 Test Way',
+    city: 'Chicago',
+    state: 'IL',
+    postalCode: '60601',
+    country: 'US'
+  });
+  assert.equal(resolveNativeTicketPerformanceLocation({
+    locationAddress: '100 Test Way',
+    city: 'Chicago, IL',
+    locationIsTba: false
+  }), null);
 `;
 
 const result = spawnSync(
