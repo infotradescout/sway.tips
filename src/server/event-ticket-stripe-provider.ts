@@ -15,6 +15,15 @@ export type EventTicketStripeProviderConfig = {
   secretKey: string;
   webhookSecret: string;
   tax: EventTicketStripeTaxConfiguration;
+  createPerformanceLocation?: (input: {
+    eventId: string;
+    line1: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: 'US';
+    description: string;
+  }) => Promise<string>;
 };
 
 export type EventTicketStripeMetadata = Record<string, string>;
@@ -35,6 +44,14 @@ export type CreateEventTicketCheckoutInput = {
   termsHash: string;
   transferGroup: string;
   idempotencyKey: string;
+  performanceLocation: {
+    line1: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: 'US';
+    description: string;
+  };
   metadata?: EventTicketStripeMetadata;
 };
 
@@ -181,6 +198,7 @@ export type EventTicketStripeProvider = {
 
 const EVENT_TICKET_METADATA_PREFIX = 'sway_ticket';
 const STRIPE_IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+const STRIPE_TAX_LOCATION_API_VERSION = '2026-02-25.preview';
 
 function requireNonEmpty(value: string, field: string, maximumLength = 500) {
   const normalized = value.trim();
@@ -188,6 +206,24 @@ function requireNonEmpty(value: string, field: string, maximumLength = 500) {
     throw new Error(`${field} is required and must not exceed ${maximumLength} characters.`);
   }
   return normalized;
+}
+
+function requirePerformanceLocation(
+  input: CreateEventTicketCheckoutInput['performanceLocation']
+) {
+  const state = requireNonEmpty(input.state, 'Event state', 2).toUpperCase();
+  const postalCode = requireNonEmpty(input.postalCode, 'Event postal code', 10);
+  if (!/^[A-Z]{2}$/.test(state) || !/^\d{5}(?:-\d{4})?$/.test(postalCode)) {
+    throw new Error('Event performance location must contain a valid US state and postal code.');
+  }
+  return {
+    line1: requireNonEmpty(input.line1, 'Event address', 240),
+    city: requireNonEmpty(input.city, 'Event city', 120),
+    state,
+    postalCode,
+    country: input.country,
+    description: requireNonEmpty(input.description, 'Event location description', 500)
+  };
 }
 
 function requireIdempotencyKey(value: string) {
@@ -645,6 +681,7 @@ export function createEventTicketStripeProvider(
       const termsHash = requireNonEmpty(input.termsHash, 'Ticket terms hash', 128);
       const transferGroup = requireNonEmpty(input.transferGroup, 'Ticket transfer group', 255);
       const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
+      const performanceLocation = requirePerformanceLocation(input.performanceLocation);
       const metadata = normalizeMetadata(input.metadata, {
         [`${EVENT_TICKET_METADATA_PREFIX}_lane`]: 'native_ga',
         [`${EVENT_TICKET_METADATA_PREFIX}_order_id`]: orderId,
@@ -653,6 +690,34 @@ export function createEventTicketStripeProvider(
         [`${EVENT_TICKET_METADATA_PREFIX}_buyer_account_id`]: buyerAccountId,
         [`${EVENT_TICKET_METADATA_PREFIX}_terms_hash`]: termsHash
       });
+      const taxLocationId = config.createPerformanceLocation
+        ? await config.createPerformanceLocation({ eventId, ...performanceLocation })
+        : (await stripe.rawRequest(
+            'POST',
+            '/v1/tax/locations',
+            {
+              type: 'performance',
+              address: {
+                line1: performanceLocation.line1,
+                city: performanceLocation.city,
+                state: performanceLocation.state,
+                postal_code: performanceLocation.postalCode,
+                country: performanceLocation.country
+              },
+              description: performanceLocation.description
+            },
+            {
+              idempotencyKey: requireIdempotencyKey(`ticket.tax-location.${eventId}.v1`),
+              additionalHeaders: { 'Stripe-Version': STRIPE_TAX_LOCATION_API_VERSION }
+            }
+          ) as { id?: unknown }).id;
+      const performanceLocationId = typeof taxLocationId === 'string'
+        && /^taxloc_[A-Za-z0-9]+$/.test(taxLocationId)
+        ? taxLocationId
+        : null;
+      if (!performanceLocationId) {
+        throw new Error('Stripe did not return a valid event performance location.');
+      }
 
       const session = await stripe.checkout.sessions.create(
         {
@@ -677,7 +742,12 @@ export function createEventTicketStripeProvider(
                   name: ticketName,
                   ...(ticketDescription ? { description: ticketDescription } : {}),
                   ...(tax.mode === 'stripe_automatic'
-                    ? { tax_code: tax.productTaxCode }
+                    ? {
+                        tax_details: {
+                          tax_code: tax.productTaxCode,
+                          performance_location: performanceLocationId
+                        }
+                      }
                     : {})
                 }
               }
