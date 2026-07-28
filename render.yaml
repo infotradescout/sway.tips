@@ -22,6 +22,16 @@ services:
       # versioned approval, legal, finance, support, and live-proof gates pass.
       - key: SWAY_NATIVE_TICKETS_ENABLED
         value: "false"
+      - key: SWAY_TICKET_TAX_MODE
+        value: stripe_automatic
+      # Select the Stripe event-admission tax code approved for Sway's ticket
+      # product in Render. Stripe Automatic Tax remains fail-closed without it.
+      - key: SWAY_TICKET_STRIPE_TAX_CODE
+        sync: false
+      - key: SWAY_TICKET_QR_SECRET
+        generateValue: true
+      - key: SWAY_TICKET_PRODUCTION_APPROVAL_VERSION
+        value: 2026-07-28.native-ga.v3
       - key: SWAY_AUDIO_STORAGE_PROVIDER
         value: r2
       - key: SWAY_AUDIO_R2_BUCKET

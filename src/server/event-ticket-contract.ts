@@ -1,15 +1,20 @@
 import { createHash } from 'node:crypto';
 
-export const NATIVE_TICKET_TERMS_VERSION = '2026-07-26.native-ga.v2';
+export const NATIVE_TICKET_TERMS_VERSION = '2026-07-28.native-ga.v3';
+export const NATIVE_TICKET_STANDARD_FEE_BPS = 1_000;
+export const NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS = 100;
 
 export const NATIVE_TICKET_SELLER_TERMS_TEXT = [
   'Sway native general-admission ticket sales addendum.',
   'The performer is the seller of record for the event and confirms they have authority to offer admission.',
+  'The performer, not Sway, is responsible for event questions, entry policies, scheduling, attendee service, and the event refund or cancellation policy. The performer support email shown before purchase is the customer contact for those matters.',
+  'Sway provides payment, account, security, and platform infrastructure support only.',
   'Sway charges the customer on Sway’s platform payment account. Sway does not transfer the performer share until a valid ticket is accepted at the door.',
   'The held amount is a contractual payment hold recorded in Sway’s ticket ledger. It is not represented as a bank account, trust account, protected account, or regulated escrow account.',
   'This version supports refund-only settlement for tickets that are not accepted. A performer cancellation or an unaccepted ticket after the disclosed grace window is queued for a full customer refund.',
   'The performer must complete required identity, tax, and payout onboarding before a native ticket event can be published.',
-  'The total customer price, including every mandatory Sway ticket fee, is displayed before checkout. Applicable government tax may be added and disclosed by the payment checkout.',
+  'Sway charges the customer a mandatory service fee equal to 10% of the admission price. For a performer with an active, accepted Sway Brand Partner entitlement, that 10% fee is capped at $1 per ticket.',
+  'The total customer price, including the mandatory Sway ticket fee, is displayed before checkout. Stripe Automatic Tax calculates and discloses applicable government tax before payment.',
   'Refund-only v1 allows one issued or pending ticket record per verified Sway account for each event.',
   'Online admission opens at the disclosed door-opening time and closes after the disclosed post-event grace window.',
   'A queued or pending refund is not complete until the payment provider confirms it.',
@@ -20,7 +25,8 @@ export const NATIVE_TICKET_SELLER_TERMS_TEXT = [
 
 export const NATIVE_TICKET_BUYER_TERMS_TEXT = [
   'Sway native general-admission ticket purchase terms.',
-  'The prominently displayed ticket total includes the admission price and every mandatory Sway ticket fee. Applicable government tax may be added and displayed before payment.',
+  'The prominently displayed ticket total includes the admission price and every mandatory Sway ticket fee. Stripe Automatic Tax calculates and displays applicable government tax before payment.',
+  'The performer selling the ticket—not Sway—is responsible for event questions, entry policies, scheduling, attendee service, and the event refund or cancellation policy. The performer support email is included with the purchase record.',
   'Sway charges the customer now, but does not transfer the performer share until a valid ticket is accepted at the door.',
   'The held amount is a contractual payment hold recorded in Sway’s ticket ledger. It is not represented as a bank account, trust account, protected account, or regulated escrow account.',
   'Each ticket uses a rotating, short-lived admission QR. A valid first acceptance admits the current ticket holder; a repeat scan does not create another admission or transfer.',
@@ -40,6 +46,8 @@ export const NATIVE_TICKET_BUYER_TERMS_HASH = createHash('sha256')
   .update(NATIVE_TICKET_BUYER_TERMS_TEXT)
   .digest('hex');
 
+// `not_required` remains readable for immutable historical offer/order snapshots.
+// New runtime configuration only enables `stripe_automatic`.
 export type NativeTicketTaxMode = 'stripe_automatic' | 'not_required';
 
 export type NativeTicketRuntimeConfig = {
@@ -116,10 +124,9 @@ export function resolveNativeTicketRuntimeConfig(
 ): NativeTicketRuntimeConfig {
   const requested = parseBoolean(env.SWAY_NATIVE_TICKETS_ENABLED);
   const productionApprovalVersion = env.SWAY_TICKET_PRODUCTION_APPROVAL_VERSION?.trim() || null;
-  const feeBps = parseBoundedInteger(env.SWAY_TICKET_FEE_BPS, 0, 5_000);
-  const feeFixedCents = parseBoundedInteger(env.SWAY_TICKET_FEE_FIXED_CENTS, 0, 10_000);
+  const feeBps = NATIVE_TICKET_STANDARD_FEE_BPS;
+  const feeFixedCents = 0;
   const taxMode = env.SWAY_TICKET_TAX_MODE === 'stripe_automatic'
-    || env.SWAY_TICKET_TAX_MODE === 'not_required'
     ? env.SWAY_TICKET_TAX_MODE
     : null;
   const stripeTaxCode = env.SWAY_TICKET_STRIPE_TAX_CODE?.trim() || null;
@@ -139,7 +146,7 @@ export function resolveNativeTicketRuntimeConfig(
     isProduction
   );
   const rawSupportEmail = env.SWAY_TICKET_SUPPORT_EMAIL?.trim() || '';
-  const supportEmail = normalizeSupportEmail(rawSupportEmail);
+  const supportEmail = rawSupportEmail ? normalizeSupportEmail(rawSupportEmail) : null;
   const reservationMinutes = parseBoundedInteger(
     env.SWAY_TICKET_RESERVATION_MINUTES,
     MIN_RESERVATION_MINUTES,
@@ -153,7 +160,6 @@ export function resolveNativeTicketRuntimeConfig(
 
   const disabledReasons: string[] = [];
   if (!requested) disabledReasons.push('native_ticket_sales_not_enabled');
-  if (feeBps === null || feeFixedCents === null) disabledReasons.push('ticket_fee_policy_missing');
   if (!taxMode) disabledReasons.push('ticket_tax_mode_missing');
   if (taxMode === 'stripe_automatic' && !stripeTaxCode) {
     disabledReasons.push('ticket_tax_code_missing');
@@ -161,9 +167,7 @@ export function resolveNativeTicketRuntimeConfig(
   if (!qrSecret || qrSecret.length < 32) disabledReasons.push('ticket_qr_secret_missing');
   if (!previousSecretsValid) disabledReasons.push('ticket_qr_previous_secrets_invalid');
   if (!appBaseUrl) disabledReasons.push('ticket_app_base_url_missing');
-  if (!rawSupportEmail) {
-    disabledReasons.push('ticket_support_email_missing');
-  } else if (!supportEmail) {
+  if (rawSupportEmail && !supportEmail) {
     disabledReasons.push('ticket_support_email_invalid');
   }
   const stripeSecretKey = env.STRIPE_SECRET_KEY?.trim();
@@ -204,6 +208,7 @@ export function calculateNativeTicketPrice(input: {
   faceValueCents: number;
   feeBps: number;
   feeFixedCents: number;
+  feeCapCents?: number | null;
 }) {
   if (!Number.isSafeInteger(input.faceValueCents) || input.faceValueCents < 100) {
     throw new Error('Ticket face value must be at least 100 cents.');
@@ -219,8 +224,18 @@ export function calculateNativeTicketPrice(input: {
     throw new Error('Ticket fixed fee is invalid.');
   }
 
-  const mandatoryFeeCents = Math.ceil(input.faceValueCents * input.feeBps / 10_000)
+  const uncappedFeeCents = Math.ceil(input.faceValueCents * input.feeBps / 10_000)
     + input.feeFixedCents;
+  const feeCapCents = input.feeCapCents ?? null;
+  if (
+    feeCapCents !== null
+    && (!Number.isSafeInteger(feeCapCents) || feeCapCents < 0 || feeCapCents > 10_000)
+  ) {
+    throw new Error('Ticket fee cap is invalid.');
+  }
+  const mandatoryFeeCents = feeCapCents === null
+    ? uncappedFeeCents
+    : Math.min(uncappedFeeCents, feeCapCents);
   const totalPriceCents = input.faceValueCents + mandatoryFeeCents;
 
   if (!Number.isSafeInteger(totalPriceCents) || totalPriceCents > 1_000_000) {
@@ -230,11 +245,21 @@ export function calculateNativeTicketPrice(input: {
   return {
     faceValueCents: input.faceValueCents,
     mandatoryFeeCents,
-    totalPriceCents
+    totalPriceCents,
+    feeBps: mandatoryFeeCents === uncappedFeeCents ? input.feeBps : 0,
+    feeFixedCents: mandatoryFeeCents === uncappedFeeCents ? input.feeFixedCents : mandatoryFeeCents
   };
 }
 
-export function buildNativeTicketSellerTermsSnapshot(config: NativeTicketRuntimeConfig) {
+export function buildNativeTicketSellerTermsSnapshot(
+  config: NativeTicketRuntimeConfig,
+  seller: {
+    supportEmail: string;
+    isSwayExclusive: boolean;
+    exclusiveEntitlementVersion: string | null;
+    exclusiveEntitlementHash: string | null;
+  }
+) {
   if (
     config.feeBps === null
     || config.feeFixedCents === null
@@ -249,6 +274,13 @@ export function buildNativeTicketSellerTermsSnapshot(config: NativeTicketRuntime
     settlementPolicy: 'refund_only' as const,
     feeBps: config.feeBps,
     feeFixedCents: config.feeFixedCents,
+    exclusiveFeeCapCents: seller.isSwayExclusive
+      ? NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS
+      : null,
+    isSwayExclusive: seller.isSwayExclusive,
+    exclusiveEntitlementVersion: seller.exclusiveEntitlementVersion,
+    exclusiveEntitlementHash: seller.exclusiveEntitlementHash,
+    sellerSupportEmail: seller.supportEmail,
     taxMode: config.taxMode,
     stripeTaxCode: config.stripeTaxCode,
     reservationMinutes: config.reservationMinutes,
@@ -264,6 +296,7 @@ export function buildNativeTicketBuyerTermsSnapshot(input: {
   offerId: string;
   performerId: string;
   performerDisplayName: string;
+  sellerSupportEmail: string;
   eventTitle: string;
   startsAt: string;
   endsAt: string;

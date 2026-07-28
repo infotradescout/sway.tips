@@ -20,9 +20,8 @@ const behaviorProgram = String.raw`
   const baseEnabledEnv = {
     NODE_ENV: 'production',
     SWAY_NATIVE_TICKETS_ENABLED: 'true',
-    SWAY_TICKET_FEE_BPS: '250',
-    SWAY_TICKET_FEE_FIXED_CENTS: '35',
-    SWAY_TICKET_TAX_MODE: 'not_required',
+    SWAY_TICKET_TAX_MODE: 'stripe_automatic',
+    SWAY_TICKET_STRIPE_TAX_CODE: 'txcd_10000000',
     SWAY_TICKET_QR_SECRET: 'q'.repeat(32),
     SWAY_TICKET_SUPPORT_EMAIL: 'Tickets@Sway.Test',
     SWAY_TICKET_PRODUCTION_APPROVAL_VERSION: NATIVE_TICKET_TERMS_VERSION,
@@ -36,10 +35,8 @@ const behaviorProgram = String.raw`
     new Set(emptyConfig.disabledReasons),
     new Set([
       'native_ticket_sales_not_enabled',
-      'ticket_fee_policy_missing',
       'ticket_tax_mode_missing',
-      'ticket_qr_secret_missing',
-      'ticket_support_email_missing'
+      'ticket_qr_secret_missing'
     ])
   );
   assert.equal(emptyConfig.appBaseUrl, 'https://app.sway.tips');
@@ -48,7 +45,7 @@ const behaviorProgram = String.raw`
     SWAY_NATIVE_TICKETS_ENABLED: 'true'
   }, true);
   assert.equal(requestedButIncomplete.salesEnabled, false);
-  assert(requestedButIncomplete.disabledReasons.includes('ticket_fee_policy_missing'));
+  assert(requestedButIncomplete.disabledReasons.includes('ticket_tax_mode_missing'));
 
   const enabledConfig = resolveNativeTicketRuntimeConfig(baseEnabledEnv, true);
   assert.equal(enabledConfig.salesEnabled, true);
@@ -68,7 +65,8 @@ const behaviorProgram = String.raw`
 
   const missingAutomaticTaxCode = resolveNativeTicketRuntimeConfig({
     ...baseEnabledEnv,
-    SWAY_TICKET_TAX_MODE: 'stripe_automatic'
+    SWAY_TICKET_TAX_MODE: 'stripe_automatic',
+    SWAY_TICKET_STRIPE_TAX_CODE: undefined
   }, true);
   assert.equal(missingAutomaticTaxCode.salesEnabled, false);
   assert(missingAutomaticTaxCode.disabledReasons.includes('ticket_tax_code_missing'));
@@ -97,7 +95,9 @@ const behaviorProgram = String.raw`
     {
       faceValueCents: 100,
       mandatoryFeeCents: 0,
-      totalPriceCents: 100
+      totalPriceCents: 100,
+      feeBps: 0,
+      feeFixedCents: 0
     }
   );
   assert.deepEqual(
@@ -109,7 +109,9 @@ const behaviorProgram = String.raw`
     {
       faceValueCents: 1_000,
       mandatoryFeeCents: 155,
-      totalPriceCents: 1_155
+      totalPriceCents: 1_155,
+      feeBps: 1_250,
+      feeFixedCents: 30
     }
   );
   assert.deepEqual(
@@ -121,7 +123,9 @@ const behaviorProgram = String.raw`
     {
       faceValueCents: 101,
       mandatoryFeeCents: 11,
-      totalPriceCents: 112
+      totalPriceCents: 112,
+      feeBps: 333,
+      feeFixedCents: 7
     }
   );
   assert.equal(
@@ -131,6 +135,36 @@ const behaviorProgram = String.raw`
       feeFixedCents: 0
     }).totalPriceCents,
     1_000_000
+  );
+  assert.deepEqual(
+    calculateNativeTicketPrice({
+      faceValueCents: 500,
+      feeBps: 1_000,
+      feeFixedCents: 0,
+      feeCapCents: 100
+    }),
+    {
+      faceValueCents: 500,
+      mandatoryFeeCents: 50,
+      totalPriceCents: 550,
+      feeBps: 1_000,
+      feeFixedCents: 0
+    }
+  );
+  assert.deepEqual(
+    calculateNativeTicketPrice({
+      faceValueCents: 2_000,
+      feeBps: 1_000,
+      feeFixedCents: 0,
+      feeCapCents: 100
+    }),
+    {
+      faceValueCents: 2_000,
+      mandatoryFeeCents: 100,
+      totalPriceCents: 2_100,
+      feeBps: 0,
+      feeFixedCents: 100
+    }
   );
 
   for (const invalidInput of [
@@ -167,7 +201,12 @@ const behaviorProgram = String.raw`
     reservationMinutes: 45,
     refundGraceMinutes: 1_440
   };
-  const sellerSnapshot = buildNativeTicketSellerTermsSnapshot(mutableSellerInput);
+  const sellerSnapshot = buildNativeTicketSellerTermsSnapshot(mutableSellerInput, {
+    supportEmail: 'seller@sway.test',
+    isSwayExclusive: false,
+    exclusiveEntitlementVersion: null,
+    exclusiveEntitlementHash: null
+  });
   mutableSellerInput.feeBps = 0;
   mutableSellerInput.feeFixedCents = 0;
   mutableSellerInput.stripeTaxCode = 'txcd_changed';
@@ -178,6 +217,11 @@ const behaviorProgram = String.raw`
     settlementPolicy: 'refund_only',
     feeBps: 250,
     feeFixedCents: 35,
+    exclusiveFeeCapCents: null,
+    isSwayExclusive: false,
+    exclusiveEntitlementVersion: null,
+    exclusiveEntitlementHash: null,
+    sellerSupportEmail: 'seller@sway.test',
     taxMode: 'stripe_automatic',
     stripeTaxCode: 'txcd_10000000',
     reservationMinutes: 45,
@@ -190,6 +234,11 @@ const behaviorProgram = String.raw`
   assert.throws(() => buildNativeTicketSellerTermsSnapshot({
     ...enabledConfig,
     feeBps: null
+  }, {
+    supportEmail: 'seller@sway.test',
+    isSwayExclusive: false,
+    exclusiveEntitlementVersion: null,
+    exclusiveEntitlementHash: null
   }));
 
   const mutableBuyerInput = {
@@ -197,6 +246,7 @@ const behaviorProgram = String.raw`
     offerId: '40000000-0000-4000-8000-000000000001',
     performerId: '20000000-0000-4000-8000-000000000001',
     performerDisplayName: 'Native Ticket Seller',
+    sellerSupportEmail: 'seller@sway.test',
     eventTitle: 'Door-time show',
     startsAt: '2035-07-26T19:00:00.000Z',
     endsAt: '2035-07-26T21:00:00.000Z',
@@ -232,6 +282,7 @@ const behaviorProgram = String.raw`
     offerId: '40000000-0000-4000-8000-000000000001',
     performerId: '20000000-0000-4000-8000-000000000001',
     performerDisplayName: 'Native Ticket Seller',
+    sellerSupportEmail: 'seller@sway.test',
     eventTitle: 'Door-time show',
     startsAt: '2035-07-26T19:00:00.000Z',
     endsAt: '2035-07-26T21:00:00.000Z',

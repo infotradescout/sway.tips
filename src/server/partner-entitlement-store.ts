@@ -62,31 +62,32 @@ export async function loadPartnerEntitlementStateForPerformer(
 
   if (!grant) return null;
 
-  const [[acceptance], [latestStatus]] = await Promise.all([
-    db
-      .select({ acceptedAt: performerPartnerTermsAcceptances.acceptedAt })
-      .from(performerPartnerTermsAcceptances)
-      .where(and(
-        eq(performerPartnerTermsAcceptances.entitlementId, grant.entitlementId),
-        eq(performerPartnerTermsAcceptances.accountUserId, grant.ownerUserId),
-        eq(performerPartnerTermsAcceptances.termsVersion, grant.termsVersion),
-        eq(performerPartnerTermsAcceptances.termsHash, grant.termsHash)
-      ))
-      .orderBy(desc(performerPartnerTermsAcceptances.acceptedAt))
-      .limit(1),
-    db
-      .select({
-        status: performerPartnerEntitlementStatusEvents.status,
-        reason: performerPartnerEntitlementStatusEvents.reason
-      })
-      .from(performerPartnerEntitlementStatusEvents)
-      .where(eq(performerPartnerEntitlementStatusEvents.entitlementId, grant.entitlementId))
-      .orderBy(
-        desc(performerPartnerEntitlementStatusEvents.createdAt),
-        desc(performerPartnerEntitlementStatusEvents.id)
-      )
-      .limit(1)
-  ]);
+  // Keep these reads sequential because this resolver is also called with an
+  // active transaction executor. Parallel statements on one transaction
+  // connection can deadlock or leave the transaction promise unsettled.
+  const [acceptance] = await db
+    .select({ acceptedAt: performerPartnerTermsAcceptances.acceptedAt })
+    .from(performerPartnerTermsAcceptances)
+    .where(and(
+      eq(performerPartnerTermsAcceptances.entitlementId, grant.entitlementId),
+      eq(performerPartnerTermsAcceptances.accountUserId, grant.ownerUserId),
+      eq(performerPartnerTermsAcceptances.termsVersion, grant.termsVersion),
+      eq(performerPartnerTermsAcceptances.termsHash, grant.termsHash)
+    ))
+    .orderBy(desc(performerPartnerTermsAcceptances.acceptedAt))
+    .limit(1);
+  const [latestStatus] = await db
+    .select({
+      status: performerPartnerEntitlementStatusEvents.status,
+      reason: performerPartnerEntitlementStatusEvents.reason
+    })
+    .from(performerPartnerEntitlementStatusEvents)
+    .where(eq(performerPartnerEntitlementStatusEvents.entitlementId, grant.entitlementId))
+    .orderBy(
+      desc(performerPartnerEntitlementStatusEvents.createdAt),
+      desc(performerPartnerEntitlementStatusEvents.id)
+    )
+    .limit(1);
 
   const currentStatus = latestStatus?.status === 'active' || latestStatus?.status === 'suspended'
     ? latestStatus.status

@@ -976,12 +976,12 @@ function renderSupportPageHtml(reference: { type: 'order' | 'ticket'; id: string
     'Sway Support',
     'How to reach Sway support, report a problem, and request safety or account help.',
     `
-      <p>Sway support is for safety issues, payment issues, performer account problems, ticket and refund questions, and live-room failures.</p>
+      <p>Sway support is for safety issues, platform payment or refund-processing failures, account problems, security, admission-pass technology, and live-room failures. Event questions, entry policies, scheduling, attendee service, and seller cancellation policy belong to the performer selling the ticket; use the seller contact shown with that event or ticket.</p>
       <h2>Use Sway support for</h2>
       <ul>
         <li>reporting harassment, unsafe behavior, or abusive requests</li>
         <li>requesting help with a performer account or live room</li>
-        <li>questioning a payment, ticket, dispute, refund, or missing request status</li>
+        <li>reporting a platform payment, dispute, refund-processing, or admission-pass technology failure</li>
         <li>starting a data deletion request</li>
       </ul>
       <h2>Contact Sway</h2>

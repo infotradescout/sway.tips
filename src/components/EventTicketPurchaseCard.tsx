@@ -19,6 +19,7 @@ export type NativeAdmissionOffer = {
   termsVersion: string;
   termsHash: string;
   refundGraceMinutes: number;
+  sellerSupportEmail: string;
 };
 
 type TicketOrderCreateResponse = {
@@ -240,7 +241,13 @@ export default function EventTicketPurchaseCard({
         <p className="mt-3 text-xs leading-5 text-slate-400">
           Includes {formatUsd(offer.faceValueCents)} admission and {formatUsd(offer.mandatoryFeeCents)} in
           mandatory Sway fees. Stripe will show any applicable government tax before payment. Refund-only
-          v1 permits one issued or pending ticket per verified Sway account for this event.
+          permits one issued or pending ticket per verified Sway account for this event.
+        </p>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          Event support is provided by the seller at{' '}
+          <a className="font-black text-cyan-100 underline" href={`mailto:${offer.sellerSupportEmail}`}>
+            {offer.sellerSupportEmail}
+          </a>. Sway handles platform, account, security, and payment infrastructure issues.
         </p>
       </div>
 

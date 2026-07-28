@@ -28,6 +28,7 @@ import {
 import {
   NATIVE_TICKET_BUYER_TERMS_HASH,
   NATIVE_TICKET_BUYER_TERMS_TEXT,
+  NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS,
   NATIVE_TICKET_SELLER_TERMS_HASH,
   NATIVE_TICKET_SELLER_TERMS_TEXT,
   NATIVE_TICKET_TERMS_VERSION,
@@ -46,6 +47,7 @@ import {
   issueEventTicketQrToken,
   verifyEventTicketQrToken
 } from './event-ticket-token';
+import { loadPartnerEntitlementStateForPerformer } from './partner-entitlement-store';
 
 type DbExecutor = SwayDb | any;
 type OfferRow = typeof eventTicketOffers.$inferSelect;
@@ -143,6 +145,7 @@ export type OwnerTicketOfferDto = {
   settlementPolicy: 'refund_only';
   checkoutReservationMinutes: number;
   refundGraceMinutes: number;
+  sellerSupportEmail: string;
   salesOpenAt: string;
   salesCloseAt: string;
   sellerTermsVersion: string;
@@ -166,6 +169,7 @@ export type PublicTicketOfferDto = {
   termsVersion: string;
   termsHash: string;
   refundGraceMinutes: number;
+  sellerSupportEmail: string;
 };
 
 export type BuyerTicketOrderDto = {
@@ -384,6 +388,7 @@ function serializeOwnerOffer(offer: OfferRow): OwnerTicketOfferDto {
     settlementPolicy: 'refund_only',
     checkoutReservationMinutes: offer.checkoutReservationMinutes,
     refundGraceMinutes: offer.refundGraceMinutes,
+    sellerSupportEmail: recordString(asRecord(offer.sellerTermsSnapshot), 'sellerSupportEmail') ?? '',
     salesOpenAt: offer.salesOpenAt.toISOString(),
     salesCloseAt: offer.salesCloseAt.toISOString(),
     sellerTermsVersion: offer.sellerTermsVersion,
@@ -440,7 +445,6 @@ function requireSalesConfiguration(config: NativeTicketRuntimeConfig) {
     || config.taxMode === null
     || !config.qrSecret
     || !config.appBaseUrl
-    || !config.supportEmail
   ) {
     serviceError(
       503,
@@ -706,9 +710,20 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     const activeTaxCode = config.taxMode === 'stripe_automatic'
       ? config.stripeTaxCode
       : null;
+    const snapshot = asRecord(offer.sellerTermsSnapshot);
+    const expectedPrice = calculateNativeTicketPrice({
+      faceValueCents: offer.faceValueCents,
+      feeBps: config.feeBps,
+      feeFixedCents: config.feeFixedCents,
+      feeCapCents: snapshot.isSwayExclusive === true
+        ? NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS
+        : null
+    });
     return !(
-      offer.mandatoryFeeBps !== config.feeBps
-      || offer.mandatoryFeeFixedCents !== config.feeFixedCents
+      offer.mandatoryFeeBps !== expectedPrice.feeBps
+      || offer.mandatoryFeeFixedCents !== expectedPrice.feeFixedCents
+      || offer.mandatoryFeeCents !== expectedPrice.mandatoryFeeCents
+      || offer.advertisedTotalCents !== expectedPrice.totalPriceCents
       || offer.taxMode !== config.taxMode
       || offer.stripeTaxCode !== activeTaxCode
     );
@@ -727,10 +742,15 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     }
   }
 
-  function offerMatchesCurrentSeller(
+  async function offerMatchesCurrentSeller(
     offer: OfferRow,
-    performer: TicketSellerReadiness
+    performer: TicketSellerReadiness,
+    executor: DbExecutor = db
   ) {
+    const partner = await loadPartnerEntitlementStateForPerformer(executor, offer.performerId);
+    const snapshot = asRecord(offer.sellerTermsSnapshot);
+    const snapshotExclusive = snapshot.isSwayExclusive === true;
+    const currentExclusive = Boolean(partner?.isEffective);
     return (
       sellerIsReady(performer)
       && offer.sellerStripeAccountIdSnapshot === performer.stripeConnectedAccountId
@@ -740,6 +760,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       && offer.sellerPayoutsEnabledSnapshot === performer.payoutsEnabled
       && offer.sellerTermsVersion === NATIVE_TICKET_TERMS_VERSION
       && offer.sellerTermsHash === NATIVE_TICKET_SELLER_TERMS_HASH
+      && snapshotExclusive === currentExclusive
+      && recordString(snapshot, 'exclusiveEntitlementHash') === (partner?.isEffective ? partner.termsHash : null)
     );
   }
 
@@ -767,7 +789,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       feeBps: runtimeConfig.feeBps,
       feeFixedCents: runtimeConfig.feeFixedCents,
       taxMode: runtimeConfig.taxMode,
-      supportEmail: runtimeConfig.supportEmail,
+      supportEmail: null,
       reservationMinutes: runtimeConfig.reservationMinutes,
       refundGraceMinutes: runtimeConfig.refundGraceMinutes,
       termsVersion: NATIVE_TICKET_TERMS_VERSION,
@@ -822,6 +844,14 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     assertUuid(input.eventId, 'eventId');
     assertUuid(input.performerId, 'performerId');
     assertUuid(input.actorUserId, 'actorUserId');
+    const [sellerAccount] = await executor
+      .select({
+        email: users.email,
+        emailVerifiedAt: users.emailVerifiedAt
+      })
+      .from(users)
+      .where(eq(users.id, input.actorUserId))
+      .limit(1);
     const query = executor
       .select({
         event: performerEvents,
@@ -850,7 +880,18 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     if (!row) {
       serviceError(403, 'ticket_event_owner_required', 'Only the performer owner can manage this ticket event.');
     }
-    return row;
+    if (!sellerAccount?.email || !sellerAccount.emailVerifiedAt) {
+      serviceError(
+        409,
+        'ticket_seller_support_email_required',
+        'Verify the seller account email before offering native tickets.'
+      );
+    }
+    return {
+      ...row,
+      sellerSupportEmail: sellerAccount.email,
+      sellerSupportEmailVerifiedAt: sellerAccount.emailVerifiedAt
+    };
   }
 
   async function requireVerifiedBuyer(executor: DbExecutor, buyerUserId: string) {
@@ -908,6 +949,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     termsAccepted: boolean;
   }): Promise<OwnerTicketOfferDto> {
     const { config } = requireCheckoutAvailability();
+    const partner = await loadPartnerEntitlementStateForPerformer(db, input.performerId);
     requireBooleanTrue(
       input.termsAccepted,
       'ticket_seller_terms_required',
@@ -916,15 +958,21 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     if (!Number.isSafeInteger(input.capacity) || input.capacity < 1 || input.capacity > MAX_CAPACITY) {
       serviceError(422, 'ticket_capacity_invalid', `Capacity must be between 1 and ${MAX_CAPACITY}.`);
     }
-    const price = calculateNativeTicketPrice({
-      faceValueCents: input.faceValueCents,
-      feeBps: config.feeBps,
-      feeFixedCents: config.feeFixedCents
-    });
-    const sellerTermsSnapshot = buildNativeTicketSellerTermsSnapshot(runtimeConfig);
-
     return db.transaction(async (tx: DbExecutor) => {
       const owner = await requireOwnerContext(tx, { ...input, lock: true });
+      const isSwayExclusive = Boolean(partner?.isEffective);
+      const price = calculateNativeTicketPrice({
+        faceValueCents: input.faceValueCents,
+        feeBps: config.feeBps,
+        feeFixedCents: config.feeFixedCents,
+        feeCapCents: isSwayExclusive ? NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS : null
+      });
+      const sellerTermsSnapshot = buildNativeTicketSellerTermsSnapshot(runtimeConfig, {
+        supportEmail: owner.sellerSupportEmail,
+        isSwayExclusive,
+        exclusiveEntitlementVersion: partner?.isEffective ? partner.termsVersion : null,
+        exclusiveEntitlementHash: partner?.isEffective ? partner.termsHash : null
+      });
       if (owner.event.ticketingMode !== 'native_ga') {
         serviceError(409, 'native_ticket_mode_required', 'This event is not configured for native general admission.');
       }
@@ -970,8 +1018,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         status: 'draft' as const,
         capacity: input.capacity,
         faceValueCents: price.faceValueCents,
-        mandatoryFeeBps: config.feeBps,
-        mandatoryFeeFixedCents: config.feeFixedCents,
+        mandatoryFeeBps: price.feeBps,
+        mandatoryFeeFixedCents: price.feeFixedCents,
         mandatoryFeeCents: price.mandatoryFeeCents,
         advertisedTotalCents: price.totalPriceCents,
         sellerTransferAmountCents: price.faceValueCents,
@@ -1452,7 +1500,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       })
     );
     const capability = getNativeTicketSalesCapability();
-    const activeSeller = offerMatchesCurrentSeller(row.offer, row.performer);
+    const activeSeller = await offerMatchesCurrentSeller(row.offer, row.performer);
+    const sellerSupportEmail = recordString(asRecord(row.offer.sellerTermsSnapshot), 'sellerSupportEmail') ?? '';
     return {
       mode: 'native_ga',
       salesStatus: salesStatus === 'on_sale'
@@ -1466,7 +1515,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       remainingCount,
       termsVersion: NATIVE_TICKET_TERMS_VERSION,
       termsHash: NATIVE_TICKET_BUYER_TERMS_HASH,
-      refundGraceMinutes: row.offer.refundGraceMinutes
+      refundGraceMinutes: row.offer.refundGraceMinutes,
+      sellerSupportEmail
     };
   }
 
@@ -1590,7 +1640,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       ) {
         serviceError(409, 'ticket_sales_not_open', 'Native ticket sales are not open for this event.');
       }
-      if (!offerMatchesCurrentSeller(offer, event.performer)) {
+      if (!await offerMatchesCurrentSeller(offer, event.performer, tx)) {
         serviceError(409, 'ticket_offer_snapshot_stale', 'The performer must refresh this ticket offer before checkout.');
       }
       assertOfferMatchesActivePolicy(offer, config);
@@ -1604,6 +1654,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         offerId: offer.id,
         performerId: offer.performerId,
         performerDisplayName: event.performer.displayName,
+        sellerSupportEmail: recordString(asRecord(offer.sellerTermsSnapshot), 'sellerSupportEmail')
+          ?? serviceError(409, 'ticket_seller_support_email_missing', 'The seller support contact is missing.'),
         eventTitle: event.event.title,
         startsAt: event.event.startsAt.toISOString(),
         endsAt: event.event.endsAt!.toISOString(),
