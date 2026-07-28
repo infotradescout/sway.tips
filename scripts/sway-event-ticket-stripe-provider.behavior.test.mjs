@@ -13,12 +13,17 @@ const behaviorProgram = String.raw`
 
   const webhookSecret = 'whsec_ticket_behavior_test';
   const secretKey = 'sk_test_ticket_behavior_test';
+  const performanceLocationCalls = [];
   const provider = createEventTicketStripeProvider({
     secretKey,
     webhookSecret,
     tax: {
       mode: 'stripe_automatic',
       productTaxCode: 'txcd_10000000'
+    },
+    createPerformanceLocation: async (input) => {
+      performanceLocationCalls.push(input);
+      return 'taxloc_1TicketEvent';
     }
   });
 
@@ -212,6 +217,14 @@ const behaviorProgram = String.raw`
       termsHash: 'a'.repeat(64),
       transferGroup: 'sway_ticket_order_1',
       idempotencyKey: 'ticket.checkout.order-1.v1',
+      performanceLocation: {
+        line1: '100 Test Way',
+        city: 'Chicago',
+        state: 'IL',
+        postalCode: '60601',
+        country: 'US',
+        description: 'Test Door — Test Show'
+      },
       metadata: { ticket_id: 'ticket-1' }
     });
 
@@ -226,9 +239,22 @@ const behaviorProgram = String.raw`
     assert.equal(checkoutParams.line_items[0].price_data.unit_amount, 1_155);
     assert.equal(checkoutParams.line_items[0].price_data.tax_behavior, 'exclusive');
     assert.equal(
-      checkoutParams.line_items[0].price_data.product_data.tax_code,
+      checkoutParams.line_items[0].price_data.product_data.tax_details.tax_code,
       'txcd_10000000'
     );
+    assert.equal(
+      checkoutParams.line_items[0].price_data.product_data.tax_details.performance_location,
+      'taxloc_1TicketEvent'
+    );
+    assert.deepEqual(performanceLocationCalls[0], {
+      eventId: 'event-1',
+      line1: '100 Test Way',
+      city: 'Chicago',
+      state: 'IL',
+      postalCode: '60601',
+      country: 'US',
+      description: 'Test Door — Test Show'
+    });
     assert.deepEqual(checkoutParams.automatic_tax, { enabled: true });
     assert.equal(checkoutParams.payment_intent_data.capture_method, 'automatic');
     assert.equal(

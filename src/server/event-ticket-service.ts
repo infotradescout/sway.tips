@@ -35,6 +35,7 @@ import {
   buildNativeTicketBuyerTermsSnapshot,
   buildNativeTicketSellerTermsSnapshot,
   calculateNativeTicketPrice,
+  resolveNativeTicketPerformanceLocation,
   resolveNativeTicketRuntimeConfig,
   type NativeTicketRuntimeConfig
 } from './event-ticket-contract';
@@ -1128,6 +1129,13 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
           422,
           'native_ticket_event_window_invalid',
           'Native ticket events require a future door-opening time, a future start, and an end time.'
+        );
+      }
+      if (!resolveNativeTicketPerformanceLocation(owner.event)) {
+        serviceError(
+          422,
+          'native_ticket_performance_location_required',
+          'Native ticket events require a complete US street address, city, state, and ZIP code for ticket tax.'
         );
       }
       if (
@@ -3886,6 +3894,12 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       ) {
         throw new TerminalOperationError('Ticket checkout reservation already expired.');
       }
+      const performanceLocation = resolveNativeTicketPerformanceLocation(context.event);
+      if (!performanceLocation) {
+        throw new TerminalOperationError(
+          'Ticket checkout requires the event’s complete US street address, city, state, and ZIP code.'
+        );
+      }
       const checkout = await provider.createCheckoutSession({
         orderId: context.order.id,
         eventId: context.event.id,
@@ -3902,6 +3916,12 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         termsHash: context.order.buyerTermsHash,
         transferGroup: sellerTransferGroup(context.order.id),
         idempotencyKey: operation.idempotencyKey,
+        performanceLocation: {
+          ...performanceLocation,
+          description: [context.event.locationName, context.event.title]
+            .filter(Boolean)
+            .join(' — ')
+        },
         metadata: {
           sway_ticket_order_id: context.order.id,
           sway_ticket_event_id: context.event.id,

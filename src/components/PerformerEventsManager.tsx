@@ -890,18 +890,22 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                 className={fieldClass()}
                 value={form.city}
                 onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
-                placeholder="Pensacola, FL"
+                placeholder={form.ticketingMode === 'native_ga' ? 'Pensacola, FL 32501' : 'Pensacola, FL'}
               />
             </label>
             <label className="space-y-1.5 sm:col-span-2">
-              <span className={fieldLabel()}>Public address — optional</span>
+              <span className={fieldLabel()}>
+                {form.ticketingMode === 'native_ga' ? 'Event street address' : 'Public address — optional'}
+              </span>
               <input
                 maxLength={240}
                 disabled={form.locationIsTba}
                 className={fieldClass()}
                 value={form.locationAddress}
                 onChange={(event) => setForm((current) => ({ ...current, locationAddress: event.target.value }))}
-                placeholder="Only add an address you want visible to everyone"
+                placeholder={form.ticketingMode === 'native_ga'
+                  ? 'Required for Stripe ticket-tax calculation'
+                  : 'Only add an address you want visible to everyone'}
               />
             </label>
 

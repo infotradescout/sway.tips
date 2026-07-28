@@ -372,7 +372,7 @@ async function seedDatabase(database: PGlite) {
          status, published_at
        ) values (
          $1, $2, $3, $4, $4, $5, $6, $9, $7, 'America/Chicago',
-         'Test Door', '100 Test Way', 'Chicago', 'public', 'native_ga',
+         'Test Door', '100 Test Way', 'Chicago, IL 60601', 'public', 'native_ga',
          'published', $8
        )`,
       [
@@ -642,6 +642,14 @@ async function runServiceProof(
   assert.match(qrCheckout.checkoutUrl ?? '', /^https:\/\/checkout\.stripe\.test\//);
   assert.equal(qrCheckout.ticketId, null);
   assert.equal(fake.checkoutCalls.length, 1);
+  assert.deepEqual(fake.checkoutCalls[0].performanceLocation, {
+    line1: '100 Test Way',
+    city: 'Chicago',
+    state: 'IL',
+    postalCode: '60601',
+    country: 'US',
+    description: 'Test Door — QR Admission Show'
+  });
 
   const idempotentCheckout = await checkout(service, {
     eventId: ids.qrEvent,
