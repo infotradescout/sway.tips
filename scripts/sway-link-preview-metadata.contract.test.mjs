@@ -10,7 +10,7 @@ const failures = [];
 
 for (const term of [
   'type ShareMetadata',
-  'DEFAULT_SHARE_IMAGE_PATH = \'/social-preview.png?v=1\'',
+  'DEFAULT_SHARE_IMAGE_PATH = \'/sway-social-preview-v3.png?v=3\'',
   'function injectShareMetadata',
   'function resolveShareMetadata',
   'function findPublicShareProfile',
@@ -39,10 +39,10 @@ for (const term of [
 }
 
 for (const term of [
-  'https://app.sway.tips/social-&#112;review.png?v=1',
-  'og:image:width" content="1672"',
-  'og:image:height" content="941"',
-  'twitter:image" content="https://app.sway.tips/social-&#112;review.png?v=1"'
+  'https://app.sway.tips/sway-social-&#112;review-v3.png?v=3',
+  'og:image:width" content="1200"',
+  'og:image:height" content="630"',
+  'twitter:image" content="https://app.sway.tips/sway-social-&#112;review-v3.png?v=3"'
 ]) {
   if (!publicHtml.includes(term)) {
     failures.push(`Public landing metadata missing required term: ${term}`);
@@ -51,6 +51,8 @@ for (const term of [
 
 for (const forbidden of [
   'https://sway.tips/assets/sway-neon-background.png?v=1',
+  'og:image:width" content="1672"',
+  'og:image:height" content="941"',
   'og:image:width" content="1080"',
   'og:image:height" content="1620"'
 ]) {
