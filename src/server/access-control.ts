@@ -63,6 +63,7 @@ function isPublicAdminLoginEntryRoute(req: Request) {
   return (
     req.method === 'GET' &&
     (req.path === '/admin/login' ||
+      req.path === '/admin/dashboard' ||
       req.path === '/admin')
   );
 }
