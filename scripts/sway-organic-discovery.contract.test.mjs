@@ -17,6 +17,8 @@ for (const term of [
   "app.get('/llms.txt'",
   "app.get('/sitemap.xml'",
   "nullif(trim(${performers.bio}), '') is not null",
+  "'platynum-47'",
+  'isDiscoveryEligibleHandle(row.handle)',
   'performer_profile_claim_started',
   'guest_to_performer_started',
   'public_profile_shared',
