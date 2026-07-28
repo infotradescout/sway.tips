@@ -16,6 +16,7 @@ for (const term of [
   "app.get('/robots.txt'",
   "app.get('/llms.txt'",
   "app.get('/sitemap.xml'",
+  "nullif(trim(${performers.bio}), '') is not null",
   'performer_profile_claim_started',
   'guest_to_performer_started',
   'public_profile_shared',
