@@ -11376,6 +11376,14 @@ app.get('/api/moderation/placeholders', (_req, res) => {
   });
 });
 
+const INTERNAL_TEST_PROFILE_HANDLES = new Set([
+  'platynum-47'
+]);
+
+function isDiscoveryEligibleHandle(handle: string | null | undefined) {
+  return Boolean(handle && !INTERNAL_TEST_PROFILE_HANDLES.has(handle.trim().toLowerCase()));
+}
+
 function escapeXml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -11452,7 +11460,9 @@ app.get('/sitemap.xml', async (_req, res) => {
     ]);
 
     for (const row of [...profileRows, ...previewRows]) {
-      if (row.handle) urls.add(`${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`);
+      if (isDiscoveryEligibleHandle(row.handle)) {
+        urls.add(`${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`);
+      }
     }
     for (const row of eventRows) urls.add(`${CANONICAL_APP_ORIGIN}/e/${row.id}`);
     for (const row of releaseRows) urls.add(`${CANONICAL_APP_ORIGIN}/r/${row.id}`);
