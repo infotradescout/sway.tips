@@ -325,7 +325,11 @@ async function seedNativeOffer(
         settlementPolicy: 'refund_only',
         feeBps: 1_000,
         feeFixedCents: 50,
-        taxMode: 'not_required'
+        taxMode: 'not_required',
+        sellerSupportEmail: 'ticket-owner@example.test',
+        isSwayExclusive: false,
+        exclusiveEntitlementVersion: null,
+        exclusiveEntitlementHash: null
       }),
       ids.owner
     ]

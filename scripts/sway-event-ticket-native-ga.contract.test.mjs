@@ -142,17 +142,13 @@ const webhookIngestion = sliceBetween(
 // Production sales must remain closed unless every policy and secret is valid.
 requireTerms(ticketContract, 'Native ticket fail-closed configuration', [
   'SWAY_NATIVE_TICKETS_ENABLED',
-  'SWAY_TICKET_FEE_BPS',
-  'SWAY_TICKET_FEE_FIXED_CENTS',
   'SWAY_TICKET_TAX_MODE',
   'SWAY_TICKET_QR_SECRET',
   'SWAY_TICKET_SUPPORT_EMAIL',
   'native_ticket_sales_not_enabled',
-  'ticket_fee_policy_missing',
   'ticket_tax_mode_missing',
   'ticket_qr_secret_missing',
   'ticket_app_base_url_missing',
-  'ticket_support_email_missing',
   'ticket_support_email_invalid'
 ]);
 requireTerms(envExample, 'Native ticket environment contract', [
@@ -162,7 +158,24 @@ requireTerms(envExample, 'Native ticket environment contract', [
   'SWAY_TICKET_SUPPORT_EMAIL=""'
 ]);
 requirePatterns(renderConfig, 'Production native ticket default', [
-  /key:\s*SWAY_NATIVE_TICKETS_ENABLED\s*\n\s*value:\s*["']?false["']?/
+  /key:\s*SWAY_NATIVE_TICKETS_ENABLED\s*\n\s*value:\s*["']?false["']?/,
+  /key:\s*SWAY_TICKET_QR_SECRET\s*\n\s*generateValue:\s*true/,
+  /key:\s*SWAY_TICKET_TAX_MODE\s*\n\s*value:\s*stripe_automatic/
+]);
+requireTerms(ticketContract, 'Locked ticket fee policy', [
+  'NATIVE_TICKET_STANDARD_FEE_BPS = 1_000',
+  'NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS = 100',
+  "const taxMode = env.SWAY_TICKET_TAX_MODE === 'stripe_automatic'",
+  'sellerSupportEmail: seller.supportEmail'
+]);
+requireTerms(ticketService, 'Verified-exclusive fee cap and seller support', [
+  'loadPartnerEntitlementStateForPerformer',
+  'const isSwayExclusive = Boolean(partner?.isEffective)',
+  'NATIVE_TICKET_EXCLUSIVE_FEE_CAP_CENTS',
+  'feeCapCents: isSwayExclusive',
+  'supportEmail: owner.sellerSupportEmail',
+  "'ticket_seller_support_email_required'",
+  "'ticket_seller_support_email_missing'"
 ]);
 requireTerms(readiness, 'Native ticket readiness HOLD', [
   '"id": "native_general_admission_tickets"',

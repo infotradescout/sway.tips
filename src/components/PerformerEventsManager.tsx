@@ -1106,7 +1106,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     I am the performer selling admission and have authority to offer it. Sway charges the
                     customer and holds the performer share until a valid ticket is accepted at check-in.
                     Cancelled events and unaccepted tickets follow Sway’s refund-only policy. Identity, tax,
-                    and payout requirements must be complete before publishing.{' '}
+                    and payout requirements must be complete before publishing. Your verified account email
+                    is shown to buyers for event support. Standard tickets carry a 10% buyer-paid Sway fee;
+                    an active, accepted Sway Brand Partner receives the verified-exclusive $1 cap.{' '}
                     <a
                       href="/legal/tickets"
                       target="_blank"
@@ -1120,9 +1122,6 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         Terms {nativeCapability.termsVersion}
                         {nativeCapability.termsHash
                           ? ` · ${nativeCapability.termsHash.slice(0, 12)}`
-                          : ''}
-                        {nativeCapability.supportEmail
-                          ? ` · Support ${nativeCapability.supportEmail}`
                           : ''}
                       </span>
                     ) : null}
