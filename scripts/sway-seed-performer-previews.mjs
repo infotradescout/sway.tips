@@ -77,9 +77,9 @@ const previews = [
     featuredMedia: [
       {
         kind: 'youtube',
-        title: 'Kita P x Corey Mack in New Orleans',
-        description: 'Say yes — beatbox cover.',
-        url: 'https://www.youtube.com/watch?v=--7MMybc6Vw',
+        title: "Corey Mack's Opening set for Theo Von's 1st Netflix Special \"No Offense\"",
+        description: 'Opening set from coreymack.us — the same showcase video on his site.',
+        url: 'https://www.youtube.com/watch?v=_KzoiR1RgrU',
         isActive: true
       }
     ]

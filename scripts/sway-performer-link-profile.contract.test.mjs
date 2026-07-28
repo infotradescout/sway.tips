@@ -105,8 +105,8 @@ for (const term of [
   'Performing since 1992',
   'kinanddignity.com/blog/taking-a-spin-with-dj-three-x',
   "displayName: 'Corey Mack'",
-  "title: 'Kita P x Corey Mack in New Orleans'",
-  'www.youtube.com/watch?v=--7MMybc6Vw',
+  'Corey Mack\'s Opening set for Theo Von\'s 1st Netflix Special',
+  'www.youtube.com/watch?v=_KzoiR1RgrU',
   'img1.wsimg.com/isteam/ip/',
   'no email, phone, password, owner id, invitation token, or terms acceptance'
 ]) requireIncludes(previewSeed, term, 'Curated preview seed');

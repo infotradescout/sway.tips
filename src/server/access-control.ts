@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
 import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
@@ -270,6 +270,14 @@ function parseFallbackAssertionMaxAgeMs(rawValue: string | undefined) {
   return Math.floor(parsed * 1000);
 }
 
+function createActiveGigAccessGrantFilter() {
+  const now = new Date();
+  return or(
+    isNull(gigAccessGrants.expiresAt),
+    gt(gigAccessGrants.expiresAt, now)
+  );
+}
+
 function createFallbackVerificationConfig(): FallbackVerificationConfig {
   const secret = process.env.SWAY_FALLBACK_ACTOR_HEADER_SECRET?.trim() || null;
 
@@ -459,7 +467,10 @@ async function hasTalentRole(db: SwayDb, actorId: string) {
   const accessRows = await db
     .select({ id: gigAccessGrants.id })
     .from(gigAccessGrants)
-    .where(eq(gigAccessGrants.userId, actorId))
+    .where(and(
+      eq(gigAccessGrants.userId, actorId),
+      createActiveGigAccessGrantFilter()
+    ))
     .limit(1);
 
   return accessRows.length > 0;
@@ -678,7 +689,8 @@ export function createAccessControl({
         .from(gigAccessGrants)
         .where(and(
           eq(gigAccessGrants.gigId, gigId),
-          eq(gigAccessGrants.userId, actor.actorId)
+          eq(gigAccessGrants.userId, actor.actorId),
+          createActiveGigAccessGrantFilter()
         ))
         .limit(1);
 

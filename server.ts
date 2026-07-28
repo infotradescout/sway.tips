@@ -87,9 +87,21 @@ import { createAudioPublishingService } from "./src/server/audio-publishing-serv
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
+import {
+  fetchSafeRemoteImage,
+  SAFE_REMOTE_IMAGE_MAX_PIXELS
+} from "./src/server/safe-remote-image";
 
 dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
+
+sharp.block({
+  operation: [
+    'VipsForeignLoadNsgif',
+    'VipsForeignLoadTiff',
+    'VipsForeignLoadVips'
+  ]
+});
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
@@ -203,6 +215,17 @@ function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Surrogate-Control', 'no-store');
 }
 
+function applyDefaultSecurityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (isProduction) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+  next();
+}
+
 function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -245,6 +268,7 @@ app.use(express.json({
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
   }
 }));
+app.use(applyDefaultSecurityHeaders);
 
 app.use(async (req, _res, next) => {
   try {
@@ -470,6 +494,15 @@ function wrapShareCardText(value: string, maxCharacters = 34) {
 }
 
 async function readShareCardAvatar(avatarUrl: string | null): Promise<Buffer | null> {
+  if (typeof avatarUrl === 'string' && avatarUrl.startsWith('/assets/')) {
+    const assetName = path.basename(avatarUrl);
+    for (const root of [path.join(process.cwd(), 'dist', 'assets'), path.join(process.cwd(), 'public', 'assets')]) {
+      const candidate = path.join(root, assetName);
+      if (existsSync(candidate)) return readFileSync(candidate);
+    }
+    return null;
+  }
+
   const safeUrl = normalizePublicProfileUrl(avatarUrl);
   if (!safeUrl) return null;
 
@@ -482,16 +515,14 @@ async function readShareCardAvatar(avatarUrl: string | null): Promise<Buffer | n
     }
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3500);
   try {
-    const response = await fetch(safeUrl, { signal: controller.signal });
-    if (!response.ok) return null;
-    return Buffer.from(await response.arrayBuffer());
-  } catch {
+    return await fetchSafeRemoteImage(safeUrl);
+  } catch (error) {
+    console.warn('Remote performer avatar rejected for share-card rendering.', {
+      host: parsed.hostname,
+      reason: error instanceof Error ? error.message : String(error)
+    });
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -533,7 +564,7 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
   if (avatar) {
     const size = 650;
     const roundedMask = Buffer.from(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" rx="72" fill="#fff"/></svg>`);
-    const framedAvatar = await sharp(avatar)
+    const framedAvatar = await sharp(avatar, { limitInputPixels: SAFE_REMOTE_IMAGE_MAX_PIXELS })
       .resize(size, size, { fit: 'cover', position: 'attention' })
       .ensureAlpha()
       .composite([{ input: roundedMask, blend: 'dest-in' }])
@@ -1833,7 +1864,13 @@ async function actorHasDurableTalentAccess(executor: any, actorUserId: string) {
   const [grantRow] = await executor
     .select({ id: gigAccessGrants.id })
     .from(gigAccessGrants)
-    .where(eq(gigAccessGrants.userId, actorUserId))
+    .where(and(
+      eq(gigAccessGrants.userId, actorUserId),
+      or(
+        isNull(gigAccessGrants.expiresAt),
+        gt(gigAccessGrants.expiresAt, new Date())
+      )
+    ))
     .limit(1);
 
   return Boolean(grantRow);
@@ -2686,25 +2723,12 @@ app.get("/api/build-marker", (_req, res) => {
 app.get('/api/runtime-config-status', (_req, res) => {
   applyNoStoreHeaders(res);
   res.json({
-    hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
-    hasPerformerBootstrapSecret: Boolean(process.env.SWAY_PERFORMER_BOOTSTRAP_SECRET?.trim()),
-    hasAdminBootstrapSecret,
-    hasPerformerLoginEmailConfig,
-    performerLoginEmailConfig: {
-      hasSwayEmailProvider,
-      hasSwayEmailApiKey,
-      hasSwayEmailFrom,
-      hasSwayEmailBaseUrl
-    },
+    buildTimestamp: buildMarker.buildTimestamp,
     audioStorage: {
       enabled: Boolean(audioObjectStore?.isEnabled),
       provider: audioObjectStore?.provider ?? null,
       objectStorageVerified: audioObjectStoreVerified
-    },
-    nodeEnv: process.env.NODE_ENV ?? null,
-    commit: buildMarker.commit,
-    branch: buildMarker.branch,
-    buildTimestamp: buildMarker.buildTimestamp
+    }
   });
 });
 
@@ -8097,9 +8121,14 @@ app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
 
 app.get('/api/public/releases/:releaseId', async (req, res) => {
   applyNoStoreHeaders(res);
+  const releaseId = parseDurableGigId(req.params.releaseId);
+  if (!releaseId) {
+    return res.status(422).json({ error: 'Release ID must be a valid UUID.' });
+  }
+
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
   try {
-    const release = await audioPublishingService.getPublicRelease({ releaseId: req.params.releaseId });
+    const release = await audioPublishingService.getPublicRelease({ releaseId });
     if (!release) return res.status(404).json({ error: 'Public release not found.' });
     return res.json({ release });
   } catch (error) {
@@ -8108,9 +8137,14 @@ app.get('/api/public/releases/:releaseId', async (req, res) => {
 });
 
 app.get('/api/public/releases/:releaseId/artwork', async (req, res) => {
+  const releaseId = parseDurableGigId(req.params.releaseId);
+  if (!releaseId) {
+    return res.status(422).json({ error: 'Release ID must be a valid UUID.' });
+  }
+
   if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
   try {
-    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId: req.params.releaseId });
+    const opened = await audioPublishingService.openPublicReleaseArtwork({ releaseId });
     res.setHeader('Content-Type', opened.version.mimeType);
     res.setHeader('Content-Length', String(opened.byteSize));
     res.setHeader('Content-Disposition', `inline; filename="${opened.version.originalFilename.replace(/"/g, '')}"`);
@@ -10293,12 +10327,14 @@ async function startServer() {
       },
       appType: "custom",
     });
+
     app.use(vite.middlewares);
     // Vite's publicDir is disabled outside demo mode, so serve repo public/
     // assets (S mark, icons, manifest, sw) directly in dev to mirror the
     // production dist static behavior. Dev-only; no business/auth logic.
     app.use(express.static(path.join(process.cwd(), 'public'), { index: false }));
-    app.get('*', async (req, res, next) => {
+
+    const renderShellHtml = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
       try {
         const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
@@ -10310,7 +10346,10 @@ async function startServer() {
       } catch (error) {
         next(error);
       }
-    });
+    };
+
+    app.get('/index.html', renderShellHtml);
+    app.get('*', renderShellHtml);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.get('/shells/dev-sandbox.html', (_req, res) => {
@@ -10320,7 +10359,7 @@ async function startServer() {
       res.status(404).send('Not found');
     });
     app.use(express.static(distPath, { index: false }));
-    app.get('*', async (req, res, next) => {
+    const renderShellHtml = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
       const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
       if (!isShellAllowed(shell)) {
         res.status(404).send('Not found');
@@ -10335,7 +10374,10 @@ async function startServer() {
       } catch (error) {
         next(error);
       }
-    });
+    };
+
+    app.get('/index.html', renderShellHtml);
+    app.get('*', renderShellHtml);
   }
 
   app.listen(PORT, "0.0.0.0", () => {
