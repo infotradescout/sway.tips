@@ -15,7 +15,12 @@ const checks = [
     path: '/faq',
     expectedStatus: 200,
     contentType: 'text/html',
-    mustInclude: ['Sway FAQ', 'Official links', 'Social links', 'Create performer account']
+    mustInclude: [
+      'Sway: the whole performer business, connected',
+      'The product in four connected parts',
+      'How Sway works for an audience member',
+      'Create a Sway account'
+    ]
   },
   {
     name: 'patron shell entry',
