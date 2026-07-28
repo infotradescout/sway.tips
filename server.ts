@@ -15,7 +15,7 @@ import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
@@ -357,6 +357,7 @@ type ShareMetadata = {
   image: string;
   imageAlt: string;
   robots?: 'noindex, nofollow';
+  structuredData?: Record<string, unknown>;
 };
 
 type PublicShareProfile = {
@@ -413,12 +414,16 @@ function renderShareMetaTags(metadata: ShareMetadata) {
   const robots = metadata.robots
     ? `<meta name="robots" content="${escapePublicProfileMetadataAttribute(metadata.robots)}" />`
     : '';
+  const structuredData = metadata.structuredData
+    ? `<script type="application/ld+json">${JSON.stringify(metadata.structuredData).replace(/</g, '\\u003c')}</script>`
+    : '';
 
   return [
     '<meta name="sway-share-meta" content="server-rendered" />',
     robots,
     `<title>${title}</title>`,
     `<meta name="description" content="${description}" />`,
+    `<link rel="canonical" href="${url}" />`,
     '<meta property="og:type" content="website" />',
     '<meta property="og:site_name" content="Sway" />',
     `<meta property="og:title" content="${title}" />`,
@@ -433,7 +438,8 @@ function renderShareMetaTags(metadata: ShareMetadata) {
     '<meta name="twitter:card" content="summary_large_image" />',
     `<meta name="twitter:title" content="${title}" />`,
     `<meta name="twitter:description" content="${description}" />`,
-    `<meta name="twitter:image" content="${image}" />`
+    `<meta name="twitter:image" content="${image}" />`,
+    structuredData
   ].join('\n    ');
 }
 
@@ -441,6 +447,8 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   const metaTags = renderShareMetaTags(metadata);
   const withoutExisting = html
     .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
+    .replace(/\s*<link\s+rel=["']canonical["'][^>]*>/gi, '')
+    .replace(/\s*<script\s+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
 
   return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
@@ -632,7 +640,18 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       description,
       url: `/p/${profile.handle}`,
       image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
-      imageAlt: `@${profile.handle} Sway public page`
+      imageAlt: `@${profile.handle} Sway public page`,
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'Person',
+        name: profile.displayName,
+        alternateName: `@${profile.handle}`,
+        description,
+        url: absoluteShareUrl(req, `/p/${profile.handle}`),
+        image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
+        homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
+        mainEntityOfPage: absoluteShareUrl(req, `/p/${profile.handle}`)
+      }
     });
   }
 
@@ -662,6 +681,32 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       url: `/e/${event.id}`,
       image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
       imageAlt: `${event.title} event artwork`,
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'Event',
+        name: event.title,
+        description: event.description || undefined,
+        startDate: event.startsAt,
+        endDate: event.endsAt || undefined,
+        eventStatus: event.status === 'cancelled'
+          ? 'https://schema.org/EventCancelled'
+          : 'https://schema.org/EventScheduled',
+        eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+        image: event.coverImageUrl || event.performer.avatarUrl || undefined,
+        url: absoluteShareUrl(req, `/e/${event.id}`),
+        location: event.locationIsTba ? undefined : {
+          '@type': 'Place',
+          name: event.locationName || event.city || undefined,
+          address: event.locationAddress || event.city || undefined
+        },
+        performer: {
+          '@type': 'Person',
+          name: event.performer.displayName,
+          url: event.performer.handle
+            ? absoluteShareUrl(req, `/p/${event.performer.handle}`)
+            : undefined
+        }
+      },
       robots: event.visibility === 'unlisted'
         || event.status === 'cancelled'
         || eventDate.getTime() <= Date.now()
@@ -683,7 +728,20 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       description: `${dateCopy} View the official credits and provider-confirmed availability on Sway.`,
       url: release.releasePath,
       image: release.artworkUrl || DEFAULT_SHARE_IMAGE_PATH,
-      imageAlt: `${release.title} release artwork`
+      imageAlt: `${release.title} release artwork`,
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'MusicAlbum',
+        name: release.title,
+        byArtist: {
+          '@type': 'MusicGroup',
+          name: release.primaryArtistName
+        },
+        datePublished: release.publishedAt || release.scheduledReleaseAt || undefined,
+        image: release.artworkUrl || undefined,
+        url: absoluteShareUrl(req, release.releasePath),
+        numTracks: Array.isArray(release.recordings) ? release.recordings.length : undefined
+      }
     });
   }
 
@@ -6537,7 +6595,12 @@ const shellTelemetryAllowedEvents = new Set([
   'room_entry_recovery_viewed',
   'share_link_copied',
   'request_started',
-  'boost_started'
+  'boost_started',
+  'performer_profile_claim_started',
+  'guest_to_performer_started',
+  'public_profile_shared',
+  'public_event_shared',
+  'public_release_shared'
 ]);
 
 const shellTelemetryAllowedKeys = new Set([
@@ -6581,7 +6644,7 @@ const shellTelemetrySensitiveKeys = new Set([
 
 type ShellTelemetryPayload = {
   shell: 'patron' | 'talent';
-  surface: 'recovery-view' | 'room-entry' | 'share-kit';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release';
   event: string;
   route_family: string;
   has_route_context: boolean;
@@ -6615,7 +6678,7 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
   if (payload.shell !== 'patron' && payload.shell !== 'talent') {
     return { ok: false, status: 400, error: 'Shell telemetry requires shell=patron or shell=talent.' };
   }
-  if (payload.surface !== 'recovery-view' && payload.surface !== 'room-entry' && payload.surface !== 'share-kit') {
+  if (payload.surface !== 'recovery-view' && payload.surface !== 'room-entry' && payload.surface !== 'share-kit' && payload.surface !== 'public-profile' && payload.surface !== 'public-event' && payload.surface !== 'public-release') {
     return { ok: false, status: 400, error: 'Shell telemetry requires a supported funnel surface.' };
   }
   if (typeof payload.event !== 'string' || !shellTelemetryAllowedEvents.has(payload.event)) {
@@ -11311,6 +11374,81 @@ app.get('/api/moderation/placeholders', (_req, res) => {
     success: true,
     app_store_ugc_controls: moderationService.getAppStoreUgcControlPlaceholders()
   });
+});
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send([
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /admin',
+    'Disallow: /talent',
+    'Disallow: /account',
+    'Disallow: /api/',
+    `Sitemap: ${CANONICAL_APP_ORIGIN}/sitemap.xml`
+  ].join('\n'));
+});
+
+app.get('/llms.txt', (_req, res) => {
+  res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send([
+    '# Sway',
+    '',
+    '> Sway gives working performers one public home for profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.',
+    '',
+    '## Public surfaces',
+    `- [About Sway](${CANONICAL_APP_ORIGIN}/about)`,
+    `- [Discover performers, shows, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
+    `- [FAQ](${CANONICAL_APP_ORIGIN}/faq)`,
+    `- [Terms](${CANONICAL_APP_ORIGIN}/terms)`,
+    `- [Privacy](${CANONICAL_APP_ORIGIN}/privacy)`,
+    '',
+    'Performer pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
+    'Only published, public, non-suspended records belong in search results. Planned delivery is not represented as confirmed store availability.'
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', async (_req, res) => {
+  const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
+  const urls = new Set(staticPaths.map((route) => `${CANONICAL_APP_ORIGIN}${route}`));
+
+  if (businessDb) {
+    const [profileRows, previewRows, eventRows, releaseRows] = await Promise.all([
+      businessDb.select({ handle: performers.handle })
+        .from(performers)
+        .where(and(eq(performers.isActive, true), notInArray(performers.onboardingStatus, ['suspended']))),
+      businessDb.select({ handle: performerProfilePreviews.handle })
+        .from(performerProfilePreviews)
+        .where(eq(performerProfilePreviews.isActive, true)),
+      businessDb.select({ id: performerEvents.id })
+        .from(performerEvents)
+        .where(and(eq(performerEvents.status, 'published'), eq(performerEvents.visibility, 'public'), gt(performerEvents.startsAt, new Date()))),
+      businessDb.select({ id: musicReleases.id })
+        .from(musicReleases)
+        .where(inArray(musicReleases.status, ['ready', 'scheduled', 'published']))
+    ]);
+
+    for (const row of [...profileRows, ...previewRows]) {
+      if (row.handle) urls.add(`${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`);
+    }
+    for (const row of eventRows) urls.add(`${CANONICAL_APP_ORIGIN}/e/${row.id}`);
+    for (const row of releaseRows) urls.add(`${CANONICAL_APP_ORIGIN}/r/${row.id}`);
+  }
+
+  const body = [...urls]
+    .sort()
+    .map((url) => `  <url><loc>${escapeXml(url)}</loc></url>`)
+    .join('\n');
+  res.type('application/xml').set('Cache-Control', 'public, max-age=900').send(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`
+  );
 });
 
 app.get('/support', (req, res) => {
