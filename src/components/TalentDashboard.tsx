@@ -1652,6 +1652,7 @@ export default function TalentDashboard({
                     <>
                       <button
                         type="button"
+                        aria-label={`Approve ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
@@ -1661,6 +1662,7 @@ export default function TalentDashboard({
                       </button>
                       <button
                         type="button"
+                        aria-label={`Deny ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
@@ -1681,6 +1683,7 @@ export default function TalentDashboard({
                     <>
                       <button
                         type="button"
+                        aria-label={`Mark ${request.title} played`}
                         onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
@@ -1690,6 +1693,7 @@ export default function TalentDashboard({
                       </button>
                       <button
                         type="button"
+                        aria-label={`Hide ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
@@ -1722,6 +1726,7 @@ export default function TalentDashboard({
                       <>
                         <button
                           type="button"
+                          aria-label={`Approve ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
@@ -1731,6 +1736,7 @@ export default function TalentDashboard({
                         </button>
                         <button
                           type="button"
+                          aria-label={`Deny ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
@@ -1751,6 +1757,7 @@ export default function TalentDashboard({
                       <>
                         <button
                           type="button"
+                          aria-label={`Mark ${request.title} played`}
                           onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
@@ -1760,6 +1767,7 @@ export default function TalentDashboard({
                         </button>
                         <button
                           type="button"
+                          aria-label={`Hide ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}

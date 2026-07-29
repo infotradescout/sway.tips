@@ -47,6 +47,17 @@ for (const term of [
   if (!performerCockpit.includes(term)) failures.push(`Performer cockpit missing no-scroll cockpit term: ${term}`);
 }
 
+for (const actionLabel of [
+  'aria-label={`Approve ${request.title}`}',
+  'aria-label={`Deny ${request.title}`}',
+  'aria-label={`Mark ${request.title} played`}',
+  'aria-label={`Hide ${request.title}`}'
+]) {
+  if ((talentDashboard.match(new RegExp(actionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ?? []).length !== 2) {
+    failures.push(`Performer cockpit must name both desktop and mobile queue controls: ${actionLabel}`);
+  }
+}
+
 const compactQrStart = performerRoomShare.indexOf('function PerformerRoomQr');
 const compactShareStart = performerRoomShare.indexOf('export default function PerformerRoomShare');
 const compactQrSource = compactQrStart === -1 || compactShareStart === -1
