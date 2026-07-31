@@ -245,14 +245,14 @@ export default function PatronView({
 }: PatronViewProps) {
   const requestPresets: Array<{ id: string; label: string; subtitle: string; amount: number; targetType: 'music' | 'custom' }> = session.talentRole === 'DJ'
     ? [
-        { id: 'preset-shoutout', label: '$5 Shoutout', subtitle: 'Quick crowd shoutout', amount: 5, targetType: 'custom' },
-        { id: 'preset-bump', label: '$10 Bump the Queue', subtitle: 'Push your moment higher', amount: 10, targetType: 'custom' },
-        { id: 'preset-vip-song', label: '$20 VIP Song Request', subtitle: 'Priority song request', amount: 20, targetType: 'music' }
+        { id: 'preset-shoutout', label: session.paymentsEnabled === false ? 'Shoutout' : '$5 Shoutout', subtitle: 'Quick crowd shoutout', amount: session.paymentsEnabled === false ? 0 : 5, targetType: 'custom' },
+        { id: 'preset-bump', label: session.paymentsEnabled === false ? 'Move it up' : '$10 Bump the Queue', subtitle: 'Push your moment higher', amount: session.paymentsEnabled === false ? 0 : 10, targetType: 'custom' },
+        { id: 'preset-vip-song', label: session.paymentsEnabled === false ? 'Song request' : '$20 VIP Song Request', subtitle: 'Priority song request', amount: session.paymentsEnabled === false ? 0 : 20, targetType: 'music' }
       ]
     : [
-        { id: 'preset-shoutout', label: '$5 Shoutout', subtitle: 'Quick audience shoutout', amount: 5, targetType: 'custom' },
-        { id: 'preset-bump', label: '$10 Bump the Queue', subtitle: 'Prioritize your request', amount: 10, targetType: 'custom' },
-        { id: 'preset-vip', label: '$20 VIP Request', subtitle: 'Premium priority action', amount: 20, targetType: 'custom' }
+        { id: 'preset-shoutout', label: session.paymentsEnabled === false ? 'Shoutout' : '$5 Shoutout', subtitle: 'Quick audience shoutout', amount: session.paymentsEnabled === false ? 0 : 5, targetType: 'custom' },
+        { id: 'preset-bump', label: session.paymentsEnabled === false ? 'Move it up' : '$10 Bump the Queue', subtitle: 'Prioritize your request', amount: session.paymentsEnabled === false ? 0 : 10, targetType: 'custom' },
+        { id: 'preset-vip', label: session.paymentsEnabled === false ? 'Custom request' : '$20 VIP Request', subtitle: 'Premium priority action', amount: session.paymentsEnabled === false ? 0 : 20, targetType: 'custom' }
       ];
 
   // Navigation Tabs
@@ -964,6 +964,10 @@ export default function PatronView({
   // Straight classic tipping logic bypass
   const handleStraightTipSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!session.tipsEnabled) {
+      showFormToast('Tips are unavailable until this performer completes payout setup.');
+      return;
+    }
     if (isSubmitLocked) return;
 
     if (networkPreflightStatus !== 'ready') {
@@ -1124,13 +1128,15 @@ export default function PatronView({
               {previewMode
                 ? 'Demo data only. No payment or moderation action will be sent.'
                 : session.paymentsEnabled === false
-                  ? `Send a free request, upvote an approved queue item, or send a direct tip for ${session.talentName || 'this performer'}. Song requests and boosts are free for this event; tips always go through payment.`
+                  ? session.tipsEnabled
+                    ? `Send a free request, upvote an approved queue item, or tip ${session.talentName || 'this performer'}. Requests and boosts are free for this event.`
+                    : 'Send a free request or upvote an approved queue item. Money actions are off for this room.'
                   : isCrowdAutopilot
                     ? `Request songs or actions, send a direct tip, or boost the crowd-ranked queue for ${session.talentName || 'this performer'}. Clean requests can move into up next automatically.`
                     : `Request songs or actions, send a direct tip, or boost an approved queue item for ${session.talentName || 'this performer'}. Confirm payment to send your action for performer approval.`}
             </p>
-            <div className="grid w-full max-w-md grid-cols-2 gap-2 pt-2">
-              <button
+            <div className={`grid w-full max-w-md gap-2 pt-2 ${session.tipsEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {session.tipsEnabled ? <button
                 type="button"
                 onClick={() => {
                   setActiveTab('tip');
@@ -1139,7 +1145,7 @@ export default function PatronView({
                 className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-2 py-3 text-center text-xs font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99] min-[360px]:px-4 min-[360px]:text-sm"
               >
                 <span className="inline-flex items-center justify-center gap-1 min-[360px]:gap-2"><Coins className="h-4 w-4" /> Tip</span>
-              </button>
+              </button> : null}
               <button
                 type="button"
                 onClick={() => {
@@ -1281,8 +1287,8 @@ export default function PatronView({
           <button
             type="button"
             onClick={() => runSafetyAction(
-              () => onBlockFoundation('patron_device_id_hash', 'anonymous-device', 'Patron requested a device block.'),
-              'Device block recorded.'
+              () => onBlockFoundation('patron_device_id_hash', '', 'Patron requested a safety block.'),
+              'Block request sent for safety review.'
             )}
             className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 hover:border-fuchsia-500/40 cursor-pointer"
           >
@@ -1323,7 +1329,7 @@ export default function PatronView({
             {session.talentRole === 'DJ' ? "Request" : "Request"}
           </button>
 
-          <button
+          {session.tipsEnabled ? <button
             onClick={() => { setActiveTab('tip'); setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip }); }}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'tip'
@@ -1332,7 +1338,7 @@ export default function PatronView({
             }`}
           >
             <Coins className="w-4 h-4" /> Tip
-          </button>
+          </button> : null}
 
           <button
             onClick={() => setActiveTab('queue')}
@@ -1424,14 +1430,14 @@ export default function PatronView({
                 <div className="p-3 bg-slate-950 border border-white/5 rounded-xl font-mono text-2xs space-y-1.5 min-w-0">
                   <span className="text-fuchsia-400 font-bold block select-none">💡 WHAT YOU CAN STILL DO:</span>
                   <div className="text-slate-400 space-y-1 font-sans text-xs">
-                    <p>• Send a <strong className="text-emerald-400">Direct Cash Tip</strong> to show love</p>
+                    {session.tipsEnabled ? <p>• Send a <strong className="text-emerald-400">Direct Cash Tip</strong> to show love</p> : null}
                     <p>• <strong className="text-cyan-400">Boost existing requests</strong> in the live queue to push them up</p>
                     <p>• Watch the live queue and try again when requests reopen</p>
                   </div>
                 </div>
 
                 <div className="flex gap-2">
-                  <button
+                  {session.tipsEnabled ? <button
                     onClick={() => {
                       setActiveTab('tip');
                       setSelectedTrack({ title: 'Classic Tip', description: 'Straight tip supporting the performer directly!', basePrice: session.minimumTip });
@@ -1439,7 +1445,7 @@ export default function PatronView({
                     className="flex-1 py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-bold rounded-xl shadow-lg transition-colors cursor-pointer"
                   >
                     💖 Support Performer Directly
-                  </button>
+                  </button> : null}
                   <button
                     onClick={() => setActiveTab('queue')}
                     className="flex-1 py-2.5 bg-slate-950 border border-white/5 text-slate-300 hover:text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
@@ -1739,7 +1745,7 @@ export default function PatronView({
         )}
 
               {/* TAB B: Straight Classic Tip Options */}
-        {activeTab === 'tip' && session.status === 'active' && (
+        {activeTab === 'tip' && session.status === 'active' && session.tipsEnabled && (
           <motion.form 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1749,7 +1755,7 @@ export default function PatronView({
             <div className="text-center pb-2 select-none">
               <Coins className="w-10 h-10 text-fuchsia-500 mx-auto animate-bounce mb-2" />
               <h3 className="font-display text-sm font-bold text-white uppercase tracking-wider">Classic Straight Tip</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Send a direct tip for {session.talentName}. Confirm payment to finalize it, and your payment method may be charged when the action is approved.</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Send a direct tip for {session.talentName}. Confirm payment to send it; a successful tip is captured immediately.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -2030,7 +2036,7 @@ export default function PatronView({
                           </div>
 
                           {/* Quick Tip action */}
-                          <button
+                          {session.tipsEnabled ? <button
                             type="button"
                             onClick={() => {
                               if (isSubmitLocked) return;
@@ -2047,12 +2053,12 @@ export default function PatronView({
                             } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
                             Tip
-                          </button>
+                          </button> : null}
                         </div>
                       </div>
 
                       {/* Display inline tip drawer if selected */}
-                      {selectedDirectoryPerformer?.id === p.id && (
+                      {session.tipsEnabled && selectedDirectoryPerformer?.id === p.id && (
                         <div className="mx-3 mb-3 p-3.5 bg-slate-950 border border-white/5 rounded-xl space-y-4 animate-slide-in font-sans">
                           <div className="flex justify-between items-center pb-2 border-b border-white/5 font-sans">
                             <span className="text-[9px] font-mono font-bold text-slate-400 uppercase">INLINE DIRECTORY LOCK</span>
@@ -2218,16 +2224,17 @@ export default function PatronView({
                       </div>
 
                       <div className="flex justify-between text-xs font-sans">
-                        <span className="text-slate-500">Service Fee:</span>
+                        <span className="text-slate-500">Estimated Sway fee:</span>
                         <span className="text-fuchsia-400 font-bold">
                           {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
                         </span>
                       </div>
 
                       <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
-                        <span className="text-slate-400">{checkoutCopy?.totalLabel ?? 'Request total:'}</span>
+                        <span className="text-slate-400">Estimated {checkoutCopy?.totalLabel?.toLowerCase() ?? 'request total:'}</span>
                         <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
                       </div>
+                      <p className="text-[10px] text-slate-500 font-sans">The payment provider confirms the final amount before submission.</p>
                     </div>
                   ) : (
                     <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5 text-left font-mono">

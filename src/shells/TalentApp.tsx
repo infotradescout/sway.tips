@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Users } from 'lucide-react';
+import { LogOut, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
 import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
-import TalentLoginCard from '../components/TalentLoginCard';
-import TalentSignupCard from '../components/TalentSignupCard';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
@@ -60,6 +58,7 @@ type TalentPerformerProfile = {
   charges_enabled: boolean;
   payouts_enabled: boolean;
   stripe_connected_account_id: string | null;
+  money_actions_ready: boolean;
 } | null;
 
 export default function TalentApp() {
@@ -76,7 +75,7 @@ export default function TalentApp() {
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
-  const statePath = isAuthEntryRoute ? null : (selectedGigId ? `/api/state/${selectedGigId}` : '/api/state');
+  const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
   const { bState, isLoading, setBState } = useSwayState({ statePath });
 
   const refreshPerformerProfile = async () => {
@@ -155,12 +154,8 @@ export default function TalentApp() {
     // request. The user (or handleStartSession) is the only thing that
     // should change an existing selection.
     if (selectedGigId) return;
-    if (bState.activeGigId) {
-      setSelectedGigId(bState.activeGigId);
-      return;
-    }
     setSelectedGigId(activeRooms[0]?.gigId ?? null);
-  }, [activeRooms, bState.activeGigId, selectedGigId]);
+  }, [activeRooms, selectedGigId]);
 
   const rejectDemoMutation = async () => {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
@@ -266,17 +261,33 @@ export default function TalentApp() {
       talentRole: 'DJ',
       feeType: 'patron',
       minimumTip: 5,
-      paymentsEnabled: true,
+      paymentsEnabled: false,
       searchScope: 'library'
     });
   };
 
+  const handleLogout = async () => {
+    if (demoMode) return;
+    await postJson('/api/account/logout', {});
+    window.location.assign('/');
+  };
+
   if (isTalentLogin(pathname)) {
-    return <TalentLoginCard />;
+    const sourceParams = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
+    sourceParams.set('intent', 'performer');
+    if (typeof window !== 'undefined') window.location.replace(`/account/login?${sourceParams.toString()}`);
+    return <LoadingState />;
   }
 
   if (isTalentSignup(pathname)) {
-    return <TalentSignupCard />;
+    const sourceParams = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
+    const targetParams = new URLSearchParams({ intent: 'performer' });
+    const claim = sourceParams.get('claim') || sourceParams.get('code');
+    const email = sourceParams.get('email');
+    if (claim) targetParams.set('claim', claim);
+    if (email) targetParams.set('email', email);
+    if (typeof window !== 'undefined') window.location.replace(`/account/signup?${targetParams.toString()}`);
+    return <LoadingState />;
   }
 
   if (isTalentInvite(pathname)) {
@@ -285,7 +296,11 @@ export default function TalentApp() {
 
   if (isTalentClaim(pathname)) {
     const params = typeof window === 'undefined' ? '' : window.location.search;
-    const target = `/talent/signup${params || ''}`;
+    const sourceParams = new URLSearchParams(params);
+    const targetParams = new URLSearchParams({ intent: 'performer' });
+    const claim = sourceParams.get('claim') || sourceParams.get('code');
+    if (claim) targetParams.set('claim', claim);
+    const target = `/account/signup?${targetParams.toString()}`;
     if (typeof window !== 'undefined') {
       window.location.replace(target);
     }
@@ -339,7 +354,8 @@ export default function TalentApp() {
 
   if (session.status !== 'inactive') {
     return (
-      <div className="h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
+      <div className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
+        {!demoMode ? <button type="button" onClick={() => { void handleLogout(); }} className="absolute right-3 top-3 z-50 inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 text-xs font-bold text-slate-200 shadow-xl"><LogOut className="h-4 w-4" /> Log out</button> : null}
         <TalentDashboard
           session={session}
           requests={requests}
@@ -376,7 +392,10 @@ export default function TalentApp() {
               <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
             </div>
           </div>
-          <DemoModeBanner compact />
+          <div className="flex items-center gap-2">
+            <DemoModeBanner compact />
+            {!demoMode ? <button type="button" onClick={() => { void handleLogout(); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 text-xs font-bold text-slate-200"><LogOut className="h-4 w-4" /> Log out</button> : null}
+          </div>
         </div>
       </div>
 

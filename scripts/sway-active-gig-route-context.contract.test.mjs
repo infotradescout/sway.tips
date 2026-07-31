@@ -37,8 +37,7 @@ for (const term of [
   'async function resolveLegacyWritableRoom(req: express.Request, res: express.Response)',
   'async function findRoomStateByRequestId(requestId: string)',
   'await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState())',
-  'if (talentAccess.allowed)',
-  '...projectPublicRoomState(state, null)'
+  '...projectPublicRoomState(createEmptyBackendState(), null)'
 ]) {
   if (!server.includes(term)) {
     failures.push(`server.ts missing required active gig route context behavior: ${term}`);
@@ -49,11 +48,12 @@ if (!businessStore.includes('hydrateStateByGigId') || !businessStore.includes('l
   failures.push('Business store must expose gig-scoped hydration helpers for room isolation.');
 }
 
-if (!server.includes('res.json({') || !server.includes('session: state.session') || !server.includes('requests: state.requests') || !server.includes('performers: state.performers')) {
-  failures.push('/api/state must explicitly serialize private performer state only after talent access succeeds.');
-}
-
 const apiStateSection = server.slice(server.indexOf('app.get("/api/state"'), server.indexOf('app.post("/api/pending-action/reconcile"'));
+for (const forbidden of ['session: state.session', 'requests: state.requests', 'performers: state.performers', 'refreshBusinessState()']) {
+  if (apiStateSection.includes(forbidden)) {
+    failures.push(`/api/state must remain a safe-empty bootstrap and never serialize global private room state: ${forbidden}`);
+  }
+}
 for (const forbidden of ['buildMarker', 'paymentService', 'idempotencyStore', 'paymentProvider']) {
   if (apiStateSection.includes(forbidden)) {
     failures.push(`/api/state must not expose adjacent runtime field source: ${forbidden}`);

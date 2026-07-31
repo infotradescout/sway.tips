@@ -16,22 +16,26 @@ export default function PerformerRoomSetup({
   performerName,
   talentRole,
   performerEmailVerified,
+  payoutReady,
   onStartSession
 }: {
   performerName: string;
   talentRole: 'DJ' | 'Performer';
   performerEmailVerified: boolean;
+  payoutReady: boolean;
   onStartSession: (data: PerformerRoomSetupData) => void;
 }) {
   const [step, setStep] = useState(0);
-  const [paymentsEnabled, setPaymentsEnabled] = useState(true);
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [minimumTip, setMinimumTip] = useState(5);
   const [feeType, setFeeType] = useState<'talent' | 'patron'>('patron');
   const [searchScope, setSearchScope] = useState<'library' | 'catalog'>('library');
 
   const pricingSummary = paymentsEnabled
     ? `Paid · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
-    : 'Free requests · direct tips stay paid';
+    : payoutReady
+      ? 'Free requests and upvotes · direct tips available'
+      : 'Free requests and upvotes · money actions off';
   const requestSummary = searchScope === 'library'
     ? 'Customers request from your synced library'
     : 'Customers can type any request; you approve or deny it';
@@ -70,8 +74,8 @@ export default function PerformerRoomSetup({
             <p className="text-xs font-bold text-cyan-300">{performerName}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Paid requests</span><span className="mt-2 block text-xs text-slate-400">Requests and boosts start at ${minimumTip}. Direct tips remain available.</span></button>
-              <button type="button" onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. Direct tips remain paid.</span></button>
+              <button type="button" disabled={!payoutReady} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Paid requests</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? `Requests and boosts start at $${minimumTip}.` : 'Finish Stripe charge and payout setup first.'}</span></button>
+              <button type="button" onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? 'Direct tips remain available.' : 'All money actions stay off.'}</span></button>
             </div>
             {paymentsEnabled ? (
               <div className="rounded-xl border border-white/10 bg-slate-950 p-4">

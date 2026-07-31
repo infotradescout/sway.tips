@@ -80,6 +80,7 @@ interface TalentDashboardProps {
     charges_enabled?: boolean;
     payouts_enabled?: boolean;
     stripe_connected_account_id?: string | null;
+    money_actions_ready?: boolean;
   } | null;
   performerEmailVerified?: boolean;
 }
@@ -2142,7 +2143,7 @@ export default function TalentDashboard({
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
-                {performerProfile?.payouts_enabled ? (
+                {performerProfile?.money_actions_ready ? (
                   <p className="mt-0.5 text-[11px] text-emerald-300">Payouts active. Paid requests, tips, and boosts route to your bank automatically.</p>
                 ) : performerProfile?.charges_enabled ? (
                   <p className="mt-0.5 text-[11px] text-amber-300">Stripe can accept charges, but payouts still need setup.</p>
@@ -2154,7 +2155,7 @@ export default function TalentDashboard({
                 {stripeConnectError ? <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
               </div>
             </div>
-            {!performerProfile?.payouts_enabled ? (
+            {!performerProfile?.money_actions_ready ? (
               <button
                 type="button"
                 onClick={handleConnectStripe}
@@ -2178,9 +2179,9 @@ export default function TalentDashboard({
             displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
             roleLabel={performerRoleLabel}
-            stripeReady={Boolean(performerProfile?.payouts_enabled)}
+            stripeReady={Boolean(performerProfile?.money_actions_ready)}
+            emailVerified={performerEmailVerified}
             onStartRoom={() => setInactiveWorkspace('room')}
-            onOpenCatalog={() => setInactiveWorkspace('catalog')}
             onOpenLibrary={() => {
               setShowAdvancedLibrary(false);
               setInactiveWorkspace('library');
@@ -2195,6 +2196,7 @@ export default function TalentDashboard({
             performerName={welcomePerformerName}
             talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
             performerEmailVerified={performerEmailVerified}
+            payoutReady={Boolean(performerProfile?.money_actions_ready)}
             onStartSession={onStartSession}
           />
         </div>

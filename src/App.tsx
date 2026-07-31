@@ -27,6 +27,7 @@ const emptySession: GigSession = {
   operatingMode: 'manual',
   searchScope: 'library',
   paymentsEnabled: true,
+  tipsEnabled: false,
   totals: {
     totalTips: 0,
     accumulatedFees: 0,

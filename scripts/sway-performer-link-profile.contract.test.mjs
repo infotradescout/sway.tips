@@ -515,25 +515,21 @@ for (const term of [
   'Featured performance',
   'media.embedUrl',
   'allowFullScreen',
-  'QRCodeCanvas',
-  'data-public-profile-qr="true"',
-  'Sway tip QR code',
-  'Copy tip link',
-  'Pay through Sway',
-  'Scan to tip {tipLabel}',
-  'profileTipUrl',
-  'const [tipOpen, setTipOpen] = useState(false)',
   'resolvePublicProfileHeroName',
   'resolvePublicProfilePageKindLabel',
-  'Tip {tipLabel}',
   'primaryRole: string | null',
   'stageName: string | null',
   'canonicalHandle',
-  'Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.',
-  'Direct profile payments are not enabled for this performer yet. No payment was started.',
   'claims and verifies the profile',
-  'Create your own free Sway page'
+  'Create your own free Sway page',
+  'href="/account/signup?intent=performer"'
 ]) requireIncludes(publicPage, term, 'Standalone public page');
+for (const forbidden of [
+  'Pay through Sway',
+  'profileTipUrl',
+  'const [tipOpen, setTipOpen] = useState(false)',
+  'Direct profile payments are not enabled for this performer yet.'
+]) requireExcludes(publicPage, forbidden, 'Standalone public page without a dead profile-payment CTA');
 requireExcludes(publicPage, 'Public performer page', 'Standalone public page must not use a generic performer eyebrow');
 requireExcludes(publicPage, "profile.handle?.toLowerCase() === 'dj3x'", 'Standalone public page must use canonical handle-first resolution');
 requireExcludes(publicPage, 'publicHeroName !== profile.displayName', 'Standalone public page must not show a second display name');

@@ -129,7 +129,8 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: typeof paymentsEnabled ===',
+  'paymentsEnabled: requestedPaymentsEnabled && sellerPayoutReady',
+  'tipsEnabled: sellerPayoutReady',
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',
   'let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip)',
   'amt = 1'

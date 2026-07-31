@@ -91,7 +91,8 @@ async function main() {
     createPerformerPasswordLoginRateLimiter
   } = performerPasswordModule;
 
-  assert.ok(talentAppSource.includes('TalentLoginCard'), 'TalentApp must render the dedicated performer login card.');
+  assert.ok(!talentAppSource.includes('TalentLoginCard'), 'TalentApp must not render a second performer-only account login.');
+  assert.ok(talentAppSource.includes('/account/login?'), 'The legacy performer login route must redirect into the universal account login.');
   assert.ok(!appSource.includes('TalentLoginCard'), 'Legacy/dev App must not duplicate the canonical performer login route.');
   assert.ok(
     talentLoginCardSource.includes('Log in'),
@@ -106,8 +107,8 @@ async function main() {
     'Talent login card must preserve the secondary magic-link recovery CTA.'
   );
   assert.ok(
-    talentLoginCardSource.includes('Create a performer account'),
-    'Talent login card must link to /talent/signup.'
+    talentLoginCardSource.includes('Create one Sway account'),
+    'The compatibility login card must link to the universal account signup.'
   );
   assert.ok(
     talentLoginCardSource.includes('If this email is on an approved Sway performer account, we sent a link.'),
@@ -129,10 +130,10 @@ async function main() {
     "app.post('/api/talent/login/request'",
     "app.get('/api/talent/login/consume'",
     'if (isProduction && !hasPerformerLoginEmailConfig)',
-    'performerPasswordLoginRateLimiter.check',
+    'checkDurablePasswordLoginLimit',
     'verifyPerformerPassword',
-    'performerPasswordLoginRateLimiter.recordFailure',
-    'performerPasswordLoginRateLimiter.reset',
+    'recordDurablePasswordLoginFailure',
+    'resetDurablePasswordLoginFailures',
     'performerSessionStore.revokeActiveSessionsForActorUser',
     "res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {",
     'performerLoginMailer.sendMagicLink'

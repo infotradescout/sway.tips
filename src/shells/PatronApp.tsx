@@ -22,7 +22,8 @@ import {
 } from './frictionClient';
 import { captureCampaignCode } from './campaignAttribution';
 import type { PatronRequestStatus } from '../types';
-import { AccountHome, AccountLogin, AccountSignup } from '../components/AccountAccess';
+import { AccountHome, AccountLogin, AccountRecovery, AccountSignup } from '../components/AccountAccess';
+import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import PublicReleasePage from '../components/PublicReleasePage';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
 import TicketOrderReturnPage from '../components/TicketOrderReturnPage';
@@ -41,12 +42,18 @@ type PatronRoute =
   | { name: 'account-home' }
   | { name: 'account-rights-review' }
   | { name: 'account-login' }
-  | { name: 'account-signup' };
+  | { name: 'account-signup' }
+  | { name: 'account-recover' }
+  | { name: 'account-resend-verification' }
+  | { name: 'account-password-reset' };
 
 function resolvePatronRoute(pathname: string): PatronRoute {
   const parts = pathname.split('/').filter(Boolean);
   if (pathname === '/account/login' || pathname === '/login') return { name: 'account-login' };
   if (pathname === '/account/signup' || pathname === '/signup') return { name: 'account-signup' };
+  if (pathname === '/account/recover') return { name: 'account-recover' };
+  if (pathname === '/account/resend-verification') return { name: 'account-resend-verification' };
+  if (pathname === '/account/password-reset') return { name: 'account-password-reset' };
   if (pathname === '/account/reviews') return { name: 'account-rights-review' };
   if (pathname === '/account') return { name: 'account-home' };
   if (pathname === '/tickets') return { name: 'ticket-wallet' };
@@ -89,8 +96,7 @@ function readPatronActivity(gigId: string | undefined): PatronActivity[] {
 }
 
 // Matches the RoomLookupStatus union produced by useSwayState in shared.tsx.
-// Duplicated locally (not imported) because shared.tsx does not export it and
-// this lane must not modify shared.tsx.
+// Duplicated locally because shared.tsx does not export it.
 type RoomLookupStatusValue = 'global' | 'active' | 'missing' | 'ended' | 'error';
 
 export type PatronRoomRecoveryBranch = 'ended' | 'connection-error' | 'no-session' | 'room-active';
@@ -112,6 +118,18 @@ export function resolvePatronRoomRecoveryBranch(input: {
   return 'room-active';
 }
 
+export function resolveRoomLinkOrId(rawValue: string): string | null {
+  const trimmed = rawValue.trim();
+  if (UUID_PATTERN.test(trimmed)) return `/g/${trimmed}`;
+  try {
+    const parsed = new URL(trimmed, typeof window === 'undefined' ? 'https://app.sway.tips' : window.location.origin);
+    const match = /^\/g\/([0-9a-f-]{36})\/?$/i.exec(parsed.pathname);
+    return match && UUID_PATTERN.test(match[1]) ? `/g/${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
 function PatronNoSessionRecovery({
   onReturnHomeClick,
   attemptedGigId
@@ -120,6 +138,8 @@ function PatronNoSessionRecovery({
   attemptedGigId?: string;
 }) {
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [roomEntry, setRoomEntry] = useState('');
+  const [roomEntryError, setRoomEntryError] = useState('');
 
   return (
     <div className="relative isolate flex min-h-[calc(var(--sway-viewport-height,100vh)*0.8)] items-center justify-center overflow-hidden px-4 py-16">
@@ -147,6 +167,25 @@ function PatronNoSessionRecovery({
         >
           Scan
         </button>
+        <form
+          className="grid gap-2 rounded-2xl border border-white/10 bg-slate-900/80 p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const destination = resolveRoomLinkOrId(roomEntry);
+            if (!destination) {
+              setRoomEntryError('Paste the full Sway room link or its room ID.');
+              return;
+            }
+            window.location.assign(destination);
+          }}
+        >
+          <label htmlFor="sway-room-entry" className="text-xs font-bold text-slate-200">Join with a room link or ID</label>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <input id="sway-room-entry" value={roomEntry} onChange={(event) => { setRoomEntry(event.target.value); setRoomEntryError(''); }} placeholder="https://app.sway.tips/g/…" className="min-h-12 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm text-white" />
+            <button className="min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-5 text-sm font-black text-cyan-100">Join room</button>
+          </div>
+          {roomEntryError ? <p role="alert" className="text-xs text-rose-200">{roomEntryError}</p> : null}
+        </form>
         {/* Intentionally no performer sign-up/sign-in links here -- this is a
             public audience surface reached by any patron whose room link
             failed to resolve, and it must not route them into performer
@@ -424,6 +463,9 @@ export default function PatronApp() {
   if (route.name === 'ticket-pass') return <TicketPassPage ticketId={route.ticketId} />;
   if (route.name === 'account-login') return <AccountLogin />;
   if (route.name === 'account-signup') return <AccountSignup />;
+  if (route.name === 'account-recover') return <AccountRecovery kind="password" />;
+  if (route.name === 'account-resend-verification') return <AccountRecovery kind="verification" />;
+  if (route.name === 'account-password-reset') return <TalentInviteAcceptCard />;
   if (route.name === 'account-rights-review') return <PerformerRightsReviewQueue backHref="/account" backLabel="Back to account" />;
   if (route.name === 'account-home') return <AccountHome />;
 

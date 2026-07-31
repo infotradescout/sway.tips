@@ -59,7 +59,8 @@ async function main() {
   } = performerPasswordModule;
 
   assert.ok(appSource.includes('/talent/signup'), 'App route spine must include /talent/signup.');
-  assert.ok(talentAppSource.includes('TalentSignupCard'), 'TalentApp must route /talent/signup to TalentSignupCard.');
+  assert.ok(!talentAppSource.includes('TalentSignupCard'), 'TalentApp must not route users into a second performer-only signup surface.');
+  assert.ok(talentAppSource.includes("new URLSearchParams({ intent: 'performer' })"), 'The legacy performer signup route must preserve intent while redirecting to the universal account signup.');
   assert.ok(signupCardSource.includes('I have a code'), 'Talent signup card must expose code claim entry at the top.');
   assert.ok(signupCardSource.includes('/api/talent/claim/accept'), 'Talent signup card must redeem claim codes without separate onboarding.');
   assert.ok(signupCardSource.includes('Claim profile'), 'Talent signup card must claim the prepared profile from a code.');
@@ -125,7 +126,7 @@ async function main() {
   assert.equal(normalizePerformerPassword(''), null, 'Empty performer passwords must be rejected.');
 
   assert.equal(validatePerformerPasswordStrength('12').ok, false, 'Too-short passwords must be rejected.');
-  assert.equal(validatePerformerPasswordStrength('123').ok, true, 'Short numeric quick-access passwords must pass.');
+  assert.equal(validatePerformerPasswordStrength('123').ok, false, 'Short numeric quick-access passwords must be rejected.');
   assert.equal(validatePerformerPasswordStrength('longpassword').ok, false, 'Passwords without digits must be rejected.');
   assert.equal(validatePerformerPasswordStrength('sway1234').ok, true, 'Passwords with minimum strength must pass.');
   assert.equal(PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL, 'verify_email', 'Verification links must use the verify_email challenge type.');

@@ -22,7 +22,12 @@ import { createModerationService, type BlockScope } from "./src/server/moderatio
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
-import { createPaymentService } from "./src/server/payment-service";
+import {
+  createPaymentService,
+  type CloseoutTotals,
+  type PaymentReversalResult,
+  type SettleResult
+} from "./src/server/payment-service";
 import { resolveProposedPlatformFee } from "./src/server/fee-policy";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
@@ -57,7 +62,6 @@ import {
 } from "./src/server/performer-login";
 import { createPerformerLoginMailer, resolvePerformerLoginBaseUrl } from "./src/server/performer-login-mailer";
 import {
-  createPerformerPasswordLoginRateLimiter,
   hashPerformerPassword,
   normalizePerformerPassword,
   validatePerformerPasswordStrength,
@@ -209,16 +213,65 @@ const performerClaimPeekRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_MAX, 20),
   windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_WINDOW_MS, 5 * 60 * 1000)
 });
-const performerPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter();
 const hasAdminBootstrapSecret = Boolean(process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim());
 const adminBootstrapRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_ADMIN_BOOTSTRAP_RATE_LIMIT_MAX, 3),
   windowMs: parsePositiveInteger(process.env.SWAY_ADMIN_BOOTSTRAP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
 });
-const adminPasswordLoginRateLimiter = createPerformerPasswordLoginRateLimiter({
-  maxFailures: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_MAX, 5),
-  windowMs: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000)
-});
+const DURABLE_PASSWORD_FAILURE_CHALLENGE_TYPE = 'password_login_failure';
+const DURABLE_PASSWORD_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+
+async function checkDurablePasswordLoginLimit(input: {
+  requesterIpHash: string;
+  accountKey: string;
+  scope: 'account' | 'admin';
+  maxFailures: number;
+}) {
+  if (!businessDb) return { allowed: false };
+  const bucketKey = `${input.scope}:${input.accountKey}`.slice(0, 320);
+  const failures = await businessDb.select({ id: performerLoginChallenges.id })
+    .from(performerLoginChallenges)
+    .where(and(
+      eq(performerLoginChallenges.challengeType, DURABLE_PASSWORD_FAILURE_CHALLENGE_TYPE),
+      eq(performerLoginChallenges.requesterIpHash, input.requesterIpHash),
+      eq(performerLoginChallenges.targetEmail, bucketKey),
+      isNull(performerLoginChallenges.revokedAt),
+      gt(performerLoginChallenges.requestedAt, new Date(Date.now() - DURABLE_PASSWORD_FAILURE_WINDOW_MS))
+    ))
+    .limit(input.maxFailures);
+  return { allowed: failures.length < input.maxFailures };
+}
+
+async function recordDurablePasswordLoginFailure(input: {
+  requesterIpHash: string;
+  accountKey: string;
+  scope: 'account' | 'admin';
+}) {
+  if (!businessDb) return;
+  const bucketKey = `${input.scope}:${input.accountKey}`.slice(0, 320);
+  await businessDb.insert(performerLoginChallenges).values({
+    targetEmail: bucketKey,
+    challengeType: DURABLE_PASSWORD_FAILURE_CHALLENGE_TYPE,
+    tokenHash: createHash('sha256').update(randomBytes(32)).digest('hex'),
+    expiresAt: new Date(Date.now() + DURABLE_PASSWORD_FAILURE_WINDOW_MS),
+    requesterIpHash: input.requesterIpHash
+  });
+}
+
+async function resetDurablePasswordLoginFailures(input: {
+  requesterIpHash: string;
+  accountKey: string;
+  scope: 'account' | 'admin';
+}) {
+  if (!businessDb) return;
+  const bucketKey = `${input.scope}:${input.accountKey}`.slice(0, 320);
+  await businessDb.update(performerLoginChallenges).set({ revokedAt: new Date() }).where(and(
+    eq(performerLoginChallenges.challengeType, DURABLE_PASSWORD_FAILURE_CHALLENGE_TYPE),
+    eq(performerLoginChallenges.requesterIpHash, input.requesterIpHash),
+    eq(performerLoginChallenges.targetEmail, bucketKey),
+    isNull(performerLoginChallenges.revokedAt)
+  ));
+}
 const performerLoginMailer = createPerformerLoginMailer({
   env: process.env,
   isProduction
@@ -1303,6 +1356,7 @@ function createInactiveSession(): GigSession {
     operatingMode: 'manual',
     searchScope: 'library',
     paymentsEnabled: true,
+    tipsEnabled: false,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -1529,6 +1583,20 @@ function parseDurableGigId(value: unknown): string | null {
   return UUID_PATTERN.test(trimmed) ? trimmed : null;
 }
 
+const PATRON_DEVICE_ID_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+function normalizePatronDeviceIdHash(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return PATRON_DEVICE_ID_HASH_PATTERN.test(normalized) ? normalized : null;
+}
+
+function resolvePatronDeviceIdHash(req: express.Request, bodyValue: unknown): string | null {
+  const actor = accessControl.resolveServerActor(req);
+  return normalizePatronDeviceIdHash(actor.patronDeviceIdHash)
+    ?? normalizePatronDeviceIdHash(bodyValue);
+}
+
 function canonicalJson(input: Record<string, string | number>): string {
   const orderedInput = {
     v: Number(input.v),
@@ -1626,7 +1694,12 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         email_verified_at: users.emailVerifiedAt,
         charges_enabled: performers.chargesEnabled,
         payouts_enabled: performers.payoutsEnabled,
-        stripe_connected_account_id: performers.stripeConnectedAccountId
+        stripe_connected_account_id: performers.stripeConnectedAccountId,
+        performer_is_active: performers.isActive,
+        onboarding_status: performers.onboardingStatus,
+        payment_account_status: performers.paymentAccountStatus,
+        kyc_status: performers.kycStatus,
+        payout_hold_reason: performers.payoutHoldReason
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
@@ -1656,7 +1729,17 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       email_verified_at: performerRow.email_verified_at,
       charges_enabled: performerRow.charges_enabled,
       payouts_enabled: performerRow.payouts_enabled,
-      stripe_connected_account_id: performerRow.stripe_connected_account_id
+      stripe_connected_account_id: performerRow.stripe_connected_account_id,
+      money_actions_ready: Boolean(
+        performerRow.performer_is_active
+        && performerRow.onboarding_status !== 'suspended'
+        && performerRow.payment_account_status === 'payouts_enabled'
+        && ['not_required', 'verified'].includes(performerRow.kyc_status)
+        && performerRow.charges_enabled
+        && performerRow.payouts_enabled
+        && performerRow.stripe_connected_account_id?.trim()
+        && !performerRow.payout_hold_reason
+      )
     };
   } catch (error) {
     console.warn('Unable to resolve authenticated performer profile for /api/state.', {
@@ -2423,6 +2506,37 @@ function sendDurableMutationReplay(
 type RoomMutationContext = { gigId: string; state: BackendState };
 type RequestMutationContext = RoomMutationContext & { request: RequestItem };
 
+function isTerminalPaymentReversal(result: SettleResult) {
+  return ['noop', 'voided', 'refunded'].includes(result.status);
+}
+
+function applyPaymentReversalTruth(
+  request: RequestItem,
+  reversals: PaymentReversalResult[]
+) {
+  const resultByPaymentId = new Map(
+    reversals.map(({ paymentId, result }) => [paymentId, result])
+  );
+  const pendingPaymentIds: string[] = [];
+
+  const applyStatus = (paymentId: string | null | undefined) => {
+    if (!paymentId) return null;
+    const result = resultByPaymentId.get(paymentId);
+    const terminal = Boolean(result && isTerminalPaymentReversal(result));
+    if (!terminal) pendingPaymentIds.push(paymentId);
+    return terminal ? 'voided_or_refunded' : 'reversal_pending';
+  };
+
+  const requestPaymentStatus = applyStatus(request.paymentId);
+  if (requestPaymentStatus) request.paymentStatus = requestPaymentStatus;
+  for (const boost of request.boosts) {
+    const boostPaymentStatus = applyStatus(boost.paymentId);
+    if (boostPaymentStatus) boost.paymentStatus = boostPaymentStatus;
+  }
+
+  return [...new Set(pendingPaymentIds)];
+}
+
 async function applyWindowToggle({
   roomContext,
   actor,
@@ -2553,9 +2667,9 @@ async function applyRequestTriage({
           continue;
         }
         if (capture.status !== 'captured') {
-          await paymentService.voidOrRefundMany(paymentIds);
+          const reversals = await paymentService.voidOrRefundMany(paymentIds);
+          const pendingPaymentIds = applyPaymentReversalTruth(request, reversals);
           request.status = 'denied';
-          request.paymentStatus = 'voided_or_refunded';
           recalculateTotals(roomState);
           await persistStateWithAudit({
             roomState,
@@ -2566,18 +2680,25 @@ async function applyRequestTriage({
             eventType: 'request.triage.approve_payment_failed',
             previousStatus,
             nextStatus: request.status,
-            metadata: { requestId: request.id, paymentId, captureStatus: capture.status }
+            metadata: {
+              requestId: request.id,
+              paymentId,
+              captureStatus: capture.status,
+              pendingPaymentIds
+            }
           });
           return {
             request,
             state: prepareRoomState(roomState, roomContext.gigId),
-            paymentError: 'Payment could not be captured. The request was denied and its hold was released.'
+            paymentError: pendingPaymentIds.length
+              ? 'Payment could not be captured. The request was denied, but its payment reversal is still processing.'
+              : 'Payment could not be captured. The request was denied and its hold was released.'
           };
         }
       }
     } else {
-      await paymentService.voidOrRefundMany(paymentIds);
-      request.paymentStatus = 'voided_or_refunded';
+      const reversals = await paymentService.voidOrRefundMany(paymentIds);
+      applyPaymentReversalTruth(request, reversals);
     }
   }
 
@@ -2769,8 +2890,8 @@ async function applyRequestHide({
       ...request.boosts.map((boost) => boost.paymentId)
     ].filter((id): id is string => Boolean(id));
     if (paymentIds.length) {
-      await paymentService.voidOrRefundMany(paymentIds);
-      request.paymentStatus = 'voided_or_refunded';
+      const reversals = await paymentService.voidOrRefundMany(paymentIds);
+      applyPaymentReversalTruth(request, reversals);
     }
   }
 
@@ -2898,6 +3019,7 @@ setInterval(async () => {
     const roomState = roomSnapshot.state;
     let changed = false;
     let closeoutReason: 'post_gig_timer' | 'maximum_room_duration' | null = null;
+    let closeoutPendingPaymentIds: string[] = [];
 
     if (roomState.session.status === 'ending' && roomState.session.endGigTimerStartedAt) {
       const startTimeStamp = new Date(roomState.session.endGigTimerStartedAt).getTime();
@@ -2905,17 +3027,25 @@ setInterval(async () => {
 
       if (elapsedTime >= 300000) {
         console.log("Post-gig timer expired. Releasing pending requests.");
-        await settleRoomCloseout(roomState, trackedGigId);
+        const closeout = await settleRoomCloseout(roomState, trackedGigId);
         changed = true;
-        closeoutReason = 'post_gig_timer';
+        if (closeout.status === 'complete') {
+          closeoutReason = 'post_gig_timer';
+        } else {
+          closeoutPendingPaymentIds = closeout.pendingPaymentIds;
+        }
       }
     }
 
     if (roomState.session.status === 'active' && roomState.session.autoCloseoutAt && Date.now() >= new Date(roomState.session.autoCloseoutAt).getTime()) {
       console.log('Room reached its automatic closeout deadline.');
-      await settleRoomCloseout(roomState, trackedGigId);
+      const closeout = await settleRoomCloseout(roomState, trackedGigId);
       changed = true;
-      closeoutReason = 'maximum_room_duration';
+      if (closeout.status === 'complete') {
+        closeoutReason = 'maximum_room_duration';
+      } else {
+        closeoutPendingPaymentIds = closeout.pendingPaymentIds;
+      }
     }
 
     if (roomState.session.isFeatured && roomState.session.featuredExpiresAt) {
@@ -2953,6 +3083,18 @@ setInterval(async () => {
           nextStatus: 'closed',
           metadata: { reason: closeoutReason }
         });
+      } else if (closeoutPendingPaymentIds.length) {
+        await persistStateWithAudit({
+          roomState,
+          gigId: trackedGigId,
+          actor: { actorId: roomState.session.ownerActorUserId || '00000000-0000-4000-8000-000000000111', actorType: 'system' },
+          entityType: 'gig_session',
+          entityId: trackedGigId,
+          eventType: 'session.closeout_reversal_pending',
+          previousStatus: roomState.session.status,
+          nextStatus: roomState.session.status,
+          metadata: { pendingPaymentIds: closeoutPendingPaymentIds }
+        });
       } else {
         await persistBusinessStateForRoom(roomState, trackedGigId);
       }
@@ -2962,18 +3104,28 @@ setInterval(async () => {
   await refreshBusinessState();
 }, 10000); // Check every 10 seconds for tighter precision
 
-async function settleRoomCloseout(inputState: BackendState, gigId: string) {
+type RoomCloseoutResult =
+  | { status: 'complete'; totals: CloseoutTotals | null; pendingPaymentIds: [] }
+  | { status: 'reversal_pending'; totals: null; pendingPaymentIds: string[] };
+
+async function settleRoomCloseout(inputState: BackendState, gigId: string): Promise<RoomCloseoutResult> {
   const unresolved = inputState.requests.filter((request) => request.type === 'request' && request.status !== 'fulfilled');
   const paymentIds = unresolved.flatMap((request) => [
     request.paymentId,
     ...request.boosts.map((boost) => boost.paymentId)
   ]).filter((paymentId): paymentId is string => Boolean(paymentId));
-  await paymentService.voidOrRefundMany([...new Set(paymentIds)]);
+  const reversals = await paymentService.voidOrRefundMany(paymentIds);
+  const pendingPaymentIds = new Set<string>();
   for (const request of unresolved) {
-    if (request.paymentId) request.paymentStatus = 'voided_or_refunded';
-    for (const boost of request.boosts) {
-      if (boost.paymentId) boost.paymentStatus = 'voided_or_refunded';
-    }
+    applyPaymentReversalTruth(request, reversals).forEach((paymentId) => pendingPaymentIds.add(paymentId));
+  }
+
+  if (pendingPaymentIds.size) {
+    return {
+      status: 'reversal_pending',
+      totals: null,
+      pendingPaymentIds: [...pendingPaymentIds]
+    };
   }
 
   executeAutoNuke(inputState);
@@ -2982,9 +3134,9 @@ async function settleRoomCloseout(inputState: BackendState, gigId: string) {
     inputState.session.totals.totalTips = totals.capturedSubtotalCents / 100;
     inputState.session.totals.accumulatedFees = totals.platformFeeCents / 100;
     inputState.session.totals.totalCount = totals.capturedCount;
-    return totals;
+    return { status: 'complete', totals, pendingPaymentIds: [] };
   }
-  return null;
+  return { status: 'complete', totals: null, pendingPaymentIds: [] };
 }
 
 function executeAutoNuke(inputState: BackendState) {
@@ -3081,7 +3233,15 @@ app.get('/api/payment/config', (_req, res) => {
     return res.status(503).json({ error: 'Payment form is not configured.' });
   }
 
-  return res.json({ publishableKey, mode });
+  if (mode === 'live') {
+    return res.status(503).json({
+      error: 'Live-room money remains test-only until durable reconciliation is production-verified.',
+      mode,
+      liveRoomMoneyEnabled: false
+    });
+  }
+
+  return res.json({ publishableKey, mode, liveRoomMoneyEnabled: true });
 });
 
 app.post('/api/talent/invite/accept', async (req, res) => {
@@ -3225,7 +3385,7 @@ app.post('/api/talent/invite/accept', async (req, res) => {
       path: '/',
       expires: outcome.issuedSession.expiresAt
     });
-    return res.status(200).json({ success: true, redirectPath: '/talent' });
+    return res.status(200).json({ success: true, redirectPath: '/account' });
   } catch (error) {
     console.warn('Performer invitation acceptance failed.', {
       path: req.path,
@@ -3569,7 +3729,7 @@ app.post('/api/talent/password-reset/accept', async (req, res) => {
       path: '/',
       expires: outcome.issuedSession.expiresAt
     });
-    return res.status(200).json({ success: true, redirectPath: '/talent' });
+    return res.status(200).json({ success: true, redirectPath: '/account' });
   } catch (error) {
     console.warn('Owner password reset failed.', {
       path: req.path,
@@ -3817,9 +3977,11 @@ app.post('/api/talent/login', async (req, res) => {
   const password = normalizePerformerPassword(req.body?.password);
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = normalizedEmail ?? '__invalid__';
-  const rateLimitState = performerPasswordLoginRateLimiter.check({
+  const rateLimitState = await checkDurablePasswordLoginLimit({
     requesterIpHash,
-    accountKey
+    accountKey,
+    scope: 'account',
+    maxFailures: 5
   });
 
   if (!rateLimitState.allowed) {
@@ -3828,9 +3990,10 @@ app.post('/api/talent/login', async (req, res) => {
   }
 
   if (!normalizedEmail || !password) {
-    performerPasswordLoginRateLimiter.recordFailure({
+    await recordDurablePasswordLoginFailure({
       requesterIpHash,
-      accountKey
+      accountKey,
+      scope: 'account'
     });
     res.status(401).json(performerCredentialFailureResponse());
     return;
@@ -3838,9 +4001,10 @@ app.post('/api/talent/login', async (req, res) => {
 
   const performerAccount = await loadPerformerPasswordAccountByEmail(businessDb, normalizedEmail);
   if (!performerAccount?.passwordHash) {
-    performerPasswordLoginRateLimiter.recordFailure({
+    await recordDurablePasswordLoginFailure({
       requesterIpHash,
-      accountKey
+      accountKey,
+      scope: 'account'
     });
     res.status(401).json(performerCredentialFailureResponse());
     return;
@@ -3848,11 +4012,19 @@ app.post('/api/talent/login', async (req, res) => {
 
   const passwordMatches = await verifyPerformerPassword(password, performerAccount.passwordHash);
   if (!passwordMatches) {
-    performerPasswordLoginRateLimiter.recordFailure({
+    await recordDurablePasswordLoginFailure({
       requesterIpHash,
-      accountKey
+      accountKey,
+      scope: 'account'
     });
     res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+  if (!validatePerformerPasswordStrength(password).ok) {
+    res.status(403).json({
+      error: 'This password no longer meets Sway security requirements. Reset it to continue.',
+      code: 'password_reset_required'
+    });
     return;
   }
 
@@ -3904,9 +4076,10 @@ app.post('/api/talent/login', async (req, res) => {
     };
   });
 
-  performerPasswordLoginRateLimiter.reset({
+  await resetDurablePasswordLoginFailures({
     requesterIpHash,
-    accountKey
+    accountKey,
+    scope: 'account'
   });
 
   res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
@@ -4849,6 +5022,143 @@ app.get('/api/account/verify-email/consume', async (req, res) => {
   return res.redirect(`/account/login?${verifiedQuery.toString()}`);
 });
 
+app.post('/api/account/verification/resend', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Account verification is temporarily unavailable.' });
+  }
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Account verification email delivery is temporarily unavailable.' });
+  }
+
+  const email = normalizePerformerLoginEmail(req.body?.email);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimit = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: email ?? '__invalid_account_verification_resend__'
+  });
+  if (!rateLimit.allowed) {
+    return res.status(429).json({ error: 'Too many verification requests. Please try again later.' });
+  }
+
+  const genericResponse = {
+    success: true,
+    message: 'If that unverified account exists, a new verification link is on its way.'
+  };
+  if (!email) return res.status(202).json(genericResponse);
+
+  const [account] = await businessDb.select({
+    id: users.id,
+    emailVerifiedAt: users.emailVerifiedAt
+  }).from(users).where(eq(users.email, email)).limit(1);
+  if (!account || account.emailVerifiedAt) return res.status(202).json(genericResponse);
+
+  const issued = await businessDb.transaction(async (tx) => {
+    await tx.update(performerLoginChallenges).set({ revokedAt: new Date() }).where(and(
+      eq(performerLoginChallenges.actorUserId, account.id),
+      eq(performerLoginChallenges.challengeType, ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL),
+      isNull(performerLoginChallenges.consumedAt),
+      isNull(performerLoginChallenges.revokedAt)
+    ));
+    const challenge = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: account.id,
+      targetEmail: email,
+      challengeType: ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
+      requesterIpHash,
+      executor: tx
+    });
+    await writeAuditEvent(tx, {
+      actorId: account.id,
+      actorType: 'account',
+      entityType: 'performer_login_challenge',
+      entityId: challenge.challengeId,
+      eventType: 'account.verify_email.resend',
+      previousStatus: null,
+      nextStatus: 'pending'
+    });
+    return challenge;
+  });
+
+  const baseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const verificationLink = `${baseUrl}/api/account/verify-email/consume?token=${encodeURIComponent(issued.token)}`;
+  const delivery = await performerLoginMailer.sendAccountVerificationLink({ toEmail: email, verificationLink });
+  if (!delivery.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({ challengeId: issued.challengeId });
+    return res.status(503).json({ error: 'Verification email delivery is temporarily unavailable.' });
+  }
+  return res.status(202).json({
+    ...genericResponse,
+    ...(delivery.provider === 'mock' ? { verificationLink } : {})
+  });
+});
+
+app.post('/api/account/password-reset/request', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
+    return res.status(503).json({ error: 'Password recovery is temporarily unavailable.' });
+  }
+  if (isProduction && !hasPerformerLoginEmailConfig) {
+    return res.status(503).json({ error: 'Password recovery email delivery is temporarily unavailable.' });
+  }
+
+  const email = normalizePerformerLoginEmail(req.body?.email);
+  const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
+  const rateLimit = performerSignupRateLimiter.consume({
+    requesterIpHash,
+    targetEmail: email ?? '__invalid_account_password_reset__'
+  });
+  if (!rateLimit.allowed) {
+    return res.status(429).json({ error: 'Too many password recovery requests. Please try again later.' });
+  }
+
+  const genericResponse = {
+    success: true,
+    message: 'If that account exists, a one-time password reset link is on its way.'
+  };
+  if (!email) return res.status(202).json(genericResponse);
+
+  const [account] = await businessDb.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (!account) return res.status(202).json(genericResponse);
+
+  const issued = await businessDb.transaction(async (tx) => {
+    await tx.update(performerLoginChallenges).set({ revokedAt: new Date() }).where(and(
+      eq(performerLoginChallenges.actorUserId, account.id),
+      eq(performerLoginChallenges.challengeType, PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET),
+      isNull(performerLoginChallenges.consumedAt),
+      isNull(performerLoginChallenges.revokedAt)
+    ));
+    const challenge = await performerLoginChallengeStore.issueChallenge({
+      actorUserId: account.id,
+      targetEmail: email,
+      challengeType: PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
+      requesterIpHash,
+      executor: tx
+    });
+    await writeAuditEvent(tx, {
+      actorId: account.id,
+      actorType: 'account',
+      entityType: 'performer_login_challenge',
+      entityId: challenge.challengeId,
+      eventType: 'account.password_reset.issue',
+      previousStatus: null,
+      nextStatus: 'pending'
+    });
+    return challenge;
+  });
+
+  const baseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  const resetLink = `${baseUrl}/account/password-reset?mode=reset&token=${encodeURIComponent(issued.token)}`;
+  const delivery = await performerLoginMailer.sendOwnerPasswordReset({ toEmail: email, resetLink });
+  if (!delivery.delivered) {
+    await performerLoginChallengeStore.revokeChallengeById({ challengeId: issued.challengeId });
+    return res.status(503).json({ error: 'Password recovery email delivery is temporarily unavailable.' });
+  }
+  return res.status(202).json({
+    ...genericResponse,
+    ...(delivery.provider === 'mock' ? { resetLink } : {})
+  });
+});
+
 app.post('/api/account/login', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!businessDb || !performerSessionStore.hasDurableStore) {
@@ -4860,7 +5170,7 @@ app.post('/api/account/login', async (req, res) => {
   const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = email ?? '__invalid__';
-  const rateLimit = performerPasswordLoginRateLimiter.check({ requesterIpHash, accountKey });
+  const rateLimit = await checkDurablePasswordLoginLimit({ requesterIpHash, accountKey, scope: 'account', maxFailures: 5 });
   if (!rateLimit.allowed) return res.status(429).json({ error: 'Too many failed sign-in attempts. Please try again later.' });
 
   const [account] = email ? await businessDb.select({
@@ -4869,13 +5179,19 @@ app.post('/api/account/login', async (req, res) => {
     emailVerifiedAt: users.emailVerifiedAt
   }).from(users).where(eq(users.email, email)).limit(1) : [];
   if (!account?.passwordHash || !password || !(await verifyPerformerPassword(password, account.passwordHash))) {
-    performerPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    await recordDurablePasswordLoginFailure({ requesterIpHash, accountKey, scope: 'account' });
     return res.status(401).json({ error: 'Email or password is incorrect.' });
+  }
+  if (!validatePerformerPasswordStrength(password).ok) {
+    return res.status(403).json({
+      error: 'This password no longer meets Sway security requirements. Reset it to continue.',
+      code: 'password_reset_required'
+    });
   }
   if (!account.emailVerifiedAt) return res.status(403).json({ error: 'Verify your email before logging in.' });
 
   const issuedSession = await performerSessionStore.issueSession({ actorUserId: account.id, issuedBy: account.id });
-  performerPasswordLoginRateLimiter.reset({ requesterIpHash, accountKey });
+  await resetDurablePasswordLoginFailures({ requesterIpHash, accountKey, scope: 'account' });
   res.cookie(performerSessionStore.cookieName, issuedSession.token, {
     httpOnly: true,
     secure: isProduction,
@@ -4908,7 +5224,16 @@ app.get('/api/account/session', async (req, res) => {
     handle: performers.handle,
     payoutsEnabled: performers.payoutsEnabled
   }).from(performers).where(eq(performers.ownerUserId, access.actor.actorId!)).limit(1);
-  return res.json({ account, performer: performer ?? null });
+  let pendingRightsReviewCount = 0;
+  if (audioPublishingService) {
+    try {
+      const pendingReviews = await audioPublishingService.listRightsReviewQueue({ actorUserId: access.actor.actorId! });
+      pendingRightsReviewCount = pendingReviews.length;
+    } catch {
+      pendingRightsReviewCount = 0;
+    }
+  }
+  return res.json({ account, performer: performer ?? null, pendingRightsReviewCount });
 });
 
 app.post('/api/account/logout', async (req, res) => {
@@ -5357,9 +5682,11 @@ app.post('/api/admin/login', async (req, res) => {
   const password = normalizePerformerPassword(req.body?.password);
   const requesterIpHash = hashPerformerLoginRequesterIp(req.ip || null);
   const accountKey = normalizedEmail ?? '__invalid__';
-  const rateLimitState = adminPasswordLoginRateLimiter.check({
+  const rateLimitState = await checkDurablePasswordLoginLimit({
     requesterIpHash,
-    accountKey
+    accountKey,
+    scope: 'admin',
+    maxFailures: parsePositiveInteger(process.env.SWAY_ADMIN_PASSWORD_LOGIN_RATE_LIMIT_MAX, 5)
   });
 
   if (!rateLimitState.allowed) {
@@ -5368,7 +5695,7 @@ app.post('/api/admin/login', async (req, res) => {
   }
 
   if (!normalizedEmail || !password) {
-    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    await recordDurablePasswordLoginFailure({ requesterIpHash, accountKey, scope: 'admin' });
     res.status(401).json(performerCredentialFailureResponse());
     return;
   }
@@ -5384,15 +5711,22 @@ app.post('/api/admin/login', async (req, res) => {
     .limit(1);
 
   if (!adminAccount?.passwordHash || (adminAccount.role !== 'admin' && adminAccount.role !== 'support')) {
-    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    await recordDurablePasswordLoginFailure({ requesterIpHash, accountKey, scope: 'admin' });
     res.status(401).json(performerCredentialFailureResponse());
     return;
   }
 
   const passwordMatches = await verifyPerformerPassword(password, adminAccount.passwordHash);
   if (!passwordMatches) {
-    adminPasswordLoginRateLimiter.recordFailure({ requesterIpHash, accountKey });
+    await recordDurablePasswordLoginFailure({ requesterIpHash, accountKey, scope: 'admin' });
     res.status(401).json(performerCredentialFailureResponse());
+    return;
+  }
+  if (!validatePerformerPasswordStrength(password).ok) {
+    res.status(403).json({
+      error: 'This password no longer meets Sway security requirements. Reset it before using an administrative account.',
+      code: 'password_reset_required'
+    });
     return;
   }
 
@@ -5440,7 +5774,7 @@ app.post('/api/admin/login', async (req, res) => {
     return { issuedSession };
   });
 
-  adminPasswordLoginRateLimiter.reset({ requesterIpHash, accountKey });
+  await resetDurablePasswordLoginFailures({ requesterIpHash, accountKey, scope: 'admin' });
 
   res.cookie(performerSessionStore.cookieName, outcome.issuedSession.token, {
     httpOnly: true,
@@ -9126,7 +9460,10 @@ app.post('/api/library/sync', async (req, res) => {
       sourceLabel: performerLibrarySources.sourceLabel
     })
     .from(performerLibrarySources)
-    .where(eq(performerLibrarySources.syncKeyHash, syncKeyHash))
+    .where(and(
+      eq(performerLibrarySources.syncKeyHash, syncKeyHash),
+      eq(performerLibrarySources.connectionStatus, 'active')
+    ))
     .limit(1);
 
   if (!sourceRow) {
@@ -9152,7 +9489,6 @@ app.post('/api/library/sync', async (req, res) => {
       await tx
         .update(performerLibrarySources)
         .set({
-          connectionStatus: 'active',
           lastSyncedAt: new Date(),
           updatedAt: new Date()
         })
@@ -9279,25 +9615,14 @@ app.post("/api/payment/webhook", async (req, res) => {
 });
 
 app.get("/api/state", async (req, res) => {
-  await refreshBusinessState();
   const talentAccess = await accessControl.requireTalentAccess(req);
   const performerProfile = talentAccess.allowed
     ? await loadAuthenticatedPerformerProfile(req)
     : null;
   applyNoStoreHeaders(res);
-  if (talentAccess.allowed) {
-    return res.json({
-      session: state.session,
-      requests: state.requests,
-      performers: state.performers,
-      activeGigId: state.activeGigId,
-      performerProfile
-    });
-  }
-
   return res.json({
-    ...projectPublicRoomState(state, null),
-    performerProfile: null
+    ...projectPublicRoomState(createEmptyBackendState(), null),
+    performerProfile
   });
 });
 
@@ -10018,6 +10343,35 @@ app.post("/api/session/start", async (req, res) => {
 
   await refreshBusinessState();
   const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
+  const [seller] = businessDb && actor.actorId
+    ? await businessDb.select({
+        isActive: performers.isActive,
+        onboardingStatus: performers.onboardingStatus,
+        paymentAccountStatus: performers.paymentAccountStatus,
+        kycStatus: performers.kycStatus,
+        chargesEnabled: performers.chargesEnabled,
+        payoutsEnabled: performers.payoutsEnabled,
+        stripeConnectedAccountId: performers.stripeConnectedAccountId,
+        payoutHoldReason: performers.payoutHoldReason
+      }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+    : [];
+  const sellerPayoutReady = Boolean(
+    seller?.isActive
+    && seller.onboardingStatus !== 'suspended'
+    && seller.paymentAccountStatus === 'payouts_enabled'
+    && ['not_required', 'verified'].includes(seller.kycStatus)
+    && seller.chargesEnabled
+    && seller.payoutsEnabled
+    && seller.stripeConnectedAccountId?.trim()
+    && !seller.payoutHoldReason
+  );
+  const requestedPaymentsEnabled = paymentsEnabled === true;
+  if (requestedPaymentsEnabled && !sellerPayoutReady) {
+    return res.status(409).json({
+      error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
+      code: 'seller_payout_not_ready'
+    });
+  }
 
   const requestedGigId = parseDurableGigId(gig_id);
   const roomGigId = requestedGigId ?? businessStore.createGigId();
@@ -10047,7 +10401,8 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: searchScope === 'catalog' ? 'catalog' : 'library',
-    paymentsEnabled: typeof paymentsEnabled === 'boolean' ? paymentsEnabled : true,
+    paymentsEnabled: requestedPaymentsEnabled && sellerPayoutReady,
+    tipsEnabled: sellerPayoutReady,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -10073,6 +10428,7 @@ app.post("/api/session/start", async (req, res) => {
       feeType: roomState.session.feeType,
       minimumTip: roomState.session.minimumTip,
       paymentsEnabled: roomState.session.paymentsEnabled,
+      tipsEnabled: roomState.session.tipsEnabled,
       searchScope: roomState.session.searchScope
     }
   });
@@ -10155,8 +10511,30 @@ app.post("/api/session/closeout", async (req, res) => {
   if (!actor) return;
   const roomState = roomContext.state;
   const previousStatus = roomState.session.status;
-  const closeoutTotals = await settleRoomCloseout(roomState, roomContext.gigId);
+  const closeout = await settleRoomCloseout(roomState, roomContext.gigId);
   roomState.session.lastMutationActorUserId = actor.actorId;
+
+  if (closeout.status === 'reversal_pending') {
+    await persistStateWithAudit({
+      roomState,
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'gig_session',
+      entityId: roomContext.gigId,
+      eventType: 'session.closeout_reversal_pending',
+      previousStatus,
+      nextStatus: roomState.session.status,
+      metadata: { pendingPaymentIds: closeout.pendingPaymentIds }
+    });
+    return res.status(409).json({
+      success: false,
+      error: 'Closeout is waiting for the payment processor to confirm every release or refund.',
+      pending_payment_ids: closeout.pendingPaymentIds,
+      state: prepareRoomState(roomState, roomContext.gigId)
+    });
+  }
+
+  const closeoutTotals = closeout.totals;
 
   await persistStateWithAudit({
     roomState,
@@ -10272,6 +10650,37 @@ app.post("/api/session/payments-enabled", async (req, res) => {
 
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ error: "enabled must be a boolean." });
+  }
+
+  if (enabled) {
+    const [seller] = businessDb && actor.actorId
+      ? await businessDb.select({
+          isActive: performers.isActive,
+          onboardingStatus: performers.onboardingStatus,
+          paymentAccountStatus: performers.paymentAccountStatus,
+          kycStatus: performers.kycStatus,
+          chargesEnabled: performers.chargesEnabled,
+          payoutsEnabled: performers.payoutsEnabled,
+          stripeConnectedAccountId: performers.stripeConnectedAccountId,
+          payoutHoldReason: performers.payoutHoldReason
+        }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+      : [];
+    const payoutReady = Boolean(
+      seller?.isActive
+      && seller.onboardingStatus !== 'suspended'
+      && seller.paymentAccountStatus === 'payouts_enabled'
+      && ['not_required', 'verified'].includes(seller.kycStatus)
+      && seller.chargesEnabled
+      && seller.payoutsEnabled
+      && seller.stripeConnectedAccountId?.trim()
+      && !seller.payoutHoldReason
+    );
+    if (!payoutReady) {
+      return res.status(409).json({
+        error: 'Complete Stripe identity, charge, and payout setup before enabling paid requests.',
+        code: 'seller_payout_not_ready'
+      });
+    }
   }
 
   const previousEnabled = roomState.session.paymentsEnabled;
@@ -10417,7 +10826,7 @@ app.post("/api/request/create", async (req, res) => {
     spotifyUrl,
     client_request_id,
     idempotency_key,
-    patron_device_id_hash = "anonymous-device",
+    patron_device_id_hash,
     gig_id,
     currency = "USD",
     expires_at,
@@ -10427,9 +10836,13 @@ app.post("/api/request/create", async (req, res) => {
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
   const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
+  const resolvedPatronDeviceIdHash = resolvePatronDeviceIdHash(req, patron_device_id_hash);
 
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (!resolvedPatronDeviceIdHash) {
+    return res.status(422).json({ error: 'A private browser identity is required. Reload this room and try again.' });
   }
   if (normalizedCurrency !== 'USD') {
     return res.status(422).json({ error: "Sway Request and Tip payments currently support USD only." });
@@ -10448,10 +10861,16 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
   const roomState = roomSnapshot.state;
-  // Only song requests are gated by the room's payments toggle. Tips support the
-  // performer directly and are always allowed, regardless of room state.
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
-  const paymentsEnabledForAction = isStraightTip || roomState.session.paymentsEnabled !== false;
+  if (isStraightTip && roomState.session.tipsEnabled !== true) {
+    return res.status(409).json({
+      error: 'Tips are unavailable until this performer completes payout setup.',
+      code: 'seller_payout_not_ready'
+    });
+  }
+  const paymentsEnabledForAction = isStraightTip
+    ? roomState.session.tipsEnabled === true
+    : roomState.session.paymentsEnabled !== false;
 
   const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
@@ -10462,7 +10881,7 @@ app.post("/api/request/create", async (req, res) => {
   const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
-    patron_device_id_hash,
+    patron_device_id_hash: resolvedPatronDeviceIdHash,
     gig_id: durableGigId,
     action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     target_entity_id: title || 'request',
@@ -10474,7 +10893,7 @@ app.post("/api/request/create", async (req, res) => {
   const durableInput: DurableActionInput = {
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
-    patronDeviceIdHash: patron_device_id_hash,
+    patronDeviceIdHash: resolvedPatronDeviceIdHash,
     gigId: durableGigId,
     actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
     amountCents: amount_cents,
@@ -10538,7 +10957,7 @@ app.post("/api/request/create", async (req, res) => {
   if (!isStraightTip) {
     const sameDeviceSessionRequests = roomState.requests.filter((item) =>
       item.gigId === durableGigId
-      && item.patronDeviceIdHash === patron_device_id_hash
+      && item.patronDeviceIdHash === resolvedPatronDeviceIdHash
       && item.type === 'request'
     );
 
@@ -10560,7 +10979,7 @@ app.post("/api/request/create", async (req, res) => {
     senderName: senderName || "Patron",
     text: message || "",
     patronUserId: resolvedActor.actorId,
-    patronDeviceIdHash: resolvedActor.patronDeviceIdHash ?? (typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null)
+    patronDeviceIdHash: resolvedPatronDeviceIdHash
   });
 
   if (moderationOutcome.decision === 'block_submission') {
@@ -10568,7 +10987,7 @@ app.post("/api/request/create", async (req, res) => {
       requestId: client_request_id,
       reason: moderationOutcome.reason,
       actorUserId: resolveActorUserId(req),
-      patronDeviceIdHash: patron_device_id_hash
+      patronDeviceIdHash: resolvedPatronDeviceIdHash
     });
     return res.status(403).json({
       error: moderationOutcome.reason,
@@ -10608,7 +11027,7 @@ app.post("/api/request/create", async (req, res) => {
     idempotencyKey: idempotency_key,
     idempotencyFingerprint,
     idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString(),
-    patronDeviceIdHash: patron_device_id_hash,
+    patronDeviceIdHash: resolvedPatronDeviceIdHash,
     gigId: durableGigId,
     payloadHash: payload_hash,
     amountCents: amount_cents,
@@ -10688,10 +11107,14 @@ app.post("/api/request/create", async (req, res) => {
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
         } else {
-          await paymentService.voidOrRefund(authorization.paymentId);
+          const reversal = await paymentService.voidOrRefund(authorization.paymentId);
+          const reversalPending = !isTerminalPaymentReversal(reversal);
           return res.status(502).json({
-            error: 'Payment could not be completed. The hold was released and no action was created.',
-            payment_status: 'capture_failed'
+            error: reversalPending
+              ? 'Payment could not be completed. No action was created, and the payment reversal is still processing.'
+              : 'Payment could not be completed. The hold was released and no action was created.',
+            payment_status: 'capture_failed',
+            reversal_status: reversalPending ? 'pending' : 'complete'
           });
         }
       }
@@ -10735,7 +11158,7 @@ app.post("/api/request/boost", async (req, res) => {
     boostAmount,
     client_request_id,
     idempotency_key,
-    patron_device_id_hash = "anonymous-device",
+    patron_device_id_hash,
     gig_id,
     currency = "USD",
     expires_at,
@@ -10745,8 +11168,12 @@ app.post("/api/request/boost", async (req, res) => {
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
   const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
+  const resolvedPatronDeviceIdHash = resolvePatronDeviceIdHash(req, patron_device_id_hash);
   if (!client_request_id || !idempotency_key) {
     return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+  }
+  if (!resolvedPatronDeviceIdHash) {
+    return res.status(422).json({ error: 'A private browser identity is required. Reload this room and try again.' });
   }
   if (normalizedCurrency !== 'USD') {
     return res.status(422).json({ error: "Sway Boost payments currently support USD only." });
@@ -10794,12 +11221,10 @@ app.post("/api/request/boost", async (req, res) => {
     });
   }
 
-  const sameActorBoostCount = resolvedActor.actorId
-    ? roomState.requests.reduce((count, current) => {
+  const sameActorBoostCount = roomState.requests.reduce((count, current) => {
         if (current.gigId !== durableGigId) return count;
-        return count + current.boosts.filter((boost) => boost.actorUserId === resolvedActor.actorId).length;
-      }, 0)
-    : 0;
+        return count + current.boosts.filter((boost) => boost.patronDeviceIdHash === resolvedPatronDeviceIdHash).length;
+      }, 0);
 
   if (sameActorBoostCount >= MAX_BOOSTS_PER_DEVICE_PER_SESSION) {
     return res.status(429).json({
@@ -10811,7 +11236,7 @@ app.post("/api/request/boost", async (req, res) => {
   const payload_hash = hashPayload({ requestId, patronName, boostAmount });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
-    patron_device_id_hash,
+    patron_device_id_hash: resolvedPatronDeviceIdHash,
     gig_id: durableGigId,
     action_type: 'boost',
     target_entity_id: requestId,
@@ -10823,7 +11248,7 @@ app.post("/api/request/boost", async (req, res) => {
   const durableInput: DurableActionInput = {
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
-    patronDeviceIdHash: patron_device_id_hash,
+    patronDeviceIdHash: resolvedPatronDeviceIdHash,
     gigId: durableGigId,
     actionType: 'boost',
     amountCents: amount_cents,
@@ -10875,7 +11300,7 @@ app.post("/api/request/boost", async (req, res) => {
     senderName: patronName || "Patron",
     text: '',
     patronUserId: resolvedActor.actorId,
-    patronDeviceIdHash: resolvedActor.patronDeviceIdHash ?? (typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null)
+    patronDeviceIdHash: resolvedPatronDeviceIdHash
   });
 
   if (moderationOutcome.decision === 'block_submission') {
@@ -10883,7 +11308,7 @@ app.post("/api/request/boost", async (req, res) => {
       requestId,
       reason: moderationOutcome.reason,
       actorUserId: resolveActorUserId(req),
-      patronDeviceIdHash: patron_device_id_hash
+      patronDeviceIdHash: resolvedPatronDeviceIdHash
     });
     return res.status(403).json({
       error: moderationOutcome.reason,
@@ -10898,6 +11323,7 @@ app.post("/api/request/boost", async (req, res) => {
     patronName: patronName || "Co-Sponsor",
     amount: amt,
     actorUserId: resolvedActor.actorId,
+    patronDeviceIdHash: resolvedPatronDeviceIdHash,
     timestamp: new Date().toISOString(),
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
@@ -10979,10 +11405,14 @@ app.post("/api/request/boost", async (req, res) => {
       if (capture.status === 'captured') {
         newBoost.paymentStatus = 'captured';
       } else {
-        await paymentService.voidOrRefund(authorization.paymentId);
+        const reversal = await paymentService.voidOrRefund(authorization.paymentId);
+        const reversalPending = !isTerminalPaymentReversal(reversal);
         return res.status(502).json({
-          error: 'Boost payment could not be completed. The hold was released and no boost was applied.',
-          payment_status: 'capture_failed'
+          error: reversalPending
+            ? 'Boost payment could not be completed. No boost was applied, and the payment reversal is still processing.'
+            : 'Boost payment could not be completed. The hold was released and no boost was applied.',
+          payment_status: 'capture_failed',
+          reversal_status: reversalPending ? 'pending' : 'complete'
         });
       }
     }
@@ -11118,6 +11548,7 @@ app.post("/api/moderation/patron-block", async (req, res) => {
   const resolvedActor = accessControl.resolveServerActor(req);
   const { scope, value, reason, patron_device_id_hash } = req.body;
   const allowedScopes: BlockScope[] = ['patron_device_id_hash', 'sender_name'];
+  const resolvedPatronDeviceIdHash = resolvePatronDeviceIdHash(req, patron_device_id_hash);
 
   if (!allowedScopes.includes(scope) || !reason) {
     return res.status(400).json({
@@ -11125,9 +11556,12 @@ app.post("/api/moderation/patron-block", async (req, res) => {
     });
   }
 
-  const normalizedValue = typeof value === 'string' && value.trim().length > 0
-    ? value.trim().toLowerCase()
-    : resolvedActor.patronDeviceIdHash ?? (typeof patron_device_id_hash === 'string' ? patron_device_id_hash.trim().toLowerCase() : 'anonymous-device');
+  const normalizedValue = scope === 'patron_device_id_hash'
+    ? resolvedPatronDeviceIdHash
+    : (typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : null);
+  if (!normalizedValue) {
+    return res.status(422).json({ error: 'A private browser identity or sender name is required for this block request.' });
+  }
   const blockReason = String(reason).trim().slice(0, 500) || 'Patron requested a safety block.';
   const entityKey = `patron-block-request:${scope}:${normalizedValue}:${Date.now()}`;
 
@@ -11338,8 +11772,8 @@ app.post("/api/moderation/remove", async (req, res) => {
       ...request.boosts.map((boost) => boost.paymentId)
     ].filter((id): id is string => Boolean(id));
     if (paymentIds.length) {
-      await paymentService.voidOrRefundMany(paymentIds);
-      request.paymentStatus = 'voided_or_refunded';
+      const reversals = await paymentService.voidOrRefundMany(paymentIds);
+      applyPaymentReversalTruth(request, reversals);
     }
   }
   recalculateTotals(roomState);
