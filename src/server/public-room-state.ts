@@ -60,7 +60,8 @@ export function projectPublicRoomState(
       requestWindowLabel: inputState.session.requestWindowLabel,
       operatingMode: inputState.session.operatingMode,
       searchScope: inputState.session.searchScope,
-      paymentsEnabled: inputState.session.paymentsEnabled !== false
+      paymentsEnabled: inputState.session.paymentsEnabled !== false,
+      tipsEnabled: inputState.session.tipsEnabled === true
     },
     requests: inputState.requests
       .map(projectPublicRequest)

@@ -47,6 +47,17 @@ export type SettleResult =
   | { status: 'captured' | 'voided' | 'refunded'; paymentId: string }
   | { status: 'failed'; reason: string };
 
+export type PaymentReversalResult = {
+  paymentId: string;
+  result: SettleResult;
+};
+
+export function isTerminalProviderReversalStatus(action: 'void' | 'refund', providerStatus: string) {
+  return action === 'void'
+    ? providerStatus === 'canceled'
+    : providerStatus === 'succeeded';
+}
+
 export type CloseoutTotals = {
   source: 'database_captured_payments';
   capturedCount: number;
@@ -101,6 +112,37 @@ export function createPaymentService(config: {
       return { status: 'disabled' };
     }
 
+    const [destinationRow] = await db
+      .select({
+        isActive: performers.isActive,
+        onboardingStatus: performers.onboardingStatus,
+        paymentAccountStatus: performers.paymentAccountStatus,
+        kycStatus: performers.kycStatus,
+        chargesEnabled: performers.chargesEnabled,
+        payoutsEnabled: performers.payoutsEnabled,
+        stripeConnectedAccountId: performers.stripeConnectedAccountId,
+        payoutHoldReason: performers.payoutHoldReason
+      })
+      .from(gigSessions)
+      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+      .where(eq(gigSessions.id, input.gigId))
+      .limit(1);
+
+    const destinationAccountId = destinationRow?.stripeConnectedAccountId?.trim() || null;
+    const sellerPayoutReady = Boolean(
+      destinationRow?.isActive
+      && destinationRow.onboardingStatus !== 'suspended'
+      && destinationRow.paymentAccountStatus === 'payouts_enabled'
+      && ['not_required', 'verified'].includes(destinationRow.kycStatus)
+      && destinationRow.chargesEnabled
+      && destinationRow.payoutsEnabled
+      && destinationAccountId
+      && !destinationRow.payoutHoldReason
+    );
+    if (!sellerPayoutReady || !destinationAccountId) {
+      return { status: 'failed', reason: 'seller_payout_not_ready' };
+    }
+
     let feePolicy;
     try {
       feePolicy = await resolveSwayPlatformFeePolicyForGig({
@@ -143,24 +185,6 @@ export function createPaymentService(config: {
 
     const paymentId = created.id;
 
-    // Passthrough target: only attached when the performer has a Stripe
-    // Connect account that can actually accept charges. If not (not yet
-    // connected, or still onboarding), the charge still proceeds without a
-    // destination -- paid actions are never blocked on Connect onboarding.
-    const [destinationRow] = await db
-      .select({
-        stripeConnectedAccountId: performers.stripeConnectedAccountId,
-        chargesEnabled: performers.chargesEnabled
-      })
-      .from(gigSessions)
-      .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-      .where(eq(gigSessions.id, input.gigId))
-      .limit(1);
-
-    const destinationAccountId = destinationRow?.chargesEnabled
-      ? destinationRow.stripeConnectedAccountId ?? undefined
-      : undefined;
-
     try {
       const authorization = await provider.authorizePayment({
         amountTotalCents,
@@ -168,9 +192,8 @@ export function createPaymentService(config: {
         idempotencyKey: `authorize:${input.idempotencyKey}`,
         paymentMethod: input.paymentMethod,
         confirm: input.confirm,
-        ...(destinationAccountId
-          ? { destinationAccountId, applicationFeeAmountCents: feePolicy.platformFeeCents }
-          : {}),
+        destinationAccountId,
+        applicationFeeAmountCents: feePolicy.platformFeeCents,
         metadata: {
           sway_payment_id: paymentId,
           sway_gig_id: input.gigId,
@@ -437,7 +460,12 @@ export function createPaymentService(config: {
   async function voidOrRefund(paymentId: string): Promise<SettleResult> {
     if (!db || !provider) return { status: 'disabled' };
     const payment = await loadPayment(paymentId);
-    if (!payment || !payment.processorPaymentIntentId) return { status: 'noop' };
+    if (!payment) return { status: 'failed', reason: 'payment_not_found' };
+    if (!payment.processorPaymentIntentId) {
+      return ['created', 'failed'].includes(payment.paymentStatus)
+        ? { status: 'noop' }
+        : { status: 'failed', reason: 'processor_payment_intent_missing' };
+    }
 
     try {
       if (payment.paymentStatus === 'authorized' || payment.paymentStatus === 'payment_pending') {
@@ -445,6 +473,9 @@ export function createPaymentService(config: {
           processorPaymentIntentId: payment.processorPaymentIntentId,
           idempotencyKey: `void:${paymentId}`
         });
+        if (!isTerminalProviderReversalStatus('void', result.status)) {
+          return { status: 'failed', reason: `void_not_terminal:${result.status}` };
+        }
         await lifecycle.transitionPaymentState({
           paymentId,
           processor: provider.processor,
@@ -461,6 +492,9 @@ export function createPaymentService(config: {
           processorPaymentIntentId: payment.processorPaymentIntentId,
           idempotencyKey: `refund:${paymentId}`
         });
+        if (!isTerminalProviderReversalStatus('refund', result.status)) {
+          return { status: 'failed', reason: `refund_not_terminal:${result.status}` };
+        }
         await lifecycle.transitionPaymentState({
           paymentId,
           processor: provider.processor,
@@ -472,16 +506,22 @@ export function createPaymentService(config: {
         return { status: 'refunded', paymentId };
       }
 
-      return { status: 'noop' };
+      if (['voided', 'refunded', 'failed'].includes(payment.paymentStatus)) {
+        return { status: 'noop' };
+      }
+
+      return { status: 'failed', reason: `reversal_not_supported_from:${payment.paymentStatus}` };
     } catch (error) {
       return { status: 'failed', reason: error instanceof Error ? error.message : 'reversal_failed' };
     }
   }
 
-  async function voidOrRefundMany(paymentIds: string[]): Promise<void> {
-    for (const paymentId of paymentIds) {
-      await voidOrRefund(paymentId);
+  async function voidOrRefundMany(paymentIds: string[]): Promise<PaymentReversalResult[]> {
+    const results: PaymentReversalResult[] = [];
+    for (const paymentId of [...new Set(paymentIds)]) {
+      results.push({ paymentId, result: await voidOrRefund(paymentId) });
     }
+    return results;
   }
 
   async function resolvePaymentIdByIntent(processorPaymentIntentId: string): Promise<string | null> {

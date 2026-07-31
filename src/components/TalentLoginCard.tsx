@@ -16,8 +16,8 @@ export default function TalentLoginCard() {
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const signupHref = useMemo(() => {
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail) return '/talent/signup';
-    return `/talent/signup?email=${encodeURIComponent(normalizedEmail)}`;
+    if (!normalizedEmail) return '/account/signup?intent=performer';
+    return `/account/signup?intent=performer&email=${encodeURIComponent(normalizedEmail)}`;
   }, [email]);
 
   const statusMessage = useAuthQueryStatusMessage({
@@ -106,7 +106,7 @@ export default function TalentLoginCard() {
           Use your performer email and password to access <code>/talent</code>. Recovery links stay available if you need account help.
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-400">
-          New to Sway? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/talent/signup">Create a performer account</a>
+          New to Sway? <a className="font-bold text-fuchsia-300 hover:text-fuchsia-200" href="/account/signup?intent=performer">Create one Sway account</a>
         </p>
 
         {statusMessage ? <StatusBanner tone="amber" message={statusMessage} /> : null}

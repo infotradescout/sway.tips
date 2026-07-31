@@ -110,6 +110,9 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     paymentsEnabled: typeof input.paymentsEnabled === 'boolean'
       ? input.paymentsEnabled
       : (fallback.paymentsEnabled ?? true),
+    tipsEnabled: typeof input.tipsEnabled === 'boolean'
+      ? input.tipsEnabled
+      : (fallback.tipsEnabled ?? false),
     totals: input.totals ?? fallback.totals
   };
 }
@@ -124,6 +127,7 @@ function coerceBoost(raw: unknown): BoostContribution | null {
     amount: Number(input.amount ?? 0),
     timestamp: input.timestamp ?? new Date().toISOString(),
     actorUserId: input.actorUserId ?? null,
+    patronDeviceIdHash: input.patronDeviceIdHash ?? null,
     clientRequestId: input.clientRequestId,
     idempotencyKey: input.idempotencyKey,
     idempotencyFingerprint: input.idempotencyFingerprint,

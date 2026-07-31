@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { isDemoModeEnabled, loadDemoBackendState } from '../demo-mode';
 import { BackendState, GigSession } from '../types';
+import { buildPatronRequestHeaders } from '../patron-device';
 
 export const emptySession: GigSession = {
   status: 'inactive',
@@ -26,6 +27,7 @@ export const emptySession: GigSession = {
   operatingMode: 'manual',
   searchScope: 'library',
   paymentsEnabled: true,
+  tipsEnabled: false,
   totals: {
     totalTips: 0,
     accumulatedFees: 0,
@@ -185,7 +187,7 @@ export function useSwayState(options?: {
     try {
       const response = statePath === '/api/state'
         ? await fetch('/api/state')
-        : await fetch(statePath);
+        : await fetch(statePath, { headers: buildPatronRequestHeaders() });
       const data = await response.json();
 
       if (!response.ok) {
@@ -234,7 +236,7 @@ export function useSwayState(options?: {
 export async function postJson(url: string, body?: unknown) {
   const response = await fetch(url, {
     method: 'POST',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: buildPatronRequestHeaders(Boolean(body)),
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await response.json();

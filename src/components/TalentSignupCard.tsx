@@ -7,7 +7,7 @@ const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
 // Mirrors src/server/performer-login.ts normalizePerformerHandle and
 // src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
 const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
-const PASSWORD_MIN_LENGTH = 3;
+const PASSWORD_MIN_LENGTH = 8;
 
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
 type EntryMode = 'code' | 'create';

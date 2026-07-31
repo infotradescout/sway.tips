@@ -2,7 +2,6 @@ import {
   ArrowUpRight,
   BadgeCheck,
   CalendarDays,
-  Coins,
   Disc3,
   Globe2,
   LockKeyhole,
@@ -15,7 +14,6 @@ import {
   Sparkles
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { QRCodeCanvas } from 'qrcode.react';
 import { useEffect, useMemo, useState } from 'react';
 import { captureCampaignCode } from '../shells/campaignAttribution';
 import { sendAcquisitionEvent } from '../shells/frictionClient';
@@ -140,30 +138,6 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
-  const [tipMessage, setTipMessage] = useState<string | null>(null);
-  const [tipOpen, setTipOpen] = useState(false);
-
-  const handleTipClick = () => {
-    if (!profile) return;
-
-    if (profile.isPreview || profile.claimState !== 'claimed') {
-      setTipOpen(false);
-      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
-      return;
-    }
-
-    setTipMessage(null);
-    setTipOpen(true);
-  };
-
-  const handlePayClick = () => {
-    if (!profile) return;
-    if (profile.isPreview || profile.claimState !== 'claimed') {
-      setTipMessage('Tipping is unavailable until this profile is claimed and verified by the performer. No payment was started.');
-      return;
-    }
-    setTipMessage('Direct profile payments are not enabled for this performer yet. No payment was started.');
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -242,8 +216,6 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       : new URL(profilePath, window.location.origin).toString();
   }, [performerHandle, profile]);
 
-  const profileTipUrl = useMemo(() => `${profileUrl}#tip`, [profileUrl]);
-
   const handleShare = async () => {
     if (!profile) return;
     const shareData = {
@@ -321,7 +293,6 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     stageName: profile.stageName,
     displayName: profile.displayName
   });
-  const tipLabel = publicHeroName;
   const pageKindLabel = resolvePublicProfilePageKindLabel({
     primaryRole: profile.primaryRole,
     specialties: profile.specialties,
@@ -423,68 +394,6 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.
               </p>
             </div>
-          ) : null}
-
-          <div className="mt-5">
-            <button
-              type="button"
-              onClick={handleTipClick}
-              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.08] px-4 py-3 text-sm font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
-            >
-              <Coins className="h-4 w-4" />
-              Tip {tipLabel}
-            </button>
-            {tipMessage ? (
-              <p id="public-profile-tip-message" role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-amber-100/90">
-                {tipMessage}
-              </p>
-            ) : null}
-          </div>
-
-          {tipOpen ? (
-            <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-left" aria-label="Tip this performer">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Tip {tipLabel}</p>
-                <p className="mt-2 text-sm font-bold text-white">Scan to tip {tipLabel}, or pay directly here.</p>
-                <p className="mt-2 break-all text-xs leading-5 text-slate-400">{profileTipUrl}</p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(profileTipUrl);
-                      setShareMessage('Tip link copied');
-                      window.setTimeout(() => setShareMessage(null), 1800);
-                    } catch {
-                      setShareMessage('Copy unavailable');
-                    }
-                  }}
-                  className="mt-3 inline-flex min-h-9 items-center justify-center rounded-xl border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/[0.14]"
-                >
-                  Copy tip link
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePayClick}
-                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-amber-200 sm:w-auto"
-                >
-                  Pay through Sway
-                </button>
-              </div>
-              <div className="shrink-0 self-center rounded-2xl bg-white p-3 shadow-inner" data-public-profile-qr="true">
-                <QRCodeCanvas
-                  key={profileTipUrl}
-                  aria-label="Sway tip QR code"
-                  value={profileTipUrl}
-                  size={156}
-                  level="H"
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                  marginSize={4}
-                />
-              </div>
-            </div>
-            </section>
           ) : null}
 
           {activeRoom ? (
@@ -646,7 +555,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             Discover live rooms and shows
           </a>
           <a
-            href="/talent/signup"
+            href="/account/signup?intent=performer"
             onClick={() => sendAcquisitionEvent('guest_to_performer_started', {
               shell: 'patron', surface: 'public-profile', route_family: 'performer-profile',
               has_route_context: true, has_session_context: false, build_commit: 'unknown'

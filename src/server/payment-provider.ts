@@ -22,11 +22,10 @@ export type ProviderAuthorizeInput = {
   paymentMethod?: string;
   confirm?: boolean;
   metadata?: Record<string, string>;
-  // Passthrough (destination charge) target: when set, Stripe automatically
+  // Required destination-charge target. Live-room money must never fall back
+  // to the platform balance when a performer is not payout-ready.
   // routes the charge (minus applicationFeeAmountCents) to this connected
-  // account once the PaymentIntent is captured. Omitted entirely for callers
-  // whose performer hasn't connected Stripe yet -- the charge still succeeds
-  // into the platform balance in that case.
+  // account once the PaymentIntent is captured.
   destinationAccountId?: string;
   applicationFeeAmountCents?: number;
 };
@@ -215,7 +214,9 @@ export function createStripeProviderAdapter(config: {
       return {
         processorPaymentIntentId: input.processorPaymentIntentId,
         processorChargeId: typeof refund.charge === 'string' ? refund.charge : refund.charge?.id ?? null,
-        status: refund.status ?? 'refunded'
+        // A missing status is not proof that money returned. The payment
+        // service only marks a refund terminal when Stripe says `succeeded`.
+        status: refund.status ?? 'unknown'
       };
     }
   };
@@ -229,7 +230,7 @@ export function createStripeProviderAdapter(config: {
 export function createConfiguredPaymentProvider(env: NodeJS.ProcessEnv = process.env): PaymentProviderAdapter | null {
   const secretKey = env.STRIPE_SECRET_KEY;
   const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
-  if (!secretKey || !webhookSecret) {
+  if (!secretKey || !webhookSecret || !secretKey.startsWith('sk_test_')) {
     return null;
   }
   return createStripeProviderAdapter({ secretKey, webhookSecret });

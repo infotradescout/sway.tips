@@ -25,6 +25,7 @@ export interface BoostContribution {
   amount: number;
   timestamp: string;
   actorUserId?: string | null;
+  patronDeviceIdHash?: string | null;
   clientRequestId?: string;
   idempotencyKey?: string;
   idempotencyFingerprint?: string;
@@ -123,6 +124,9 @@ export interface GigSession {
   // When false, this room is a free event: tips are rejected, boosts become
   // free upvotes, and requests are created with no payment step at all.
   paymentsEnabled: boolean;
+  // Direct tips and every other paid room action require a payout-ready seller.
+  // A genuinely free room keeps this false while requests/upvotes remain usable.
+  tipsEnabled: boolean;
   totals: {
     totalTips: number;
     accumulatedFees: number;
@@ -194,6 +198,7 @@ export interface PublicGigSession {
   operatingMode: GigSession['operatingMode'];
   searchScope: GigSession['searchScope'];
   paymentsEnabled: boolean;
+  tipsEnabled: boolean;
 }
 
 export interface PublicRoomState {

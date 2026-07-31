@@ -11,6 +11,7 @@ type AccountSession = {
     proModeStatus: 'disabled' | 'onboarding' | 'active' | 'suspended' | 'revoked';
   };
   performer: { id: string; displayName: string; handle: string | null; payoutsEnabled: boolean } | null;
+  pendingRightsReviewCount: number;
 };
 
 type ClaimPreview = {
@@ -170,16 +171,22 @@ export function AccountLogin() {
         ) : null}
         <button disabled={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Logging in…' : 'Log in'}</button>
       </form>
+      <div className="mt-4 flex justify-center gap-4 text-xs font-bold">
+        <a href="/account/recover" className="text-cyan-300">Forgot password?</a>
+        <a href="/account/resend-verification" className="text-slate-400">Resend verification</a>
+      </div>
       <a href={signupHref} className="mt-4 block text-center text-sm font-bold text-cyan-300">Create an account</a>
     </AccessFrame>
   );
 }
 
 export function AccountSignup() {
+  const signupParams = new URLSearchParams(window.location.search);
+  const performerIntent = signupParams.get('intent') === 'performer';
   const initialClaim = readClaimFromLocation();
   const accountNext = readSafeAccountNextFromLocation();
   const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(signupParams.get('email')?.trim() || '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [claimCode, setClaimCode] = useState(initialClaim);
@@ -286,16 +293,16 @@ export function AccountSignup() {
 
   return (
     <AccessFrame>
-      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Customer or performer</p>
+      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">One Sway account</p>
       <h1 className="mt-2 font-display text-3xl font-black">Create your Sway account</h1>
-      <p className="mt-2 text-sm text-slate-400">Start as a customer. Activate Pro Mode whenever you are ready to perform.</p>
+      <p className="mt-2 text-sm text-slate-400">{performerIntent ? 'Create one account, verify your email, then activate your performer identity and prepare your first room.' : 'Join rooms as a customer. Activate Pro Mode later from this same account whenever you are ready to perform.'}</p>
       {message ? <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       {verificationLink ? <a href={verificationLink} className="mt-3 block text-xs font-bold text-cyan-300 underline">Open local verification link</a> : null}
       <form onSubmit={submit} className="mt-5 space-y-3">
         <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
         <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm password" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        <input type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (8+ characters, letter and number)" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        <input type="password" required minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm password" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
         <ClaimCodeField
           value={claimCode}
           onChange={(value) => {
@@ -456,7 +463,9 @@ export function AccountHome() {
       <div className="mt-5 grid gap-3">
         <a href="/home" className="flex min-h-14 items-center justify-between rounded-xl bg-fuchsia-600 px-4 text-sm font-black"><span className="inline-flex items-center gap-2"><QrCode className="h-4 w-4" /> Join or scan a room</span><ArrowRight className="h-4 w-4" /></a>
         <a href="/tickets" className="flex min-h-14 items-center justify-between rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-4 text-sm font-black text-fuchsia-100"><span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4" /> My tickets</span><ArrowRight className="h-4 w-4" /></a>
-        <a href="/account/reviews" className="flex min-h-14 items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100"><span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Review release rights</span><ArrowRight className="h-4 w-4" /></a>
+        {(session?.pendingRightsReviewCount ?? 0) > 0 ? (
+          <a href="/account/reviews" className="flex min-h-14 items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100"><span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Review release rights ({session?.pendingRightsReviewCount})</span><ArrowRight className="h-4 w-4" /></a>
+        ) : null}
         {session?.performer ? (
           <a href="/talent" className="flex min-h-14 items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100"><span className="inline-flex items-center gap-2"><Radio className="h-4 w-4" /> Open performer console</span><ArrowRight className="h-4 w-4" /></a>
         ) : (
@@ -469,6 +478,48 @@ export function AccountHome() {
           </form>
         )}
       </div>
+    </AccessFrame>
+  );
+}
+
+export function AccountRecovery({ kind }: { kind: 'password' | 'verification' }) {
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState('');
+  const [link, setLink] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const isVerification = kind === 'verification';
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setPending(true);
+    setMessage('');
+    setLink(null);
+    try {
+      const data = await accountJson(
+        isVerification ? '/api/account/verification/resend' : '/api/account/password-reset/request',
+        { email }
+      );
+      setMessage(data.message || 'Check your email for the next step.');
+      setLink(typeof data.verificationLink === 'string' ? data.verificationLink : (typeof data.resetLink === 'string' ? data.resetLink : null));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to send that email right now.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <AccessFrame>
+      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account recovery</p>
+      <h1 className="mt-2 font-display text-3xl font-black">{isVerification ? 'Resend verification' : 'Reset your password'}</h1>
+      <p className="mt-2 text-sm text-slate-400">Enter the email on your Sway account. The response stays private whether or not an account exists.</p>
+      {message ? <p role="status" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {link ? <a href={link} className="mt-3 block text-xs font-bold text-cyan-300 underline">Open local recovery link</a> : null}
+      <form onSubmit={submit} className="mt-5 space-y-3">
+        <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        <button disabled={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Sending…' : isVerification ? 'Send verification link' : 'Send password reset link'}</button>
+      </form>
+      <a href="/account/login" className="mt-4 block text-center text-sm font-bold text-cyan-300">Back to login</a>
     </AccessFrame>
   );
 }

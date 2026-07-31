@@ -121,6 +121,7 @@ const internalState = {
     operatingMode: 'manual',
     searchScope: 'catalog',
     paymentsEnabled: true,
+    tipsEnabled: true,
     totals: {
       totalTips: 25,
       accumulatedFees: 3,
@@ -143,6 +144,7 @@ const internalState = {
 };
 
 const publicState = projectPublicRoomState(internalState, gigId);
+assert.equal(publicState.session.tipsEnabled, true, 'Public room state must carry the server-authoritative tip gate.');
 assert.deepEqual(
   publicState.requests.map((request) => request.id),
   ['req-approved', 'req-tip'],
@@ -220,7 +222,7 @@ const controlBridgeSource = readFileSync(join(root, 'scripts/sway-control-bridge
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 for (const term of [
-  '...projectPublicRoomState(state, null)',
+  '...projectPublicRoomState(createEmptyBackendState(), null)',
   '...projectPublicRoomState(roomSnapshot.state, requestedGigId)',
   'app.post("/api/patron/request-status"',
   'matchesPatronStatusReceipt(receipt, candidate.patronStatusReceiptHash)',

@@ -243,7 +243,7 @@ export default function PublicDiscoverPage() {
         <footer className="mt-14 border-t border-white/10 py-8 text-center">
           <UserRound className="mx-auto h-5 w-5 text-slate-600" aria-hidden="true" />
           <p className="mt-3 text-xs text-slate-500">Have a performer link? Open it directly to see their full page.</p>
-          <a href="/talent/signup" className="mt-3 inline-flex text-xs font-black text-fuchsia-200 transition hover:text-white">
+          <a href="/account/signup?intent=performer" className="mt-3 inline-flex text-xs font-black text-fuchsia-200 transition hover:text-white">
             Create your own Sway page
           </a>
         </footer>
