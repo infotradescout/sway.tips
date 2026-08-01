@@ -12,6 +12,7 @@ const requiredServerTerms = [
   "app.post('/api/talent/connect/onboard'",
   'stripeConnectService.createRecipientAccount',
   'stripeConnectService.createOnboardingLink',
+  'liveRoomPaymentRuntimeConfig.connectEnabled',
   "console.error('Stripe Connect onboarding failed.'",
   'Stripe Connect onboarding could not be started',
   'return res.status(502).json'
@@ -25,6 +26,7 @@ for (const term of requiredServerTerms) {
 
 const requiredConnectTerms = [
   'STRIPE_API_VERSION',
+  "secretKey?.startsWith('sk_test_')",
   "apiVersion: STRIPE_API_VERSION",
   'stripe.v2.core.accounts.create',
   'configuration:',
@@ -66,6 +68,10 @@ if (!/try\s*\{[\s\S]*createRecipientAccount[\s\S]*createOnboardingLink[\s\S]*\}\
 
 if (!talentDashboardSource.includes('await response.json().catch(() => null)')) {
   failures.push('Talent dashboard must tolerate non-JSON Connect onboarding failures.');
+}
+
+if (!talentDashboardSource.includes("disabled={previewMode || liveRoomPaymentMode !== 'test' || stripeConnectStatus === 'submitting'}")) {
+  failures.push('Talent dashboard must disable Connect onboarding unless the server verifies Stripe test mode.');
 }
 
 if (/Unexpected token.*DOCTYPE/i.test(talentDashboardSource)) {

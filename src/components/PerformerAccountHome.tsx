@@ -6,6 +6,7 @@ export default function PerformerAccountHome({
   displayName,
   roleLabel,
   stripeReady,
+  paymentMode,
   emailVerified,
   onStartRoom,
   onOpenLibrary
@@ -14,6 +15,7 @@ export default function PerformerAccountHome({
   displayName: string;
   roleLabel: string;
   stripeReady: boolean;
+  paymentMode: 'test' | 'unavailable';
   emailVerified: boolean;
   onStartRoom: () => void;
   onOpenLibrary: () => void;
@@ -22,7 +24,7 @@ export default function PerformerAccountHome({
   const readiness = [
     { done: emailVerified, label: 'Verify your account email' },
     { done: Boolean(performerHandle), label: 'Set your performer name and public handle' },
-    { done: stripeReady, label: 'Connect Stripe before accepting any money', optional: true }
+    { done: stripeReady, label: 'Finish Stripe test setup for paid-mode rehearsal', optional: true }
   ];
 
   return (
@@ -37,10 +39,16 @@ export default function PerformerAccountHome({
             <h2 className="mt-1 font-display text-xl font-black text-white">{displayName}</h2>
             <p className="mt-2 text-sm text-slate-400">Finish the essentials, run a free test room, then share your live link or QR.</p>
           </div>
-          <div className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${stripeReady ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-200'}`}>
-            {stripeReady ? 'Payouts ready' : 'Free rooms only'}
+          <div className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${stripeReady ? 'bg-cyan-500/15 text-cyan-200' : 'bg-amber-500/15 text-amber-200'}`}>
+            {stripeReady ? 'Test-money ready' : 'Free rooms only'}
           </div>
         </div>
+
+        <p role="status" className={`mt-4 rounded-xl border px-3 py-3 text-xs leading-5 ${paymentMode === 'test' ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100' : 'border-amber-500/25 bg-amber-500/10 text-amber-100'}`}>
+          {paymentMode === 'test'
+            ? 'Stripe test mode — no real money moves. Start with a free room; use test cards only when rehearsing money flows.'
+            : 'Money actions are unavailable because Stripe test mode could not be verified. Free rooms still work.'}
+        </p>
 
         <ol className="mt-5 space-y-2" aria-label="First room readiness">
           {readiness.map((item) => (
@@ -52,6 +60,15 @@ export default function PerformerAccountHome({
             </li>
           ))}
         </ol>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950 p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-300">Solo rehearsal</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5 text-slate-300">
+            <li>Start a free room and keep this console open.</li>
+            <li>Open the room QR or link in three private browser windows or devices.</li>
+            <li>Submit, approve, boost, fulfill, hide, reconnect, then end the room.</li>
+          </ol>
+        </div>
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button type="button" onClick={onStartRoom} disabled={!emailVerified} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50">

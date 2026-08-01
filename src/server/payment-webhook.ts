@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { and, asc, eq, inArray, lte, ne, or } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { liveRoomProcessorEvents, payments } from '../db/schema';
@@ -67,10 +67,14 @@ function recordString(value: unknown) {
  */
 export function createPaymentWebhookService({
   databaseUrl,
-  provider
+  provider,
+  hooks
 }: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter;
+  hooks?: {
+    afterClaim?: (event: typeof liveRoomProcessorEvents.$inferSelect) => Promise<void>;
+  };
 }) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
   const service = createPaymentService({ databaseUrl, provider });
@@ -130,12 +134,14 @@ export function createPaymentWebhookService({
         .for('update', { skipLocked: true })
         .limit(1);
       if (!row) return null;
+      const processingLeaseOwner = `live-room-webhook:${process.pid}:${randomUUID()}`;
       const [claimed] = await tx
         .update(liveRoomProcessorEvents)
         .set({
           status: 'processing',
           attemptCount: row.attemptCount + 1,
           processingStartedAt: now,
+          processingLeaseOwner,
           lastError: null
         })
         .where(eq(liveRoomProcessorEvents.id, row.id))
@@ -144,21 +150,28 @@ export function createPaymentWebhookService({
     });
   }
 
-  async function markProcessed(eventId: string, input: {
+  async function markProcessed(event: typeof liveRoomProcessorEvents.$inferSelect, input: {
     status: 'processed' | 'ignored';
     paymentId?: string | null;
   }) {
-    if (!db) return;
-    await db
+    if (!db || !event.processingLeaseOwner) return false;
+    const updated = await db
       .update(liveRoomProcessorEvents)
       .set({
         status: input.status,
         paymentId: input.paymentId ?? null,
         processingStartedAt: null,
+        processingLeaseOwner: null,
         processedAt: new Date(),
         lastError: null
       })
-      .where(eq(liveRoomProcessorEvents.id, eventId));
+      .where(and(
+        eq(liveRoomProcessorEvents.id, event.id),
+        eq(liveRoomProcessorEvents.status, 'processing'),
+        eq(liveRoomProcessorEvents.processingLeaseOwner, event.processingLeaseOwner)
+      ))
+      .returning({ id: liveRoomProcessorEvents.id });
+    return updated.length === 1;
   }
 
   async function markFailed(
@@ -166,17 +179,24 @@ export function createPaymentWebhookService({
     error: unknown,
     input: { terminal?: boolean } = {}
   ) {
-    if (!db) return;
+    if (!db || !event.processingLeaseOwner) return false;
     const terminal = input.terminal === true || event.attemptCount >= 20;
-    await db
+    const updated = await db
       .update(liveRoomProcessorEvents)
       .set({
         status: terminal ? 'terminal_failed' : 'retryable_failed',
         processingStartedAt: null,
+        processingLeaseOwner: null,
         nextAttemptAt: retryAt(event.attemptCount),
         lastError: safeError(error)
       })
-      .where(eq(liveRoomProcessorEvents.id, event.id));
+      .where(and(
+        eq(liveRoomProcessorEvents.id, event.id),
+        eq(liveRoomProcessorEvents.status, 'processing'),
+        eq(liveRoomProcessorEvents.processingLeaseOwner, event.processingLeaseOwner)
+      ))
+      .returning({ id: liveRoomProcessorEvents.id });
+    return updated.length === 1;
   }
 
   async function processClaimedEvent(event: typeof liveRoomProcessorEvents.$inferSelect) {
@@ -184,7 +204,7 @@ export function createPaymentWebhookService({
     if (event.livemode) throw new Error('Live-mode Stripe events are forbidden while Sway room payments are test-only.');
     const mappedState = mapProviderEventToPaymentState(event.eventType);
     if (!mappedState) {
-      await markProcessed(event.id, { status: 'ignored' });
+      await markProcessed(event, { status: 'ignored' });
       return { status: 'ignored' as const };
     }
 
@@ -308,7 +328,7 @@ export function createPaymentWebhookService({
     if (mappedState === 'authorized' && processorPaymentIntentId) {
       await service.recordAuthorizationFromWebhook(paymentId, processorPaymentIntentId, recordString(payload.providerStatus));
     }
-    await markProcessed(event.id, { status: 'processed', paymentId });
+    await markProcessed(event, { status: 'processed', paymentId });
     return { status: 'processed' as const, paymentId, transition };
   }
 
@@ -316,6 +336,7 @@ export function createPaymentWebhookService({
     const event = await claimEvent(eventId);
     if (!event) return { status: 'not_claimed' as const };
     try {
+      await hooks?.afterClaim?.(event);
       return await processClaimedEvent(event);
     } catch (error) {
       await markFailed(event, error);

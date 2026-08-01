@@ -297,8 +297,8 @@ export default function PatronView({
     idempotencyKey: string;
     expires_at: string;
     gigId: string;
-    // A straight tip always goes through real payment, regardless of the room's
-    // free/paid toggle -- only song requests and boosts are room-specific.
+    // A straight tip always goes through Stripe's test-only payment path,
+    // regardless of the room's free/paid toggle. No real money moves.
     isTip?: boolean;
     clientSecret?: string;
     paymentIntentId?: string;
@@ -513,7 +513,13 @@ export default function PatronView({
     setStripeConfigError(null);
     const response = await fetch('/api/payment/config', { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || typeof data.publishableKey !== 'string' || !data.publishableKey.startsWith('pk_')) {
+    if (
+      !response.ok
+      || data?.mode !== 'test'
+      || data?.liveRoomMoneyEnabled !== true
+      || typeof data.publishableKey !== 'string'
+      || !data.publishableKey.startsWith('pk_test_')
+    ) {
       throw new Error(data?.error || 'Payment form is not configured.');
     }
     setStripePublishableKey(data.publishableKey);
@@ -1727,8 +1733,9 @@ export default function PatronView({
 
                 {/* Senders vital name */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">Your Name / Group</label>
+                  <label htmlFor="sway-patron-sender-name" className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">Your Name / Group</label>
                   <input
+                    id="sway-patron-sender-name"
                     type="text"
                     value={senderName}
                     onChange={(e) => setSenderName(e.target.value)}
@@ -1741,8 +1748,9 @@ export default function PatronView({
 
                 {/* Custom sentiment comment note */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">Custom Note / Shoutout (Profanity Filtered)</label>
+                  <label htmlFor="sway-patron-custom-note" className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">Custom Note / Shoutout (Profanity Filtered)</label>
                   <input
+                    id="sway-patron-custom-note"
                     type="text"
                     value={commentMessage}
                     onChange={(e) => setCommentMessage(e.target.value)}
@@ -2334,6 +2342,11 @@ export default function PatronView({
 
                   {/* Submit action */}
                   <div className="space-y-2">
+                    {(checkoutPayload.isTip || session.paymentsEnabled !== false) ? (
+                      <p role="status" className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold leading-4 text-cyan-100">
+                        Stripe test mode — use a test card. No real money moves.
+                      </p>
+                    ) : null}
                     {checkoutPayload.clientSecret && stripePromise && stripeElementsOptions ? (
                       <Elements stripe={stripePromise} options={stripeElementsOptions} key={checkoutPayload.clientSecret}>
                         <StripeAuthorizationForm

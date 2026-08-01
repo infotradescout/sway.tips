@@ -1,0 +1,603 @@
+import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createServer } from 'node:net';
+import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
+
+type JsonObject = Record<string, any>;
+
+function hash(value: string) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function reservePort() {
+  const socket = createServer();
+  await new Promise<void>((resolve, reject) => {
+    socket.once('error', reject);
+    socket.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = socket.address();
+  if (!address || typeof address === 'string') throw new Error('Unable to reserve a local proof port.');
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => socket.close((error) => error ? reject(error) : resolve()));
+  return port;
+}
+
+class HttpClient {
+  private cookie = '';
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly defaultHeaders: Record<string, string> = {}
+  ) {}
+
+  async request(path: string, init: RequestInit = {}) {
+    const headers = new Headers(this.defaultHeaders);
+    for (const [name, value] of new Headers(init.headers).entries()) headers.set(name, value);
+    if (this.cookie) headers.set('cookie', this.cookie);
+    const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers, redirect: init.redirect ?? 'manual' });
+    const cookies = typeof response.headers.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : [response.headers.get('set-cookie')].filter((value): value is string => Boolean(value));
+    const sessionCookie = cookies.find((value) => value.startsWith('sway_performer_session='));
+    if (sessionCookie) this.cookie = sessionCookie.split(';', 1)[0];
+    const text = await response.text();
+    let body: JsonObject = {};
+    if (text) {
+      try {
+        body = JSON.parse(text) as JsonObject;
+      } catch {
+        body = { text };
+      }
+    }
+    return { status: response.status, body, headers: response.headers };
+  }
+
+  get(path: string, init: RequestInit = {}) {
+    return this.request(path, { ...init, method: 'GET' });
+  }
+
+  post(path: string, body: JsonObject, init: RequestInit = {}) {
+    return this.request(path, {
+      ...init,
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...Object.fromEntries(new Headers(init.headers).entries()) },
+      body: JSON.stringify(body)
+    });
+  }
+}
+
+type RunningServer = {
+  baseUrl: string;
+  logs: () => string;
+  stop: () => Promise<void>;
+};
+
+async function startSwayServer(databaseUrl: string, port: number): Promise<RunningServer> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DATABASE_URL: databaseUrl,
+      SWAY_APP_BASE_URL: baseUrl,
+      APP_URL: baseUrl,
+      APP_BASE_URL: baseUrl,
+      VITE_SWAY_DEMO_MODE: 'false',
+      SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED: 'false',
+      STRIPE_SECRET_KEY: '',
+      STRIPE_PUBLISHABLE_KEY: '',
+      VITE_STRIPE_PUBLISHABLE_KEY: '',
+      STRIPE_WEBHOOK_SECRET: '',
+      SWAY_EMAIL_PROVIDER: '',
+      SWAY_EMAIL_API_KEY: '',
+      SWAY_EMAIL_FROM: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  }) as ChildProcessWithoutNullStreams;
+
+  const output: string[] = [];
+  const record = (chunk: Buffer) => {
+    output.push(chunk.toString('utf8'));
+    if (output.length > 200) output.splice(0, output.length - 200);
+  };
+  child.stdout.on('data', record);
+  child.stderr.on('data', record);
+
+  const earlyExit = new Promise<never>((_resolve, reject) => {
+    child.once('exit', (code, signal) => reject(new Error(
+      `Sway proof server exited before readiness (code=${code}, signal=${signal}).\n${output.join('')}`
+    )));
+  });
+  const readiness = (async () => {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(`${baseUrl}/api/health/network-probe`);
+        if (response.status === 204) return;
+      } catch {
+        // The listener is not ready yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`Timed out waiting for the Sway proof server.\n${output.join('')}`);
+  })();
+  await Promise.race([readiness, earlyExit]);
+
+  return {
+    baseUrl,
+    logs: () => output.join(''),
+    async stop() {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      child.kill('SIGTERM');
+      const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      const forced = new Promise<void>((resolve) => setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        resolve();
+      }, 5_000));
+      await Promise.race([stopped, forced]);
+    }
+  };
+}
+
+function assertStatus(
+  response: { status: number; body: JsonObject },
+  expected: number | number[],
+  label: string,
+  server: RunningServer
+) {
+  const statuses = Array.isArray(expected) ? expected : [expected];
+  assert.ok(statuses.includes(response.status),
+    `${label}: expected ${statuses.join(' or ')}, received ${response.status}: ${JSON.stringify(response.body)}\n${server.logs()}`);
+}
+
+async function createPerformerAccount(input: {
+  server: RunningServer;
+  suffix: string;
+  displayName: string;
+  handle: string;
+}) {
+  const client = new HttpClient(input.server.baseUrl);
+  const email = `simulated-${input.suffix}@example.test`;
+  const password = `Sway!${input.suffix}-Pilot-2026-Long`;
+  const signup = await client.post('/api/account/signup', {
+    displayName: input.displayName,
+    email,
+    password,
+    confirmPassword: password,
+    termsAccepted: true,
+    next: '/account?intent=performer'
+  });
+  assertStatus(signup, 202, `${input.suffix} account signup`, input.server);
+  assert.match(String(signup.body.verificationLink ?? ''), /\/api\/account\/verify-email\/consume\?token=/);
+
+  const verificationUrl = new URL(String(signup.body.verificationLink));
+  const verification = await client.get(`${verificationUrl.pathname}${verificationUrl.search}`);
+  assertStatus(verification, 302, `${input.suffix} email verification`, input.server);
+  const verificationLocation = new URL(String(verification.headers.get('location') ?? ''), input.server.baseUrl);
+  assert.equal(verificationLocation.pathname, '/account/login');
+  assert.equal(verificationLocation.searchParams.get('verified'), '1');
+  assert.equal(verificationLocation.searchParams.get('next'), '/account?intent=performer');
+
+  const login = await client.post('/api/account/login', { email, password, next: '/account?intent=performer' });
+  assertStatus(login, 200, `${input.suffix} account login`, input.server);
+  assert.equal(login.body.redirectPath, '/account?intent=performer');
+
+  const beforePro = await client.get('/api/account/session');
+  assertStatus(beforePro, 200, `${input.suffix} pre-Pro account session`, input.server);
+  assert.equal(beforePro.body.account.proModeStatus, 'disabled');
+  assert.equal(beforePro.body.performer, null);
+
+  const activation = await client.post('/api/account/pro-mode/activate', {
+    displayName: input.displayName,
+    handle: input.handle
+  });
+  assertStatus(activation, 200, `${input.suffix} Pro Mode activation`, input.server);
+  assert.equal(activation.body.status, 'active');
+  assert.equal(activation.body.redirectPath, '/talent');
+
+  const afterPro = await client.get('/api/account/session');
+  assertStatus(afterPro, 200, `${input.suffix} performer account session`, input.server);
+  assert.equal(afterPro.body.account.proModeStatus, 'active');
+  assert.equal(afterPro.body.performer.handle, input.handle);
+  return { client, email, performerId: String(afterPro.body.performer.id) };
+}
+
+function freeRequestBody(input: {
+  gigId: string;
+  label: string;
+  deviceHash: string;
+  message?: string;
+}) {
+  const clientRequestId = `${input.label}-${randomUUID()}`;
+  return {
+    body: {
+      type: 'request',
+      targetType: 'music',
+      title: input.label,
+      subtitle: 'Simulated Artist',
+      senderName: `Patron ${input.label}`,
+      message: input.message ?? '',
+      amount: 0,
+      client_request_id: clientRequestId,
+      idempotency_key: `idempotency-${clientRequestId}`,
+      patron_device_id_hash: input.deviceHash,
+      gig_id: input.gigId,
+      currency: 'USD',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    },
+    clientRequestId
+  };
+}
+
+async function main() {
+  const proof = await startEmbeddedPostgresProof('simulated_live_night');
+  const port = await reservePort();
+  let server: RunningServer | null = null;
+
+  try {
+    server = await startSwayServer(proof.databaseUrl, port);
+    const runtime = await new HttpClient(server.baseUrl).get('/api/runtime-config-status');
+    assertStatus(runtime, 200, 'runtime safety status', server);
+    assert.equal(runtime.body.liveRoomDurabilityWritesEnabled, true);
+    assert.equal(runtime.body.liveRoomDurabilityKillSwitchActive, false);
+    const paymentConfig = await new HttpClient(server.baseUrl).get('/api/payment/config');
+    assertStatus(paymentConfig, 503, 'payment provider disabled in simulated night', server);
+    assert.notEqual(paymentConfig.body.mode, 'live');
+    const legacySignup = await new HttpClient(server.baseUrl).post('/api/talent/signup', {
+      displayName: 'Legacy Split Account',
+      handle: 'legacy-split-account',
+      email: 'legacy-split@example.test',
+      password: 'Sway!Legacy-2026',
+      confirmPassword: 'Sway!Legacy-2026',
+      termsAccepted: true
+    });
+    assertStatus(legacySignup, 410, 'legacy performer signup is terminal', server);
+    assert.equal(legacySignup.body.code, 'universal_account_required');
+    assert.equal(legacySignup.body.redirectPath, '/account/signup?intent=performer');
+
+    const primary = await createPerformerAccount({
+      server,
+      suffix: 'primary',
+      displayName: 'DJ Simulated',
+      handle: 'dj-simulated'
+    });
+
+    const missingStartId = await primary.client.post('/api/session/start', {
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: false,
+      searchScope: 'catalog'
+    });
+    assertStatus(missingStartId, 422, 'room start requires a stable identity', server);
+    assert.equal(missingStartId.body.code, 'room_start_id_required');
+    const malformedStartId = await primary.client.post('/api/session/start', {
+      gig_id: 'not-a-uuid',
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: false,
+      searchScope: 'catalog'
+    });
+    assertStatus(malformedStartId, 422, 'malformed room start identity is rejected', server);
+    const unavailablePaidRoom = await primary.client.post('/api/session/start', {
+      gig_id: randomUUID(),
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: true,
+      searchScope: 'catalog'
+    });
+    assertStatus(unavailablePaidRoom, 503, 'paid room fails closed without verified Stripe test execution', server);
+    assert.equal(unavailablePaidRoom.body.code, 'test_payment_runtime_unavailable');
+    const unavailableConnect = await primary.client.post('/api/talent/connect/onboard', {});
+    assertStatus(unavailableConnect, 503, 'Connect fails closed without verified Stripe test execution', server);
+
+    const gigId = randomUUID();
+    const roomStartBody = {
+      gig_id: gigId,
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: false,
+      searchScope: 'catalog'
+    };
+    const roomStarts = await Promise.all(
+      Array.from({ length: 20 }, () => primary.client.post('/api/session/start', roomStartBody))
+    );
+    for (const [index, response] of roomStarts.entries()) {
+      assertStatus(response, 200, `duplicate room start ${index + 1}`, server);
+      assert.equal(response.body.state.activeGigId, gigId);
+    }
+    const mismatchedRoomStart = await primary.client.post('/api/session/start', {
+      ...roomStartBody,
+      searchScope: 'library'
+    });
+    assertStatus(mismatchedRoomStart, 409, 'room start identity rejects changed setup', server);
+    const unavailablePaidToggle = await primary.client.post('/api/session/payments-enabled', {
+      gig_id: gigId,
+      enabled: true
+    });
+    assertStatus(unavailablePaidToggle, 503, 'paid-room toggle fails closed without verified Stripe test execution', server);
+    assert.equal(unavailablePaidToggle.body.code, 'test_payment_runtime_unavailable');
+
+    const initialRooms = await primary.client.get('/api/talent/active-rooms');
+    assertStatus(initialRooms, 200, 'primary active room registry', server);
+    assert.deepEqual(initialRooms.body.rooms.map((room: JsonObject) => room.gigId), [gigId]);
+
+    const patronAHash = hash('simulated-patron-a');
+    const patronBHash = hash('simulated-patron-b');
+    const patronCHash = hash('simulated-patron-c');
+    const patronA = new HttpClient(server.baseUrl, { 'x-sway-device-id-hash': patronAHash });
+    const patronB = new HttpClient(server.baseUrl, { 'x-sway-device-id-hash': patronBHash });
+    const patronC = new HttpClient(server.baseUrl, { 'x-sway-device-id-hash': patronCHash });
+
+    const requestA = freeRequestBody({ gigId, label: 'Simulated Song A', deviceHash: patronAHash });
+    const requestB = freeRequestBody({ gigId, label: 'Simulated Song B', deviceHash: patronBHash });
+    const requestC = freeRequestBody({ gigId, label: 'Simulated Song C', deviceHash: patronCHash });
+    const created = await Promise.all([
+      patronA.post('/api/request/create', requestA.body),
+      patronB.post('/api/request/create', requestB.body),
+      patronC.post('/api/request/create', requestC.body)
+    ]);
+    for (const [index, response] of created.entries()) {
+      assertStatus(response, 200, `patron request ${index + 1}`, server);
+      assert.equal(response.body.patron_status.status, 'hold');
+      assert.match(String(response.body.patron_status_receipt ?? ''), /^[A-Za-z0-9_-]{43}$/);
+    }
+
+    const duplicateResponses = await Promise.all(
+      Array.from({ length: 10 }, () => patronA.post('/api/request/create', requestA.body))
+    );
+    for (const [index, response] of duplicateResponses.entries()) {
+      assertStatus(response, [200, 202], `duplicate patron replay ${index + 1}`, server);
+    }
+    const duplicateReconcile = await patronA.post('/api/pending-action/reconcile', {
+      client_request_id: requestA.body.client_request_id,
+      idempotency_key: requestA.body.idempotency_key
+    });
+    assertStatus(duplicateReconcile, 200, 'duplicate patron canonical reconciliation', server);
+    assert.equal(duplicateReconcile.body.status, 'reconciled');
+
+    const privateState = await primary.client.get(`/api/state/${gigId}`);
+    assertStatus(privateState, 200, 'performer private room state', server);
+    assert.equal(privateState.body.requests.length, 3);
+    const byTitle = new Map<string, JsonObject>(
+      privateState.body.requests.map((request: JsonObject) => [String(request.title), request] as const)
+    );
+    const runtimeRequestA = byTitle.get('Simulated Song A');
+    const runtimeRequestB = byTitle.get('Simulated Song B');
+    const runtimeRequestC = byTitle.get('Simulated Song C');
+    assert.ok(runtimeRequestA?.id && runtimeRequestB?.id && runtimeRequestC?.id);
+
+    const approveA = await primary.client.post('/api/request/triage', {
+      requestId: runtimeRequestA.id,
+      action: 'approve'
+    });
+    assertStatus(approveA, 200, 'approve first request', server);
+
+    const boostClientRequestId = `boost-${randomUUID()}`;
+    const boost = await patronC.post('/api/request/boost', {
+      requestId: runtimeRequestA.id,
+      patronName: 'Patron C',
+      boostAmount: 0,
+      client_request_id: boostClientRequestId,
+      idempotency_key: `idempotency-${boostClientRequestId}`,
+      patron_device_id_hash: patronCHash,
+      gig_id: gigId,
+      currency: 'USD',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    });
+    assertStatus(boost, 200, 'free-room boost', server);
+
+    const fulfillA = await primary.client.post('/api/request/fulfill', { requestId: runtimeRequestA.id });
+    assertStatus(fulfillA, 200, 'fulfill first request', server);
+    const denyB = await primary.client.post('/api/request/triage', { requestId: runtimeRequestB.id, action: 'deny' });
+    assertStatus(denyB, 200, 'deny second request', server);
+    const hideC = await primary.client.post('/api/moderation/hide', {
+      requestId: runtimeRequestC.id,
+      reason: 'Simulated safety hide'
+    });
+    assertStatus(hideC, 200, 'hide third request', server);
+
+    const closeWindow = await primary.client.post('/api/session/window/toggle', { gig_id: gigId, open: false });
+    assertStatus(closeWindow, 200, 'pause request window', server);
+    const pausedAttempt = freeRequestBody({ gigId, label: 'Paused Request', deviceHash: patronAHash });
+    const pausedResponse = await patronA.post('/api/request/create', pausedAttempt.body);
+    assertStatus(pausedResponse, 400, 'request rejected while paused', server);
+    const openWindow = await primary.client.post('/api/session/window/toggle', { gig_id: gigId, open: true });
+    assertStatus(openWindow, 200, 'resume request window', server);
+
+    const tipClientRequestId = `tip-${randomUUID()}`;
+    const tip = await patronB.post('/api/request/create', {
+      type: 'tip',
+      targetType: 'straight_tip',
+      senderName: 'Patron B',
+      amount: 5,
+      client_request_id: tipClientRequestId,
+      idempotency_key: `idempotency-${tipClientRequestId}`,
+      patron_device_id_hash: patronBHash,
+      gig_id: gigId,
+      currency: 'USD',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    });
+    assertStatus(tip, 409, 'tip blocked without payout readiness', server);
+    assert.equal(tip.body.code, 'seller_payout_not_ready');
+
+    const reconnectRequest = freeRequestBody({ gigId, label: 'Reconnect Song', deviceHash: patronAHash });
+    await patronA.post('/api/request/create', reconnectRequest.body); // Simulate a response the browser never receives.
+    const reconnectedPatronA = new HttpClient(server.baseUrl, { 'x-sway-device-id-hash': patronAHash });
+    const reconnectTruth = await reconnectedPatronA.post('/api/pending-action/reconcile', {
+      client_request_id: reconnectRequest.body.client_request_id,
+      idempotency_key: reconnectRequest.body.idempotency_key
+    });
+    assertStatus(reconnectTruth, 200, 'reconnect recovers canonical request result', server);
+    assert.equal(reconnectTruth.body.status, 'reconciled');
+
+    const publicState = await new HttpClient(server.baseUrl).get(`/api/state/${gigId}`);
+    assertStatus(publicState, 200, 'public room state', server);
+    assert.deepEqual(publicState.body.requests.map((request: JsonObject) => request.title), ['Simulated Song A']);
+    assert.equal(publicState.body.requests[0].status, 'fulfilled');
+    assert.equal(publicState.body.requests[0].boosts.length, 1);
+    const publicJson = JSON.stringify(publicState.body);
+    for (const privateField of [
+      'patronDeviceIdHash', 'idempotencyKey', 'clientRequestId', 'paymentId',
+      'paymentIntentId', 'patronStatusReceiptHash', 'ownerActorUserId'
+    ]) assert.ok(!publicJson.includes(privateField), `Public room leaked ${privateField}.`);
+
+    await server.stop();
+    server = null;
+    const databaseTruth = await proof.query<{
+      users: string;
+      performers: string;
+      gigs: string;
+      requests: string;
+      boosts: string;
+      payments: string;
+    }>(`
+      select
+        (select count(*) from users where email = 'simulated-primary@example.test')::text as users,
+        (select count(*) from performers where owner_user_id = (
+          select id from users where email = 'simulated-primary@example.test'
+        ))::text as performers,
+        (select count(*) from gig_sessions where id = $1)::text as gigs,
+        (select count(*) from requests where gig_id = $1 and activated_at is not null)::text as requests,
+        (select count(*) from request_boosts where gig_id = $1 and activated_at is not null)::text as boosts,
+        (select count(*) from payments where gig_id = $1)::text as payments
+    `, [gigId]);
+    assert.equal(Number(databaseTruth.rows[0].users), 1);
+    assert.equal(Number(databaseTruth.rows[0].performers), 1);
+    assert.equal(Number(databaseTruth.rows[0].gigs), 1);
+    assert.equal(Number(databaseTruth.rows[0].requests), 4);
+    assert.equal(Number(databaseTruth.rows[0].boosts), 1);
+    assert.equal(Number(databaseTruth.rows[0].payments), 0);
+
+    server = await startSwayServer(proof.databaseUrl, port);
+    const restartedPrivateState = await primary.client.get(`/api/state/${gigId}`);
+    assertStatus(restartedPrivateState, 200, 'room survives process restart', server);
+    assert.equal(restartedPrivateState.body.requests.length, 4);
+
+    // Simulate configuration disappearing after a paid room was persisted.
+    // Direct API callers must not bypass the payment-form/start-room gates.
+    await proof.query(`
+      update gig_sessions
+      set runtime_session_state = jsonb_set(
+            jsonb_set(runtime_session_state, '{paymentsEnabled}', 'true'::jsonb),
+            '{tipsEnabled}', 'true'::jsonb
+          ),
+          state_revision = state_revision + 1,
+          updated_at = now()
+      where id = $1
+    `, [gigId]);
+    const unavailableDirectPaidRequest = freeRequestBody({
+      gigId,
+      label: 'Configuration Loss Paid Request',
+      deviceHash: patronBHash
+    });
+    unavailableDirectPaidRequest.body.amount = 5;
+    const unavailableDirectPaidResponse = await patronB.post('/api/request/create', unavailableDirectPaidRequest.body);
+    assertStatus(unavailableDirectPaidResponse, 503, 'direct paid request fails closed after runtime configuration loss', server);
+    assert.equal(unavailableDirectPaidResponse.body.code, 'test_payment_runtime_unavailable');
+    const unavailableDirectPaidTruth = await proof.query<{ actions: string; payments: string }>(`
+      select
+        (select count(*) from client_pending_actions where idempotency_key = $1)::text as actions,
+        (select count(*) from payments where idempotency_key = $1)::text as payments
+    `, [unavailableDirectPaidRequest.body.idempotency_key]);
+    assert.equal(Number(unavailableDirectPaidTruth.rows[0].actions), 0);
+    assert.equal(Number(unavailableDirectPaidTruth.rows[0].payments), 0);
+    const unavailableDirectBoostId = `configuration-loss-boost-${randomUUID()}`;
+    const unavailableDirectBoost = await patronC.post('/api/request/boost', {
+      requestId: runtimeRequestA.id,
+      patronName: 'Patron C',
+      boostAmount: 5,
+      client_request_id: unavailableDirectBoostId,
+      idempotency_key: `idempotency-${unavailableDirectBoostId}`,
+      patron_device_id_hash: patronCHash,
+      gig_id: gigId,
+      currency: 'USD',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    });
+    assertStatus(unavailableDirectBoost, 503, 'direct paid boost fails closed after runtime configuration loss', server);
+    assert.equal(unavailableDirectBoost.body.code, 'test_payment_runtime_unavailable');
+    const unavailableDirectBoostTruth = await proof.query<{ actions: string; payments: string }>(`
+      select
+        (select count(*) from client_pending_actions where idempotency_key = $1)::text as actions,
+        (select count(*) from payments where idempotency_key = $1)::text as payments
+    `, [`idempotency-${unavailableDirectBoostId}`]);
+    assert.equal(Number(unavailableDirectBoostTruth.rows[0].actions), 0);
+    assert.equal(Number(unavailableDirectBoostTruth.rows[0].payments), 0);
+    await proof.query(`
+      update gig_sessions
+      set runtime_session_state = jsonb_set(
+            jsonb_set(runtime_session_state, '{paymentsEnabled}', 'false'::jsonb),
+            '{tipsEnabled}', 'false'::jsonb
+          ),
+          state_revision = state_revision + 1,
+          updated_at = now()
+      where id = $1
+    `, [gigId]);
+
+    const secondary = await createPerformerAccount({
+      server,
+      suffix: 'secondary',
+      displayName: 'DJ Isolated',
+      handle: 'dj-isolated'
+    });
+    const secondaryGigId = randomUUID();
+    const secondaryStart = await secondary.client.post('/api/session/start', {
+      gig_id: secondaryGigId,
+      talentName: 'DJ Isolated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: false,
+      searchScope: 'catalog'
+    });
+    assertStatus(secondaryStart, 200, 'secondary performer room start', server);
+
+    const primaryRooms = await primary.client.get('/api/talent/active-rooms');
+    const secondaryRooms = await secondary.client.get('/api/talent/active-rooms');
+    assertStatus(primaryRooms, 200, 'primary room isolation', server);
+    assertStatus(secondaryRooms, 200, 'secondary room isolation', server);
+    assert.deepEqual(primaryRooms.body.rooms.map((room: JsonObject) => room.gigId), [gigId]);
+    assert.deepEqual(secondaryRooms.body.rooms.map((room: JsonObject) => room.gigId), [secondaryGigId]);
+    const crossRoom = await secondary.client.get(`/api/state/${gigId}`);
+    assertStatus(crossRoom, 200, 'secondary receives only public projection for primary room', server);
+    assert.ok(!JSON.stringify(crossRoom.body).includes('Reconnect Song'));
+
+    const endSecondary = await secondary.client.post('/api/session/end', { gig_id: secondaryGigId });
+    assertStatus(endSecondary, 200, 'secondary room end', server);
+    const closeSecondary = await secondary.client.post('/api/session/closeout', { gig_id: secondaryGigId });
+    assertStatus(closeSecondary, 200, 'secondary room closeout', server);
+
+    const endPrimary = await primary.client.post('/api/session/end', { gig_id: gigId });
+    assertStatus(endPrimary, 200, 'primary room end', server);
+    const closePrimary = await primary.client.post('/api/session/closeout', { gig_id: gigId });
+    assertStatus(closePrimary, 200, 'primary room closeout', server);
+    const endedPublicRoom = await new HttpClient(server.baseUrl).get(`/api/state/${gigId}`);
+    assertStatus(endedPublicRoom, 410, 'closed room is no longer publicly readable', server);
+    const history = await primary.client.get('/api/talent/rooms/history');
+    assertStatus(history, 200, 'closed room history', server);
+    assert.ok(history.body.rooms.some((room: JsonObject) => room.gigId === gigId));
+
+    console.log('Sway simulated live-night integration proof passed.');
+  } catch (error) {
+    if (server) console.error(server.logs());
+    throw error;
+  } finally {
+    if (server) await server.stop();
+    await proof.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

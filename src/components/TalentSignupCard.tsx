@@ -2,8 +2,6 @@ import { KeyRound, Lock, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 
-const SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
-
 // Mirrors src/server/performer-login.ts normalizePerformerHandle and
 // src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
 const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -182,52 +180,11 @@ export default function TalentSignupCard() {
     }
   };
 
-  const handleCreateSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (status === 'submitting') return;
-
-    setStatus('submitting');
-    setMessage(null);
-    setVerificationLink(null);
-
-    try {
-      const response = await fetch('/api/talent/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          displayName,
-          handle,
-          email,
-          password,
-          confirmPassword,
-          termsAccepted
-        })
-      });
-
-      const data = await response.json().catch(() => null) as SignupResponse | null;
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Performer signup request failed.');
-      }
-
-      setStatus('success');
-      if (data?.deliveryMode === 'mock' && typeof data.verificationLink === 'string') {
-        setMessage('Local email delivery is mocked. Open the verification link below to finish setup.');
-        setVerificationLink(data.verificationLink);
-      } else {
-        setMessage(data?.message || SUCCESS_COPY);
-      }
-      setDisplayName('');
-      setHandle('');
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-      setTermsAccepted(false);
-    } catch (error) {
-      console.warn('Unable to create performer account:', error);
-      setStatus('error');
-      setVerificationLink(null);
-      setMessage(error instanceof Error ? error.message : 'We could not create your performer account right now. Please try again in a moment.');
-    }
+    const params = new URLSearchParams({ intent: 'performer' });
+    if (email.trim()) params.set('email', email.trim());
+    window.location.assign(`/account/signup?${params.toString()}`);
   };
 
   return (

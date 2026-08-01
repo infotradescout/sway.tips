@@ -17,8 +17,9 @@ import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.
  *  - closeout totals aggregate from captured payment rows (DB-backed)
  *  - provider failure fails safe (no successful financial state)
  *
- * Skips cleanly when STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / DATABASE_URL
- * are not provisioned, so the contract gate is never blocked by missing secrets.
+ * Skips cleanly when credentials are absent during the normal contract gate.
+ * Set SWAY_REQUIRE_EXTERNAL_PAYMENT_PROOF=true for a strict release/pilot proof
+ * that fails instead of silently skipping.
  */
 
 
@@ -28,6 +29,9 @@ const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const stripeConnectedAccountId = process.env.SWAY_STRIPE_TEST_CONNECTED_ACCOUNT_ID;
 
 if (!databaseUrl || !stripeSecretKey || !stripeWebhookSecret || !stripeConnectedAccountId) {
+  if (process.env.SWAY_REQUIRE_EXTERNAL_PAYMENT_PROOF === 'true') {
+    throw new Error('Strict Stripe/PostgreSQL proof requires disposable DATABASE_URL, Stripe test keys, and SWAY_STRIPE_TEST_CONNECTED_ACCOUNT_ID.');
+  }
   console.log('Payment execution integration test SKIPPED: set disposable DATABASE_URL, Stripe test keys, and SWAY_STRIPE_TEST_CONNECTED_ACCOUNT_ID to run.');
   process.exit(0);
 }
@@ -98,6 +102,7 @@ const GIG_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 async function main() {
   const adminClient = new Client({ connectionString: databaseUrl });
+  let service = null;
   await adminClient.connect();
   try {
     await resetDatabase(adminClient);
@@ -127,28 +132,60 @@ async function main() {
       secretKey: stripeSecretKey,
       webhookSecret: stripeWebhookSecret
     });
-    const service = createPaymentService({ databaseUrl, provider });
+    service = createPaymentService({ databaseUrl, provider });
 
     async function reserveRequest(label, amountCents) {
       const requestId = randomUUID();
       const clientRequestId = `${label}-${Date.now()}-${randomUUID()}`;
       const idempotencyKey = `it-${label}-${randomUUID()}`;
       const intentFingerprint = createHash('sha256').update(`${GIG_ID}:${idempotencyKey}:${amountCents}`).digest('hex');
+      const payloadHash = createHash('sha256').update(`payload:${label}:${clientRequestId}`).digest('hex');
+      const patronDeviceIdHash = createHash('sha256').update(`device:${label}`).digest('hex');
+      await adminClient.query(
+        `INSERT INTO idempotency_keys (
+           idempotency_key, patron_device_id_hash, gig_id, action_type,
+           amount_cents, currency, target_entity_type, target_entity_id,
+           payload_hash, intent_fingerprint, expires_at
+         ) VALUES ($1, $2, $3, 'request', $4, 'USD', 'music', $5, $6, $7, now() + interval '5 minutes')`,
+        [idempotencyKey, patronDeviceIdHash, GIG_ID, amountCents, label, payloadHash, intentFingerprint]
+      );
+      await adminClient.query(
+        `INSERT INTO client_pending_actions (
+           client_request_id, idempotency_key, gig_id, action_type,
+           payload_hash, expires_at, status
+         ) VALUES ($1, $2, $3, 'request', $4, now() + interval '5 minutes', 'pending')`,
+        [clientRequestId, idempotencyKey, GIG_ID, payloadHash]
+      );
       await adminClient.query(
         `INSERT INTO requests (
            id, gig_id, client_request_id, idempotency_key, intent_fingerprint,
            patron_device_id_hash, status, request_type, amount_cents, currency,
-           runtime_request_state
-         ) VALUES ($1, $2, $3, $4, $5, 'integration-device', 'payment_pending',
-           'music', $6, 'USD', $7::jsonb)`,
+           runtime_request_state,
+           activated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'payment_pending',
+           'music', $7, 'USD', $8::jsonb, null)`,
         [
           requestId,
           GIG_ID,
           clientRequestId,
           idempotencyKey,
           intentFingerprint,
+          patronDeviceIdHash,
           amountCents,
-          JSON.stringify({ id: `req-${requestId}`, type: 'request', status: 'hold', boosts: [] })
+          JSON.stringify({
+            id: `req-${requestId}`,
+            type: 'request',
+            status: 'hold',
+            clientRequestId,
+            idempotencyKey,
+            idempotencyFingerprint: intentFingerprint,
+            patronDeviceIdHash,
+            gigId: GIG_ID,
+            payloadHash,
+            amountCents,
+            currency: 'USD',
+            boosts: []
+          })
         ]
       );
       return { requestId, clientRequestId, idempotencyKey, intentFingerprint };
@@ -163,6 +200,7 @@ async function main() {
       actionType: 'request',
       amountSubtotalCents: 1500,
       platformFeeCents: 100,
+      platformFeePayer: 'patron',
       currency: 'USD',
       attributionSource: 'creator_direct',
       campaignId: null,
@@ -203,6 +241,7 @@ async function main() {
       actionType: 'request',
       amountSubtotalCents: 800,
       platformFeeCents: 100,
+      platformFeePayer: 'patron',
       currency: 'USD',
       attributionSource: 'creator_direct',
       campaignId: null,
@@ -228,6 +267,7 @@ async function main() {
       actionType: 'request',
       amountSubtotalCents: 700,
       platformFeeCents: 100,
+      platformFeePayer: 'patron',
       currency: 'USD',
       attributionSource: 'creator_direct',
       campaignId: null,
@@ -248,6 +288,7 @@ async function main() {
       actionType: 'request',
       amountSubtotalCents: -100,
       platformFeeCents: 0,
+      platformFeePayer: 'patron',
       currency: 'USD',
       attributionSource: 'creator_direct',
       campaignId: null,
@@ -260,8 +301,17 @@ async function main() {
     const failedTotals = await service.aggregateCapturedTotals(GIG_ID);
     assert.equal(failedTotals.capturedSubtotalCents, 1500, 'failed authorization must not create captured funds');
 
+    // Leave no captured or customer-awaiting Stripe test objects behind.
+    const capturedCleanup = await service.voidOrRefund(auth.paymentId);
+    assert.equal(capturedCleanup.status, 'refunded', 'captured test payment cleanup must be terminal');
+    const unconfirmedCleanup = await service.voidOrRefund(unconfirmed.paymentId);
+    assert.equal(unconfirmedCleanup.status, 'voided', 'unconfirmed test intent cleanup must be terminal');
+    const cleanTotals = await service.aggregateCapturedTotals(GIG_ID);
+    assert.equal(cleanTotals.capturedSubtotalCents, 0, 'external proof must leave no captured liability');
+
     console.log('Payment execution integration test passed.');
   } finally {
+    await service?.dispose?.();
     await adminClient.end();
   }
 }

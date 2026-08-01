@@ -46,7 +46,11 @@ function readSafeAccountNextFromLocation() {
     if (parsed.origin !== window.location.origin) return '';
     const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
       || parsed.pathname === '/tickets'
-      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname);
+      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname)
+      || parsed.pathname === '/talent'
+      || (parsed.pathname === '/account'
+        && parsed.searchParams.get('intent') === 'performer'
+        && [...parsed.searchParams.keys()].every((key) => key === 'intent'));
     return allowed ? `${parsed.pathname}${parsed.search}` : '';
   } catch {
     return '';
@@ -121,12 +125,15 @@ function ClaimCodeField(props: {
 export function AccountLogin() {
   const params = new URLSearchParams(window.location.search);
   const initialClaim = readClaimFromLocation();
-  const accountNext = readSafeAccountNextFromLocation();
+  const performerIntent = params.get('intent') === 'performer';
+  const accountNext = readSafeAccountNextFromLocation() || (performerIntent ? '/account?intent=performer' : '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [claimCode, setClaimCode] = useState(initialClaim);
   const [message, setMessage] = useState(params.get('verified') === '1' ? 'Email verified. Log in to continue.' : '');
   const [pending, setPending] = useState(false);
+  const emailId = useId();
+  const passwordId = useId();
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -148,6 +155,7 @@ export function AccountLogin() {
   };
 
   const signupParams = new URLSearchParams();
+  if (performerIntent) signupParams.set('intent', 'performer');
   if (claimCode.trim()) signupParams.set('claim', claimCode.trim());
   if (accountNext) signupParams.set('next', accountNext);
   const signupHref = `/account/signup${signupParams.size ? `?${signupParams.toString()}` : ''}`;
@@ -162,14 +170,20 @@ export function AccountLogin() {
           After login, Sway will continue your claim for the pending performer profile.
         </p>
       ) : null}
-      {message ? <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       <form onSubmit={submit} className="mt-5 space-y-3">
-        <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        <div className="space-y-1.5">
+          <label htmlFor={emailId} className="block text-xs font-bold text-slate-200">Email</label>
+          <input id={emailId} name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={passwordId} className="block text-xs font-bold text-slate-200">Password</label>
+          <input id={passwordId} name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
         {claimCode.trim() ? (
           <input type="hidden" name="claimCode" value={claimCode.trim()} />
         ) : null}
-        <button disabled={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Logging in…' : 'Log in'}</button>
+        <button type="submit" disabled={pending} aria-busy={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Logging in…' : 'Log in'}</button>
       </form>
       <div className="mt-4 flex justify-center gap-4 text-xs font-bold">
         <a href="/account/recover" className="text-cyan-300">Forgot password?</a>
@@ -185,6 +199,7 @@ export function AccountSignup() {
   const performerIntent = signupParams.get('intent') === 'performer';
   const initialClaim = readClaimFromLocation();
   const accountNext = readSafeAccountNextFromLocation();
+  const performerNext = accountNext || (performerIntent ? '/account?intent=performer' : '');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState(signupParams.get('email')?.trim() || '');
   const [password, setPassword] = useState('');
@@ -198,6 +213,10 @@ export function AccountSignup() {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const validateSeq = useRef(0);
+  const displayNameId = useId();
+  const emailId = useId();
+  const passwordId = useId();
+  const confirmPasswordId = useId();
 
   const validateClaim = useCallback(async (raw: string) => {
     const trimmed = raw.trim();
@@ -235,9 +254,9 @@ export function AccountSignup() {
     const params = new URLSearchParams();
     const trimmed = claimCode.trim();
     if (trimmed) params.set('claim', trimmed);
-    if (accountNext) params.set('next', accountNext);
+    if (performerNext) params.set('next', performerNext);
     return `/account/login${params.size ? `?${params.toString()}` : ''}`;
-  }, [accountNext, claimCode]);
+  }, [claimCode, performerNext]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -276,7 +295,7 @@ export function AccountSignup() {
         confirmPassword,
         termsAccepted,
         claimCode: trimmedClaim || undefined,
-        next: accountNext || undefined
+        next: performerNext || undefined
       });
       if (typeof data.redirectPath === 'string' && data.redirectPath) {
         window.location.assign(data.redirectPath);
@@ -296,13 +315,26 @@ export function AccountSignup() {
       <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">One Sway account</p>
       <h1 className="mt-2 font-display text-3xl font-black">Create your Sway account</h1>
       <p className="mt-2 text-sm text-slate-400">{performerIntent ? 'Create one account, verify your email, then activate your performer identity and prepare your first room.' : 'Join rooms as a customer. Activate Pro Mode later from this same account whenever you are ready to perform.'}</p>
-      {message ? <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       {verificationLink ? <a href={verificationLink} className="mt-3 block text-xs font-bold text-cyan-300 underline">Open local verification link</a> : null}
       <form onSubmit={submit} className="mt-5 space-y-3">
-        <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (8+ characters, letter and number)" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <input type="password" required minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm password" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        <div className="space-y-1.5">
+          <label htmlFor={displayNameId} className="block text-xs font-bold text-slate-200">Your name</label>
+          <input id={displayNameId} name="name" autoComplete="name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={emailId} className="block text-xs font-bold text-slate-200">Email</label>
+          <input id={emailId} name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={passwordId} className="block text-xs font-bold text-slate-200">Password</label>
+          <input id={passwordId} name="new-password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} aria-describedby={`${passwordId}-help`} className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+          <p id={`${passwordId}-help`} className="text-[11px] text-slate-400">At least 8 characters with a letter and a number.</p>
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={confirmPasswordId} className="block text-xs font-bold text-slate-200">Confirm password</label>
+          <input id={confirmPasswordId} name="confirm-password" type="password" autoComplete="new-password" required minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
         <ClaimCodeField
           value={claimCode}
           onChange={(value) => {
@@ -327,7 +359,7 @@ export function AccountSignup() {
           <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />
           <span>I accept the Sway Terms.</span>
         </label>
-        <button disabled={pending || !termsAccepted} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Creating…' : 'Create account'}</button>
+        <button type="submit" disabled={pending || !termsAccepted} aria-busy={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Creating…' : 'Create account'}</button>
       </form>
       <a href={loginHref} className="mt-4 block text-center text-sm font-bold text-cyan-300">Already have an account?</a>
     </AccessFrame>
@@ -336,6 +368,7 @@ export function AccountSignup() {
 
 export function AccountHome() {
   const pendingClaim = readClaimFromLocation();
+  const performerIntent = new URLSearchParams(window.location.search).get('intent') === 'performer';
   const [session, setSession] = useState<AccountSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
@@ -345,17 +378,24 @@ export function AccountHome() {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
+  const performerNameId = useId();
+  const performerHandleId = useId();
 
   const load = async () => {
     try {
       const data = await accountJson('/api/account/session');
+      if (performerIntent && data.performer) {
+        window.location.replace('/talent');
+        return;
+      }
       setSession(data);
       setDisplayName(data.account?.displayName || '');
     } catch (error: any) {
       if (error?.status === 401) {
-        const next = pendingClaim
-          ? `/account/login?claim=${encodeURIComponent(pendingClaim)}`
-          : '/account/login';
+        const loginParams = new URLSearchParams();
+        if (pendingClaim) loginParams.set('claim', pendingClaim);
+        if (performerIntent) loginParams.set('next', '/account?intent=performer');
+        const next = `/account/login${loginParams.size ? `?${loginParams.toString()}` : ''}`;
         window.location.replace(next);
       } else setMessage(error instanceof Error ? error.message : 'Unable to load account.');
     } finally {
@@ -391,9 +431,8 @@ export function AccountHome() {
     setPending(true);
     setMessage('');
     try {
-      await accountJson('/api/account/pro-mode/activate', { displayName, handle });
-      await load();
-      setMessage('Pro Mode is active. Your performer console is ready.');
+      const data = await accountJson('/api/account/pro-mode/activate', { displayName, handle });
+      window.location.assign(data.redirectPath || '/talent');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to activate Pro Mode.');
     } finally {
@@ -437,7 +476,7 @@ export function AccountHome() {
         </div>
         <button onClick={logout} className="rounded-xl border border-white/10 bg-slate-950 p-3 text-slate-300" aria-label="Log out"><LogOut className="h-4 w-4" /></button>
       </div>
-      {message ? <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       {pendingClaim ? (
         <div className="mt-4 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Claim confirmation</p>
@@ -471,10 +510,16 @@ export function AccountHome() {
         ) : (
           <form onSubmit={activate} className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
             <div className="flex items-center gap-2"><UserRound className="h-4 w-4 text-cyan-300" /><h2 className="font-black">Activate Pro Mode</h2></div>
-            <p className="mt-2 text-xs leading-5 text-slate-400">Create your performer identity, start rooms, share your QR, run requests, and receive earnings from this same account.</p>
-            <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Performer name" className="mt-4 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
-            <input required value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="Your handle" className="mt-3 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
-            <button disabled={pending} className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60">{pending ? 'Activating…' : 'Activate Pro Mode'}</button>
+            <p className="mt-2 text-xs leading-5 text-slate-400">Create your performer identity, run free rooms, share your QR, manage requests, and rehearse Stripe test-mode money flows from this same account.</p>
+            <div className="mt-4 space-y-1.5">
+              <label htmlFor={performerNameId} className="block text-xs font-bold text-slate-200">Performer name</label>
+              <input id={performerNameId} name="performer-name" autoComplete="name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+            </div>
+            <div className="mt-3 space-y-1.5">
+              <label htmlFor={performerHandleId} className="block text-xs font-bold text-slate-200">Public handle</label>
+              <input id={performerHandleId} name="performer-handle" autoComplete="username" required value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your-handle" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+            </div>
+            <button type="submit" disabled={pending} aria-busy={pending} className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60">{pending ? 'Activating…' : 'Activate Pro Mode'}</button>
           </form>
         )}
       </div>
@@ -488,6 +533,7 @@ export function AccountRecovery({ kind }: { kind: 'password' | 'verification' })
   const [link, setLink] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isVerification = kind === 'verification';
+  const emailId = useId();
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -513,11 +559,14 @@ export function AccountRecovery({ kind }: { kind: 'password' | 'verification' })
       <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account recovery</p>
       <h1 className="mt-2 font-display text-3xl font-black">{isVerification ? 'Resend verification' : 'Reset your password'}</h1>
       <p className="mt-2 text-sm text-slate-400">Enter the email on your Sway account. The response stays private whether or not an account exists.</p>
-      {message ? <p role="status" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       {link ? <a href={link} className="mt-3 block text-xs font-bold text-cyan-300 underline">Open local recovery link</a> : null}
       <form onSubmit={submit} className="mt-5 space-y-3">
-        <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
-        <button disabled={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Sending…' : isVerification ? 'Send verification link' : 'Send password reset link'}</button>
+        <div className="space-y-1.5">
+          <label htmlFor={emailId} className="block text-xs font-bold text-slate-200">Account email</label>
+          <input id={emailId} name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm" />
+        </div>
+        <button type="submit" disabled={pending} aria-busy={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Sending…' : isVerification ? 'Send verification link' : 'Send password reset link'}</button>
       </form>
       <a href="/account/login" className="mt-4 block text-center text-sm font-bold text-cyan-300">Back to login</a>
     </AccessFrame>

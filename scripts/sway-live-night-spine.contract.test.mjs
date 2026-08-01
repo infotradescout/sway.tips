@@ -56,6 +56,10 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'masters, beats, mixes, spoken word, audiobooks, demos',
   'data-sway-account-workspace="true"',
   'Money & access',
+  "fetch('/api/payment/config'",
+  "data?.mode === 'test'",
+  'Money actions are unavailable because Stripe test mode could not be verified.',
+  'Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.',
   'Backers',
   '<PerformerRoomSetup',
   'performerName={welcomePerformerName}'
@@ -66,12 +70,19 @@ requireIncludes('PerformerRoomSetup', performerRoomSetup, [
   "const steps = ['Pricing', 'Requests', 'Review', 'Start']",
   'Step {step + 1} of 4',
   'Create room',
-  'Paid requests',
+  'Test paid requests',
   'Free requests',
   'My synced library',
   'Open requests',
   'Ready to go live',
-  'disabled={!performerEmailVerified}'
+  'disabled={!performerEmailVerified || isStarting}',
+  'Stripe test mode — no real money moves',
+  'globalThis.crypto.randomUUID()',
+  'gig_id: string',
+  "useState(false)",
+  "role=\"alert\"",
+  'Customers may still type a manual request',
+  'No real money moves.'
 ]);
 
 requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSetup, [
@@ -82,7 +93,9 @@ requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSe
 
 requireIncludes('Session start request scope', server, [
   'const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
-  "searchScope: searchScope === 'catalog' ? 'catalog' : 'library'",
+  "searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'",
+  'loadMatchingStartedRoom',
+  "error.message === 'gig_session_state_revision_conflict'",
   'searchScope: roomState.session.searchScope'
 ]);
 
@@ -129,8 +142,10 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: requestedPaymentsEnabled && sellerPayoutReady',
-  'tipsEnabled: sellerPayoutReady',
+  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerPayoutReady',
+  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerPayoutReady',
+  "code: 'test_payment_runtime_unavailable'",
+  "code: 'room_start_id_required'",
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',
   'let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip)',
   'amt = 1'

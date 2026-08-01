@@ -95,7 +95,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
     if (!db) return null;
     return db.transaction(async (tx) => {
       const now = new Date();
-      const [operation] = await tx
+      const candidates = await tx
         .select()
         .from(liveRoomPaymentOperations)
         .where(and(
@@ -111,43 +111,45 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         ))
         .orderBy(asc(liveRoomPaymentOperations.availableAt), asc(liveRoomPaymentOperations.id))
         .for('update', { skipLocked: true })
-        .limit(1);
-      if (!operation) return null;
-      // Serialize every operation for one payment through the payment row.
-      // Separate authorize/capture/reverse rows may exist, but they must never
-      // contact the processor concurrently.
-      await tx
-        .select({ id: payments.id })
-        .from(payments)
-        .where(eq(payments.id, operation.paymentId))
-        .for('update')
-        .limit(1);
-      const [leasedSibling] = await tx
-        .select({ id: liveRoomPaymentOperations.id })
-        .from(liveRoomPaymentOperations)
-        .where(and(
-          eq(liveRoomPaymentOperations.paymentId, operation.paymentId),
-          eq(liveRoomPaymentOperations.status, 'leased'),
-          ne(liveRoomPaymentOperations.id, operation.id),
-          gt(liveRoomPaymentOperations.leaseExpiresAt, now)
-        ))
-        .limit(1);
-      if (leasedSibling) return null;
-      const leaseToken = `${workerId}:${randomUUID()}`;
-      const [leased] = await tx
-        .update(liveRoomPaymentOperations)
-        .set({
-          status: 'leased',
-          attemptCount: operation.attemptCount + 1,
-          leaseOwner: leaseToken,
-          leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
-          lastAttemptAt: now,
-          lastError: null,
-          updatedAt: now
-        })
-        .where(eq(liveRoomPaymentOperations.id, operation.id))
-        .returning();
-      return leased ?? null;
+        .limit(operationId ? 1 : 25);
+      for (const operation of candidates) {
+        // Serialize every operation for one payment through the payment row.
+        // If this payment already has a live sibling lease, keep scanning so
+        // one blocked payment cannot starve unrelated rooms or customers.
+        await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(eq(payments.id, operation.paymentId))
+          .for('update')
+          .limit(1);
+        const [leasedSibling] = await tx
+          .select({ id: liveRoomPaymentOperations.id })
+          .from(liveRoomPaymentOperations)
+          .where(and(
+            eq(liveRoomPaymentOperations.paymentId, operation.paymentId),
+            eq(liveRoomPaymentOperations.status, 'leased'),
+            ne(liveRoomPaymentOperations.id, operation.id),
+            gt(liveRoomPaymentOperations.leaseExpiresAt, now)
+          ))
+          .limit(1);
+        if (leasedSibling) continue;
+        const leaseToken = `${workerId}:${randomUUID()}`;
+        const [leased] = await tx
+          .update(liveRoomPaymentOperations)
+          .set({
+            status: 'leased',
+            attemptCount: operation.attemptCount + 1,
+            leaseOwner: leaseToken,
+            leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+            lastAttemptAt: now,
+            lastError: null,
+            updatedAt: now
+          })
+          .where(eq(liveRoomPaymentOperations.id, operation.id))
+          .returning();
+        if (leased) return leased;
+      }
+      return null;
     });
   }
 

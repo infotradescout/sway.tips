@@ -71,7 +71,8 @@ async function main() {
   assert.ok(signupCardSource.includes('Create Account'), 'Talent signup card must expose the Create Account CTA.');
   assert.ok(signupCardSource.includes('Already have an account?'), 'Talent signup card must link performers back to /talent/login.');
   assert.ok(signupCardSource.includes('termsAccepted'), 'Talent signup card must capture terms acceptance.');
-  assert.ok(signupCardSource.includes(PERFORMER_SIGNUP_SUCCESS_COPY), 'Talent signup card must show the approved signup success copy.');
+  assert.ok(!signupCardSource.includes("fetch('/api/talent/signup'"), 'Legacy performer UI must not submit a second account-creation API.');
+  assert.ok(signupCardSource.includes("new URLSearchParams({ intent: 'performer' })"), 'Legacy performer UI must route creation into universal account signup.');
   assert.ok(signupCardSource.includes('Open local verification link'), 'Local mock signup must expose the verification link instead of implying real email delivery.');
 
   assert.ok(
@@ -145,8 +146,9 @@ async function main() {
   assert.ok(existsSync(signupRunbookPath), 'Performer self-serve signup runbook is required.');
 
   const signupRunbook = readFileSync(signupRunbookPath, 'utf8');
-  assert.ok(signupRunbook.includes('/api/talent/verify-email/consume'), 'Signup runbook must document the verification consume route.');
-  assert.ok(signupRunbook.includes('log in before verification'), 'Signup runbook must document the restricted unverified login state.');
+  assert.ok(signupRunbook.includes('/api/account/verify-email/consume'), 'Signup runbook must document the canonical account verification route.');
+  assert.ok(signupRunbook.includes('/account?intent=performer'), 'Signup runbook must document performer-intent continuity.');
+  assert.ok(signupRunbook.includes('410 universal_account_required'), 'Signup runbook must document the terminal legacy signup API.');
 
   assert.ok(
     (packageJson.scripts?.['test:contracts'] ?? '').includes('node scripts/sway-performer-self-serve-signup.contract.test.mjs'),

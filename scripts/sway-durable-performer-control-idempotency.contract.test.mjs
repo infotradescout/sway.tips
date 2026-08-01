@@ -77,15 +77,20 @@ assertOrderInBlock('control bridge toggle branch', server, "if (action === 'togg
 assertOrderInBlock('control bridge approved-top branch', server, "if (action === 'fulfill-top' || action === 'hide-top')", 'await applyRequestFulfill', 'completeDurableActorMutation', bridgeRouteStart);
 assertOrderInBlock('control bridge pending-top branch', server, "if (action === 'approve-pending' || action === 'veto-pending')", 'await applyRequestTriage', 'completeDurableActorMutation', bridgeRouteStart);
 
-for (const forbidden of [
-  'stripe',
-  'PaymentIntent',
-  'webhook'
-]) {
-  const helperStart = server.indexOf('function buildDurableActorActionInput');
-  const helperEnd = server.indexOf('type RoomMutationContext', helperStart);
-  const helperBody = helperStart >= 0 && helperEnd > helperStart ? server.slice(helperStart, helperEnd) : '';
-  if (new RegExp(forbidden, 'i').test(helperBody) || new RegExp(forbidden, 'i').test(store)) {
+const helperStart = server.indexOf('function buildDurableActorActionInput');
+const helperEnd = server.indexOf('type RoomMutationContext', helperStart);
+const helperBody = helperStart >= 0 && helperEnd > helperStart ? server.slice(helperStart, helperEnd) : '';
+const reserveActorStart = store.indexOf('async function reserveDurableActorAction');
+const reserveActorEnd = store.indexOf('async function completePendingAction', reserveActorStart);
+const completeActorStart = store.indexOf('async function completeDurableActorAction');
+const completeActorEnd = store.indexOf('async function completePendingActionFailure', completeActorStart);
+const actorStoreBody = [
+  reserveActorStart >= 0 && reserveActorEnd > reserveActorStart ? store.slice(reserveActorStart, reserveActorEnd) : '',
+  completeActorStart >= 0 && completeActorEnd > completeActorStart ? store.slice(completeActorStart, completeActorEnd) : ''
+].join('\n');
+
+for (const forbidden of ['stripe', 'PaymentIntent', 'webhook']) {
+  if (new RegExp(forbidden, 'i').test(helperBody) || new RegExp(forbidden, 'i').test(actorStoreBody)) {
     failures.push(`Durable performer/control idempotency must stay provider-free: ${forbidden}`);
   }
 }
