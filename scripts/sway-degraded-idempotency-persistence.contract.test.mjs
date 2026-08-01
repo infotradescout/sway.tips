@@ -185,13 +185,29 @@ for (const pattern of [
   }
 }
 
-// Provider coupling must stay out of the idempotency store and bounded retry
-// helper. The patron component may render Stripe's confirmation surface after
-// the backend returns client_secret, but retry/idempotency itself must remain
-// provider-agnostic.
+// Provider calls must stay out of the idempotency store and bounded retry
+// helper. The store may inspect an opaque persisted processor reference when
+// deciding whether expiry still carries financial liability, but it must not
+// import an SDK or invoke Stripe. The patron component may render Stripe's
+// confirmation surface after the backend returns client_secret; bounded retry
+// itself remains provider-agnostic.
+for (const pattern of [
+  /from\s+['"]stripe['"]/i,
+  /import\s+Stripe/i,
+  /new\s+Stripe\b/i,
+  /\bstripe\s*\./i,
+  /\.paymentIntents\s*\./i,
+  /\.refunds\s*\./i,
+  /webhook/i
+]) {
+  if (pattern.test(store)) {
+    failures.push(`Idempotency store must not import or call a payment provider: ${pattern}`);
+  }
+}
+
 for (const pattern of [/stripe/i, /PaymentIntent/i, /webhook/i]) {
-  if (pattern.test(store) || pattern.test(boundedRetryBody)) {
-    failures.push(`Idempotency store/retry helper must stay provider-free: ${pattern}`);
+  if (pattern.test(boundedRetryBody)) {
+    failures.push(`Bounded retry helper must stay provider-free: ${pattern}`);
   }
 }
 

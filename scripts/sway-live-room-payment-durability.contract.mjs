@@ -64,7 +64,7 @@ assert.match(patronReservationSource, /return replay\.kind === 'new' \? \{ kind:
 
 const terminalFailureSource = idempotencyStoreSource.slice(
   idempotencyStoreSource.indexOf('async function completePendingActionFailure'),
-  idempotencyStoreSource.indexOf('async function reconcilePendingAction')
+  idempotencyStoreSource.indexOf('async function expireStalePendingActions')
 );
 assert.match(terminalFailureSource, /pendingAction\.clientRequestId !== input\.clientRequestId/);
 assert.doesNotMatch(terminalFailureSource, /pending_action_not_found/);
@@ -72,7 +72,28 @@ assert.match(terminalFailureSource, /if \(action\?\.activatedAt\) throw new Erro
 assert.equal(
   terminalFailureSource.match(/status: 'denied'/g)?.length,
   2,
-  'Terminal request and boost failures must fence their invisible business row.'
+  'A terminal request or boost response must fence its own invisible business row.'
+);
+assert.equal(
+  terminalFailureSource.match(/isNull\((?:requestBoosts|requests)\.activatedAt\)/g)?.length,
+  2,
+  'Terminal HTTP failure fencing must never deny a visible request or boost.'
+);
+
+const expiryWorkerSource = idempotencyStoreSource.slice(
+  idempotencyStoreSource.indexOf('async function expireStalePendingActions'),
+  idempotencyStoreSource.indexOf('async function reconcilePendingAction')
+);
+assert.match(expiryWorkerSource, /if \(action\?\.activatedAt\) return null/);
+assert.equal(
+  expiryWorkerSource.match(/status: 'denied'/g)?.length,
+  2,
+  'The expiry worker must separately fence either kind of invisible business row.'
+);
+assert.equal(
+  expiryWorkerSource.match(/isNull\((?:requestBoosts|requests)\.activatedAt\)/g)?.length,
+  2,
+  'Expiry fencing must never deny a visible request or boost.'
 );
 assert.doesNotMatch(serverSource, /businessStore\.setPatronStatusReceipt/);
 assert.match(serverSource, /responseStatus: completion\.status/);
@@ -263,10 +284,10 @@ assert.ok(requestInsertIndex > requestCapIndex, 'Request caps must be enforced b
 assert.match(reserveRequestSection, /eq\(requests\.gigId, gigId\)[\s\S]+eq\(requests\.patronDeviceIdHash, request\.patronDeviceIdHash\)/);
 assert.match(reserveRequestSection, /request_device_per_gig_cap_reached/);
 assert.match(reserveRequestSection, /request_custom_note_device_per_gig_cap_reached/);
-assert.doesNotMatch(
+assert.match(
   reserveRequestSection.slice(requestCapIndex, requestInsertIndex),
-  /activatedAt/,
-  'Request cap count must include visible and invisible durable rows.'
+  /!\(!row\.activatedAt && \['denied', 'voided_or_refunded'\]\.includes\(row\.status\)\)/,
+  'Request caps must count visible and pending rows while releasing only terminal invisible reservations.'
 );
 
 const boostCapIndex = reserveBoostSection.indexOf('const sameDeviceBoosts = await tx');
@@ -278,10 +299,10 @@ assert.ok(
 assert.ok(boostInsertIndex > boostCapIndex, 'Boost cap must be enforced before the durable reservation insert.');
 assert.match(reserveBoostSection, /eq\(requestBoosts\.gigId, gigId\)[\s\S]+eq\(requestBoosts\.patronDeviceIdHash, boost\.patronDeviceIdHash\)/);
 assert.match(reserveBoostSection, /boost_device_per_gig_cap_reached/);
-assert.doesNotMatch(
+assert.match(
   reserveBoostSection.slice(boostCapIndex, boostInsertIndex),
-  /activatedAt/,
-  'Boost cap count must include visible and invisible durable rows.'
+  /!row\.activatedAt && \['denied', 'voided_or_refunded'\]\.includes\(row\.status\)/,
+  'Boost caps must count visible and pending rows while releasing only terminal invisible reservations.'
 );
 
 assert.match(serverSource, /maxRequestsPerDevicePerGig: MAX_REQUESTS_PER_DEVICE_PER_SESSION/);

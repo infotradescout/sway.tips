@@ -1320,6 +1320,9 @@ export const liveRoomProcessorEvents = pgTable('live_room_processor_events', {
   attemptCount: integer('attempt_count').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
   processingStartedAt: timestamp('processing_started_at', { withTimezone: true }),
+  // A random claim generation fences a worker that resumes after its lease
+  // was reclaimed and completed by another process.
+  processingLeaseOwner: text('processing_lease_owner'),
   processedAt: timestamp('processed_at', { withTimezone: true }),
   lastError: text('last_error'),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow()

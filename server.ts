@@ -22,6 +22,7 @@ import { createModerationService, type BlockScope } from "./src/server/moderatio
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
+import { resolveLiveRoomPaymentRuntimeConfig } from "./src/server/live-room-payment-config";
 import {
   createPaymentService,
   type CloseoutTotals,
@@ -291,6 +292,12 @@ const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
   : null;
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
+const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
+  env: process.env,
+  paymentProviderConfigured: Boolean(paymentProvider),
+  stripeConnectConfigured: Boolean(stripeConnectService),
+  durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
+});
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -3386,26 +3393,23 @@ app.get('/api/runtime-config-status', (_req, res) => {
 
 app.get('/api/payment/config', (_req, res) => {
   applyNoStoreHeaders(res);
-  const publishableKey = (process.env.STRIPE_PUBLISHABLE_KEY || process.env.VITE_STRIPE_PUBLISHABLE_KEY || '').trim();
-  const mode = publishableKey.startsWith('pk_test_')
-    ? 'test'
-    : publishableKey.startsWith('pk_live_')
-      ? 'live'
-      : null;
-
-  if (!publishableKey || !mode) {
-    return res.status(503).json({ error: 'Payment form is not configured.' });
-  }
-
-  if (mode === 'live') {
+  if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return res.status(503).json({
-      error: 'Live-room money remains test-only until durable reconciliation is production-verified.',
-      mode,
+      error: liveRoomPaymentRuntimeConfig.reason === 'live_keys_forbidden'
+        ? 'Live-room money remains test-only until durable reconciliation is production-verified.'
+        : liveRoomPaymentRuntimeConfig.reason === 'durability_writes_disabled'
+          ? 'Live-room money is temporarily paused by the durability safety switch.'
+          : 'Stripe test-mode payment execution is not fully configured.',
+      mode: liveRoomPaymentRuntimeConfig.mode,
       liveRoomMoneyEnabled: false
     });
   }
 
-  return res.json({ publishableKey, mode, liveRoomMoneyEnabled: liveRoomDurabilityWritesEnabled });
+  return res.json({
+    publishableKey: liveRoomPaymentRuntimeConfig.publishableKey,
+    mode: liveRoomPaymentRuntimeConfig.mode,
+    liveRoomMoneyEnabled: true
+  });
 });
 
 app.post('/api/talent/invite/accept', async (req, res) => {
@@ -3907,6 +3911,16 @@ app.post('/api/talent/password-reset/accept', async (req, res) => {
 app.post('/api/talent/signup', async (req, res) => {
   applyNoStoreHeaders(res);
 
+  // Performer acquisition is one universal-account flow. Keep the old API
+  // terminal and explicit so stale clients cannot create a second account
+  // shape or bypass the account -> verification -> Pro Mode sequence.
+  return res.status(410).json({
+    error: 'Performer signup now uses one Sway account and Pro Mode.',
+    code: 'universal_account_required',
+    redirectPath: '/account/signup?intent=performer'
+  });
+
+  /* c8 ignore start -- retained below only until legacy deployment readers drain */
   if (isProduction && !hasPerformerLoginEmailConfig) {
     res.status(503).json({ error: 'Performer verification email delivery is temporarily unavailable.' });
     return;
@@ -4122,6 +4136,7 @@ app.post('/api/talent/signup', async (req, res) => {
     });
     res.status(500).json({ error: 'Unable to create your performer account right now.' });
   }
+  /* c8 ignore stop */
 });
 
 app.post('/api/talent/login', async (req, res) => {
@@ -4911,7 +4926,11 @@ function normalizeSafeAccountNextPath(value: unknown): string | null {
     if (parsed.origin !== 'https://app.sway.tips') return null;
     const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
       || parsed.pathname === '/tickets'
-      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname);
+      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname)
+      || parsed.pathname === '/talent'
+      || (parsed.pathname === '/account'
+        && parsed.searchParams.get('intent') === 'performer'
+        && [...parsed.searchParams.keys()].every((key) => key === 'intent'));
     if (!allowed) return null;
     return `${parsed.pathname}${parsed.search}`;
   } catch {
@@ -5470,7 +5489,12 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
       handle
     });
     if (activation.allowed === false) return res.status(409).json({ error: activation.reason });
-    return res.json({ status: activation.nextStatus, changed: activation.changed, performer: activation.performer });
+    return res.json({
+      status: activation.nextStatus,
+      changed: activation.changed,
+      performer: activation.performer,
+      redirectPath: '/talent'
+    });
   } catch (error) {
     if (isUniqueConstraintViolation(error, 'idx_performers_handle') || isUniqueConstraintViolation(error, 'idx_performers_handle_lower')) {
       return res.status(409).json({ error: 'This handle is already taken.' });
@@ -9548,8 +9572,8 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   if (!talentAccess.actor.actorId || !businessDb) {
     return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
   }
-  if (!stripeConnectService) {
-    return res.status(503).json({ error: 'Stripe Connect is not configured yet.' });
+  if (!stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
+    return res.status(503).json({ error: 'Stripe test-mode Connect onboarding is unavailable until payment execution is fully configured.' });
   }
 
   const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
@@ -10616,8 +10640,62 @@ app.post("/api/session/start", async (req, res) => {
     }
   }
 
-  await refreshBusinessState();
   const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
+  const requestedGigId = parseDurableGigId(gig_id);
+  if (!requestedGigId) {
+    return res.status(422).json({
+      error: 'A valid stable gig_id is required to start a room safely.',
+      code: 'room_start_id_required'
+    });
+  }
+  const requestedRoomConfig = {
+    talentName: talentName || "DJ Pro",
+    talentRole: talentRole || 'DJ',
+    feeType: feeType || 'patron',
+    minimumTip: Math.max(5, Number(minimumTip) || 5),
+    paymentsEnabled: paymentsEnabled === true,
+    searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'
+  };
+
+  const loadMatchingStartedRoom = async () => {
+    if (!businessStore.hasDurableStore) return { kind: 'missing' as const };
+    const existing = await loadRoomState(requestedGigId);
+    if (existing.roomStatus === 'missing') return { kind: 'missing' as const };
+    const session = existing.state.session;
+    const ownedByCaller = session.ownerActorUserId === actor.actorId;
+    const sameConfig = session.talentName === requestedRoomConfig.talentName
+      && session.talentRole === requestedRoomConfig.talentRole
+      && session.feeType === requestedRoomConfig.feeType
+      && session.minimumTip === requestedRoomConfig.minimumTip
+      && session.paymentsEnabled === requestedRoomConfig.paymentsEnabled
+      && session.searchScope === requestedRoomConfig.searchScope;
+    if (ownedByCaller && sameConfig && session.status === 'active') {
+      return { kind: 'replay' as const, state: existing.state };
+    }
+    return { kind: 'conflict' as const };
+  };
+
+  // The client supplies one stable UUID for a room-start attempt. Replaying
+  // that exact intent is a read, not a second room mutation. Reusing the UUID
+  // for another performer or different setup is rejected without leaking the
+  // existing room's private state.
+  const existingStart = await loadMatchingStartedRoom();
+  if (existingStart.kind === 'replay') {
+    state = prepareRoomState(existingStart.state, requestedGigId);
+    activeGigId = requestedGigId;
+    return res.json({ success: true, replayed: true, state });
+  }
+  if (existingStart.kind === 'conflict') {
+    return res.status(409).json({ error: 'This room start identity was already used for a different or completed room.' });
+  }
+
+  if (requestedRoomConfig.paymentsEnabled && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
+    return res.status(503).json({
+      error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+      code: 'test_payment_runtime_unavailable'
+    });
+  }
+
   const [seller] = businessDb && actor.actorId
     ? await businessDb.select({
         isActive: performers.isActive,
@@ -10640,7 +10718,7 @@ app.post("/api/session/start", async (req, res) => {
     && seller.stripeConnectedAccountId?.trim()
     && !seller.payoutHoldReason
   );
-  const requestedPaymentsEnabled = paymentsEnabled === true;
+  const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
   if (requestedPaymentsEnabled && !sellerPayoutReady) {
     return res.status(409).json({
       error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
@@ -10648,8 +10726,7 @@ app.post("/api/session/start", async (req, res) => {
     });
   }
 
-  const requestedGigId = parseDurableGigId(gig_id);
-  const roomGigId = requestedGigId ?? businessStore.createGigId();
+  const roomGigId = requestedGigId;
   const roomState = createEmptyBackendState();
 
   roomState.session = {
@@ -10659,10 +10736,10 @@ app.post("/api/session/start", async (req, res) => {
     closedAt: null,
     ownerActorUserId: actor.actorId,
     lastMutationActorUserId: actor.actorId,
-    talentName: talentName || "DJ Pro",
-    talentRole: talentRole || 'DJ',
-    feeType: feeType || 'patron',
-    minimumTip: Math.max(5, Number(minimumTip) || 5),
+    talentName: requestedRoomConfig.talentName,
+    talentRole: requestedRoomConfig.talentRole,
+    feeType: requestedRoomConfig.feeType,
+    minimumTip: requestedRoomConfig.minimumTip,
     endGigTimerStartedAt: null,
     isFeatured: false,
     featuredExpiresAt: null,
@@ -10675,9 +10752,9 @@ app.post("/api/session/start", async (req, res) => {
     requestWindowLabel: null,
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
-    searchScope: searchScope === 'catalog' ? 'catalog' : 'library',
-    paymentsEnabled: requestedPaymentsEnabled && sellerPayoutReady,
-    tipsEnabled: sellerPayoutReady,
+    searchScope: requestedRoomConfig.searchScope,
+    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerPayoutReady,
+    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerPayoutReady,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -10686,28 +10763,46 @@ app.post("/api/session/start", async (req, res) => {
     }
   };
   roomState.requests = [];
-  activeGigId = roomGigId;
-  state = prepareRoomState(roomState, roomGigId);
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomGigId,
-    actor,
-    entityType: 'gig_session',
-    entityId: roomGigId,
-    eventType: 'session.start',
-    previousStatus: null,
-    nextStatus: roomState.session.status,
-    metadata: {
-      talentName: roomState.session.talentName,
-      talentRole: roomState.session.talentRole,
-      feeType: roomState.session.feeType,
-      minimumTip: roomState.session.minimumTip,
-      paymentsEnabled: roomState.session.paymentsEnabled,
-      tipsEnabled: roomState.session.tipsEnabled,
-      searchScope: roomState.session.searchScope
+  try {
+    await persistStateWithAudit({
+      roomState,
+      gigId: roomGigId,
+      actor,
+      entityType: 'gig_session',
+      entityId: roomGigId,
+      eventType: 'session.start',
+      previousStatus: null,
+      nextStatus: roomState.session.status,
+      metadata: {
+        talentName: roomState.session.talentName,
+        talentRole: roomState.session.talentRole,
+        feeType: roomState.session.feeType,
+        minimumTip: roomState.session.minimumTip,
+        paymentsEnabled: roomState.session.paymentsEnabled,
+        tipsEnabled: roomState.session.tipsEnabled,
+        searchScope: roomState.session.searchScope
+      }
+    });
+  } catch (error) {
+    // Concurrent copies of the same start can all observe an empty slot. The
+    // database insert is the one-flight winner; losers reload and replay only
+    // when ownership and immutable setup match exactly.
+    if (error instanceof Error && error.message === 'gig_session_state_revision_conflict') {
+      const racedStart = await loadMatchingStartedRoom();
+      if (racedStart.kind === 'replay') {
+        state = prepareRoomState(racedStart.state, roomGigId);
+        activeGigId = roomGigId;
+        return res.json({ success: true, replayed: true, state });
+      }
+      return res.status(409).json({ error: 'This room start identity was already used for a different room setup.' });
     }
-  });
-  res.json({ success: true, state: prepareRoomState(roomState, roomGigId) });
+    console.error('[sway.session.start] durable room start failed:', error);
+    return res.status(503).json({ error: 'The room could not be started safely. Retry with the same room start.' });
+  }
+
+  state = prepareRoomState(roomState, roomGigId);
+  activeGigId = roomGigId;
+  return res.json({ success: true, state });
 });
 
 app.post("/api/session/feature", async (req, res) => {
@@ -10935,6 +11030,12 @@ app.post("/api/session/payments-enabled", async (req, res) => {
   }
 
   if (enabled) {
+    if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
+      return res.status(503).json({
+        error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+        code: 'test_payment_runtime_unavailable'
+      });
+    }
     const [seller] = businessDb && actor.actorId
       ? await businessDb.select({
           isActive: performers.isActive,
@@ -11139,10 +11240,6 @@ app.post("/api/request/create", async (req, res) => {
   if (preliminaryReplay.kind === 'replay') {
     return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
   }
-  if (preliminaryReplay.kind === 'pending' && !confirmedPaymentIntentId) {
-    return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
-  }
-
   // Reconcile an SCA-confirmed PaymentIntent against its immutable durable
   // action identity before reading any room setting that may have changed
   // while the customer was in Stripe.js.
@@ -11237,6 +11334,13 @@ app.post("/api/request/create", async (req, res) => {
   const paymentsEnabledForAction = isStraightTip
     ? roomState.session.tipsEnabled === true
     : roomState.session.paymentsEnabled !== false;
+
+  if (paymentsEnabledForAction && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
+    return rejectAfterConfirmedAuthorization(503, {
+      error: 'This paid action is paused until Stripe test-mode payment execution is fully configured.',
+      code: 'test_payment_runtime_unavailable'
+    });
+  }
 
   const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
@@ -11519,13 +11623,18 @@ app.post("/api/request/create", async (req, res) => {
   try {
     await businessStore.activateRequestAction(durableGigId, newItem);
   } catch (error) {
+    const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
     if (newItem.paymentId) {
-      return rejectAfterPaymentReversal(newItem.paymentId, 409, {
-        error: 'The room changed before this request could be committed. Its payment is being released safely.'
+      return rejectAfterPaymentReversal(newItem.paymentId, pendingExpired ? 410 : 409, {
+        error: pendingExpired
+          ? 'This request expired before it could be committed. Its payment is being released safely.'
+          : 'The room changed before this request could be committed. Its payment is being released safely.'
       });
     }
-    return completeReservedFailure(409, {
-      error: 'The room changed before this request could be committed.'
+    return completeReservedFailure(pendingExpired ? 410 : 409, {
+      error: pendingExpired
+        ? 'This request expired before it could be committed.'
+        : 'The room changed before this request could be committed.'
     });
   }
   const committedSnapshot = await loadRoomState(durableGigId);
@@ -11595,9 +11704,6 @@ app.post("/api/request/boost", async (req, res) => {
   const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
   if (preliminaryReplay.kind === 'replay') {
     return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
-  }
-  if (preliminaryReplay.kind === 'pending' && !confirmedPaymentIntentId) {
-    return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
   }
   const confirmedAuthorization = confirmedPaymentIntentId
     ? await paymentService.confirmAuthorizedAction({
@@ -11693,6 +11799,12 @@ app.post("/api/request/boost", async (req, res) => {
     return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting boosts.' });
   }
   const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
+  if (paymentsEnabledForRoom && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
+    return rejectAfterConfirmedAuthorization(503, {
+      error: 'Paid boosts are paused until Stripe test-mode payment execution is fully configured.',
+      code: 'test_payment_runtime_unavailable'
+    });
+  }
   let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip); // Paid boosts follow the room minimum.
   if (!paymentsEnabledForRoom) {
     // Free room: boosts become free upvotes -- fixed 1-unit weight, no money.
@@ -11947,13 +12059,18 @@ app.post("/api/request/boost", async (req, res) => {
   try {
     await businessStore.activateBoostAction(durableGigId, request, newBoost);
   } catch (error) {
+    const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
     if (newBoost.paymentId) {
-      return rejectAfterPaymentReversal(newBoost.paymentId, 409, {
-        error: 'The room changed before this boost could be committed. Its payment is being released safely.'
+      return rejectAfterPaymentReversal(newBoost.paymentId, pendingExpired ? 410 : 409, {
+        error: pendingExpired
+          ? 'This boost expired before it could be committed. Its payment is being released safely.'
+          : 'The room changed before this boost could be committed. Its payment is being released safely.'
       });
     }
-    return completeReservedFailure(409, {
-      error: 'The room changed before this boost could be committed.'
+    return completeReservedFailure(pendingExpired ? 410 : 409, {
+      error: pendingExpired
+        ? 'This boost expired before it could be committed.'
+        : 'The room changed before this boost could be committed.'
     });
   }
   const committedSnapshot = await loadRoomState(durableGigId);

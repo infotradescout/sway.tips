@@ -89,14 +89,25 @@ assert.equal(paymentProvider.includes("!secretKey.startsWith('sk_test_')"), true
 for (const required of [
   '/account/recover',
   '/account/resend-verification',
-  'Password (8+ characters, letter and number)',
+  'At least 8 characters with a letter and a number.',
+  'autoComplete="new-password"',
+  "'/account?intent=performer'",
+  "window.location.assign(data.redirectPath || '/talent')",
+  'htmlFor={displayNameId}',
+  'htmlFor={emailId}',
+  'aria-live="polite"',
   'pendingRightsReviewCount'
 ]) {
   assert.equal(accountAccess.includes(required), true, `Canonical account recovery/readiness UI missing: ${required}`);
 }
+assert.equal(server.includes("code: 'universal_account_required'"), true, 'Legacy performer signup must terminate at the universal account flow.');
+assert.equal(server.includes("redirectPath: '/account/signup?intent=performer'"), true, 'Legacy performer signup must identify the canonical destination.');
 assert.equal(patronApp.includes('Join with a room link or ID'), true, 'The room recovery screen needs a real typed-entry path.');
 assert.equal(patronView.includes("onBlockFoundation('patron_device_id_hash', ''"), true, 'Patron block requests must use the private browser header identity.');
 assert.equal(patronView.includes('Device block recorded.'), false, 'Block UI must not claim immediate enforcement.');
 assert.equal(patronView.includes('session.tipsEnabled'), true, 'Tip UI must honor seller payout readiness.');
+assert.equal(patronView.includes("data?.mode !== 'test'"), true, 'Patron payment UI must fail closed unless Stripe test mode is verified.');
+assert.equal(patronView.includes("!data.publishableKey.startsWith('pk_test_')"), true, 'Patron payment UI must reject non-test publishable keys.');
+assert.equal(patronView.includes('Stripe test mode — use a test card. No real money moves.'), true, 'Patron checkout must state the test-money boundary.');
 
 console.log('Sway containment and canonical onboarding contract passed.');

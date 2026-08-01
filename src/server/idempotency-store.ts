@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { createSwayDb, type SwayDb } from '../db/client';
-import { clientPendingActions, idempotencyKeys, requestBoosts, requests } from '../db/schema';
+import { clientPendingActions, idempotencyKeys, payments, requestBoosts, requests } from '../db/schema';
 import { hashPatronStatusReceipt, isPatronStatusReceipt } from './patron-status-receipt';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
@@ -43,14 +43,43 @@ function hashResponseBody(body: unknown): string {
 }
 
 function parseExpiresAt(expiresAt?: string | null) {
-  if (!expiresAt) return new Date(Date.now() + PENDING_ACTION_TTL_MS);
+  const maximum = new Date(Date.now() + PENDING_ACTION_TTL_MS);
+  if (!expiresAt) return maximum;
   const parsed = new Date(expiresAt);
-  if (Number.isNaN(parsed.getTime())) return new Date(Date.now() + PENDING_ACTION_TTL_MS);
-  return parsed;
+  if (Number.isNaN(parsed.getTime())) return maximum;
+  // The client may shorten the recovery window, but it cannot extend the
+  // server's financial uncertainty budget with an arbitrary future date.
+  return parsed > maximum ? maximum : parsed;
 }
 
 export function createIdempotencyStore(databaseUrl?: string) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
+
+  async function isDurableActionVisible(input: {
+    idempotencyKey: string;
+    actionType: string;
+    clientRequestId?: string | null;
+  }) {
+    if (!db) return false;
+    const [row] = input.actionType === 'boost'
+      ? await db
+        .select({ activatedAt: requestBoosts.activatedAt })
+        .from(requestBoosts)
+        .where(and(
+          eq(requestBoosts.idempotencyKey, input.idempotencyKey),
+          ...(input.clientRequestId ? [eq(requestBoosts.clientRequestId, input.clientRequestId)] : [])
+        ))
+        .limit(1)
+      : await db
+        .select({ activatedAt: requests.activatedAt })
+        .from(requests)
+        .where(and(
+          eq(requests.idempotencyKey, input.idempotencyKey),
+          ...(input.clientRequestId ? [eq(requests.clientRequestId, input.clientRequestId)] : [])
+        ))
+        .limit(1);
+    return Boolean(row?.activatedAt);
+  }
 
   async function loadDurableActionRecord(idempotencyKey: string, intentFingerprint?: string): Promise<IdempotencyReplay> {
     if (!db) return { kind: 'new' };
@@ -61,7 +90,10 @@ export function createIdempotencyStore(databaseUrl?: string) {
         firstResponseStatus: idempotencyKeys.firstResponseStatus,
         firstResponseBody: idempotencyKeys.firstResponseBody,
         expiresAt: idempotencyKeys.expiresAt,
-        pendingExpiresAt: clientPendingActions.expiresAt
+        pendingExpiresAt: clientPendingActions.expiresAt,
+        pendingCreatedAt: clientPendingActions.createdAt,
+        pendingClientRequestId: clientPendingActions.clientRequestId,
+        actionType: idempotencyKeys.actionType
       })
       .from(idempotencyKeys)
       .leftJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, idempotencyKeys.idempotencyKey))
@@ -76,7 +108,20 @@ export function createIdempotencyStore(databaseUrl?: string) {
     if (record.firstResponseStatus && record.firstResponseBody) {
       return { kind: 'replay', status: record.firstResponseStatus, body: record.firstResponseBody };
     }
-    if (record.pendingExpiresAt && Date.now() > record.pendingExpiresAt.getTime()) return { kind: 'expired' };
+    const pendingDeadline = record.pendingExpiresAt
+      ? Math.min(
+          record.pendingExpiresAt.getTime(),
+          (record.pendingCreatedAt?.getTime() ?? record.pendingExpiresAt.getTime()) + PENDING_ACTION_TTL_MS
+        )
+      : null;
+    if (pendingDeadline !== null && Date.now() > pendingDeadline) {
+      if (await isDurableActionVisible({
+        idempotencyKey,
+        actionType: record.actionType,
+        clientRequestId: record.pendingClientRequestId
+      })) return { kind: 'pending' };
+      return { kind: 'expired' };
+    }
     return { kind: 'pending' };
   }
 
@@ -430,7 +475,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
           .for('update')
           .limit(1);
       if (action?.activatedAt) throw new Error('pending_action_already_visible');
-      if (action && action.status !== 'payment_pending') {
+      if (action && !['payment_pending', 'denied'].includes(action.status)) {
         throw new Error('pending_action_terminal_state_conflict');
       }
 
@@ -438,7 +483,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
       // before terminal provider truth arrived. Missing action rows are valid
       // for admission/cap failures that happen after the idempotency owner is
       // established but before a business row is inserted.
-      if (action) {
+      if (action?.status === 'payment_pending') {
         const terminalizedAction = input.actionType === 'boost'
           ? await tx
             .update(requestBoosts)
@@ -500,6 +545,209 @@ export function createIdempotencyStore(databaseUrl?: string) {
     });
   }
 
+  async function expireStalePendingActions(input: { limit?: number } = {}) {
+    if (!db) return {
+      inspected: 0,
+      fenced: 0,
+      terminalized: 0,
+      financiallyBlocked: 0,
+      financiallyBlockedPaymentIds: [] as string[]
+    };
+    const limit = Math.max(1, Math.min(100, Math.trunc(Number(input.limit) || 25)));
+    const now = new Date();
+    const candidates = await db
+      .select({
+        clientRequestId: clientPendingActions.clientRequestId,
+        idempotencyKey: clientPendingActions.idempotencyKey,
+        gigId: clientPendingActions.gigId,
+        actionType: clientPendingActions.actionType
+      })
+      .from(clientPendingActions)
+      .where(and(
+        inArray(clientPendingActions.status, ['pending', 'retrying']),
+        or(
+          lte(clientPendingActions.expiresAt, now),
+          lte(clientPendingActions.createdAt, new Date(now.getTime() - PENDING_ACTION_TTL_MS))
+        )
+      ))
+      .limit(limit);
+
+    let fenced = 0;
+    let terminalized = 0;
+    const financiallyBlockedPaymentIds: string[] = [];
+    for (const candidate of candidates) {
+      const fencedAction = await db.transaction(async (tx) => {
+        const [pending] = await tx
+          .select({
+            id: clientPendingActions.id,
+            status: clientPendingActions.status,
+            expiresAt: clientPendingActions.expiresAt,
+            createdAt: clientPendingActions.createdAt
+          })
+          .from(clientPendingActions)
+          .where(and(
+            eq(clientPendingActions.clientRequestId, candidate.clientRequestId),
+            eq(clientPendingActions.idempotencyKey, candidate.idempotencyKey)
+          ))
+          .for('update')
+          .limit(1);
+        if (!pending || !['pending', 'retrying'].includes(pending.status)) return null;
+        const effectiveDeadline = Math.min(
+          pending.expiresAt.getTime(),
+          pending.createdAt.getTime() + PENDING_ACTION_TTL_MS
+        );
+        if (effectiveDeadline > Date.now()) return null;
+
+        const [action] = candidate.actionType === 'boost'
+          ? await tx
+            .select({
+              id: requestBoosts.id,
+              activatedAt: requestBoosts.activatedAt,
+              status: requestBoosts.status
+            })
+            .from(requestBoosts)
+            .where(and(
+              eq(requestBoosts.gigId, candidate.gigId),
+              eq(requestBoosts.clientRequestId, candidate.clientRequestId),
+              eq(requestBoosts.idempotencyKey, candidate.idempotencyKey)
+            ))
+            .for('update')
+            .limit(1)
+          : await tx
+            .select({
+              id: requests.id,
+              activatedAt: requests.activatedAt,
+              status: requests.status
+            })
+            .from(requests)
+            .where(and(
+              eq(requests.gigId, candidate.gigId),
+              eq(requests.clientRequestId, candidate.clientRequestId),
+              eq(requests.idempotencyKey, candidate.idempotencyKey)
+            ))
+            .for('update')
+            .limit(1);
+        if (action?.activatedAt) return null;
+
+        if (action?.status === 'payment_pending') {
+          const fencedRows = candidate.actionType === 'boost'
+            ? await tx
+              .update(requestBoosts)
+              .set({
+                status: 'denied',
+                stateRevision: sql`${requestBoosts.stateRevision} + 1`,
+                updatedAt: now
+              })
+              .where(and(
+                eq(requestBoosts.id, action.id),
+                eq(requestBoosts.status, 'payment_pending'),
+                isNull(requestBoosts.activatedAt)
+              ))
+              .returning({ id: requestBoosts.id })
+            : await tx
+              .update(requests)
+              .set({
+                status: 'denied',
+                stateRevision: sql`${requests.stateRevision} + 1`,
+                updatedAt: now
+              })
+              .where(and(
+                eq(requests.id, action.id),
+                eq(requests.status, 'payment_pending'),
+                isNull(requests.activatedAt)
+              ))
+              .returning({ id: requests.id });
+          if (fencedRows.length !== 1) return null;
+        } else if (action && action.status !== 'denied') {
+          return null;
+        }
+
+        const [payment] = !action
+          ? []
+          : candidate.actionType === 'boost'
+            ? await tx
+              .select({
+                id: payments.id,
+                paymentStatus: payments.paymentStatus,
+                processorPaymentIntentId: payments.processorPaymentIntentId
+              })
+              .from(payments)
+              .where(eq(payments.requestBoostId, action.id))
+              .for('update')
+              .limit(1)
+            : await tx
+              .select({
+                id: payments.id,
+                paymentStatus: payments.paymentStatus,
+                processorPaymentIntentId: payments.processorPaymentIntentId
+              })
+              .from(payments)
+              .where(eq(payments.requestId, action.id))
+              .for('update')
+              .limit(1);
+
+        await tx
+          .update(clientPendingActions)
+          .set({
+            status: 'retrying',
+            lastAttemptAt: now,
+            lastError: payment ? 'expired_payment_reversal_pending' : 'expired_before_payment_creation'
+          })
+          .where(eq(clientPendingActions.id, pending.id));
+
+        return { action, payment: payment ?? null };
+      });
+
+      if (!fencedAction) continue;
+      fenced += 1;
+      const payment = fencedAction.payment;
+      const financiallyTerminal = !payment
+        || ['voided', 'refunded'].includes(payment.paymentStatus)
+        || (payment.paymentStatus === 'failed' && !payment.processorPaymentIntentId);
+      if (!financiallyTerminal) {
+        financiallyBlockedPaymentIds.push(payment!.id);
+        continue;
+      }
+
+      try {
+        const completed = await completePendingActionFailure({
+          clientRequestId: candidate.clientRequestId,
+          idempotencyKey: candidate.idempotencyKey,
+          gigId: candidate.gigId,
+          actionType: candidate.actionType === 'boost'
+            ? 'boost'
+            : candidate.actionType === 'tip'
+              ? 'tip'
+              : 'request',
+          status: 410,
+          body: {
+            success: false,
+            terminal: true,
+            expired: true,
+            payment_status: payment?.paymentStatus === 'voided' || payment?.paymentStatus === 'refunded'
+              ? 'voided_or_refunded'
+              : 'not_created',
+            error: 'Pending action expired before confirmation was completed.'
+          }
+        });
+        if (completed.completed) terminalized += 1;
+      } catch (error) {
+        if (!(error instanceof Error) || ![
+          'pending_action_already_visible',
+          'pending_action_completion_conflict'
+        ].includes(error.message)) throw error;
+      }
+    }
+
+    return {
+      inspected: candidates.length,
+      fenced,
+      terminalized,
+      financiallyBlocked: financiallyBlockedPaymentIds.length,
+      financiallyBlockedPaymentIds
+    };
+  }
+
   async function reconcilePendingAction(input: { clientRequestId: string; idempotencyKey: string }) {
     if (!db) return { status: 'unavailable' as const };
 
@@ -509,6 +757,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
         gigId: clientPendingActions.gigId,
         actionType: clientPendingActions.actionType,
         expiresAt: clientPendingActions.expiresAt,
+        createdAt: clientPendingActions.createdAt,
         idempotencyExpiresAt: idempotencyKeys.expiresAt,
         responseStatus: idempotencyKeys.firstResponseStatus,
         responseBody: idempotencyKeys.firstResponseBody
@@ -527,7 +776,18 @@ export function createIdempotencyStore(databaseUrl?: string) {
     if (row.responseStatus && row.responseBody) {
       return { status: 'reconciled' as const, responseStatus: row.responseStatus, responseBody: row.responseBody };
     }
-    if (Date.now() > row.expiresAt.getTime()) return { status: 'expired' as const };
+    const effectiveDeadline = Math.min(
+      row.expiresAt.getTime(),
+      row.createdAt.getTime() + PENDING_ACTION_TTL_MS
+    );
+    if (Date.now() > effectiveDeadline) {
+      if (await isDurableActionVisible({
+        idempotencyKey: input.idempotencyKey,
+        actionType: row.actionType,
+        clientRequestId: input.clientRequestId
+      })) return { status: row.pendingStatus, gigId: row.gigId, actionType: row.actionType };
+      return { status: 'expired' as const };
+    }
     return { status: row.pendingStatus, gigId: row.gigId, actionType: row.actionType };
   }
 
@@ -538,6 +798,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
     reserveDurableActorAction,
     completePendingAction,
     completePendingActionFailure,
+    expireStalePendingActions,
     completeDurableActorAction,
     reconcilePendingAction
   };

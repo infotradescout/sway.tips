@@ -171,24 +171,20 @@ export default function TalentApp() {
 
   const handleStartSession = async (setupData: PerformerRoomSetupData) => {
     if (demoMode) return rejectDemoMutation();
-    try {
-      const performerIdentityName = performerProfile
-        ? resolvePublicProfileHeroName({
-            handle: performerProfile.handle,
-            stageName: performerProfile.stage_name,
-            displayName: performerProfile.display_name
-          })
-        : '';
-      const data = await postJson('/api/session/start', {
-        ...setupData,
-        talentName: setupData.talentName.trim() || performerIdentityName
-      });
-      setBState(data.state);
-      setSelectedGigId(data.state?.activeGigId ?? null);
-      await refreshActiveRooms();
-    } catch (e) {
-      console.error(e);
-    }
+    const performerIdentityName = performerProfile
+      ? resolvePublicProfileHeroName({
+          handle: performerProfile.handle,
+          stageName: performerProfile.stage_name,
+          displayName: performerProfile.display_name
+        })
+      : '';
+    const data = await postJson('/api/session/start', {
+      ...setupData,
+      talentName: setupData.talentName.trim() || performerIdentityName
+    });
+    setBState(data.state);
+    setSelectedGigId(data.state?.activeGigId ?? null);
+    await refreshActiveRooms();
   };
 
   const handleEndSession = async () => {
@@ -264,7 +260,8 @@ export default function TalentApp() {
   };
 
   const resetInactiveSession = () => {
-    handleStartSession({
+    void handleStartSession({
+      gig_id: globalThis.crypto.randomUUID(),
       talentName: 'Sway Performer',
       talentRole: 'DJ',
       feeType: 'patron',

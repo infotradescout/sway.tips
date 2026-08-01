@@ -40,7 +40,7 @@ for (const term of [
   requireTerm(account, term, 'Account signup claim UI');
 }
 
-const confirmIdx = account.indexOf('placeholder="Confirm password"');
+const confirmIdx = account.indexOf('>Confirm password</label>');
 const claimFieldIdx = account.indexOf('<ClaimCodeField');
 const termsIdx = account.indexOf('I accept the Sway Terms.');
 if (!(confirmIdx >= 0 && claimFieldIdx > confirmIdx && termsIdx > claimFieldIdx)) {

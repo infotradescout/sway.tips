@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
-import { createSwayDb } from '../db/client';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { closeDisposableSwayDbProof, createSwayDb } from '../db/client';
 import {
   gigSessions,
+  clientPendingActions,
   liveRoomPaymentOperations,
   payments,
   performers,
@@ -12,6 +13,7 @@ import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
 import { createLiveRoomPaymentOperationStore } from './live-room-payment-operation-store';
 import { resolveSwayPlatformFeePolicyForGig } from './partner-entitlement-store';
+import { createIdempotencyStore } from './idempotency-store';
 
 type ActionType = 'tip' | 'request' | 'boost' | 'bump' | 'vip';
 
@@ -175,6 +177,7 @@ export function createPaymentService(config: {
   const provider = config.provider;
   const lifecycle = createPaymentLifecycleService(config.databaseUrl);
   const operationStore = createLiveRoomPaymentOperationStore(config.databaseUrl);
+  const idempotencyStore = createIdempotencyStore(config.databaseUrl);
   const enabled = Boolean(db && provider);
   const workerId = `live-room-payment:${process.pid}`;
 
@@ -203,6 +206,43 @@ export function createPaymentService(config: {
       ))
       .limit(1);
     return row ?? null;
+  }
+
+  async function loadPendingActionDeadline(idempotencyKey: string | null) {
+    if (!db || !idempotencyKey) return null;
+    const [row] = await db
+      .select({
+        status: clientPendingActions.status,
+        expiresAt: clientPendingActions.expiresAt,
+        createdAt: clientPendingActions.createdAt
+      })
+      .from(clientPendingActions)
+      .where(eq(clientPendingActions.idempotencyKey, idempotencyKey))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async function hasExpiredUnresolvedPendingAction(payment: NonNullable<Awaited<ReturnType<typeof loadPayment>>>) {
+    const [linkedAction] = payment.requestBoostId
+      ? await db!
+        .select({ activatedAt: requestBoosts.activatedAt })
+        .from(requestBoosts)
+        .where(eq(requestBoosts.id, payment.requestBoostId))
+        .limit(1)
+      : payment.requestId
+        ? await db!
+          .select({ activatedAt: requests.activatedAt })
+          .from(requests)
+          .where(eq(requests.id, payment.requestId))
+          .limit(1)
+        : [];
+    if (linkedAction?.activatedAt) return false;
+    const pending = await loadPendingActionDeadline(payment.idempotencyKey);
+    const effectiveDeadline = pending
+      ? Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000)
+      : null;
+    if (!pending || !['pending', 'retrying'].includes(pending.status)) return true;
+    return effectiveDeadline === null || effectiveDeadline <= Date.now();
   }
 
   async function alignPaymentWithProviderTruth(
@@ -522,6 +562,15 @@ export function createPaymentService(config: {
       });
       return;
     }
+    const expiredBeforeProviderCall = await hasExpiredUnresolvedPendingAction(payment);
+    if (
+      expiredBeforeProviderCall
+      && operation.attemptCount <= 1
+      && !payment.processorPaymentIntentId
+      && !operation.processorObjectId
+    ) {
+      throw new Error('pending_action_expired_before_provider_call');
+    }
     const [room] = await db
       .select({ status: gigSessions.status })
       .from(gigSessions)
@@ -566,6 +615,18 @@ export function createPaymentService(config: {
       providerStatus: authorization.status,
       ...feePolicyFromPayload(payload)
     };
+    if (expiredBeforeProviderCall || await hasExpiredUnresolvedPendingAction(payment)) {
+      // A retry after provider uncertainty must first discover the remote
+      // PaymentIntent with the original idempotency key. Once discovered, an
+      // expired action is released/refunded and can never become visible.
+      await operationStore.markSucceeded(operation, {
+        processorObjectId: authorization.processorPaymentIntentId,
+        resultPayload: { ...resultPayload, outcome: 'expired_action_provider_truth_recovered' }
+      });
+      await voidOrRefund(payment.id);
+      await idempotencyStore.expireStalePendingActions({ limit: 10 });
+      return;
+    }
     const [latestRoom] = await db
       .select({ status: gigSessions.status })
       .from(gigSessions)
@@ -843,6 +904,9 @@ export function createPaymentService(config: {
     if (payment.paymentStatus !== 'authorized' || !payment.processorPaymentIntentId) {
       throw new Error(`capture_not_ready_from:${payment.paymentStatus}`);
     }
+    if (await hasExpiredUnresolvedPendingAction(payment)) {
+      throw new Error('pending_action_expired_before_capture');
+    }
     const [room] = await db
       .select({ status: gigSessions.status })
       .from(gigSessions)
@@ -1047,7 +1111,9 @@ export function createPaymentService(config: {
   ) {
     const closeoutBlocked = error instanceof Error && [
       'capture_canceled_before_provider_call',
-      'authorization_canceled_before_provider_call'
+      'authorization_canceled_before_provider_call',
+      'pending_action_expired_before_provider_call',
+      'pending_action_expired_before_capture'
     ].includes(error.message);
     const terminalProcessorRejection = operation.operationType === 'authorize' && isTerminalProcessorError(error);
     const terminal = forceTerminal || closeoutBlocked || terminalProcessorRejection;
@@ -1216,7 +1282,9 @@ export function createPaymentService(config: {
       } catch (error) {
         const forceTerminal = error instanceof Error && [
           'capture_canceled_before_provider_call',
-          'authorization_canceled_before_provider_call'
+          'authorization_canceled_before_provider_call',
+          'pending_action_expired_before_provider_call',
+          'pending_action_expired_before_capture'
         ].includes(error.message);
         await markOperationFailure(operation, error, forceTerminal);
         result.failed += 1;
@@ -1437,9 +1505,30 @@ export function createPaymentService(config: {
       .map((payment) => payment.id);
   }
 
+  async function reverseExpiredPendingPayments(paymentIds: string[]) {
+    if (!db || !provider) return { attempted: 0, terminal: 0 };
+    let terminal = 0;
+    const uniquePaymentIds = [...new Set(paymentIds)];
+    for (const paymentId of uniquePaymentIds) {
+      const result = await voidOrRefund(paymentId);
+      if (['noop', 'voided', 'refunded'].includes(result.status)) terminal += 1;
+    }
+    return { attempted: uniquePaymentIds.length, terminal };
+  }
+
   async function reconcileActionVisibility(input: { limit?: number } = {}) {
-    if (!db) return { authorizationsReconciled: 0, requestsActivated: 0, boostsActivated: 0, paymentsConverged: 0 };
+    if (!db) return {
+      authorizationsReconciled: 0,
+      requestsActivated: 0,
+      boostsActivated: 0,
+      paymentsConverged: 0,
+      expiredPaymentsReversed: 0,
+      expiredActionsTerminalized: 0
+    };
     const limit = Math.max(1, Math.min(100, Math.trunc(Number(input.limit) || 25)));
+    const firstExpiryFence = await idempotencyStore.expireStalePendingActions({ limit });
+    const expiredReversals = await reverseExpiredPendingPayments(firstExpiryFence.financiallyBlockedPaymentIds);
+    const secondExpiryFence = await idempotencyStore.expireStalePendingActions({ limit });
     let authorizationsReconciled = 0;
     let requestsActivated = 0;
     let boostsActivated = 0;
@@ -1562,6 +1651,7 @@ export function createPaymentService(config: {
       .select({
         requestId: requests.id,
         gigId: requests.gigId,
+        idempotencyKey: requests.idempotencyKey,
         stateRevision: requests.stateRevision,
         runtimeState: requests.runtimeRequestState,
         paymentId: payments.id,
@@ -1572,10 +1662,14 @@ export function createPaymentService(config: {
       .from(requests)
       .innerJoin(gigSessions, eq(gigSessions.id, requests.gigId))
       .leftJoin(payments, eq(payments.requestId, requests.id))
+      .innerJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, requests.idempotencyKey))
       .where(and(
         isNull(requests.activatedAt),
         eq(requests.status, 'payment_pending'),
         eq(gigSessions.status, 'active'),
+        inArray(clientPendingActions.status, ['pending', 'retrying']),
+        gt(clientPendingActions.expiresAt, new Date()),
+        gt(clientPendingActions.createdAt, new Date(Date.now() - 5 * 60 * 1000)),
         or(
           inArray(payments.paymentStatus, ['authorized', 'captured']),
           and(
@@ -1617,6 +1711,7 @@ export function createPaymentService(config: {
             : 'held_for_review';
       const now = new Date();
       const activated = await db.transaction(async (tx) => {
+        if (!row.idempotencyKey) return [];
         const [room] = await tx
           .select({ status: gigSessions.status })
           .from(gigSessions)
@@ -1624,6 +1719,21 @@ export function createPaymentService(config: {
           .for('update')
           .limit(1);
         if (room?.status !== 'active') return [];
+        const [pending] = await tx
+          .select({
+            status: clientPendingActions.status,
+            expiresAt: clientPendingActions.expiresAt,
+            createdAt: clientPendingActions.createdAt
+          })
+          .from(clientPendingActions)
+          .where(eq(clientPendingActions.idempotencyKey, row.idempotencyKey))
+          .for('update')
+          .limit(1);
+        if (
+          !pending
+          || !['pending', 'retrying'].includes(pending.status)
+          || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000) <= Date.now()
+        ) return [];
         return tx
           .update(requests)
           .set({
@@ -1659,6 +1769,7 @@ export function createPaymentService(config: {
       .select({
         boostId: requestBoosts.id,
         gigId: requestBoosts.gigId,
+        idempotencyKey: requestBoosts.idempotencyKey,
         parentId: requestBoosts.requestId,
         stateRevision: requestBoosts.stateRevision,
         runtimeState: requestBoosts.runtimeBoostState,
@@ -1672,10 +1783,14 @@ export function createPaymentService(config: {
       .innerJoin(requests, eq(requests.id, requestBoosts.requestId))
       .innerJoin(gigSessions, eq(gigSessions.id, requestBoosts.gigId))
       .leftJoin(payments, eq(payments.requestBoostId, requestBoosts.id))
+      .innerJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, requestBoosts.idempotencyKey))
       .where(and(
         isNull(requestBoosts.activatedAt),
         eq(requestBoosts.status, 'payment_pending'),
         eq(gigSessions.status, 'active'),
+        inArray(clientPendingActions.status, ['pending', 'retrying']),
+        gt(clientPendingActions.expiresAt, new Date()),
+        gt(clientPendingActions.createdAt, new Date(Date.now() - 5 * 60 * 1000)),
         or(
           inArray(payments.paymentStatus, ['authorized', 'captured']),
           and(
@@ -1709,6 +1824,7 @@ export function createPaymentService(config: {
       if (paymentStatus !== 'captured' && !(paymentStatus === 'not_applicable' && !row.paymentId)) continue;
       const now = new Date();
       const activated = await db.transaction(async (tx) => {
+        if (!row.idempotencyKey) return [];
         const [room] = await tx
           .select({ status: gigSessions.status })
           .from(gigSessions)
@@ -1716,6 +1832,21 @@ export function createPaymentService(config: {
           .for('update')
           .limit(1);
         if (room?.status !== 'active') return [];
+        const [pending] = await tx
+          .select({
+            status: clientPendingActions.status,
+            expiresAt: clientPendingActions.expiresAt,
+            createdAt: clientPendingActions.createdAt
+          })
+          .from(clientPendingActions)
+          .where(eq(clientPendingActions.idempotencyKey, row.idempotencyKey))
+          .for('update')
+          .limit(1);
+        if (
+          !pending
+          || !['pending', 'retrying'].includes(pending.status)
+          || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000) <= Date.now()
+        ) return [];
         const [parent] = await tx
           .select({ status: requests.status, runtimeState: requests.runtimeRequestState })
           .from(requests)
@@ -1900,7 +2031,29 @@ export function createPaymentService(config: {
       paymentsConverged += updated.length;
     }
 
-    return { authorizationsReconciled, requestsActivated, boostsActivated, paymentsConverged };
+    // Time can cross the deadline while a provider call or activation CAS is
+    // in flight. Finish with the same fence -> reverse -> canonicalize order
+    // so one reconciliation pass cannot leave newly expired work chargeable.
+    const finalExpiryFence = await idempotencyStore.expireStalePendingActions({ limit });
+    const finalExpiredReversals = await reverseExpiredPendingPayments(finalExpiryFence.financiallyBlockedPaymentIds);
+    const finalExpiryCompletion = await idempotencyStore.expireStalePendingActions({ limit });
+
+    return {
+      authorizationsReconciled,
+      requestsActivated,
+      boostsActivated,
+      paymentsConverged,
+      expiredPaymentsReversed: expiredReversals.terminal + finalExpiredReversals.terminal,
+      expiredActionsTerminalized: firstExpiryFence.terminalized
+        + secondExpiryFence.terminalized
+        + finalExpiryFence.terminalized
+        + finalExpiryCompletion.terminalized
+    };
+  }
+
+  async function dispose() {
+    if (!config.databaseUrl) return;
+    await closeDisposableSwayDbProof(config.databaseUrl);
   }
 
   return {
@@ -1920,6 +2073,7 @@ export function createPaymentService(config: {
     listCloseoutReversalPaymentIds,
     listCloseoutBlockingPaymentIds,
     reconcileActionVisibility,
+    dispose,
     transitionPaymentState: lifecycle.transitionPaymentState
   };
 }

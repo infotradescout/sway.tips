@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Play } from 'lucide-react';
 
 export type PerformerRoomSetupData = {
+  gig_id: string;
   talentName: string;
   talentRole: 'DJ' | 'Performer';
   feeType: 'talent' | 'patron';
@@ -17,37 +18,58 @@ export default function PerformerRoomSetup({
   talentRole,
   performerEmailVerified,
   payoutReady,
+  paymentMode,
   onStartSession
 }: {
   performerName: string;
   talentRole: 'DJ' | 'Performer';
   performerEmailVerified: boolean;
   payoutReady: boolean;
-  onStartSession: (data: PerformerRoomSetupData) => void;
+  paymentMode: 'test' | 'unavailable';
+  onStartSession: (data: PerformerRoomSetupData) => Promise<void>;
 }) {
   const [step, setStep] = useState(0);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [minimumTip, setMinimumTip] = useState(5);
   const [feeType, setFeeType] = useState<'talent' | 'patron'>('patron');
   const [searchScope, setSearchScope] = useState<'library' | 'catalog'>('library');
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const startAttemptRef = useRef<{ fingerprint: string; gigId: string } | null>(null);
 
   const pricingSummary = paymentsEnabled
-    ? `Paid · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
+    ? `Stripe test mode · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
     : payoutReady
-      ? 'Free requests and upvotes · direct tips available'
+      ? 'Free requests and upvotes · test tips available'
       : 'Free requests and upvotes · money actions off';
   const requestSummary = searchScope === 'library'
-    ? 'Customers request from your synced library'
+    ? 'Customers search your synced library first and may still type a manual request'
     : 'Customers can type any request; you approve or deny it';
 
-  const submit = () => onStartSession({
-    talentName: performerName,
-    talentRole,
-    feeType,
-    minimumTip: Math.max(5, minimumTip),
-    paymentsEnabled,
-    searchScope
-  });
+  const submit = async () => {
+    if (isStarting) return;
+    const setup = {
+      talentName: performerName,
+      talentRole,
+      feeType,
+      minimumTip: Math.max(5, minimumTip),
+      paymentsEnabled,
+      searchScope
+    };
+    const fingerprint = JSON.stringify(setup);
+    if (!startAttemptRef.current || startAttemptRef.current.fingerprint !== fingerprint) {
+      startAttemptRef.current = { fingerprint, gigId: globalThis.crypto.randomUUID() };
+    }
+    setIsStarting(true);
+    setStartError(null);
+    try {
+      await onStartSession({ ...setup, gig_id: startAttemptRef.current.gigId });
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : 'The room could not be created. Retry uses the same safe room start.');
+    } finally {
+      setIsStarting(false);
+    }
+  };
 
   return (
     <section data-sway-performer-room-setup="true" className="mx-auto w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:p-6">
@@ -68,14 +90,20 @@ export default function PerformerRoomSetup({
         ))}
       </div>
 
+      <div role="status" className={`mt-4 rounded-xl border px-4 py-3 text-xs leading-5 ${paymentMode === 'test' ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100' : 'border-amber-500/25 bg-amber-500/10 text-amber-100'}`}>
+        {paymentMode === 'test'
+          ? 'Stripe test mode — no real money moves. Paid-mode rehearsals require Stripe test cards.'
+          : 'Money actions unavailable — Sway could not verify Stripe test mode. You can still run a free room.'}
+      </div>
+
       <div className="mt-5 min-h-[18rem]">
         {step === 0 ? (
           <div className="space-y-4">
             <p className="text-xs font-bold text-cyan-300">{performerName}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" disabled={!payoutReady} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Paid requests</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? `Requests and boosts start at $${minimumTip}.` : 'Finish Stripe charge and payout setup first.'}</span></button>
-              <button type="button" onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? 'Direct tips remain available.' : 'All money actions stay off.'}</span></button>
+              <button type="button" disabled={!payoutReady || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Test paid requests</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? `Test requests and boosts start at $${minimumTip}. No real money moves.` : 'Finish Stripe test charge and payout setup first.'}</span></button>
+              <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? 'Test-mode direct tips remain available.' : 'All money actions stay off.'}</span></button>
             </div>
             {paymentsEnabled ? (
               <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
@@ -91,7 +119,7 @@ export default function PerformerRoomSetup({
         ) : step === 1 ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">What can customers ask for?</p>
-            <button type="button" onClick={() => setSearchScope('library')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'library' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">My synced library</span><span className="mt-2 block text-xs text-slate-400">Only show tracks you have synced to Sway.</span></button>
+            <button type="button" onClick={() => setSearchScope('library')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'library' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">My synced library first</span><span className="mt-2 block text-xs text-slate-400">Show synced tracks first. Customers may still type a manual request for you to approve or deny.</span></button>
             <button type="button" onClick={() => setSearchScope('catalog')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'catalog' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Open requests</span><span className="mt-2 block text-xs text-slate-400">Customers type anything. Nothing enters the approved queue until you allow it.</span></button>
           </div>
         ) : step === 2 ? (
@@ -107,16 +135,17 @@ export default function PerformerRoomSetup({
             <h3 className="mt-4 font-display text-2xl font-black uppercase text-white">Ready to go live</h3>
             <p className="mt-2 max-w-sm text-sm text-slate-400">Create the room, then Sway opens your live queue and generates the customer link and QR.</p>
             {!performerEmailVerified ? <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">Verify your email before creating a room.</p> : null}
+            {startError ? <p role="alert" aria-live="assertive" className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{startError}</p> : null}
           </div>
         )}
       </div>
 
       <div className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-        <button type="button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-bold text-slate-300 disabled:opacity-30"><ArrowLeft className="h-4 w-4" /> Back</button>
+        <button type="button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || isStarting} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-bold text-slate-300 disabled:opacity-30"><ArrowLeft className="h-4 w-4" /> Back</button>
         {step < 3 ? (
           <button type="button" onClick={() => setStep((current) => Math.min(3, current + 1))} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white">Next <ArrowRight className="h-4 w-4" /></button>
         ) : (
-          <button type="button" onClick={submit} disabled={!performerEmailVerified} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-slate-950 disabled:bg-slate-800 disabled:text-slate-500"><Play className="h-4 w-4" /> Create room</button>
+          <button type="button" onClick={() => { void submit(); }} disabled={!performerEmailVerified || isStarting} aria-busy={isStarting} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-slate-950 disabled:bg-slate-800 disabled:text-slate-500"><Play className="h-4 w-4" /> {isStarting ? 'Creating room…' : 'Create room'}</button>
         )}
       </div>
     </section>

@@ -5,6 +5,7 @@ import { createSwayDb, type SwayDb } from '../db/client';
 import type { FeeAttribution } from './fee-policy';
 import {
   activeRoomRegistry,
+  clientPendingActions,
   gigSessions,
   requestBoosts,
   requests,
@@ -13,6 +14,8 @@ import {
   promotionCampaigns,
   requestStatusEnum
 } from '../db/schema';
+
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 
 export type BusinessStoreRoomStatus = 'missing' | 'active' | 'inactive' | 'ended' | 'legacy_safe_empty';
 
@@ -616,14 +619,19 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         const sameDeviceRequests = await tx
           .select({
             requestType: requests.requestType,
-            message: requests.message
+            message: requests.message,
+            status: requests.status,
+            activatedAt: requests.activatedAt
           })
           .from(requests)
           .where(and(
             eq(requests.gigId, gigId),
             eq(requests.patronDeviceIdHash, request.patronDeviceIdHash)
           ));
-        const durableRequests = sameDeviceRequests.filter((row) => row.requestType !== 'tip');
+        const durableRequests = sameDeviceRequests.filter((row) => (
+          row.requestType !== 'tip'
+          && !(!row.activatedAt && ['denied', 'voided_or_refunded'].includes(row.status))
+        ));
         if (durableRequests.length >= caps.maxRequestsPerDevicePerGig) {
           throw new Error('request_device_per_gig_cap_reached');
         }
@@ -795,13 +803,16 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
 
       if (boost.patronDeviceIdHash) {
         const sameDeviceBoosts = await tx
-          .select({ id: requestBoosts.id })
+          .select({ id: requestBoosts.id, status: requestBoosts.status, activatedAt: requestBoosts.activatedAt })
           .from(requestBoosts)
           .where(and(
             eq(requestBoosts.gigId, gigId),
             eq(requestBoosts.patronDeviceIdHash, boost.patronDeviceIdHash)
           ));
-        if (sameDeviceBoosts.length >= caps.maxBoostsPerDevicePerGig) {
+        const activeDeviceBoosts = sameDeviceBoosts.filter((row) => !(
+          !row.activatedAt && ['denied', 'voided_or_refunded'].includes(row.status)
+        ));
+        if (activeDeviceBoosts.length >= caps.maxBoostsPerDevicePerGig) {
           throw new Error('boost_device_per_gig_cap_reached');
         }
       }
@@ -935,6 +946,20 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         .where(eq(gigSessions.id, gigId))
         .for('update')
         .limit(1);
+      const [pending] = await tx
+        .select({
+          status: clientPendingActions.status,
+          expiresAt: clientPendingActions.expiresAt,
+          createdAt: clientPendingActions.createdAt
+        })
+        .from(clientPendingActions)
+        .where(and(
+          eq(clientPendingActions.clientRequestId, request.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, request.idempotencyKey),
+          eq(clientPendingActions.gigId, gigId)
+        ))
+        .for('update')
+        .limit(1);
       const [reserved] = await tx
         .select({
           idempotencyKey: requests.idempotencyKey,
@@ -959,6 +984,11 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         request.stateRevision = reserved.stateRevision;
         return;
       }
+      if (
+        !pending
+        || !['pending', 'retrying'].includes(pending.status)
+        || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + PENDING_ACTION_TTL_MS) <= Date.now()
+      ) throw new Error('pending_action_expired');
       if (reserved.status !== 'payment_pending') throw new Error('durable_request_activation_terminal');
       if (room?.status !== 'active') throw new Error('room_not_accepting_money');
       const now = new Date();
@@ -1002,6 +1032,20 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         .where(eq(gigSessions.id, gigId))
         .for('update')
         .limit(1);
+      const [pending] = await tx
+        .select({
+          status: clientPendingActions.status,
+          expiresAt: clientPendingActions.expiresAt,
+          createdAt: clientPendingActions.createdAt
+        })
+        .from(clientPendingActions)
+        .where(and(
+          eq(clientPendingActions.clientRequestId, boost.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, boost.idempotencyKey),
+          eq(clientPendingActions.gigId, gigId)
+        ))
+        .for('update')
+        .limit(1);
       const [reserved] = await tx
         .select({
           requestId: requestBoosts.requestId,
@@ -1028,6 +1072,11 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         boost.stateRevision = reserved.stateRevision;
         return;
       }
+      if (
+        !pending
+        || !['pending', 'retrying'].includes(pending.status)
+        || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + PENDING_ACTION_TTL_MS) <= Date.now()
+      ) throw new Error('pending_action_expired');
       if (reserved.status !== 'payment_pending') throw new Error('durable_boost_activation_terminal');
       if (room?.status !== 'active') throw new Error('room_not_accepting_money');
       const [parent] = await tx

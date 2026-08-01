@@ -91,6 +91,7 @@ export function sanitizePatronMutationResponseBody(body: unknown): Record<string
   if (typeof body.pending === 'boolean') sanitized.pending = body.pending;
   if (typeof body.terminal === 'boolean') sanitized.terminal = body.terminal;
   if (typeof body.error === 'string') sanitized.error = body.error;
+  if (typeof body.code === 'string') sanitized.code = body.code;
   if (typeof body.payment_status === 'string') sanitized.payment_status = body.payment_status;
 
   if (isRecord(body.state)

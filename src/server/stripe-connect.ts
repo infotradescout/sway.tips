@@ -29,13 +29,13 @@ export type StripeConnectService = {
 };
 
 /**
- * Reads STRIPE_SECRET_KEY and returns a configured Connect adapter, or null
- * when execution is not provisioned. A null service fails safe: no Connect
- * account, onboarding link, or status sync is ever created without real keys.
+ * Reads STRIPE_SECRET_KEY and returns a test-mode Connect adapter, or null
+ * when test execution is not provisioned. Live keys remain forbidden while
+ * Sway room money is test-only.
  */
 export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = process.env): StripeConnectService | null {
-  const secretKey = env.STRIPE_SECRET_KEY;
-  if (!secretKey) return null;
+  const secretKey = env.STRIPE_SECRET_KEY?.trim();
+  if (!secretKey?.startsWith('sk_test_')) return null;
 
   const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
   const connectCountry = (env.SWAY_STRIPE_CONNECT_COUNTRY || 'US').trim().toUpperCase();
