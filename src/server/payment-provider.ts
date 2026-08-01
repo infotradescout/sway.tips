@@ -5,8 +5,13 @@ export const STRIPE_API_VERSION = '2026-06-24.dahlia' as const;
 export type ProviderWebhookEnvelope = {
   providerEventId: string;
   providerType: string;
+  livemode: boolean;
   processorPaymentIntentId?: string | null;
   processorChargeId?: string | null;
+  providerStatus?: string | null;
+  amountCents?: number | null;
+  amountRefundedCents?: number | null;
+  fullyRefunded?: boolean | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -35,6 +40,11 @@ export type ProviderAuthorizeResult = {
   processorChargeId: string | null;
   status: string;
   clientSecret: string | null;
+  amountCents: number;
+  amountReceivedCents: number;
+  amountCapturableCents: number;
+  amountRefundedCents?: number | null;
+  fullyRefunded?: boolean | null;
   metadata?: Record<string, string>;
 };
 
@@ -46,6 +56,7 @@ export type ProviderCaptureInput = {
 export type ProviderActionResult = {
   processorPaymentIntentId: string;
   processorChargeId: string | null;
+  processorRefundId?: string | null;
   status: string;
 };
 
@@ -57,6 +68,8 @@ export type ProviderVoidInput = {
 export type ProviderRefundInput = {
   processorPaymentIntentId: string;
   idempotencyKey?: string;
+  reverseTransfer: boolean;
+  refundApplicationFee: boolean;
 };
 
 export type PaymentProviderAdapter = {
@@ -74,6 +87,26 @@ function extractChargeId(intent: Stripe.PaymentIntent): string | null {
   const latest = intent.latest_charge;
   if (!latest) return null;
   return typeof latest === 'string' ? latest : latest.id;
+}
+
+function paymentIntentResult(intent: Stripe.PaymentIntent): ProviderAuthorizeResult {
+  const expandedCharge = intent.latest_charge && typeof intent.latest_charge !== 'string'
+    ? intent.latest_charge
+    : null;
+  return {
+    processorPaymentIntentId: intent.id,
+    processorChargeId: extractChargeId(intent),
+    status: intent.status,
+    clientSecret: intent.client_secret,
+    amountCents: intent.amount,
+    amountReceivedCents: intent.amount_received,
+    amountCapturableCents: intent.amount_capturable,
+    amountRefundedCents: expandedCharge?.amount_refunded ?? null,
+    fullyRefunded: expandedCharge
+      ? expandedCharge.refunded && expandedCharge.amount_refunded >= expandedCharge.amount
+      : null,
+    metadata: intent.metadata
+  };
 }
 
 /**
@@ -109,31 +142,58 @@ export function createStripeProviderAdapter(config: {
         throw new Error('Webhook signature header is required to parse a Stripe event.');
       }
       const event = stripe.webhooks.constructEvent(input.rawBody, input.signatureHeader, config.webhookSecret);
-      const object = event.data?.object as Stripe.PaymentIntent | Stripe.Charge | undefined;
+      const object = event.data?.object as Stripe.PaymentIntent | Stripe.Charge | Stripe.Dispute | undefined;
 
       let processorPaymentIntentId: string | null = null;
       let processorChargeId: string | null = null;
+      let providerStatus: string | null = null;
+      let amountCents: number | null = null;
+      let amountRefundedCents: number | null = null;
+      let fullyRefunded: boolean | null = null;
+      let objectMetadata: Record<string, unknown> = {};
 
       if (object && 'object' in object) {
         if (object.object === 'payment_intent') {
           const intent = object as Stripe.PaymentIntent;
           processorPaymentIntentId = intent.id;
           processorChargeId = extractChargeId(intent);
+          providerStatus = intent.status;
+          amountCents = intent.amount;
+          objectMetadata = intent.metadata;
         } else if (object.object === 'charge') {
           const charge = object as Stripe.Charge;
           processorChargeId = charge.id;
           processorPaymentIntentId = typeof charge.payment_intent === 'string'
             ? charge.payment_intent
             : charge.payment_intent?.id ?? null;
+          providerStatus = charge.status;
+          amountCents = charge.amount;
+          amountRefundedCents = charge.amount_refunded;
+          fullyRefunded = charge.refunded && charge.amount_refunded >= charge.amount;
+          objectMetadata = charge.metadata;
+        } else if (object.object === 'dispute') {
+          const dispute = object as Stripe.Dispute;
+          processorChargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id ?? null;
+          processorPaymentIntentId = typeof dispute.payment_intent === 'string'
+            ? dispute.payment_intent
+            : dispute.payment_intent?.id ?? null;
+          providerStatus = dispute.status;
+          amountCents = dispute.amount;
+          objectMetadata = dispute.metadata;
         }
       }
 
       return {
         providerEventId: event.id,
         providerType: event.type,
+        livemode: event.livemode,
         processorPaymentIntentId,
         processorChargeId,
-        metadata: { livemode: event.livemode }
+        providerStatus,
+        amountCents,
+        amountRefundedCents,
+        fullyRefunded,
+        metadata: objectMetadata
       };
     },
 
@@ -157,24 +217,18 @@ export function createStripeProviderAdapter(config: {
         { idempotencyKey: input.idempotencyKey }
       );
 
-      return {
-        processorPaymentIntentId: intent.id,
-        processorChargeId: extractChargeId(intent),
-        status: intent.status,
-        clientSecret: intent.client_secret,
-        metadata: intent.metadata
-      };
+      return paymentIntentResult(intent);
     },
 
     async retrievePaymentAuthorization(processorPaymentIntentId) {
-      const intent = await stripe.paymentIntents.retrieve(processorPaymentIntentId);
-      return {
-        processorPaymentIntentId: intent.id,
-        processorChargeId: extractChargeId(intent),
-        status: intent.status,
-        clientSecret: intent.client_secret,
-        metadata: intent.metadata
-      };
+      // Refund state lives on the Charge, while a refunded PaymentIntent keeps
+      // reporting `succeeded`. Always expand the latest Charge for reconciliation
+      // so closeout can distinguish captured, partially refunded, and fully
+      // refunded money without depending on webhook delivery order.
+      const intent = await stripe.paymentIntents.retrieve(processorPaymentIntentId, {
+        expand: ['latest_charge']
+      });
+      return paymentIntentResult(intent);
     },
 
     async capturePayment(input) {
@@ -207,13 +261,18 @@ export function createStripeProviderAdapter(config: {
 
     async refundPayment(input) {
       const refund = await stripe.refunds.create(
-        { payment_intent: input.processorPaymentIntentId },
+        {
+          payment_intent: input.processorPaymentIntentId,
+          reverse_transfer: input.reverseTransfer,
+          refund_application_fee: input.refundApplicationFee
+        },
         input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
       );
 
       return {
         processorPaymentIntentId: input.processorPaymentIntentId,
         processorChargeId: typeof refund.charge === 'string' ? refund.charge : refund.charge?.id ?? null,
+        processorRefundId: refund.id,
         // A missing status is not proof that money returned. The payment
         // service only marks a refund terminal when Stripe says `succeeded`.
         status: refund.status ?? 'unknown'

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 const root = process.cwd();
 const databaseUrl = process.env.DATABASE_URL;
@@ -13,6 +14,7 @@ if (!disposableProofEnabled) {
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for the disposable migration proof.');
 }
+assertDisposableDatabaseTarget({ databaseUrl, approval: disposableProofEnabled ? 'true' : undefined, label: 'Pro Mode migration proof' });
 
 const parsedDatabaseUrl = new URL(databaseUrl);
 const databaseName = parsedDatabaseUrl.pathname.replace(/^\//, '');

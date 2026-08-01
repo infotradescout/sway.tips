@@ -363,21 +363,22 @@ for (const term of [
 ]) requireIncludes(partnerStore, term, 'Partner entitlement resolver');
 
 const resolverCallCount = (paymentService.match(/resolveSwayPlatformFeePolicyForGig\(/g) || []).length;
-if (resolverCallCount !== 2) {
-  failures.push(`Payment service must resolve the fee policy for create and confirm paths; found ${resolverCallCount} calls.`);
+if (resolverCallCount !== 1) {
+  failures.push(`Payment service must resolve the fee policy exactly once, then confirm from the immutable operation snapshot; found ${resolverCallCount} calls.`);
 }
 for (const term of [
   'platform_fee_policy_unavailable',
   'platformFee: feePolicy.platformFeeCents',
+  'requestPayload',
+  'feePolicyFromPayload(payload)',
   'calculateSwayPaymentAmounts',
   "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
   "platformFeePayer === 'patron'",
   'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: feePolicy.platformFeeCents',
-  'sway_platform_fee_cents: String(feePolicy.platformFeeCents)',
-  'sway_platform_fee_payer: platformFeePayer',
-  'sway_platform_fee_charged_to_patron_cents: String(platformFeeChargedToPatronCents)',
-  'payment.platformFee === feePolicy.platformFeeCents'
+  'applicationFeeAmountCents: payment.platformFee',
+  'sway_platform_fee_cents: String(payment.platformFee)',
+  "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
+  "sway_platform_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
 
 const requestCreateRoute = sliceBetween(
@@ -410,7 +411,7 @@ for (const term of [
   'platformFeeCents: appliedBoostPlatformFeeCents',
   'platformFeePayer: boostPlatformFeePayer',
   'appliedBoostPlatformFeeCents = authorization.platformFeeCents',
-  'request.platformFee += appliedBoostPlatformFeeCents / 100'
+  'newBoost.platformFee = appliedBoostPlatformFeeCents / 100'
 ]) requireIncludes(boostRoute, term, 'Boost payment route');
 requireExcludes(boostRoute, 'request.platformFee += 1.0', 'Boost payment route');
 

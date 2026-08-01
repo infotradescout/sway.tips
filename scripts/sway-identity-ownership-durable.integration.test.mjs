@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 function splitStatements(sql) {
   return sql
@@ -177,6 +178,7 @@ async function main() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL is required for identity/ownership durability integration test.');
   }
+  assertDisposableDatabaseTarget({ databaseUrl, label: 'Identity ownership durability integration test' });
 
   const adminClient = new Client({ connectionString: databaseUrl });
   await adminClient.connect();

@@ -128,6 +128,11 @@ dotenv.config({ override: false });
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
+// Render applies migrations before replacing the previous instance. This
+// explicit gate supports a two-release rollout: first migrate with all new
+// live-room writers paused, then enable only after the legacy snapshot writer
+// has drained. Missing or malformed configuration stays fail-closed.
+const liveRoomDurabilityWritesEnabled = process.env.SWAY_LIVE_ROOM_DURABILITY_WRITES_ENABLED?.trim().toLowerCase() === 'true';
 const hasSwayEmailProvider = Boolean(process.env.SWAY_EMAIL_PROVIDER?.trim());
 const hasSwayEmailApiKey = Boolean(process.env.SWAY_EMAIL_API_KEY?.trim());
 const hasSwayEmailFrom = Boolean(process.env.SWAY_EMAIL_FROM?.trim());
@@ -361,6 +366,28 @@ app.use((_req, res, next) => {
   res.setHeader('x-sway-build', `${buildMarker.commit}:${buildMarker.buildTimestamp}`);
   res.setHeader('x-commit-sha', buildMarker.commit);
   next();
+});
+
+const LIVE_ROOM_MUTATION_ROLLOUT_PATHS = [
+  /^\/api\/session(?:\/|$)/i,
+  /^\/api\/request(?:\/|$)/i,
+  /^\/api\/pending-action(?:\/|$)/i,
+  /^\/api\/moderation\/(?:hide|remove)(?:\/|$)/i,
+  /^\/api\/talent\/control-bridge\/action(?:\/|$)/i
+];
+app.use((req, res, next) => {
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  const isLiveRoomMutation = LIVE_ROOM_MUTATION_ROLLOUT_PATHS.some((pattern) => pattern.test(req.path));
+  if (liveRoomDurabilityWritesEnabled || !isMutation || !isLiveRoomMutation) {
+    next();
+    return;
+  }
+  applyNoStoreHeaders(res);
+  res.status(503).json({
+    error: 'Live-room updates are briefly paused while payment safety storage is activated. Retry shortly.',
+    retryable: true,
+    durability_rollout: 'read_only'
+  });
 });
 
 type SwayShell = 'public' | 'patron' | 'talent' | 'overlay' | 'admin' | 'dev-sandbox';
@@ -2500,6 +2527,10 @@ function sendDurableMutationReplay(
     res.status(replay.status).json(replay.body);
     return true;
   }
+  if (replay.kind === 'pending') {
+    res.status(202).json({ success: false, pending: true });
+    return true;
+  }
   return false;
 }
 
@@ -2508,6 +2539,47 @@ type RequestMutationContext = RoomMutationContext & { request: RequestItem };
 
 function isTerminalPaymentReversal(result: SettleResult) {
   return ['noop', 'voided', 'refunded'].includes(result.status);
+}
+
+async function sendCanonicalPatronActionFailure(input: {
+  res: express.Response;
+  clientRequestId: string;
+  idempotencyKey: string;
+  gigId: string;
+  actionType: 'request' | 'tip' | 'boost';
+  status: number;
+  body: Record<string, unknown>;
+}) {
+  const terminalBody = {
+    ...input.body,
+    success: false,
+    pending: false,
+    terminal: true
+  };
+  try {
+    const completion = await idempotencyStore.completePendingActionFailure({
+      clientRequestId: input.clientRequestId,
+      idempotencyKey: input.idempotencyKey,
+      gigId: input.gigId,
+      actionType: input.actionType,
+      status: input.status,
+      body: terminalBody
+    });
+    return input.res
+      .status(completion.status)
+      .json(sanitizePatronMutationResponseBody(completion.body));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'pending_action_already_visible') {
+      // Visibility won the race. Never overwrite it with a failure; the
+      // reconciliation endpoint will mint/replay the canonical success.
+      return input.res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing'
+      });
+    }
+    throw error;
+  }
 }
 
 function applyPaymentReversalTruth(
@@ -2653,6 +2725,22 @@ async function applyRequestTriage({
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
 
+  // Commit the performer's decision before any irreversible processor call.
+  // A crash after this point is recoverable by the payment reconciler; a CAS
+  // conflict before it guarantees Stripe has not been touched.
+  recalculateTotals(roomState);
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: `request.triage.${action}.financial_intent`,
+    previousStatus,
+    nextStatus: request.status,
+    metadata: { requestId: request.id, recoveryRequired: true }
+  });
+
   if (paymentService.isEnabled()) {
     const paymentIds = [
       request.paymentId,
@@ -2795,6 +2883,19 @@ async function applyRequestFulfill({
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
 
+  recalculateTotals(roomState);
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'request.fulfill.financial_intent',
+    previousStatus,
+    nextStatus: request.status,
+    metadata: { requestId: request.id, recoveryRequired: true }
+  });
+
   if (paymentService.isEnabled()) {
     const paymentIds = [
       request.paymentId,
@@ -2884,6 +2985,18 @@ async function applyRequestHide({
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
 
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'moderation.hide.financial_intent',
+    previousStatus,
+    nextStatus: 'hidden',
+    metadata: { requestId: request.id, reason, recoveryRequired: true }
+  });
+
   if (paymentService.isEnabled()) {
     const paymentIds = [
       request.paymentId,
@@ -2961,6 +3074,8 @@ function controlBridgeRequestText(request: RequestItem | null): string | null {
 
 // 5-Minute Timer Closeout Routine Worker
 setInterval(async () => {
+  try {
+  if (!liveRoomDurabilityWritesEnabled) return;
   if (!businessStore.hasDurableStore) {
     await refreshBusinessState();
 
@@ -3015,6 +3130,7 @@ setInterval(async () => {
   const trackedGigIds = await businessStore.listTrackedGigIds();
 
   for (const trackedGigId of trackedGigIds) {
+    try {
     const roomSnapshot = await loadRoomState(trackedGigId);
     const roomState = roomSnapshot.state;
     let changed = false;
@@ -3099,9 +3215,19 @@ setInterval(async () => {
         await persistBusinessStateForRoom(roomState, trackedGigId);
       }
     }
+    } catch (error) {
+      // A bad provider response or optimistic-concurrency retry for one room
+      // must not starve closeout and safety maintenance for every other room.
+      console.error(`Room maintenance failed for ${trackedGigId}; skipping until the next cycle.`, error);
+    }
   }
 
   await refreshBusinessState();
+  } catch (error) {
+    // Optimistic-concurrency conflicts are retry signals, not process-fatal
+    // errors. The next bounded maintenance pass reloads the current room.
+    console.error('Room maintenance cycle failed; it will retry safely.', error);
+  }
 }, 10000); // Check every 10 seconds for tighter precision
 
 type RoomCloseoutResult =
@@ -3109,15 +3235,50 @@ type RoomCloseoutResult =
   | { status: 'reversal_pending'; totals: null; pendingPaymentIds: string[] };
 
 async function settleRoomCloseout(inputState: BackendState, gigId: string): Promise<RoomCloseoutResult> {
+  if (paymentService.hasDurableStore && UUID_PATTERN.test(gigId)) {
+    await paymentService.reconcileActionVisibility({ limit: 100 });
+  }
+  if (businessStore.hasDurableStore && UUID_PATTERN.test(gigId)) {
+    const barrier = await businessStore.beginRoomCloseout(gigId);
+    if (!['started', 'already_pending', 'closed'].includes(barrier.status) || !('stateRevision' in barrier)) {
+      return {
+        status: 'reversal_pending',
+        totals: null,
+        pendingPaymentIds: [`closeout-barrier:${gigId}`]
+      };
+    }
+    inputState.session.stateRevision = barrier.stateRevision;
+    inputState.session.status = 'ending';
+    inputState.session.requestsOpen = false;
+    inputState.session.endGigTimerStartedAt = inputState.session.endGigTimerStartedAt ?? new Date().toISOString();
+
+    // Reconciliation and the closeout barrier both advance durable revisions.
+    // Replace the caller's snapshot in place so the final audited persistence
+    // uses those exact revisions instead of turning a normal CAS retry into an
+    // unhandled background rejection.
+    const refreshed = await loadRoomState(gigId);
+    Object.assign(inputState, refreshed.state);
+  }
   const unresolved = inputState.requests.filter((request) => request.type === 'request' && request.status !== 'fulfilled');
-  const paymentIds = unresolved.flatMap((request) => [
+  const runtimePaymentIds = unresolved.flatMap((request) => [
     request.paymentId,
     ...request.boosts.map((boost) => boost.paymentId)
   ]).filter((paymentId): paymentId is string => Boolean(paymentId));
+  const durablePaymentIds = paymentService.hasDurableStore && UUID_PATTERN.test(gigId)
+    ? await paymentService.listCloseoutReversalPaymentIds(gigId)
+    : [];
+  const paymentIds = [...new Set([...runtimePaymentIds, ...durablePaymentIds])];
   const reversals = await paymentService.voidOrRefundMany(paymentIds);
   const pendingPaymentIds = new Set<string>();
+  for (const { paymentId, result } of reversals) {
+    if (!isTerminalPaymentReversal(result)) pendingPaymentIds.add(paymentId);
+  }
   for (const request of unresolved) {
     applyPaymentReversalTruth(request, reversals).forEach((paymentId) => pendingPaymentIds.add(paymentId));
+  }
+  if (paymentService.hasDurableStore && UUID_PATTERN.test(gigId)) {
+    const blockingPaymentIds = await paymentService.listCloseoutBlockingPaymentIds(gigId);
+    blockingPaymentIds.forEach((paymentId) => pendingPaymentIds.add(paymentId));
   }
 
   if (pendingPaymentIds.size) {
@@ -3213,6 +3374,7 @@ app.get('/api/runtime-config-status', (_req, res) => {
       provider: audioObjectStore?.provider ?? null,
       objectStorageVerified: audioObjectStoreVerified
     },
+    liveRoomDurabilityWritesEnabled,
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
     branch: buildMarker.branch,
@@ -3241,7 +3403,7 @@ app.get('/api/payment/config', (_req, res) => {
     });
   }
 
-  return res.json({ publishableKey, mode, liveRoomMoneyEnabled: true });
+  return res.json({ publishableKey, mode, liveRoomMoneyEnabled: liveRoomDurabilityWritesEnabled });
 });
 
 app.post('/api/talent/invite/accept', async (req, res) => {
@@ -5415,7 +5577,7 @@ async function reserveControlBridgeMutation(input: { actor: ProtectedMutationAct
     }
   });
   const durableReplay = await reserveDurableActorMutation(durableMutation);
-  if (durableReplay.kind === 'replay') {
+  if (durableReplay.kind === 'replay' || durableReplay.kind === 'pending') {
     return { replay: true, replayKey, reservation: durableMutation, durableReplay };
   }
   if (durableReplay.kind === 'expired' || durableReplay.kind === 'misuse') {
@@ -9604,6 +9766,12 @@ app.post("/api/payment/webhook", async (req, res) => {
   if (!paymentWebhookService) {
     return res.status(503).json({ error: "Payment provider is not configured." });
   }
+  if (!liveRoomDurabilityWritesEnabled) {
+    // Ask Stripe to retry after the migration-only release has drained the
+    // legacy room writer. Signature admission and event processing resume in
+    // the writer-enabled release; no event is acknowledged and lost here.
+    return res.status(503).json({ error: 'Live-room payment reconciliation is briefly paused.' });
+  }
   try {
     const result = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
     return res.json({ received: true, result });
@@ -10321,10 +10489,115 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
   }
 
   if (result.status === 'reconciled') {
+    const sanitizedBody = sanitizePatronMutationResponseBody(result.responseBody);
+    if (result.responseStatus >= 400) {
+      return res.status(result.responseStatus).json(sanitizedBody);
+    }
     return res.json({
       ...result,
-      responseBody: sanitizePatronMutationResponseBody(result.responseBody)
+      responseBody: sanitizedBody
     });
+  }
+
+  if (
+    (result.status === 'pending' || result.status === 'retrying')
+    && result.gigId
+    && ['request', 'tip', 'boost'].includes(result.actionType)
+  ) {
+    const reconciledActionType = result.actionType as 'request' | 'tip' | 'boost';
+    // A worker may have completed the processor/database work after the
+    // original HTTP request disappeared. Converge visibility first, then mint
+    // a fresh private receipt and persist the exact terminal replay before
+    // telling the browser that the action succeeded.
+    await paymentService.reconcileActionVisibility({ limit: 50 });
+    const snapshot = await loadRoomState(result.gigId);
+    const receipt = issuePatronStatusReceipt();
+    let responseBody: ReturnType<typeof buildPatronRequestMutationResponse> | ReturnType<typeof buildPatronBoostMutationResponse> | null = null;
+
+    if (reconciledActionType === 'boost') {
+      const request = snapshot.state.requests.find((item) =>
+        item.boosts.some((boost) => boost.clientRequestId === client_request_id && boost.idempotencyKey === idempotency_key)
+      );
+      const boost = request?.boosts.find((item) =>
+        item.clientRequestId === client_request_id && item.idempotencyKey === idempotency_key
+      );
+      if (request && boost) {
+        recalculateTotals(snapshot.state);
+        responseBody = buildPatronBoostMutationResponse({
+          request,
+          boost,
+          roomState: snapshot.state,
+          gigId: result.gigId,
+          receipt: receipt.receipt,
+          reconciled: true
+        });
+      }
+    } else {
+      const request = snapshot.state.requests.find((item) =>
+        item.clientRequestId === client_request_id && item.idempotencyKey === idempotency_key
+      );
+      if (request) {
+        recalculateTotals(snapshot.state);
+        responseBody = buildPatronRequestMutationResponse({
+          request,
+          roomState: snapshot.state,
+          gigId: result.gigId,
+          receipt: receipt.receipt,
+          reconciled: true
+        });
+      }
+    }
+
+    if (responseBody) {
+      const completion = await idempotencyStore.completePendingAction({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        gigId: result.gigId,
+        actionType: reconciledActionType,
+        receiptHash: receipt.receiptHash,
+        status: 200,
+        body: responseBody
+      });
+      return res.json({
+        status: 'reconciled',
+        responseStatus: completion.status,
+        responseBody: sanitizePatronMutationResponseBody(completion.body)
+      });
+    }
+
+    const terminalOutcome = await paymentService.loadInvisibleActionTerminalOutcome({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key
+    });
+    if (terminalOutcome) {
+      const responseStatus = terminalOutcome.outcome === 'failed' ? 402 : 409;
+      const failureBody = {
+        success: false,
+        pending: false,
+        terminal: true,
+        error: terminalOutcome.outcome === 'failed'
+          ? 'Payment authorization failed. Your card was not charged and the action was not created.'
+          : 'The action was not created. Its payment hold was released or its charge was refunded.',
+        payment_status: terminalOutcome.paymentStatus,
+        payment_id: terminalOutcome.paymentId
+      };
+      try {
+        const completion = await idempotencyStore.completePendingActionFailure({
+          clientRequestId: client_request_id,
+          idempotencyKey: idempotency_key,
+          gigId: terminalOutcome.gigId,
+          actionType: terminalOutcome.actionType,
+          status: responseStatus,
+          body: failureBody
+        });
+        return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
+      } catch (error) {
+        if (error instanceof Error && error.message === 'pending_action_already_visible') {
+          return res.json({ ...result, status: 'retrying' });
+        }
+        throw error;
+      }
+    }
   }
 
   return res.json(result);
@@ -10483,6 +10756,13 @@ app.post("/api/session/end", async (req, res) => {
   const roomState = roomContext.state;
   if (roomState.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
+  }
+  if (businessStore.hasDurableStore && UUID_PATTERN.test(roomContext.gigId)) {
+    const barrier = await businessStore.beginRoomCloseout(roomContext.gigId);
+    if (!['started', 'already_pending'].includes(barrier.status) || !('stateRevision' in barrier)) {
+      return res.status(503).json({ error: 'Room closeout could not be reserved safely. No payment state was changed.' });
+    }
+    roomState.session.stateRevision = barrier.stateRevision;
   }
   const previousStatus = roomState.session.status;
   roomState.session.status = 'ending';
@@ -10844,10 +11124,6 @@ app.post("/api/request/create", async (req, res) => {
   if (!resolvedPatronDeviceIdHash) {
     return res.status(422).json({ error: 'A private browser identity is required. Reload this room and try again.' });
   }
-  if (normalizedCurrency !== 'USD') {
-    return res.status(422).json({ error: "Sway Request and Tip payments currently support USD only." });
-  }
-
   const durableGigId = parseDurableGigId(gig_id);
   const confirmedPaymentIntentId = typeof payment_intent_id === 'string' && payment_intent_id.trim()
     ? payment_intent_id.trim()
@@ -10856,18 +11132,106 @@ app.post("/api/request/create", async (req, res) => {
     return res.status(422).json({ error: "A valid route gig_id is required for durable request submission." });
   }
 
-  const roomSnapshot = await loadRoomState(durableGigId);
-  if (roomSnapshot.roomStatus !== 'active') {
-    return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
-  }
-  const roomState = roomSnapshot.state;
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
-  if (isStraightTip && roomState.session.tipsEnabled !== true) {
-    return res.status(409).json({
-      error: 'Tips are unavailable until this performer completes payout setup.',
-      code: 'seller_payout_not_ready'
+  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
+  if (preliminaryReplay.kind === 'replay') {
+    return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
+  }
+  if (preliminaryReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+  }
+
+  // Reconcile an SCA-confirmed PaymentIntent against its immutable durable
+  // action identity before reading any room setting that may have changed
+  // while the customer was in Stripe.js.
+  const confirmedAuthorization = confirmedPaymentIntentId
+    ? await paymentService.confirmAuthorizedAction({
+        gigId: durableGigId,
+        actionType: isStraightTip ? 'tip' : 'request',
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        patronDeviceIdHash: resolvedPatronDeviceIdHash,
+        processorPaymentIntentId: confirmedPaymentIntentId
+      })
+    : null;
+  if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
+    return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
+      success: false,
+      error: confirmedAuthorization.status === 'disabled'
+        ? 'Payments are temporarily unavailable. Confirmation is still pending.'
+        : 'Payment confirmation could not be matched to this request.',
+      payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
     });
   }
+  if (confirmedAuthorization?.status === 'processing') {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: 'processing',
+      payment_id: confirmedAuthorization.paymentId
+    });
+  }
+  if (confirmedAuthorization?.status === 'requires_confirmation') {
+    return res.status(402).json({
+      success: false,
+      error: 'Payment confirmation is still required before your request is submitted.',
+      payment_status: 'requires_confirmation',
+      payment_id: confirmedAuthorization.paymentId,
+      payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
+      client_secret: confirmedAuthorization.clientSecret
+    });
+  }
+
+  let durableReservationEstablished = preliminaryReplay.kind === 'pending'
+    && Boolean(confirmedAuthorization && 'paymentId' in confirmedAuthorization);
+
+  const completeReservedFailure = async (status: number, body: Record<string, unknown>) => {
+    if (!durableReservationEstablished) return res.status(status).json(body);
+    return sendCanonicalPatronActionFailure({
+      res,
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: isStraightTip ? 'tip' : 'request',
+      status,
+      body
+    });
+  };
+
+  const rejectAfterPaymentReversal = async (
+    paymentId: string,
+    status: number,
+    body: Record<string, unknown>
+  ) => {
+    const reversal = await paymentService.voidOrRefund(paymentId);
+    const terminal = isTerminalPaymentReversal(reversal);
+    const responseBody = {
+      ...body,
+      success: false,
+      pending: !terminal,
+      payment_status: terminal ? 'voided_or_refunded' : 'reversal_pending',
+      payment_id: paymentId
+    };
+    if (!terminal) return res.status(202).json(responseBody);
+    return completeReservedFailure(status, responseBody);
+  };
+
+  const rejectAfterConfirmedAuthorization = async (status: number, body: Record<string, unknown>) => {
+    if (!confirmedAuthorization || !('paymentId' in confirmedAuthorization)) {
+      return completeReservedFailure(status, body);
+    }
+    return rejectAfterPaymentReversal(confirmedAuthorization.paymentId, status, body);
+  };
+
+  if (preliminaryReplay.kind === 'expired') {
+    return rejectAfterConfirmedAuthorization(410, { error: "Pending action expired before request creation." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return rejectAfterConfirmedAuthorization(422, { error: "Sway Request and Tip payments currently support USD only." });
+  }
+
+  const roomSnapshot = await loadRoomState(durableGigId);
+  const roomState = roomSnapshot.state;
   const paymentsEnabledForAction = isStraightTip
     ? roomState.session.tipsEnabled === true
     : roomState.session.paymentsEnabled !== false;
@@ -10907,23 +11271,22 @@ app.post("/api/request/create", async (req, res) => {
 
   const durableReplay = await idempotencyStore.reservePendingAction(durableInput);
   if (durableReplay.kind === 'expired') {
-    return res.status(410).json({ error: "Pending action expired before request creation." });
+    return rejectAfterConfirmedAuthorization(410, { error: "Pending action expired before request creation." });
   }
   if (durableReplay.kind === 'misuse') {
-    return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+    return rejectAfterConfirmedAuthorization(409, { error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
     return res.status(durableReplay.status).json(sanitizePatronMutationResponseBody(durableReplay.body));
   }
+  durableReservationEstablished = true;
 
   const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
   if (existingRequest) {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
-      return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+      return rejectAfterConfirmedAuthorization(409, { error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
     const patronStatusReceipt = issuePatronStatusReceipt();
-    existingRequest.patronStatusReceiptHash = patronStatusReceipt.receiptHash;
-    await persistBusinessStateForRoom(roomState, durableGigId);
     const responseBody = buildPatronRequestMutationResponse({
       request: existingRequest,
       roomState,
@@ -10931,13 +11294,33 @@ app.post("/api/request/create", async (req, res) => {
       receipt: patronStatusReceipt.receipt,
       reconciled: true
     });
-    await idempotencyStore.completePendingAction({
+    const completion = await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: isStraightTip ? 'tip' : 'request',
+      receiptHash: patronStatusReceipt.receiptHash,
       status: 200,
       body: responseBody
     });
-    return res.json(responseBody);
+    return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
+  }
+  if (durableReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: 'processing'
+    });
+  }
+
+  if (roomSnapshot.roomStatus !== 'active') {
+    return rejectAfterConfirmedAuthorization(404, { error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+  }
+  if (isStraightTip && roomState.session.tipsEnabled !== true) {
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'Tips are unavailable until this performer completes payout setup.',
+      code: 'seller_payout_not_ready'
+    });
   }
 
   const tipAmount = paymentsEnabledForAction ? Math.max(Number(amount) || 0, roomState.session.minimumTip) : 0;
@@ -10948,32 +11331,6 @@ app.post("/api/request/create", async (req, res) => {
   const proposedFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution });
   const proposedPlatformFeeCents = paymentsEnabledForAction ? proposedFee.proposedPlatformFeeCents : 0;
   const platformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
-
-  // Troll-control: durable server-side gate blocking requests when paused/ending/closed.
-  if (!isStraightTip && (!roomState.session.requestsOpen || roomState.session.status !== 'active')) {
-    return res.status(400).json({ error: "Request submissions are currently closed by the host." });
-  }
-
-  if (!isStraightTip) {
-    const sameDeviceSessionRequests = roomState.requests.filter((item) =>
-      item.gigId === durableGigId
-      && item.patronDeviceIdHash === resolvedPatronDeviceIdHash
-      && item.type === 'request'
-    );
-
-    if (sameDeviceSessionRequests.length >= MAX_REQUESTS_PER_DEVICE_PER_SESSION) {
-      return res.status(429).json({
-        error: "You've reached the request limit for this session. Try again shortly as the queue moves."
-      });
-    }
-
-    const noteRequests = sameDeviceSessionRequests.filter((item) => typeof item.message === 'string' && item.message.trim().length > 0);
-    if ((message || '').trim().length > 0 && noteRequests.length >= MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION) {
-      return res.status(429).json({
-        error: "You've reached the custom-note limit for this session. Try a preset request next."
-      });
-    }
-  }
 
   const moderationOutcome = await moderationService.evaluateSubmission({
     senderName: senderName || "Patron",
@@ -10989,7 +11346,7 @@ app.post("/api/request/create", async (req, res) => {
       actorUserId: resolveActorUserId(req),
       patronDeviceIdHash: resolvedPatronDeviceIdHash
     });
-    return res.status(403).json({
+    return rejectAfterConfirmedAuthorization(403, {
       error: moderationOutcome.reason,
       outage_behavior: 'block_submission'
     });
@@ -11033,8 +11390,41 @@ app.post("/api/request/create", async (req, res) => {
     amountCents: amount_cents,
     currency: normalizedCurrency,
     patronStatusReceiptHash: patronStatusReceipt.receiptHash,
+    ...(!paymentsEnabledForAction ? { paymentStatus: 'not_applicable' } : {}),
     boosts: []
   };
+
+  // Reserve an invisible, permanent request identity before any processor
+  // call. The row is activated only after the payment reaches the state this
+  // action requires (or immediately for a genuinely free request).
+  try {
+    await businessStore.reserveRequestAction(durableGigId, newItem, {
+      maxRequestsPerDevicePerGig: MAX_REQUESTS_PER_DEVICE_PER_SESSION,
+      maxCustomNotesPerDevicePerGig: MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'durable_request_reservation_failed';
+    if (reason === 'request_device_per_gig_cap_reached') {
+      return rejectAfterConfirmedAuthorization(429, {
+        error: "You've reached the request limit for this session. Try again shortly as the queue moves."
+      });
+    }
+    if (reason === 'request_custom_note_device_per_gig_cap_reached') {
+      return rejectAfterConfirmedAuthorization(429, {
+        error: "You've reached the custom-note limit for this session. Try a preset request next."
+      });
+    }
+    if (reason === 'room_not_accepting_money') {
+      return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting requests or tips.' });
+    }
+    if (reason === 'room_not_accepting_requests') {
+      return rejectAfterConfirmedAuthorization(400, { error: "Request submissions are currently closed by the host." });
+    }
+    if (reason === 'durable_request_identity_conflict') {
+      return rejectAfterConfirmedAuthorization(409, { error: 'client_request_id or idempotency_key was already used for a different request.' });
+    }
+    return rejectAfterConfirmedAuthorization(503, { error: 'The request could not be reserved safely. No payment was attempted.' });
+  }
 
   // Provider-backed authorization/hold. A paid request/tip must NOT enter app
   // state or Private Triage until the provider confirms a real hold
@@ -11043,22 +11433,7 @@ app.post("/api/request/create", async (req, res) => {
     // Free room, non-tip request: no money changes hands, nothing to authorize.
     newItem.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
-    const authorization = confirmedPaymentIntentId
-      ? await paymentService.confirmAuthorizedAction({
-          gigId: durableGigId,
-          actionType: isStraightTip ? 'tip' : 'request',
-          amountSubtotalCents: amount_cents,
-          platformFeeCents: proposedPlatformFeeCents,
-          platformFeePayer,
-          attributionSource: proposedFee.attributionSource,
-          campaignId: proposedFee.campaignId,
-          commissionBpsApplied: proposedFee.commissionBpsApplied,
-          currency: normalizedCurrency,
-          runtimeRequestId: newItem.id,
-          clientRequestId: client_request_id,
-          processorPaymentIntentId: confirmedPaymentIntentId
-        })
-      : await paymentService.authorizeAction({
+    const authorization = confirmedAuthorization ?? await paymentService.authorizeAction({
           gigId: durableGigId,
           actionType: isStraightTip ? 'tip' : 'request',
           amountSubtotalCents: amount_cents,
@@ -11069,13 +11444,15 @@ app.post("/api/request/create", async (req, res) => {
           commissionBpsApplied: proposedFee.commissionBpsApplied,
           currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
+          intentFingerprint: idempotencyFingerprint,
+          requestId: newItem.durableRequestId,
           runtimeRequestId: newItem.id,
           clientRequestId: client_request_id,
           paymentMethod: payment_method,
           confirm: typeof payment_method === 'string' && payment_method.length > 0
         });
     if (authorization.status === 'failed') {
-      return res.status(402).json({
+      return completeReservedFailure(402, {
         error: "Payment authorization failed. Your card was not charged and no request was created.",
         payment_status: 'failed'
       });
@@ -11090,6 +11467,14 @@ app.post("/api/request/create", async (req, res) => {
         payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
         client_secret: authorization.clientSecret
+      });
+    }
+    if (authorization.status === 'processing') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        payment_id: authorization.paymentId
       });
     }
     // status === 'authorized': a real hold exists. Only now may the request enter
@@ -11107,14 +11492,14 @@ app.post("/api/request/create", async (req, res) => {
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
         } else {
-          const reversal = await paymentService.voidOrRefund(authorization.paymentId);
-          const reversalPending = !isTerminalPaymentReversal(reversal);
-          return res.status(502).json({
-            error: reversalPending
-              ? 'Payment could not be completed. No action was created, and the payment reversal is still processing.'
-              : 'Payment could not be completed. The hold was released and no action was created.',
+          return res.status(202).json({
+            success: false,
+            pending: true,
+            // Preserve the established client-facing primary status while the
+            // separate field carries the new durable reconciliation truth.
             payment_status: 'capture_failed',
-            reversal_status: reversalPending ? 'pending' : 'complete'
+            reconciliation_status: 'pending',
+            payment_id: authorization.paymentId
           });
         }
       }
@@ -11129,23 +11514,45 @@ app.post("/api/request/create", async (req, res) => {
     });
   }
 
-  roomState.requests.push(newItem);
-  recalculateTotals(roomState);
-  await persistBusinessStateForRoom(roomState, durableGigId);
+  try {
+    await businessStore.activateRequestAction(durableGigId, newItem);
+  } catch (error) {
+    if (newItem.paymentId) {
+      return rejectAfterPaymentReversal(newItem.paymentId, 409, {
+        error: 'The room changed before this request could be committed. Its payment is being released safely.'
+      });
+    }
+    return completeReservedFailure(409, {
+      error: 'The room changed before this request could be committed.'
+    });
+  }
+  const committedSnapshot = await loadRoomState(durableGigId);
+  const committedRequest = committedSnapshot.state.requests.find((item) => item.durableRequestId === newItem.durableRequestId);
+  if (!committedRequest) {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: newItem.paymentId ? 'processing' : 'not_applicable'
+    });
+  }
+  recalculateTotals(committedSnapshot.state);
 
   const responseBody = buildPatronRequestMutationResponse({
-    request: newItem,
-    roomState,
+    request: committedRequest,
+    roomState: committedSnapshot.state,
     gigId: durableGigId,
     receipt: patronStatusReceipt.receipt
   });
-  await idempotencyStore.completePendingAction({
+  const completion = await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
+    gigId: durableGigId,
+    actionType: isStraightTip ? 'tip' : 'request',
+    receiptHash: patronStatusReceipt.receiptHash,
     status: 200,
     body: responseBody
   });
-  res.json(responseBody);
+  res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
 });
 
 // Boost an existing request
@@ -11175,10 +11582,6 @@ app.post("/api/request/boost", async (req, res) => {
   if (!resolvedPatronDeviceIdHash) {
     return res.status(422).json({ error: 'A private browser identity is required. Reload this room and try again.' });
   }
-  if (normalizedCurrency !== 'USD') {
-    return res.status(422).json({ error: "Sway Boost payments currently support USD only." });
-  }
-
   const durableGigId = parseDurableGigId(gig_id);
   const confirmedPaymentIntentId = typeof payment_intent_id === 'string' && payment_intent_id.trim()
     ? payment_intent_id.trim()
@@ -11187,11 +11590,106 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
   }
 
+  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
+  if (preliminaryReplay.kind === 'replay') {
+    return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
+  }
+  if (preliminaryReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+  }
+  const confirmedAuthorization = confirmedPaymentIntentId
+    ? await paymentService.confirmAuthorizedAction({
+        gigId: durableGigId,
+        actionType: 'boost',
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        patronDeviceIdHash: resolvedPatronDeviceIdHash,
+        processorPaymentIntentId: confirmedPaymentIntentId
+      })
+    : null;
+  if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
+    return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
+      success: false,
+      error: confirmedAuthorization.status === 'disabled'
+        ? 'Payments are temporarily unavailable. Confirmation is still pending.'
+        : 'Payment confirmation could not be matched to this boost.',
+      payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
+    });
+  }
+  if (confirmedAuthorization?.status === 'processing') {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: 'processing',
+      payment_id: confirmedAuthorization.paymentId
+    });
+  }
+  if (confirmedAuthorization?.status === 'requires_confirmation') {
+    return res.status(402).json({
+      success: false,
+      error: 'Payment confirmation is still required before your boost is applied.',
+      payment_status: 'requires_confirmation',
+      payment_id: confirmedAuthorization.paymentId,
+      payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
+      client_secret: confirmedAuthorization.clientSecret
+    });
+  }
+
+  let durableReservationEstablished = preliminaryReplay.kind === 'pending'
+    && Boolean(confirmedAuthorization && 'paymentId' in confirmedAuthorization);
+
+  const completeReservedFailure = async (status: number, body: Record<string, unknown>) => {
+    if (!durableReservationEstablished) return res.status(status).json(body);
+    return sendCanonicalPatronActionFailure({
+      res,
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: 'boost',
+      status,
+      body
+    });
+  };
+
+  const rejectAfterPaymentReversal = async (
+    paymentId: string,
+    status: number,
+    body: Record<string, unknown>
+  ) => {
+    const reversal = await paymentService.voidOrRefund(paymentId);
+    const terminal = isTerminalPaymentReversal(reversal);
+    const responseBody = {
+      ...body,
+      success: false,
+      pending: !terminal,
+      payment_status: terminal ? 'voided_or_refunded' : 'reversal_pending',
+      payment_id: paymentId
+    };
+    if (!terminal) return res.status(202).json(responseBody);
+    return completeReservedFailure(status, responseBody);
+  };
+
+  const rejectAfterConfirmedAuthorization = async (status: number, body: Record<string, unknown>) => {
+    if (!confirmedAuthorization || !('paymentId' in confirmedAuthorization)) {
+      return completeReservedFailure(status, body);
+    }
+    return rejectAfterPaymentReversal(confirmedAuthorization.paymentId, status, body);
+  };
+  if (preliminaryReplay.kind === 'expired') {
+    return rejectAfterConfirmedAuthorization(410, { error: "Pending action expired before boost creation." });
+  }
+  if (normalizedCurrency !== 'USD') {
+    return rejectAfterConfirmedAuthorization(422, { error: "Sway Boost payments currently support USD only." });
+  }
+
   const roomSnapshot = await loadRoomState(durableGigId);
   if (roomSnapshot.roomStatus !== 'active') {
-    return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+    return rejectAfterConfirmedAuthorization(404, { error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
   const roomState = roomSnapshot.state;
+  if (roomState.session.status !== 'active') {
+    return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting boosts.' });
+  }
   const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
   let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip); // Paid boosts follow the room minimum.
   if (!paymentsEnabledForRoom) {
@@ -11201,35 +11699,7 @@ app.post("/api/request/boost", async (req, res) => {
 
   const request = roomState.requests.find(r => r.id === requestId);
   if (!request) {
-    return res.status(404).json({ error: "Request not found" });
-  }
-
-  // Gate #9.2: Paid boosts must never bypass private triage or moderation.
-  // A boost is an ordering action that may only touch content that has already
-  // cleared the Private Triage Desk. Allowlist approved, non-shadowbanned,
-  // visible requests only; everything else (hold/denied/fulfilled/hidden/removed)
-  // is rejected so money can never grant display or approval authority.
-  const isBoostEligible =
-    request.status === 'approved'
-    && !request.shadowBanned
-    && !request.hidden
-    && !request.removed;
-
-  if (!isBoostEligible) {
-    return res.status(409).json({
-      error: "This request cannot be boosted right now. Boosts are only allowed on approved queue items."
-    });
-  }
-
-  const sameActorBoostCount = roomState.requests.reduce((count, current) => {
-        if (current.gigId !== durableGigId) return count;
-        return count + current.boosts.filter((boost) => boost.patronDeviceIdHash === resolvedPatronDeviceIdHash).length;
-      }, 0);
-
-  if (sameActorBoostCount >= MAX_BOOSTS_PER_DEVICE_PER_SESSION) {
-    return res.status(429).json({
-      error: "You've reached the boost limit for this session. Try again later."
-    });
+    return rejectAfterConfirmedAuthorization(404, { error: "Request not found" });
   }
 
   const amount_cents = Math.round(amt * 100);
@@ -11262,23 +11732,22 @@ app.post("/api/request/boost", async (req, res) => {
 
   const durableReplay = await idempotencyStore.reservePendingAction(durableInput);
   if (durableReplay.kind === 'expired') {
-    return res.status(410).json({ error: "Pending action expired before boost creation." });
+    return rejectAfterConfirmedAuthorization(410, { error: "Pending action expired before boost creation." });
   }
   if (durableReplay.kind === 'misuse') {
-    return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+    return rejectAfterConfirmedAuthorization(409, { error: "idempotency misuse: same key submitted with a different fingerprint." });
   }
   if (durableReplay.kind === 'replay') {
     return res.status(durableReplay.status).json(sanitizePatronMutationResponseBody(durableReplay.body));
   }
+  durableReservationEstablished = true;
 
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
   if (existingBoost) {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
-      return res.status(409).json({ error: "idempotency misuse: same key submitted with a different fingerprint." });
+      return rejectAfterConfirmedAuthorization(409, { error: "idempotency misuse: same key submitted with a different fingerprint." });
     }
     const replayReceipt = issuePatronStatusReceipt();
-    existingBoost.patronStatusReceiptHash = replayReceipt.receiptHash;
-    await persistBusinessStateForRoom(roomState, durableGigId);
     const responseBody = buildPatronBoostMutationResponse({
       request,
       boost: existingBoost,
@@ -11287,13 +11756,23 @@ app.post("/api/request/boost", async (req, res) => {
       receipt: replayReceipt.receipt,
       reconciled: true
     });
-    await idempotencyStore.completePendingAction({
+    const completion = await idempotencyStore.completePendingAction({
       clientRequestId: client_request_id,
       idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: 'boost',
+      receiptHash: replayReceipt.receiptHash,
       status: 200,
       body: responseBody
     });
-    return res.json(responseBody);
+    return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
+  }
+  if (durableReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: 'processing'
+    });
   }
 
   const moderationOutcome = await moderationService.evaluateSubmission({
@@ -11310,13 +11789,29 @@ app.post("/api/request/boost", async (req, res) => {
       actorUserId: resolveActorUserId(req),
       patronDeviceIdHash: resolvedPatronDeviceIdHash
     });
-    return res.status(403).json({
+    return rejectAfterConfirmedAuthorization(403, {
       error: moderationOutcome.reason,
       outage_behavior: 'block_submission'
     });
   }
 
   const isBackerShadowed = moderationOutcome.decision === 'hold_for_review';
+  if (isBackerShadowed) {
+    try {
+      await businessStore.shadowRequestForBoostModeration(durableGigId, request);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'boost_moderation_persistence_failed';
+      return rejectAfterConfirmedAuthorization(reason === 'room_not_accepting_money' ? 409 : 503, {
+        error: reason === 'room_not_accepting_money'
+          ? 'This room is closing and is no longer accepting boosts.'
+          : 'The safety hold could not be persisted, so the boost was not applied.'
+      });
+    }
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'This boost was held by safety review and was not applied.',
+      outage_behavior: 'hold_for_review'
+    });
+  }
 
   const newBoost: BoostContribution = {
     id: `boost-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
@@ -11328,7 +11823,8 @@ app.post("/api/request/boost", async (req, res) => {
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
     idempotencyFingerprint,
-    idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString()
+    idempotencyExpiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_HOURS * 3600000).toISOString(),
+    ...(!paymentsEnabledForRoom ? { paymentStatus: 'not_applicable' } : {})
   };
   const patronStatusReceipt = issuePatronStatusReceipt();
   newBoost.patronStatusReceiptHash = patronStatusReceipt.receiptHash;
@@ -11339,6 +11835,31 @@ app.post("/api/request/boost", async (req, res) => {
   let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? proposedBoostFee.proposedPlatformFeeCents : 0;
   const boostPlatformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
 
+  // As with requests, the boost must have a stable invisible database identity
+  // before Stripe is contacted. Concurrent duplicates converge on this row.
+  try {
+    await businessStore.reserveBoostAction(durableGigId, request, newBoost, {
+      maxBoostsPerDevicePerGig: MAX_BOOSTS_PER_DEVICE_PER_SESSION
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'durable_boost_reservation_failed';
+    if (reason === 'boost_device_per_gig_cap_reached') {
+      return rejectAfterConfirmedAuthorization(429, {
+        error: "You've reached the boost limit for this session. Try again later."
+      });
+    }
+    if (reason === 'room_not_accepting_money') {
+      return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting boosts.' });
+    }
+    if (reason === 'boost_target_not_eligible') {
+      return rejectAfterConfirmedAuthorization(409, { error: 'This request can no longer be boosted.' });
+    }
+    if (reason === 'durable_boost_identity_conflict') {
+      return rejectAfterConfirmedAuthorization(409, { error: 'client_request_id or idempotency_key was already used for a different boost.' });
+    }
+    return rejectAfterConfirmedAuthorization(503, { error: 'The boost could not be reserved safely. No payment was attempted.' });
+  }
+
   // Provider-backed authorization/hold for the boost. The booster only reaches
   // this point because the target request already cleared Private Triage, so the
   // boost never grants approval authority. Fail safe on provider rejection.
@@ -11346,22 +11867,7 @@ app.post("/api/request/boost", async (req, res) => {
     // Free room: the boost is a free upvote, nothing to authorize.
     newBoost.paymentStatus = 'not_applicable';
   } else if (paymentService.isEnabled()) {
-    const authorization = confirmedPaymentIntentId
-      ? await paymentService.confirmAuthorizedAction({
-          gigId: durableGigId,
-          actionType: 'boost',
-          amountSubtotalCents: amount_cents,
-          platformFeeCents: appliedBoostPlatformFeeCents,
-          platformFeePayer: boostPlatformFeePayer,
-          attributionSource: proposedBoostFee.attributionSource,
-          campaignId: proposedBoostFee.campaignId,
-          commissionBpsApplied: proposedBoostFee.commissionBpsApplied,
-          currency: normalizedCurrency,
-          runtimeRequestId: request.id,
-          clientRequestId: client_request_id,
-          processorPaymentIntentId: confirmedPaymentIntentId
-        })
-      : await paymentService.authorizeAction({
+    const authorization = confirmedAuthorization ?? await paymentService.authorizeAction({
           gigId: durableGigId,
           actionType: 'boost',
           amountSubtotalCents: amount_cents,
@@ -11372,13 +11878,15 @@ app.post("/api/request/boost", async (req, res) => {
           commissionBpsApplied: proposedBoostFee.commissionBpsApplied,
           currency: normalizedCurrency,
           idempotencyKey: idempotency_key,
+          intentFingerprint: idempotencyFingerprint,
+          requestBoostId: newBoost.durableBoostId,
           runtimeRequestId: request.id,
           clientRequestId: client_request_id,
           paymentMethod: payment_method,
           confirm: typeof payment_method === 'string' && payment_method.length > 0
         });
     if (authorization.status === 'failed') {
-      return res.status(402).json({
+      return completeReservedFailure(402, {
         error: "Boost authorization failed. Your card was not charged.",
         payment_status: 'failed'
       });
@@ -11394,6 +11902,14 @@ app.post("/api/request/boost", async (req, res) => {
         client_secret: authorization.clientSecret
       });
     }
+    if (authorization.status === 'processing') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        payment_id: authorization.paymentId
+      });
+    }
     // status === 'authorized': a real hold exists. The target request already
     // cleared Private Triage, so the approved boost is captured immediately.
     if (authorization.status === 'authorized') {
@@ -11405,51 +11921,67 @@ app.post("/api/request/boost", async (req, res) => {
       if (capture.status === 'captured') {
         newBoost.paymentStatus = 'captured';
       } else {
-        const reversal = await paymentService.voidOrRefund(authorization.paymentId);
-        const reversalPending = !isTerminalPaymentReversal(reversal);
-        return res.status(502).json({
-          error: reversalPending
-            ? 'Boost payment could not be completed. No boost was applied, and the payment reversal is still processing.'
-            : 'Boost payment could not be completed. The hold was released and no boost was applied.',
+        return res.status(202).json({
+          success: false,
+          pending: true,
           payment_status: 'capture_failed',
-          reversal_status: reversalPending ? 'pending' : 'complete'
+          reconciliation_status: 'pending',
+          payment_id: authorization.paymentId
         });
       }
     }
   } else if (isProduction) {
     // Fail closed: a visible money action must never silently create no-money
     // boost state in production when the payment provider is unavailable.
-    return res.status(503).json({
+    return rejectAfterConfirmedAuthorization(503, {
       error: "Payments are temporarily unavailable. Your boost was not applied and you were not charged.",
       payment_status: 'provider_unavailable'
     });
   }
 
-  request.boosts.push(newBoost);
-  request.amount += amt; // Pool funds!
-  request.platformFee += appliedBoostPlatformFeeCents / 100;
-  request.sponsorCount += 1;
-
-  if (isBackerShadowed) {
-    request.shadowBanned = true; // Cascade shadow ban if the booster is vulgar
+  // Persist the authoritative fee on the stable boost itself. Hydration folds
+  // it into the parent projection without racing a whole-request snapshot.
+  newBoost.platformFee = appliedBoostPlatformFeeCents / 100;
+  try {
+    await businessStore.activateBoostAction(durableGigId, request, newBoost);
+  } catch (error) {
+    if (newBoost.paymentId) {
+      return rejectAfterPaymentReversal(newBoost.paymentId, 409, {
+        error: 'The room changed before this boost could be committed. Its payment is being released safely.'
+      });
+    }
+    return completeReservedFailure(409, {
+      error: 'The room changed before this boost could be committed.'
+    });
   }
-
-  recalculateTotals(roomState);
-  await persistBusinessStateForRoom(roomState, durableGigId);
+  const committedSnapshot = await loadRoomState(durableGigId);
+  const committedRequest = committedSnapshot.state.requests.find((item) => item.durableRequestId === request.durableRequestId);
+  const committedBoost = committedRequest?.boosts.find((item) => item.durableBoostId === newBoost.durableBoostId);
+  if (!committedRequest || !committedBoost) {
+    return res.status(202).json({
+      success: false,
+      pending: true,
+      payment_status: newBoost.paymentId ? 'processing' : 'not_applicable'
+    });
+  }
+  recalculateTotals(committedSnapshot.state);
   const responseBody = buildPatronBoostMutationResponse({
-    request,
-    boost: newBoost,
-    roomState,
+    request: committedRequest,
+    boost: committedBoost,
+    roomState: committedSnapshot.state,
     gigId: durableGigId,
     receipt: patronStatusReceipt.receipt
   });
-  await idempotencyStore.completePendingAction({
+  const completion = await idempotencyStore.completePendingAction({
     clientRequestId: client_request_id,
     idempotencyKey: idempotency_key,
+    gigId: durableGigId,
+    actionType: 'boost',
+    receiptHash: patronStatusReceipt.receiptHash,
     status: 200,
     body: responseBody
   });
-  res.json(responseBody);
+  res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
 });
 
 // Triage Queue Action (Accept / Deny)
@@ -11764,6 +12296,24 @@ app.post("/api/moderation/remove", async (req, res) => {
   request.status = 'denied';
   request.lastMutationActorUserId = actor.actorId;
   roomState.session.lastMutationActorUserId = actor.actorId;
+
+  recalculateTotals(roomState);
+  await persistStateWithAudit({
+    roomState,
+    gigId: roomContext.gigId,
+    actor,
+    entityType: 'request',
+    entityId: request.id,
+    eventType: 'moderation.remove.financial_intent',
+    previousStatus,
+    nextStatus: request.status,
+    metadata: {
+      requestId: request.id,
+      removed: true,
+      reason: String(reason),
+      recoveryRequired: true
+    }
+  });
 
   // A removed request is never publicly eligible, so release its funds.
   if (paymentService.isEnabled()) {
@@ -12219,6 +12769,34 @@ function startEventTicketWorker() {
   timer.unref();
 }
 
+function startLiveRoomPaymentWorker() {
+  if (!liveRoomDurabilityWritesEnabled || !paymentService.hasDurableStore) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      if (paymentService.isEnabled()) {
+        await paymentService.runDueOperations({ limit: 50 });
+      }
+      await paymentService.reconcileActionVisibility({ limit: 50 });
+      await paymentWebhookService?.runDueEvents({ limit: 50 });
+    } catch (error) {
+      console.error(
+        '[sway.payments] durable worker iteration failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, 5_000);
+  timer.unref();
+}
+
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
   if (audioObjectStore) {
@@ -12228,6 +12806,7 @@ async function startServer() {
   }
   await refreshBusinessState();
   startEventTicketWorker();
+  startLiveRoomPaymentWorker();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
-import dotenv from 'dotenv';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 /**
  * Proves account claim onboarding against real Postgres:
@@ -15,14 +15,13 @@ import dotenv from 'dotenv';
  * - fingerprints are used instead of raw codes in audit metadata helpers
  */
 
-dotenv.config({ path: '.env.local', override: false, quiet: true });
-dotenv.config({ override: false, quiet: true });
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.log('Account claim-code integration test SKIPPED: set DATABASE_URL to run.');
   process.exit(0);
 }
+assertDisposableDatabaseTarget({ databaseUrl, label: 'Account claim onboarding integration test' });
 
 async function loadModules() {
   const tempDir = join(process.cwd(), '.tmp');

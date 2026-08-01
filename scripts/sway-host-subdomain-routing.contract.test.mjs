@@ -54,6 +54,12 @@ for (const routePath of ['/', '/home']) {
 requireTerm("return 'public'", 'app/local/root public landing shell');
 requireTerm("return 'patron'", '/home patron shell');
 
+const shellResolver = server.slice(
+  server.indexOf('function resolveShellForRoute('),
+  server.indexOf('function shouldRedirectToAppHost(') > server.indexOf('function resolveShellForRoute(')
+    ? server.indexOf('function shouldRedirectToAppHost(')
+    : server.indexOf('function isShellAllowed(')
+);
 for (const routeToShell of [
   { route: '/g/', shell: "return 'patron'" },
   { route: '/p/', shell: "return 'patron'" },
@@ -61,8 +67,8 @@ for (const routeToShell of [
   { route: '/overlay', shell: "return 'overlay'" },
   { route: '/admin', shell: "return 'admin'" }
 ]) {
-  const routeIndex = server.indexOf(routeToShell.route);
-  const shellIndex = server.indexOf(routeToShell.shell, Math.max(routeIndex, 0));
+  const routeIndex = shellResolver.indexOf(routeToShell.route);
+  const shellIndex = shellResolver.indexOf(routeToShell.shell, Math.max(routeIndex, 0));
   if (routeIndex === -1 || shellIndex === -1 || shellIndex - routeIndex > 240) {
     failures.push(`Expected ${routeToShell.route} to map to ${routeToShell.shell}.`);
   }

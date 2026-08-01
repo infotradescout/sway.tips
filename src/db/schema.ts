@@ -95,6 +95,27 @@ export const pendingActionStatusEnum = pgEnum('pending_action_status', [
   'expired',
   'failed'
 ]);
+export const liveRoomPaymentOperationTypeEnum = pgEnum('live_room_payment_operation_type', [
+  'authorize',
+  'capture',
+  'reverse'
+]);
+export const liveRoomPaymentOperationStatusEnum = pgEnum('live_room_payment_operation_status', [
+  'pending',
+  'leased',
+  'awaiting_customer',
+  'retryable_failed',
+  'succeeded',
+  'terminal_failed'
+]);
+export const liveRoomProcessorEventStatusEnum = pgEnum('live_room_processor_event_status', [
+  'pending',
+  'processing',
+  'processed',
+  'ignored',
+  'retryable_failed',
+  'terminal_failed'
+]);
 export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'active', 'paused', 'ended']);
 export const attributionSourceEnum = pgEnum('attribution_source', ['creator_direct', 'sway_promoted']);
 export const performerEventStatusEnum = pgEnum('performer_event_status', ['draft', 'published', 'cancelled']);
@@ -946,6 +967,7 @@ export const gigSessions = pgTable('gig_sessions', {
   autoCloseoutAt: timestamp('auto_closeout_at', { withTimezone: true }).notNull(),
   autoCloseoutReason: text('auto_closeout_reason'),
   closeoutPolicy: text('closeout_policy').notNull().default('max_started_at_4h_or_scheduled_end_at_30m'),
+  stateRevision: integer('state_revision').notNull().default(0),
   ...timestamps
 }, (table) => ({
   performerStatusIdx: index('gig_sessions_performer_status_idx').on(table.performerId, table.status),
@@ -1121,16 +1143,26 @@ export const requests = pgTable('requests', {
   patronUserId: uuid('patron_user_id').references(() => users.id),
   lastMutationActorUserId: uuid('last_mutation_actor_user_id').references(() => users.id),
   clientRequestId: text('client_request_id').notNull(),
+  idempotencyKey: text('idempotency_key'),
+  intentFingerprint: text('intent_fingerprint'),
+  patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
   requestType: text('request_type').notNull(),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   message: text('message'),
   runtimeRequestState: jsonb('runtime_request_state'),
+  // Old-server writes omit this new column during the rolling deploy and must
+  // remain visible. New payment reservations explicitly write NULL until the
+  // processor reaches the action's required state.
+  activatedAt: timestamp('activated_at', { withTimezone: true }).defaultNow(),
+  stateRevision: integer('state_revision').notNull().default(0),
   ...timestamps
 }, (table) => ({
   gigStatusIdx: index('requests_gig_status_idx').on(table.gigId, table.status),
-  clientRequestIdx: uniqueIndex('requests_client_request_id_idx').on(table.clientRequestId)
+  clientRequestIdx: uniqueIndex('requests_client_request_id_idx').on(table.clientRequestId),
+  idempotencyIdx: uniqueIndex('requests_idempotency_key_idx').on(table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
+  activeGigIdx: index('requests_active_gig_idx').on(table.gigId, table.activatedAt)
 }));
 
 export const requestBoosts = pgTable('request_boosts', {
@@ -1139,21 +1171,44 @@ export const requestBoosts = pgTable('request_boosts', {
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
   patronUserId: uuid('patron_user_id').references(() => users.id),
   actorUserId: uuid('actor_user_id').references(() => users.id),
+  // Kept nullable at the database boundary for one rolling deploy so the
+  // pre-0028 server can continue inserting boosts while the migration runs.
+  // Every new-server reservation supplies this identity explicitly.
+  clientRequestId: text('client_request_id'),
+  idempotencyKey: text('idempotency_key'),
+  intentFingerprint: text('intent_fingerprint'),
+  patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   runtimeBoostState: jsonb('runtime_boost_state'),
+  // See requests.activatedAt: omission means a legacy visible row; an
+  // explicit NULL means a new-server payment reservation is still invisible.
+  activatedAt: timestamp('activated_at', { withTimezone: true }).defaultNow(),
+  stateRevision: integer('state_revision').notNull().default(0),
   ...timestamps
 }, (table) => ({
   requestIdx: index('request_boosts_request_id_idx').on(table.requestId),
-  gigIdx: index('request_boosts_gig_id_idx').on(table.gigId)
+  gigIdx: index('request_boosts_gig_id_idx').on(table.gigId),
+  clientRequestIdx: uniqueIndex('request_boosts_client_request_id_idx').on(table.clientRequestId),
+  idempotencyIdx: uniqueIndex('request_boosts_idempotency_key_idx').on(table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
+  activeGigIdx: index('request_boosts_active_gig_idx').on(table.gigId, table.activatedAt)
 }));
 
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
+  performerId: uuid('performer_id').references(() => performers.id),
   requestId: uuid('request_id').references(() => requests.id),
   requestBoostId: uuid('request_boost_id').references(() => requestBoosts.id),
+  actionType: text('action_type'),
+  idempotencyKey: text('idempotency_key'),
+  destinationAccountId: text('destination_account_id'),
+  // Expand/contract rollout bridge. Migration 0028 defaults this true so the
+  // still-running pre-0028 server remains write-compatible while Render applies
+  // the migration. New code always writes false and must satisfy the binding
+  // constraint; a later reconciled migration can retire the legacy lane.
+  legacyUnlinked: boolean('legacy_unlinked').notNull().default(true),
   paymentStatus: paymentStatusEnum('payment_status').notNull().default('created'),
   processor: text('processor').notNull(),
   processorPaymentIntentId: text('processor_payment_intent_id'),
@@ -1179,7 +1234,106 @@ export const payments = pgTable('payments', {
 }, (table) => ({
   gigStatusIdx: index('payments_gig_status_idx').on(table.gigId, table.paymentStatus),
   processorIntentIdx: uniqueIndex('payments_processor_payment_intent_idx').on(table.processorPaymentIntentId),
-  campaignIdx: index('payments_campaign_id_idx').on(table.campaignId)
+  campaignIdx: index('payments_campaign_id_idx').on(table.campaignId),
+  // Historical rows stay in the explicit legacy lane during the rolling
+  // deploy. Enforce one payment per action only for new, fully bound writes so
+  // an unknown pre-0028 duplicate cannot block the production migration.
+  requestIdx: uniqueIndex('payments_request_id_idx').on(table.requestId).where(sql`${table.legacyUnlinked} = false and ${table.requestId} is not null`),
+  requestBoostIdx: uniqueIndex('payments_request_boost_id_idx').on(table.requestBoostId).where(sql`${table.legacyUnlinked} = false and ${table.requestBoostId} is not null`),
+  idempotencyIdx: uniqueIndex('payments_idempotency_key_idx').on(table.idempotencyKey).where(sql`${table.legacyUnlinked} = false and ${table.idempotencyKey} is not null`),
+  durableActionLink: check('payments_durable_action_link', sql`
+    ${table.legacyUnlinked}
+    or (
+      ${table.performerId} is not null
+      and length(trim(${table.idempotencyKey})) > 0
+      and length(trim(${table.destinationAccountId})) > 0
+      and (
+        (${table.actionType} in ('tip', 'request') and ${table.requestId} is not null and ${table.requestBoostId} is null)
+        or (${table.actionType} = 'boost' and ${table.requestId} is null and ${table.requestBoostId} is not null)
+      )
+    )
+  `)
+}));
+
+export const liveRoomPaymentOperations = pgTable('live_room_payment_operations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  paymentId: uuid('payment_id').notNull().references(() => payments.id),
+  gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  requestId: uuid('request_id').references(() => requests.id),
+  requestBoostId: uuid('request_boost_id').references(() => requestBoosts.id),
+  operationType: liveRoomPaymentOperationTypeEnum('operation_type').notNull(),
+  status: liveRoomPaymentOperationStatusEnum('status').notNull().default('pending'),
+  processor: text('processor').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  destinationAccountId: text('destination_account_id').notNull(),
+  requestPayload: jsonb('request_payload').notNull(),
+  processorObjectId: text('processor_object_id'),
+  resultPayload: jsonb('result_payload'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(20),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  idempotencyIdx: uniqueIndex('live_room_payment_operations_idempotency_idx').on(table.idempotencyKey),
+  paymentTypeIdx: uniqueIndex('live_room_payment_operations_payment_type_idx').on(table.paymentId, table.operationType),
+  processorObjectIdx: uniqueIndex('live_room_payment_operations_processor_object_idx').on(table.operationType, table.processorObjectId).where(sql`${table.processorObjectId} is not null`),
+  claimIdx: index('live_room_payment_operations_claim_idx').on(table.status, table.availableAt, table.leaseExpiresAt),
+  requestIdx: index('live_room_payment_operations_request_idx').on(table.requestId, table.operationType),
+  requestBoostIdx: index('live_room_payment_operations_boost_idx').on(table.requestBoostId, table.operationType),
+  requestPayloadValid: check('live_room_payment_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object'`),
+  actionLink: check('live_room_payment_operations_action_link', sql`
+    ((${table.requestId} is not null)::int + (${table.requestBoostId} is not null)::int) = 1
+    or (
+      ${table.operationType} = 'reverse'
+      and ${table.requestId} is null
+      and ${table.requestBoostId} is null
+    )
+  `),
+  attemptsValid: check('live_room_payment_operations_attempts_valid', sql`${table.attemptCount} >= 0 and ${table.maxAttempts} > 0`),
+  leaseCoherent: check('live_room_payment_operations_lease_coherent', sql`
+    (${table.status} = 'leased' and ${table.leaseOwner} is not null and ${table.leaseExpiresAt} is not null)
+    or (${table.status} <> 'leased' and ${table.leaseOwner} is null and ${table.leaseExpiresAt} is null)
+  `),
+  completionCoherent: check('live_room_payment_operations_completion_coherent', sql`
+    (${table.status} in ('succeeded', 'terminal_failed') and ${table.completedAt} is not null)
+    or (${table.status} not in ('succeeded', 'terminal_failed') and ${table.completedAt} is null)
+  `)
+}));
+
+export const liveRoomProcessorEvents = pgTable('live_room_processor_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  processor: text('processor').notNull(),
+  processorEventId: text('processor_event_id').notNull(),
+  eventType: text('event_type').notNull(),
+  payloadSha256: text('payload_sha256').notNull(),
+  payload: jsonb('payload').notNull(),
+  livemode: boolean('livemode').notNull(),
+  paymentId: uuid('payment_id').references(() => payments.id),
+  paymentOperationId: uuid('payment_operation_id').references(() => liveRoomPaymentOperations.id),
+  status: liveRoomProcessorEventStatusEnum('status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  processingStartedAt: timestamp('processing_started_at', { withTimezone: true }),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  processorEventIdx: uniqueIndex('live_room_processor_events_event_idx').on(table.processor, table.processorEventId),
+  reconcileIdx: index('live_room_processor_events_reconcile_idx').on(table.status, table.nextAttemptAt),
+  paymentReceivedIdx: index('live_room_processor_events_payment_idx').on(table.paymentId, table.receivedAt),
+  payloadHashValid: check('live_room_processor_events_payload_hash_valid', sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`),
+  payloadValid: check('live_room_processor_events_payload_valid', sql`jsonb_typeof(${table.payload}) = 'object'`),
+  attemptsValid: check('live_room_processor_events_attempts_valid', sql`${table.attemptCount} >= 0`),
+  processedStateCoherent: check('live_room_processor_events_processed_state', sql`
+    (${table.status} in ('processed', 'ignored') and ${table.processedAt} is not null)
+    or (${table.status} not in ('processed', 'ignored') and ${table.processedAt} is null)
+  `)
 }));
 
 export const paymentEvents = pgTable('payment_events', {

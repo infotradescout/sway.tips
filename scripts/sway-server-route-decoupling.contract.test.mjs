@@ -41,9 +41,18 @@ const shellMappings = [
   { route: '/p/', shell: 'patron' }
 ];
 
+// Inspect only the route resolver. Other security middleware legitimately
+// mentions paths such as /api/talent before this function, which must not make
+// this structural contract pair a route with the wrong return statement.
+const shellResolverStart = server.indexOf('function resolveShellForRoute(');
+const shellResolverEnd = server.indexOf('function shellHtmlRelativePath(', shellResolverStart);
+const shellResolver = shellResolverStart === -1 || shellResolverEnd === -1
+  ? ''
+  : server.slice(shellResolverStart, shellResolverEnd);
+
 for (const { route, shell } of shellMappings) {
-  const routeIndex = server.indexOf(route);
-  const shellIndex = server.indexOf(`return '${shell}'`, Math.max(routeIndex, 0));
+  const routeIndex = shellResolver.indexOf(route);
+  const shellIndex = shellResolver.indexOf(`return '${shell}'`, Math.max(routeIndex, 0));
   if (routeIndex === -1 || shellIndex === -1 || shellIndex - routeIndex > 180) {
     failures.push(`Server must map ${route} to ${shell} shell.`);
   }

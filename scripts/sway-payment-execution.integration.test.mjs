@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
-import dotenv from 'dotenv';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 /**
  * Real Stripe test-mode payment execution integration test.
@@ -20,17 +21,21 @@ import dotenv from 'dotenv';
  * are not provisioned, so the contract gate is never blocked by missing secrets.
  */
 
-dotenv.config({ path: '.env.local', override: false, quiet: true });
-dotenv.config({ override: false, quiet: true });
 
 const databaseUrl = process.env.DATABASE_URL;
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const stripeConnectedAccountId = process.env.SWAY_STRIPE_TEST_CONNECTED_ACCOUNT_ID;
 
-if (!databaseUrl || !stripeSecretKey || !stripeWebhookSecret) {
-  console.log('Payment execution integration test SKIPPED: set DATABASE_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET to run.');
+if (!databaseUrl || !stripeSecretKey || !stripeWebhookSecret || !stripeConnectedAccountId) {
+  console.log('Payment execution integration test SKIPPED: set disposable DATABASE_URL, Stripe test keys, and SWAY_STRIPE_TEST_CONNECTED_ACCOUNT_ID to run.');
   process.exit(0);
 }
+assertDisposableDatabaseTarget({
+  databaseUrl,
+  label: 'Stripe payment execution integration test',
+  stripeSecretKey
+});
 
 function splitStatements(sql) {
   return sql
@@ -103,8 +108,13 @@ async function main() {
       [USER_ID]
     );
     await adminClient.query(
-      `INSERT INTO performers (id, owner_user_id, handle, display_name) VALUES ($1, $2, 'perf', 'Perf')`,
-      [PERFORMER_ID, USER_ID]
+      `INSERT INTO performers (
+         id, owner_user_id, handle, display_name, is_active, onboarding_status,
+         payment_account_status, kyc_status, charges_enabled, payouts_enabled,
+         stripe_connected_account_id
+       ) VALUES ($1, $2, 'perf', 'Perf', true, 'payouts_enabled', 'payouts_enabled',
+         'verified', true, true, $3)`,
+      [PERFORMER_ID, USER_ID, stripeConnectedAccountId]
     );
     await adminClient.query(
       `INSERT INTO gig_sessions (id, performer_id, status, title, venue_name, auto_closeout_at)
@@ -119,16 +129,45 @@ async function main() {
     });
     const service = createPaymentService({ databaseUrl, provider });
 
+    async function reserveRequest(label, amountCents) {
+      const requestId = randomUUID();
+      const clientRequestId = `${label}-${Date.now()}-${randomUUID()}`;
+      const idempotencyKey = `it-${label}-${randomUUID()}`;
+      const intentFingerprint = createHash('sha256').update(`${GIG_ID}:${idempotencyKey}:${amountCents}`).digest('hex');
+      await adminClient.query(
+        `INSERT INTO requests (
+           id, gig_id, client_request_id, idempotency_key, intent_fingerprint,
+           patron_device_id_hash, status, request_type, amount_cents, currency,
+           runtime_request_state
+         ) VALUES ($1, $2, $3, $4, $5, 'integration-device', 'payment_pending',
+           'music', $6, 'USD', $7::jsonb)`,
+        [
+          requestId,
+          GIG_ID,
+          clientRequestId,
+          idempotencyKey,
+          intentFingerprint,
+          amountCents,
+          JSON.stringify({ id: `req-${requestId}`, type: 'request', status: 'hold', boosts: [] })
+        ]
+      );
+      return { requestId, clientRequestId, idempotencyKey, intentFingerprint };
+    }
+
     assert.equal(service.isEnabled(), true, 'service must be enabled with provider + db');
 
     // 1. Authorization created (confirm a test card so funds are capturable).
+    const request1 = await reserveRequest('auth', 1500);
     const auth = await service.authorizeAction({
       gigId: GIG_ID,
       actionType: 'request',
       amountSubtotalCents: 1500,
       platformFeeCents: 100,
       currency: 'USD',
-      idempotencyKey: `it-auth-${Date.now()}`,
+      attributionSource: 'creator_direct',
+      campaignId: null,
+      commissionBpsApplied: null,
+      ...request1,
       paymentMethod: 'pm_card_visa',
       confirm: true
     });
@@ -158,13 +197,17 @@ async function main() {
     assert.equal(totals.capturedTotalCents, 1600, 'captured total must include fee');
 
     // 4. Void releases an authorized hold (deny path).
+    const request2 = await reserveRequest('void', 800);
     const auth2 = await service.authorizeAction({
       gigId: GIG_ID,
       actionType: 'request',
       amountSubtotalCents: 800,
       platformFeeCents: 100,
       currency: 'USD',
-      idempotencyKey: `it-auth2-${Date.now()}`,
+      attributionSource: 'creator_direct',
+      campaignId: null,
+      commissionBpsApplied: null,
+      ...request2,
       paymentMethod: 'pm_card_visa',
       confirm: true
     });
@@ -179,13 +222,17 @@ async function main() {
 
     // 5. Unconfirmed authorization (no payment_method) must NOT be capturable:
     //    it must return requires_confirmation, never 'authorized'.
+    const request3 = await reserveRequest('unconfirmed', 700);
     const unconfirmed = await service.authorizeAction({
       gigId: GIG_ID,
       actionType: 'request',
       amountSubtotalCents: 700,
       platformFeeCents: 100,
       currency: 'USD',
-      idempotencyKey: `it-unconfirmed-${Date.now()}`
+      attributionSource: 'creator_direct',
+      campaignId: null,
+      commissionBpsApplied: null,
+      ...request3
     });
     assert.equal(unconfirmed.status, 'requires_confirmation', 'unconfirmed intent must not be authorized');
     assert.ok(unconfirmed.clientSecret, 'requires_confirmation must expose a client secret for confirmation');
@@ -195,13 +242,17 @@ async function main() {
     assert.equal(totalsAfterUnconfirmed.capturedSubtotalCents, 1500, 'unconfirmed intent must not be captured');
 
     // 6. Provider failure fails safe (invalid amount => no successful state).
+    const request4 = await reserveRequest('failure', -100);
     const failed = await service.authorizeAction({
       gigId: GIG_ID,
       actionType: 'request',
       amountSubtotalCents: -100,
       platformFeeCents: 0,
       currency: 'USD',
-      idempotencyKey: `it-fail-${Date.now()}`,
+      attributionSource: 'creator_direct',
+      campaignId: null,
+      commissionBpsApplied: null,
+      ...request4,
       paymentMethod: 'pm_card_visa',
       confirm: true
     });

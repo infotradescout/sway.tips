@@ -23,12 +23,14 @@ import { createLocalAudioObjectStore } from '../src/server/audio-object-storage-
 import { createAudioFileCollaborationService } from '../src/server/audio-file-collaboration-service.ts';
 import { createAudioFilePairingService } from '../src/server/audio-file-pairing-service.ts';
 import { createAudioPublishingService } from '../src/server/audio-publishing-service.ts';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 if (process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
   throw new Error('Audio collaboration integration requires SWAY_DISPOSABLE_MIGRATION_PROOF=1.');
 }
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error('DATABASE_URL is required.');
+assertDisposableDatabaseTarget({ databaseUrl, approval: 'true', label: 'Audio collaboration integration proof' });
 
 async function streamToBuffer(stream) {
   const chunks = [];

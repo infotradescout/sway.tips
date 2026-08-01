@@ -21,8 +21,11 @@ export interface CustomMenuItem {
 
 export interface BoostContribution {
   id: string;
+  durableBoostId?: string;
+  stateRevision?: number;
   patronName: string;
   amount: number;
+  platformFee?: number;
   timestamp: string;
   actorUserId?: string | null;
   patronDeviceIdHash?: string | null;
@@ -38,6 +41,8 @@ export interface BoostContribution {
 
 export interface RequestItem {
   id: string;
+  durableRequestId?: string;
+  stateRevision?: number;
   type: 'request' | 'tip';
   targetType: 'music' | 'custom' | 'straight_tip';
   title: string;          // Song title, menu item, or "Classic Tip"
@@ -127,6 +132,7 @@ export interface GigSession {
   // Direct tips and every other paid room action require a payout-ready seller.
   // A genuinely free room keeps this false while requests/upvotes remain usable.
   tipsEnabled: boolean;
+  stateRevision?: number;
   totals: {
     totalTips: number;
     accumulatedFees: number;

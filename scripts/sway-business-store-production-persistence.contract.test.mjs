@@ -60,6 +60,13 @@ for (const route of persistenceProtectedRoutes) {
   // that itself calls persistStateWithAudit -- extracted so mutation/payment
   // logic isn't duplicated across the legacy route and the control-bridge
   // smart-action route.
+  const persistsStablePaymentAction =
+    (route === '/api/request/create'
+      && routeBlock.includes('await businessStore.reserveRequestAction(')
+      && routeBlock.includes('await businessStore.activateRequestAction('))
+    || (route === '/api/request/boost'
+      && routeBlock.includes('await businessStore.reserveBoostAction(')
+      && routeBlock.includes('await businessStore.activateBoostAction('));
   if (
     !routeBlock.includes('await persistBusinessState()') &&
     !routeBlock.includes('await persistBusinessStateForRoom(') &&
@@ -68,6 +75,7 @@ for (const route of persistenceProtectedRoutes) {
     !routeBlock.includes('await applyRequestTriage(') &&
     !routeBlock.includes('await applyRequestFulfill(') &&
     !routeBlock.includes('await applyRequestHide(') &&
+    !persistsStablePaymentAction &&
     !route.includes('/api/moderation/report') &&
     !route.includes('/api/moderation/block')
   ) {

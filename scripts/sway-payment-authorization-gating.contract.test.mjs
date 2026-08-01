@@ -11,8 +11,8 @@ const failures = [];
 //    real hold (requires_capture). Otherwise it must return requires_confirmation.
 for (const term of [
   "status: 'requires_confirmation'",
-  "authorization.status === 'requires_capture'",
-  'if (!capturable)',
+  "authorization.status !== 'requires_capture'",
+  "payment.paymentStatus === 'payment_pending'",
   "status: 'authorized'"
 ]) {
   if (!serviceSource.includes(term)) {
@@ -50,12 +50,14 @@ if (/paymentStatus\s*=\s*authorization\.capturable\s*\?/.test(serverSource)) {
 // 5. Request creation must only happen after a confirmed (capturable) hold:
 //    the requires_confirmation early return must precede state mutation.
 const requestConfirmIndex = serverSource.indexOf("payment_status: 'requires_confirmation'");
-const requestPushIndex = Math.max(
-  serverSource.indexOf('state.requests.push(newItem)'),
-  serverSource.indexOf('roomState.requests.push(newItem)')
-);
-if (requestConfirmIndex === -1 || requestPushIndex === -1 || requestConfirmIndex > requestPushIndex) {
+const requestActivationIndex = serverSource.indexOf('businessStore.activateRequestAction(durableGigId, newItem)');
+if (requestConfirmIndex === -1 || requestActivationIndex === -1 || requestConfirmIndex > requestActivationIndex) {
   failures.push('Request must not enter app state before the requires_confirmation gate.');
+}
+const requestReservationIndex = serverSource.indexOf('businessStore.reserveRequestAction(durableGigId, newItem, {');
+const requestAuthorizeIndex = serverSource.indexOf('paymentService.authorizeAction({', requestReservationIndex);
+if (requestReservationIndex === -1 || requestAuthorizeIndex === -1 || requestReservationIndex > requestAuthorizeIndex) {
+  failures.push('Request must reserve its durable invisible identity before processor authorization.');
 }
 if (!/newItem\.paymentStatus\s*=\s*'authorized'/.test(serverSource)) {
   failures.push('Request must be marked authorized only via the confirmed-hold branch.');
@@ -63,12 +65,14 @@ if (!/newItem\.paymentStatus\s*=\s*'authorized'/.test(serverSource)) {
 
 // Boost creation must likewise be gated before the boost is pushed.
 const boostConfirmIndex = serverSource.lastIndexOf("payment_status: 'requires_confirmation'");
-const boostPushIndex = Math.max(
-  serverSource.indexOf('request.boosts.push(newBoost)'),
-  serverSource.indexOf('request.boosts.push(newBoost)')
-);
-if (boostConfirmIndex === -1 || boostPushIndex === -1 || boostConfirmIndex > boostPushIndex) {
+const boostActivationIndex = serverSource.indexOf('businessStore.activateBoostAction(durableGigId, request, newBoost)');
+if (boostConfirmIndex === -1 || boostActivationIndex === -1 || boostConfirmIndex > boostActivationIndex) {
   failures.push('Boost must not enter app state before the requires_confirmation gate.');
+}
+const boostReservationIndex = serverSource.indexOf('businessStore.reserveBoostAction(durableGigId, request, newBoost, {');
+const boostAuthorizeIndex = serverSource.indexOf('paymentService.authorizeAction({', boostReservationIndex);
+if (boostReservationIndex === -1 || boostAuthorizeIndex === -1 || boostReservationIndex > boostAuthorizeIndex) {
+  failures.push('Boost must reserve its durable invisible identity before processor authorization.');
 }
 if (!/newBoost\.paymentStatus\s*=\s*'authorized'/.test(serverSource)) {
   failures.push('Boost must be marked authorized only via the confirmed-hold branch.');
