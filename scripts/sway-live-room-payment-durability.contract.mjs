@@ -78,7 +78,8 @@ assert.doesNotMatch(serverSource, /businessStore\.setPatronStatusReceipt/);
 assert.match(serverSource, /responseStatus: completion\.status/);
 assert.match(serverSource, /Object\.assign\(inputState, refreshed\.state\)/);
 assert.match(serverSource, /Room maintenance cycle failed; it will retry safely\./);
-assert.match(serverSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_ENABLED/);
+assert.match(serverSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED/);
+assert.match(serverSource, /const liveRoomDurabilityWritesEnabled = !liveRoomDurabilityKillSwitchActive;/);
 assert.match(serverSource, /LIVE_ROOM_MUTATION_ROLLOUT_PATHS/);
 assert.equal(
   (serverSource.match(/\^\\\/api\\\/[\s\S]*?\/i/g) ?? []).length >= 5,
@@ -101,7 +102,7 @@ assert.match(
   /if \(paymentService\.isEnabled\(\)\) \{[\s\S]+runDueOperations[\s\S]+\}[\s\S]+reconcileActionVisibility/,
   'Provider operations must stay gated while DB-only visibility reconciliation always runs.'
 );
-assert.match(renderConfigSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_ENABLED[\s\S]+value: "(?:false|true)"/);
+assert.match(renderConfigSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED[\s\S]+value: "false"/);
 assert.match(operationStoreSource, /ne\(liveRoomPaymentOperations\.id, operation\.id\)/);
 assert.match(operationStoreSource, /gt\(liveRoomPaymentOperations\.leaseExpiresAt, now\)/);
 assert.match(paymentServiceSource, /reverseTransfer: true,[\s\S]+refundApplicationFee: true/);

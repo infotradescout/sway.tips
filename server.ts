@@ -128,11 +128,12 @@ dotenv.config({ override: false });
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
-// Render applies migrations before replacing the previous instance. This
-// explicit gate supports a two-release rollout: first migrate with all new
-// live-room writers paused, then enable only after the legacy snapshot writer
-// has drained. Missing or malformed configuration stays fail-closed.
-const liveRoomDurabilityWritesEnabled = process.env.SWAY_LIVE_ROOM_DURABILITY_WRITES_ENABLED?.trim().toLowerCase() === 'true';
+// Migration 0028 is live and the legacy snapshot writer has drained, so the
+// durable writer is now canonical. Operators retain an explicit emergency
+// kill switch; missing or malformed configuration does not silently disable
+// the production write path after a deploy.
+const liveRoomDurabilityKillSwitchActive = process.env.SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED?.trim().toLowerCase() === 'true';
+const liveRoomDurabilityWritesEnabled = !liveRoomDurabilityKillSwitchActive;
 const hasSwayEmailProvider = Boolean(process.env.SWAY_EMAIL_PROVIDER?.trim());
 const hasSwayEmailApiKey = Boolean(process.env.SWAY_EMAIL_API_KEY?.trim());
 const hasSwayEmailFrom = Boolean(process.env.SWAY_EMAIL_FROM?.trim());
@@ -3375,6 +3376,7 @@ app.get('/api/runtime-config-status', (_req, res) => {
       objectStorageVerified: audioObjectStoreVerified
     },
     liveRoomDurabilityWritesEnabled,
+    liveRoomDurabilityKillSwitchActive,
     nodeEnv: process.env.NODE_ENV ?? null,
     commit: buildMarker.commit,
     branch: buildMarker.branch,
