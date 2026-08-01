@@ -12,8 +12,10 @@ No task is complete because an agent says it is complete. No deployment is succe
 
 - Merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md`.
 - Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Do not turn it Off to wait for Actions.
-- GitHub Actions CI is advisory until billing works; it must not block Render auto-deploy.
-- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up).
+- GitHub Actions is not used. There are no workflows; see `.github/README.md`. A red or missing check on a pull request carries no information.
+- Verification is local: `npm run validate` (lint, build, contract tests) against the exact commit under review. Record the commands and results in the PR.
+- After deploying, confirm production caught up: `npm run guard:production-drift`. This replaces the retired `Production Deploy Drift Guard` workflow and enforces the same Release-State Rule.
+- Render `checksPass` is no longer deadlock-prone now that the drift-guard workflow is gone, but it still has nothing to gate on, so leave it off.
 
 ## Council Roles
 

@@ -15,6 +15,7 @@
     "readiness:assert": "node scripts/sway-complete-product-readiness.mjs --assert-ready",
     "proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs",
     "proof:tickets:production": "node scripts/sway-native-ticket-production-proof.mjs",
+    "guard:production-drift": "node scripts/sway-production-deploy-drift-guard.mjs",
     "audit:audio:production-evidence": "tsx scripts/sway-production-audio-evidence-audit.mjs",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
