@@ -57,6 +57,11 @@ function readSafeAccountNextFromLocation() {
   }
 }
 
+function hasPerformerIntent(params: URLSearchParams, accountNext: string) {
+  return params.get('intent') === 'performer'
+    || accountNext === '/account?intent=performer';
+}
+
 function AccessFrame({ children }: { children: ReactNode }) {
   return (
     <div className="relative isolate min-h-[100dvh] overflow-y-auto overflow-x-hidden bg-slate-950 px-4 py-8 text-white sm:py-10">
@@ -125,8 +130,9 @@ function ClaimCodeField(props: {
 export function AccountLogin() {
   const params = new URLSearchParams(window.location.search);
   const initialClaim = readClaimFromLocation();
-  const performerIntent = params.get('intent') === 'performer';
-  const accountNext = readSafeAccountNextFromLocation() || (performerIntent ? '/account?intent=performer' : '');
+  const safeAccountNext = readSafeAccountNextFromLocation();
+  const performerIntent = hasPerformerIntent(params, safeAccountNext);
+  const accountNext = safeAccountNext || (performerIntent ? '/account?intent=performer' : '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [claimCode, setClaimCode] = useState(initialClaim);
@@ -196,9 +202,9 @@ export function AccountLogin() {
 
 export function AccountSignup() {
   const signupParams = new URLSearchParams(window.location.search);
-  const performerIntent = signupParams.get('intent') === 'performer';
   const initialClaim = readClaimFromLocation();
   const accountNext = readSafeAccountNextFromLocation();
+  const performerIntent = hasPerformerIntent(signupParams, accountNext);
   const performerNext = accountNext || (performerIntent ? '/account?intent=performer' : '');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState(signupParams.get('email')?.trim() || '');

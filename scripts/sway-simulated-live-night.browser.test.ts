@@ -236,6 +236,26 @@ async function main() {
       'canonical performer-intent signup copy',
       server
     );
+
+    await Promise.all([
+      performerPage.waitForURL((url) => url.pathname === '/account/login' && url.searchParams.get('next') === '/account?intent=performer'),
+      performerPage.getByRole('link', { name: 'Already have an account?' }).click()
+    ]);
+    await Promise.all([
+      performerPage.waitForURL((url) => url.pathname === '/account/signup'
+        && url.searchParams.get('intent') === 'performer'
+        && url.searchParams.get('next') === '/account?intent=performer'),
+      performerPage.getByRole('link', { name: 'Create an account' }).click()
+    ]);
+    await waitVisible(
+      performerPage.getByText(
+        'Create one account, verify your email, then activate your performer identity and prepare your first room.',
+        { exact: true }
+      ),
+      'performer-intent copy after login detour',
+      server
+    );
+
     await performerPage.getByLabel('Your name').fill(performerName);
     await performerPage.getByLabel('Email').fill(email);
     await performerPage.getByLabel('Password', { exact: true }).fill(password);
