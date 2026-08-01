@@ -187,10 +187,11 @@ export default function App() {
           body: data
         });
       }
-      setBState(data.state);
+      if (data?.state) setBState(data.state);
       return data;
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -201,7 +202,8 @@ export default function App() {
     clientRequestId?: string,
     idempotencyKey?: string,
     expiresAt?: string,
-    gigId?: string
+    gigId?: string,
+    paymentIntentId?: string
   ) => {
     if (isDemoMode) {
       throw new Error('Demo mode is read-only right now.');
@@ -217,7 +219,8 @@ export default function App() {
           client_request_id: clientRequestId,
           idempotency_key: idempotencyKey,
           expires_at: expiresAt,
-          gig_id: gigId
+          gig_id: gigId,
+          payment_intent_id: paymentIntentId
         })
       });
       const data = await response.json();
@@ -227,10 +230,11 @@ export default function App() {
           body: data
         });
       }
-      setBState(data.state);
+      if (data?.state) setBState(data.state);
       return data;
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 

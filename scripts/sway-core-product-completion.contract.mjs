@@ -68,7 +68,7 @@ for (const term of [
   'rel="noreferrer"'
 ]) requireTerm(rightsReview, term, 'Sealed rights evidence action');
 
-for (const term of ['patronStatusReceiptHash', 'projectPatronBoostStatus', 'boost: newBoost', 'receipt: patronStatusReceipt.receipt']) {
+for (const term of ['patronStatusReceiptHash', 'projectPatronBoostStatus', 'boost: committedBoost', 'receipt: patronStatusReceipt.receipt']) {
   requireTerm(server + types, term, 'Boost receipt status');
 }
 for (const term of ['sway.patronStatusReceipts', 'JSON.stringify(next)', 'patronActivity={patronActivity.map']) {

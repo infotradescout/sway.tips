@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 import { Client } from 'pg';
 import { randomUUID } from 'node:crypto';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 function createInactiveSession() {
   return {
@@ -111,6 +112,7 @@ async function main() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL is required for business-store process-kill integration test.');
   }
+  assertDisposableDatabaseTarget({ databaseUrl, label: 'Business-store process-kill integration test' });
 
   const adminClient = new Client({ connectionString: databaseUrl });
   await adminClient.connect();

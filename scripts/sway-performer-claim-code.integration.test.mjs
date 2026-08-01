@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
-import dotenv from 'dotenv';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 /**
  * Proves, against a real Postgres database, that the claim-code flow actually works:
@@ -18,8 +18,6 @@ import dotenv from 'dotenv';
  * Skips cleanly when DATABASE_URL is not provisioned.
  */
 
-dotenv.config({ path: '.env.local', override: false, quiet: true });
-dotenv.config({ override: false, quiet: true });
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -27,6 +25,7 @@ if (!databaseUrl) {
   console.log('Performer claim-code integration test SKIPPED: set DATABASE_URL to run.');
   process.exit(0);
 }
+assertDisposableDatabaseTarget({ databaseUrl, label: 'Performer claim-code integration test' });
 
 async function loadModules() {
   const tempDir = join(process.cwd(), '.tmp');

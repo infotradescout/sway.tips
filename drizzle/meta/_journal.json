@@ -197,6 +197,13 @@
       "when": 1785079727104,
       "tag": "0027_warm_ultron",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785535791379,
+      "tag": "0028_live_room_payment_durability",
+      "breakpoints": true
     }
   ]
 }

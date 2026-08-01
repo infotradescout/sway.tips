@@ -321,7 +321,8 @@ export default function PatronView({
     formToastTimeoutRef.current = window.setTimeout(() => setFormToast(null), 4000);
   };
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
-  const isSubmitLocked = isPaying || isPaymentConfirmationPending;
+  const isDurableActionPending = Boolean(pendingAction);
+  const isSubmitLocked = isPaying || isPaymentConfirmationPending || isDurableActionPending;
   const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
   const stripeElementsOptions = useMemo(() => checkoutPayload?.clientSecret
     ? {
@@ -329,6 +330,27 @@ export default function PatronView({
         appearance: { theme: 'night' as const }
       }
     : null, [checkoutPayload?.clientSecret]);
+
+  const completeCheckoutSuccess = (completedActionType: 'request' | 'boost') => {
+    setBackendConfirmed(true);
+    setPaymentConfirmationState(null);
+    setStripeConfigError(null);
+    setDegraded(false);
+    setPendingAction(null);
+    setPendingActionMessage('');
+    localStorage.removeItem('sway.pendingAction');
+    setTimeout(() => {
+      setBackendConfirmed(false);
+      setCheckoutPayload(null);
+      setBoostingItem(null);
+      setSelectedTrack(null);
+      setCommentMessage('');
+      setSenderName('');
+      setBoostPatronName('');
+      setTipAmount(session.minimumTip);
+      setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
+    }, 2000);
+  };
 
   // A personalized status is rendered only when the browser holds the opaque
   // receipt returned for its own submission. Public queue order is never used
@@ -377,9 +399,10 @@ export default function PatronView({
   }, []);
 
   useEffect(() => {
-    const storedPendingAction = localStorage.getItem('sway.pendingAction');
+    const storedPendingAction = pendingAction || localStorage.getItem('sway.pendingAction');
     if (!storedPendingAction) return;
     let cancelled = false;
+    let retryTimer: number | null = null;
 
     try {
       const parsed = JSON.parse(storedPendingAction);
@@ -400,24 +423,37 @@ export default function PatronView({
       setPendingAction(storedPendingAction);
       setPendingActionMessage('Reconnecting to confirm your pending action.');
 
-      onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey)
-        .then((result) => {
+      const reconcile = async () => {
+        if (cancelled) return;
+        if (parsed.expires_at && Date.now() > new Date(parsed.expires_at).getTime()) {
+          localStorage.removeItem('sway.pendingAction');
+          setPendingAction(null);
+          setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
+          return;
+        }
+        try {
+          const result = await onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey);
           if (cancelled) return;
           if (result?.status === 'reconciled') {
-            localStorage.removeItem('sway.pendingAction');
-            setPendingAction(null);
-            setPendingActionMessage('');
             window.dispatchEvent(new Event('re-fetch-state'));
+            completeCheckoutSuccess(parsed.type === 'boost' ? 'boost' : 'request');
             return;
           }
-          if (result?.status === 'pending') {
+          if (result?.status === 'pending' || result?.status === 'retrying' || result?.status === 'missing') {
             setDegraded(true);
             setPendingActionMessage('Connection degraded. Your pending action is still awaiting backend confirmation.');
           }
-        })
-        .catch((error: any) => {
+        } catch (error: any) {
           if (cancelled) return;
           setDegraded(true);
+          if (error?.body?.terminal === true && error?.body?.pending === false) {
+            localStorage.removeItem('sway.pendingAction');
+            setPendingAction(null);
+            setPaymentConfirmationState(null);
+            setCheckoutPayload(null);
+            setPendingActionMessage(error?.body?.error || 'The action did not complete, and its payment was safely released.');
+            return;
+          }
           if (error?.status === 410) {
             localStorage.removeItem('sway.pendingAction');
             setPendingAction(null);
@@ -425,7 +461,10 @@ export default function PatronView({
             return;
           }
           setPendingActionMessage('Connection degraded. Sway will retry reconciliation when the network is available.');
-        });
+        }
+        if (!cancelled) retryTimer = window.setTimeout(reconcile, 2000);
+      };
+      void reconcile();
     } catch {
       localStorage.removeItem('sway.pendingAction');
       setPendingAction(null);
@@ -433,8 +472,9 @@ export default function PatronView({
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, []);
+  }, [pendingAction]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -494,6 +534,12 @@ export default function PatronView({
       try {
         const response = await submitAction();
         if (response?.success || response?.reconciled) return response;
+        if (response?.pending) {
+          throw Object.assign(new Error('The backend is still reconciling this action.'), {
+            status: 202,
+            body: response
+          });
+        }
         throw new Error('Backend did not confirm the action.');
       } catch (error: any) {
         lastError = error;
@@ -814,31 +860,22 @@ export default function PatronView({
     }
   };
 
-  const completeCheckoutSuccess = (completedActionType: 'request' | 'boost') => {
-    setBackendConfirmed(true);
-    setPaymentConfirmationState(null);
-    setStripeConfigError(null);
-    setPendingAction(null);
-    localStorage.removeItem('sway.pendingAction');
-    setTimeout(() => {
-      setBackendConfirmed(false);
-      setCheckoutPayload(null);
-      setBoostingItem(null);
-      setSelectedTrack(null);
-      setCommentMessage('');
-      setSenderName('');
-      setBoostPatronName('');
-      setTipAmount(session.minimumTip);
-      setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
-    }, 2000);
-  };
-
   const handleCheckoutError = async (e: unknown) => {
     console.error(e);
     const status = (e as any)?.status;
     const body = (e as any)?.body;
     const backendMessage = body?.error;
     const paymentStatus = body?.payment_status;
+
+    if (status === 202 || body?.pending) {
+      setDegraded(true);
+      setPendingActionMessage(
+        paymentStatus === 'reversal_pending'
+          ? 'Your payment release is still being confirmed. Sway will keep checking safely.'
+          : 'Sway is still confirming this action. It has not been shown as complete yet.'
+      );
+      return;
+    }
 
     if (status === 402 && paymentStatus === 'requires_confirmation') {
       setDegraded(false);
@@ -2192,11 +2229,13 @@ export default function PatronView({
                     <h3 className="font-sans text-base font-bold text-white">
                       {previewMode
                         ? 'Demo Only'
-                        : isPaymentConfirmationPending
-                          ? 'Payment authorization required'
-                          : checkoutPayload.type === 'request'
-                            ? 'Confirm Request'
-                            : 'Confirm Boost'}
+                        : isDurableActionPending
+                          ? 'Confirmation pending'
+                          : isPaymentConfirmationPending
+                            ? 'Payment authorization required'
+                            : checkoutPayload.type === 'request'
+                              ? 'Confirm Request'
+                              : 'Confirm Boost'}
                     </h3>
                     {previewMode && (
                       <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
@@ -2205,7 +2244,11 @@ export default function PatronView({
                     )}
                     {!previewMode && (
                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                        {isPaymentConfirmationPending ? PAYMENT_CONFIRMATION_WAITING_COPY : PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                        {isDurableActionPending
+                          ? (pendingActionMessage || PAYMENT_CONFIRMATION_WAITING_COPY)
+                          : isPaymentConfirmationPending
+                            ? PAYMENT_CONFIRMATION_WAITING_COPY
+                            : PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                       </p>
                     )}
                   </div>
@@ -2294,7 +2337,7 @@ export default function PatronView({
                     {checkoutPayload.clientSecret && stripePromise && stripeElementsOptions ? (
                       <Elements stripe={stripePromise} options={stripeElementsOptions} key={checkoutPayload.clientSecret}>
                         <StripeAuthorizationForm
-                          disabled={isPaying || previewMode}
+                          disabled={isPaying || isDurableActionPending || previewMode}
                           onAuthorized={finalizeStripeAuthorization}
                           onError={(message) => {
                             setStripeConfigError(message);
@@ -2324,9 +2367,11 @@ export default function PatronView({
                             ? 'Demo only: sending disabled'
                             : isPaying
                               ? "Sending..."
-                              : !checkoutPayload.isTip && session.paymentsEnabled === false
-                                ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
-                                : "Confirm Payment"}
+                              : isDurableActionPending
+                                ? 'Confirmation pending'
+                                : !checkoutPayload.isTip && session.paymentsEnabled === false
+                                  ? (checkoutPayload.type === 'boost' ? 'Confirm Upvote' : 'Confirm Request')
+                                  : "Confirm Payment"}
                         </button>
 
                         <button
@@ -2337,7 +2382,7 @@ export default function PatronView({
                             setPaymentConfirmationState(null);
                             setStripeConfigError(null);
                           }}
-                          disabled={isPaying}
+                          disabled={isPaying || isDurableActionPending}
                           className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                           Cancel

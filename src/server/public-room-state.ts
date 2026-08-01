@@ -88,7 +88,10 @@ export function sanitizePatronMutationResponseBody(body: unknown): Record<string
   const sanitized: Record<string, unknown> = {};
   if (typeof body.success === 'boolean') sanitized.success = body.success;
   if (typeof body.reconciled === 'boolean') sanitized.reconciled = body.reconciled;
+  if (typeof body.pending === 'boolean') sanitized.pending = body.pending;
+  if (typeof body.terminal === 'boolean') sanitized.terminal = body.terminal;
   if (typeof body.error === 'string') sanitized.error = body.error;
+  if (typeof body.payment_status === 'string') sanitized.payment_status = body.payment_status;
 
   if (isRecord(body.state)
     && isRecord(body.state.session)

@@ -74,15 +74,15 @@ assert.equal(talentApp.includes('TalentSignupCard'), false, 'The split performer
 
 for (const required of [
   "paymentAccountStatus === 'payouts_enabled'",
-  'destinationRow.payoutsEnabled',
-  "reason: 'seller_payout_not_ready'",
+  'destination.payoutsEnabled',
+  "'seller_payout_not_ready'",
   'destinationAccountId,',
-  'applicationFeeAmountCents: feePolicy.platformFeeCents'
+  'applicationFeeAmountCents: payment.platformFee'
 ]) {
   assert.equal(paymentService.includes(required), true, `Payout gate missing: ${required}`);
 }
 assert.equal(paymentService.includes('the charge still proceeds without a destination'), false, 'Platform-balance fallback language must be removed.');
-assert.equal(paymentService.includes("reason: `refund_not_terminal:${result.status}`"), true, 'Pending provider refunds must remain non-terminal.');
+assert.equal(paymentService.includes("throw new Error(`refund_not_terminal:${result.status}`)"), true, 'Pending provider refunds must remain non-terminal.');
 assert.equal(paymentService.includes('Promise<PaymentReversalResult[]>'), true, 'Batch reversals must return every result to callers.');
 assert.equal(paymentProvider.includes("!secretKey.startsWith('sk_test_')"), true, 'Live-room provider must remain test-key only.');
 

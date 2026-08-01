@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { Client } from 'pg';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 const root = process.cwd();
 const databaseUrl = process.env.DATABASE_URL;
@@ -14,6 +15,7 @@ if (!disposableProofEnabled) {
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for the disposable projection proof.');
 }
+assertDisposableDatabaseTarget({ databaseUrl, approval: disposableProofEnabled ? 'true' : undefined, label: 'Public room state projection proof' });
 
 const parsedDatabaseUrl = new URL(databaseUrl);
 const databaseName = parsedDatabaseUrl.pathname.replace(/^\//, '');

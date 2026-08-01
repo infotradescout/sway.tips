@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { build } from 'esbuild';
 import { Client } from 'pg';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 const root = process.cwd();
 const databaseUrl = process.env.DATABASE_URL;
@@ -16,6 +17,7 @@ if (!disposableProofEnabled) {
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for the disposable account-lifecycle proof.');
 }
+assertDisposableDatabaseTarget({ databaseUrl, approval: disposableProofEnabled ? 'true' : undefined, label: 'Pro Mode account-lifecycle proof' });
 
 const parsedDatabaseUrl = new URL(databaseUrl);
 const databaseName = parsedDatabaseUrl.pathname.replace(/^\//, '');

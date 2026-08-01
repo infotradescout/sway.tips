@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 const root = process.cwd();
 const failures = [];
@@ -70,11 +71,16 @@ function splitStatements(sql) {
 }
 
 async function runDatabaseProof() {
+  if (process.env.SWAY_ALLOW_DISPOSABLE_DATABASE_RESET !== 'true') {
+    console.log('Active room registry database proof skipped: explicit disposable-database approval not set.');
+    return;
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.log('Active room registry contract database proof skipped: DATABASE_URL not set.');
     return;
   }
+  assertDisposableDatabaseTarget({ databaseUrl, label: 'Active room registry database proof' });
 
   const { Client } = await import('pg');
   const { build } = await import('esbuild');

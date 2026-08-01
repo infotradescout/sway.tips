@@ -72,7 +72,37 @@ requireIncludes(partnerStoreSource, 'platformFeeCents: Math.min(proposedPlatform
 requireIncludes(serverSource, 'attributionSource: proposedFee.attributionSource,', 'The tip/request route must persist attributionSource.');
 requireIncludes(serverSource, 'attributionSource: proposedBoostFee.attributionSource,', 'The boost route must persist attributionSource.');
 requireIncludes(serviceSource, 'attributionSource: input.attributionSource,', 'payment-service.ts must persist attributionSource on the payments row.');
-requireIncludes(serviceSource, 'payment.attributionSource === input.attributionSource', 'confirmAuthorizedAction must re-verify attribution consistency, not just the fee amount.');
+
+// Confirmation is an identity/provider-truth reconciliation step, not a second
+// fee-policy decision. Attribution was resolved server-side and frozen when the
+// authorization was reserved. Do not accept a mutable campaign snapshot from
+// the caller on the post-SCA request; use the persisted payment/operation truth.
+const confirmationInputSource = serviceSource.slice(
+  serviceSource.indexOf('export type ConfirmAuthorizedActionInput'),
+  serviceSource.indexOf('type FeePolicySnapshot')
+);
+for (const callerControlledSnapshotField of ['attributionSource', 'campaignId', 'commissionBpsApplied']) {
+  if (confirmationInputSource.includes(callerControlledSnapshotField)) {
+    failures.push(`ConfirmAuthorizedActionInput must not accept caller-controlled ${callerControlledSnapshotField}.`);
+  }
+}
+
+const reservationSource = serviceSource.slice(
+  serviceSource.indexOf('async function reserveAuthorization'),
+  serviceSource.indexOf('async function resultForExistingAuthorization')
+);
+requireIncludes(reservationSource, 'existing.attributionSource !== input.attributionSource', 'Authorization reservation replay must reject a changed attribution snapshot.');
+requireIncludes(reservationSource, 'existing.campaignId !== input.campaignId', 'Authorization reservation replay must reject a changed campaign snapshot.');
+requireIncludes(reservationSource, 'existing.commissionBpsApplied !== input.commissionBpsApplied', 'Authorization reservation replay must reject a changed commission snapshot.');
+
+const confirmationSource = serviceSource.slice(
+  serviceSource.indexOf('async function confirmAuthorizedAction'),
+  serviceSource.indexOf('async function ensureDurablePaymentBinding')
+);
+requireIncludes(confirmationSource, '.where(eq(payments.processorPaymentIntentId, input.processorPaymentIntentId))', 'Confirmation must resolve the immutable payment by its provider identity.');
+requireIncludes(confirmationSource, 'const payload = asRecord(operation.requestPayload);', 'Confirmation must load the durable authorization snapshot.');
+requireIncludes(confirmationSource, '...feePolicyFromPayload(payload)', 'Confirmation results must return the durable fee-policy snapshot.');
+requireIncludes(serverSource, 'const authorization = confirmedAuthorization ?? await paymentService.authorizeAction({', 'A confirmed authorization must supersede any fee proposal recomputed from the follow-up request.');
 
 // 6. Attribution must be resolved server-side against a real, active,
 //    performer-scoped campaign -- never trusted from the client directly, and

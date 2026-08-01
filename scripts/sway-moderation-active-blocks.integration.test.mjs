@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { Client } from 'pg';
 import { build } from 'esbuild';
+import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 
 function getDatabaseUrl() {
   const value = process.env.DATABASE_URL;
   if (!value) {
     throw new Error('DATABASE_URL is required for live Postgres moderation integration test.');
   }
-  return value;
+  return assertDisposableDatabaseTarget({ databaseUrl: value, label: 'Moderation active-blocks integration test' });
 }
 
 function splitStatements(sql) {

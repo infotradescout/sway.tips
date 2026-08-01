@@ -18,6 +18,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Two-release migration handoff. Keep false for the schema rollout; flip
+      # true only after that exact build is live and the legacy writer drained.
+      - key: SWAY_LIVE_ROOM_DURABILITY_WRITES_ENABLED
+        value: "false"
       # Native ticket money remains explicitly closed in production until the
       # versioned approval, legal, finance, support, and live-proof gates pass.
       - key: SWAY_NATIVE_TICKETS_ENABLED

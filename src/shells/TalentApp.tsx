@@ -161,6 +161,14 @@ export default function TalentApp() {
     throw new Error('Demo data is read-only. No backend mutation was sent.');
   };
 
+  const applyDurableMutationState = (data: any) => {
+    if (data?.state) {
+      setBState(data.state);
+      return;
+    }
+    if (data?.pending) window.dispatchEvent(new Event('re-fetch-state'));
+  };
+
   const handleStartSession = async (setupData: PerformerRoomSetupData) => {
     if (demoMode) return rejectDemoMutation();
     try {
@@ -209,7 +217,7 @@ export default function TalentApp() {
     if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/request/triage', { requestId, action });
-      setBState(data.state);
+      applyDurableMutationState(data);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
@@ -220,7 +228,7 @@ export default function TalentApp() {
     if (demoMode) return rejectDemoMutation();
     try {
       const data = await postJson('/api/request/fulfill', { requestId });
-      setBState(data.state);
+      applyDurableMutationState(data);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
@@ -234,7 +242,7 @@ export default function TalentApp() {
         requestId,
         reason: 'Performer hid this request from the live queue.'
       });
-      setBState(data.state);
+      applyDurableMutationState(data);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);

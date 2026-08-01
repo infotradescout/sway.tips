@@ -13,7 +13,9 @@ const paymentTransitionGraph: Record<PaymentState, ReadonlyArray<PaymentState>> 
   refunded: [],
   failed: [],
   disputed: ['refunded', 'paid_out'],
-  paid_out: []
+  // Destination-charge refunds can occur after funds were paid out; Stripe's
+  // full refund truth must still supersede the earlier payout terminal.
+  paid_out: ['refunded', 'disputed']
 };
 
 export function isFinitePaymentState(input: string): input is PaymentState {
@@ -40,6 +42,7 @@ export type TransitionPaymentInput = {
   actorId?: string | null;
   metadata?: Record<string, unknown>;
   allowOutOfOrderNoop?: boolean;
+  allowProviderTruthRecovery?: boolean;
 };
 
 export function createPaymentLifecycleService(databaseUrl?: string) {
@@ -92,7 +95,10 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
       };
     }
 
-    if (!canTransitionPaymentState(previousStatus, input.nextStatus)) {
+    const providerTruthRecovery = input.allowProviderTruthRecovery === true
+      && previousStatus === 'failed'
+      && ['payment_pending', 'authorized', 'captured', 'voided'].includes(input.nextStatus);
+    if (!canTransitionPaymentState(previousStatus, input.nextStatus) && !providerTruthRecovery) {
       if (input.allowOutOfOrderNoop) {
         return {
           status: 'ignored_out_of_order' as const,

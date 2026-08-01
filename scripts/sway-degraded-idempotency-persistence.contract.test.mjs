@@ -42,10 +42,12 @@ for (const term of [
 }
 
 for (const term of [
-  'db.insert(clientPendingActions)',
-  'db.insert(idempotencyKeys)',
+  'tx.insert(clientPendingActions)',
+  'tx.insert(idempotencyKeys)',
+  '.onConflictDoNothing().returning',
+  "return { kind: 'pending' }",
   'db.update(idempotencyKeys)',
-  'db.update(clientPendingActions)',
+  'tx.update(clientPendingActions)',
   'eq(idempotencyKeys.idempotencyKey, input.idempotencyKey)',
   "record.intentFingerprint !== input.intentFingerprint",
   "return { kind: 'misuse' }",
@@ -99,6 +101,8 @@ for (const term of [
   'onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey)',
   "result?.status === 'reconciled'",
   "result?.status === 'pending'",
+  'window.setTimeout(reconcile, 2000)',
+  'if (response?.pending)',
   'setBackendConfirmed(true)',
   'localStorage.setItem',
   'localStorage.removeItem'
@@ -112,6 +116,8 @@ const completeCheckoutSuccessBody = extractFunctionBody(patron, 'completeCheckou
 if (!completeCheckoutSuccessBody) failures.push('Patron client missing completeCheckoutSuccess function.');
 const boundedRetryBody = extractFunctionBody(patron, 'submitWithBoundedRetry');
 if (!boundedRetryBody) failures.push('Patron client missing submitWithBoundedRetry function.');
+const checkoutErrorBody = extractFunctionBody(patron, 'handleCheckoutError');
+if (!checkoutErrorBody) failures.push('Patron client missing handleCheckoutError function.');
 
 if (completePaymentBody.indexOf('beginPendingSubmit') === -1 || completePaymentBody.indexOf('beginPendingSubmit') > completePaymentBody.indexOf('submitCheckoutPayload')) {
   failures.push('Patron client must persist pending action before network submit.');
@@ -123,6 +129,29 @@ if (completePaymentBody.indexOf('completeCheckoutSuccess') < completePaymentBody
 
 if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(completeCheckoutSuccessBody)) {
   failures.push('Patron client must clear pending action only after backend confirmation.');
+}
+
+const pending202Start = checkoutErrorBody.indexOf('if (status === 202 || body?.pending)');
+const confirmationRequiredStart = checkoutErrorBody.indexOf("if (status === 402 && paymentStatus === 'requires_confirmation')");
+const pending202Body = pending202Start >= 0 && confirmationRequiredStart > pending202Start
+  ? checkoutErrorBody.slice(pending202Start, confirmationRequiredStart)
+  : '';
+if (!pending202Body) {
+  failures.push('Patron client must classify durable HTTP 202 as nonterminal pending state.');
+} else if (
+  pending202Body.includes("localStorage.removeItem('sway.pendingAction')")
+  || pending202Body.includes('setPendingAction(null)')
+  || pending202Body.includes('setCheckoutPayload(null)')
+) {
+  failures.push('Patron client must preserve the pending payload and checkout while HTTP 202 reconciles.');
+}
+
+if (!patron.includes('const isSubmitLocked = isPaying || isPaymentConfirmationPending || isDurableActionPending;')) {
+  failures.push('Patron client must lock duplicate submit while a durable action is reconciling.');
+}
+
+if (!/result\?\.status === 'reconciled'[\s\S]{0,220}completeCheckoutSuccess\(parsed\.type === 'boost' \? 'boost' : 'request'\)/.test(patron)) {
+  failures.push('Patron reconciliation success must enter the normal confirmed checkout completion path.');
 }
 
 if (!patronApp.includes('expires_at: expiresAt')) {
