@@ -442,6 +442,19 @@ function isShellAllowed(shell: SwayShell): boolean {
   return !(isProduction && shell === 'dev-sandbox');
 }
 
+type DiscoveryFacts = {
+  entityType: 'performer' | 'event' | 'release' | 'live_room';
+  entityName: string;
+  heading: string;
+  summary: string;
+  categories: string[];
+  location?: string | null;
+  primaryActionLabel: string;
+  primaryActionHref: string;
+  relatedLinks: Array<{ label: string; href: string }>;
+  lastUpdated?: string | null;
+};
+
 type ShareMetadata = {
   title: string;
   description: string;
@@ -450,6 +463,7 @@ type ShareMetadata = {
   imageAlt: string;
   robots?: 'noindex, nofollow';
   structuredData?: Record<string, unknown>;
+  discoveryFacts?: DiscoveryFacts;
 };
 
 type PublicShareProfile = {
@@ -459,6 +473,8 @@ type PublicShareProfile = {
   headline: string | null;
   city: string | null;
   avatarUrl: string | null;
+  specialties: string[] | null;
+  updatedAt: Date | null;
 };
 
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
@@ -487,14 +503,71 @@ function absoluteShareUrl(req: express.Request, pathOrUrl: string) {
   return `${resolveRequestOrigin(req)}${pathAndQuery}`;
 }
 
+/** Public entity canonical URLs always use app.sway.tips (apex/www may serve the same app). */
+function canonicalPublicUrl(pathOrUrl: string) {
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    try {
+      const parsed = new URL(pathOrUrl);
+      return `${CANONICAL_APP_ORIGIN}${parsed.pathname}${parsed.search}`;
+    } catch {
+      return pathOrUrl;
+    }
+  }
+  const pathAndQuery = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+  return `${CANONICAL_APP_ORIGIN}${pathAndQuery.split('#')[0]}`;
+}
+
 function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<ShareMetadata, 'url' | 'image'>> & { url?: string; image?: string } = {}): ShareMetadata {
   return {
     title: overrides.title || DEFAULT_SHARE_TITLE,
     description: overrides.description || DEFAULT_SHARE_DESCRIPTION,
-    url: absoluteShareUrl(req, overrides.url || req.originalUrl || '/'),
+    url: overrides.url
+      ? canonicalPublicUrl(overrides.url)
+      : canonicalPublicUrl(req.originalUrl || '/'),
     image: absoluteShareUrl(req, overrides.image || DEFAULT_SHARE_IMAGE_PATH),
-    imageAlt: overrides.imageAlt || 'Sway approved neon brand artwork'
+    imageAlt: overrides.imageAlt || 'Sway approved neon brand artwork',
+    robots: overrides.robots,
+    structuredData: overrides.structuredData,
+    discoveryFacts: overrides.discoveryFacts
   };
+}
+
+function escapeDiscoveryHtmlText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
+  const categories = facts.categories.map((value) => value.trim()).filter(Boolean);
+  const related = facts.relatedLinks
+    .filter((link) => link.label.trim() && link.href.trim())
+    .map((link) => `<li><a href="${escapeDiscoveryHtmlText(link.href)}">${escapeDiscoveryHtmlText(link.label)}</a></li>`)
+    .join('');
+  const location = facts.location?.trim()
+    ? `<p data-discovery="location">${escapeDiscoveryHtmlText(facts.location.trim())}</p>`
+    : '';
+  const lastUpdated = facts.lastUpdated?.trim()
+    ? `<p data-discovery="last-updated">Last updated: ${escapeDiscoveryHtmlText(facts.lastUpdated.trim())}</p>`
+    : '';
+  const categoryHtml = categories.length
+    ? `<p data-discovery="categories">${categories.map((value) => escapeDiscoveryHtmlText(value)).join(' · ')}</p>`
+    : '';
+
+  return [
+    '<main id="sway-discovery-first-response" data-sway-discovery="server-rendered">',
+    `  <h1>${escapeDiscoveryHtmlText(facts.heading)}</h1>`,
+    `  <p data-discovery="summary">${escapeDiscoveryHtmlText(facts.summary)}</p>`,
+    `  <p data-discovery="entity"><span data-discovery="entity-name">${escapeDiscoveryHtmlText(facts.entityName)}</span> · <span data-discovery="entity-type">${escapeDiscoveryHtmlText(facts.entityType)}</span></p>`,
+    location,
+    categoryHtml,
+    `  <p data-discovery="primary-action"><a href="${escapeDiscoveryHtmlText(facts.primaryActionHref)}">${escapeDiscoveryHtmlText(facts.primaryActionLabel)}</a></p>`,
+    related ? `  <ul data-discovery="related-links">${related}</ul>` : '',
+    lastUpdated,
+    '</main>'
+  ].filter(Boolean).join('\n    ');
 }
 
 function renderShareMetaTags(metadata: ShareMetadata) {
@@ -541,9 +614,17 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
     .replace(/\s*<title>[\s\S]*?<\/title>/i, '')
     .replace(/\s*<link\s+rel=["']canonical["'][^>]*>/gi, '')
     .replace(/\s*<script\s+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\s*<main\s+id=["']sway-discovery-first-response["'][\s\S]*?<\/main>/gi, '')
     .replace(/\s*<meta\s+(?:name|property)=["'](?:description|robots|og:[^"']+|twitter:[^"']+|sway-share-meta)["'][^>]*>/gi, '');
 
-  return withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
+  const withHead = withoutExisting.replace('</head>', `    ${metaTags}\n  </head>`);
+  if (!metadata.discoveryFacts) return withHead;
+
+  const discoveryBody = renderDiscoveryBodyHtml(metadata.discoveryFacts);
+  return withHead.replace(
+    /<div id="root"><\/div>/i,
+    `<div id="root">\n    ${discoveryBody}\n    </div>`
+  );
 }
 
 async function findPublicShareProfile(rawHandle: string): Promise<PublicShareProfile | null> {
@@ -557,7 +638,9 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
       bio: performers.bio,
       headline: performerPublicProfiles.headline,
       city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      specialties: performerPublicProfiles.specialties,
+      updatedAt: performerPublicProfiles.updatedAt
     })
     .from(performers)
     .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
@@ -588,7 +671,9 @@ async function findPublicShareProfile(rawHandle: string): Promise<PublicSharePro
       bio: performerProfilePreviews.bio,
       headline: performerProfilePreviews.headline,
       city: performerProfilePreviews.city,
-      avatarUrl: performerProfilePreviews.avatarUrl
+      avatarUrl: performerProfilePreviews.avatarUrl,
+      specialties: performerProfilePreviews.specialties,
+      updatedAt: performerProfilePreviews.updatedAt
     })
     .from(performerProfilePreviews)
     .where(and(
@@ -726,6 +811,13 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
     const locationCopy = profile.city ? ` in ${profile.city}` : '';
     const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
+    const canonicalProfileUrl = canonicalPublicUrl(`/p/${profile.handle}`);
+    const categories = Array.isArray(profile.specialties)
+      ? profile.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 8)
+      : [];
+    const lastUpdated = profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
+      ? profile.updatedAt.toISOString().slice(0, 10)
+      : null;
 
     return defaultShareMetadata(req, {
       title,
@@ -739,10 +831,26 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         name: profile.displayName,
         alternateName: `@${profile.handle}`,
         description,
-        url: absoluteShareUrl(req, `/p/${profile.handle}`),
+        url: canonicalProfileUrl,
         image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
         homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
-        mainEntityOfPage: absoluteShareUrl(req, `/p/${profile.handle}`)
+        mainEntityOfPage: canonicalProfileUrl,
+        knowsAbout: categories.length ? categories : undefined
+      },
+      discoveryFacts: {
+        entityType: 'performer',
+        entityName: profile.displayName || `@${profile.handle}`,
+        heading: profile.displayName || `@${profile.handle}`,
+        summary: description,
+        categories: categories.length ? categories : ['Performer'],
+        location: profile.city,
+        primaryActionLabel: 'View performer page',
+        primaryActionHref: canonicalProfileUrl,
+        relatedLinks: [
+          { label: 'Discover shows and live rooms', href: canonicalPublicUrl('/discover') },
+          { label: 'About Sway', href: canonicalPublicUrl('/about') }
+        ],
+        lastUpdated
       }
     });
   }
@@ -767,9 +875,16 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         : '';
     const cancellationCopy = event.status === 'cancelled' ? ' This event has been cancelled.' : '';
 
+    const canonicalEventUrl = canonicalPublicUrl(`/e/${event.id}`);
+    const eventDescription = `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim();
+    const venueLabel = event.locationIsTba
+      ? 'Location TBA'
+      : [event.locationName, event.city].filter(Boolean).join(' · ') || null;
+    const performerPath = event.performer.handle ? `/p/${event.performer.handle}` : null;
+
     return defaultShareMetadata(req, {
       title: `${event.title} on Sway`,
-      description: `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim(),
+      description: eventDescription,
       url: `/e/${event.id}`,
       image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
       imageAlt: `${event.title} event artwork`,
@@ -785,7 +900,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
           : 'https://schema.org/EventScheduled',
         eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
         image: event.coverImageUrl || event.performer.avatarUrl || undefined,
-        url: absoluteShareUrl(req, `/e/${event.id}`),
+        url: canonicalEventUrl,
         location: event.locationIsTba ? undefined : {
           '@type': 'Place',
           name: event.locationName || event.city || undefined,
@@ -794,16 +909,31 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         performer: {
           '@type': 'Person',
           name: event.performer.displayName,
-          url: event.performer.handle
-            ? absoluteShareUrl(req, `/p/${event.performer.handle}`)
-            : undefined
+          url: performerPath ? canonicalPublicUrl(performerPath) : undefined
         }
       },
       robots: event.visibility === 'unlisted'
         || event.status === 'cancelled'
         || eventDate.getTime() <= Date.now()
         ? 'noindex, nofollow'
-        : undefined
+        : undefined,
+      discoveryFacts: {
+        entityType: 'event',
+        entityName: event.title,
+        heading: event.title,
+        summary: eventDescription,
+        categories: ['Event', 'Live show'],
+        location: venueLabel,
+        primaryActionLabel: 'Attend this event',
+        primaryActionHref: canonicalEventUrl,
+        relatedLinks: [
+          ...(performerPath
+            ? [{ label: `View ${event.performer.displayName}`, href: canonicalPublicUrl(performerPath) }]
+            : []),
+          { label: 'Discover shows', href: canonicalPublicUrl('/discover') }
+        ],
+        lastUpdated: null
+      }
     });
   }
 
@@ -815,9 +945,11 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       : release.scheduledReleaseAt
         ? `Planned for ${new Date(release.scheduledReleaseAt).toLocaleDateString('en-US')}.`
         : 'Release ready; destination delivery is not yet confirmed.';
+    const releaseDescription = `${dateCopy} View the official credits and provider-confirmed availability on Sway.`;
+    const canonicalReleaseUrl = canonicalPublicUrl(release.releasePath);
     return defaultShareMetadata(req, {
       title: `${release.title} by ${release.primaryArtistName}`,
-      description: `${dateCopy} View the official credits and provider-confirmed availability on Sway.`,
+      description: releaseDescription,
       url: release.releasePath,
       image: release.artworkUrl || DEFAULT_SHARE_IMAGE_PATH,
       imageAlt: `${release.title} release artwork`,
@@ -831,8 +963,23 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         },
         datePublished: release.publishedAt || release.scheduledReleaseAt || undefined,
         image: release.artworkUrl || undefined,
-        url: absoluteShareUrl(req, release.releasePath),
+        url: canonicalReleaseUrl,
         numTracks: Array.isArray(release.recordings) ? release.recordings.length : undefined
+      },
+      discoveryFacts: {
+        entityType: 'release',
+        entityName: release.title,
+        heading: `${release.title} by ${release.primaryArtistName}`,
+        summary: releaseDescription,
+        categories: ['Release', 'Self-Production'],
+        primaryActionLabel: 'View release',
+        primaryActionHref: canonicalReleaseUrl,
+        relatedLinks: [
+          { label: 'Discover on Sway', href: canonicalPublicUrl('/discover') }
+        ],
+        lastUpdated: release.publishedAt
+          ? new Date(release.publishedAt).toISOString().slice(0, 10)
+          : null
       }
     });
   }
@@ -867,13 +1014,28 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       ? 'The live room is wrapping up.'
       : 'The live room is open.';
     const description = room.headline || `${statusCopy} Send requests, tips, boosts, and follow the queue in real time.`;
+    const roomPath = room.routePath || req.originalUrl;
+    const canonicalRoomUrl = canonicalPublicUrl(roomPath);
 
     return defaultShareMetadata(req, {
       title,
       description,
-      url: room.routePath || req.originalUrl,
+      url: roomPath,
       image: normalizePublicProfileUrl(room.avatarUrl) || DEFAULT_SHARE_IMAGE_PATH,
-      imageAlt: `${performerName} Sway live room`
+      imageAlt: `${performerName} Sway live room`,
+      discoveryFacts: {
+        entityType: 'live_room',
+        entityName: performerName,
+        heading: title,
+        summary: description,
+        categories: ['Live Room'],
+        primaryActionLabel: 'Enter Live Room',
+        primaryActionHref: canonicalRoomUrl,
+        relatedLinks: [
+          { label: 'Discover live rooms', href: canonicalPublicUrl('/discover') }
+        ],
+        lastUpdated: null
+      }
     });
   }
 
@@ -7138,10 +7300,25 @@ const shellTelemetryAllowedEvents = new Set([
   'guest_to_performer_started',
   'public_profile_shared',
   'public_event_shared',
-  'public_release_shared'
+  'public_release_shared',
+  'discovery_landing',
+  'discovery_entity_view',
+  'discovery_primary_action'
 ]);
 
 const shellTelemetryAllowedKeys = new Set([
+  'shell',
+  'surface',
+  'event',
+  'route_family',
+  'has_route_context',
+  'has_session_context',
+  'build_commit',
+  'attribution_channel',
+  'entity_kind'
+]);
+
+const shellTelemetryRequiredKeys = new Set([
   'shell',
   'surface',
   'event',
@@ -7188,6 +7365,8 @@ type ShellTelemetryPayload = {
   has_route_context: boolean;
   has_session_context: boolean;
   build_commit: string;
+  attribution_channel?: string;
+  entity_kind?: string;
 };
 
 function validateShellTelemetryPayload(body: unknown): { ok: true; payload: ShellTelemetryPayload } | { ok: false; status: number; error: string } {
@@ -7207,7 +7386,7 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
     }
   }
 
-  for (const key of shellTelemetryAllowedKeys) {
+  for (const key of shellTelemetryRequiredKeys) {
     if (!(key in payload)) {
       return { ok: false, status: 400, error: `Missing telemetry field: ${key}` };
     }
@@ -7231,6 +7410,20 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
   if (typeof payload.build_commit !== 'string' || payload.build_commit.length === 0 || payload.build_commit.length > 128) {
     return { ok: false, status: 400, error: 'build_commit must be a non-empty string.' };
   }
+  if (payload.attribution_channel !== undefined) {
+    if (typeof payload.attribution_channel !== 'string'
+      || payload.attribution_channel.length === 0
+      || payload.attribution_channel.length > 64
+      || /[?&=#]/.test(payload.attribution_channel)) {
+      return { ok: false, status: 400, error: 'attribution_channel must be a coarse, query-free string.' };
+    }
+  }
+  if (payload.entity_kind !== undefined) {
+    if (typeof payload.entity_kind !== 'string'
+      || !['performer', 'event', 'release', 'live_room'].includes(payload.entity_kind)) {
+      return { ok: false, status: 400, error: 'entity_kind must be a supported public entity kind.' };
+    }
+  }
 
   return {
     ok: true,
@@ -7241,7 +7434,13 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
       route_family: payload.route_family,
       has_route_context: payload.has_route_context,
       has_session_context: payload.has_session_context,
-      build_commit: payload.build_commit
+      build_commit: payload.build_commit,
+      ...(typeof payload.attribution_channel === 'string'
+        ? { attribution_channel: payload.attribution_channel }
+        : {}),
+      ...(typeof payload.entity_kind === 'string'
+        ? { entity_kind: payload.entity_kind }
+        : {})
     }
   };
 }
@@ -12513,6 +12712,8 @@ function escapeXml(value: string) {
 }
 
 app.get('/robots.txt', (_req, res) => {
+  // Canonical host for sitemap locs and HTML <link rel="canonical"> is app.sway.tips.
+  // Apex/www may serve the same crawler files; they must keep pointing at the app host.
   res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send([
     'User-agent: *',
     'Allow: /',
@@ -12520,6 +12721,7 @@ app.get('/robots.txt', (_req, res) => {
     'Disallow: /talent',
     'Disallow: /account',
     'Disallow: /api/',
+    `# Canonical discovery host: ${CANONICAL_APP_HOST}`,
     `Sitemap: ${CANONICAL_APP_ORIGIN}/sitemap.xml`
   ].join('\n'));
 });
@@ -12530,6 +12732,9 @@ app.get('/llms.txt', (_req, res) => {
     '',
     '> Sway gives working performers one public home for profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.',
     '',
+    `Canonical public host: ${CANONICAL_APP_ORIGIN}`,
+    'Apex and www may redirect or mirror; permanent addresses and sitemap locs use the app host.',
+    '',
     '## Public surfaces',
     `- [About Sway](${CANONICAL_APP_ORIGIN}/about)`,
     `- [Discover performers, shows, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
@@ -12538,17 +12743,27 @@ app.get('/llms.txt', (_req, res) => {
     `- [Privacy](${CANONICAL_APP_ORIGIN}/privacy)`,
     '',
     'Performer pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
+    'Venue/location facts appear on event pages when published; Sway does not invent standalone venue catalog pages.',
+    'Live Rooms (/g/{id}) are operating product pages when a room is active; Self-Production releases are a separate lane.',
+    'Sway.DIO is not a live discovery surface.',
     'Only published, public, non-suspended records belong in search results. Planned delivery is not represented as confirmed store availability.'
   ].join('\n'));
 });
 
 app.get('/sitemap.xml', async (_req, res) => {
   const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
-  const urls = new Set(staticPaths.map((route) => `${CANONICAL_APP_ORIGIN}${route}`));
+  type SitemapEntry = { loc: string; lastmod?: string | null };
+  const entries = new Map<string, SitemapEntry>();
+  for (const route of staticPaths) {
+    entries.set(`${CANONICAL_APP_ORIGIN}${route}`, { loc: `${CANONICAL_APP_ORIGIN}${route}` });
+  }
 
   if (businessDb) {
     const [profileRows, previewRows, eventRows, releaseRows] = await Promise.all([
-      businessDb.select({ handle: performers.handle })
+      businessDb.select({
+        handle: performers.handle,
+        updatedAt: performerPublicProfiles.updatedAt
+      })
         .from(performers)
         .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
         .where(and(
@@ -12560,7 +12775,10 @@ app.get('/sitemap.xml', async (_req, res) => {
             or nullif(trim(${performerPublicProfiles.avatarUrl}), '') is not null
           )`
         )),
-      businessDb.select({ handle: performerProfilePreviews.handle })
+      businessDb.select({
+        handle: performerProfilePreviews.handle,
+        updatedAt: performerProfilePreviews.updatedAt
+      })
         .from(performerProfilePreviews)
         .where(and(
           eq(performerProfilePreviews.isActive, true),
@@ -12570,26 +12788,63 @@ app.get('/sitemap.xml', async (_req, res) => {
             or nullif(trim(${performerProfilePreviews.avatarUrl}), '') is not null
           )`
         )),
-      businessDb.select({ id: performerEvents.id })
+      // Venue/location is event context only — no fake /v/ venue URLs.
+      businessDb.select({
+        id: performerEvents.id,
+        updatedAt: performerEvents.updatedAt,
+        startsAt: performerEvents.startsAt
+      })
         .from(performerEvents)
-        .where(and(eq(performerEvents.status, 'published'), eq(performerEvents.visibility, 'public'), gt(performerEvents.startsAt, new Date()))),
-      businessDb.select({ id: musicReleases.id })
+        .where(and(
+          eq(performerEvents.status, 'published'),
+          eq(performerEvents.visibility, 'public'),
+          gt(performerEvents.startsAt, new Date()),
+          sql`nullif(trim(${performerEvents.title}), '') is not null`
+        )),
+      // Align with getPublicRelease: never list private distributionMode releases.
+      businessDb.select({
+        id: musicReleases.id,
+        updatedAt: musicReleases.updatedAt,
+        publishedAt: musicReleases.publishedAt
+      })
         .from(musicReleases)
-        .where(inArray(musicReleases.status, ['ready', 'scheduled', 'published']))
+        .where(and(
+          inArray(musicReleases.status, ['ready', 'scheduled', 'published']),
+          ne(musicReleases.distributionMode, 'private'),
+          sql`nullif(trim(${musicReleases.title}), '') is not null`
+        ))
     ]);
 
     for (const row of [...profileRows, ...previewRows]) {
-      if (isDiscoveryEligibleHandle(row.handle)) {
-        urls.add(`${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`);
-      }
+      if (!isDiscoveryEligibleHandle(row.handle)) continue;
+      const loc = `${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`;
+      const lastmod = row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
+        ? row.updatedAt.toISOString()
+        : null;
+      entries.set(loc, { loc, lastmod });
     }
-    for (const row of eventRows) urls.add(`${CANONICAL_APP_ORIGIN}/e/${row.id}`);
-    for (const row of releaseRows) urls.add(`${CANONICAL_APP_ORIGIN}/r/${row.id}`);
+    for (const row of eventRows) {
+      const loc = `${CANONICAL_APP_ORIGIN}/e/${row.id}`;
+      const stamp = row.updatedAt || row.startsAt;
+      const lastmod = stamp instanceof Date && !Number.isNaN(stamp.getTime()) ? stamp.toISOString() : null;
+      entries.set(loc, { loc, lastmod });
+    }
+    for (const row of releaseRows) {
+      const loc = `${CANONICAL_APP_ORIGIN}/r/${row.id}`;
+      const stamp = row.publishedAt || row.updatedAt;
+      const lastmod = stamp instanceof Date && !Number.isNaN(stamp.getTime()) ? stamp.toISOString() : null;
+      entries.set(loc, { loc, lastmod });
+    }
   }
 
-  const body = [...urls]
-    .sort()
-    .map((url) => `  <url><loc>${escapeXml(url)}</loc></url>`)
+  const body = [...entries.values()]
+    .sort((a, b) => a.loc.localeCompare(b.loc))
+    .map((entry) => {
+      const lastmod = entry.lastmod
+        ? `\n    <lastmod>${escapeXml(entry.lastmod.slice(0, 10))}</lastmod>`
+        : '';
+      return `  <url>\n    <loc>${escapeXml(entry.loc)}</loc>${lastmod}\n  </url>`;
+    })
     .join('\n');
   res.type('application/xml').set('Cache-Control', 'public, max-age=900').send(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`

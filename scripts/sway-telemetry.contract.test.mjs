@@ -40,10 +40,21 @@ for (const key of [
   'route_family',
   'has_route_context',
   'has_session_context',
-  'build_commit'
+  'build_commit',
+  'attribution_channel',
+  'entity_kind'
 ]) {
   requireIncludes(server, `'${key}'`, `Server telemetry allowlist missing key: ${key}`);
   requireIncludes(telemetryClient, `'${key}'`, `Client telemetry allowlist missing key: ${key}`);
+}
+
+for (const eventName of [
+  'discovery_landing',
+  'discovery_entity_view',
+  'discovery_primary_action'
+]) {
+  requireIncludes(server, eventName, `Missing discovery telemetry event in server.ts: ${eventName}`);
+  requireIncludes(telemetryClient, eventName, `telemetryClient must allow discovery event: ${eventName}`);
 }
 
 for (const sensitiveKey of [

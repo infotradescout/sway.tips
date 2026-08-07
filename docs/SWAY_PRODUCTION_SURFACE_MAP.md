@@ -127,9 +127,12 @@ API routes observed in `server.ts`:
 | `https://sway.tips/talent/gigs` | `200` | `text/html` | Performer console with visible demo data. |
 | `https://sway.tips/admin` | `200` | `text/html` | Operator overview with visible demo data. |
 | `https://sway.tips/overlay/00000000-0000-4000-8000-000000000001` | `200` | `text/html` | Overlay with visible demo data. |
-| `https://sway.tips/metadata.json` | `200` | `text/html` | Serves app shell HTML, not JSON metadata. |
-| `https://sway.tips/robots.txt` | `200` | `text/html` | Serves app shell HTML, not robots text. |
-| `https://sway.tips/sitemap.xml` | `200` | `text/html` | Serves app shell HTML, not sitemap XML. |
+| `https://sway.tips/metadata.json` | `200` | `text/html` | Still serves app shell HTML, not JSON metadata (legacy note). |
+| `https://sway.tips/robots.txt` | `200` | `text/plain` | **Current (2026-08-07):** valid robots text. Sitemap directive points at `https://app.sway.tips/sitemap.xml`. |
+| `https://www.sway.tips/robots.txt` | `200` | `text/plain` | Same policy; canonical discovery host remains `app.sway.tips`. |
+| `https://app.sway.tips/robots.txt` | `200` | `text/plain` | Canonical crawler policy host. |
+| `https://sway.tips/sitemap.xml` | `200` | `application/xml` | **Current (2026-08-07):** valid sitemap XML. `<loc>` values use `https://app.sway.tips/...`. |
+| `https://app.sway.tips/sitemap.xml` | `200` | `application/xml` | Canonical sitemap host; eligible performers/events/releases only. |
 
 ## Screenshot Capture Summary
 
@@ -228,10 +231,10 @@ Overlay deeper panels:
 | Public description | Present and specific. | Good. |
 | Public OG/Twitter | Present with image, dimensions, alt text. | Good. |
 | App shell titles | `Sway Patron`, `Sway Talent`, `Sway Admin`, `Sway Overlay` | P2: thin if indexed/shared directly. |
-| `metadata.json` | Local file exists, but production URL serves HTML. | P1: nonfunctional public metadata URL. |
-| `robots.txt` | Production URL serves HTML. | P1: indexing intent unclear. |
-| `sitemap.xml` | Production URL serves HTML. | P2: missing sitemap if public pages expand. |
-| Canonical | No canonical link found in public shell. | P2: add explicit apex canonical. |
+| `metadata.json` | Local file exists, but production URL may still serve HTML. | P2: make unavailable or valid JSON. |
+| `robots.txt` | **Current:** `text/plain` Allow `/` with private Disallows; Sitemap → `https://app.sway.tips/sitemap.xml`. | Keep content-type contract; do not regress to app shell. |
+| `sitemap.xml` | **Current:** `application/xml` with `app.sway.tips` locs only for eligible public URLs. | Deepen with real events/releases when eligible; never invent entities. |
+| Canonical | **Current policy:** HTML canonical + sitemap locs + robots Sitemap use `https://app.sway.tips`. Apex/www may serve the same files but must not silently diverge. | Documented; preserve agreement across hosts. |
 | Favicons | No favicon links observed. | P3/P2 depending launch bar. |
 
 ## Header And Security Signal Inventory
@@ -286,7 +289,7 @@ Risks:
 | P0 | Public landing CTAs route users into the hardcoded demo gig. | `shells/public.html` links to `/g/00000000-0000-4000-8000-000000000001` and `/overlay/00000000-0000-4000-8000-000000000001`. |
 | P1 | Auth/login copy exposes roadmap state. | `Account authentication is the next production milestone...`. |
 | P1 | Not-found route exposes internal route spine. | `Use /talent/login, /talent/gigs...`. |
-| P1 | Metadata/robots/sitemap URLs serve HTML app shells. | Live checks returned `text/html` for all three. |
+| P1 | ~~Metadata/robots/sitemap URLs serve HTML app shells.~~ **Updated 2026-08-07:** robots + sitemap now return `text/plain` / `application/xml`. Metadata.json may still be HTML. | Live probe on `c4e95655` + Public Discovery Contract v1 remediation on feature branch. |
 | P1 | Security headers are sparse. | No HSTS/CSP/nosniff/referrer/permissions headers observed. |
 | P2 | App shell titles are thin for SEO/share context. | `Sway Patron`, `Sway Talent`, etc. |
 | P2 | "Ledger" loading copy may overstate financial durability to users. | Shared loading state. |
@@ -303,8 +306,9 @@ P0:
 
 P1:
 
-- Add real `robots.txt` and make `metadata.json` either intentionally unavailable or valid JSON.
-- Add/verify `sitemap.xml` strategy if public indexable pages matter.
+- ~~Add real `robots.txt`~~ Done in production; keep contract tests failing on app-shell regression.
+- Make `metadata.json` either intentionally unavailable or valid JSON.
+- Deepen `sitemap.xml` with eligible real events/releases (no fake venues/DIO catalog).
 - Replace public roadmap/internal copy in talent login and not-found surfaces.
 - Add baseline security headers: HSTS, CSP, `X-Content-Type-Options`, Referrer-Policy, Permissions-Policy, and frame policy.
 - Run keyboard-only walkthrough for public, patron, talent, admin, and overlay states.

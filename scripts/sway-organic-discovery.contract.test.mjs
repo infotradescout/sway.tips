@@ -23,7 +23,17 @@ for (const term of [
   'guest_to_performer_started',
   'public_profile_shared',
   'public_event_shared',
-  'public_release_shared'
+  'public_release_shared',
+  'structuredData: overrides.structuredData',
+  'discoveryFacts: overrides.discoveryFacts',
+  'sway-discovery-first-response',
+  'function renderDiscoveryBodyHtml',
+  'function canonicalPublicUrl',
+  "ne(musicReleases.distributionMode, 'private')",
+  'Canonical discovery host',
+  'discovery_landing',
+  'discovery_entity_view',
+  'discovery_primary_action'
 ]) {
   if (!server.includes(term)) failures.push(`Organic discovery implementation missing: ${term}`);
 }
@@ -33,9 +43,31 @@ for (const event of [
   'guest_to_performer_started',
   'public_profile_shared',
   'public_event_shared',
-  'public_release_shared'
+  'public_release_shared',
+  'discovery_landing',
+  'discovery_entity_view',
+  'discovery_primary_action'
 ]) {
   if (!client.includes(event)) failures.push(`Acquisition telemetry client missing: ${event}`);
+}
+
+// App-shell crawler files are a hard failure.
+if (server.includes("app.get('/robots.txt'") && !server.includes("res.type('text/plain')")) {
+  failures.push('robots.txt must return text/plain, not an app shell.');
+}
+if (server.includes("app.get('/sitemap.xml'") && !server.includes("res.type('application/xml')")) {
+  failures.push('sitemap.xml must return application/xml, not an app shell.');
+}
+
+// Public entity pages must put identity facts in the first HTML response.
+if (!server.includes('<h1>${escapeDiscoveryHtmlText(facts.heading)}</h1>')) {
+  failures.push('First-response discovery HTML must include a real H1.');
+}
+if (!server.includes('data-discovery="entity-name"')) {
+  failures.push('First-response discovery HTML must include entity name.');
+}
+if (!server.includes('data-discovery="primary-action"')) {
+  failures.push('First-response discovery HTML must include primary action.');
 }
 
 if (!(packageJson.scripts?.['test:contracts'] || '').includes('sway-organic-discovery.contract.test.mjs')) {
