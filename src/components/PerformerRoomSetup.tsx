@@ -25,7 +25,7 @@ export default function PerformerRoomSetup({
   talentRole: 'DJ' | 'Performer';
   performerEmailVerified: boolean;
   payoutReady: boolean;
-  paymentMode: 'test' | 'unavailable';
+  paymentMode: 'test' | 'live' | 'unavailable';
   onStartSession: (data: PerformerRoomSetupData) => Promise<void>;
 }) {
   const [step, setStep] = useState(0);
@@ -36,11 +36,14 @@ export default function PerformerRoomSetup({
   const [isStarting, setIsStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const startAttemptRef = useRef<{ fingerprint: string; gigId: string } | null>(null);
+  const moneyConfigured = paymentMode === 'test' || paymentMode === 'live';
 
   const pricingSummary = paymentsEnabled
-    ? `Stripe test mode · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
+    ? paymentMode === 'live'
+      ? `Stripe live · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
+      : `Stripe test mode · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
     : payoutReady
-      ? 'Free requests and upvotes · test tips available'
+      ? (paymentMode === 'live' ? 'Free requests and upvotes · tips available' : 'Free requests and upvotes · test tips available')
       : 'Free requests and upvotes · money actions off';
   const requestSummary = searchScope === 'library'
     ? 'Customers search your synced library first and may still type a manual request'
@@ -90,10 +93,18 @@ export default function PerformerRoomSetup({
         ))}
       </div>
 
-      <div role="status" className={`mt-4 rounded-xl border px-4 py-3 text-xs leading-5 ${paymentMode === 'test' ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100' : 'border-amber-500/25 bg-amber-500/10 text-amber-100'}`}>
-        {paymentMode === 'test'
-          ? 'Stripe test mode — no real money moves. Paid-mode rehearsals require Stripe test cards.'
-          : 'Money actions unavailable — Sway could not verify Stripe test mode. You can still run a free room.'}
+      <div role="status" className={`mt-4 rounded-xl border px-4 py-3 text-xs leading-5 ${
+        paymentMode === 'live'
+          ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-100'
+          : paymentMode === 'test'
+            ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100'
+            : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+      }`}>
+        {paymentMode === 'live'
+          ? 'Stripe live mode — real money moves. Paid rooms require completed payout setup.'
+          : paymentMode === 'test'
+            ? 'Stripe test mode — no real money moves. Paid-mode rehearsals require Stripe test cards.'
+            : 'Money actions unavailable — Sway could not verify Stripe. You can still run a free room.'}
       </div>
 
       <div className="mt-5 min-h-[18rem]">
@@ -102,8 +113,8 @@ export default function PerformerRoomSetup({
             <p className="text-xs font-bold text-cyan-300">{performerName}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" disabled={!payoutReady || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Test paid requests</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? `Test requests and boosts start at $${minimumTip}. No real money moves.` : 'Finish Stripe test charge and payout setup first.'}</span></button>
-              <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? 'Test-mode direct tips remain available.' : 'All money actions stay off.'}</span></button>
+              <button type="button" disabled={!payoutReady || !moneyConfigured || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">{paymentMode === 'live' ? 'Paid requests' : 'Test paid requests'}</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? (paymentMode === 'live' ? `Requests and boosts start at $${minimumTip}. Real money moves.` : `Test requests and boosts start at $${minimumTip}. No real money moves.`) : (paymentMode === 'live' ? 'Finish Stripe charge and payout setup first.' : 'Finish Stripe test charge and payout setup first.')}</span></button>
+              <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? (paymentMode === 'live' ? 'Direct tips remain available.' : 'Test-mode direct tips remain available.') : 'All money actions stay off.'}</span></button>
             </div>
             {paymentsEnabled ? (
               <div className="rounded-xl border border-white/10 bg-slate-950 p-4">

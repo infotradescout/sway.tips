@@ -15,7 +15,7 @@ export default function PerformerAccountHome({
   displayName: string;
   roleLabel: string;
   stripeReady: boolean;
-  paymentMode: 'test' | 'unavailable';
+  paymentMode: 'test' | 'live' | 'unavailable';
   emailVerified: boolean;
   onStartRoom: () => void;
   onOpenLibrary: () => void;
@@ -44,10 +44,18 @@ export default function PerformerAccountHome({
           </div>
         </div>
 
-        <p role="status" className={`mt-4 rounded-xl border px-3 py-3 text-xs leading-5 ${paymentMode === 'test' ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100' : 'border-amber-500/25 bg-amber-500/10 text-amber-100'}`}>
-          {paymentMode === 'test'
-            ? 'Stripe test mode — no real money moves. Start with a free room; use test cards only when rehearsing money flows.'
-            : 'Money actions are unavailable because Stripe test mode could not be verified. Free rooms still work.'}
+        <p role="status" className={`mt-4 rounded-xl border px-3 py-3 text-xs leading-5 ${
+          paymentMode === 'live'
+            ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-100'
+            : paymentMode === 'test'
+              ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-100'
+              : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+        }`}>
+          {paymentMode === 'live'
+            ? 'Stripe live mode — real charges. Complete payout setup before starting a paid room.'
+            : paymentMode === 'test'
+              ? 'Stripe test mode — no real money moves. Start with a free room; use test cards only when rehearsing money flows.'
+              : 'Money actions are unavailable because Stripe could not be verified. Free rooms still work.'}
         </p>
 
         <ol className="mt-5 space-y-2" aria-label="First room readiness">

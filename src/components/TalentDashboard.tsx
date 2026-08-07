@@ -841,7 +841,7 @@ export default function TalentDashboard({
   const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>('home');
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
-  const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'unavailable'>('loading');
+  const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
 
   useEffect(() => {
     if (previewMode) {
@@ -855,8 +855,10 @@ export default function TalentDashboard({
         const data = await response.json().catch(() => null);
         if (!cancelled) {
           setLiveRoomPaymentMode(
-            response.ok && data?.mode === 'test' && data?.liveRoomMoneyEnabled === true
-              ? 'test'
+            response.ok
+              && (data?.mode === 'test' || data?.mode === 'live')
+              && data?.liveRoomMoneyEnabled === true
+              ? data.mode
               : 'unavailable'
           );
         }
@@ -867,7 +869,8 @@ export default function TalentDashboard({
     return () => { cancelled = true; };
   }, [previewMode]);
 
-  const testMoneyReady = liveRoomPaymentMode === 'test' && Boolean(performerProfile?.money_actions_ready);
+  const moneyReady = (liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live')
+    && Boolean(performerProfile?.money_actions_ready);
 
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -1581,8 +1584,18 @@ export default function TalentDashboard({
                 <p className="truncate text-[11px] font-bold text-slate-400">
                   {session.status === 'ending' ? `Ending room - closeout ${timeLeft}` : `${session.talentRole} live room`}
                 </p>
-                <p className={`truncate text-[9px] font-bold ${liveRoomPaymentMode === 'test' ? 'text-cyan-300' : 'text-amber-300'}`}>
-                  {liveRoomPaymentMode === 'test' ? 'Stripe test mode · no real money' : 'Money unavailable · free room only'}
+                <p className={`truncate text-[9px] font-bold ${
+                  liveRoomPaymentMode === 'live'
+                    ? 'text-emerald-300'
+                    : liveRoomPaymentMode === 'test'
+                      ? 'text-cyan-300'
+                      : 'text-amber-300'
+                }`}>
+                  {liveRoomPaymentMode === 'live'
+                    ? 'Stripe live mode · real money'
+                    : liveRoomPaymentMode === 'test'
+                      ? 'Stripe test mode · no real money'
+                      : 'Money unavailable · free room only'}
                 </p>
                 {activeRooms.length > 0 ? (
                   <label className="mt-1 flex min-w-0 items-center gap-1 text-[9px] font-bold text-slate-500">
@@ -2173,16 +2186,28 @@ export default function TalentDashboard({
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
-                {liveRoomPaymentMode !== 'test' ? (
-                  <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because Stripe test mode could not be verified. Free rooms remain available.</p>
+                {liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live' ? (
+                  <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because Stripe could not be verified. Free rooms remain available.</p>
                 ) : performerProfile?.money_actions_ready ? (
-                  <p className="mt-0.5 text-[11px] text-emerald-300">Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.</p>
+                  <p className="mt-0.5 text-[11px] text-emerald-300">
+                    {liveRoomPaymentMode === 'live'
+                      ? 'Stripe live mode. Paid requests, tips, and boosts move real money after payout setup.'
+                      : 'Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.'}
+                  </p>
                 ) : performerProfile?.charges_enabled ? (
-                  <p className="mt-0.5 text-[11px] text-amber-300">Stripe test charges are available, but test payout setup is incomplete.</p>
+                  <p className="mt-0.5 text-[11px] text-amber-300">
+                    {liveRoomPaymentMode === 'live'
+                      ? 'Stripe charges are available, but payout setup is incomplete.'
+                      : 'Stripe test charges are available, but test payout setup is incomplete.'}
+                  </p>
                 ) : performerProfile?.stripe_connected_account_id ? (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Stripe test onboarding has started but is not finished.</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Stripe onboarding has started but is not finished.</p>
                 ) : (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Connect Stripe test mode before rehearsing paid requests, tips, or boosts.</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {liveRoomPaymentMode === 'live'
+                      ? 'Connect Stripe before starting paid requests, tips, or boosts.'
+                      : 'Connect Stripe test mode before rehearsing paid requests, tips, or boosts.'}
+                  </p>
                 )}
                 {stripeConnectError ? <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
               </div>
@@ -2191,14 +2216,14 @@ export default function TalentDashboard({
               <button
                 type="button"
                 onClick={handleConnectStripe}
-                disabled={previewMode || liveRoomPaymentMode !== 'test' || stripeConnectStatus === 'submitting'}
+                disabled={previewMode || (liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live') || stripeConnectStatus === 'submitting'}
                 className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {stripeConnectStatus === 'submitting'
                   ? 'Opening Stripe...'
                   : performerProfile?.stripe_connected_account_id
-                    ? 'Finish Stripe test setup'
-                    : 'Connect Stripe test mode'}
+                    ? (liveRoomPaymentMode === 'live' ? 'Finish Stripe setup' : 'Finish Stripe test setup')
+                    : (liveRoomPaymentMode === 'live' ? 'Connect Stripe' : 'Connect Stripe test mode')}
               </button>
             ) : null}
           </div>
@@ -2211,8 +2236,8 @@ export default function TalentDashboard({
             displayName={welcomePerformerName}
             performerHandle={performerProfile?.handle}
             roleLabel={performerRoleLabel}
-            stripeReady={testMoneyReady}
-            paymentMode={liveRoomPaymentMode === 'test' ? 'test' : 'unavailable'}
+            stripeReady={moneyReady}
+            paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}
             emailVerified={performerEmailVerified}
             onStartRoom={() => setInactiveWorkspace('room')}
             onOpenLibrary={() => {
@@ -2229,8 +2254,8 @@ export default function TalentDashboard({
             performerName={welcomePerformerName}
             talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
             performerEmailVerified={performerEmailVerified}
-            payoutReady={testMoneyReady}
-            paymentMode={liveRoomPaymentMode === 'test' ? 'test' : 'unavailable'}
+            payoutReady={moneyReady}
+            paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}
             onStartSession={onStartSession}
           />
         </div>

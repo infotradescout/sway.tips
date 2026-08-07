@@ -289,7 +289,11 @@ export function createStripeProviderAdapter(config: {
 export function createConfiguredPaymentProvider(env: NodeJS.ProcessEnv = process.env): PaymentProviderAdapter | null {
   const secretKey = env.STRIPE_SECRET_KEY;
   const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
-  if (!secretKey || !webhookSecret || !secretKey.startsWith('sk_test_')) {
+  const secretModeOk = Boolean(
+    secretKey
+    && (secretKey.startsWith('sk_test_') || secretKey.startsWith('sk_live_'))
+  );
+  if (!secretKey || !webhookSecret || !secretModeOk) {
     return null;
   }
   return createStripeProviderAdapter({ secretKey, webhookSecret });

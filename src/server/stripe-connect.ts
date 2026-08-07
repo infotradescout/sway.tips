@@ -29,13 +29,12 @@ export type StripeConnectService = {
 };
 
 /**
- * Reads STRIPE_SECRET_KEY and returns a test-mode Connect adapter, or null
- * when test execution is not provisioned. Live keys remain forbidden while
- * Sway room money is test-only.
+ * Reads STRIPE_SECRET_KEY and returns a Connect adapter for matching test or
+ * live keys, or null when Stripe Connect execution is not provisioned.
  */
 export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = process.env): StripeConnectService | null {
   const secretKey = env.STRIPE_SECRET_KEY?.trim();
-  if (!secretKey?.startsWith('sk_test_')) return null;
+  if (!secretKey?.startsWith('sk_test_') && !secretKey?.startsWith('sk_live_')) return null;
 
   const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
   const connectCountry = (env.SWAY_STRIPE_CONNECT_COUNTRY || 'US').trim().toUpperCase();

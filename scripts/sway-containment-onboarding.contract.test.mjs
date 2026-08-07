@@ -26,8 +26,9 @@ const { getPatronDeviceIdHash } = await tsImport('../src/patron-device.ts', impo
 assert.equal(validatePerformerPasswordStrength('123').ok, false, 'Three-digit passwords must be rejected.');
 assert.equal(validatePerformerPasswordStrength('abcdefgh').ok, false, 'Passwords need a number.');
 assert.equal(validatePerformerPasswordStrength('abc12345').ok, true, 'A current-policy password should pass.');
-assert.equal(createConfiguredPaymentProvider({ STRIPE_SECRET_KEY: 'sk_live_blocked', STRIPE_WEBHOOK_SECRET: 'whsec_live' }), null, 'Live Stripe keys must fail closed for room money.');
+assert.ok(createConfiguredPaymentProvider({ STRIPE_SECRET_KEY: 'sk_live_authorized', STRIPE_WEBHOOK_SECRET: 'whsec_live' }), 'Live Stripe keys must construct a provider when authorized.');
 assert.ok(createConfiguredPaymentProvider({ STRIPE_SECRET_KEY: 'sk_test_contract', STRIPE_WEBHOOK_SECRET: 'whsec_test' }), 'Test Stripe keys should remain usable for provider proof.');
+assert.equal(createConfiguredPaymentProvider({ STRIPE_SECRET_KEY: 'rk_test_blocked', STRIPE_WEBHOOK_SECRET: 'whsec_test' }), null, 'Non sk_test_/sk_live_ secrets must fail closed.');
 assert.equal(isTerminalProviderReversalStatus('void', 'canceled'), true, 'A processor-confirmed cancellation is terminal.');
 assert.equal(isTerminalProviderReversalStatus('refund', 'succeeded'), true, 'A processor-confirmed refund is terminal.');
 assert.equal(isTerminalProviderReversalStatus('refund', 'pending'), false, 'A pending refund must never be labeled complete.');
@@ -84,7 +85,8 @@ for (const required of [
 assert.equal(paymentService.includes('the charge still proceeds without a destination'), false, 'Platform-balance fallback language must be removed.');
 assert.equal(paymentService.includes("throw new Error(`refund_not_terminal:${result.status}`)"), true, 'Pending provider refunds must remain non-terminal.');
 assert.equal(paymentService.includes('Promise<PaymentReversalResult[]>'), true, 'Batch reversals must return every result to callers.');
-assert.equal(paymentProvider.includes("!secretKey.startsWith('sk_test_')"), true, 'Live-room provider must remain test-key only.');
+assert.equal(paymentProvider.includes("secretKey.startsWith('sk_live_')"), true, 'Live-room provider must accept sk_live_ when mode matches.');
+assert.equal(paymentProvider.includes("secretKey.startsWith('sk_test_')"), true, 'Live-room provider must still accept sk_test_.');
 
 for (const required of [
   '/account/recover',
@@ -109,8 +111,9 @@ assert.equal(patronApp.includes('Join with a room link or ID'), true, 'The room 
 assert.equal(patronView.includes("onBlockFoundation('patron_device_id_hash', ''"), true, 'Patron block requests must use the private browser header identity.');
 assert.equal(patronView.includes('Device block recorded.'), false, 'Block UI must not claim immediate enforcement.');
 assert.equal(patronView.includes('session.tipsEnabled'), true, 'Tip UI must honor seller payout readiness.');
-assert.equal(patronView.includes("data?.mode !== 'test'"), true, 'Patron payment UI must fail closed unless Stripe test mode is verified.');
-assert.equal(patronView.includes("!data.publishableKey.startsWith('pk_test_')"), true, 'Patron payment UI must reject non-test publishable keys.');
+assert.equal(patronView.includes("data?.mode !== 'test' && data?.mode !== 'live'"), true, 'Patron payment UI must fail closed unless Stripe test or live mode is verified.');
+assert.equal(patronView.includes("data.publishableKey.startsWith('pk_live_')"), true, 'Patron payment UI must accept matching live publishable keys.');
 assert.equal(patronView.includes('Stripe test mode — use a test card. No real money moves.'), true, 'Patron checkout must state the test-money boundary.');
+assert.equal(patronView.includes('Stripe live mode — real charges. Use a real card.'), true, 'Patron checkout must state the live-money boundary.');
 
 console.log('Sway containment and canonical onboarding contract passed.');
