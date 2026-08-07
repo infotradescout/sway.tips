@@ -308,6 +308,7 @@ export default function PatronView({
   const [isPaying, setIsPaying] = useState(false);
   const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
   const [stripePublishableKey, setStripePublishableKey] = useState<string | null>(null);
+  const [stripePaymentMode, setStripePaymentMode] = useState<'test' | 'live' | null>(null);
   const [stripeConfigError, setStripeConfigError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
   const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
@@ -513,16 +514,21 @@ export default function PatronView({
     setStripeConfigError(null);
     const response = await fetch('/api/payment/config', { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
+    const publishableKeyOk = typeof data.publishableKey === 'string'
+      && (
+        (data?.mode === 'test' && data.publishableKey.startsWith('pk_test_'))
+        || (data?.mode === 'live' && data.publishableKey.startsWith('pk_live_'))
+      );
     if (
       !response.ok
-      || data?.mode !== 'test'
+      || (data?.mode !== 'test' && data?.mode !== 'live')
       || data?.liveRoomMoneyEnabled !== true
-      || typeof data.publishableKey !== 'string'
-      || !data.publishableKey.startsWith('pk_test_')
+      || !publishableKeyOk
     ) {
       throw new Error(data?.error || 'Payment form is not configured.');
     }
     setStripePublishableKey(data.publishableKey);
+    setStripePaymentMode(data.mode === 'live' ? 'live' : 'test');
     return data.publishableKey;
   };
 
@@ -2344,7 +2350,9 @@ export default function PatronView({
                   <div className="space-y-2">
                     {(checkoutPayload.isTip || session.paymentsEnabled !== false) ? (
                       <p role="status" className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold leading-4 text-cyan-100">
-                        Stripe test mode — use a test card. No real money moves.
+                        {stripePaymentMode === 'live'
+                          ? 'Stripe live mode — real charges. Use a real card.'
+                          : 'Stripe test mode — use a test card. No real money moves.'}
                       </p>
                     ) : null}
                     {checkoutPayload.clientSecret && stripePromise && stripeElementsOptions ? (

@@ -5,7 +5,11 @@ export type LiveRoomPaymentRuntimeConfig = {
   publishableKey: string | null;
   moneyEnabled: boolean;
   connectEnabled: boolean;
-  reason: 'ready' | 'live_keys_forbidden' | 'test_configuration_incomplete' | 'durability_writes_disabled';
+  reason:
+    | 'ready'
+    | 'mode_key_mismatch'
+    | 'configuration_incomplete'
+    | 'durability_writes_disabled';
 };
 
 function keyMode(value: string, prefixes: { test: string; live: string }) {
@@ -27,34 +31,41 @@ export function resolveLiveRoomPaymentRuntimeConfig(input: {
   const publishableMode = keyMode(publishableKey, { test: 'pk_test_', live: 'pk_live_' });
   const secretMode = keyMode(secretKey, { test: 'sk_test_', live: 'sk_live_' });
 
-  if (publishableMode === 'live' || secretMode === 'live') {
-    return {
-      mode: 'live',
-      publishableKey: null,
-      moneyEnabled: false,
-      connectEnabled: false,
-      reason: 'live_keys_forbidden'
-    };
-  }
-
-  const testConfigurationComplete = publishableMode === 'test'
-    && secretMode === 'test'
-    && Boolean(webhookSecret)
-    && input.paymentProviderConfigured
-    && input.stripeConnectConfigured;
-  if (!testConfigurationComplete) {
+  if (publishableMode === 'unavailable' || secretMode === 'unavailable' || !webhookSecret) {
     return {
       mode: 'unavailable',
       publishableKey: null,
       moneyEnabled: false,
       connectEnabled: false,
-      reason: 'test_configuration_incomplete'
+      reason: 'configuration_incomplete'
+    };
+  }
+
+  if (publishableMode !== secretMode) {
+    return {
+      mode: 'unavailable',
+      publishableKey: null,
+      moneyEnabled: false,
+      connectEnabled: false,
+      reason: 'mode_key_mismatch'
+    };
+  }
+
+  const mode = publishableMode;
+  const configurationComplete = input.paymentProviderConfigured && input.stripeConnectConfigured;
+  if (!configurationComplete) {
+    return {
+      mode: 'unavailable',
+      publishableKey: null,
+      moneyEnabled: false,
+      connectEnabled: false,
+      reason: 'configuration_incomplete'
     };
   }
 
   if (!input.durabilityWritesEnabled) {
     return {
-      mode: 'test',
+      mode,
       publishableKey,
       moneyEnabled: false,
       connectEnabled: false,
@@ -63,7 +74,7 @@ export function resolveLiveRoomPaymentRuntimeConfig(input: {
   }
 
   return {
-    mode: 'test',
+    mode,
     publishableKey,
     moneyEnabled: true,
     connectEnabled: true,

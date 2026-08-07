@@ -68,16 +68,29 @@ function recordString(value: unknown) {
 export function createPaymentWebhookService({
   databaseUrl,
   provider,
-  hooks
+  hooks,
+  expectedLivemode = false
 }: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter;
   hooks?: {
     afterClaim?: (event: typeof liveRoomProcessorEvents.$inferSelect) => Promise<void>;
   };
+  /** Must match STRIPE_SECRET_KEY mode: false for sk_test_, true for sk_live_. */
+  expectedLivemode?: boolean;
 }) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
   const service = createPaymentService({ databaseUrl, provider });
+
+  function assertLivemodeMatch(livemode: boolean, context: string) {
+    if (livemode !== expectedLivemode) {
+      throw new Error(
+        livemode
+          ? `${context}: live-mode Stripe event received while Sway is configured for test keys.`
+          : `${context}: test-mode Stripe event received while Sway is configured for live keys.`
+      );
+    }
+  }
 
   async function receiveVerifiedEvent(rawBody: string, event: ProviderWebhookEnvelope) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
@@ -201,7 +214,7 @@ export function createPaymentWebhookService({
 
   async function processClaimedEvent(event: typeof liveRoomProcessorEvents.$inferSelect) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
-    if (event.livemode) throw new Error('Live-mode Stripe events are forbidden while Sway room payments are test-only.');
+    assertLivemodeMatch(event.livemode, 'processClaimedEvent');
     const mappedState = mapProviderEventToPaymentState(event.eventType);
     if (!mappedState) {
       await markProcessed(event, { status: 'ignored' });
@@ -357,16 +370,14 @@ export function createPaymentWebhookService({
     }
     const providerEvent = await provider.parseWebhookEvent(input);
     const received = await receiveVerifiedEvent(input.rawBody, providerEvent);
-    if (received.row.livemode) {
+    try {
+      assertLivemodeMatch(received.row.livemode, 'ingestWebhook');
+    } catch (error) {
       const claimed = await claimEvent(received.row.id);
       if (claimed) {
-        await markFailed(
-          claimed,
-          new Error('Live-mode Stripe events are forbidden while Sway room payments are test-only.'),
-          { terminal: true }
-        );
+        await markFailed(claimed, error, { terminal: true });
       }
-      throw new Error('Live-mode Stripe events are forbidden while Sway room payments are test-only.');
+      throw error;
     }
     if (['processed', 'ignored'].includes(received.row.status)) {
       return { status: 'duplicate' as const };

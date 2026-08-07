@@ -26,7 +26,7 @@ for (const term of requiredServerTerms) {
 
 const requiredConnectTerms = [
   'STRIPE_API_VERSION',
-  "secretKey?.startsWith('sk_test_')",
+  "!secretKey?.startsWith('sk_test_') && !secretKey?.startsWith('sk_live_')",
   "apiVersion: STRIPE_API_VERSION",
   'stripe.v2.core.accounts.create',
   'configuration:',
@@ -70,8 +70,8 @@ if (!talentDashboardSource.includes('await response.json().catch(() => null)')) 
   failures.push('Talent dashboard must tolerate non-JSON Connect onboarding failures.');
 }
 
-if (!talentDashboardSource.includes("disabled={previewMode || liveRoomPaymentMode !== 'test' || stripeConnectStatus === 'submitting'}")) {
-  failures.push('Talent dashboard must disable Connect onboarding unless the server verifies Stripe test mode.');
+if (!talentDashboardSource.includes("disabled={previewMode || (liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live') || stripeConnectStatus === 'submitting'}")) {
+  failures.push('Talent dashboard must disable Connect onboarding unless the server verifies Stripe test or live mode.');
 }
 
 if (/Unexpected token.*DOCTYPE/i.test(talentDashboardSource)) {

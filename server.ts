@@ -292,9 +292,6 @@ const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
   provider: paymentProvider
 });
-const paymentWebhookService = paymentProvider
-  ? createPaymentWebhookService({ databaseUrl: process.env.DATABASE_URL, provider: paymentProvider })
-  : null;
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
@@ -302,6 +299,13 @@ const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   stripeConnectConfigured: Boolean(stripeConnectService),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
 });
+const paymentWebhookService = paymentProvider
+  ? createPaymentWebhookService({
+      databaseUrl: process.env.DATABASE_URL,
+      provider: paymentProvider,
+      expectedLivemode: liveRoomPaymentRuntimeConfig.mode === 'live'
+    })
+  : null;
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -3573,11 +3577,11 @@ app.get('/api/payment/config', (_req, res) => {
   applyNoStoreHeaders(res);
   if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return res.status(503).json({
-      error: liveRoomPaymentRuntimeConfig.reason === 'live_keys_forbidden'
-        ? 'Live-room money remains test-only until durable reconciliation is production-verified.'
-        : liveRoomPaymentRuntimeConfig.reason === 'durability_writes_disabled'
-          ? 'Live-room money is temporarily paused by the durability safety switch.'
-          : 'Stripe test-mode payment execution is not fully configured.',
+      error: liveRoomPaymentRuntimeConfig.reason === 'durability_writes_disabled'
+        ? 'Live-room money is temporarily paused by the durability safety switch.'
+        : liveRoomPaymentRuntimeConfig.reason === 'mode_key_mismatch'
+          ? 'Stripe publishable and secret keys must both be test or both be live.'
+          : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
       liveRoomMoneyEnabled: false
     });
