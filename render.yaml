@@ -3,14 +3,15 @@ services:
     name: sway-tips-web
     runtime: node
     branch: main
-    # main is the release channel: Render auto-deploys on commit.
+    # main is the release channel: Render auto-deploys on commit after a verified merge.
+    # Merge gate is GitHub required check `validate` (must execute real steps).
     # Do NOT use checksPass while Production Deploy Drift Guard observes catch-up (deadlock).
-    # GitHub Actions is not required for production deploy.
     autoDeployTrigger: commit
     buildCommand: npm ci && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm run start
-    healthCheckPath: /api/build-marker
+    # Fail closed: process up + DB reachable + migrations compatible with this commit.
+    healthCheckPath: /api/release-health
     domains:
       - sway.tips
       - www.sway.tips

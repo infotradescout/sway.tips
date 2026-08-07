@@ -4,6 +4,25 @@ Release evidence must use real command outputs only.
 
 No simulated validation is allowed. Simulated validation, invented command output, or soft-pass language is release-blocking.
 
+Release-chain evidence does **not** authorize live Stripe. The Live Rooms two-account Stripe test-mode production pilot remains HOLD — see `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`. Dual-lane product truth: `docs/SWAY_PRODUCT_STRUCTURE.md` (Live Rooms current; Self-Production in progress; DistroKid-class distribution is one Self-Production outlet, not Sway’s identity).
+
+## Minimum release contract checklist
+
+- Exact proposed commit SHA:
+- Clean dependency installation (`npm ci`) evidence:
+- Type and build validation (`npm run lint`, `npm run build`) evidence:
+- Relevant contract tests (`npm run test:contracts` / CI) evidence:
+- Database compatibility proof (migration proofs + `/api/release-health` migrations.compatible):
+- Browser proof for changed user paths (device/browser, routes, pass/fail):
+- Health endpoint (`GET /api/release-health`, `releaseActive`):
+- Deployment commit marker (`GET /api/build-marker` commit match):
+- Post-deployment smoke result:
+- Rollback or safe roll-forward record:
+- Branch rule / required check `validate` confirmed for this merge path:
+
+Empty CI (zero real steps) is release-blocking even if the UI shows a completed job.
+
+
 ## Requested Outcome
 
 - Human intent:
@@ -35,13 +54,25 @@ Record exact output or attach the log location.
 ## Production Marker Evidence When Deploying
 
 - Intended production commit:
-- Observed production commit:
+- Observed production commit (`/api/build-marker`):
+- Observed release-health commit (`/api/release-health`):
+- `releaseActive`:
+- `database.reachable`:
+- `migrations.compatible` / `migrations.status`:
 - Observed timestamp:
 - Apex marker result:
 - `www` marker result:
 - App subdomain marker result:
 - Render origin marker result:
 - Marker confirms deployed identity only; customer outcome verified separately:
+
+## Browser Proof For Changed User Paths
+
+- Changed routes/paths:
+- Device/browser:
+- Steps exercised:
+- Pass/fail:
+- Screenshots or notes location:
 
 ## Route Smoke Evidence
 
@@ -71,19 +102,26 @@ Record exact output or attach the log location.
 
 ## Rollback Path
 
-- Rollback commit:
-- Rollback command or deploy action:
-- Routes to verify after rollback:
+Rollback or safe roll-forward record (required before accepting the deploy):
+
+- Decision: rollback / roll-forward:
+- Rollback commit (previous known-good SHA):
+- Roll-forward commit (if fixing forward):
+- Rollback command or Render deploy action:
+- Routes to verify after boundary action:
 - Automatic rollback trigger:
 - Observability signal that activates the trigger:
+- Signal notes (`/api/release-health` not releaseActive, commit mismatch, smoke fail):
 
 ## Complete-Product Readiness
 
-- `npm run readiness:report` result:
+- Whole-product ledger decision (`npm run readiness:report`):
 - `npm run readiness:assert` result:
 - DistroKid-replacement pillar evidence:
 - Original-Sway pillar evidence:
+- Note: DistroKid-replacement pillar = Self-Production external-distribution outlet evidence (not Sway’s identity). Original-Sway pillar = Live Rooms / shared account evidence.
 - Cohesive one-account journey evidence:
+- Note: complete-product readiness is separate from iterative deploy approval, from Live Rooms operating-product status, and from live-Stripe authorization.
 
 ## Known Risks
 

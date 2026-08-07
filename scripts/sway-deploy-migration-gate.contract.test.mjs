@@ -22,6 +22,7 @@ const ciWorkflow = read('.github/workflows/ci.yml');
 // test can only prove the gate is wired, not independently re-prove Render's
 // own fail-closed behavior.
 requireIncludes(renderYaml, 'preDeployCommand: npm run db:migrate', 'render.yaml deployment definition');
+requireIncludes(renderYaml, 'healthCheckPath: /api/release-health', 'render.yaml release-health path');
 
 // db:migrate must actually run drizzle-kit's real migration runner, not a
 // placeholder or a no-op.
@@ -33,10 +34,17 @@ requireIncludes(packageJson.scripts?.['db:migrate'] ?? '', 'drizzle-kit migrate'
 // deploy time.
 for (const term of [
   'test:integration:pro-mode-migration',
-  'test:integration:public-room-state-projection'
+  'test:integration:public-room-state-projection',
+  'Assert CI executed substantive steps'
 ]) {
   requireIncludes(ciWorkflow, term, 'CI workflow');
 }
+
+requireIncludes(
+  packageJson.scripts?.['test:contracts'] ?? '',
+  'sway-release-health.contract.test',
+  'package.json test:contracts must include release-health contract'
+);
 
 if (failures.length) {
   console.error('Deploy migration gate contract failed:');

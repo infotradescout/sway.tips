@@ -20,124 +20,165 @@ jobs:
         with:
           node-version: 22
 
-      - name: Verify production build marker catches up
+      - name: Verify production release-health and build marker catch up
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           node <<'NODE'
-          const urls = [
+          const markerUrls = [
             'https://sway.tips/api/build-marker',
             'https://www.sway.tips/api/build-marker',
             'https://app.sway.tips/api/build-marker'
           ];
+          const healthUrls = [
+            'https://sway.tips/api/release-health',
+            'https://www.sway.tips/api/release-health',
+            'https://app.sway.tips/api/release-health'
+          ];
 
           const expectedSha = process.env.EXPECTED_SHA;
           const timeoutMs = 15 * 60 * 1000;
-          const intervalMs = 30 * 1000;
-          const requestTimeoutMs = 12 * 1000;
-          const started = Date.now();
+          const intervalMs = 15 * 1000;
+          const requestTimeoutMs = 10 * 1000;
+          const startedAt = Date.now();
 
-          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+          }
 
           function formatObservation(observation) {
-            const lines = [];
-            lines.push(`URL: ${observation.url}`);
-            lines.push(`HTTP: ${observation.status}`);
-            lines.push(`Content-Type: ${observation.contentType || 'missing'}`);
+            const lines = [
+              `URL: ${observation.url}`,
+              `Status: ${observation.status}`,
+              `Content-Type: ${observation.contentType || 'n/a'}`
+            ];
             if (observation.error) {
               lines.push(`Error: ${observation.error}`);
             }
             if (observation.bodySnippet) {
-              lines.push(`Body snippet: ${observation.bodySnippet}`);
+              lines.push(`Body: ${observation.bodySnippet}`);
             }
             if (observation.commit) {
               lines.push(`Commit: ${observation.commit}`);
             }
+            if (observation.releaseActive !== undefined) {
+              lines.push(`releaseActive: ${observation.releaseActive}`);
+            }
             return lines.join('\n');
+          }
+
+          async function fetchJson(url) {
+            const observation = {
+              url,
+              status: 'n/a',
+              contentType: '',
+              commit: '',
+              releaseActive: undefined,
+              error: '',
+              bodySnippet: ''
+            };
+
+            try {
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+              let response;
+              try {
+                response = await fetch(url, { redirect: 'follow', signal: controller.signal });
+              } finally {
+                clearTimeout(timer);
+              }
+              observation.status = response.status;
+              observation.contentType = response.headers.get('content-type') || '';
+              const body = await response.text();
+              observation.bodySnippet = body.slice(0, 180).replace(/\s+/g, ' ').trim();
+
+              let parsed;
+              try {
+                parsed = JSON.parse(body);
+              } catch {
+                parsed = null;
+              }
+
+              if (!parsed || typeof parsed !== 'object') {
+                observation.error = 'Response is not JSON.';
+                return { ok: false, observation };
+              }
+
+              if (parsed.service !== 'sway.tips') {
+                observation.error = `Unexpected service marker: ${String(parsed.service)}`;
+                return { ok: false, observation };
+              }
+
+              if (typeof parsed.commit !== 'string' || parsed.commit.length < 7) {
+                observation.error = 'Commit marker is missing or invalid.';
+                return { ok: false, observation };
+              }
+
+              observation.commit = parsed.commit;
+              if (parsed.commit !== expectedSha) {
+                observation.error = `Commit mismatch. Expected ${expectedSha}, got ${parsed.commit}`;
+                return { ok: false, observation };
+              }
+
+              return { ok: true, observation, parsed };
+            } catch (error) {
+              observation.error = error instanceof Error ? error.message : String(error);
+              return { ok: false, observation };
+            }
           }
 
           async function checkOnce() {
             const observations = [];
             let allOk = true;
 
-            for (const url of urls) {
-              const observation = {
-                url,
-                status: 'n/a',
-                contentType: '',
-                commit: '',
-                error: '',
-                bodySnippet: ''
-              };
+            for (const url of markerUrls) {
+              const result = await fetchJson(url);
+              observations.push(result.observation);
+              if (!result.ok) allOk = false;
+            }
 
-              try {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-                let response;
-                try {
-                  response = await fetch(url, { redirect: 'follow', signal: controller.signal });
-                } finally {
-                  clearTimeout(timer);
-                }
-                observation.status = response.status;
-                observation.contentType = response.headers.get('content-type') || '';
-
-                const body = await response.text();
-                observation.bodySnippet = body.slice(0, 180).replace(/\s+/g, ' ').trim();
-
-                let parsed;
-                try {
-                  parsed = JSON.parse(body);
-                } catch {
-                  parsed = null;
-                }
-
-                if (!parsed || typeof parsed !== 'object') {
-                  observation.error = 'Response is not JSON.';
+            for (const url of healthUrls) {
+              const result = await fetchJson(url);
+              if (result.ok) {
+                const parsed = result.parsed;
+                result.observation.releaseActive = parsed.releaseActive;
+                if (parsed.releaseActive !== true) {
+                  result.observation.error = 'releaseActive is not true.';
                   allOk = false;
-                } else if (parsed.service !== 'sway.tips') {
-                  observation.error = `Unexpected service marker: ${String(parsed.service)}`;
+                } else if (!parsed.database?.reachable) {
+                  result.observation.error = 'database.reachable is not true.';
                   allOk = false;
-                } else if (typeof parsed.commit !== 'string' || parsed.commit.length < 7) {
-                  observation.error = 'Commit marker is missing or invalid.';
+                } else if (!parsed.migrations?.compatible) {
+                  result.observation.error = 'migrations.compatible is not true.';
                   allOk = false;
-                } else {
-                  observation.commit = parsed.commit;
-                  if (parsed.commit !== expectedSha) {
-                    observation.error = `Commit mismatch. Expected ${expectedSha}, got ${parsed.commit}`;
-                    allOk = false;
-                  }
+                } else if (result.observation.status !== 200) {
+                  result.observation.error = `Expected HTTP 200 for active release-health, got ${result.observation.status}`;
+                  allOk = false;
                 }
-              } catch (error) {
-                observation.error = error instanceof Error ? error.message : String(error);
+              } else {
                 allOk = false;
               }
-
-              observations.push(observation);
+              observations.push(result.observation);
             }
 
             return { allOk, observations };
           }
 
-          let attempt = 0;
-          while (Date.now() - started < timeoutMs) {
-            attempt += 1;
+          while (Date.now() - startedAt < timeoutMs) {
             const { allOk, observations } = await checkOnce();
-
-            console.log(`Attempt ${attempt}:`);
-            for (const o of observations) {
-              console.log(formatObservation(o));
-              console.log('----');
+            for (const observation of observations) {
+              console.log(formatObservation(observation));
+              console.log('---');
             }
 
             if (allOk) {
-              console.log('Production build marker matches pushed commit on all domains.');
+              console.log('Production build marker and release-health match pushed commit on all domains.');
               process.exit(0);
             }
 
             await sleep(intervalMs);
           }
 
-          console.error('Timed out waiting for production build marker to match pushed commit.');
+          console.error('Timed out waiting for production release-health/build-marker to match pushed commit.');
           process.exit(1);
           NODE

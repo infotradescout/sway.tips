@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "decision": "HOLD",
-  "ownerStandard": "Sway must replace the core DistroKid workflow and retain the original Sway features in one cohesive production experience.",
+  "ownerStandard": "Sway is two connected products: Live Rooms (current) and Self-Production (in progress). Whole-product launch remains HOLD until Live Rooms capabilities and Self-Production capabilities (including DistroKid-class external distribution as one outlet, not Sway’s identity) are independently production-verified under one account journey. See docs/SWAY_PRODUCT_STRUCTURE.md.",
   "allowedStatuses": [
     "production_verified",
     "implemented_unverified",
@@ -12,7 +12,7 @@
   "pillars": [
     {
       "id": "distrokid_replacement",
-      "label": "DistroKid replacement",
+      "label": "Self-Production external distribution (DistroKid-class outlet)",
       "capabilities": [
         {
           "id": "durable_master_storage",
@@ -114,7 +114,7 @@
     },
     {
       "id": "original_sway",
-      "label": "Original Sway product",
+      "label": "Live Rooms (original Sway / current operating product)",
       "capabilities": [
         {
           "id": "one_account_journey",
