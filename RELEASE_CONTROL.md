@@ -8,7 +8,7 @@ Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md`.
 
 - **Live Rooms** = current operating product.
 - **Self-Production** = active build in progress (includes files, collaboration, releases, events/tickets, external distribution, planned Sway.DIO streaming, ownership/earnings records).
-- **Sway.DIO economics** (when that lane is built): zero-take, listener-directed streaming summarized in `docs/SWAY_PRODUCT_STRUCTURE.md` — not a fixed per-stream rate and not a platform-wide streamshare pool. A separate DIO economic-model document is a later Self-Production artifact, not required for this release-health lane.
+- **Sway.DIO economics** (when that lane is built): decision D staged all-three funding summarized in `docs/SWAY_PRODUCT_STRUCTURE.md` — subscriptions first (Sway Exclusives only in private beta), then advertising and sponsorships later; forever 100% attributable streaming income to qualifying Sway Exclusive artists; Sway takes $0 streaming cut; Sway Exclusive ≠ ownership. A separate DIO economic-model document is a later Self-Production artifact, not required for this release-health lane.
 - Unfinished Self-Production does **not** make Live Rooms unfinished; judge lanes independently.
 - Release-chain hardening does **not** authorize live Stripe.
 

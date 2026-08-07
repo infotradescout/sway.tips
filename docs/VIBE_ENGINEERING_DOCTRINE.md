@@ -59,7 +59,7 @@ Sway is **two connected products on different timelines**. See `docs/SWAY_PRODUC
 | External distribution | One Self-Production capability, not Sway’s identity |
 | Live payment activation | Separate release gate for Live Rooms |
 
-Sway.DIO economics (planned): zero-take, listener-directed streaming — per-listener monthly creator pool; Sway keeps $0 from the streaming pool; no fixed per-stream penny promise. Binding summary: `docs/SWAY_PRODUCT_STRUCTURE.md`. That lock does not authorize Sway.DIO launch.
+Sway.DIO economics (planned): decision D staged all-three funding — subscription-funded Sway Exclusives first, then advertising and sponsorships; forever 100% attributable streaming income to qualifying Sway Exclusive artists; Sway takes $0 streaming cut; Sway Exclusive ≠ ownership. Binding summary: `docs/SWAY_PRODUCT_STRUCTURE.md`. That lock does not authorize Sway.DIO launch.
 
 Unfinished Self-Production does **not** make Live Rooms unfinished. Future audits must judge Live Rooms and Self-Production independently, with separate readiness judgments, roadmaps, and release gates.
 

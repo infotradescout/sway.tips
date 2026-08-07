@@ -16,7 +16,7 @@ Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) a
 2. A live room is night mode, not an entry tax. The site must be useful with zero live room.
 3. Original Sway—**Live Rooms**: rooms, requests, tips, boosts, queue control, QR sharing, profiles, moderation, earnings, and closeout—must remain intact as the current operating product.
 4. Sway replaces the core DistroKid workflow **as one Self-Production external-distribution outlet**: durable masters, releases, DSP delivery, delivery management, royalties, splits and payouts, promotion, and safe catalog transfer. DistroKid-class distribution is not Sway’s identity and is not the whole of Self-Production (which also includes files, collaboration, releases, events/tickets, and planned Sway.DIO streaming).
-5. Planned Sway.DIO streaming follows the zero-take, listener-directed economic summary in `docs/SWAY_PRODUCT_STRUCTURE.md`: monthly creator pools; Sway keeps $0 from the streaming pool; masters retained; splits paid at source. No royalty runtime yet — this is product law for the future lane, not a shipped capability.
+5. Planned Sway.DIO streaming follows the decision D staged all-three funding summary in `docs/SWAY_PRODUCT_STRUCTURE.md`: subscription-funded Sway Exclusives first; advertising and sponsorships later; forever 100% attributable streaming income to qualifying Sway Exclusive artists; Sway takes $0 streaming cut; Sway Exclusive ≠ ownership. No royalty runtime yet — this is product law for the future lane, not a shipped capability.
 6. The Live Rooms and Self-Production lanes should form one cohesive customer journey under one account, but readiness judgments, roadmaps, and release gates remain **independent**. Unfinished Self-Production does not make Live Rooms unfinished.
 7. Schema, code, tests, PRs, deployments, and build markers are evidence inputs. None independently proves the customer outcome.
 8. Live payment activation is a separate Live Rooms release gate after the Stripe test-mode production pilot is proven.
@@ -47,7 +47,7 @@ Judge this lane independently of Self-Production progress.
 
 ## DistroKid-Replacement Pillar (Self-Production external-distribution outlet)
 
-This pillar tracks DistroKid-class external distribution work **inside Self-Production**. It is one outlet — not Sway’s identity, and not the full Self-Production product (files, collaboration, releases, events/tickets, planned Sway.DIO under the economic summary in `docs/SWAY_PRODUCT_STRUCTURE.md`). Gaps here do not make Live Rooms unfinished.
+This pillar tracks DistroKid-class external distribution work **inside Self-Production**. It is one outlet — not Sway’s identity, and not the full Self-Production product (files, collaboration, releases, events/tickets, planned Sway.DIO under the decision D economic summary in `docs/SWAY_PRODUCT_STRUCTURE.md`). Gaps here do not make Live Rooms unfinished.
 
 | Capability | Current truth | Readiness impact |
 |---|---|---|
@@ -68,14 +68,14 @@ No contracted DSP delivery provider exists. No royalty ledger, collaborator dist
 
 ## Sway.DIO pillar (planned native streaming — Self-Production)
 
-Judge independently of Live Rooms. Economic law is summarized in `docs/SWAY_PRODUCT_STRUCTURE.md`; runtime is not shipped.
+Judge independently of Live Rooms. Economic law is the decision D staged all-three funding spine in `docs/SWAY_PRODUCT_STRUCTURE.md`; runtime is not shipped.
 
 | Capability | Current truth | Readiness impact |
 |---|---|---|
-| Zero-take / listener-directed economic model | Summarized in `docs/SWAY_PRODUCT_STRUCTURE.md` | Product law only |
-| Per-listener monthly creator pool + verified listening allocation | Not implemented | Future Self-Production lane |
-| Master/composition rights intake and splits-at-source payout | Not implemented | Future Self-Production lane |
-| Separated royalty ledgers + public zero-take report | Not implemented | Future Self-Production lane |
+| Decision D staged funding + $0 streaming cut | Summarized in `docs/SWAY_PRODUCT_STRUCTURE.md` | Product law only |
+| Subscription-funded Sway Exclusives (private beta / first earnable streams) | Not implemented | Future Self-Production lane |
+| Later advertising-funded and sponsor-funded listening | Not implemented | Future Self-Production lane |
+| 100% attributable streaming income to qualifying Sway Exclusive artists | Not implemented | Future Self-Production lane |
 | Paid-listener beta + three audited payout cycles | Not started | Required before public Sway.DIO launch claims |
 
 ## Correct Outcome Order
