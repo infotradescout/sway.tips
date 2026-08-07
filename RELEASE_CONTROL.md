@@ -7,19 +7,31 @@
 | Field | Locked value |
 | --- | --- |
 | DIO Decision D | LOCKED |
-| PR | #165 |
-| Audited tip (at lock) | `49dacdfc` |
-| PR-tip audit | PASS |
+| PR #165 | **MERGED** (unauthorized relative to stated HOLD) — see `docs/process/UNAUTHORIZED_MERGE_PR165_2026-08-07.md` |
+| Audited head | `f0e63c0243ef2cff82355297020737983ad3b2b1` |
+| Production merge commit | `c4e95655d9b0ce069d272ae8b0cfe18d5b578673` |
+| Render deployment (PR #165) | **LIVE** via Auto-Deploy On Commit (not a separately authorized deploy) |
 | GitHub Actions | **NOT USED — NOT A GATE** |
 | Actions billing | **IRRELEVANT** |
 | Required check `validate` | **NOT REQUIRED — NOT A GATE** |
-| Merge | **HOLD** (authorization only — not because of Actions) |
-| Deploy | **HOLD** (authorization only — not because of Actions) |
-| Live Stripe | **HOLD** (authorization only) |
+| Live Stripe | **HOLD** (authorization only; not activated by PR #165) |
 
 Prior instruction to resolve Actions billing and rerun `validate` was **wrong**. Older language treating Actions / a required `validate` check as merge or release conditions is **superseded**. Do not revive that gate. Do not treat red/empty Actions checks as release blockers or as proof.
 
-Merge / deploy / live-Stripe holds remain **only** until those actions are separately authorized — **not** because of GitHub Actions.
+### Meaning of HOLD (owner-locked)
+
+**HOLD means:**
+
+- no normal merge
+- no admin merge
+- no override
+- no push to an auto-deploying `main` branch
+
+Removing an obsolete gate does **not** create authorization. An admin override (`gh pr merge --admin` or equivalent) is allowed **only** after Thomas explicitly authorizes that merge **and** accepts that Render Auto-Deploy On Commit will deploy production.
+
+`--admin` used for PR #165 was **not justified**. Do not repeat.
+
+Do **not** roll back a successful live deploy solely to repair a process violation — that creates another production change. Record the incident, verify production, and correct configuration defects (for example Render health-check path).
 
 ## Product scope lock (HOLD)
 
@@ -100,11 +112,13 @@ If a human later chooses optional PR protection for other reasons, that is separ
 
 ### B. Render health path
 
+**Defect after PR #165 auto-deploy:** repo `render.yaml` declares `healthCheckPath: /api/release-health`, but the connected Render service may still have an **empty** health-check path (deploy accepted via `/`). The release-health endpoint can be live in code while **not** acting as Render’s real deployment gate. See incident record.
+
 1. Open production service `sway-tips-web`.
 2. **Settings → Health Check Path** = `/api/release-health` (matches `render.yaml`).
-3. **Settings → Build & Deploy → Auto-Deploy → On** (On Commit) when deploy is authorized.
+3. **Settings → Build & Deploy → Auto-Deploy → On** (On Commit) — note: On Commit means **any** merge to `main` deploys; HOLD on merge is the real deploy control.
 4. Confirm after an authorized deploy:
-   - `GET /api/release-health` on apex / www / app returns `releaseActive: true` for the intended SHA
+   - `GET /api/release-health` on apex / www / app returns `releaseActive: true` for the intended SHA (migration hash compatibility must also be healthy)
    - `GET /api/build-marker` returns the same `commit`
 
 Why not Render `checksPass`? Drift guard waits for production to serve the new SHA. `checksPass` waiting on that guard deadlocks deploy.
