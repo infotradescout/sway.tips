@@ -51,17 +51,11 @@ for (const term of [
   'Separate release gate for Live Rooms',
   'Unfinished Self-Production does **not** make Live Rooms unfinished',
   'External distribution',
-  'zero-take, listener-directed streaming',
+  'decision D',
+  'subscription-funded Sway Exclusives',
+  'Sway Exclusive ≠ ownership',
   'Sway streaming take',
   '**$0**',
-  // Decision D: all-three funding, staged; Exclusive ≠ ownership
-  'listener subscriptions',
-  'advertising',
-  'sponsorships',
-  'subscription-funded',
-  'Sway Exclusives',
-  'Sway Exclusive ≠ ownership',
-  'streaming side of Self-Production',
   'does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`'
 ]) {
   requireIncludes(structure, term, 'SWAY_PRODUCT_STRUCTURE.md');
@@ -69,7 +63,9 @@ for (const term of [
 
 for (const term of [
   'SWAY_PRODUCT_STRUCTURE.md',
-  'zero-take, listener-directed streaming',
+  'decision D staged all-three funding',
+  'subscription-funded Sway Exclusives',
+  'Sway Exclusive ≠ ownership',
   'Live Rooms (current)',
   'Self-Production (in progress)',
   'does not make Live Rooms'
@@ -79,7 +75,7 @@ for (const term of [
 
 for (const term of [
   'SWAY_PRODUCT_STRUCTURE.md',
-  'zero-take, listener-directed streaming',
+  'decision D staged all-three funding',
   'Live Rooms',
   'Self-Production',
   'do not redefine Live Rooms as incomplete'
@@ -89,7 +85,7 @@ for (const term of [
 
 for (const term of [
   'SWAY_PRODUCT_STRUCTURE.md',
-  'zero-take, listener-directed streaming',
+  'decision D staged all-three funding',
   'Live Rooms',
   'Self-Production',
   'not Sway’s identity',
@@ -101,7 +97,7 @@ for (const term of [
 
 for (const term of [
   'SWAY_PRODUCT_STRUCTURE.md',
-  'zero-take, listener-directed',
+  'decision D staged all-three funding',
   'Sway.DIO pillar',
   'Sway replaces the core DistroKid workflow',
   'do not make Live Rooms unfinished',
