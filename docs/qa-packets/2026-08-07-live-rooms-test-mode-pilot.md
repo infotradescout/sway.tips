@@ -4,7 +4,7 @@
 
 - Pilot date: 2026-08-07
 - Environment tested: production-hosted `https://app.sway.tips`
-- Build marker / commit SHA: `2da0e27f7465fc833da05e94109739b02c1dbc05` (pre-pilot baseline)
+- Build marker / commit SHA: baseline `2da0e27f…`; post when-compat deploy `c6b8188f9c683622599c953e82a60afb504ae0c5`
 - Operator name: A1 agent + Thomas (human clicks required)
 - Hold/go decision: **HOLD** (human two-account money loop not completed this session)
 
@@ -23,10 +23,9 @@
 
 ### Deployed-commit evidence
 
-- `GET https://app.sway.tips/api/build-marker` → commit `2da0e27f7465fc833da05e94109739b02c1dbc05`, branch `main`
-- `GET https://app.sway.tips/api/release-health` → same commit; **`releaseActive: false`** at baseline
-  - migrations: `expectedCount=30`, `appliedCount=30`, `missingCount=17`, `driftedCount=17`, `compatible=false`
-  - Diagnosis: drizzle hash algorithm matches repo (`sha256` of SQL); all 30 journal `when` values present in production ledger `created_at`; 17 SQL files edited after apply (cosmetic hash drift). Fix lane: `fix/release-active-when-compat`.
+- Baseline (pre-fix): commit `2da0e27f…`; **`releaseActive: false`** (`missingCount=17`/`driftedCount=17` hash-only false pending)
+- Diagnosis: drizzle hash algorithm matches repo (`sha256` of SQL); all 30 journal `when` values present in production ledger `created_at`; 17 SQL files edited after apply (cosmetic hash drift)
+- After PR #168 deploy: `GET /api/build-marker` + `/api/release-health` → commit `c6b8188f9c683622599c953e82a60afb504ae0c5`; **`releaseActive: true`**; `compatible: true`; `missingCount: 0`; `driftedCount: 17` (hash drift reported, not blocking)
 
 ### Live Stripe guard
 
@@ -112,10 +111,9 @@
 
 | Failure | Impact | Owner | Required fix before go |
 | --- | --- | --- | --- |
-| `releaseActive: false` on production at baseline | Milestone item 10 fails; money pilot should wait | Eng | Merge/deploy when-compat release-health fix |
 | No performer + audience credentials / inboxes for agent | Cannot complete two-account browser pilot | Thomas / operator | Run runbook sections A–E |
 | No Stripe Dashboard session for agent | Cannot execute duplicate/delayed webhook resend | Thomas / operator | Resend from test-mode webhook UI |
-| Empty Render `healthCheckPath` | Deploy health not aligned to `/api/release-health` | Eng / Thomas | Set after `releaseActive: true` (503 would brick if set earlier) |
+| Empty Render `healthCheckPath` | Deploy health not aligned to `/api/release-health` | Thomas | Dashboard click-path (API key unavailable to agent); safe now that `releaseActive: true` returns 200 |
 
 ## Explicit Non-Claims
 
