@@ -53,7 +53,16 @@ for (const term of [
   'External distribution',
   'zero-take, listener-directed streaming',
   'Sway streaming take',
-  '**$0**'
+  '**$0**',
+  // Decision D: all-three funding, staged; Exclusive ≠ ownership
+  'listener subscriptions',
+  'advertising',
+  'sponsorships',
+  'subscription-funded',
+  'Sway Exclusives',
+  'Sway Exclusive ≠ ownership',
+  'streaming side of Self-Production',
+  'does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`'
 ]) {
   requireIncludes(structure, term, 'SWAY_PRODUCT_STRUCTURE.md');
 }

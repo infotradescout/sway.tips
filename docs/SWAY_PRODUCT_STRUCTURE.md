@@ -9,9 +9,9 @@ Sway gives independent performers two connected systems:
 1. **Live Rooms** — earning and engaging audiences during real performances
 2. **Self-Production** — creating, owning, releasing, ticketing, distributing, and streaming original work
 
-**Sway.DIO** — Digital Independent Original streaming, built for work owned by the people who created it. It lives **inside Self-Production** as the native streaming destination. It is not a third unrelated product.
+**Sway.DIO** — Digital Independent Original streaming, built for work owned by the people who created it. It lives **inside Self-Production** as the native streaming destination (the streaming side of Self-Production). It is not a third unrelated product.
 
-**Sway.DIO economic model:** zero-take, listener-directed streaming. Each paying listener creates a monthly creator pool that follows verified listening; Sway keeps **$0** from the streaming pool and earns from Live Rooms, events, tickets, Self-Production, files, and optional services. Artists keep masters; collaborators are paid at the source. Binding summary for this dual-lane lock lives in this document; a separate DIO economic-model document is a later Self-Production artifact outside this release-health PR.
+**Sway.DIO economic model (decision D):** all three funding sources — listener subscriptions, advertising, and sponsorships — **staged**. Private beta / first earnable streams are **subscription-funded Sway Exclusives only** (clear funding source). Later, advertising-funded and sponsor-funded listening may be added without changing the zero streaming-cut rule. Forever: **100%** of streaming income attributable to qualifying Sway Exclusive artists goes to them; Sway takes **$0** streaming cut. For now only Sway Exclusives qualify to earn from streams. Sway Exclusive ≠ ownership: exclusive home / distributor / business partner for specific releases; artist keeps the master. Sway earns from Live Rooms (requests/tips/boosts), event/ticket fees, Self-Production services, file storage/collaboration, distribution services, and promotion/optional tools — not music streaming income. Competitive offer: Keep ownership. Release through Sway. Stream on Sway.DIO. Receive 100% of stream money. Sway makes money helping the career grow, not taking music income. Binding summary for this dual-lane lock lives in this document only (no hard dependency on a separate DIO economic-model file in this PR).
 
 ## Hierarchy
 
@@ -97,20 +97,21 @@ Later independent lanes (not Live Rooms unfinished-proof): DSP delivery, ticket 
 
 ## Sway.DIO economic model (summary)
 
-Governing summary for dual-lane language is this section.
+Governing summary for dual-lane language is this section. Simplified spine (authorized decision **D**):
 
 | Rule | Required truth |
 | --- | --- |
-| Pool model | Per-listener monthly creator pool — not one platform-wide streamshare pool |
-| Allocation | Verified listening share (time-based rules), not raw play count or fixed pennies |
-| Sway streaming take | **$0** after taxes, refunds/chargebacks, disclosed payment-rail costs, and required composition royalties |
-| Masters | Creator retains master copyright |
-| Splits | Paid directly to approved master owners and named contributors |
-| Outside DSPs | Pass through 100% of actual master royalties received; never claim PRO/other-org payments as Sway-paid |
-| Sway Exclusive | Exclusive distributor/administrator for selected recordings + defined term; not ownership of the artist |
-| Company profit | Live Rooms, events, tickets, Self-Production, files, optional services — not the streaming pool |
+| Role | Sway.DIO = streaming side of Self-Production |
+| Who can earn from streams (for now) | Only **Sway Exclusives** qualify to earn from streams |
+| Funding sources (all three, staged) | Listener subscriptions → then advertising → then sponsorships |
+| Private beta / first earnable streams | **Subscription-funded** Sway Exclusives only (clear funding source) |
+| Later stages | Add advertising-funded and sponsor-funded listening **without** changing the zero streaming-cut rule |
+| Sway streaming take | Forever **$0** — 100% of attributable streaming income to qualifying Sway Exclusive artists |
+| Sway Exclusive ≠ ownership | Exclusive home / distributor / business partner for specific releases; artist keeps the master |
+| Company profit | Live Rooms (requests/tips/boosts), event/ticket fees, Self-Production services, file storage/collaboration, distribution services, promotion/optional tools — **not** streaming income |
+| Competitive offer | Keep ownership. Release through Sway. Stream on Sway.DIO. Receive 100% of stream money. Sway makes money helping the career grow, not taking music income. |
 
-This economic lock does **not** authorize Sway.DIO launch or royalty runtime.
+This economic lock does **not** authorize Sway.DIO launch, streaming/royalty runtime, live Stripe, merge, or deploy.
 
 ## Dual-lane readiness rule
 
@@ -123,7 +124,8 @@ This economic lock does **not** authorize Sway.DIO launch or royalty runtime.
 
 - Live Rooms pilot: `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md`
 - Test-mode milestone HOLD: `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`
-- Sway.DIO economic model: `docs/SWAY_DIO_ECONOMIC_MODEL.md`
 - Gap ledger (capability detail): `docs/SWAY_COMPLETE_PRODUCT_GAP.md`
 - Release chain: `RELEASE_CONTROL.md`
 - Agent rules: `AGENTS.md`
+
+A fuller Sway.DIO economic-model document may exist later as a Self-Production artifact; this dual-lane PR does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`.
