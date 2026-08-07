@@ -127,6 +127,7 @@ requireIncludes(driftGuard, 'releaseActive', 'drift guard must require releaseAc
 const expectedFromRepo = loadExpectedMigrations();
 assert.ok(expectedFromRepo.length > 0, 'repo must expose expected migrations from drizzle journal');
 assert.ok(expectedFromRepo.every((entry) => entry.tag && entry.hash.length === 64));
+assert.ok(expectedFromRepo.every((entry) => entry.when == null || Number.isFinite(entry.when)));
 
 const compatible = evaluateMigrationCompatibility(expectedFromRepo, expectedFromRepo.map((entry) => entry.hash));
 assert.equal(compatible.status, 'compatible');
@@ -138,6 +139,26 @@ assert.equal(pending.status, 'pending');
 assert.equal(pending.compatible, false);
 assert.equal(pending.missingCount, 1);
 
+// Drizzle identity is journal when ↔ ledger created_at. Hash drift after apply must not fake-pending.
+{
+  const withWhen = expectedFromRepo.filter((entry) => entry.when != null);
+  assert.ok(withWhen.length >= 2, 'repo journal must expose when timestamps');
+  const driftedLedger = withWhen.map((entry, index) => ({
+    hash: index === 0 ? 'a'.repeat(64) : entry.hash,
+    createdAt: entry.when
+  }));
+  const whenCompat = evaluateMigrationCompatibility(withWhen, driftedLedger);
+  assert.equal(whenCompat.status, 'compatible');
+  assert.equal(whenCompat.compatible, true);
+  assert.equal(whenCompat.missingCount, 0);
+  assert.ok(whenCompat.driftedCount >= 1, 'hash drift must still be reported');
+
+  const missingWhen = evaluateMigrationCompatibility(withWhen, driftedLedger.slice(0, -1));
+  assert.equal(missingWhen.status, 'pending');
+  assert.equal(missingWhen.compatible, false);
+  assert.equal(missingWhen.missingCount, 1);
+}
+
 const tempDir = mkdtempSync(join(tmpdir(), 'sway-release-health-'));
 try {
   mkdirSync(join(tempDir, 'meta'), { recursive: true });
@@ -146,11 +167,12 @@ try {
   writeFileSync(join(tempDir, `${tag}.sql`), sqlBody);
   writeFileSync(
     join(tempDir, 'meta', '_journal.json'),
-    JSON.stringify({ version: '7', dialect: 'postgresql', entries: [{ idx: 0, tag }] })
+    JSON.stringify({ version: '7', dialect: 'postgresql', entries: [{ idx: 0, tag, when: 1780000000000 }] })
   );
   const loaded = loadExpectedMigrations(tempDir);
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].hash, createHash('sha256').update(sqlBody).digest('hex'));
+  assert.equal(loaded[0].when, 1780000000000);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }
@@ -228,7 +250,8 @@ assert.equal(/stripe/i.test(server.slice(server.indexOf('app.get("/api/release-h
       databaseConfigured: true,
       databaseReachable: true,
       migrationQueryOk: true,
-      appliedHashes: []
+      appliedHashes: [],
+      appliedMigrations: []
     })
   });
   assert.equal(result.statusCode, 503);

@@ -57,17 +57,27 @@ export type ReleaseHealthReport = {
 export type ExpectedMigration = {
   tag: string;
   hash: string;
+  /** Drizzle journal `when` / folderMillis. Matches ledger `created_at`. */
+  when: number | null;
+};
+
+export type AppliedMigrationLedgerRow = {
+  hash: string;
+  /** Drizzle ledger `created_at` (journal `when`). Null when only a hash is known. */
+  createdAt: number | null;
 };
 
 type JournalFile = {
-  entries?: Array<{ tag?: unknown }>;
+  entries?: Array<{ tag?: unknown; when?: unknown }>;
 };
 
 export type ReleaseDatabaseProbeResult = {
   databaseConfigured: boolean;
   databaseReachable: boolean;
   migrationQueryOk: boolean;
+  /** @deprecated Prefer appliedMigrations; retained for older call sites/tests. */
   appliedHashes: string[];
+  appliedMigrations: AppliedMigrationLedgerRow[];
 };
 
 export type ReleaseHealthPoolFactory = (config: PoolConfig) => {
@@ -76,7 +86,7 @@ export type ReleaseHealthPoolFactory = (config: PoolConfig) => {
 };
 
 const MIGRATION_LEDGER_QUERY =
-  'SELECT hash FROM drizzle.__drizzle_migrations ORDER BY id ASC';
+  'SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id ASC';
 
 export function buildReleaseHealthPoolConfig(databaseUrl: string): PoolConfig {
   return {
@@ -89,6 +99,44 @@ export function buildReleaseHealthPoolConfig(databaseUrl: string): PoolConfig {
     // PostgreSQL-side abort; required because Promise.race alone does not cancel PG work.
     options: `-c statement_timeout=${RELEASE_HEALTH_TIMEOUTS.statementTimeoutMs}`
   };
+}
+
+function normalizeCreatedAt(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber)) {
+      return asNumber;
+    }
+  }
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+  return null;
+}
+
+export function normalizeAppliedMigrationRows(
+  applied: Iterable<string | AppliedMigrationLedgerRow>
+): AppliedMigrationLedgerRow[] {
+  const rows: AppliedMigrationLedgerRow[] = [];
+  for (const entry of applied) {
+    if (typeof entry === 'string') {
+      if (entry.length > 0) {
+        rows.push({ hash: entry, createdAt: null });
+      }
+      continue;
+    }
+    if (!entry || typeof entry.hash !== 'string' || entry.hash.length === 0) {
+      continue;
+    }
+    rows.push({
+      hash: entry.hash,
+      createdAt: normalizeCreatedAt(entry.createdAt)
+    });
+  }
+  return rows;
 }
 
 export function loadExpectedMigrations(migrationsDir = join(process.cwd(), 'drizzle')): ExpectedMigration[] {
@@ -115,35 +163,86 @@ export function loadExpectedMigrations(migrationsDir = join(process.cwd(), 'driz
     if (!existsSync(sqlPath)) {
       continue;
     }
+    // Same algorithm as drizzle-orm readMigrationFiles: sha256 of full SQL file contents.
     const hash = createHash('sha256').update(readFileSync(sqlPath)).digest('hex');
-    expected.push({ tag: entry.tag, hash });
+    const when = normalizeCreatedAt(entry.when);
+    expected.push({ tag: entry.tag, hash, when });
   }
 
   return expected;
 }
 
+/**
+ * Compatibility with drizzle-orm migrate identity:
+ * - Applied identity is journal `when` ↔ ledger `created_at`
+ * - File content hash is integrity metadata; edits after apply cause hash drift
+ *   without meaning the migration is pending
+ * - Hash-only applied rows remain supported for tests / partial probes
+ */
 export function evaluateMigrationCompatibility(
   expected: ExpectedMigration[],
-  appliedHashes: Iterable<string>
+  appliedInput: Iterable<string | AppliedMigrationLedgerRow>
 ): Pick<
   ReleaseHealthReport['migrations'],
   'status' | 'compatible' | 'expectedCount' | 'appliedCount' | 'missingCount' | 'driftedCount' | 'latestExpectedTag'
 > {
-  const applied = new Set(
-    [...appliedHashes].filter((hash) => typeof hash === 'string' && hash.length > 0)
-  );
-  const missing = expected.filter((migration) => !applied.has(migration.hash));
-  const expectedHashSet = new Set(expected.map((migration) => migration.hash));
-  const driftedCount = [...applied].filter((hash) => !expectedHashSet.has(hash)).length;
+  const applied = normalizeAppliedMigrationRows(appliedInput);
+  const appliedByWhen = new Map<number, AppliedMigrationLedgerRow>();
+  const appliedHashes = new Set<string>();
+
+  for (const row of applied) {
+    appliedHashes.add(row.hash);
+    if (row.createdAt != null && !appliedByWhen.has(row.createdAt)) {
+      appliedByWhen.set(row.createdAt, row);
+    }
+  }
+
+  const expectedWhens = new Set<number>();
+  const expectedHashes = new Set<string>();
+  for (const migration of expected) {
+    expectedHashes.add(migration.hash);
+    if (migration.when != null) {
+      expectedWhens.add(migration.when);
+    }
+  }
+
+  let missingCount = 0;
+  let hashDriftCount = 0;
+
+  for (const migration of expected) {
+    const byWhen = migration.when != null ? appliedByWhen.get(migration.when) : undefined;
+    if (byWhen) {
+      if (byWhen.hash !== migration.hash) {
+        hashDriftCount += 1;
+      }
+      continue;
+    }
+    if (appliedHashes.has(migration.hash)) {
+      continue;
+    }
+    missingCount += 1;
+  }
+
+  const orphanCount = applied.filter((row) => {
+    if (row.createdAt != null && expectedWhens.has(row.createdAt)) {
+      return false;
+    }
+    if (expectedHashes.has(row.hash)) {
+      return false;
+    }
+    return true;
+  }).length;
+
+  const driftedCount = hashDriftCount + orphanCount;
 
   let status: MigrationCompatibilityStatus = 'compatible';
   if (expected.length === 0) {
     status = 'unknown';
-  } else if (missing.length > 0) {
+  } else if (missingCount > 0) {
     status = 'pending';
   } else if (driftedCount > 0) {
-    // All expected hashes are present; extra ledger rows are recorded but do not
-    // block releaseActive (production may retain reconciled historical rows).
+    // All expected migrations are present by when (or hash fallback). Hash drift /
+    // orphan historical rows are reported but do not block releaseActive.
     status = 'compatible';
   }
 
@@ -151,8 +250,8 @@ export function evaluateMigrationCompatibility(
     status,
     compatible: status === 'compatible' && expected.length > 0,
     expectedCount: expected.length,
-    appliedCount: applied.size,
-    missingCount: missing.length,
+    appliedCount: applied.length,
+    missingCount,
     driftedCount,
     latestExpectedTag: expected.at(-1)?.tag ?? null
   };
@@ -163,10 +262,14 @@ export function buildReleaseHealthReport(input: {
   databaseConfigured: boolean;
   databaseReachable: boolean;
   migrationQueryOk: boolean;
-  appliedHashes: string[];
+  appliedHashes?: string[];
+  appliedMigrations?: AppliedMigrationLedgerRow[];
   expectedMigrations?: ExpectedMigration[];
 }): ReleaseHealthReport {
   const expected = input.expectedMigrations ?? loadExpectedMigrations();
+  const appliedRows = Array.isArray(input.appliedMigrations)
+    ? input.appliedMigrations
+    : (input.appliedHashes ?? []).map((hash) => ({ hash, createdAt: null as number | null }));
 
   let migrations: ReleaseHealthReport['migrations'];
   if (!input.databaseConfigured) {
@@ -190,7 +293,7 @@ export function buildReleaseHealthReport(input: {
       latestExpectedTag: expected.at(-1)?.tag ?? null
     };
   } else {
-    migrations = evaluateMigrationCompatibility(expected, input.appliedHashes);
+    migrations = evaluateMigrationCompatibility(expected, appliedRows);
   }
 
   const database = {
@@ -259,7 +362,8 @@ export async function probeReleaseDatabase(input: {
       databaseConfigured: false,
       databaseReachable: false,
       migrationQueryOk: false,
-      appliedHashes: []
+      appliedHashes: [],
+      appliedMigrations: []
     };
   }
 
@@ -274,7 +378,8 @@ export async function probeReleaseDatabase(input: {
       databaseConfigured: true,
       databaseReachable: false,
       migrationQueryOk: false,
-      appliedHashes: []
+      appliedHashes: [],
+      appliedMigrations: []
     };
   }
 
@@ -288,7 +393,8 @@ export async function probeReleaseDatabase(input: {
         databaseConfigured: true,
         databaseReachable: false,
         migrationQueryOk: false,
-        appliedHashes: []
+        appliedHashes: [],
+        appliedMigrations: []
       };
     }
 
@@ -302,22 +408,28 @@ export async function probeReleaseDatabase(input: {
         databaseConfigured: true,
         databaseReachable: true,
         migrationQueryOk: false,
-        appliedHashes: []
+        appliedHashes: [],
+        appliedMigrations: []
       };
     }
 
     try {
-      const migrationRows = await client.query<{ hash: string }>(migrationQuerySql);
-      const appliedHashes = migrationRows.rows
-        .map((row) => row.hash)
-        .filter((hash): hash is string => typeof hash === 'string' && hash.length > 0);
+      const migrationRows = await client.query<{ hash: string; created_at: unknown }>(migrationQuerySql);
+      const appliedMigrations = migrationRows.rows
+        .map((row) => ({
+          hash: typeof row.hash === 'string' ? row.hash : '',
+          createdAt: normalizeCreatedAt(row.created_at)
+        }))
+        .filter((row) => row.hash.length > 0);
+      const appliedHashes = appliedMigrations.map((row) => row.hash);
       client.release();
       client = null;
       return {
         databaseConfigured: true,
         databaseReachable,
         migrationQueryOk: true,
-        appliedHashes
+        appliedHashes,
+        appliedMigrations
       };
     } catch {
       // Connect succeeded (reachable); migration/statement/query timeout or ledger error fails closed.
@@ -327,7 +439,8 @@ export async function probeReleaseDatabase(input: {
         databaseConfigured: true,
         databaseReachable,
         migrationQueryOk: false,
-        appliedHashes: []
+        appliedHashes: [],
+        appliedMigrations: []
       };
     }
   } catch {
@@ -337,7 +450,8 @@ export async function probeReleaseDatabase(input: {
       databaseConfigured: true,
       databaseReachable: false,
       migrationQueryOk: false,
-      appliedHashes: []
+      appliedHashes: [],
+      appliedMigrations: []
     };
   } finally {
     await probePool.end().catch(() => undefined);
@@ -370,6 +484,7 @@ export async function evaluateReleaseHealth(input: {
     databaseReachable: probeResult.databaseReachable,
     migrationQueryOk: probeResult.migrationQueryOk,
     appliedHashes: probeResult.appliedHashes,
+    appliedMigrations: probeResult.appliedMigrations,
     expectedMigrations: input.expectedMigrations
   });
 
