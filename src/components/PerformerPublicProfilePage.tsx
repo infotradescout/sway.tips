@@ -16,11 +16,16 @@ import {
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 import { captureCampaignCode } from '../shells/campaignAttribution';
-import { sendAcquisitionEvent } from '../shells/frictionClient';
+import {
+  captureDiscoveryAttribution,
+  getEffectiveDiscoveryChannel
+} from '../shells/discoveryAttribution';
+import { sendAcquisitionEvent, sendDiscoveryEvent } from '../shells/frictionClient';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
+import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
 import { PublicEventCard, type PublicEventDto } from './PublicEventPage';
 
 type PublicProfileLink = {
@@ -131,6 +136,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   // through to the live room; this just needs the persistence side effect -- PatronApp
   // reads it back on the room route. This page never submits a payment itself.
   captureCampaignCode();
+  captureDiscoveryAttribution();
   const [profile, setProfile] = useState<PublicPerformerProfile | null>(null);
   const [activeRoom, setActiveRoom] = useState<ActiveProfileRoom | null>(null);
   const [events, setEvents] = useState<PublicEventDto[]>([]);
@@ -191,6 +197,26 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           stageName: data.performer.stageName,
           displayName: data.performer.displayName
         })} on Sway`;
+        sendDiscoveryEvent('discovery_landing', {
+          shell: 'patron',
+          surface: 'public-profile',
+          route_family: 'performer-profile',
+          has_route_context: true,
+          has_session_context: false,
+          build_commit: 'unknown',
+          attribution_channel: getEffectiveDiscoveryChannel(),
+          entity_kind: 'performer'
+        });
+        sendDiscoveryEvent('discovery_entity_view', {
+          shell: 'patron',
+          surface: 'public-profile',
+          route_family: 'performer-profile',
+          has_route_context: true,
+          has_session_context: false,
+          build_commit: 'unknown',
+          attribution_channel: getEffectiveDiscoveryChannel(),
+          entity_kind: 'performer'
+        });
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
@@ -399,6 +425,16 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           {activeRoom ? (
             <a
               href={activeRoom.routePath}
+              onClick={() => sendDiscoveryEvent('discovery_primary_action', {
+                shell: 'patron',
+                surface: 'public-profile',
+                route_family: 'performer-profile',
+                has_route_context: true,
+                has_session_context: false,
+                build_commit: 'unknown',
+                attribution_channel: getEffectiveDiscoveryChannel(),
+                entity_kind: 'live_room'
+              })}
               className="mt-6 flex min-h-16 items-center justify-between gap-4 rounded-2xl border border-fuchsia-300/30 bg-gradient-to-r from-fuchsia-600 to-violet-600 px-5 py-4 text-left shadow-lg shadow-fuchsia-950/30 transition hover:from-fuchsia-500 hover:to-violet-500"
             >
               <span>
@@ -546,6 +582,8 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
             ))}
           </section>
         ) : null}
+
+        <DiscoveryFindUsPrompt routeFamily="performer-profile" surface="public-profile" />
 
         <footer className="mt-10 text-center">
           <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-slate-600">

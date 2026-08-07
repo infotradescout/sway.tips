@@ -143,8 +143,8 @@ Primary Sway gap is **eligible real entity depth**, not another crawler file.
 ## Required next phases (feature branches only)
 
 1. **Phase 2** — Contract doc added: `docs/PUBLIC_DISCOVERY_CONTRACT_V1.md` (this branch).  
-2. **Phase 3–6** — Shared foundation + attribution + product surfaces + contract tests — **per repo**, starting with Sway first-response/H1/JSON-LD + sitemap depth, without fake entities.  
-3. **Phase 7** — Fixed query matrix + measurement dashboard — after pages pass.  
+2. **Phase 3–6** — **Sway implemented on this branch (HOLD — not merged/deployed):** first-response H1 + JSON-LD passthrough fix + discovery body facts; sitemap eligibility tightened (non-private releases, titled events, lastmod); attribution (`discovery_*` + UTM first-touch + optional How did you find us?); contract tests fail on app-shell robots/sitemap and missing first-response identity facts.  
+3. **Phase 7** — Fixed query matrix doc: `docs/process/PUBLIC_DISCOVERY_QUERY_MATRIX_V1.md` (results intentionally `_not run — HOLD_` until authorized deploy).  
 4. Sibling repos (MealScout, TradeScoutPro, skill-gaming-world, …) need dedicated clean feature branches and live domain probes — not started beyond path discovery.
 
 ## Rollback procedure (if a bad discovery change were ever deployed)

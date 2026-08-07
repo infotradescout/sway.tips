@@ -16,11 +16,16 @@ import {
   useSwayState
 } from './shared';
 import {
+  sendDiscoveryEvent,
   sendPatronNoSessionRecoveryViewed,
   sendPatronNoSessionReturnHomeClicked,
   sendRoomEntryViewed
 } from './frictionClient';
 import { captureCampaignCode } from './campaignAttribution';
+import {
+  captureDiscoveryAttribution,
+  getEffectiveDiscoveryChannel
+} from './discoveryAttribution';
 import type { PatronRequestStatus } from '../types';
 import { AccountHome, AccountLogin, AccountRecovery, AccountSignup } from '../components/AccountAccess';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
@@ -431,6 +436,7 @@ export default function PatronApp() {
     const eventKey = `${routeFamily}:${routeGigId ?? 'none'}:entry`;
     if (roomEntryEventKeyRef.current === eventKey) return;
     roomEntryEventKeyRef.current = eventKey;
+    captureDiscoveryAttribution();
     sendRoomEntryViewed({
       shell: 'patron',
       surface: 'room-entry',
@@ -438,6 +444,36 @@ export default function PatronApp() {
       has_route_context: hasPatronRouteContext,
       has_session_context: hasSessionContext,
       build_commit: 'unknown'
+    });
+    sendDiscoveryEvent('discovery_landing', {
+      shell: 'patron',
+      surface: 'room-entry',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown',
+      attribution_channel: getEffectiveDiscoveryChannel(),
+      entity_kind: 'live_room'
+    });
+    sendDiscoveryEvent('discovery_entity_view', {
+      shell: 'patron',
+      surface: 'room-entry',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown',
+      attribution_channel: getEffectiveDiscoveryChannel(),
+      entity_kind: 'live_room'
+    });
+    sendDiscoveryEvent('discovery_primary_action', {
+      shell: 'patron',
+      surface: 'room-entry',
+      route_family: routeFamily,
+      has_route_context: hasPatronRouteContext,
+      has_session_context: hasSessionContext,
+      build_commit: 'unknown',
+      attribution_channel: getEffectiveDiscoveryChannel(),
+      entity_kind: 'live_room'
     });
   }, [hasPatronRouteContext, hasSessionContext, isLoading, route.name, routeFamily, routeGigId, shouldShowConnectionRecovery, shouldShowEndedRoomRecovery, shouldShowNoSessionRecovery]);
 

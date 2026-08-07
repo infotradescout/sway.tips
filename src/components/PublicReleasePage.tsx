@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, Disc3, Loader2, Share2 } from 'lucide-react';
-import { sendAcquisitionEvent } from '../shells/frictionClient';
+import {
+  captureDiscoveryAttribution,
+  getEffectiveDiscoveryChannel
+} from '../shells/discoveryAttribution';
+import { sendAcquisitionEvent, sendDiscoveryEvent } from '../shells/frictionClient';
+import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
 
 type PublicRelease = {
   id: string;
@@ -42,6 +47,17 @@ export default function PublicReleasePage({ releaseId }: { releaseId: string }) 
         setRelease(data.release);
         setStatus('ready');
         document.title = `${data.release.title} by ${data.release.primaryArtistName} on Sway`;
+        captureDiscoveryAttribution();
+        sendDiscoveryEvent('discovery_landing', {
+          shell: 'patron', surface: 'public-release', route_family: 'public-release',
+          has_route_context: true, has_session_context: false, build_commit: 'unknown',
+          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'release'
+        });
+        sendDiscoveryEvent('discovery_entity_view', {
+          shell: 'patron', surface: 'public-release', route_family: 'public-release',
+          has_route_context: true, has_session_context: false, build_commit: 'unknown',
+          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'release'
+        });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setStatus('error');
@@ -59,6 +75,11 @@ export default function PublicReleasePage({ releaseId }: { releaseId: string }) 
       sendAcquisitionEvent('public_release_shared', {
         shell: 'patron', surface: 'public-release', route_family: 'public-release',
         has_route_context: true, has_session_context: false, build_commit: 'unknown'
+      });
+      sendDiscoveryEvent('discovery_primary_action', {
+        shell: 'patron', surface: 'public-release', route_family: 'public-release',
+        has_route_context: true, has_session_context: false, build_commit: 'unknown',
+        attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'release'
       });
       setMessage(navigator.share ? 'Share opened.' : 'Release link copied.');
     } catch (error) {
@@ -88,6 +109,7 @@ export default function PublicReleasePage({ releaseId }: { releaseId: string }) 
             {(release.pLine || release.cLine || release.labelName) ? <div className="mt-6 space-y-1 text-[11px] text-slate-500">{release.labelName ? <p>Label: {release.labelName}</p> : null}{release.pLine ? <p>{release.pLine}</p> : null}{release.cLine ? <p>{release.cLine}</p> : null}</div> : null}
           </div>
         </section>
+        <DiscoveryFindUsPrompt routeFamily="public-release" surface="public-release" />
       </div>
     </main>
   );
