@@ -29,7 +29,11 @@ for (const term of [
   'maximum verified throughput per unit of human attention',
   'Sway replaces the core DistroKid workflow',
   'Sway retains its original product',
-  'npm run readiness:assert'
+  'npm run readiness:assert',
+  'SWAY_PRODUCT_STRUCTURE.md',
+  'Live Rooms',
+  'Self-Production',
+  'not Sway’s identity'
 ]) {
   requireIncludes(doctrine, term, 'Vibe engineering doctrine');
 }

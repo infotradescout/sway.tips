@@ -10,11 +10,20 @@ No task is complete because an agent says it is complete. No deployment is succe
 
 ## Release control (read before merging to main)
 
-- Merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md`.
-- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Do not turn it Off to wait for Actions.
-- GitHub Actions CI is advisory until billing works; it must not block Render auto-deploy.
+- Verified merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md` minimum release contract (11 gates).
+- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Prefer blocking merge until exact-commit CI (`validate`) executes real steps and passes — not turning Auto-Deploy Off.
+- Empty CI jobs (zero executed steps / billing shells) are a **blocker**, not permission to skip the gate.
 - Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up).
+- Public release health is `GET /api/release-health`; deploy identity marker remains `GET /api/build-marker`.
 
+## Product scope lock (HOLD)
+
+- Governing product structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) and Self-Production (in progress) are separate lanes; Sway.DIO is inside Self-Production; external distribution is one outlet, not Sway’s identity.
+- Governing Sway.DIO economics: `docs/SWAY_DIO_ECONOMIC_MODEL.md` — zero-take, listener-directed streaming; per-listener monthly creator pool; Sway keeps $0 from the streaming pool; no fixed per-stream penny promise; masters retained; splits paid at source. Do not contradict this model in marketing or implementation language.
+- Release-chain hardening does **not** authorize live Stripe or live money.
+- Next **Live Rooms** product proof gate is the two-account **Stripe test-mode** production pilot (performer + audience, real hosted room, request/tip/boost/refund, webhook dup/delay, closeout, earnings, receipt/history, DB reconciliation, exact commit evidence). HOLD until proven — see `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
+- Do not implement or ungate DSP delivery, ticket sales, royalty processing, or collaborator payouts in the Live Rooms lane; those are later Self-Production / independent lanes.
+- Do not treat unfinished Self-Production as proof that Live Rooms is incomplete. Unfinished Self-Production does not make Live Rooms unfinished.
 ## Council Roles
 
 ```text

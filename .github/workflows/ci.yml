@@ -42,6 +42,14 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Assert CI executed substantive steps
+        run: |
+          test -f package.json
+          test -d node_modules
+          test -n "${{ github.sha }}"
+          echo "Exact commit under test: ${{ github.sha }}"
+          echo "CI_SUBSTANTIVE_STEPS_OK=1" >> "$GITHUB_ENV"
+
       - name: Run Contract Tests
         run: npm run test:contracts
 
@@ -56,6 +64,12 @@ jobs:
 
       - name: Run Drizzle Check
         run: npm run db:check
+
+      - name: Assert build artifact exists
+        run: |
+          test -d dist
+          test -f dist/server.cjs
+          echo "Build artifact present for ${{ github.sha }}"
 
       - name: Run Active Blocks Postgres Integration Test
         run: npm run test:integration:moderation-active-blocks

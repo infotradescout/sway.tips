@@ -10,12 +10,16 @@ Owner bar: **Do not ship until the product is complete.**
 
 ## Product Law
 
+Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) and Self-Production (in progress) are separate lanes.
+
 1. One account can be audience and creator. Stripe verification unlocks getting paid, not using the site.
 2. A live room is night mode, not an entry tax. The site must be useful with zero live room.
-3. Original Sway—rooms, requests, tips, boosts, queue control, QR sharing, profiles, moderation, earnings, and closeout—must remain intact.
-4. Sway must replace the core DistroKid workflow: durable masters, releases, DSP delivery, delivery management, royalties, splits and payouts, promotion, and safe catalog transfer.
-5. The original and distribution pillars must form one cohesive customer journey.
-6. Schema, code, tests, PRs, deployments, and build markers are evidence inputs. None independently proves the customer outcome.
+3. Original Sway—**Live Rooms**: rooms, requests, tips, boosts, queue control, QR sharing, profiles, moderation, earnings, and closeout—must remain intact as the current operating product.
+4. Sway replaces the core DistroKid workflow **as one Self-Production external-distribution outlet**: durable masters, releases, DSP delivery, delivery management, royalties, splits and payouts, promotion, and safe catalog transfer. DistroKid-class distribution is not Sway’s identity and is not the whole of Self-Production (which also includes files, collaboration, releases, events/tickets, and planned Sway.DIO streaming).
+5. Planned Sway.DIO streaming follows `docs/SWAY_DIO_ECONOMIC_MODEL.md`: zero-take, listener-directed monthly creator pools; Sway keeps $0 from the streaming pool; masters retained; splits paid at source. No royalty runtime yet — this is product law for the future lane, not a shipped capability.
+6. The Live Rooms and Self-Production lanes should form one cohesive customer journey under one account, but readiness judgments, roadmaps, and release gates remain **independent**. Unfinished Self-Production does not make Live Rooms unfinished.
+7. Schema, code, tests, PRs, deployments, and build markers are evidence inputs. None independently proves the customer outcome.
+8. Live payment activation is a separate Live Rooms release gate after the Stripe test-mode production pilot is proven.
 
 ## Current Verified Production Facts
 
@@ -28,8 +32,9 @@ Owner bar: **Do not ship until the product is complete.**
 - Deterministic storage evidence proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, and identity/traversal denial. It does not prove the live bucket, production authorization journey, or independent recovery.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
-## Original Sway Pillar
+## Original Sway Pillar (Live Rooms — current operating product)
 
+Judge this lane independently of Self-Production progress.
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Performer signup, login, and session | Implemented | Needs a current production role/access evidence packet |
@@ -39,8 +44,9 @@ Owner bar: **Do not ship until the product is complete.**
 | Overlay, earnings, closeout, and recap | Implemented | Needs current production live-night closeout evidence |
 | Unified account for audience and creator | Universal signup, login, session, logout, audience access, and Pro Mode activation are implemented | Full production audience-to-creator journey remains unverified |
 
-## DistroKid-Replacement Pillar
+## DistroKid-Replacement Pillar (Self-Production external-distribution outlet)
 
+This pillar tracks DistroKid-class external distribution work **inside Self-Production**. It is one outlet — not Sway’s identity, and not the full Self-Production product (files, collaboration, releases, events/tickets, planned Sway.DIO under `docs/SWAY_DIO_ECONOMIC_MODEL.md`). Gaps here do not make Live Rooms unfinished.
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
@@ -57,6 +63,18 @@ Owner bar: **Do not ship until the product is complete.**
 | Catalog transfer and DistroKid cutover | Parity/continuity schema only; execution disabled | Critical blocker |
 
 No contracted DSP delivery provider exists. No royalty ledger, collaborator distribution splits, or distribution payouts exist. Live-room payment records must never be reused as proof of distribution accounting.
+
+## Sway.DIO pillar (planned native streaming — Self-Production)
+
+Judge independently of Live Rooms. Economic law is locked; runtime is not shipped.
+
+| Capability | Current truth | Readiness impact |
+|---|---|---|
+| Zero-take / listener-directed economic model | Locked in `docs/SWAY_DIO_ECONOMIC_MODEL.md` | Product law only |
+| Per-listener monthly creator pool + verified listening allocation | Not implemented | Future Self-Production lane |
+| Master/composition rights intake and splits-at-source payout | Not implemented | Future Self-Production lane |
+| Separated royalty ledgers + public zero-take report | Not implemented | Future Self-Production lane |
+| Paid-listener beta + three audited payout cycles | Not started | Required before public Sway.DIO launch claims |
 
 ## Correct Outcome Order
 
@@ -79,3 +97,4 @@ No contracted DSP delivery provider exists. No royalty ledger, collaborator dist
 - A provider submission does not prove store acceptance or a live release.
 - A deployed commit does not prove a successful deployment outcome.
 - Passing contracts do not prove complete-product readiness.
+- Locking `docs/SWAY_DIO_ECONOMIC_MODEL.md` does not ship Sway.DIO streaming or royalty payouts.
