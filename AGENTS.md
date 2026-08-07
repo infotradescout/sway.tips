@@ -12,14 +12,15 @@ No task is complete because an agent says it is complete. No deployment is succe
 
 - Authorized merge/push to `main` **is** the production release path when merge/deploy are separately authorized. See `RELEASE_CONTROL.md` minimum release contract (local/optional evidence).
 - **GitHub Actions is NOT USED — NOT A GATE.** Actions billing is **IRRELEVANT**. Required check `validate` is **NOT REQUIRED**. Do not resolve billing or rerun `validate` as a release precondition. Older docs that said otherwise are superseded.
-- Merge / deploy / live Stripe remain **HOLD** for authorization reasons only — **not** because of Actions.
+- Live Stripe remains **HOLD** for authorization reasons only — **not** because of Actions. PR #165 was merged/deployed without justified authorization — see `docs/process/UNAUTHORIZED_MERGE_PR165_2026-08-07.md`.
 - Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit) when deploy is authorized — not turned Off to compensate for unused Actions.
 - Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up). Drift guard is **NOT A GATE**.
 - Public release health is `GET /api/release-health`; deploy identity marker remains `GET /api/build-marker`.
 
 ## Product scope lock (HOLD)
 
-- Public discovery: `docs/PUBLIC_DISCOVERY_CONTRACT_V1.md` — JW Stone is the behavior reference fixture; Sway Live Rooms and Self-Production are separate discovery lanes; no fake entities; no merge/deploy of discovery work without separate authorization. Phase 1 matrix: `docs/process/PUBLIC_DISCOVERY_PHASE1_AUDIT_MATRIX.md`. Query matrix: `docs/process/PUBLIC_DISCOVERY_QUERY_MATRIX_V1.md`. Canonical host for HTML canonical, robots Sitemap, and sitemap locs is `https://app.sway.tips`.
+- Public discovery: `docs/PUBLIC_DISCOVERY_CONTRACT_V1.md` - JW Stone is the behavior reference fixture; Sway Live Rooms and Self-Production are separate discovery lanes; no fake entities; no merge/deploy of discovery work without separate authorization. Phase 1 matrix: `docs/process/PUBLIC_DISCOVERY_PHASE1_AUDIT_MATRIX.md`. Query matrix: `docs/process/PUBLIC_DISCOVERY_QUERY_MATRIX_V1.md`. Canonical host for HTML canonical, robots Sitemap, and sitemap locs is `https://app.sway.tips`.
+- **HOLD** means no merge, no admin merge, no override, no push to auto-deploying `main` unless Thomas explicitly authorizes that action. Removing an obsolete gate does not authorize merge. See `docs/process/UNAUTHORIZED_MERGE_PR165_2026-08-07.md`.
 - Governing product structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) and Self-Production (in progress) are separate lanes; Sway.DIO is inside Self-Production; external distribution is one outlet, not Sway’s identity.
 - Governing Sway.DIO economics (summary): `docs/SWAY_PRODUCT_STRUCTURE.md` — decision D staged all-three funding (subscriptions → advertising → sponsorships); private beta / first earnable streams are subscription-funded Sway Exclusives only; forever 100% attributable streaming income to qualifying Sway Exclusive artists; Sway takes $0 streaming cut; Sway Exclusive ≠ ownership (artist keeps the master). Binding lock is this structure doc only; a separate DIO economic-model document is a later Self-Production artifact, not required for this lane.
 - Release-chain hardening does **not** authorize live Stripe or live money.
