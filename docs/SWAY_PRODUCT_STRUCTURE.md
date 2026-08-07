@@ -119,6 +119,7 @@ This economic lock does **not** authorize Sway.DIO launch, streaming/royalty run
 - **Self-Production readiness** may advance capability-by-capability without redefining Live Rooms as incomplete.
 - Machine config `config/sway-complete-product-readiness.json` remains a cohesive HOLD ledger across both lanes for whole-product launch claims; it must not be used to deny that Live Rooms is the current operating product.
 - Iterative `main` deploys follow `RELEASE_CONTROL.md`. They do not authorize live Stripe and do not imply Self-Production or Sway.DIO is shipped.
+- **GitHub Actions is NOT USED — NOT A GATE.** Actions billing and required check `validate` are irrelevant to merge/release. Holds on merge/deploy/live Stripe are authorization-only (see `RELEASE_CONTROL.md` corrected operating rule).
 
 ## Related docs
 

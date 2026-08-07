@@ -1,3 +1,5 @@
+# Optional post-deploy observer only. NOT A GATE — GitHub Actions is unused for Sway release control.
+# Do not require this job as a merge status check (deadlocks Render checksPass / on-commit deploy).
 name: Production Deploy Drift Guard
 
 on:

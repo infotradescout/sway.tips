@@ -1,3 +1,6 @@
+# Optional local/CI evidence only. GitHub Actions is NOT USED as a Sway release gate.
+# Required check `validate` and Actions billing are NOT merge/release conditions.
+# See RELEASE_CONTROL.md corrected operating rule.
 name: CI Validation Gate 1
 
 on:

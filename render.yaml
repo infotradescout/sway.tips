@@ -3,8 +3,8 @@ services:
     name: sway-tips-web
     runtime: node
     branch: main
-    # main is the release channel: Render auto-deploys on commit after a verified merge.
-    # Merge gate is GitHub required check `validate` (must execute real steps).
+    # main is the release channel: Render auto-deploys on commit when merge/deploy are authorized.
+    # GitHub Actions / required check `validate` are NOT A GATE (unused; billing irrelevant).
     # Do NOT use checksPass while Production Deploy Drift Guard observes catch-up (deadlock).
     autoDeployTrigger: commit
     buildCommand: npm ci && npm run build

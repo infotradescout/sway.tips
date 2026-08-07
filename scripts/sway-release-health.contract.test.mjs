@@ -65,8 +65,13 @@ for (const term of [
   'GET /api/build-marker',
   'Post-deployment smoke',
   'Rollback or roll-forward',
+  'NOT A GATE',
+  'NOT USED',
+  'Actions billing',
+  'IRRELEVANT',
   'required check `validate`',
-  'Empty CI jobs',
+  'NOT REQUIRED',
+  'authorization only',
   'does **not** authorize live Stripe',
   'Stripe **test-mode**',
   'SWAY_PRODUCT_STRUCTURE.md'
@@ -76,7 +81,11 @@ for (const term of [
 
 for (const term of [
   'minimum release contract',
-  'Empty CI jobs',
+  'NOT A GATE',
+  'NOT USED',
+  'IRRELEVANT',
+  'NOT REQUIRED',
+  'authorization reasons only',
   'GET /api/release-health',
   'does **not** authorize live Stripe',
   'TEST_MODE_PILOT_MILESTONE_HOLD.md',

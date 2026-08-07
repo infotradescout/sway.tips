@@ -1,33 +1,35 @@
-# Branch ruleset activation (human click-path)
+# Branch ruleset notes (NOT A GATE)
 
-Owner-controlled is OK. Zero required approval counts is OK. The gate must **execute** with real CI steps.
+**GitHub Actions is NOT USED — NOT A GATE.** Actions billing is **IRRELEVANT**. Required check `validate` is **NOT REQUIRED**.
 
-This is a dashboard action. Agents must not ask for tokens or CLI secrets to complete it.
+This file remains only so agents do not revive older click-path language that treated a GitHub ruleset + `validate` status check as a merge or release condition. That doctrine is **superseded** by `RELEASE_CONTROL.md` (corrected operating rule).
 
-## GitHub ruleset
+## Corrected rule
 
-1. Open the Sway GitHub repository → **Settings → Rules → Rulesets**.
-2. **New ruleset → Branch ruleset**.
-3. Name: `main release gate`.
-4. Target branches: include `main`.
-5. Enable **Require a pull request before merging**.
-   - Required approvals: **0** is allowed (owner-controlled).
-6. Enable **Require status checks to pass**.
-   - Add required check: **`validate`** (job from workflow `CI Validation Gate 1` / `.github/workflows/ci.yml`).
-7. Do **not** add `verify-production-build-marker` as a required merge check (post-deploy observer; deadlocks Render `checksPass` / delays merges unnecessarily).
-8. Enable **Block force pushes**.
-9. Save the ruleset.
+- Do **not** block merge or release on Actions green/red/empty runs.
+- Do **not** fix Actions billing or rerun `validate` as a release precondition.
+- Merge / deploy / live Stripe holds are **authorization-only**, not Actions-related.
+- Local (or optional CI) evidence under the minimum release-contract concept in `RELEASE_CONTROL.md` may still be recorded when preparing an authorized merge — that evidence is **not** an Actions gate.
 
-## Render (paired settings)
+## Optional human PR protection (non-blocking doctrine)
+
+If an owner later chooses repository rules for other reasons, that is separate policy. Under Sway release doctrine it still must **not** reintroduce Actions billing or required check `validate` as a release gate.
+
+Historical (superseded) pattern that must **not** be treated as current law:
+
+1. Ruleset named `main release gate` targeting `main`
+2. Require a pull request before merging
+3. Require status checks to pass → required check `validate`
+4. Block force pushes
+
+Do **not** add `verify-production-build-marker` as a required merge check (post-deploy observer; deadlocks Render `checksPass`).
+
+## Render (paired settings — when deploy is authorized)
 
 1. Service `sway-tips-web` → Auto-Deploy **On** (On Commit).
 2. Health Check Path: `/api/release-health`.
 3. Do not switch Auto-Deploy to `checksPass` while the drift guard observes production catch-up.
 
-## Actions billing blocker
-
-If a `validate` run finishes in seconds with no Checkout / `npm ci` / lint / build / contract steps, that run is **not** proof. Restore GitHub Actions billing or runner execution before merging to `main`.
-
 ## Product HOLD reminder
 
-Completing this ruleset does not authorize live Stripe. Live Rooms is the current operating product; Self-Production is a separate lane. See `docs/SWAY_PRODUCT_STRUCTURE.md` and `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
+Completing or skipping any GitHub ruleset does not authorize live Stripe. Live Rooms is the current operating product; Self-Production is a separate lane. See `docs/SWAY_PRODUCT_STRUCTURE.md` and `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.

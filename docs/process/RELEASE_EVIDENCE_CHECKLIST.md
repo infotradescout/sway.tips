@@ -11,16 +11,16 @@ Release-chain evidence does **not** authorize live Stripe. The Live Rooms two-ac
 - Exact proposed commit SHA:
 - Clean dependency installation (`npm ci`) evidence:
 - Type and build validation (`npm run lint`, `npm run build`) evidence:
-- Relevant contract tests (`npm run test:contracts` / CI) evidence:
+- Relevant contract tests (`npm run test:contracts` local/optional) evidence:
 - Database compatibility proof (migration proofs + `/api/release-health` migrations.compatible):
 - Browser proof for changed user paths (device/browser, routes, pass/fail):
 - Health endpoint (`GET /api/release-health`, `releaseActive`):
 - Deployment commit marker (`GET /api/build-marker` commit match):
 - Post-deployment smoke result:
 - Rollback or safe roll-forward record:
-- Branch rule / required check `validate` confirmed for this merge path:
+- GitHub Actions / required check `validate`: **NOT A GATE** (unused; billing irrelevant; do not wait on or require):
 
-Empty CI (zero real steps) is release-blocking even if the UI shows a completed job.
+Actions red/empty/missing checks are **not** release-blocking. Do not resolve Actions billing or rerun `validate` as a release precondition. Merge/deploy/live-Stripe holds are authorization-only.
 
 
 ## Requested Outcome

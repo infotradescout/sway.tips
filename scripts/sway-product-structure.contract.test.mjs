@@ -56,7 +56,9 @@ for (const term of [
   'Sway Exclusive ≠ ownership',
   'Sway streaming take',
   '**$0**',
-  'does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`'
+  'does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`',
+  'NOT A GATE',
+  'authorization-only'
 ]) {
   requireIncludes(structure, term, 'SWAY_PRODUCT_STRUCTURE.md');
 }
@@ -78,7 +80,9 @@ for (const term of [
   'decision D staged all-three funding',
   'Live Rooms',
   'Self-Production',
-  'do not redefine Live Rooms as incomplete'
+  'do not redefine Live Rooms as incomplete',
+  'NOT A GATE',
+  'NOT USED'
 ]) {
   requireIncludes(releaseControl, term, 'RELEASE_CONTROL.md');
 }

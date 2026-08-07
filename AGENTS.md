@@ -10,10 +10,11 @@ No task is complete because an agent says it is complete. No deployment is succe
 
 ## Release control (read before merging to main)
 
-- Verified merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md` minimum release contract (11 gates).
-- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Prefer blocking merge until exact-commit CI (`validate`) executes real steps and passes — not turning Auto-Deploy Off.
-- Empty CI jobs (zero executed steps / billing shells) are a **blocker**, not permission to skip the gate.
-- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up).
+- Authorized merge/push to `main` **is** the production release path when merge/deploy are separately authorized. See `RELEASE_CONTROL.md` minimum release contract (local/optional evidence).
+- **GitHub Actions is NOT USED — NOT A GATE.** Actions billing is **IRRELEVANT**. Required check `validate` is **NOT REQUIRED**. Do not resolve billing or rerun `validate` as a release precondition. Older docs that said otherwise are superseded.
+- Merge / deploy / live Stripe remain **HOLD** for authorization reasons only — **not** because of Actions.
+- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit) when deploy is authorized — not turned Off to compensate for unused Actions.
+- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up). Drift guard is **NOT A GATE**.
 - Public release health is `GET /api/release-health`; deploy identity marker remains `GET /api/build-marker`.
 
 ## Product scope lock (HOLD)

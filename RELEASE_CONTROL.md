@@ -1,6 +1,25 @@
 # Release control
 
-**Status:** `main` is the production release channel. Render auto-deploys on every push/merge to `main` **after** the exact-commit CI gate has actually executed and passed.
+**Status:** `main` is the production release channel. Render auto-deploys on every push/merge to `main` when merge/deploy are separately authorized. **GitHub Actions is NOT USED and is NOT A GATE.**
+
+## Corrected operating rule (owner-locked — supersedes older pre-flight)
+
+| Field | Locked value |
+| --- | --- |
+| DIO Decision D | LOCKED |
+| PR | #165 |
+| Audited tip (at lock) | `49dacdfc` |
+| PR-tip audit | PASS |
+| GitHub Actions | **NOT USED — NOT A GATE** |
+| Actions billing | **IRRELEVANT** |
+| Required check `validate` | **NOT REQUIRED — NOT A GATE** |
+| Merge | **HOLD** (authorization only — not because of Actions) |
+| Deploy | **HOLD** (authorization only — not because of Actions) |
+| Live Stripe | **HOLD** (authorization only) |
+
+Prior instruction to resolve Actions billing and rerun `validate` was **wrong**. Older language treating Actions / a required `validate` check as merge or release conditions is **superseded**. Do not revive that gate. Do not treat red/empty Actions checks as release blockers or as proof.
+
+Merge / deploy / live-Stripe holds remain **only** until those actions are separately authorized — **not** because of GitHub Actions.
 
 ## Product scope lock (HOLD)
 
@@ -31,65 +50,60 @@ Only after that milestone is proven may Sway consider live Stripe for Live Rooms
 
 Pilot hold criteria live in `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md` and `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
 
-## Minimum release contract (fail-closed)
+## Minimum release contract (local/optional evidence — NOT an Actions gate)
 
-Every merge to `main` that is allowed to become production must satisfy:
+The checklist below is the **minimum release-contract concept**: useful local (or optional CI) evidence when preparing an authorized merge. It is **not** enforced by GitHub Actions, is **not** a required status check, and **Actions billing does not block** merge or release.
 
-| # | Gate | Where enforced |
+Every merge to `main` that is allowed to become production should have evidence covering:
+
+| # | Evidence | Where / how |
 | --- | --- | --- |
-| 1 | Exact proposed commit | PR head SHA + CI run bound to that SHA |
-| 2 | Clean dependency installation | CI `npm ci` |
-| 3 | Type and build validation | CI `npm run lint` + `npm run build` |
-| 4 | Relevant contract tests | CI `npm run test:contracts` (+ integration proofs) |
-| 5 | Database compatibility proof | CI migration integration proofs + deploy `preDeployCommand: npm run db:migrate` + public `/api/release-health` migration status |
-| 6 | Browser proof for changed user paths | Human evidence in PR / `docs/process/RELEASE_EVIDENCE_CHECKLIST.md` (required when user-facing paths change) |
+| 1 | Exact proposed commit | PR head SHA + recorded validation bound to that SHA |
+| 2 | Clean dependency installation | Local (or optional CI) `npm ci` |
+| 3 | Type and build validation | Local (or optional CI) `npm run lint` + `npm run build` |
+| 4 | Relevant contract tests | Local (or optional CI) `npm run test:contracts` (+ integration proofs as needed) |
+| 5 | Database compatibility proof | Migration integration proofs + deploy `preDeployCommand: npm run db:migrate` + public `/api/release-health` migration status |
+| 6 | Browser proof for changed user paths | Human evidence in PR / `docs/process/RELEASE_EVIDENCE_CHECKLIST.md` (when user-facing paths change) |
 | 7 | Health endpoint | Public `GET /api/release-health` (service, DB, commit, migration compatibility; no secrets) |
 | 8 | Deployment commit marker | Public `GET /api/build-marker` + same commit fields on release-health |
-| 9 | Post-deployment smoke | `Production Deploy Drift Guard` + operator smoke checklist |
-| 10 | Rollback or roll-forward record | Release evidence checklist section (required before treating deploy as accepted) |
-| 11 | Branch rule requiring the gate before merge | GitHub ruleset: required check `validate` (owner-controlled; zero approval counts OK) |
+| 9 | Post-deployment smoke | Operator smoke checklist (drift-guard workflow is optional observer only — **NOT A GATE**) |
+| 10 | Rollback or roll-forward record | Release evidence checklist section (before treating deploy as accepted) |
+| 11 | GitHub Actions / required check `validate` | **NOT A GATE** — unused; billing irrelevant; do not require or wait on `validate` |
 
-Empty CI jobs (billing-locked runners that finish with zero real steps) are a **blocker**, not permission to skip. Do not merge on an empty green/red shell. Fix Actions billing / runner execution first, or keep the change off `main`.
+Workflow files under `.github/workflows/` may still exist as vestigial/optional runners. Red, empty, or missing Actions runs carry **no release meaning**. Do not fix billing or rerun `validate` as a release precondition.
 
 ## Control plane
 
 | Layer | Posture |
 | --- | --- |
-| Merge to `main` | Blocked until exact-commit CI job `validate` executes real steps and passes |
-| Render auto-deploy | **On Commit** for `sway-tips-web` (deploys the merged SHA) |
-| GitHub Actions | **Required merge gate** when runners execute; empty-step runs do not count as proof |
-| Drift guard | Post-deploy observer of production catch-up; **not** a merge gate. Do not use Render `checksPass` with it (deadlock) |
+| Merge to `main` | **HOLD** until separately authorized — **not** blocked by Actions / `validate` |
+| Render auto-deploy | **On Commit** for `sway-tips-web` when deploy is authorized (deploys the merged SHA); deploy remains **HOLD** until authorized |
+| GitHub Actions | **NOT USED — NOT A GATE**; Actions billing **IRRELEVANT** |
+| Required check `validate` | **NOT REQUIRED — NOT A GATE** |
+| Drift guard | Optional post-deploy observer; **NOT A GATE**. Do not use Render `checksPass` with it (deadlock) |
+| Live Stripe | **HOLD** until separately authorized |
 
-Repo file `render.yaml` sets `autoDeployTrigger: commit` and `healthCheckPath: /api/release-health`. **Dashboard Auto-Deploy must stay On**. Prefer keeping Render on commit while GitHub blocks unverified merges.
+Repo file `render.yaml` sets `autoDeployTrigger: commit` and `healthCheckPath: /api/release-health`. **Dashboard Auto-Deploy must stay On** when deploy is authorized. Prefer keeping Render on commit; do not invent an Actions merge gate.
 
 ## Operating rule
 
-**Verified merge to `main` deploys production via Render.**
-Unverified merge (no real CI execution) must not become production solely by pressing Merge.
+**Authorized merge to `main` deploys production via Render** when deploy is also authorized.
+GitHub Actions success/failure is **not** the authorization signal and is **not** a release condition.
 
-## Human activation (required once)
+## Human notes (optional / non-blocking)
 
-### A. GitHub branch ruleset (owner click-path)
+### A. GitHub branch ruleset — NOT A GATE
 
-Full click-path: `docs/process/BRANCH_RULESET_ACTIVATION.md`.
+Older click-path docs that required status check `validate` are **superseded**. See `docs/process/BRANCH_RULESET_ACTIVATION.md`. Do **not** treat enabling a required `validate` check, fixing Actions billing, or getting a green Actions run as a merge/release condition.
 
-1. GitHub → repository **Settings → Rules → Rulesets → New ruleset → Branch ruleset**.
-2. Name: `main release gate`.
-3. Target: branch `main`.
-4. Enable: **Require a pull request before merging** (approval count may be **0**; owner-controlled is OK).
-5. Enable: **Require status checks to pass** → add required check **`validate`** (workflow `CI Validation Gate 1`).
-6. Do **not** require `verify-production-build-marker` for merge (it waits for production and would deadlock deploy-on-commit).
-7. Block force pushes to `main`.
-8. Save ruleset.
-
-If Actions billing causes jobs to complete with no Checkout / npm steps, treat that as a hard stop: restore billing or runner capacity before merging release work.
+If a human later chooses optional PR protection for other reasons, that is separate owner policy — it still does **not** make Actions billing or empty runners a release blocker under this doctrine.
 
 ### B. Render health path
 
 1. Open production service `sway-tips-web`.
 2. **Settings → Health Check Path** = `/api/release-health` (matches `render.yaml`).
-3. **Settings → Build & Deploy → Auto-Deploy → On** (On Commit).
-4. Confirm after deploy:
+3. **Settings → Build & Deploy → Auto-Deploy → On** (On Commit) when deploy is authorized.
+4. Confirm after an authorized deploy:
    - `GET /api/release-health` on apex / www / app returns `releaseActive: true` for the intended SHA
    - `GET /api/build-marker` returns the same `commit`
 
@@ -117,15 +131,16 @@ No secrets, connection strings, hostnames, or credential flags.
 
 ## Post-deploy smoke + rollback boundary
 
-After production catch-up:
+After an authorized production catch-up:
 
-1. Drift guard (or manual) confirms `/api/build-marker` and `/api/release-health` commit == intended SHA.
+1. Confirm `/api/build-marker` and `/api/release-health` commit == intended SHA (manual or optional drift observer).
 2. Confirm `releaseActive: true`.
 3. Run changed-path browser smoke; record in release evidence.
 4. Record rollback SHA / Render rollback action **or** explicit safe roll-forward SHA before accepting the release.
 
 ## Agent rules
 
-- Treat merge to `main` as a production release only when the minimum release contract executed for that exact SHA.
+- Do **not** require GitHub Actions, Actions billing fixes, or required check `validate` for merge or release.
+- Treat merge to `main` as a production release only when separately authorized and the minimum release-contract evidence (local/optional) is recorded for that exact SHA.
 - Do not treat drift-guard success or a build marker alone as complete-product proof or live-Stripe authorization.
 - See `AGENTS.md` release-control section.
