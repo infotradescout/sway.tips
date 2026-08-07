@@ -10,10 +10,21 @@ No task is complete because an agent says it is complete. No deployment is succe
 
 ## Release control (read before merging to main)
 
-- Merge/push to `main` **is** the production release path. See `RELEASE_CONTROL.md`.
-- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit). Do not turn it Off to wait for Actions.
-- GitHub Actions CI is advisory until billing works; it must not block Render auto-deploy.
-- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up).
+- Authorized merge/push to `main` **is** the production release path when merge/deploy are separately authorized. See `RELEASE_CONTROL.md` minimum release contract (local/optional evidence).
+- **GitHub Actions is NOT USED — NOT A GATE.** Actions billing is **IRRELEVANT**. Required check `validate` is **NOT REQUIRED**. Do not resolve billing or rerun `validate` as a release precondition. Older docs that said otherwise are superseded.
+- Merge / deploy / live Stripe remain **HOLD** for authorization reasons only — **not** because of Actions.
+- Render Auto-Deploy for `sway-tips-web` must stay **On** (On Commit) when deploy is authorized — not turned Off to compensate for unused Actions.
+- Do not use Render `checksPass` while `Production Deploy Drift Guard` exists (deadlock with production catch-up). Drift guard is **NOT A GATE**.
+- Public release health is `GET /api/release-health`; deploy identity marker remains `GET /api/build-marker`.
+
+## Product scope lock (HOLD)
+
+- Governing product structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) and Self-Production (in progress) are separate lanes; Sway.DIO is inside Self-Production; external distribution is one outlet, not Sway’s identity.
+- Governing Sway.DIO economics (summary): `docs/SWAY_PRODUCT_STRUCTURE.md` — decision D staged all-three funding (subscriptions → advertising → sponsorships); private beta / first earnable streams are subscription-funded Sway Exclusives only; forever 100% attributable streaming income to qualifying Sway Exclusive artists; Sway takes $0 streaming cut; Sway Exclusive ≠ ownership (artist keeps the master). Binding lock is this structure doc only; a separate DIO economic-model document is a later Self-Production artifact, not required for this lane.
+- Release-chain hardening does **not** authorize live Stripe or live money.
+- Next **Live Rooms** product proof gate is the two-account **Stripe test-mode** production pilot (performer + audience, real hosted room, request/tip/boost/refund, webhook dup/delay, closeout, earnings, receipt/history, DB reconciliation, exact commit evidence). HOLD until proven — see `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
+- Do not implement or ungate DSP delivery, ticket sales, royalty processing, or collaborator payouts in the Live Rooms lane; those are later Self-Production / independent lanes.
+- Do not treat unfinished Self-Production as proof that Live Rooms is incomplete. Unfinished Self-Production does not make Live Rooms unfinished.
 
 ## Council Roles
 

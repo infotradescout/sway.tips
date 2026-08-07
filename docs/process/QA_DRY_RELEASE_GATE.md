@@ -34,6 +34,9 @@ Evidence must identify the requested outcome, the verifier, the environment, the
 
 Complete-product launch approval is separate from iterative deployment approval. For Sway, `npm run readiness:assert` must fail closed until both the DistroKid-replacement pillar and the original-Sway pillar are production verified.
 
+That whole-product HOLD does not redefine Live Rooms as incomplete while Self-Production is in progress. Live Rooms is the current operating product; Self-Production is a separate lane; external distribution is one Self-Production capability, not Sway’s identity. See `docs/SWAY_PRODUCT_STRUCTURE.md`. Live Stripe remains a separate Live Rooms gate after the test-mode production pilot.
+
+
 ## Scope Separation
 
 QA, fixes, DRY/SRP cleanup, and feature work must be separate lanes unless the owner explicitly approves a combined lane with documented risk.

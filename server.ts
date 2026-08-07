@@ -17,6 +17,10 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
+import {
+  evaluateReleaseHealth,
+  loadExpectedMigrations
+} from "./src/server/release-health";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
@@ -1141,14 +1145,14 @@ const aboutPageHtml = renderStaticDocument(
   'Sway: the whole performer business, connected',
   'One read on how Sway connects a performer’s public identity, live audience, music catalog, releases, distribution, payments, and control.',
   `
-    <p class="hero-note"><strong>Sway is an operating system for independent performers.</strong> It gives an artist one public home, a live audience room, direct fan support, a private working Catalog, and a release-and-distribution workflow—without taking control of the performance or the creator’s work.</p>
+    <p class="hero-note"><strong>Sway gives independent performers two connected systems.</strong> Live Rooms earn and engage audiences during real performances. Self-Production helps creators own, release, ticket, distribute, and eventually stream original work—including planned Sway.DIO (Digital Independent Original) streaming. External distribution is one Self-Production outlet, not Sway’s whole identity.</p>
 
     <h2>The product in four connected parts</h2>
     <div class="card-grid">
       <article class="card"><h3>Your public page</h3><p>A shareable Sway profile for your story, image, featured media, social links, booking contact, support links, releases, and live-room entry. It is designed to replace a patchwork artist website and link page with one place that stays connected to the rest of your business.</p></article>
-      <article class="card"><h3>Your live room</h3><p>A performer-controlled room for real-world shows. People scan a QR code or open a room link, make requests, tip, boost approved queue items, and follow what happened from their own private status receipts.</p></article>
-      <article class="card"><h3>Your Catalog and collaborators</h3><p>Private, original-quality file storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
-      <article class="card"><h3>Your publishing and distribution</h3><p>The start of a DistroKid-replacement workflow inside the same account. The current release workspace assembles singles, EPs, and albums from verified masters, with an ordered track list, per-track metadata and credits, artwork, identifiers, territories, and reviewed rights evidence. It prepares a release but does not send it to stores: provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live.</p></article>
+      <article class="card"><h3>Your live room</h3><p>Live Rooms is the current operating product: a performer-controlled room for real-world shows. People scan a QR code or open a room link, make requests, tip, boost approved queue items, and follow what happened from their own private status receipts. Stripe live money remains a separate release gate; test-mode payment proof comes first.</p></article>
+      <article class="card"><h3>Your Catalog and collaborators</h3><p>Self-Production files and collaboration: private, original-quality storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
+      <article class="card"><h3>Your publishing and distribution</h3><p>Self-Production release prep plus one external-distribution outlet (DistroKid-class workflow) inside the same account—not the definition of Sway. The current release workspace assembles singles, EPs, and albums from verified masters, with an ordered track list, per-track metadata and credits, artwork, identifiers, territories, and reviewed rights evidence. It prepares a release but does not send it to stores: provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live.</p></article>
     </div>
 
     <h2>How Sway works for an audience member</h2>
@@ -1183,7 +1187,7 @@ const aboutPageHtml = renderStaticDocument(
 
     <h2>Where the publishing product stands</h2>
     <p><strong>Available in the product:</strong> durable original masters, projects, private collaborator connections, immutable file sharing and review, editable ordered multi-recording release drafts built from one verified master per track, artwork, identifiers, territories, per-track credits, sealed rights declarations, independent rights review, readiness checks, public artist profiles, and eligible public release pages.</p>
-    <p><strong>Still required for the complete DistroKid replacement:</strong> a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed.</p>
+    <p><strong>Still required for Self-Production external distribution (DistroKid-class outlet):</strong> a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed. Those gaps do not make Live Rooms unfinished.</p>
 
     <h2>Money, ownership, and control</h2>
     <div class="card-grid">
@@ -3362,6 +3366,18 @@ app.get("/api/health/network-probe", (_req, res) => {
 app.get("/api/build-marker", (_req, res) => {
   applyNoStoreHeaders(res);
   res.json(buildMarker);
+});
+
+app.get("/api/release-health", async (_req, res) => {
+  applyNoStoreHeaders(res);
+
+  const { statusCode, report } = await evaluateReleaseHealth({
+    buildMarker,
+    databaseUrl: process.env.DATABASE_URL,
+    expectedMigrations: loadExpectedMigrations()
+  });
+
+  res.status(statusCode).json(report);
 });
 
 app.get('/api/runtime-config-status', (_req, res) => {
