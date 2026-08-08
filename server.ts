@@ -91,6 +91,7 @@ import {
   evaluatePublicPerformerVisibility,
   type PerformerVisibilityState
 } from "./src/server/public-profile";
+import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 import {
@@ -2248,7 +2249,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       performerId: performers.id,
       displayName: performers.displayName,
       handle: performers.handle,
-      bio: performers.bio
+      bio: performers.bio,
+      visibilityState: performers.visibilityState
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -8094,6 +8096,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
+      visibilityState: performerOwner.visibilityState,
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
       primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
@@ -8132,6 +8135,79 @@ app.get('/api/talent/profile/public', async (req, res) => {
       updatedAt: profileRow?.updatedAt ?? null
     }
   });
+});
+
+app.post('/api/talent/profile/visibility', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer visibility requires a durable database connection.' });
+  }
+
+  const nextVisibilityState = parsePerformerVisibilityState(req.body?.visibilityState);
+  if (!nextVisibilityState) {
+    return res.status(422).json({ error: 'Visibility must be draft, unlisted, or public.' });
+  }
+
+  try {
+    const transition = await businessDb.transaction(async (tx) => {
+      const [performer] = await tx
+        .select({
+          performerId: performers.id,
+          visibilityState: performers.visibilityState
+        })
+        .from(performers)
+        .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
+        .for('update')
+        .limit(1);
+
+      if (!performer) return null;
+
+      const changed = performer.visibilityState !== nextVisibilityState;
+      if (changed) {
+        await tx
+          .update(performers)
+          .set({ visibilityState: nextVisibilityState, updatedAt: new Date() })
+          .where(eq(performers.id, performer.performerId));
+
+        await writeAuditEvent(tx, {
+          actorId: talentAccess.actor.actorId,
+          actorType: 'performer',
+          entityType: 'performer',
+          entityId: performer.performerId,
+          eventType: 'performer_visibility.update',
+          previousStatus: performer.visibilityState,
+          nextStatus: nextVisibilityState,
+          metadata: {
+            control: 'owner',
+            visibilityState: nextVisibilityState
+          }
+        });
+      }
+
+      return {
+        changed,
+        visibilityState: nextVisibilityState
+      };
+    });
+
+    if (!transition) {
+      return res.status(403).json({ error: 'Only the performer owner can manage visibility.' });
+    }
+
+    return res.json({
+      success: true,
+      changed: transition.changed,
+      visibilityState: transition.visibilityState
+    });
+  } catch (error) {
+    console.error('Performer visibility update failed', error);
+    return res.status(500).json({ error: 'Unable to update performer visibility.' });
+  }
 });
 
 app.post('/api/talent/partner/terms/accept', async (req, res) => {
@@ -8357,9 +8433,11 @@ app.post('/api/talent/profile/public', async (req, res) => {
       entityType: 'performer',
       entityId: performerOwner.performerId,
       eventType: 'performer_public_profile.update',
-      previousStatus: null,
-      nextStatus: 'published',
+      previousStatus: performerOwner.visibilityState,
+      nextStatus: performerOwner.visibilityState,
       metadata: {
+        operation: 'profile_save',
+        visibilityState: performerOwner.visibilityState,
         hasBio: Boolean(bio),
         specialtyCount: specialties?.length ?? 0,
         hasBookingEmail: Boolean(bookingEmail),
@@ -8393,6 +8471,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio,
+      visibilityState: performerOwner.visibilityState,
       headline,
       stageName: normalizePublicProfileText(
         savedLinks.metadata && typeof savedLinks.metadata === 'object'
