@@ -446,25 +446,27 @@ for (const term of [
   'verificationRequired: !ownerEmailVerified && hasConfiguredContact'
 ]) requireIncludes(normalizers, term, 'Public profile normalizer');
 
-const shareProfileLookup = sliceBetween(server, 'async function findPublicShareProfile', 'function escapeShareCardText', 'share profile lookup');
+const shareProfileLookup = sliceBetween(server, 'async function resolvePublicPerformerDiscovery', 'async function findPublicShareProfile', 'share profile lookup');
 for (const term of [
-  'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['suspended'])",
-  'performerProfilePreviews',
-  'suspendedPerformer',
-  "eq(performers.onboardingStatus, 'suspended')",
-  // Unclaimed/incomplete performer rows must not hide an active curated preview.
-  'Unclaimed/incomplete does not mean private'
+  'visibilityState: performers.visibilityState',
+  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
+  'nullif(trim(${performers.bio}), \'\') is not null',
+  'profiles.length !== 1',
+  'evaluatePublicPerformerVisibility'
 ]) requireIncludes(shareProfileLookup, term, 'Share profile lookup');
-requireExcludes(shareProfileLookup, 'existingPerformer', 'Share profile lookup');
+for (const term of ['performerProfilePreviews', 'existingPerformer', 'suspendedPerformer']) {
+  requireExcludes(shareProfileLookup, term, 'Share profile lookup');
+}
 
 const shareMetadataRoute = sliceBetween(server, 'async function resolveShareMetadata', 'function renderStaticDocument', 'share metadata resolver');
 for (const term of [
   'findPublicShareProfile(normalizedHandle)',
-  'share-card.png?v=1',
+  'buildPublicPerformerShareMetadata(req, profile)',
   "inArray(activeRoomRegistry.registryStatus, ['active', 'ending'])",
   'normalizePublicProfileUrl(room.avatarUrl)'
 ]) requireIncludes(shareMetadataRoute, term, 'Share metadata resolver');
+const performerShareMetadata = sliceBetween(server, 'function buildPublicPerformerShareMetadata', 'async function findPublicShareProfile', 'performer share metadata');
+requireIncludes(performerShareMetadata, 'share-card.png?v=1', 'Performer share metadata');
 
 const publicFeedRoute = sliceBetween(server, "app.get('/api/public/feed'", "app.get('/api/public/performer/:handle'", 'public feed route');
 for (const term of [
@@ -476,21 +478,20 @@ for (const term of [
 
 const publicPerformerRoute = sliceBetween(server, "app.get('/api/public/performer/:handle'", 'app.get("/api/lyrics"', 'public performer route');
 for (const term of [
-  'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['suspended'])",
-  'ownerEmailVerifiedAt: users.emailVerifiedAt',
-  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
+  'resolvePublicPerformerDiscovery(req.params.handle)',
+  "resolution.kind === 'unavailable'",
+  "resolution.kind !== 'public' && resolution.kind !== 'unlisted'",
+  'const profile = resolution.profile',
   'normalizePublicProfileUrl(effectiveAvatarUrl)',
   'resolveVerifiedPublicBookingContact',
   'normalizePublicProfileFeaturedMedia',
   'booking: publicBooking',
   'partnerState?.isEffective',
-  'performerProfilePreviews',
-  'suspendedPerformer',
-  "eq(performers.onboardingStatus, 'suspended')",
-  'Unclaimed does not mean private',
-  "claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'"
+  "claimState: 'claimed'"
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
+for (const term of ['performerProfilePreviews', 'suspendedPerformer', 'curatedPreview', 'preview.claimedPerformerId']) {
+  requireExcludes(publicPerformerRoute, term, 'Public performer route');
+}
 requireExcludes(publicPerformerRoute, 'existingPerformer', 'Public performer route');
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
 for (const forbidden of [

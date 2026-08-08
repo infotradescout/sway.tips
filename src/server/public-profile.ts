@@ -383,3 +383,45 @@ export function normalizePublicProfileLinks(value: unknown): NormalizedPublicPro
 
   return { provided: true, links, error: null };
 }
+
+export type PerformerVisibilityState = 'draft' | 'unlisted' | 'public';
+
+export type PublicPerformerPolicyResult =
+  | { kind: 'public'; visibility: 'public' }
+  | { kind: 'unlisted'; visibility: 'unlisted' }
+  | { kind: 'not_resolvable' };
+
+export function evaluatePublicPerformerVisibility(input: {
+  claimed: boolean;
+  hasOwner: boolean;
+  isActive: boolean;
+  onboardingStatus: string | null | undefined;
+  visibilityState: unknown;
+  handle: string | null | undefined;
+  displayName: string | null | undefined;
+  conflicted?: boolean;
+  moderationBlocked?: boolean;
+}): PublicPerformerPolicyResult {
+  const canonicalHandle = typeof input.handle === 'string' ? input.handle.trim().toLowerCase() : '';
+  const displayName = typeof input.displayName === 'string' ? input.displayName.trim() : '';
+  const status = typeof input.onboardingStatus === 'string'
+    ? input.onboardingStatus.trim().toLowerCase()
+    : '';
+
+  if (
+    !input.claimed
+    || !input.hasOwner
+    || !input.isActive
+    || input.conflicted
+    || input.moderationBlocked
+    || ['restricted', 'suspended', 'inactive', 'deleted'].includes(status)
+    || !/^[a-z0-9_-]{1,64}$/.test(canonicalHandle)
+    || !displayName
+  ) {
+    return { kind: 'not_resolvable' };
+  }
+
+  if (input.visibilityState === 'public') return { kind: 'public', visibility: 'public' };
+  if (input.visibilityState === 'unlisted') return { kind: 'unlisted', visibility: 'unlisted' };
+  return { kind: 'not_resolvable' };
+}
