@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
+import { PerformerVisibilityControl } from './PerformerVisibilityControl';
 
 type LinkDraft = {
   key: string;
@@ -395,6 +396,8 @@ export default function PerformerPublicProfileEditor({
       ) : partnerAcceptanceMessage ? (
         <div className="border-b border-emerald-500/20 bg-emerald-500/5 px-5 py-3 text-xs text-emerald-100">{partnerAcceptanceMessage}</div>
       ) : null}
+
+      <PerformerVisibilityControl previewMode={previewMode} />
 
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
         <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
