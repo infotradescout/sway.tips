@@ -31,6 +31,12 @@ export const performerOnboardingStatusEnum = pgEnum('performer_onboarding_status
   'suspended'
 ]);
 
+export const performerVisibilityStateEnum = pgEnum('performer_visibility_state', [
+  'draft',
+  'unlisted',
+  'public'
+]);
+
 export const paymentAccountStatusEnum = pgEnum('payment_account_status', [
   'not_started',
   'created',
@@ -266,6 +272,7 @@ export const performers = pgTable('performers', {
   displayName: text('display_name').notNull(),
   bio: text('bio'),
   isActive: boolean('is_active').notNull().default(false),
+  visibilityState: performerVisibilityStateEnum('visibility_state').notNull().default('draft'),
   onboardingStatus: performerOnboardingStatusEnum('onboarding_status').notNull().default('created'),
   paymentAccountStatus: paymentAccountStatusEnum('payment_account_status').notNull().default('not_started'),
   kycStatus: kycStatusEnum('kyc_status').notNull().default('not_required'),

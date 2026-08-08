@@ -1,0 +1,2 @@
+CREATE TYPE "public"."performer_visibility_state" AS ENUM('draft', 'unlisted', 'public');--> statement-breakpoint
+ALTER TABLE "performers" ADD COLUMN "visibility_state" "performer_visibility_state" DEFAULT 'draft' NOT NULL;
