@@ -1,8 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { isDemoModeEnabled, loadDemoBackendState } from '../demo-mode';
 import { BackendState, GigSession } from '../types';
 import { buildPatronRequestHeaders } from '../patron-device';
+import {
+  getDiscoveryEntryPath,
+  getEffectiveDiscoveryChannel,
+  getOrCreateDiscoveryJourneyId
+} from './discoveryAttribution';
 
 export const emptySession: GigSession = {
   status: 'inactive',
@@ -160,6 +165,7 @@ export function useSwayState(options?: {
     status: statePath === '/api/state' ? 'global' : 'missing',
     message: null
   });
+  const discoveryRoomEntryRecordedRef = useRef(false);
 
   const fetchState = async () => {
     if (!statePath) {
@@ -187,7 +193,17 @@ export function useSwayState(options?: {
     try {
       const response = statePath === '/api/state'
         ? await fetch('/api/state')
-        : await fetch(statePath, { headers: buildPatronRequestHeaders() });
+        : await fetch(statePath, {
+            headers: {
+              ...buildPatronRequestHeaders(),
+              ...(!discoveryRoomEntryRecordedRef.current ? {
+                'x-sway-discovery-journey': getOrCreateDiscoveryJourneyId(),
+                'x-sway-discovery-source': getEffectiveDiscoveryChannel(),
+                'x-sway-discovery-entry-path': getDiscoveryEntryPath(),
+                'x-sway-discovery-entry-once': '1'
+              } : {})
+            }
+          });
       const data = await response.json();
 
       if (!response.ok) {
@@ -206,6 +222,9 @@ export function useSwayState(options?: {
         status: data?.room_lookup === 'active' ? 'active' : 'global',
         message: typeof data?.message === 'string' ? data.message : null
       });
+      if (statePath !== '/api/state' && response.headers.get('x-sway-discovery-recorded') === '1') {
+        discoveryRoomEntryRecordedRef.current = true;
+      }
     } catch (e) {
       console.warn('Unable to sync server state:', e);
       setBState(initialState);

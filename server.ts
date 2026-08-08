@@ -118,6 +118,16 @@ import {
   createEventTicketService,
   EventTicketServiceError
 } from "./src/server/event-ticket-service";
+import { createDiscoveryObservatoryStore } from "./src/server/discovery-observatory-store";
+import {
+  buildDiscoveryObservatorySnapshot,
+  buildSwayDiscoveryQueryCollection,
+  resolvePerformerDiscoveryEligibility,
+  SWAY_DISCOVERY_EXPERIMENTS,
+  type DiscoveryJourneyEventInput,
+  type PerformerDiscoveryVisibilityState,
+  type SwayDiscoverySupply
+} from "./src/server/discovery-observatory";
 import {
   NATIVE_TICKET_BUYER_TERMS_HASH,
   NATIVE_TICKET_BUYER_TERMS_TEXT,
@@ -165,6 +175,9 @@ const idempotencyStore = createIdempotencyStore(process.env.DATABASE_URL);
 const moderationService = createModerationService(process.env.DATABASE_URL);
 const businessStore = createBusinessStore(process.env.DATABASE_URL, createInactiveSession);
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
+const discoveryObservatoryStore = businessDb
+  ? createDiscoveryObservatoryStore(businessDb)
+  : null;
 const audioObjectStore = (() => {
   try {
     return createConfiguredAudioObjectStore(process.env);
@@ -1518,6 +1531,16 @@ app.use((req, res, next) => {
     return;
   }
   req.headers['x-sway-shell'] = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
+  next();
+});
+
+app.use('/admin/discovery-observatory', async (req, res, next) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).send(adminAccess.reason);
+    return;
+  }
+  applyNoStoreHeaders(res);
   next();
 });
 
@@ -7307,7 +7330,8 @@ const shellTelemetryAllowedEvents = new Set([
   'public_release_shared',
   'discovery_landing',
   'discovery_entity_view',
-  'discovery_primary_action'
+  'discovery_primary_action',
+  'internal_search_zero_result'
 ]);
 
 const shellTelemetryAllowedKeys = new Set([
@@ -7319,7 +7343,15 @@ const shellTelemetryAllowedKeys = new Set([
   'has_session_context',
   'build_commit',
   'attribution_channel',
-  'entity_kind'
+  'entity_kind',
+  'journey_id',
+  'entry_path',
+  'entity_key',
+  'action_kind',
+  'experiment_key',
+  'visibility_eligibility',
+  'search_phrase',
+  'link_strength'
 ]);
 
 const shellTelemetryRequiredKeys = new Set([
@@ -7363,7 +7395,7 @@ const shellTelemetrySensitiveKeys = new Set([
 
 type ShellTelemetryPayload = {
   shell: 'patron' | 'talent';
-  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release' | 'public-discover';
   event: string;
   route_family: string;
   has_route_context: boolean;
@@ -7371,6 +7403,14 @@ type ShellTelemetryPayload = {
   build_commit: string;
   attribution_channel?: string;
   entity_kind?: string;
+  journey_id?: string;
+  entry_path?: string;
+  entity_key?: string;
+  action_kind?: DiscoveryJourneyEventInput['actionKind'];
+  experiment_key?: string;
+  visibility_eligibility?: DiscoveryJourneyEventInput['visibilityEligibility'];
+  search_phrase?: string;
+  link_strength?: DiscoveryJourneyEventInput['linkStrength'];
 };
 
 function validateShellTelemetryPayload(body: unknown): { ok: true; payload: ShellTelemetryPayload } | { ok: false; status: number; error: string } {
@@ -7399,7 +7439,7 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
   if (payload.shell !== 'patron' && payload.shell !== 'talent') {
     return { ok: false, status: 400, error: 'Shell telemetry requires shell=patron or shell=talent.' };
   }
-  if (payload.surface !== 'recovery-view' && payload.surface !== 'room-entry' && payload.surface !== 'share-kit' && payload.surface !== 'public-profile' && payload.surface !== 'public-event' && payload.surface !== 'public-release') {
+  if (payload.surface !== 'recovery-view' && payload.surface !== 'room-entry' && payload.surface !== 'share-kit' && payload.surface !== 'public-profile' && payload.surface !== 'public-event' && payload.surface !== 'public-release' && payload.surface !== 'public-discover') {
     return { ok: false, status: 400, error: 'Shell telemetry requires a supported funnel surface.' };
   }
   if (typeof payload.event !== 'string' || !shellTelemetryAllowedEvents.has(payload.event)) {
@@ -7428,6 +7468,58 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
       return { ok: false, status: 400, error: 'entity_kind must be a supported public entity kind.' };
     }
   }
+  if (payload.journey_id !== undefined && (typeof payload.journey_id !== 'string' || !UUID_PATTERN.test(payload.journey_id))) {
+    return { ok: false, status: 400, error: 'journey_id must be a UUID.' };
+  }
+  if (payload.entry_path !== undefined && (
+    typeof payload.entry_path !== 'string'
+    || payload.entry_path.length === 0
+    || payload.entry_path.length > 300
+    || /[?#]/.test(payload.entry_path)
+    || !/^\/(?:$|p\/[^\s]+|e\/[0-9a-f-]{36}|g\/[0-9a-f-]{36}|r\/[0-9a-f-]{36}|discover\/?$)/i.test(payload.entry_path)
+  )) {
+    return { ok: false, status: 400, error: 'entry_path must be a supported public path.' };
+  }
+  if (payload.entity_key !== undefined && (
+    typeof payload.entity_key !== 'string' || !/^[a-z0-9][a-z0-9_.:-]{0,127}$/i.test(payload.entity_key)
+  )) {
+    return { ok: false, status: 400, error: 'entity_key is invalid.' };
+  }
+  if (Boolean(payload.entity_kind) !== Boolean(payload.entity_key)) {
+    return { ok: false, status: 400, error: 'entity_kind and entity_key must be supplied together.' };
+  }
+  if (payload.action_kind !== undefined && (
+    typeof payload.action_kind !== 'string'
+    || !['follow', 'room_entry', 'event_entry', 'ticket', 'tip', 'request', 'boost', 'share', 'other'].includes(payload.action_kind)
+  )) {
+    return { ok: false, status: 400, error: 'action_kind is invalid.' };
+  }
+  if (payload.experiment_key !== undefined && (
+    typeof payload.experiment_key !== 'string'
+    || !SWAY_DISCOVERY_EXPERIMENTS.some((experiment) => experiment.key === payload.experiment_key)
+  )) {
+    return { ok: false, status: 400, error: 'experiment_key is not predeclared.' };
+  }
+  if (payload.visibility_eligibility !== undefined && (
+    typeof payload.visibility_eligibility !== 'string'
+    || !['eligible', 'ineligible', 'unknown'].includes(payload.visibility_eligibility)
+  )) {
+    return { ok: false, status: 400, error: 'visibility_eligibility is invalid.' };
+  }
+  if (payload.search_phrase !== undefined && (
+    typeof payload.search_phrase !== 'string'
+    || !payload.search_phrase.trim()
+    || payload.search_phrase.length > 160
+    || /@|https?:\/\/|\b\d{7,}\b|\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/i.test(payload.search_phrase)
+  )) {
+    return { ok: false, status: 400, error: 'search_phrase must be a short public discovery phrase without contact data or URLs.' };
+  }
+  if (payload.link_strength !== undefined && (
+    typeof payload.link_strength !== 'string'
+    || !['direct_server_observed', 'client_correlated_unverified', 'unknown_unavailable'].includes(payload.link_strength)
+  )) {
+    return { ok: false, status: 400, error: 'link_strength is invalid.' };
+  }
 
   return {
     ok: true,
@@ -7444,9 +7536,32 @@ function validateShellTelemetryPayload(body: unknown): { ok: true; payload: Shel
         : {}),
       ...(typeof payload.entity_kind === 'string'
         ? { entity_kind: payload.entity_kind }
+        : {}),
+      ...(typeof payload.journey_id === 'string' ? { journey_id: payload.journey_id } : {}),
+      ...(typeof payload.entry_path === 'string' ? { entry_path: payload.entry_path } : {}),
+      ...(typeof payload.entity_key === 'string' ? { entity_key: payload.entity_key } : {}),
+      ...(typeof payload.action_kind === 'string' ? { action_kind: payload.action_kind as ShellTelemetryPayload['action_kind'] } : {}),
+      ...(typeof payload.experiment_key === 'string' ? { experiment_key: payload.experiment_key } : {}),
+      ...(typeof payload.visibility_eligibility === 'string'
+        ? { visibility_eligibility: payload.visibility_eligibility as ShellTelemetryPayload['visibility_eligibility'] }
+        : {}),
+      ...(typeof payload.search_phrase === 'string' ? { search_phrase: payload.search_phrase.trim().replace(/\s+/g, ' ') } : {}),
+      ...(typeof payload.link_strength === 'string'
+        ? { link_strength: payload.link_strength as ShellTelemetryPayload['link_strength'] }
         : {})
     }
   };
+}
+
+function discoveryStageForTelemetryEvent(event: string): DiscoveryJourneyEventInput['stage'] | null {
+  if (event === 'discovery_landing' || event === 'discovery_entity_view' || event === 'room_entry_viewed') return 'entry';
+  if (
+    event === 'discovery_primary_action'
+    || event === 'request_started'
+    || event === 'boost_started'
+    || event === 'internal_search_zero_result'
+  ) return 'action';
+  return null;
 }
 
 app.post("/api/analytics/shell", async (req, res) => {
@@ -7471,6 +7586,39 @@ app.post("/api/analytics/shell", async (req, res) => {
   const auditPayload = { ...payload, build_commit: buildMarker.commit };
 
   try {
+    const stage = discoveryStageForTelemetryEvent(payload.event);
+    if (stage && payload.journey_id && discoveryObservatoryStore) {
+      const visibilityEligibility = await resolveDiscoveryEntityVisibilityEligibility({
+        entityKind: payload.entity_kind,
+        entityKey: payload.entity_key
+      });
+      await discoveryObservatoryStore.recordJourneyEvent({
+        journeyId: payload.journey_id,
+        stage,
+        eventType: payload.event,
+        source: payload.attribution_channel ?? 'unknown',
+        surface: payload.surface,
+        entryPath: payload.entry_path ?? null,
+        entityKind: payload.entity_kind as DiscoveryJourneyEventInput['entityKind'],
+        entityKey: payload.entity_key ?? null,
+        actionKind: payload.action_kind ?? (
+          payload.event === 'request_started' ? 'request'
+            : payload.event === 'boost_started' ? 'boost'
+              : payload.event === 'internal_search_zero_result' ? 'other'
+                : null
+        ),
+        // Anonymous shell telemetry cannot submit outcome evidence. Durable
+        // room/tip results are written only by their server-owned state paths.
+        outcomeStatus: null,
+        experimentKey: payload.experiment_key ?? null,
+        // Client eligibility is never trusted for funnel inclusion. Resolve
+        // it from current public server state or keep it explicitly unknown.
+        visibilityEligibility,
+        linkStrength: 'client_correlated_unverified',
+        searchPhrase: payload.search_phrase ?? null
+      });
+      return res.status(202).json({ accepted: true });
+    }
     await businessDb.transaction(async (tx) => {
       await writeAuditEvent(tx, {
         actorId: null,
@@ -7484,6 +7632,416 @@ app.post("/api/analytics/shell", async (req, res) => {
     return res.status(202).json({ accepted: true });
   } catch {
     return res.status(500).json({ error: 'Unable to capture shell telemetry event.' });
+  }
+});
+
+function executeRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === 'object' && Array.isArray((result as { rows?: unknown[] }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
+
+async function loadDiscoveryPerformerSupply() {
+  if (!businessDb) return {
+    visibilitySchema: 'explicit_visibility_unavailable' as const,
+    performers: [] as SwayDiscoverySupply['performers'],
+    visibilityCounts: { eligible: 0, ineligible: 0, unknown: 0 }
+  };
+  const columnResult = await businessDb.execute(sql`
+    select exists (
+      select 1
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'performers'
+        and column_name = 'visibility_state'
+    ) as present
+  `);
+  const explicitVisibilityAvailable = Boolean(executeRows<{ present: boolean }>(columnResult)[0]?.present);
+  const visibilityProjection = explicitVisibilityAvailable
+    ? sql.raw('p.visibility_state')
+    : sql.raw('null::text');
+  const rowsResult = await businessDb.execute(sql`
+    select
+      p.id,
+      p.owner_user_id,
+      p.display_name,
+      p.handle,
+      p.is_active,
+      p.onboarding_status,
+      ${visibilityProjection} as visibility_state,
+      pp.city,
+      coalesce(pp.specialties, '[]'::jsonb) as specialties
+    from performers p
+    left join performer_public_profiles pp on pp.performer_id = p.id
+    order by p.id
+  `);
+  const rows = executeRows<{
+    id: string;
+    owner_user_id: string | null;
+    display_name: string;
+    handle: string | null;
+    is_active: boolean;
+    onboarding_status: string;
+    visibility_state: string | null;
+    city: string | null;
+    specialties: unknown;
+  }>(rowsResult);
+  const performerSupply: SwayDiscoverySupply['performers'] = rows.map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    handle: row.handle,
+    city: row.city,
+    specialties: Array.isArray(row.specialties)
+      ? row.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 20)
+      : [],
+    visibilityState: explicitVisibilityAvailable
+      ? row.visibility_state as PerformerDiscoveryVisibilityState | null
+      : undefined,
+    isActive: row.is_active,
+    onboardingStatus: row.onboarding_status,
+    claimed: Boolean(row.owner_user_id)
+  }));
+  const eligibility = performerSupply.map(resolvePerformerDiscoveryEligibility);
+  return {
+    visibilitySchema: explicitVisibilityAvailable
+      ? 'explicit_visibility_available' as const
+      : 'explicit_visibility_unavailable' as const,
+    performers: performerSupply,
+    visibilityCounts: {
+      eligible: eligibility.filter((item) => item.eligible).length,
+      ineligible: eligibility.filter((item) => !item.eligible).length,
+      unknown: eligibility.filter((item) => item.evidence !== 'explicit_visibility').length
+    }
+  };
+}
+
+async function resolveDiscoveryEntityVisibilityEligibility(input: {
+  entityKind?: string;
+  entityKey?: string;
+}): Promise<'eligible' | 'ineligible' | 'unknown'> {
+  if (!businessDb || !input.entityKind || !input.entityKey) return 'unknown';
+  try {
+    const performerSupply = await loadDiscoveryPerformerSupply();
+    const eligiblePerformerIds = new Set(performerSupply.performers
+      .filter((performer) => resolvePerformerDiscoveryEligibility(performer).eligible)
+      .map((performer) => performer.id));
+    if (input.entityKind === 'performer') {
+      const performer = performerSupply.performers.find((candidate) => (
+        candidate.id === input.entityKey || candidate.handle?.toLowerCase() === input.entityKey?.toLowerCase()
+      ));
+      return performer ? (eligiblePerformerIds.has(performer.id) ? 'eligible' : 'ineligible') : 'unknown';
+    }
+    if (input.entityKind === 'event') {
+      const [event] = await businessDb.select({
+        performerId: performerEvents.performerId,
+        status: performerEvents.status,
+        visibility: performerEvents.visibility
+      }).from(performerEvents).where(eq(performerEvents.id, input.entityKey)).limit(1);
+      if (!event) return 'unknown';
+      return event.status === 'published' && event.visibility === 'public'
+        && eligiblePerformerIds.has(event.performerId) ? 'eligible' : 'ineligible';
+    }
+    if (input.entityKind === 'live_room') {
+      const [room] = await businessDb.select({
+        performerId: activeRoomRegistry.performerId,
+        registryStatus: activeRoomRegistry.registryStatus
+      }).from(activeRoomRegistry).where(eq(activeRoomRegistry.gigId, input.entityKey)).limit(1);
+      if (!room) return 'unknown';
+      return ['active', 'ending'].includes(room.registryStatus)
+        && eligiblePerformerIds.has(room.performerId) ? 'eligible' : 'ineligible';
+    }
+    if (input.entityKind === 'release') {
+      const [release] = await businessDb.select({
+        id: musicReleases.id,
+        performerId: musicReleases.performerId,
+        status: musicReleases.status,
+        distributionMode: musicReleases.distributionMode
+      }).from(musicReleases).where(eq(musicReleases.id, input.entityKey)).limit(1);
+      if (!release) return 'unknown';
+      const publicRelease = audioPublishingService
+        ? await audioPublishingService.getPublicRelease({ releaseId: release.id })
+        : null;
+      return release.distributionMode !== 'private'
+        && ['ready', 'scheduled', 'published'].includes(release.status)
+        && eligiblePerformerIds.has(release.performerId)
+        && Boolean(publicRelease) ? 'eligible' : 'ineligible';
+    }
+    return 'unknown';
+  } catch (error) {
+    console.warn('[sway.discovery] entity eligibility could not be resolved.', {
+      entityKind: input.entityKind,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return 'unknown';
+  }
+}
+
+async function loadSwayDiscoverySupply(auditRows: Array<{ metadata: unknown }>) {
+  if (!businessDb) throw new Error('Discovery Observatory requires durable persistence.');
+  const performerSupply = await loadDiscoveryPerformerSupply();
+  const [eventRows, roomRows, releaseCandidates] = await Promise.all([
+    businessDb.select({
+      id: performerEvents.id,
+      performerId: performerEvents.performerId,
+      title: performerEvents.title,
+      startsAt: performerEvents.startsAt,
+      timeZone: performerEvents.timeZone,
+      city: performerEvents.city,
+      locationName: performerEvents.locationName,
+      externalTicketUrl: performerEvents.externalTicketUrl
+    }).from(performerEvents).where(and(
+      eq(performerEvents.status, 'published'),
+      eq(performerEvents.visibility, 'public'),
+      gt(performerEvents.startsAt, new Date())
+    )).orderBy(asc(performerEvents.startsAt)).limit(100),
+    businessDb.select({
+      gigId: activeRoomRegistry.gigId,
+      performerId: activeRoomRegistry.performerId,
+      performerName: activeRoomRegistry.talentName,
+      performerDisplayName: performers.displayName,
+      city: performerPublicProfiles.city,
+      routePath: activeRoomRegistry.routePath,
+      startedAt: activeRoomRegistry.startedAt,
+      lastActivityAt: activeRoomRegistry.lastActivityAt
+    }).from(activeRoomRegistry)
+      .innerJoin(performers, eq(performers.id, activeRoomRegistry.performerId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(inArray(activeRoomRegistry.registryStatus, ['active', 'ending']))
+      .orderBy(desc(activeRoomRegistry.lastActivityAt)).limit(100),
+    businessDb.select({
+      id: musicReleases.id,
+      performerId: musicReleases.performerId
+    }).from(musicReleases).where(and(
+      ne(musicReleases.distributionMode, 'private'),
+      inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
+    )).orderBy(desc(musicReleases.updatedAt)).limit(100)
+  ]);
+
+  const publicReleases = audioPublishingService
+    ? (await Promise.all(releaseCandidates.map(async (candidate) => {
+        const release = await audioPublishingService.getPublicRelease({ releaseId: candidate.id });
+        return release ? {
+          id: release.id,
+          performerId: candidate.performerId,
+          title: release.title,
+          primaryArtistName: release.primaryArtistName,
+          credits: release.recordings.flatMap((recording) => recording.credits.map((credit) => ({
+            displayName: credit.displayName,
+            role: credit.role
+          })))
+        } : null;
+      }))).filter((release): release is NonNullable<typeof release> => Boolean(release))
+    : [];
+  const internalZeroResults = auditRows.flatMap((row) => {
+    if (!row.metadata || typeof row.metadata !== 'object' || Array.isArray(row.metadata)) return [];
+    const metadata = row.metadata as Record<string, unknown>;
+    return metadata.stage === 'action'
+      && metadata.event_type === 'internal_search_zero_result'
+      && typeof metadata.search_phrase === 'string'
+      && typeof metadata.occurred_at === 'string'
+      ? [{ phrase: metadata.search_phrase, observedAt: metadata.occurred_at }]
+      : [];
+  });
+  const supply: SwayDiscoverySupply = {
+    performers: performerSupply.performers,
+    events: eventRows.map((event) => ({
+      id: event.id,
+      performerId: event.performerId,
+      title: event.title,
+      startsAt: event.startsAt.toISOString(),
+      timeZone: event.timeZone,
+      city: event.city,
+      locationName: event.locationName,
+      ticketAvailable: Boolean(event.externalTicketUrl)
+    })),
+    rooms: roomRows.map((room) => ({
+      gigId: room.gigId,
+      performerId: room.performerId,
+      performerName: room.performerName || room.performerDisplayName,
+      city: room.city,
+      routePath: room.routePath,
+      startedAt: room.startedAt?.toISOString() ?? null
+    })),
+    releases: publicReleases,
+    internalZeroResults
+  };
+  return { supply, performerSupply, roomRows };
+}
+
+async function buildCurrentDiscoveryObservatory(windowDays: number) {
+  if (!businessDb || !discoveryObservatoryStore) throw new Error('Discovery Observatory requires durable persistence.');
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const auditRows = await discoveryObservatoryStore.listDiscoveryAuditRows({ since });
+  const { supply, performerSupply, roomRows } = await loadSwayDiscoverySupply(auditRows);
+  const staleEventRows = await businessDb.select({
+    id: performerEvents.id,
+    performerId: performerEvents.performerId,
+    startsAt: performerEvents.startsAt,
+    updatedAt: performerEvents.updatedAt
+  }).from(performerEvents).where(and(
+    eq(performerEvents.status, 'published'),
+    eq(performerEvents.visibility, 'public'),
+    sql`${performerEvents.startsAt} <= now()`
+  )).limit(200);
+  const eligiblePerformerIds = new Set(performerSupply.performers
+    .filter((performer) => resolvePerformerDiscoveryEligibility(performer).eligible)
+    .map((performer) => performer.id));
+  const staleEligibleEventRows = staleEventRows.filter((event) => eligiblePerformerIds.has(event.performerId));
+  const staleRoomRows = roomRows.filter((room) => eligiblePerformerIds.has(room.performerId) && (
+    room.lastActivityAt.getTime() < Date.now() - 30 * 60 * 1000
+  ));
+  const freshnessFailures = [
+    ...staleEligibleEventRows.map((event) => ({
+      kind: 'event', entityKey: event.id, reason: 'published_public_event_start_is_past',
+      sourceAsOf: event.updatedAt.toISOString(), expiresAt: event.startsAt.toISOString()
+    })),
+    ...staleRoomRows.map((room) => ({
+      kind: 'live_room', entityKey: room.gigId, reason: 'active_registry_has_no_recent_activity',
+      sourceAsOf: room.lastActivityAt.toISOString(), freshnessThresholdMinutes: 30
+    }))
+  ];
+  const queryCollection = buildSwayDiscoveryQueryCollection(supply);
+  const eligibilityExclusions = {
+    events: supply.events.filter((event) => !eligiblePerformerIds.has(event.performerId)).length,
+    rooms: supply.rooms.filter((room) => !room.performerId || !eligiblePerformerIds.has(room.performerId)).length,
+    releases: supply.releases.filter((release) => !eligiblePerformerIds.has(release.performerId)).length,
+    unknownPerformerRooms: supply.rooms.filter((room) => !room.performerId).length
+  };
+  const generatedAt = new Date();
+  return buildDiscoveryObservatorySnapshot({
+    auditRows,
+    queryCollection,
+    visibilitySchema: performerSupply.visibilitySchema,
+    visibilityCounts: performerSupply.visibilityCounts,
+    freshnessFailures,
+    eligibilityExclusions,
+    sourceAvailability: [
+      {
+        source: 'audit_store', state: 'available', asOf: generatedAt.toISOString(),
+        note: 'Current read from durable audit_events; window and event allowlists are applied.'
+      },
+      {
+        source: 'current_public_supply', state: 'available', asOf: generatedAt.toISOString(),
+        note: 'Current database projection of performers, public events, active rooms, and public release projections.'
+      },
+      {
+        source: 'performer_visibility',
+        state: performerSupply.visibilitySchema === 'explicit_visibility_available' ? 'available' : 'unavailable',
+        asOf: generatedAt.toISOString(),
+        note: performerSupply.visibilitySchema === 'explicit_visibility_available'
+          ? 'Explicit performer visibility states were read without modification.'
+          : 'The explicit visibility column is not present in this checkout/database; legacy eligibility is reported with unknown evidence.'
+      },
+      {
+        source: 'performer_ownership', state: 'available', asOf: generatedAt.toISOString(),
+        note: 'Current internal performer owner_user_id is available for admin-only unclaimed-demand measurement.'
+      },
+      {
+        source: 'google_search_console', state: 'unavailable', asOf: null,
+        note: 'No authorized Search Console source is connected to this observatory.'
+      },
+      {
+        source: 'bing_webmaster_tools', state: 'unavailable', asOf: null,
+        note: 'No authorized Bing Webmaster source is connected to this observatory.'
+      }
+    ],
+    claimOwnershipSource: {
+      state: 'available',
+      asOf: generatedAt.toISOString(),
+      unclaimedPublicEntities: (() => {
+        const unclaimedEligibleIds = new Set(performerSupply.performers
+          .filter((performer) => !performer.claimed && resolvePerformerDiscoveryEligibility(performer).eligible)
+          .map((performer) => performer.id));
+        return [
+          ...performerSupply.performers
+            .filter((performer) => unclaimedEligibleIds.has(performer.id) && Boolean(performer.handle))
+            .map((performer) => ({ entityKind: 'performer' as const, entityKey: performer.handle! })),
+          ...supply.events
+            .filter((event) => unclaimedEligibleIds.has(event.performerId))
+            .map((event) => ({ entityKind: 'event' as const, entityKey: event.id })),
+          ...supply.rooms
+            .filter((room) => Boolean(room.performerId) && unclaimedEligibleIds.has(room.performerId!))
+            .map((room) => ({ entityKind: 'live_room' as const, entityKey: room.gigId })),
+          ...supply.releases
+            .filter((release) => unclaimedEligibleIds.has(release.performerId))
+            .map((release) => ({ entityKind: 'release' as const, entityKey: release.id }))
+        ];
+      })()
+    }
+  });
+}
+
+app.get('/api/admin/discovery-observatory', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  applyNoStoreHeaders(res);
+  const windowDays = Math.max(1, Math.min(180, parsePositiveInteger(
+    typeof req.query.windowDays === 'string' ? req.query.windowDays : undefined,
+    30
+  )));
+  try {
+    return res.json({ observatory: await buildCurrentDiscoveryObservatory(windowDays) });
+  } catch (error) {
+    console.error('[sway.discovery] observatory read failed:', error);
+    return res.status(503).json({ error: 'Discovery Observatory is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/admin/discovery-observatory/observations', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!discoveryObservatoryStore || !adminAccess.actor.actorId) {
+    return res.status(503).json({ error: 'Discovery observation persistence is unavailable.' });
+  }
+  applyNoStoreHeaders(res);
+  try {
+    const observation = await discoveryObservatoryStore.recordObservation({
+      actorUserId: adminAccess.actor.actorId,
+      observation: req.body
+    });
+    return res.status(201).json({ observation });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Observation is invalid.' });
+  }
+});
+
+app.post('/api/admin/discovery-observatory/experiments/:experimentKey/decision', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!discoveryObservatoryStore || !adminAccess.actor.actorId) {
+    return res.status(503).json({ error: 'Discovery experiment persistence is unavailable.' });
+  }
+  applyNoStoreHeaders(res);
+  try {
+    const result = await discoveryObservatoryStore.recordExperimentDecision({
+      actorUserId: adminAccess.actor.actorId,
+      experimentKey: req.params.experimentKey,
+      decision: req.body?.decision,
+      evidenceNote: typeof req.body?.evidenceNote === 'string' ? req.body.evidenceNote : ''
+    });
+    return res.status(201).json({ experiment: result, publicChangeApplied: false });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Experiment decision is invalid.' });
+  }
+});
+
+app.post('/api/discovery/experiments/:experimentKey/assign', async (req, res) => {
+  applyNoStoreHeaders(res);
+  if (!discoveryObservatoryStore) return res.status(503).json({ error: 'Experiment assignment is unavailable.' });
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+    || Object.keys(req.body).some((key) => key !== 'journey_id')) {
+    return res.status(400).json({ error: 'Experiment assignment accepts only a server-validated journey_id.' });
+  }
+  try {
+    const result = await discoveryObservatoryStore.assignExperiment({
+      journeyId: req.body?.journey_id,
+      experimentKey: req.params.experimentKey
+    });
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    return res.status(409).json({ error: error instanceof Error ? error.message : 'Experiment assignment is unavailable.' });
   }
 });
 
@@ -10559,6 +11117,133 @@ app.get("/api/lyrics", async (req, res) => {
   return res.json(result);
 });
 
+async function recordDirectRoomDiscoveryOutcome(
+  req: express.Request,
+  res: express.Response,
+  gigId: string
+) {
+  if (req.headers['x-sway-discovery-entry-once'] !== '1' || !discoveryObservatoryStore) return;
+  const journeyId = typeof req.headers['x-sway-discovery-journey'] === 'string'
+    ? req.headers['x-sway-discovery-journey'].trim()
+    : '';
+  if (!UUID_PATTERN.test(journeyId)) return;
+  const source = typeof req.headers['x-sway-discovery-source'] === 'string'
+    && /^[a-z][a-z0-9_-]{0,63}$/i.test(req.headers['x-sway-discovery-source'])
+    ? req.headers['x-sway-discovery-source'].toLowerCase()
+    : 'unknown';
+  const requestedEntryPath = typeof req.headers['x-sway-discovery-entry-path'] === 'string'
+    ? req.headers['x-sway-discovery-entry-path']
+    : `/g/${gigId}`;
+  const entryPath = /^\/(?:$|p\/[^?#\s]+|e\/[0-9a-f-]{36}|g\/[0-9a-f-]{36}|r\/[0-9a-f-]{36}|discover\/?$)/i.test(requestedEntryPath)
+    ? requestedEntryPath
+    : `/g/${gigId}`;
+  const visibilityEligibility = await resolveDiscoveryEntityVisibilityEligibility({
+    entityKind: 'live_room', entityKey: gigId
+  });
+
+  try {
+    await discoveryObservatoryStore.recordJourneyEvent({
+      journeyId,
+      stage: 'entry',
+      eventType: 'discovery_landing',
+      source,
+      surface: 'room-entry',
+      entryPath,
+      entityKind: 'live_room',
+      entityKey: gigId,
+      visibilityEligibility,
+      linkStrength: 'client_correlated_unverified'
+    }, undefined, { idempotencyKey: `room-entry:${gigId}:entry` });
+    await discoveryObservatoryStore.recordJourneyEvent({
+      journeyId,
+      stage: 'action',
+      eventType: 'room_entry_attempted',
+      source,
+      surface: 'room-entry',
+      entryPath,
+      entityKind: 'live_room',
+      entityKey: gigId,
+      actionKind: 'room_entry',
+      visibilityEligibility,
+      linkStrength: 'direct_server_observed'
+    }, undefined, { idempotencyKey: `room-entry:${gigId}:action` });
+    await discoveryObservatoryStore.recordJourneyEvent({
+      journeyId,
+      stage: 'outcome',
+      eventType: 'room_entry_completed',
+      source,
+      surface: 'room-entry',
+      entryPath,
+      entityKind: 'live_room',
+      entityKey: gigId,
+      actionKind: 'room_entry',
+      outcomeStatus: 'completed',
+      visibilityEligibility,
+      linkStrength: 'direct_server_observed'
+    }, undefined, { idempotencyKey: `room-entry:${gigId}:outcome` });
+    res.setHeader('x-sway-discovery-recorded', '1');
+  } catch (error) {
+    console.warn('[sway.discovery] room entry evidence was not recorded.', {
+      gigId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function recordDirectTipDiscoveryOutcome(input: {
+  journeyId: unknown;
+  source: unknown;
+  entryPath: unknown;
+  gigId: string;
+  idempotencyKey: string;
+}) {
+  if (!discoveryObservatoryStore || typeof input.journeyId !== 'string' || !UUID_PATTERN.test(input.journeyId)) return;
+  const source = typeof input.source === 'string' && /^[a-z][a-z0-9_-]{0,63}$/i.test(input.source)
+    ? input.source.toLowerCase()
+    : 'unknown';
+  const entryPath = typeof input.entryPath === 'string'
+    && /^\/(?:$|p\/[^?#\s]+|e\/[0-9a-f-]{36}|g\/[0-9a-f-]{36}|r\/[0-9a-f-]{36}|discover\/?$)/i.test(input.entryPath)
+    ? input.entryPath
+    : `/g/${input.gigId}`;
+  const visibilityEligibility = await resolveDiscoveryEntityVisibilityEligibility({
+    entityKind: 'live_room', entityKey: input.gigId
+  });
+  try {
+    await discoveryObservatoryStore.recordJourneyEvent({
+      journeyId: input.journeyId,
+      stage: 'action',
+      eventType: 'discovery_primary_action',
+      source,
+      surface: 'room-entry',
+      entryPath,
+      entityKind: 'live_room',
+      entityKey: input.gigId,
+      actionKind: 'tip',
+      visibilityEligibility,
+      linkStrength: 'direct_server_observed'
+    }, undefined, { idempotencyKey: `tip:${input.idempotencyKey}:action` });
+    await discoveryObservatoryStore.recordJourneyEvent({
+      journeyId: input.journeyId,
+      stage: 'outcome',
+      eventType: 'tip_action_completed',
+      source,
+      surface: 'room-entry',
+      entryPath,
+      entityKind: 'live_room',
+      entityKey: input.gigId,
+      actionKind: 'tip',
+      outcomeStatus: 'completed',
+      visibilityEligibility,
+      linkStrength: 'direct_server_observed'
+    }, undefined, { idempotencyKey: `tip:${input.idempotencyKey}:outcome` });
+  } catch (error) {
+    console.warn('[sway.discovery] durable tip evidence was not recorded.', {
+      gigId: input.gigId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 app.get("/api/state/:gigId", async (req, res) => {
   applyNoStoreHeaders(res);
 
@@ -10596,6 +11281,8 @@ app.get("/api/state/:gigId", async (req, res) => {
       room_lookup: 'missing'
     });
   }
+
+  await recordDirectRoomDiscoveryOutcome(req, res, requestedGigId);
 
   const privateRoomAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
   if (privateRoomAccess.allowed) {
@@ -11434,7 +12121,10 @@ app.post("/api/request/create", async (req, res) => {
     expires_at,
     payment_method,
     payment_intent_id,
-    campaign_code
+    campaign_code,
+    discovery_journey_id,
+    discovery_source,
+    discovery_entry_path
   } = req.body;
   const normalizedCurrency = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
   const normalizedCampaignCode = typeof campaign_code === 'string' ? campaign_code : null;
@@ -11882,6 +12572,15 @@ app.post("/api/request/create", async (req, res) => {
     status: 200,
     body: responseBody
   });
+  if (isStraightTip) {
+    await recordDirectTipDiscoveryOutcome({
+      journeyId: discovery_journey_id,
+      source: discovery_source,
+      entryPath: discovery_entry_path,
+      gigId: durableGigId,
+      idempotencyKey: idempotency_key
+    });
+  }
   res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
 });
 

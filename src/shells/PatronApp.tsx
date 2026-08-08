@@ -24,7 +24,9 @@ import {
 import { captureCampaignCode } from './campaignAttribution';
 import {
   captureDiscoveryAttribution,
-  getEffectiveDiscoveryChannel
+  getDiscoveryEntryPath,
+  getEffectiveDiscoveryChannel,
+  getOrCreateDiscoveryJourneyId
 } from './discoveryAttribution';
 import type { PatronRequestStatus } from '../types';
 import { AccountHome, AccountLogin, AccountRecovery, AccountSignup } from '../components/AccountAccess';
@@ -297,7 +299,13 @@ export default function PatronApp() {
   const handleCreateRequest = async (requestData: Record<string, unknown>) => {
     if (demoMode) return rejectDemoMutation();
     try {
-      const data = await postJson('/api/request/create', { ...requestData, campaign_code: campaignCode });
+      const data = await postJson('/api/request/create', {
+        ...requestData,
+        campaign_code: campaignCode,
+        discovery_journey_id: getOrCreateDiscoveryJourneyId(),
+        discovery_source: getEffectiveDiscoveryChannel(),
+        discovery_entry_path: getDiscoveryEntryPath()
+      });
       applyPatronMutationResponse(data);
       return data;
     } catch (e) {
@@ -453,7 +461,9 @@ export default function PatronApp() {
       has_session_context: hasSessionContext,
       build_commit: 'unknown',
       attribution_channel: getEffectiveDiscoveryChannel(),
-      entity_kind: 'live_room'
+      entity_kind: 'live_room',
+      entity_key: routeGigId,
+      visibility_eligibility: 'eligible'
     });
     sendDiscoveryEvent('discovery_entity_view', {
       shell: 'patron',
@@ -463,17 +473,9 @@ export default function PatronApp() {
       has_session_context: hasSessionContext,
       build_commit: 'unknown',
       attribution_channel: getEffectiveDiscoveryChannel(),
-      entity_kind: 'live_room'
-    });
-    sendDiscoveryEvent('discovery_primary_action', {
-      shell: 'patron',
-      surface: 'room-entry',
-      route_family: routeFamily,
-      has_route_context: hasPatronRouteContext,
-      has_session_context: hasSessionContext,
-      build_commit: 'unknown',
-      attribution_channel: getEffectiveDiscoveryChannel(),
-      entity_kind: 'live_room'
+      entity_kind: 'live_room',
+      entity_key: routeGigId,
+      visibility_eligibility: 'eligible'
     });
   }, [hasPatronRouteContext, hasSessionContext, isLoading, route.name, routeFamily, routeGigId, shouldShowConnectionRecovery, shouldShowEndedRoomRecovery, shouldShowNoSessionRecovery]);
 
