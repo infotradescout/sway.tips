@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 const root = process.cwd();
@@ -86,8 +85,7 @@ function startServer(port, databaseUrl) {
   if (databaseUrl) env.DATABASE_URL = databaseUrl;
   else env.DATABASE_URL = '';
 
-  const tsxCli = join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const child = spawn(process.execPath, [tsxCli, 'server.ts'], {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: root,
     env,
     stdio: ['ignore', 'pipe', 'pipe']

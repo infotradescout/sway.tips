@@ -19,12 +19,13 @@ const OPTIONS: Array<{ value: DiscoveryChannel; label: string }> = [
 type Props = {
   routeFamily: string;
   surface: 'public-profile' | 'public-event' | 'public-release' | 'room-entry';
+  entityKey: string;
 };
 
 /**
  * Optional offline attribution. Never overwrites a stronger first-touch channel.
  */
-export default function DiscoveryFindUsPrompt({ routeFamily, surface }: Props) {
+export default function DiscoveryFindUsPrompt({ routeFamily, surface, entityKey }: Props) {
   const [saved, setSaved] = useState(() => Boolean(getOfflineFindUs()));
   const [hidden, setHidden] = useState(() => {
     const channel = getEffectiveDiscoveryChannel();
@@ -52,7 +53,9 @@ export default function DiscoveryFindUsPrompt({ routeFamily, surface }: Props) {
                 has_session_context: false,
                 build_commit: 'unknown',
                 attribution_channel: getEffectiveDiscoveryChannel(),
-                entity_kind: surface === 'room-entry' ? 'live_room' : surface === 'public-event' ? 'event' : surface === 'public-release' ? 'release' : 'performer'
+                entity_kind: surface === 'room-entry' ? 'live_room' : surface === 'public-event' ? 'event' : surface === 'public-release' ? 'release' : 'performer',
+                entity_key: entityKey,
+                visibility_eligibility: 'eligible'
               });
               setSaved(true);
             }}

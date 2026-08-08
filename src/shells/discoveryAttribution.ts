@@ -9,6 +9,8 @@
 const FIRST_TOUCH_KEY = 'sway.discovery.firstTouch';
 const LATEST_TOUCH_KEY = 'sway.discovery.latestTouch';
 const OFFLINE_FIND_US_KEY = 'sway.discovery.offlineFindUs';
+const JOURNEY_ID_KEY = 'sway.discovery.journeyId';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DiscoveryChannel =
   | 'chatgpt'
@@ -161,6 +163,49 @@ export function getLatestDiscoveryTouch(): DiscoveryTouch | null {
 
 export function getEffectiveDiscoveryChannel(): DiscoveryChannel {
   return getFirstDiscoveryTouch()?.channel || 'unknown';
+}
+
+function fallbackJourneyUuid() {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Pseudonymous browser journey key scoped to one browser-tab session. It is
+ * reused within that session, rotates when the session storage boundary ends,
+ * contains no account/contact/payment data, and is hashed again by the server.
+ */
+export function getOrCreateDiscoveryJourneyId(): string {
+  if (typeof window === 'undefined') return '00000000-0000-4000-8000-000000000000';
+  try {
+    // Remove the pre-Observatory persistent key if an older build left one.
+    window.localStorage.removeItem(JOURNEY_ID_KEY);
+    const existing = window.sessionStorage.getItem(JOURNEY_ID_KEY);
+    if (existing && UUID_PATTERN.test(existing)) return existing.toLowerCase();
+    const created = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : fallbackJourneyUuid();
+    window.sessionStorage.setItem(JOURNEY_ID_KEY, created);
+    return created.toLowerCase();
+  } catch {
+    // Blocked storage still receives a valid per-page identifier. Attribution
+    // can degrade to client-correlated without breaking the public journey.
+    return fallbackJourneyUuid();
+  }
+}
+
+export function getDiscoveryEntryPath() {
+  return getFirstDiscoveryTouch()?.landingPath || safePathname();
 }
 
 /**

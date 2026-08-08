@@ -1,3 +1,8 @@
+import {
+  getDiscoveryEntryPath,
+  getOrCreateDiscoveryJourneyId
+} from './discoveryAttribution';
+
 const ALLOWED_PAYLOAD_KEYS = [
   'shell',
   'surface',
@@ -7,7 +12,13 @@ const ALLOWED_PAYLOAD_KEYS = [
   'has_session_context',
   'build_commit',
   'attribution_channel',
-  'entity_kind'
+  'entity_kind',
+  'entity_key',
+  'action_kind',
+  'experiment_key',
+  'visibility_eligibility',
+  'search_phrase',
+  'link_strength'
 ] as const;
 
 const ALLOWED_EVENTS = [
@@ -25,20 +36,27 @@ const ALLOWED_EVENTS = [
   'public_release_shared',
   'discovery_landing',
   'discovery_entity_view',
-  'discovery_primary_action'
+  'discovery_primary_action',
+  'internal_search_zero_result'
 ] as const;
 
 type ShellFrictionEvent = (typeof ALLOWED_EVENTS)[number];
 
 type ShellFrictionPayload = {
   shell: 'patron' | 'talent';
-  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release';
+  surface: 'recovery-view' | 'room-entry' | 'share-kit' | 'public-profile' | 'public-event' | 'public-release' | 'public-discover';
   route_family: string;
   has_route_context: boolean;
   has_session_context: boolean;
   build_commit: string;
   attribution_channel?: string;
   entity_kind?: string;
+  entity_key?: string;
+  action_kind?: string;
+  experiment_key?: string;
+  visibility_eligibility?: string;
+  search_phrase?: string;
+  link_strength?: string;
 };
 
 function isAllowedEvent(event: string): event is ShellFrictionEvent {
@@ -60,16 +78,40 @@ function isValidPayload(payload: Record<string, unknown>): payload is ShellFrict
   const entityOk = payload.entity_kind === undefined
     || (typeof payload.entity_kind === 'string'
       && ['performer', 'event', 'release', 'live_room'].includes(payload.entity_kind));
+  const entityKeyOk = payload.entity_key === undefined
+    || (typeof payload.entity_key === 'string' && /^[a-z0-9][a-z0-9_.:-]{0,127}$/i.test(payload.entity_key));
+  const actionKindOk = payload.action_kind === undefined
+    || (typeof payload.action_kind === 'string'
+      && ['follow', 'room_entry', 'event_entry', 'ticket', 'tip', 'request', 'boost', 'share', 'other'].includes(payload.action_kind));
+  const experimentOk = payload.experiment_key === undefined
+    || (typeof payload.experiment_key === 'string' && /^[a-z0-9][a-z0-9_.:-]{0,127}$/i.test(payload.experiment_key));
+  const visibilityOk = payload.visibility_eligibility === undefined
+    || (typeof payload.visibility_eligibility === 'string'
+      && ['eligible', 'ineligible', 'unknown'].includes(payload.visibility_eligibility));
+  const searchPhraseOk = payload.search_phrase === undefined
+    || (typeof payload.search_phrase === 'string'
+      && payload.search_phrase.trim().length > 0
+      && payload.search_phrase.length <= 160
+      && !/@|https?:\/\/|www\.|\b\d{7,}\b|\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/i.test(payload.search_phrase));
+  const linkStrengthOk = payload.link_strength === undefined
+    || (typeof payload.link_strength === 'string'
+      && ['direct_server_observed', 'client_correlated_unverified', 'unknown_unavailable'].includes(payload.link_strength));
 
   return (
     (payload.shell === 'patron' || payload.shell === 'talent') &&
-    (payload.surface === 'recovery-view' || payload.surface === 'room-entry' || payload.surface === 'share-kit' || payload.surface === 'public-profile' || payload.surface === 'public-event' || payload.surface === 'public-release') &&
+    (payload.surface === 'recovery-view' || payload.surface === 'room-entry' || payload.surface === 'share-kit' || payload.surface === 'public-profile' || payload.surface === 'public-event' || payload.surface === 'public-release' || payload.surface === 'public-discover') &&
     typeof payload.route_family === 'string' &&
     typeof payload.has_route_context === 'boolean' &&
     typeof payload.has_session_context === 'boolean' &&
     typeof payload.build_commit === 'string' &&
     attributionOk &&
-    entityOk
+    entityOk &&
+    entityKeyOk &&
+    actionKindOk &&
+    experimentOk &&
+    visibilityOk &&
+    searchPhraseOk &&
+    linkStrengthOk
   );
 }
 
@@ -90,8 +132,16 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
         has_route_context: payload.has_route_context,
         has_session_context: payload.has_session_context,
         build_commit: payload.build_commit,
+        journey_id: getOrCreateDiscoveryJourneyId(),
+        entry_path: getDiscoveryEntryPath(),
         ...(payload.attribution_channel ? { attribution_channel: payload.attribution_channel } : {}),
-        ...(payload.entity_kind ? { entity_kind: payload.entity_kind } : {})
+        ...(payload.entity_kind ? { entity_kind: payload.entity_kind } : {}),
+        ...(payload.entity_key ? { entity_key: payload.entity_key } : {}),
+        ...(payload.action_kind ? { action_kind: payload.action_kind } : {}),
+        ...(payload.experiment_key ? { experiment_key: payload.experiment_key } : {}),
+        ...(payload.visibility_eligibility ? { visibility_eligibility: payload.visibility_eligibility } : {}),
+        ...(payload.search_phrase ? { search_phrase: payload.search_phrase } : {}),
+        link_strength: payload.link_strength || 'client_correlated_unverified'
       })
     }).catch(() => {});
   } catch {
@@ -135,7 +185,11 @@ export function sendAcquisitionEvent(
 }
 
 export function sendDiscoveryEvent(
-  event: 'discovery_landing' | 'discovery_entity_view' | 'discovery_primary_action',
+  event:
+    | 'discovery_landing'
+    | 'discovery_entity_view'
+    | 'discovery_primary_action'
+    | 'internal_search_zero_result',
   payload: Record<string, unknown>
 ) {
   sendFrictionEvent(event, payload);

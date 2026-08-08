@@ -307,12 +307,14 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
         sendDiscoveryEvent('discovery_landing', {
           shell: 'patron', surface: 'public-event', route_family: 'public-event',
           has_route_context: true, has_session_context: false, build_commit: 'unknown',
-          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event'
+          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event', entity_key: eventId,
+          visibility_eligibility: 'eligible'
         });
         sendDiscoveryEvent('discovery_entity_view', {
           shell: 'patron', surface: 'public-event', route_family: 'public-event',
           has_route_context: true, has_session_context: false, build_commit: 'unknown',
-          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event'
+          attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event', entity_key: eventId,
+          visibility_eligibility: 'eligible'
         });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -493,7 +495,8 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   onClick={() => sendDiscoveryEvent('discovery_primary_action', {
                     shell: 'patron', surface: 'public-event', route_family: 'public-event',
                     has_route_context: true, has_session_context: false, build_commit: 'unknown',
-                    attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event'
+                    attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event', entity_key: event.id,
+                    action_kind: 'ticket', visibility_eligibility: 'eligible'
                   })}
                   aria-label={`${externalTicketCtaLabel(event.externalTicket.label)} on external ticket site (opens in a new tab)`}
                   className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-5 text-sm font-black text-white transition hover:bg-fuchsia-500"
@@ -525,7 +528,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
           </div>
         </section>
 
-        <DiscoveryFindUsPrompt routeFamily="public-event" surface="public-event" />
+        <DiscoveryFindUsPrompt routeFamily="public-event" surface="public-event" entityKey={event.id} />
 
         <footer className="mt-8 flex flex-col items-center justify-center gap-3 pb-6 text-center sm:flex-row">
           <a href="/discover" className="text-xs font-black text-fuchsia-200 transition hover:text-white">Discover live rooms and shows</a>

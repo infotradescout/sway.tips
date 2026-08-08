@@ -205,7 +205,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           has_session_context: false,
           build_commit: 'unknown',
           attribution_channel: getEffectiveDiscoveryChannel(),
-          entity_kind: 'performer'
+          entity_kind: 'performer',
+          entity_key: data.performer.handle || performerHandle,
+          visibility_eligibility: 'eligible'
         });
         sendDiscoveryEvent('discovery_entity_view', {
           shell: 'patron',
@@ -215,7 +217,9 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           has_session_context: false,
           build_commit: 'unknown',
           attribution_channel: getEffectiveDiscoveryChannel(),
-          entity_kind: 'performer'
+          entity_kind: 'performer',
+          entity_key: data.performer.handle || performerHandle,
+          visibility_eligibility: 'eligible'
         });
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
@@ -433,7 +437,10 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
                 has_session_context: false,
                 build_commit: 'unknown',
                 attribution_channel: getEffectiveDiscoveryChannel(),
-                entity_kind: 'live_room'
+                entity_kind: 'live_room',
+                entity_key: activeRoom.routePath.split('/').filter(Boolean).at(-1),
+                action_kind: 'room_entry',
+                visibility_eligibility: 'eligible'
               })}
               className="mt-6 flex min-h-16 items-center justify-between gap-4 rounded-2xl border border-fuchsia-300/30 bg-gradient-to-r from-fuchsia-600 to-violet-600 px-5 py-4 text-left shadow-lg shadow-fuchsia-950/30 transition hover:from-fuchsia-500 hover:to-violet-500"
             >
@@ -583,7 +590,11 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           </section>
         ) : null}
 
-        <DiscoveryFindUsPrompt routeFamily="performer-profile" surface="public-profile" />
+        <DiscoveryFindUsPrompt
+          routeFamily="performer-profile"
+          surface="public-profile"
+          entityKey={profile.handle || performerHandle}
+        />
 
         <footer className="mt-10 text-center">
           <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-slate-600">
