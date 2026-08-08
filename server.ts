@@ -87,8 +87,11 @@ import {
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
   normalizePublicProfileUrl,
-  resolveVerifiedPublicBookingContact
+  resolveVerifiedPublicBookingContact,
+  evaluatePublicPerformerVisibility,
+  type PerformerVisibilityState
 } from "./src/server/public-profile";
+import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 import {
@@ -133,6 +136,10 @@ dotenv.config({ override: false });
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
+const skipStartupBusinessStateHydration = process.env.SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION === 'true';
+if (isProduction && skipStartupBusinessStateHydration) {
+  throw new Error('SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION is not allowed in production.');
+}
 // Migration 0028 is live and the legacy snapshot writer has drained, so the
 // durable writer is now canonical. Operators retain an explicit emergency
 // kill switch; missing or malformed configuration does not silently disable
@@ -479,7 +486,39 @@ type PublicShareProfile = {
   avatarUrl: string | null;
   specialties: string[] | null;
   updatedAt: Date | null;
+  visibility: 'public' | 'unlisted';
 };
+
+type PublicPerformerDiscoveryProfile = {
+  performerId: string;
+  ownerUserId: string;
+  ownerEmailVerifiedAt: Date | null;
+  displayName: string;
+  handle: string | null;
+  bio: string | null;
+  visibilityState: PerformerVisibilityState;
+  isActive: boolean;
+  onboardingStatus: string;
+  headline: string | null;
+  specialties: string[] | null;
+  city: string | null;
+  avatarUrl: string | null;
+  metadata: unknown;
+  bookingEmail: string | null;
+  bookingPhone: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  tiktokUrl: string | null;
+  youtubeUrl: string | null;
+  soundcloudUrl: string | null;
+  websiteUrl: string | null;
+  featuredMedia: unknown;
+  updatedAt: Date | null;
+};
+
+type PublicPerformerDiscoveryResolution =
+  | { kind: 'public' | 'unlisted'; profile: PublicPerformerDiscoveryProfile }
+  | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
 const DEFAULT_SHARE_DESCRIPTION = 'Sway gives performers one place for public profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.';
@@ -631,62 +670,192 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   );
 }
 
-async function findPublicShareProfile(rawHandle: string): Promise<PublicShareProfile | null> {
+async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<PublicPerformerDiscoveryResolution> {
   const normalizedHandle = normalizePerformerHandle(rawHandle);
-  if (!normalizedHandle || !businessDb) return null;
+  if (!normalizedHandle) return { kind: 'not_resolvable', profile: null };
+  if (!businessDb) return { kind: 'unavailable', profile: null };
 
-  const [profile] = await businessDb
-    .select({
-      displayName: performers.displayName,
-      handle: performers.handle,
-      bio: performers.bio,
-      headline: performerPublicProfiles.headline,
-      city: performerPublicProfiles.city,
-      avatarUrl: performerPublicProfiles.avatarUrl,
-      specialties: performerPublicProfiles.specialties,
-      updatedAt: performerPublicProfiles.updatedAt
-    })
-    .from(performers)
-    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-    .where(and(
-      sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
-      eq(performers.isActive, true),
-      notInArray(performers.onboardingStatus, ['suspended'])
-    ))
-    .limit(1);
+  try {
+    const profiles = await businessDb
+      .select({
+        performerId: performers.id,
+        ownerUserId: performers.ownerUserId,
+        ownerEmailVerifiedAt: users.emailVerifiedAt,
+        displayName: performers.displayName,
+        handle: performers.handle,
+        bio: performers.bio,
+        visibilityState: performers.visibilityState,
+        isActive: performers.isActive,
+        onboardingStatus: performers.onboardingStatus,
+        headline: performerPublicProfiles.headline,
+        specialties: performerPublicProfiles.specialties,
+        city: performerPublicProfiles.city,
+        avatarUrl: performerPublicProfiles.avatarUrl,
+        metadata: performerPublicProfiles.metadata,
+        bookingEmail: performerPublicProfiles.bookingEmail,
+        bookingPhone: performerPublicProfiles.bookingPhone,
+        facebookUrl: performerPublicProfiles.facebookUrl,
+        instagramUrl: performerPublicProfiles.instagramUrl,
+        tiktokUrl: performerPublicProfiles.tiktokUrl,
+        youtubeUrl: performerPublicProfiles.youtubeUrl,
+        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+        websiteUrl: performerPublicProfiles.websiteUrl,
+        featuredMedia: performerPublicProfiles.featuredMedia,
+        updatedAt: performerPublicProfiles.updatedAt
+      })
+      .from(performers)
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(and(
+        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        sql`nullif(trim(${performers.bio}), '') is not null`
+      ));
 
-  if (profile) return profile;
+    if (profiles.length !== 1) return { kind: 'not_resolvable', profile: null };
 
-  // Unclaimed/incomplete does not mean private. Only suspended handles stay dark.
-  const [suspendedPerformer] = await businessDb
-    .select({ id: performers.id })
-    .from(performers)
-    .where(and(
-      sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
-      eq(performers.onboardingStatus, 'suspended')
-    ))
-    .limit(1);
-  if (suspendedPerformer) return null;
+    const candidate = profiles[0];
+    if (!isDiscoveryEligibleHandle(candidate.handle)) return { kind: 'not_resolvable', profile: null };
+    const storedHandle = normalizePerformerHandle(candidate.handle);
+    const policy = evaluatePublicPerformerVisibility({
+      claimed: true,
+      hasOwner: Boolean(candidate.ownerUserId),
+      isActive: candidate.isActive,
+      onboardingStatus: candidate.onboardingStatus,
+      visibilityState: candidate.visibilityState,
+      handle: storedHandle,
+      displayName: candidate.displayName,
+      conflicted: false
+    });
 
-  const [preview] = await businessDb
-    .select({
-      displayName: performerProfilePreviews.displayName,
-      handle: performerProfilePreviews.handle,
-      bio: performerProfilePreviews.bio,
-      headline: performerProfilePreviews.headline,
-      city: performerProfilePreviews.city,
-      avatarUrl: performerProfilePreviews.avatarUrl,
-      specialties: performerProfilePreviews.specialties,
-      updatedAt: performerProfilePreviews.updatedAt
-    })
-    .from(performerProfilePreviews)
-    .where(and(
-      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
-      eq(performerProfilePreviews.isActive, true)
-    ))
-    .limit(1);
+    if (policy.kind !== 'public' && policy.kind !== 'unlisted') {
+      return { kind: 'not_resolvable', profile: null };
+    }
 
-  return preview || null;
+    return {
+      kind: policy.kind,
+      profile: {
+        ...candidate,
+        handle: storedHandle?.toLowerCase() ?? null
+      }
+    };
+  } catch (error) {
+    console.error('[sway.discovery] claimed performer resolution failed:', error);
+    return { kind: 'unavailable', profile: null };
+  }
+}
+
+function toPublicShareProfile(
+  profile: PublicPerformerDiscoveryProfile,
+  visibility: 'public' | 'unlisted'
+): PublicShareProfile {
+  return {
+    displayName: profile.displayName,
+    handle: profile.handle!,
+    bio: profile.bio,
+    headline: profile.headline,
+    city: profile.city,
+    avatarUrl: profile.avatarUrl,
+    specialties: profile.specialties,
+    updatedAt: profile.updatedAt,
+    visibility
+  };
+}
+
+function buildPublicPerformerShareMetadata(
+  req: express.Request,
+  profile: PublicShareProfile
+): ShareMetadata {
+  const title = `@${profile.handle} on Sway`;
+  const description = profile.headline?.trim() || profile.bio?.trim() || 'Public performer profile on Sway.';
+  const canonicalProfileUrl = canonicalPublicUrl(`/p/${profile.handle}`);
+  const categories = Array.isArray(profile.specialties)
+    ? profile.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const lastUpdated = profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
+    ? profile.updatedAt.toISOString().slice(0, 10)
+    : null;
+
+  return defaultShareMetadata(req, {
+    title,
+    description,
+    url: `/p/${profile.handle}`,
+    image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
+    imageAlt: `@${profile.handle} Sway public page`,
+    robots: profile.visibility === 'unlisted' ? 'noindex, nofollow' : undefined,
+    structuredData: profile.visibility === 'public'
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'Person',
+          name: profile.displayName,
+          alternateName: `@${profile.handle}`,
+          description: profile.bio?.trim() || undefined,
+          url: canonicalProfileUrl,
+          image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
+          homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
+          mainEntityOfPage: canonicalProfileUrl,
+          knowsAbout: categories.length ? categories : undefined
+        }
+      : undefined,
+    discoveryFacts: {
+      entityType: 'performer',
+      entityName: profile.displayName || `@${profile.handle}`,
+      heading: profile.displayName || `@${profile.handle}`,
+      summary: description,
+      categories: categories.length ? categories : ['Performer'],
+      location: profile.city,
+      primaryActionLabel: 'View performer page',
+      primaryActionHref: canonicalProfileUrl,
+      relatedLinks: [
+        { label: 'Discover shows and live rooms', href: canonicalPublicUrl('/discover') },
+        { label: 'About Sway', href: canonicalPublicUrl('/about') }
+      ],
+      lastUpdated
+    }
+  });
+}
+
+async function findPublicShareProfile(rawHandle: string): Promise<PublicShareProfile | null> {
+  const resolution = await resolvePublicPerformerDiscovery(rawHandle);
+  if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) return null;
+  return toPublicShareProfile(resolution.profile, resolution.kind);
+}
+
+const PUBLIC_PROFILE_NOT_FOUND_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway performer profile not found</title></head><body><main><h1>Performer profile not found</h1><p>This Sway performer profile is not publicly available.</p></main></body></html>';
+const PUBLIC_PROFILE_UNAVAILABLE_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway performer profile unavailable</title></head><body><main><h1>Performer profile unavailable</h1><p>Sway could not load this performer profile right now.</p></main></body></html>';
+
+function sendPublicProfileNotFound(res: express.Response) {
+  return res
+    .status(404)
+    .type('html')
+    .set('X-Robots-Tag', 'noindex, nofollow')
+    .send(PUBLIC_PROFILE_NOT_FOUND_HTML);
+}
+
+function sendPublicProfileUnavailable(res: express.Response) {
+  return res
+    .status(503)
+    .type('html')
+    .set('X-Robots-Tag', 'noindex, nofollow')
+    .send(PUBLIC_PROFILE_UNAVAILABLE_HTML);
+}
+
+async function renderPublicPerformerDocument(
+  req: express.Request,
+  res: express.Response,
+  templateHtml: string
+) {
+  const rawHandle = req.params.handle ?? req.params[0];
+  const resolution = await resolvePublicPerformerDiscovery(rawHandle);
+  if (resolution.kind === 'unavailable') return sendPublicProfileUnavailable(res);
+  if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
+    return sendPublicProfileNotFound(res);
+  }
+
+  const profile = toPublicShareProfile(resolution.profile, resolution.kind);
+  const html = injectShareMetadata(templateHtml, buildPublicPerformerShareMetadata(req, profile));
+  applyNoStoreHeaders(res);
+  if (resolution.kind === 'unlisted') res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  return res.status(200).type('html').send(html);
 }
 
 function escapeShareCardText(value: string) {
@@ -810,53 +979,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     const profile = await findPublicShareProfile(normalizedHandle);
 
     if (!profile) return defaultMetadata;
-
-    const title = `@${profile.handle} on Sway`;
-    const handleCopy = profile.handle ? `@${profile.handle}` : 'this performer';
-    const locationCopy = profile.city ? ` in ${profile.city}` : '';
-    const description = profile.headline || profile.bio || `Explore ${handleCopy}${locationCopy} on Sway for public links, booking details, and live rooms.`;
-    const canonicalProfileUrl = canonicalPublicUrl(`/p/${profile.handle}`);
-    const categories = Array.isArray(profile.specialties)
-      ? profile.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 8)
-      : [];
-    const lastUpdated = profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
-      ? profile.updatedAt.toISOString().slice(0, 10)
-      : null;
-
-    return defaultShareMetadata(req, {
-      title,
-      description,
-      url: `/p/${profile.handle}`,
-      image: `/api/public/performer/${encodeURIComponent(profile.handle)}/share-card.png?v=1`,
-      imageAlt: `@${profile.handle} Sway public page`,
-      structuredData: {
-        '@context': 'https://schema.org',
-        '@type': 'Person',
-        name: profile.displayName,
-        alternateName: `@${profile.handle}`,
-        description,
-        url: canonicalProfileUrl,
-        image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
-        homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
-        mainEntityOfPage: canonicalProfileUrl,
-        knowsAbout: categories.length ? categories : undefined
-      },
-      discoveryFacts: {
-        entityType: 'performer',
-        entityName: profile.displayName || `@${profile.handle}`,
-        heading: profile.displayName || `@${profile.handle}`,
-        summary: description,
-        categories: categories.length ? categories : ['Performer'],
-        location: profile.city,
-        primaryActionLabel: 'View performer page',
-        primaryActionHref: canonicalProfileUrl,
-        relatedLinks: [
-          { label: 'Discover shows and live rooms', href: canonicalPublicUrl('/discover') },
-          { label: 'About Sway', href: canonicalPublicUrl('/about') }
-        ],
-        lastUpdated
-      }
-    });
+    return buildPublicPerformerShareMetadata(req, profile);
   }
 
   if (pathParts[0] === 'e' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && performerEventService) {
@@ -1686,7 +1809,11 @@ async function persistBusinessStateForRoom(roomState: BackendState, gigId: strin
 }
 
 async function resolveLegacyWritableRoom(req: express.Request, res: express.Response) {
-  await refreshBusinessState();
+  if (skipStartupBusinessStateHydration) {
+    console.warn('[sway.startup] skipping live-room state hydration for a non-production HTTP proof.');
+  } else {
+    await refreshBusinessState();
+  }
 
   const requestedGigId = parseDurableGigId(req.body?.gig_id);
   const targetGigId = requestedGigId ?? activeGigId;
@@ -2122,7 +2249,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       performerId: performers.id,
       displayName: performers.displayName,
       handle: performers.handle,
-      bio: performers.bio
+      bio: performers.bio,
+      visibilityState: performers.visibilityState
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -7968,6 +8096,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
+      visibilityState: performerOwner.visibilityState,
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
       primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
@@ -8006,6 +8135,79 @@ app.get('/api/talent/profile/public', async (req, res) => {
       updatedAt: profileRow?.updatedAt ?? null
     }
   });
+});
+
+app.post('/api/talent/profile/visibility', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Performer visibility requires a durable database connection.' });
+  }
+
+  const nextVisibilityState = parsePerformerVisibilityState(req.body?.visibilityState);
+  if (!nextVisibilityState) {
+    return res.status(422).json({ error: 'Visibility must be draft, unlisted, or public.' });
+  }
+
+  try {
+    const transition = await businessDb.transaction(async (tx) => {
+      const [performer] = await tx
+        .select({
+          performerId: performers.id,
+          visibilityState: performers.visibilityState
+        })
+        .from(performers)
+        .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
+        .for('update')
+        .limit(1);
+
+      if (!performer) return null;
+
+      const changed = performer.visibilityState !== nextVisibilityState;
+      if (changed) {
+        await tx
+          .update(performers)
+          .set({ visibilityState: nextVisibilityState, updatedAt: new Date() })
+          .where(eq(performers.id, performer.performerId));
+
+        await writeAuditEvent(tx, {
+          actorId: talentAccess.actor.actorId,
+          actorType: 'performer',
+          entityType: 'performer',
+          entityId: performer.performerId,
+          eventType: 'performer_visibility.update',
+          previousStatus: performer.visibilityState,
+          nextStatus: nextVisibilityState,
+          metadata: {
+            control: 'owner',
+            visibilityState: nextVisibilityState
+          }
+        });
+      }
+
+      return {
+        changed,
+        visibilityState: nextVisibilityState
+      };
+    });
+
+    if (!transition) {
+      return res.status(403).json({ error: 'Only the performer owner can manage visibility.' });
+    }
+
+    return res.json({
+      success: true,
+      changed: transition.changed,
+      visibilityState: transition.visibilityState
+    });
+  } catch (error) {
+    console.error('Performer visibility update failed', error);
+    return res.status(500).json({ error: 'Unable to update performer visibility.' });
+  }
 });
 
 app.post('/api/talent/partner/terms/accept', async (req, res) => {
@@ -8231,9 +8433,11 @@ app.post('/api/talent/profile/public', async (req, res) => {
       entityType: 'performer',
       entityId: performerOwner.performerId,
       eventType: 'performer_public_profile.update',
-      previousStatus: null,
-      nextStatus: 'published',
+      previousStatus: performerOwner.visibilityState,
+      nextStatus: performerOwner.visibilityState,
       metadata: {
+        operation: 'profile_save',
+        visibilityState: performerOwner.visibilityState,
         hasBio: Boolean(bio),
         specialtyCount: specialties?.length ?? 0,
         hasBookingEmail: Boolean(bookingEmail),
@@ -8267,6 +8471,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
       handle: performerOwner.handle,
       displayName: performerOwner.displayName,
       bio,
+      visibilityState: performerOwner.visibilityState,
       headline,
       stageName: normalizePublicProfileText(
         savedLinks.metadata && typeof savedLinks.metadata === 'object'
@@ -10170,8 +10375,12 @@ app.get('/api/public/feed', async (_req, res) => {
 });
 
 app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
-  const profile = await findPublicShareProfile(req.params.handle);
-  if (!profile) return res.status(404).send('Performer profile not found.');
+  const resolution = await resolvePublicPerformerDiscovery(req.params.handle);
+  if (resolution.kind === 'unavailable') return res.status(503).send('Public performer profiles require a durable database connection.');
+  if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
+    return res.status(404).send('Performer profile not found.');
+  }
+  const profile = toPublicShareProfile(resolution.profile, resolution.kind);
 
   try {
     const card = await renderPerformerShareCard(profile);
@@ -10215,153 +10424,19 @@ app.get('/api/public/releases/:releaseId/artwork', async (req, res) => {
 app.get('/api/public/performer/:handle', async (req, res) => {
   applyNoStoreHeaders(res);
 
-  const normalizedHandle = normalizePerformerHandle(req.params.handle);
-  if (!normalizedHandle) {
+  const resolution = await resolvePublicPerformerDiscovery(req.params.handle);
+  if (resolution.kind === 'unavailable') {
+    return res.status(503).json({ error: 'Public performer profiles require a durable database connection.' });
+  }
+  if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
     return res.status(404).json({ error: 'Performer profile not found.' });
   }
 
-  if (!businessDb) {
-    return res.status(503).json({ error: 'Public performer profiles require a durable database connection.' });
-  }
-
+  const profile = resolution.profile;
   try {
-    const [profile] = await businessDb
-      .select({
-        performerId: performers.id,
-        ownerEmailVerifiedAt: users.emailVerifiedAt,
-        displayName: performers.displayName,
-        handle: performers.handle,
-        bio: performers.bio,
-        headline: performerPublicProfiles.headline,
-        specialties: performerPublicProfiles.specialties,
-        city: performerPublicProfiles.city,
-        avatarUrl: performerPublicProfiles.avatarUrl,
-        metadata: performerPublicProfiles.metadata,
-        bookingEmail: performerPublicProfiles.bookingEmail,
-        bookingPhone: performerPublicProfiles.bookingPhone,
-        facebookUrl: performerPublicProfiles.facebookUrl,
-        instagramUrl: performerPublicProfiles.instagramUrl,
-        tiktokUrl: performerPublicProfiles.tiktokUrl,
-        youtubeUrl: performerPublicProfiles.youtubeUrl,
-        soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-        websiteUrl: performerPublicProfiles.websiteUrl,
-        featuredMedia: performerPublicProfiles.featuredMedia
-      })
-      .from(performers)
-      .innerJoin(users, eq(users.id, performers.ownerUserId))
-      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-      .where(and(
-        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
-        eq(performers.isActive, true),
-        notInArray(performers.onboardingStatus, ['suspended'])
-      ))
-      .limit(1);
-
-    if (!profile) {
-      // Unclaimed does not mean private. Curated previews stay public even when a
-      // linked performer row exists but is inactive / incomplete. Only a
-      // suspended performer hard-darks the handle (no preview fallback).
-      const [suspendedPerformer] = await businessDb
-        .select({ id: performers.id })
-        .from(performers)
-        .where(and(
-          sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
-          eq(performers.onboardingStatus, 'suspended')
-        ))
-        .limit(1);
-
-      if (suspendedPerformer) {
-        return res.status(404).json({ error: 'Performer profile not found.' });
-      }
-
-      const [preview] = await businessDb
-        .select({
-          displayName: performerProfilePreviews.displayName,
-          handle: performerProfilePreviews.handle,
-          claimedPerformerId: performerProfilePreviews.claimedPerformerId,
-          bio: performerProfilePreviews.bio,
-          headline: performerProfilePreviews.headline,
-          specialties: performerProfilePreviews.specialties,
-          city: performerProfilePreviews.city,
-          avatarUrl: performerProfilePreviews.avatarUrl,
-          metadata: performerProfilePreviews.metadata,
-          facebookUrl: performerProfilePreviews.facebookUrl,
-          instagramUrl: performerProfilePreviews.instagramUrl,
-          tiktokUrl: performerProfilePreviews.tiktokUrl,
-          youtubeUrl: performerProfilePreviews.youtubeUrl,
-          soundcloudUrl: performerProfilePreviews.soundcloudUrl,
-          websiteUrl: performerProfilePreviews.websiteUrl,
-          links: performerProfilePreviews.links,
-          featuredMedia: performerProfilePreviews.featuredMedia
-        })
-        .from(performerProfilePreviews)
-        .where(and(
-          sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
-          eq(performerProfilePreviews.isActive, true)
-        ))
-        .limit(1);
-
-      if (!preview) {
-        return res.status(404).json({ error: 'Performer profile not found.' });
-      }
-
-      const normalizedPreviewLinks = normalizePublicProfileLinks(preview.links ?? undefined);
-      const previewLinks = normalizedPreviewLinks.links
-        .filter((link) => link.isActive)
-        .map(({ isActive: _isActive, ...link }) => link);
-      const normalizedPreviewMedia = normalizePublicProfileFeaturedMedia(preview.featuredMedia ?? undefined);
-      const previewMedia = normalizedPreviewMedia.media
-        .filter((media) => media.isActive)
-        .map(({ isActive: _isActive, ...media }) => media);
-
-      return res.json({
-        performer: {
-          displayName: preview.displayName,
-          stageName: resolvePublicStageName({
-            displayName: preview.displayName,
-            handle: preview.handle,
-            headline: preview.headline,
-            metadata: preview.metadata
-          }),
-          primaryRole: resolvePublicPrimaryRole(preview.metadata),
-          handle: preview.handle,
-          bio: preview.bio,
-          headline: preview.headline,
-          specialties: preview.specialties ?? [],
-          city: preview.city,
-          avatarUrl: normalizePublicProfileUrl(preview.avatarUrl),
-          booking: {
-            email: null,
-            phone: null,
-            available: false,
-            verificationRequired: false
-          },
-          socialLinks: toPublicSocialLinks({
-            facebookUrl: preview.facebookUrl,
-            instagramUrl: preview.instagramUrl,
-            tiktokUrl: preview.tiktokUrl,
-            youtubeUrl: preview.youtubeUrl,
-            soundcloudUrl: preview.soundcloudUrl,
-            websiteUrl: preview.websiteUrl
-          }),
-          links: previewLinks,
-          featuredMedia: previewMedia,
-          partner: {
-            active: false,
-            kind: null,
-            termsVersion: null
-          },
-          isPreview: true,
-          claimState: preview.claimedPerformerId ? 'pending' : 'unclaimed'
-        },
-        activeRoom: null,
-        releases: [],
-        events: []
-      });
-    }
 
     const publicProfilePerformerId = profile.performerId;
-    const [[activeRoom], linkRows, partnerState, [curatedPreview], publicReleaseRows, publicEventRows] = await Promise.all([
+    const [[activeRoom], linkRows, partnerState, publicReleaseRows, publicEventRows] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -10391,33 +10466,6 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         ))
         .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
       loadPartnerEntitlementStateForPerformer(businessDb, profile.performerId),
-      businessDb
-        .select({
-          claimedPerformerId: performerProfilePreviews.claimedPerformerId,
-          displayName: performerProfilePreviews.displayName,
-          handle: performerProfilePreviews.handle,
-          bio: performerProfilePreviews.bio,
-          headline: performerProfilePreviews.headline,
-          specialties: performerProfilePreviews.specialties,
-          city: performerProfilePreviews.city,
-          avatarUrl: performerProfilePreviews.avatarUrl,
-          metadata: performerProfilePreviews.metadata,
-          facebookUrl: performerProfilePreviews.facebookUrl,
-          instagramUrl: performerProfilePreviews.instagramUrl,
-          tiktokUrl: performerProfilePreviews.tiktokUrl,
-          youtubeUrl: performerProfilePreviews.youtubeUrl,
-          soundcloudUrl: performerProfilePreviews.soundcloudUrl,
-          websiteUrl: performerProfilePreviews.websiteUrl,
-          links: performerProfilePreviews.links,
-          featuredMedia: performerProfilePreviews.featuredMedia
-        })
-        .from(performerProfilePreviews)
-        .where(and(
-          sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
-          eq(performerProfilePreviews.isActive, true),
-          or(isNull(performerProfilePreviews.claimedPerformerId), eq(performerProfilePreviews.claimedPerformerId, profile.performerId))
-        ))
-        .limit(1),
       businessDb
         .select({
           id: musicReleases.id,
@@ -10450,29 +10498,17 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       const safeUrl = normalizePublicProfileUrl(link.url);
       return safeUrl ? [{ ...link, url: safeUrl }] : [];
     });
-    const normalizedCuratedLinks = normalizePublicProfileLinks(curatedPreview?.links ?? undefined);
-    const curatedLinkRows = normalizedCuratedLinks.links
-      .filter((link) => link.isActive)
-      .map(({ isActive: _isActive, ...link }) => link);
-    const combinedLinkRows = [...publicLinkRows, ...curatedLinkRows.filter((curatedLink) => (
-      !publicLinkRows.some((publicLink) => publicLink.url === curatedLink.url || publicLink.label.toLowerCase() === curatedLink.label.toLowerCase())
-    ))].slice(0, 12);
-    const effectiveHeadline = profile.headline || curatedPreview?.headline || null;
-    const effectiveBio = profile.bio || curatedPreview?.bio || null;
-    const effectiveSpecialties = profile.specialties?.length
-      ? profile.specialties
-      : curatedPreview?.specialties ?? [];
-    const effectiveCity = profile.city || curatedPreview?.city || null;
-    const effectiveAvatarUrl = profile.avatarUrl || curatedPreview?.avatarUrl || null;
-    const normalizedMedia = normalizePublicProfileFeaturedMedia(
-      Array.isArray(profile.featuredMedia) && profile.featuredMedia.length
-        ? profile.featuredMedia
-        : curatedPreview?.featuredMedia
-    );
+    const combinedLinkRows = publicLinkRows.slice(0, 12);
+    const effectiveHeadline = profile.headline;
+    const effectiveBio = profile.bio;
+    const effectiveSpecialties = profile.specialties ?? [];
+    const effectiveCity = profile.city;
+    const effectiveAvatarUrl = profile.avatarUrl;
+    const normalizedMedia = normalizePublicProfileFeaturedMedia(profile.featuredMedia ?? undefined);
     const publicMedia = normalizedMedia.media
       .filter((media) => media.isActive)
       .map(({ isActive: _isActive, ...media }) => media);
-    const effectiveMetadata = profile.metadata || curatedPreview?.metadata || null;
+    const effectiveMetadata = profile.metadata || null;
     const stageName = resolvePublicStageName({
       displayName: profile.displayName,
       handle: profile.handle,
@@ -10501,12 +10537,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         avatarUrl: normalizePublicProfileUrl(effectiveAvatarUrl),
         booking: publicBooking,
         socialLinks: toPublicSocialLinks({
-          facebookUrl: profile.facebookUrl || curatedPreview?.facebookUrl || null,
-          instagramUrl: profile.instagramUrl || curatedPreview?.instagramUrl || null,
-          tiktokUrl: profile.tiktokUrl || curatedPreview?.tiktokUrl || null,
-          youtubeUrl: profile.youtubeUrl || curatedPreview?.youtubeUrl || null,
-          soundcloudUrl: profile.soundcloudUrl || curatedPreview?.soundcloudUrl || null,
-          websiteUrl: profile.websiteUrl || curatedPreview?.websiteUrl || null
+          facebookUrl: profile.facebookUrl,
+          instagramUrl: profile.instagramUrl,
+          tiktokUrl: profile.tiktokUrl,
+          youtubeUrl: profile.youtubeUrl,
+          soundcloudUrl: profile.soundcloudUrl,
+          websiteUrl: profile.websiteUrl
         }),
         links: combinedLinkRows,
         featuredMedia: publicMedia,
@@ -10542,7 +10578,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
     });
   } catch (error) {
     console.error('Public performer profile lookup failed:', error);
-    return res.status(500).json({ error: 'Unable to load this performer profile right now.' });
+    return res.status(503).json({ error: 'Public performer profiles require a durable database connection.' });
   }
 });
 
@@ -12755,6 +12791,14 @@ app.get('/llms.txt', (_req, res) => {
 });
 
 app.get('/sitemap.xml', async (_req, res) => {
+  if (!businessDb) {
+    return res
+      .status(503)
+      .type('application/xml')
+      .set('X-Robots-Tag', 'noindex, nofollow')
+      .send('Sitemap temporarily unavailable.');
+  }
+
   const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
   type SitemapEntry = { loc: string; lastmod?: string | null };
   const entries = new Map<string, SitemapEntry>();
@@ -12763,34 +12807,28 @@ app.get('/sitemap.xml', async (_req, res) => {
   }
 
   if (businessDb) {
-    const [profileRows, previewRows, eventRows, releaseRows] = await Promise.all([
+    try {
+    const [profileRows, eventRows, releaseRows] = await Promise.all([
       businessDb.select({
+        ownerUserId: performers.ownerUserId,
         handle: performers.handle,
+        displayName: performers.displayName,
+        bio: performers.bio,
+        visibilityState: performers.visibilityState,
+        isActive: performers.isActive,
+        onboardingStatus: performers.onboardingStatus,
         updatedAt: performerPublicProfiles.updatedAt
       })
         .from(performers)
+        .innerJoin(users, eq(users.id, performers.ownerUserId))
         .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
         .where(and(
+          eq(performers.visibilityState, 'public'),
           eq(performers.isActive, true),
-          notInArray(performers.onboardingStatus, ['suspended']),
-          sql`(
-            nullif(trim(${performers.bio}), '') is not null
-            or nullif(trim(${performerPublicProfiles.headline}), '') is not null
-            or nullif(trim(${performerPublicProfiles.avatarUrl}), '') is not null
-          )`
-        )),
-      businessDb.select({
-        handle: performerProfilePreviews.handle,
-        updatedAt: performerProfilePreviews.updatedAt
-      })
-        .from(performerProfilePreviews)
-        .where(and(
-          eq(performerProfilePreviews.isActive, true),
-          sql`(
-            nullif(trim(${performerProfilePreviews.bio}), '') is not null
-            or nullif(trim(${performerProfilePreviews.headline}), '') is not null
-            or nullif(trim(${performerProfilePreviews.avatarUrl}), '') is not null
-          )`
+          notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+          sql`nullif(trim(${performers.handle}), '') is not null`,
+          sql`nullif(trim(${performers.bio}), '') is not null`,
+          sql`nullif(trim(${performers.displayName}), '') is not null`
         )),
       // Venue/location is event context only — no fake /v/ venue URLs.
       businessDb.select({
@@ -12819,9 +12857,30 @@ app.get('/sitemap.xml', async (_req, res) => {
         ))
     ]);
 
-    for (const row of [...profileRows, ...previewRows]) {
+    const rowsByHandle = new Map<string, typeof profileRows>();
+    for (const row of profileRows) {
       if (!isDiscoveryEligibleHandle(row.handle)) continue;
-      const loc = `${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(row.handle)}`;
+      const normalizedHandle = normalizePerformerHandle(row.handle)?.toLowerCase();
+      if (!normalizedHandle) continue;
+      const existing = rowsByHandle.get(normalizedHandle) ?? [];
+      existing.push(row);
+      rowsByHandle.set(normalizedHandle, existing);
+    }
+    for (const [normalizedHandle, rows] of rowsByHandle) {
+      if (rows.length !== 1) continue;
+      const row = rows[0];
+      const policy = evaluatePublicPerformerVisibility({
+        claimed: true,
+        hasOwner: Boolean(row.ownerUserId),
+        isActive: row.isActive,
+        onboardingStatus: row.onboardingStatus,
+        visibilityState: row.visibilityState,
+        handle: normalizedHandle,
+        displayName: row.displayName,
+        conflicted: false
+      });
+      if (policy.kind !== 'public') continue;
+      const loc = `${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(normalizedHandle)}`;
       const lastmod = row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
         ? row.updatedAt.toISOString()
         : null;
@@ -12838,6 +12897,14 @@ app.get('/sitemap.xml', async (_req, res) => {
       const stamp = row.publishedAt || row.updatedAt;
       const lastmod = stamp instanceof Date && !Number.isNaN(stamp.getTime()) ? stamp.toISOString() : null;
       entries.set(loc, { loc, lastmod });
+    }
+    } catch (error) {
+      console.error('[sway.discovery] sitemap generation failed:', error);
+      return res
+        .status(503)
+        .type('application/xml')
+        .set('X-Robots-Tag', 'noindex, nofollow')
+        .send('Sitemap temporarily unavailable.');
     }
   }
 
@@ -13215,6 +13282,18 @@ async function startServer() {
     // assets (S mark, icons, manifest, sw) directly in dev to mirror the
     // production dist static behavior. Dev-only; no business/auth logic.
     app.use(express.static(path.join(process.cwd(), 'public'), { index: false }));
+    const handlePublicPerformerRoute = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      try {
+        const templatePath = path.join(process.cwd(), shellHtmlRelativePath('patron'));
+        const template = readFileSync(templatePath, 'utf8');
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
+        await renderPublicPerformerDocument(req, res, transformedHtml);
+      } catch (error) {
+        next(error);
+      }
+    };
+    app.get('/p/:handle', handlePublicPerformerRoute);
+    app.get(/^\/p\/.+$/, handlePublicPerformerRoute);
     app.get('*', async (req, res, next) => {
       try {
         const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
@@ -13237,6 +13316,17 @@ async function startServer() {
       res.status(404).send('Not found');
     });
     app.use(express.static(distPath, { index: false }));
+    const handlePublicPerformerRoute = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      try {
+        const htmlPath = path.join(distPath, shellHtmlRelativePath('patron'));
+        const template = readFileSync(htmlPath, 'utf8');
+        await renderPublicPerformerDocument(req, res, template);
+      } catch (error) {
+        next(error);
+      }
+    };
+    app.get('/p/:handle', handlePublicPerformerRoute);
+    app.get(/^\/p\/.+$/, handlePublicPerformerRoute);
     app.get('*', async (req, res, next) => {
       const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
       if (!isShellAllowed(shell)) {
