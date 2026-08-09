@@ -5,6 +5,7 @@ import { createConfiguredStripeConnectService } from '../src/server/stripe-conne
 import {
   resolveLiveRoomSellerMoneyReadiness,
   resolveTestModePlatformBalanceEnabled,
+  resolveTestModePlatformBalancePerformerIds,
   SWAY_TEST_PLATFORM_BALANCE_DESTINATION
 } from '../src/server/live-room-seller-readiness';
 
@@ -95,6 +96,31 @@ assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'test', config
 assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'live', configuredValue: 'true' }), false,
   'A live Stripe runtime must never enable the platform-balance rehearsal lane.');
 assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'unavailable', configuredValue: 'true' }), false);
+
+const allowedPilotIds = resolveTestModePlatformBalancePerformerIds({
+  paymentMode: 'test',
+  configuredValue: 'true',
+  performerIdsValue: '10000000-0000-4000-8000-000000000002,20000000-0000-4000-8000-000000000003'
+});
+assert.deepEqual([...allowedPilotIds], [
+  '10000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000003'
+]);
+assert.equal(resolveTestModePlatformBalancePerformerIds({
+  paymentMode: 'test',
+  configuredValue: 'true',
+  performerIdsValue: '10000000-0000-4000-8000-000000000002,invalid'
+}).size, 0, 'One invalid entry must reject the entire payment allowlist.');
+assert.equal(resolveTestModePlatformBalancePerformerIds({
+  paymentMode: 'live',
+  configuredValue: 'true',
+  performerIdsValue: '10000000-0000-4000-8000-000000000002'
+}).size, 0, 'Live mode must discard the pilot performer allowlist.');
+assert.equal(resolveTestModePlatformBalancePerformerIds({
+  paymentMode: 'test',
+  configuredValue: 'true',
+  performerIdsValue: ''
+}).size, 0, 'An empty allowlist must keep the pilot lane closed.');
 
 const activeUnconnectedSeller = {
   isActive: true,

@@ -15,6 +15,7 @@ import { createLiveRoomPaymentOperationStore } from './live-room-payment-operati
 import { resolveSwayPlatformFeePolicyForGig } from './partner-entitlement-store';
 import { createIdempotencyStore } from './idempotency-store';
 import {
+  isTestModePlatformBalancePerformerAllowed,
   isSwayTestPlatformBalanceDestination,
   resolveLiveRoomSellerMoneyReadiness
 } from './live-room-seller-readiness';
@@ -176,7 +177,7 @@ function actionLink(input: Pick<AuthorizeActionInput, 'actionType' | 'requestId'
 export function createPaymentService(config: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter | null;
-  allowTestPlatformBalance?: boolean;
+  testPlatformBalancePerformerIds?: ReadonlySet<string>;
 }) {
   const db = config.databaseUrl ? createSwayDb(config.databaseUrl) : null;
   const provider = config.provider;
@@ -184,7 +185,7 @@ export function createPaymentService(config: {
   const operationStore = createLiveRoomPaymentOperationStore(config.databaseUrl);
   const idempotencyStore = createIdempotencyStore(config.databaseUrl);
   const enabled = Boolean(db && provider);
-  const allowTestPlatformBalance = config.allowTestPlatformBalance === true;
+  const testPlatformBalancePerformerIds = config.testPlatformBalancePerformerIds ?? new Set<string>();
   const workerId = `live-room-payment:${process.pid}`;
 
   function isEnabled() {
@@ -409,7 +410,10 @@ export function createPaymentService(config: {
       const sellerReadiness = resolveLiveRoomSellerMoneyReadiness({
         roomStatus: destination?.roomStatus,
         seller: destination,
-        allowTestPlatformBalance
+        allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+          destination?.performerId,
+          testPlatformBalancePerformerIds
+        )
       });
       const destinationAccountId = sellerReadiness.destinationAccountId;
       if (!sellerReadiness.ready || !destinationAccountId || !destination?.performerId) {

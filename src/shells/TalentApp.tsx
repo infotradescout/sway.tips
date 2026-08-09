@@ -59,6 +59,7 @@ type TalentPerformerProfile = {
   payouts_enabled: boolean;
   stripe_connected_account_id: string | null;
   money_actions_ready: boolean;
+  test_mode_platform_balance_allowed: boolean;
 } | null;
 
 export default function TalentApp() {

@@ -628,7 +628,7 @@ async function main() {
     const platformTestService = createPaymentService({
       databaseUrl: proof.databaseUrl,
       provider: fake.provider,
-      allowTestPlatformBalance: true
+      testPlatformBalancePerformerIds: new Set([PERFORMER_ID])
     });
     const platformRequest = await reserveRequest({
       label: 'platform-test-balance',
@@ -666,9 +666,14 @@ async function main() {
       set status = 'approved', runtime_request_state = jsonb_set(runtime_request_state, '{status}', '"approved"'::jsonb)
       where id = $1
     `, [platformRequest.requestId]);
-    const platformCapture = await platformTestService.captureAuthorization(platformPayment.rows[0].id);
+    const disabledPilotDrainService = createPaymentService({
+      databaseUrl: proof.databaseUrl,
+      provider: fake.provider,
+      testPlatformBalancePerformerIds: new Set()
+    });
+    const platformCapture = await disabledPilotDrainService.captureAuthorization(platformPayment.rows[0].id);
     assert.equal(platformCapture.status, 'captured');
-    const platformRefund = await platformTestService.voidOrRefund(platformPayment.rows[0].id);
+    const platformRefund = await disabledPilotDrainService.voidOrRefund(platformPayment.rows[0].id);
     assert.equal(platformRefund.status, 'refunded');
     assert.equal(fake.calls.lastRefundInput?.reverseTransfer, false);
     assert.equal(fake.calls.lastRefundInput?.refundApplicationFee, false);

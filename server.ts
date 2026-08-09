@@ -35,8 +35,9 @@ import {
 } from "./src/server/payment-service";
 import { resolveProposedPlatformFee } from "./src/server/fee-policy";
 import {
+  isTestModePlatformBalancePerformerAllowed,
   resolveLiveRoomSellerMoneyReadiness,
-  resolveTestModePlatformBalanceEnabled
+  resolveTestModePlatformBalancePerformerIds
 } from "./src/server/live-room-seller-readiness";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
@@ -319,14 +320,16 @@ const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   stripeConnectConfigured: Boolean(stripeConnectService),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
 });
-const testModePlatformBalanceEnabled = resolveTestModePlatformBalanceEnabled({
+const testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds({
   paymentMode: liveRoomPaymentRuntimeConfig.mode,
-  configuredValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED
+  configuredValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED,
+  performerIdsValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS
 });
+const testModePlatformBalanceEnabled = testModePlatformBalancePerformerIds.size > 0;
 const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
   provider: paymentProvider,
-  allowTestPlatformBalance: testModePlatformBalanceEnabled
+  testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({
@@ -2103,6 +2106,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         && performerRow.payouts_enabled
         && performerRow.stripe_connected_account_id?.trim()
         && !performerRow.payout_hold_reason
+      ),
+      test_mode_platform_balance_allowed: isTestModePlatformBalancePerformerAllowed(
+        performerRow.performer_id,
+        testModePlatformBalancePerformerIds
       )
     };
   } catch (error) {
@@ -10868,13 +10875,12 @@ app.get('/api/public/feed', async (_req, res) => {
     const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
-    const selectedRooms = activeRooms.slice(0, roomLimit);
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
-    const gigIds = selectedRooms.map((room) => room.gigId);
+    const gigIds = activeRooms.map((room) => room.gigId);
     const [details, publicEvents] = await Promise.all([
       gigIds.length
         ? businessDb
@@ -10894,21 +10900,28 @@ app.get('/api/public/feed', async (_req, res) => {
             })
             .from(gigSessions)
             .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+            .innerJoin(users, eq(users.id, performers.ownerUserId))
             .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
             .where(and(
               inArray(gigSessions.id, gigIds),
               eq(performers.isActive, true),
-              notInArray(performers.onboardingStatus, ['suspended'])
+              notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+              eq(performers.visibilityState, 'public'),
+              sql`nullif(trim(${performers.handle}), '') is not null`,
+              sql`nullif(trim(${performers.bio}), '') is not null`,
+              sql`nullif(trim(${performers.displayName}), '') is not null`
             ))
         : Promise.resolve([]),
       performerEventService.listPublicEvents({ limit: eventLimit })
     ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
+    const selectedRooms = activeRooms
+      .filter((room) => detailsByGigId.has(room.gigId))
+      .slice(0, roomLimit);
 
     return res.json({
       rooms: selectedRooms
-        .filter((room) => detailsByGigId.has(room.gigId))
         .map((room) => {
         const detail = detailsByGigId.get(room.gigId)!;
         return {
@@ -11650,7 +11663,8 @@ app.post("/api/session/start", async (req, res) => {
   }
 
   const [seller] = businessDb && actor.actorId
-    ? await businessDb.select({
+      ? await businessDb.select({
+        id: performers.id,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
         paymentAccountStatus: performers.paymentAccountStatus,
@@ -11663,7 +11677,10 @@ app.post("/api/session/start", async (req, res) => {
     : [];
   const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
     seller,
-    allowTestPlatformBalance: testModePlatformBalanceEnabled
+    allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+      seller?.id,
+      testModePlatformBalancePerformerIds
+    )
   });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
   if (requestedPaymentsEnabled && !sellerMoneyReadiness.ready) {
@@ -11985,6 +12002,7 @@ app.post("/api/session/payments-enabled", async (req, res) => {
     }
     const [seller] = businessDb && actor.actorId
       ? await businessDb.select({
+          id: performers.id,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
           paymentAccountStatus: performers.paymentAccountStatus,
@@ -11997,7 +12015,10 @@ app.post("/api/session/payments-enabled", async (req, res) => {
       : [];
     const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
       seller,
-      allowTestPlatformBalance: testModePlatformBalanceEnabled
+      allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+        seller?.id,
+        testModePlatformBalancePerformerIds
+      )
     });
     if (!sellerMoneyReadiness.ready) {
       return res.status(409).json({

@@ -81,6 +81,7 @@ interface TalentDashboardProps {
     payouts_enabled?: boolean;
     stripe_connected_account_id?: string | null;
     money_actions_ready?: boolean;
+    test_mode_platform_balance_allowed?: boolean;
   } | null;
   performerEmailVerified?: boolean;
 }
@@ -879,8 +880,10 @@ export default function TalentDashboard({
     return () => { cancelled = true; };
   }, [previewMode]);
 
+  const testModePlatformBalanceReady = testModePlatformBalanceEnabled
+    && performerProfile?.test_mode_platform_balance_allowed === true;
   const moneyReady = liveRoomPaymentMode === 'test'
-    ? testModePlatformBalanceEnabled || Boolean(performerProfile?.money_actions_ready)
+    ? testModePlatformBalanceReady || Boolean(performerProfile?.money_actions_ready)
     : liveRoomPaymentMode === 'live' && Boolean(performerProfile?.money_actions_ready);
 
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
@@ -2199,7 +2202,7 @@ export default function TalentDashboard({
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
                 {liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live' ? (
                   <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because Stripe could not be verified. Free rooms remain available.</p>
-                ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceEnabled ? (
+                ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceReady ? (
                   <p className="mt-0.5 text-[11px] text-cyan-300">
                     Stripe test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a bank.
                   </p>

@@ -412,6 +412,41 @@ async function main() {
     assertStatus(initialRooms, 200, 'primary active room registry', server);
     assert.deepEqual(initialRooms.body.rooms.map((room: JsonObject) => room.gigId), [gigId]);
 
+    const directlyKnownDraftRoom = await fetch(`${server.baseUrl}/g/${gigId}`);
+    assert.equal(directlyKnownDraftRoom.status, 200, 'A known room link remains directly reachable for invited QA participants.');
+    const draftPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(draftPublicFeed, 200, 'draft performer public feed containment', server);
+    assert.equal(
+      draftPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A draft performer room must never enter public discovery.'
+    );
+    const publishPrimary = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'public' });
+    assertStatus(publishPrimary, 200, 'publish performer for public-room feed proof', server);
+    const thinPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(thinPublicFeed, 200, 'thin public performer room containment', server);
+    assert.equal(
+      thinPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A public status alone must not publish a thin room card.'
+    );
+    const completePublicProfile = await primary.client.post('/api/talent/profile/public', {
+      bio: 'Disposable integration performer used only to prove complete public eligibility.',
+      headline: 'Disposable public eligibility proof',
+      primaryRole: 'DJ',
+      specialties: ['Integration testing']
+    });
+    assertStatus(completePublicProfile, 202, 'complete disposable public profile facts', server);
+    const publishedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(publishedPublicFeed, 200, 'public performer room discovery', server);
+    assert.equal(
+      publishedPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      true,
+      'A published performer room must remain eligible for public discovery.'
+    );
+    const restoreDraft = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'draft' });
+    assertStatus(restoreDraft, 200, 'restore disposable performer to draft', server);
+
     const patronAHash = hash('simulated-patron-a');
     const patronBHash = hash('simulated-patron-b');
     const patronCHash = hash('simulated-patron-c');
@@ -683,12 +718,24 @@ async function main() {
       STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
       STRIPE_WEBHOOK_SECRET: 'whsec_platform_balance_runtime_proof',
-      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'true'
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'true',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS: primary.performerId
     });
     const testMoneyConfig = await new HttpClient(server.baseUrl).get('/api/payment/config');
     assertStatus(testMoneyConfig, 200, 'platform test-balance runtime config', server);
     assert.equal(testMoneyConfig.body.mode, 'test');
     assert.equal(testMoneyConfig.body.testModePlatformBalanceEnabled, true);
+    const unapprovedTestMoneyRoom = await secondary.client.post('/api/session/start', {
+      gig_id: randomUUID(),
+      talentName: 'Secondary Performer',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: true,
+      searchScope: 'catalog'
+    });
+    assertStatus(unapprovedTestMoneyRoom, 409, 'unallowlisted performer cannot start a test paid room', server);
+    assert.equal(unapprovedTestMoneyRoom.body.code, 'seller_payout_not_ready');
     const testMoneyGigId = randomUUID();
     const testMoneyRoom = await primary.client.post('/api/session/start', {
       gig_id: testMoneyGigId,

@@ -27,6 +27,8 @@ services:
       # Stripe keys; live money still requires a payout-ready connected account.
       - key: SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED
         value: "false"
+      - key: SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS
+        value: ""
       # Native ticket money remains explicitly closed in production until the
       # versioned approval, legal, finance, support, and live-proof gates pass.
       - key: SWAY_NATIVE_TICKETS_ENABLED

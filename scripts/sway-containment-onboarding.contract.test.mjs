@@ -87,13 +87,14 @@ for (const required of [
   'seller?.payoutsEnabled',
   'connectedAccountId',
   'input.allowTestPlatformBalance',
+  'isTestModePlatformBalancePerformerAllowed',
   'SWAY_TEST_PLATFORM_BALANCE_DESTINATION'
 ]) {
   assert.equal(sellerReadiness.includes(required), true, `Seller readiness contract missing: ${required}`);
 }
 assert.match(
   server,
-  /testModePlatformBalanceEnabled = resolveTestModePlatformBalanceEnabled\([\s\S]+liveRoomPaymentRuntimeConfig\.mode[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED/,
+  /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds\([\s\S]+liveRoomPaymentRuntimeConfig\.mode[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS/,
   'The platform-balance rehearsal switch must be derived from verified Stripe test mode.'
 );
 assert.match(sellerReadiness, /input\.paymentMode === 'test'[\s\S]+configuredValue\?\.trim\(\)\.toLowerCase\(\) === 'true'/);

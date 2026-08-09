@@ -132,7 +132,8 @@ assert.match(paymentServiceSource, /reverseTransfer: reverseConnectedTransfer,[\
 assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : operation\.destinationAccountId/);
 assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : payment\.platformFee/);
 assert.match(sellerReadinessSource, /baseEligible && input\.allowTestPlatformBalance/);
-assert.match(serverSource, /testModePlatformBalanceEnabled = resolveTestModePlatformBalanceEnabled/);
+assert.match(serverSource, /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds/);
+assert.match(serverSource, /SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS/);
 assert.match(sellerReadinessSource, /input\.paymentMode === 'test'/);
 assert.match(paymentWebhookSource, /ignored_out_of_order'[\s\S]+retry after predecessor state/);
 assert.match(paymentWebhookSource, /\{ terminal: true \}/);

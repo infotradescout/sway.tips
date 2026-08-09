@@ -35,6 +35,31 @@ export function resolveTestModePlatformBalanceEnabled(input: {
     && input.configuredValue?.trim().toLowerCase() === 'true';
 }
 
+export function resolveTestModePlatformBalancePerformerIds(input: {
+  paymentMode: string | null | undefined;
+  configuredValue: string | null | undefined;
+  performerIdsValue: string | null | undefined;
+}) {
+  if (!resolveTestModePlatformBalanceEnabled(input)) return new Set<string>();
+
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const performerIds = (input.performerIdsValue ?? '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (!performerIds.length || performerIds.some((value) => !uuidPattern.test(value))) {
+    return new Set<string>();
+  }
+  return new Set(performerIds);
+}
+
+export function isTestModePlatformBalancePerformerAllowed(
+  performerId: string | null | undefined,
+  allowedPerformerIds: ReadonlySet<string>
+) {
+  return Boolean(performerId && allowedPerformerIds.has(performerId.trim().toLowerCase()));
+}
+
 /**
  * Resolves the durable destination used by a live-room payment.
  *
