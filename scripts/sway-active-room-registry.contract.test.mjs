@@ -28,7 +28,10 @@ for (const term of [
   'listTrackedGigIds',
   'restoreSnapshotForGig',
   'activeRoomRegistry',
-  'legacy_safe_empty'
+  'legacy_safe_empty',
+  'autoCloseoutAt: gigSessions.autoCloseoutAt',
+  'restoredSession.status = durableFallback.status',
+  'restoredSession.autoCloseoutAt = durableFallback.autoCloseoutAt'
 ]) {
   requireIncludes(storeSource, term, `Business store missing active room registry term: ${term}`);
 }
