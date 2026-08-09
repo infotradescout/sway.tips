@@ -585,7 +585,7 @@ for (const term of [
   'resolvePublicProfilePageKindLabel',
   'performerProfile?.primary_role',
   'performerProfile?.specialties',
-  '{performerRoleLabel} Console'
+  'Ready to start a live room · ${performerRoleLabel}'
 ]) requireIncludes(talentApp, term, 'Handle-first performer console');
 requireExcludes(talentApp, "performerProfile?.display_name?.trim()\n    || performerProfile?.handle?.trim()", 'Performer console identity');
 

@@ -92,7 +92,7 @@ const fulfilledTip = requestFixture({
   id: 'req-tip',
   type: 'tip',
   targetType: 'straight_tip',
-  title: 'Straight Tip',
+  title: 'Direct Tip',
   subtitle: 'Supported the performer',
   albumArt: undefined,
   status: 'fulfilled'

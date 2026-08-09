@@ -4,6 +4,7 @@ import { Flame, Music, RotateCw, Rocket } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { BackendState } from '../types';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
+import { LIVE_ROOM_ACTION_SLASH, LIVE_ROOM_LANGUAGE, resolveLiveRoomModeCopy } from '../live-room-language';
 import { useSwayState } from './shared';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -87,7 +88,9 @@ export default function OverlayApp() {
   const nowPlaying = useNowPlaying(bState);
 
   if (isLoading) return null;
-  if (roomLookup.status === 'ended') return <OverlayCaption text="Live room ended" transparent={transparent} />;
+  if (roomLookup.status === 'ended') {
+    return <OverlayCaption text={`${LIVE_ROOM_LANGUAGE.liveRoom} ${LIVE_ROOM_LANGUAGE.ended.toLowerCase()}`} transparent={transparent} />;
+  }
   if (roomLookup.status === 'error') return <OverlayCaption text="Reconnecting to live room..." transparent={transparent} />;
   if (!routeGigId) return <OverlayCaption text="This overlay link is missing a room ID" transparent={transparent} />;
   if (roomLookup.status !== 'active') return <OverlayCaption text="Waiting for this room to go live..." transparent={transparent} />;
@@ -108,8 +111,8 @@ export default function OverlayApp() {
     .slice(0, 5);
   const roomLink = resolveRoomLink(routeGigId);
   const roomPath = `/g/${routeGigId}`;
-  const isCrowdAutopilot = bState.session.operatingMode === 'crowd_autopilot';
   const paymentsEnabled = bState.session.paymentsEnabled !== false;
+  const modeCopy = resolveLiveRoomModeCopy(bState.session.operatingMode);
 
   return (
     <>
@@ -127,7 +130,10 @@ export default function OverlayApp() {
                   <DemoModeBanner compact />
                 </div>
               ) : (
-                <span className="text-[9px] font-mono text-cyan-400 animate-pulse">LIVE GIG FEED</span>
+                <span className="text-right font-mono text-[9px] text-cyan-400">
+                  <span className="block animate-pulse font-bold uppercase">{modeCopy.label}</span>
+                  <span className="block text-[8px] text-slate-500">{modeCopy.queueLabel}</span>
+                </span>
               )}
             </div>
 
@@ -143,7 +149,7 @@ export default function OverlayApp() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="text-[10px] font-mono tracking-widest text-cyan-300 uppercase">
-                      {isCrowdAutopilot ? 'Crowd Pick Leading' : 'Now Playing'}
+                      {LIVE_ROOM_LANGUAGE.nowPlaying}
                     </div>
                     <div className={`truncate font-black text-white ${transparent ? 'text-base' : 'text-5xl leading-tight'}`}>{nowPlaying.title}</div>
                     {nowPlaying.subtitle && <div className={`truncate text-slate-300 ${transparent ? 'text-xs' : 'text-xl font-bold'}`}>{nowPlaying.subtitle}</div>}
@@ -152,14 +158,14 @@ export default function OverlayApp() {
               </div>
             ) : (
               <div className={`rounded-2xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'p-4 text-[10px]' : 'p-10 text-xl'}`}>
-                  {isCrowdAutopilot ? 'Waiting for the crowd to pick next...' : 'Waiting for the next song...'}
+                  Waiting for the next request...
               </div>
             )}
 
             <div className="min-w-0 flex-1 space-y-2 overflow-hidden">
               {upNextQueue.length > 0 && (
                 <div className={`${transparent ? 'text-[9px]' : 'text-sm'} font-mono tracking-widest text-fuchsia-300 uppercase`}>
-                  {isCrowdAutopilot ? 'Crowd Ranked Up Next' : 'Up Next'}
+                  {LIVE_ROOM_LANGUAGE.upNext}
                 </div>
               )}
               {upNextQueue.slice(0, transparent ? 5 : 4).map((req, idx) => (
@@ -196,7 +202,7 @@ export default function OverlayApp() {
               ))}
               {upNextQueue.length === 0 && (
                 <div className={`rounded-xl border border-white/5 bg-slate-950/40 text-center font-mono text-slate-500 ${transparent ? 'py-4 text-[10px]' : 'py-10 text-xl'}`}>
-                  {isCrowdAutopilot ? 'Scan to control what comes next' : 'Waiting for requests...'}
+                  Waiting for requests...
                 </div>
               )}
             </div>
@@ -220,7 +226,7 @@ export default function OverlayApp() {
                 <div className="mt-4 text-center">
                   <p className="font-display text-4xl font-black uppercase tracking-wide">Scan</p>
                   <p className="text-xl font-black uppercase tracking-wide text-fuchsia-700">
-                    {isCrowdAutopilot ? 'Crowd Controls Next' : 'Request / Tip / Boost'}
+                    {LIVE_ROOM_ACTION_SLASH}
                   </p>
                   <p className="mt-2 break-all font-mono text-sm font-black text-slate-700">{roomPath}</p>
                 </div>

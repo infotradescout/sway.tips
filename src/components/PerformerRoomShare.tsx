@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { QrCode } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
+import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
 
 export function resolveLiveRoomLink(activeGigId: string | null) {
   if (!activeGigId) return null;
@@ -97,11 +98,11 @@ export default function PerformerRoomShare({ activeGigId }: { activeGigId: strin
         </div>
         <div className="min-w-0 space-y-2">
           <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
-            <p className="text-[9px] font-black uppercase tracking-widest text-cyan-300">Customer room</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-cyan-300">{LIVE_ROOM_LANGUAGE.audienceRoom}</p>
             <p className="mt-1 truncate font-mono text-xs font-bold text-white">{roomLink ?? 'No live room yet'}</p>
           </div>
           <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
-            <p className="text-[9px] font-black uppercase tracking-widest text-fuchsia-300">Bigger screen</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-fuchsia-300">{LIVE_ROOM_LANGUAGE.roomScreen}</p>
             <p className="mt-1 truncate font-mono text-xs font-bold text-white">{overlayLink ?? 'No screen link yet'}</p>
           </div>
         </div>
@@ -109,16 +110,16 @@ export default function PerformerRoomShare({ activeGigId }: { activeGigId: strin
 
       <div className="grid grid-cols-2 gap-2 landscape:grid-cols-4">
         <button type="button" onClick={() => handleCopy('room', roomLink)} disabled={!roomLink} className="min-h-10 rounded-xl bg-fuchsia-600 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500">
-          {copied === 'room' ? 'Copied' : 'Copy room'}
+          {copied === 'room' ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomLink}
         </button>
         <a href={roomLink ?? undefined} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${roomLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
-          Open room
+          {LIVE_ROOM_LANGUAGE.openRoom}
         </a>
         <button type="button" onClick={() => handleCopy('overlay', overlayLink)} disabled={!overlayLink} className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black text-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500">
-          {copied === 'overlay' ? 'Copied' : 'Copy screen'}
+          {copied === 'overlay' ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomScreen}
         </button>
         <a href={overlayLink ?? undefined} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${overlayLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
-          Open screen
+          {LIVE_ROOM_LANGUAGE.openRoomScreen}
         </a>
       </div>
     </section>

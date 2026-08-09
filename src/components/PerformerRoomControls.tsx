@@ -1,5 +1,6 @@
 import React from 'react';
 import { GigSession } from '../types';
+import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
 
 interface PerformerRoomControlsProps {
   session: GigSession;
@@ -32,7 +33,7 @@ export default function PerformerRoomControls({
       className="grid h-full min-h-0 min-w-0 w-full grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_auto_auto] content-start gap-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3 landscape:p-2"
     >
       <div>
-        <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Room Control</h3>
+        <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Live Room Controls</h3>
         <p className="mt-1 truncate text-[11px] text-slate-400">{operatorNextAction}: {operatorNextDetail}</p>
       </div>
 
@@ -43,7 +44,7 @@ export default function PerformerRoomControls({
           disabled={actionPending || !session.requestsOpen}
           className="min-h-10 rounded-xl bg-rose-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Pause
+          {LIVE_ROOM_LANGUAGE.pauseRequests}
         </button>
         <button
           type="button"
@@ -51,14 +52,14 @@ export default function PerformerRoomControls({
           disabled={actionPending || session.requestsOpen}
           className="min-h-10 rounded-xl bg-emerald-500 px-3 text-xs font-black uppercase text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Resume
+          {LIVE_ROOM_LANGUAGE.resumeRequests}
         </button>
       </div>
 
       <div data-sway-crowd-autopilot-control="true" className="grid grid-cols-3 gap-2">
         {[
           ['manual', 'Manual'],
-          ['open_call', 'Open'],
+          ['open_call', 'Open Call'],
           ['crowd_autopilot', 'Auto']
         ].map(([mode, label]) => (
           <button
@@ -79,7 +80,7 @@ export default function PerformerRoomControls({
 
       <div className="grid gap-2 rounded-xl border border-white/10 bg-slate-950 p-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Request scope</p>
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{LIVE_ROOM_LANGUAGE.requestSource}</p>
           <p className="truncate text-[10px] font-bold text-white">{requestScopeLabel}</p>
         </div>
         <div className="grid grid-cols-2 gap-1">
@@ -109,7 +110,7 @@ export default function PerformerRoomControls({
           href={selectedRoomLink ? `/g/${selectedRoomLink}` : '/talent/gigs'}
           className="flex min-h-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-center text-xs font-black uppercase text-cyan-200"
         >
-          Share
+          {LIVE_ROOM_LANGUAGE.shareRoom}
         </a>
         <button
           type="button"
@@ -117,7 +118,7 @@ export default function PerformerRoomControls({
           disabled={session.status !== 'active'}
           className="min-h-10 rounded-xl border border-white/10 bg-slate-950 px-3 text-xs font-black uppercase text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          End
+          {LIVE_ROOM_LANGUAGE.endRoom}
         </button>
       </div>
     </section>

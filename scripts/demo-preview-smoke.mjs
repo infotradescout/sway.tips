@@ -32,7 +32,7 @@ const scenarios = [
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-off-app-home.png',
-        expectedText: ['Live room', 'No live records yet'],
+        expectedText: ['Live Room', 'No room activity yet'],
         absentText: [...demoOffForbiddenText, 'Aria Neon']
       },
       {
@@ -40,7 +40,7 @@ const scenarios = [
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-off-patron.png',
-        expectedText: ['Live room', 'No live records yet', 'Room status'],
+        expectedText: ['Live Room', 'No room activity yet', 'Room status'],
         absentText: [...demoOffForbiddenText, 'Midnight City']
       },
       {
@@ -86,23 +86,23 @@ const scenarios = [
         path: '/home',
         host: 'app.sway.tips',
         screenshot: 'demo-on-app-home.png',
-        expectedText: ['Live room', 'Demo data', 'Aria Neon', 'Midnight City'],
-        absentText: ['No live records yet']
+        expectedText: ['Live Room', 'Demo data', 'Aria Neon', 'Midnight City'],
+        absentText: ['No room activity yet']
       },
       {
         surface: 'patron Split View',
         path: demoGigPath,
         host: 'app.sway.tips',
         screenshot: 'demo-on-patron.png',
-        expectedText: ['Live room', 'Demo data', 'Demo data only. No payment or moderation action will be sent.', 'Midnight City'],
-        absentText: ['No live records yet']
+        expectedText: ['Live Room', 'Demo data', 'Demo data only. No payment or moderation action will be sent.', 'Midnight City'],
+        absentText: ['No room activity yet']
       },
       {
         surface: 'talent Split View',
         path: '/talent/gigs',
         host: 'app.sway.tips',
         screenshot: 'demo-on-talent.png',
-        expectedText: ['Performer Console', 'Demo data', 'Demo data only; no live tips are being collected.', 'Midnight City', 'Demo only', 'Demo total shown'],
+        expectedText: ['Live Room', 'Demo data', 'Demo data only; no live tips are being collected.', 'Midnight City', 'Demo only', 'Demo total shown'],
         absentText: ['No active session yet', 'Fulfill & Capture', 'Current captured total:', 'Veto / Cancel Promotion']
       },
       {

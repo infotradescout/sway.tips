@@ -12,9 +12,15 @@ for (const term of [
   'const roomLink = resolveRoomLink(routeGigId);',
   'const roomPath = `/g/${routeGigId}`;',
   'aria-label="Scan to open this Sway live room"',
-  'Request / Tip / Boost',
+  "import { LIVE_ROOM_ACTION_SLASH, LIVE_ROOM_LANGUAGE, resolveLiveRoomModeCopy } from '../live-room-language';",
+  '{LIVE_ROOM_ACTION_SLASH}',
+  '{LIVE_ROOM_LANGUAGE.nowPlaying}',
+  '{LIVE_ROOM_LANGUAGE.upNext}',
+  'resolveLiveRoomModeCopy(bState.session.operatingMode)',
+  '{modeCopy.label}',
+  '{modeCopy.queueLabel}',
   "grid h-full grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)]",
-  'LIVE GIG FEED'
+  'Waiting for requests...'
 ]) {
   if (!overlayApp.includes(term)) failures.push(`OverlayApp missing projector QR term: ${term}`);
 }

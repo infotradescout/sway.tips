@@ -33,9 +33,12 @@ for (const term of [
   'data-sway-crowd-autopilot-control="true"',
   "['crowd_autopilot', 'Auto']",
   'Autopilot live',
-  'Clean requests jump straight to up next',
+  'Clean requests jump straight to Up Next',
   'Autopilot is moving clean requests into the queue',
-  'Crowd Picks What Is Next'
+  'LIVE_ROOM_ACTION_SLASH',
+  'resolveLiveRoomModeCopy(session.operatingMode)',
+  'modeCopy.label',
+  'modeCopy.queueLabel'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent cockpit missing crowd autopilot UX term: ${term}`);
@@ -53,13 +56,26 @@ for (const term of [
 }
 
 for (const term of [
+  'LIVE_ROOM_LANGUAGE.nowPlaying',
+  'LIVE_ROOM_LANGUAGE.upNext',
+  'LIVE_ROOM_ACTION_SLASH',
+  'resolveLiveRoomModeCopy(bState.session.operatingMode)',
+  'modeCopy.label',
+  'modeCopy.queueLabel'
+]) {
+  if (!overlayApp.includes(term)) {
+    failures.push(`Projector overlay missing unified crowd-autopilot language: ${term}`);
+  }
+}
+
+for (const fragmentedTerm of [
   'Crowd Pick Leading',
   'Crowd Ranked Up Next',
   'Crowd Controls Next',
   'Scan to control what comes next'
 ]) {
-  if (!overlayApp.includes(term)) {
-    failures.push(`Projector overlay missing crowd autopilot term: ${term}`);
+  if (overlayApp.includes(fragmentedTerm)) {
+    failures.push(`Projector overlay must not fork its state labels in crowd-autopilot mode: ${fragmentedTerm}`);
   }
 }
 

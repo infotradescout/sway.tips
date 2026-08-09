@@ -21,7 +21,7 @@ const performerShareKit = read('src/components/PerformerShareKit.tsx');
 for (const term of [
   'Live show snapshot',
   '<Sparkles className="h-4 w-4" /> Request',
-  'Request scope',
+  'LIVE_ROOM_LANGUAGE.requestSource',
   'DJ library requests',
   'Setlist song requests',
   'Open request lane',
@@ -39,8 +39,8 @@ for (const term of [
   'Minimum request',
   'Test-mode direct tips remain available.',
   'Create room',
-  'Show QR',
-  'Copy link',
+  'LIVE_ROOM_LANGUAGE.shareRoom',
+  'LIVE_ROOM_LANGUAGE.copyRoomLink',
   'Nothing enters the approved queue until you allow it',
   'Should song requests cost money tonight?',
   'Free requests',
@@ -58,8 +58,8 @@ for (const term of [
 }
 
 for (const term of [
-  'Crowd route',
-  'Request scope',
+  'Room link',
+  'LIVE_ROOM_LANGUAGE.requestSource',
   'Crowd can request; performer approves what moves forward.'
 ]) {
   if (!talentApp.includes(term)) {
