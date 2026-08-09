@@ -579,7 +579,7 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
     description: overrides.description || DEFAULT_SHARE_DESCRIPTION,
     url: overrides.url
       ? canonicalPublicUrl(overrides.url)
-      : canonicalPublicUrl(req.originalUrl || '/'),
+      : canonicalPublicUrl(req.path || '/'),
     image: absoluteShareUrl(req, overrides.image || DEFAULT_SHARE_IMAGE_PATH),
     imageAlt: overrides.imageAlt || 'Sway approved neon brand artwork',
     robots: overrides.robots,
