@@ -98,9 +98,25 @@ for (const rel of vocabularyGuardSourceFiles) {
   vocabularyCorpus += `\n${readFileSync(abs, 'utf8')}`;
 }
 
-for (const requiredTerm of ['Request', 'Tip', 'Boost', 'Pending', 'Approved', 'Playing', 'Up Next', 'Paused', 'Ended']) {
-  if (!vocabularyCorpus.includes(requiredTerm)) {
-    failures.push(`Product vocabulary corpus is missing required term: ${requiredTerm}`);
+const sharedLanguage = readFileSync(join(root, 'src/live-room-language.ts'), 'utf8');
+const vocabularyReferences = new Map([
+  ['Request', { value: 'Request', reference: 'LIVE_ROOM_ACTION_SLASH' }],
+  ['Tip', { value: 'Tip', reference: 'LIVE_ROOM_ACTION_SLASH' }],
+  ['Boost', { value: 'Boost', reference: 'LIVE_ROOM_ACTION_SLASH' }],
+  ['Pending', { value: 'Pending', reference: 'LIVE_ROOM_LANGUAGE.pending' }],
+  ['Approved', { value: 'Approved', reference: 'LIVE_ROOM_LANGUAGE.approved' }],
+  ['Playing', { value: 'Now Playing', reference: 'LIVE_ROOM_LANGUAGE.nowPlaying' }],
+  ['Up Next', { value: 'Up Next', reference: 'LIVE_ROOM_LANGUAGE.upNext' }],
+  ['Paused', { value: 'Paused', reference: 'LIVE_ROOM_LANGUAGE.paused' }],
+  ['Ended', { value: 'Ended', reference: 'LIVE_ROOM_LANGUAGE.ended' }]
+]);
+
+for (const [requiredTerm, { value, reference }] of vocabularyReferences) {
+  if (!sharedLanguage.includes(`'${value}'`)) {
+    failures.push(`Shared product vocabulary is missing required term: ${requiredTerm}`);
+  }
+  if (!vocabularyCorpus.includes(reference)) {
+    failures.push(`Rendered surface corpus is missing shared vocabulary reference: ${reference}`);
   }
 }
 
@@ -108,9 +124,9 @@ const performerDashboard = readFileSync(join(root, 'src/components/TalentDashboa
 const performerHome = readFileSync(join(root, 'src/components/PerformerAccountHome.tsx'), 'utf8');
 for (const workspace of [
   "{ id: 'home', label: 'Home'",
-  "{ id: 'room', label: 'Live'",
-  "{ id: 'library', label: 'Library'",
-  "{ id: 'catalog', label: 'Catalog'",
+  "{ id: 'room', label: 'Live Room'",
+  "{ id: 'library', label: 'Music'",
+  "{ id: 'catalog', label: 'Files'",
   "{ id: 'profile', label: 'Profile'",
   "{ id: 'account', label: 'Account'"
 ]) {

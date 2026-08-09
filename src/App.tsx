@@ -3,6 +3,7 @@ import { CalendarDays, Flame, Lock, Smartphone } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BackendState, GigSession, RequestItem } from './types';
 import PatronView from './components/PatronView';
+import { LIVE_ROOM_LANGUAGE } from './live-room-language';
 
 const emptySession: GigSession = {
   status: 'inactive',
@@ -457,7 +458,7 @@ export default function App() {
               </div>
               <div>
                 <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Live Room</span>
-                <p className="text-[10px] text-slate-400">Customer room</p>
+                <p className="text-[10px] text-slate-400">{LIVE_ROOM_LANGUAGE.audienceRoom}</p>
               </div>
             </div>
           </div>

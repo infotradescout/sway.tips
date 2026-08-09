@@ -14,6 +14,7 @@ import { existsSync } from "fs";
 import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
+import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
@@ -12434,7 +12435,7 @@ app.post("/api/request/create", async (req, res) => {
     id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
     type: isStraightTip ? 'tip' : 'request',
     targetType: targetType || 'music',
-    title: isStraightTip ? 'Straight Tip' : (title || 'Request'),
+    title: isStraightTip ? LIVE_ROOM_LANGUAGE.directTip : (title || LIVE_ROOM_LANGUAGE.request),
     subtitle: isStraightTip ? 'Supported the talent directly!' : (subtitle || ''),
     albumArt: albumArt || (targetType === 'music' ? "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop" : undefined),
     sourceProvider: isStraightTip ? null : normalizedSourceProvider,

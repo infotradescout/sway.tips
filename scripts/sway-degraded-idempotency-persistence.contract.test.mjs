@@ -169,7 +169,7 @@ for (const term of [
   if (!patronApp.includes(term)) failures.push(`Patron shell missing route gig/reconciliation behavior: ${term}`);
 }
 
-if (!patron.includes('This QR route is missing a valid gig ID.')) {
+if (!patron.includes('This room link is incomplete.')) {
   failures.push('Patron client must block checkout when a valid route gig ID is unavailable.');
 }
 

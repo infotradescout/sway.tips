@@ -36,6 +36,7 @@ import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue
 import TicketOrderReturnPage from '../components/TicketOrderReturnPage';
 import TicketPassPage from '../components/TicketPassPage';
 import TicketWalletPage from '../components/TicketWalletPage';
+import { LIVE_ROOM_ACTION_LIST, LIVE_ROOM_LANGUAGE } from '../live-room-language';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -416,8 +417,8 @@ export default function PatronApp() {
   const shouldShowNoSessionRecovery = recoveryBranch === 'no-session';
   const routeFamily = routeGigId ? 'patron-gig' : 'patron-root';
   const patronTopbarSubtitle = shouldShowNoSessionRecovery
-    ? 'Open a room link or sign in as the performer'
-    : 'Request, Tip, and Boost live';
+    ? 'Scan or paste a room link to join'
+    : `${LIVE_ROOM_ACTION_LIST} live`;
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
@@ -544,16 +545,16 @@ export default function PatronApp() {
             />
           ) : (
             <SplitViewShell
-              title="Live room"
-              eyebrow="Live Room"
+              title={LIVE_ROOM_LANGUAGE.liveRoom}
+              eyebrow={LIVE_ROOM_LANGUAGE.liveRoom}
               showHeader={false}
-              primaryLabel="Request, Tip, Boost, and see status"
-              secondaryLabel="Room status"
+              primaryLabel={`${LIVE_ROOM_ACTION_LIST} — then track status`}
+              secondaryLabel={LIVE_ROOM_LANGUAGE.roomStatus}
               isEmpty={requests.length === 0 && performers.length === 0}
               emptyState={
                 <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
-                  <p className="text-sm font-bold text-white">No live records yet</p>
-                  <p className="mt-2 text-xs text-slate-400">The live room shell is ready for the first active session, request, or performer record.</p>
+                  <p className="text-sm font-bold text-white">No room activity yet</p>
+                  <p className="mt-2 text-xs text-slate-400">Requests and boosts will appear when this Live Room starts.</p>
                 </div>
               }
               primary={
@@ -579,7 +580,7 @@ export default function PatronApp() {
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
                     <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>
-                    <p className="text-xs text-slate-400">{session.talentRole} surface</p>
+                    <p className="text-xs text-slate-400">Live Room host</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-lg bg-slate-950 p-3">
@@ -597,7 +598,7 @@ export default function PatronApp() {
                     <p className="text-xs text-slate-400">
                       {topRequest
                         ? (session.paymentsEnabled !== false ? `$${topRequest.amount} request value` : '')
-                        : 'Empty-state inspector remains visible.'}
+                        : 'Approved requests will appear here.'}
                     </p>
                   </div>
                 </div>

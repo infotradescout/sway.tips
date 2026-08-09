@@ -1,18 +1,31 @@
 import React from 'react';
 import { GigSession, RequestItem } from '../types';
 import { PerformerRoomQr } from './PerformerRoomShare';
+import { LIVE_ROOM_ACTION_SLASH, LIVE_ROOM_LANGUAGE, resolveLiveRoomModeCopy } from '../live-room-language';
+
+export function resolvePerformerAudienceMoments(
+  nowPlayingRequest: RequestItem | null,
+  approvedQueue: RequestItem[]
+) {
+  return {
+    nowPlaying: nowPlayingRequest,
+    upNext: approvedQueue[0] ?? null
+  };
+}
 
 export default function PerformerAudienceScreen({
   activeGigId,
   session,
+  nowPlayingRequest,
   approvedQueue
 }: {
   activeGigId: string | null;
   session: GigSession;
+  nowPlayingRequest: RequestItem | null;
   approvedQueue: RequestItem[];
 }) {
-  const nowPlaying = approvedQueue[0] ?? null;
-  const nextAfter = approvedQueue[1] ?? null;
+  const { nowPlaying, upNext } = resolvePerformerAudienceMoments(nowPlayingRequest, approvedQueue);
+  const modeCopy = resolveLiveRoomModeCopy(session.operatingMode);
 
   return (
     <section
@@ -25,28 +38,28 @@ export default function PerformerAudienceScreen({
         </div>
       </div>
       <div className="min-w-0 self-center overflow-hidden landscape:text-center">
-        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Customer Screen</p>
+        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">{LIVE_ROOM_LANGUAGE.audienceScreen}</p>
         <p className="mt-1 font-display text-xl font-black uppercase tracking-wide text-white min-[360px]:text-2xl landscape:text-4xl">Scan to Request</p>
         <p className="mt-1 truncate text-xs font-bold text-fuchsia-200 landscape:text-sm">
-          {session.operatingMode === 'crowd_autopilot' ? 'Crowd Picks What Is Next' : 'Tip / Boost / Move the Queue'}
+          {LIVE_ROOM_ACTION_SLASH}
         </p>
         <p className="mt-2 truncate font-mono text-[10px] font-bold text-slate-400">{activeGigId ? `/g/${activeGigId}` : 'Room link after start'}</p>
         <div className="mt-3 hidden gap-1.5 text-left min-[360px]:grid landscape:mt-4 landscape:grid">
           <div className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2">
-            <p className="text-[8px] font-black uppercase tracking-widest text-cyan-300">Now</p>
-            <p className="truncate text-sm font-black text-white">{nowPlaying?.title ?? (session.requestsOpen ? 'Requests open' : 'Requests paused')}</p>
+            <p className="text-[8px] font-black uppercase tracking-widest text-cyan-300">{LIVE_ROOM_LANGUAGE.nowPlaying}</p>
+            <p className="truncate text-sm font-black text-white">{nowPlaying?.title ?? 'Waiting for the performer'}</p>
           </div>
           <div className="hidden rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 landscape:block">
-            <p className="text-[8px] font-black uppercase tracking-widest text-fuchsia-300">Up next</p>
-            <p className="truncate text-sm font-black text-white">{nextAfter?.title ?? 'Waiting for the crowd'}</p>
+            <p className="text-[8px] font-black uppercase tracking-widest text-fuchsia-300">{LIVE_ROOM_LANGUAGE.upNext}</p>
+            <p className="truncate text-sm font-black text-white">{upNext?.title ?? 'Waiting for requests'}</p>
           </div>
         </div>
       </div>
       <div className="hidden rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-center landscape:block">
         <p className={`text-xs font-black uppercase tracking-widest ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {session.operatingMode === 'crowd_autopilot'
-            ? 'Crowd autopilot live'
-            : session.requestsOpen ? 'Live requests open' : 'Requests paused'}
+          {session.requestsOpen
+            ? `${modeCopy.label} · ${modeCopy.queueLabel}`
+            : `Requests ${LIVE_ROOM_LANGUAGE.paused.toLowerCase()} · ${modeCopy.label}`}
         </p>
       </div>
     </section>

@@ -36,7 +36,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
   "useState<InactivePerformerWorkspace>('home')",
   'data-sway-performer-app-navigation="true"',
-  'aria-label="Performer console sections"',
+  'aria-label="Performer sections"',
   "inactiveWorkspace === 'home'",
   "inactiveWorkspace === 'room'",
   "inactiveWorkspace === 'library'",
@@ -45,9 +45,9 @@ requireIncludes('TalentDashboard', talentDashboard, [
   "inactiveWorkspace === 'account'",
   "onStartRoom={() => setInactiveWorkspace('room')}",
   'Start a Room',
-  'Show QR',
-  "{ id: 'settings', label: 'Control' }",
-  'Copy link',
+  'LIVE_ROOM_LANGUAGE.shareRoom',
+  "{ id: 'settings', label: LIVE_ROOM_LANGUAGE.controls }",
+  'LIVE_ROOM_LANGUAGE.copyRoomLink',
   'Request library',
   'data-sway-library-workspace="true"',
   'Synced catalogs and external music sources used for audience requests.',
@@ -105,7 +105,7 @@ requireExcludes('TalentDashboard selectable request scopes', talentDashboard, [
 
 requireIncludes('PerformerRoomControls', performerRoomControls, [
   'data-sway-performer-room-controls="true"',
-  'Request scope',
+  'LIVE_ROOM_LANGUAGE.requestSource',
   "['library', 'Library']",
   "['catalog', 'Catalog']"
 ]);
@@ -137,7 +137,7 @@ requireIncludes('PatronView', patronView, [
   "summaryLabel: 'BOOST SUMMARY'",
   "amountLabel: session.paymentsEnabled === false ? 'Upvote weight:' : 'Boost amount:'",
   "totalLabel: session.paymentsEnabled === false ? 'Upvote total:' : 'Total boost charge:'",
-  'Sent. Status: Pending.',
+  'Sent. Status: {LIVE_ROOM_LANGUAGE.pending}.',
   'Sway will show Pending until the performer and payment outcome are confirmed.'
 ]);
 
@@ -168,7 +168,7 @@ requireExcludes('OverlayApp default', overlayApp, [
 ]);
 
 requireIncludes('OverlayApp', overlayApp, [
-  'Request / Tip / Boost',
+  'LIVE_ROOM_ACTION_SLASH',
   'Scan to open this Sway live room',
   'Tips flowing in',
   'Boosts'

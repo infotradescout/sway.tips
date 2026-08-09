@@ -53,6 +53,7 @@ import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
+import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -90,9 +91,9 @@ type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'catalog' | 'pro
 
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'room', label: 'Live', icon: Radio },
-  { id: 'library', label: 'Library', icon: Music2 },
-  { id: 'catalog', label: 'Catalog', icon: AudioLines },
+  { id: 'room', label: 'Live Room', icon: Radio },
+  { id: 'library', label: 'Music', icon: Music2 },
+  { id: 'catalog', label: 'Files', icon: AudioLines },
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'account', label: 'Account', icon: Settings }
 ] as const;
@@ -208,7 +209,7 @@ const HARDWARE_ACTIONS: Array<{ id: HardwareActionId; label: string }> = [
   { id: 'fulfill_top', label: 'Play / Clear Top' },
   { id: 'hide_top', label: 'Hide Top' },
   { id: 'approve_pending', label: 'Approve Pending' },
-  { id: 'veto_pending', label: 'Veto Pending' },
+  { id: 'veto_pending', label: 'Deny Pending' },
   { id: 'open_top_source', label: 'Open Source' }
 ];
 
@@ -230,7 +231,7 @@ const BRIDGE_PRESET_ACTIONS = [
   ['search-top-soundcloud', 'SoundCloud Search', '/action/search-top-soundcloud', '#ff5500'],
   ['search-top-youtube', 'YouTube Search', '/action/search-top-youtube', '#ef4444'],
   ['approve-pending', 'Approve Pending', '/action/approve-pending', '#84cc16'],
-  ['veto-pending', 'Veto Pending', '/action/veto-pending', '#f43f5e']
+  ['veto-pending', 'Deny Pending', '/action/veto-pending', '#f43f5e']
 ] as const;
 
 function createDefaultHardwareBindings(): HardwareBindingMap {
@@ -1305,6 +1306,10 @@ export default function TalentDashboard({
     .filter(r => r.status === 'approved' && !r.hidden && !r.removed)
     .sort((a, b) => b.amount - a.amount); // SORTED BY LOWER TO HIGHEST OR HIGH TO LOW (AUCTION VALUE)
   const fulfilledHistory = requests.filter(r => (r.status === 'fulfilled' || r.type === 'tip') && !r.hidden && !r.removed);
+  const nowPlayingRequest = fulfilledHistory
+    .filter(r => r.status === 'fulfilled' && r.type !== 'tip' && !r.shadowBanned)
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
   const poolBackersCount = requests
     .filter(r => !r.hidden && !r.removed)
     .reduce((sum, r) => sum + Math.max(1, r.sponsorCount), 0);
@@ -1325,9 +1330,9 @@ export default function TalentDashboard({
   const operatorNextDetail = isCrowdAutopilot
     ? (leadingApprovedRequest
       ? `${leadingApprovedRequest.title} is leading the crowd-ranked queue.`
-      : 'Clean requests jump straight to up next; use pause or veto only when needed.')
+      : 'Clean requests jump straight to Up Next; use pause or deny only when needed.')
     : triageQueue.length > 0
-    ? `${triageQueue.length} request${triageQueue.length === 1 ? '' : 's'} waiting for approve or veto.`
+    ? `${triageQueue.length} request${triageQueue.length === 1 ? '' : 's'} waiting for approval or denial.`
     : leadingApprovedRequest
       ? `${leadingApprovedRequest.title} is leading the approved queue.`
       : 'Copy the room link or show the QR so the crowd can start sending requests.';
@@ -1524,7 +1529,7 @@ export default function TalentDashboard({
     const visibleApproved = liveLadderQueue.slice(0, 5);
     const overflowPending = Math.max(0, triageQueue.length - visiblePending.length);
     const overflowApproved = Math.max(0, liveLadderQueue.length - visibleApproved.length);
-    const roomOpenLabel = session.requestsOpen ? 'Open' : 'Paused';
+    const roomOpenLabel = session.requestsOpen ? 'Open' : LIVE_ROOM_LANGUAGE.paused;
     const roomStatusTone = session.requestsOpen ? 'text-emerald-300' : 'text-rose-300';
 
     return (
@@ -1579,6 +1584,7 @@ export default function TalentDashboard({
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate">{actionError}</span>
                 <button type="button" onClick={() => setActionError(null)} className="shrink-0 text-rose-200">
+                  <span className="sr-only">Dismiss error</span>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -1633,8 +1639,8 @@ export default function TalentDashboard({
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center landscape:w-[23rem]">
               {[
-                [isCrowdAutopilot ? 'Review' : 'Pending', triageQueue.length, 'text-amber-300'],
-                [isCrowdAutopilot ? 'Crowd' : 'Approved', liveLadderQueue.length, 'text-cyan-300'],
+                [LIVE_ROOM_LANGUAGE.pending, triageQueue.length, 'text-amber-300'],
+                [LIVE_ROOM_LANGUAGE.approved, liveLadderQueue.length, 'text-cyan-300'],
                 ['Backers', poolBackersCount, 'text-fuchsia-300'],
                 ['Mode', isCrowdAutopilot ? 'Auto' : roomOpenLabel, isCrowdAutopilot ? 'text-fuchsia-300' : roomStatusTone]
               ].map(([label, value, tone]) => (
@@ -1674,15 +1680,16 @@ export default function TalentDashboard({
             <PerformerAudienceScreen
               activeGigId={selectedGigId ?? activeGigId}
               session={session}
+              nowPlayingRequest={nowPlayingRequest}
               approvedQueue={liveLadderQueue}
             />
           </div>
 
           <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Live-night sections">
             {[
-              { id: 'live', label: 'Live' },
-              { id: 'share', label: 'Show QR' },
-              { id: 'settings', label: 'Control' }
+              { id: 'live', label: LIVE_ROOM_LANGUAGE.requests },
+              { id: 'share', label: LIVE_ROOM_LANGUAGE.shareRoom },
+              { id: 'settings', label: LIVE_ROOM_LANGUAGE.controls }
             ].map((item) => (
               <button
                 key={item.id}
@@ -1701,7 +1708,7 @@ export default function TalentDashboard({
             <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]">
               <div className="grid min-h-0 grid-cols-2 gap-2">
                 <CompactRequestPanel
-                  title="Pending"
+                  title={LIVE_ROOM_LANGUAGE.pending}
                   empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                   overflowCount={overflowPending}
                   requests={visiblePending}
@@ -1710,6 +1717,7 @@ export default function TalentDashboard({
                     <>
                       <button
                         type="button"
+                        aria-label={`Approve ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
@@ -1719,6 +1727,7 @@ export default function TalentDashboard({
                       </button>
                       <button
                         type="button"
+                        aria-label={`Deny ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
@@ -1730,7 +1739,7 @@ export default function TalentDashboard({
                   )}
                 />
                 <CompactRequestPanel
-                  title="Approved"
+                  title={LIVE_ROOM_LANGUAGE.approved}
                   empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                   overflowCount={overflowApproved}
                   requests={visibleApproved}
@@ -1739,6 +1748,7 @@ export default function TalentDashboard({
                     <>
                       <button
                         type="button"
+                        aria-label={`Mark ${request.title} played`}
                         onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
@@ -1748,6 +1758,7 @@ export default function TalentDashboard({
                       </button>
                       <button
                         type="button"
+                        aria-label={`Hide ${request.title}`}
                         onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
@@ -1763,6 +1774,7 @@ export default function TalentDashboard({
               <PerformerAudienceScreen
                 activeGigId={selectedGigId ?? activeGigId}
                 session={session}
+                nowPlayingRequest={nowPlayingRequest}
                 approvedQueue={liveLadderQueue}
               />
             </div>
@@ -1771,7 +1783,7 @@ export default function TalentDashboard({
               {mobilePanel === 'live' ? (
                 <div className="grid h-full min-h-0 grid-rows-2 gap-2">
                   <CompactRequestPanel
-                    title="Pending"
+                    title={LIVE_ROOM_LANGUAGE.pending}
                     empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
                     overflowCount={overflowPending}
                     requests={visiblePending.slice(0, 3)}
@@ -1780,6 +1792,7 @@ export default function TalentDashboard({
                       <>
                         <button
                           type="button"
+                          aria-label={`Approve ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
@@ -1789,6 +1802,7 @@ export default function TalentDashboard({
                         </button>
                         <button
                           type="button"
+                          aria-label={`Deny ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
@@ -1800,7 +1814,7 @@ export default function TalentDashboard({
                     )}
                   />
                   <CompactRequestPanel
-                    title="Approved"
+                    title={LIVE_ROOM_LANGUAGE.approved}
                     empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
                     overflowCount={overflowApproved}
                     requests={visibleApproved.slice(0, 3)}
@@ -1809,6 +1823,7 @@ export default function TalentDashboard({
                       <>
                         <button
                           type="button"
+                          aria-label={`Mark ${request.title} played`}
                           onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
@@ -1818,6 +1833,7 @@ export default function TalentDashboard({
                         </button>
                         <button
                           type="button"
+                          aria-label={`Hide ${request.title}`}
                           onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
@@ -1860,7 +1876,7 @@ export default function TalentDashboard({
               disabled={!selectedRoomUrl}
               className="hidden min-h-12 rounded-xl bg-fuchsia-600 px-3 text-xs font-black uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 sm:block"
             >
-              {liveLinkCopied ? 'Copied' : 'Copy link'}
+              {liveLinkCopied ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomLink}
             </button>
             <button
               type="button"
@@ -1878,7 +1894,7 @@ export default function TalentDashboard({
                 session.requestsOpen ? 'bg-rose-500' : 'bg-emerald-500'
               }`}
             >
-              {session.requestsOpen ? 'Pause' : 'Resume'}
+              {session.requestsOpen ? LIVE_ROOM_LANGUAGE.pauseRequests : LIVE_ROOM_LANGUAGE.resumeRequests}
             </button>
             <button
               type="button"
@@ -1886,7 +1902,7 @@ export default function TalentDashboard({
               disabled={previewMode || (session.status !== 'active' && session.status !== 'ending')}
               className="min-h-12 rounded-xl border border-white/10 bg-slate-900 px-3 text-xs font-black uppercase tracking-wide text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {session.status === 'ending' ? 'Recap' : 'End'}
+              {session.status === 'ending' ? LIVE_ROOM_LANGUAGE.roomRecap : LIVE_ROOM_LANGUAGE.endRoom}
             </button>
           </footer>
         </div>
@@ -1903,6 +1919,7 @@ export default function TalentDashboard({
           <button
             type="button"
             onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
             className="shrink-0 text-rose-300 hover:text-rose-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -1912,7 +1929,7 @@ export default function TalentDashboard({
 
       <nav
         data-sway-performer-app-navigation="true"
-        aria-label="Performer console sections"
+        aria-label="Performer sections"
         className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur sm:grid-cols-6"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {

@@ -123,7 +123,7 @@ const PRESET_ACTIONS = [
   },
   {
     id: 'veto-pending',
-    label: 'Veto Pending',
+    label: 'Deny Pending',
     method: 'POST',
     path: '/action/veto-pending',
     color: '#f43f5e',

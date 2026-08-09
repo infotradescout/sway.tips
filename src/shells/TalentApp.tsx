@@ -16,6 +16,7 @@ import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
+import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -394,8 +395,8 @@ export default function TalentApp() {
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <span className="font-display text-xs font-black uppercase tracking-widest text-white">{performerRoleLabel} Console</span>
-              <p className="text-[9px] text-slate-400">Start, share, earn, and run the queue</p>
+              <span className="font-display text-xs font-black uppercase tracking-widest text-white">Sway Performer</span>
+              <p className="text-[9px] text-slate-400">Live Rooms, music, files, and account</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -408,12 +409,12 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
-            title={session.status === 'inactive' ? `${performerRoleLabel} console` : "Tonight's room"}
-            eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : 'Live room'}
+            title={session.status === 'inactive' ? 'Performer home' : "Tonight's Live Room"}
+            eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : LIVE_ROOM_LANGUAGE.liveRoom}
             primaryLabel={session.status === 'inactive'
-              ? 'Choose one workspace at a time'
-              : 'Queue, QR, earnings, and room controls'}
-            secondaryLabel={session.status === 'inactive' ? 'Account status' : 'Room status'}
+              ? 'Choose what you want to manage'
+              : 'Requests, room link, earnings, and controls'}
+            secondaryLabel={LIVE_ROOM_LANGUAGE.roomStatus}
             showHeader={session.status !== 'inactive'}
             isEmpty={false}
             emptyState={
@@ -445,7 +446,7 @@ export default function TalentApp() {
             secondary={
               <div className="space-y-4 text-sm">
                 <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Session</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{LIVE_ROOM_LANGUAGE.liveRoom}</p>
                   <p className="mt-1 font-bold text-white">{performerIdentityName}</p>
                   <p className="text-xs text-slate-400">
                     {session.status === 'inactive'
@@ -455,30 +456,30 @@ export default function TalentApp() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                    <p className="text-slate-500">Pending</p>
+                    <p className="text-slate-500">{LIVE_ROOM_LANGUAGE.pending}</p>
                     <p className="mt-1 font-mono text-lg font-black text-amber-300">{pendingCount}</p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                    <p className="text-slate-500">Approved</p>
+                    <p className="text-slate-500">{LIVE_ROOM_LANGUAGE.approved}</p>
                     <p className="mt-1 font-mono text-lg font-black text-cyan-300">{approvedCount}</p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Window</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Request window</p>
                   <p className={`mt-2 font-bold ${session.requestsOpen ? 'text-emerald-300' : 'text-rose-300'}`}>{session.requestsOpen ? 'Open' : 'Closed'}</p>
                   <p className="text-xs text-slate-400">{session.requestWindowLabel || 'Manual request window'}</p>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Crowd route</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Room link</p>
                   <p className="mt-2 break-all font-mono text-xs font-bold text-white">
-                    {selectedRoomRoute ? `/g/${selectedRoomRoute}` : 'Generated after room start'}
+                    {selectedRoomRoute ? `/g/${selectedRoomRoute}` : 'Available after the room starts'}
                   </p>
                   {selectedRoomSummary ? (
-                    <p className="mt-2 text-xs text-slate-400">{selectedRoomSummary.requestCount} live item{selectedRoomSummary.requestCount === 1 ? '' : 's'} on this route.</p>
+                    <p className="mt-2 text-xs text-slate-400">{selectedRoomSummary.requestCount} request{selectedRoomSummary.requestCount === 1 ? '' : 's'} in this room.</p>
                   ) : null}
                 </div>
                 <div className="rounded-lg border border-white/10 bg-slate-950 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Request scope</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{LIVE_ROOM_LANGUAGE.requestSource}</p>
                   <p className="mt-2 font-bold text-white">{scopeLabel}</p>
                   <p className="text-xs text-slate-400">Crowd can request; performer approves what moves forward.</p>
                 </div>

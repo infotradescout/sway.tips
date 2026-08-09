@@ -17,7 +17,7 @@ for (const banned of ['Gig route:', 'Performer link:']) {
   }
 }
 
-if (!patronSource.includes('Request, Tip, and Boost live')) {
+if (!patronSource.includes('`${LIVE_ROOM_ACTION_LIST} live`')) {
   failures.push('Patron mobile top bar must orient patrons with Request, Tip, and Boost language.');
 }
 
@@ -25,8 +25,8 @@ if (talentSource.includes('Now Playing, Pending Requests, Approved Queue, Contro
   failures.push('Performer mobile top bar must not use the dense feature-list descriptor.');
 }
 
-if (!talentSource.includes('Start, share, earn, and run the queue')) {
-  failures.push('Performer mobile top bar must orient performers with start, share, earn, and queue language.');
+if (!talentSource.includes('Live Rooms, music, files, and account')) {
+  failures.push('Performer mobile top bar must orient performers across the complete performer app.');
 }
 
 if (failures.length > 0) {

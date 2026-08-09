@@ -45,7 +45,7 @@ export interface RequestItem {
   stateRevision?: number;
   type: 'request' | 'tip';
   targetType: 'music' | 'custom' | 'straight_tip';
-  title: string;          // Song title, menu item, or "Classic Tip"
+  title: string;          // Song title, menu item, or direct tip
   subtitle: string;       // Artist, description, or empty
   albumArt?: string;      // Optional URL
   sourceProvider?: string | null;

@@ -144,7 +144,7 @@
         "fixtureSource": "demo-fixture-harness",
         "type": "tip",
         "targetType": "straight_tip",
-        "title": "Classic Tip",
+        "title": "Direct Tip",
         "subtitle": "",
         "senderName": "Demo Supporter",
         "message": "Preview tip record. No money moved.",
