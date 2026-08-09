@@ -51,6 +51,8 @@ if (apiBlock.includes('performerProfilePreviews') || apiBlock.includes('curatedP
 requireText(apiBlock, 'resolvePublicPerformerDiscovery', 'performer API');
 requireText(apiBlock, 'res.status(503)', 'performer API unavailable response');
 
+requireText(server, "canonicalPublicUrl(req.path || '/')", 'canonical URL must omit query tokens');
+
 const sitemapBlock = routeBlock("app.get('/sitemap.xml'");
 if (sitemapBlock.includes('performerProfilePreviews') || sitemapBlock.includes('previewRows')) {
   failures.push('sitemap: preview enumeration remains in the canonical sitemap path');

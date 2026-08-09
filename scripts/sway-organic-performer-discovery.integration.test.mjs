@@ -104,7 +104,9 @@ async function stopServer(child) {
 
 async function waitForServer(port, child, getOutput) {
   let lastError = 'server did not become ready';
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  // The clean isolated worktree may need more than 20 seconds to initialize
+  // Vite, the bundled server, and the disposable database on a cold run.
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     if (getOutput().includes('EADDRINUSE')) throw new Error(getOutput());
     if (child.exitCode !== null) throw new Error(`server exited with code ${child.exitCode}\n${getOutput()}`);
     try {
@@ -174,6 +176,24 @@ async function main() {
     assert.ok(jsonLdMatch, 'public performer HTML must contain one parseable JSON-LD script');
     const jsonLdPayload = JSON.parse(jsonLdMatch[1]);
     assert.equal(jsonLdPayload.description, JSON_LD_XSS_PAYLOAD, 'malicious fixture text must survive only as inert JSON-LD data');
+
+    const trackedPublicHtml = await request(port, '/p/PublicArtist?utm_source=organic');
+    assert.equal(trackedPublicHtml.status, 200);
+    assert.match(
+      trackedPublicHtml.body,
+      /<link rel="canonical" href="https:\/\/app\.sway\.tips\/p\/publicartist" \/>/,
+      'public performer canonical must omit query tokens'
+    );
+    assert.doesNotMatch(trackedPublicHtml.body, /utm_source=organic/);
+
+    const trackedDiscoverHtml = await request(port, '/discover?utm_source=organic');
+    assert.equal(trackedDiscoverHtml.status, 200);
+    assert.match(
+      trackedDiscoverHtml.body,
+      /<link rel="canonical" href="https:\/\/app\.sway\.tips\/discover" \/>/,
+      'default discovery canonical must omit query tokens'
+    );
+    assert.doesNotMatch(trackedDiscoverHtml.body, /utm_source=organic/);
 
     const unlistedHtml = await request(port, '/p/unlistedartist');
     assert.equal(unlistedHtml.status, 200);
