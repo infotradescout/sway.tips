@@ -58,7 +58,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Money & access',
   "fetch('/api/payment/config'",
   "data?.mode === 'test'",
-  'Money actions are unavailable because Stripe test mode could not be verified.',
+  'Money actions are unavailable because Stripe could not be verified. Free rooms remain available.',
   'Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.',
   'Backers',
   '<PerformerRoomSetup',

@@ -38,6 +38,9 @@ type PersistedSessionRow = {
   id: string;
   runtimeSessionState: unknown;
   status: string;
+  startedAt: Date | null;
+  autoCloseoutAt: Date;
+  manualCloseoutCompletedAt: Date | null;
   stateRevision: number;
   updatedAt: Date;
 };
@@ -235,6 +238,13 @@ function hasLiveRoomContext(status: GigSession['status']) {
   return status === 'active' || status === 'ending';
 }
 
+function restoreDurableSessionStatus(status: string): GigSession['status'] {
+  if (status === 'active') return 'active';
+  if (status === 'closeout_pending') return 'ending';
+  if (status === 'closed' || status === 'expired' || status === 'canceled') return 'closed';
+  return 'inactive';
+}
+
 function derivePerformersFromSession(session: GigSession): PerformerProfile[] {
   if (session.status === 'inactive' || !session.talentName) {
     return [];
@@ -374,7 +384,20 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       })
       .filter((request): request is RequestItem => Boolean(request));
 
-    const restoredSession = coerceGigSession(sessionRow.runtimeSessionState, createInactiveSession());
+    const durableFallback = createInactiveSession();
+    durableFallback.status = restoreDurableSessionStatus(sessionRow.status);
+    durableFallback.startedAt = sessionRow.startedAt?.toISOString() ?? null;
+    durableFallback.autoCloseoutAt = sessionRow.autoCloseoutAt.toISOString();
+    durableFallback.closedAt = sessionRow.manualCloseoutCompletedAt?.toISOString() ?? null;
+
+    const restoredSession = coerceGigSession(sessionRow.runtimeSessionState, durableFallback);
+    // Relational session columns are the durable source of truth. Older room
+    // snapshots predate these JSON fields, and a stale JSON status or missing
+    // deadline must never keep an expired room publicly active forever.
+    restoredSession.status = durableFallback.status;
+    restoredSession.startedAt = durableFallback.startedAt;
+    restoredSession.autoCloseoutAt = durableFallback.autoCloseoutAt;
+    restoredSession.closedAt = durableFallback.closedAt;
     restoredSession.stateRevision = sessionRow.stateRevision;
     // 'ending' (the 5-minute post-gig sweep) must still resolve as a live,
     // readable room -- both the performer's own dashboard and the patron
@@ -458,6 +481,9 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         id: gigSessions.id,
         runtimeSessionState: gigSessions.runtimeSessionState,
         status: gigSessions.status,
+        startedAt: gigSessions.startedAt,
+        autoCloseoutAt: gigSessions.autoCloseoutAt,
+        manualCloseoutCompletedAt: gigSessions.manualCloseoutCompletedAt,
         stateRevision: gigSessions.stateRevision,
         updatedAt: gigSessions.updatedAt
       })

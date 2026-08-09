@@ -153,6 +153,19 @@ function assertStatus(
     `${label}: expected ${statuses.join(' or ')}, received ${response.status}: ${JSON.stringify(response.body)}\n${server.logs()}`);
 }
 
+async function waitForDatabaseState(
+  assertion: () => Promise<boolean>,
+  label: string,
+  timeoutMs = 15_000
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await assertion()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for ${label}.`);
+}
+
 async function createPerformerAccount(input: {
   server: RunningServer;
   suffix: string;
@@ -264,6 +277,66 @@ async function main() {
       displayName: 'DJ Simulated',
       handle: 'dj-simulated'
     });
+
+    // Production once contained pre-deadline JSON snapshots whose relational
+    // auto_closeout_at had already expired. The worker must restore that
+    // canonical deadline from the row and close the room instead of keeping a
+    // legacy fixture publicly active forever.
+    const legacyExpiredGigId = randomUUID();
+    const legacyExpiredSession = {
+      status: 'active',
+      startedAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+      closedAt: null,
+      ownerActorUserId: null,
+      lastMutationActorUserId: null,
+      talentName: 'Legacy Expired Room',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      endGigTimerStartedAt: null,
+      isFeatured: false,
+      featuredExpiresAt: null,
+      featuredCost: 0,
+      featuredDurationHours: 0,
+      requestsOpen: true,
+      requestWindowMode: 'manual',
+      requestWindowExpiresAt: null,
+      requestWindowDuration: null,
+      requestWindowLabel: null,
+      requestPresets: [],
+      operatingMode: 'manual',
+      searchScope: 'library',
+      paymentsEnabled: false,
+      tipsEnabled: false,
+      totals: { totalTips: 0, accumulatedFees: 0, totalCount: 0, topRequest: 'None yet' }
+    };
+    await proof.query(`
+      insert into gig_sessions (
+        id, performer_id, owner_actor_user_id, last_mutation_actor_user_id,
+        status, title, runtime_session_state, started_at, last_activity_at, auto_closeout_at
+      ) values ($1, $2, null, null, 'active', 'legacy_expired_room', $3::jsonb,
+        now() - interval '5 hours', now() - interval '5 hours', now() - interval '1 hour')
+    `, [legacyExpiredGigId, primary.performerId, JSON.stringify(legacyExpiredSession)]);
+    await proof.query(`
+      insert into active_room_registry (
+        gig_id, performer_id, owner_actor_user_id, talent_name, talent_role,
+        route_path, registry_status, started_at, last_activity_at
+      ) values ($1::uuid, $2::uuid, null, 'Legacy Expired Room', 'DJ', '/g/' || $1::uuid::text,
+        'active', now() - interval '5 hours', now() - interval '5 hours')
+    `, [legacyExpiredGigId, primary.performerId]);
+
+    await waitForDatabaseState(async () => {
+      const result = await proof.query<{ session_status: string; registry_status: string }>(`
+        select g.status as session_status, r.registry_status
+        from gig_sessions g
+        join active_room_registry r on r.gig_id = g.id
+        where g.id = $1
+      `, [legacyExpiredGigId]);
+      return result.rows[0]?.session_status === 'closed'
+        && result.rows[0]?.registry_status === 'closed';
+    }, 'legacy room automatic closeout');
+    const expiredLegacyPublic = await new HttpClient(server.baseUrl).get(`/api/state/${legacyExpiredGigId}`);
+    assertStatus(expiredLegacyPublic, 410, 'legacy expired room is no longer publicly readable', server);
 
     const missingStartId = await primary.client.post('/api/session/start', {
       talentName: 'DJ Simulated',
