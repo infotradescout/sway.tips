@@ -73,13 +73,18 @@ type RunningServer = {
   stop: () => Promise<void>;
 };
 
-async function startSwayServer(databaseUrl: string, port: number): Promise<RunningServer> {
+async function startSwayServer(
+  databaseUrl: string,
+  port: number,
+  envOverrides: Record<string, string> = {}
+): Promise<RunningServer> {
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       NODE_ENV: 'test',
+      DISABLE_HMR: 'true',
       PORT: String(port),
       DATABASE_URL: databaseUrl,
       SWAY_APP_BASE_URL: baseUrl,
@@ -91,9 +96,11 @@ async function startSwayServer(databaseUrl: string, port: number): Promise<Runni
       STRIPE_PUBLISHABLE_KEY: '',
       VITE_STRIPE_PUBLISHABLE_KEY: '',
       STRIPE_WEBHOOK_SECRET: '',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'false',
       SWAY_EMAIL_PROVIDER: '',
       SWAY_EMAIL_API_KEY: '',
-      SWAY_EMAIL_FROM: ''
+      SWAY_EMAIL_FROM: '',
+      ...envOverrides
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }) as ChildProcessWithoutNullStreams;
@@ -405,6 +412,41 @@ async function main() {
     assertStatus(initialRooms, 200, 'primary active room registry', server);
     assert.deepEqual(initialRooms.body.rooms.map((room: JsonObject) => room.gigId), [gigId]);
 
+    const directlyKnownDraftRoom = await fetch(`${server.baseUrl}/g/${gigId}`);
+    assert.equal(directlyKnownDraftRoom.status, 200, 'A known room link remains directly reachable for invited QA participants.');
+    const draftPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(draftPublicFeed, 200, 'draft performer public feed containment', server);
+    assert.equal(
+      draftPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A draft performer room must never enter public discovery.'
+    );
+    const publishPrimary = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'public' });
+    assertStatus(publishPrimary, 200, 'publish performer for public-room feed proof', server);
+    const thinPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(thinPublicFeed, 200, 'thin public performer room containment', server);
+    assert.equal(
+      thinPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A public status alone must not publish a thin room card.'
+    );
+    const completePublicProfile = await primary.client.post('/api/talent/profile/public', {
+      bio: 'Disposable integration performer used only to prove complete public eligibility.',
+      headline: 'Disposable public eligibility proof',
+      primaryRole: 'DJ',
+      specialties: ['Integration testing']
+    });
+    assertStatus(completePublicProfile, 202, 'complete disposable public profile facts', server);
+    const publishedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(publishedPublicFeed, 200, 'public performer room discovery', server);
+    assert.equal(
+      publishedPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      true,
+      'A published performer room must remain eligible for public discovery.'
+    );
+    const restoreDraft = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'draft' });
+    assertStatus(restoreDraft, 200, 'restore disposable performer to draft', server);
+
     const patronAHash = hash('simulated-patron-a');
     const patronBHash = hash('simulated-patron-b');
     const patronCHash = hash('simulated-patron-c');
@@ -530,6 +572,7 @@ async function main() {
     const databaseTruth = await proof.query<{
       users: string;
       performers: string;
+      proModeEvents: string;
       gigs: string;
       requests: string;
       boosts: string;
@@ -540,6 +583,9 @@ async function main() {
         (select count(*) from performers where owner_user_id = (
           select id from users where email = 'simulated-primary@example.test'
         ))::text as performers,
+        (select count(*) from pro_mode_status_events where user_id = (
+          select id from users where email = 'simulated-primary@example.test'
+        ))::text as "proModeEvents",
         (select count(*) from gig_sessions where id = $1)::text as gigs,
         (select count(*) from requests where gig_id = $1 and activated_at is not null)::text as requests,
         (select count(*) from request_boosts where gig_id = $1 and activated_at is not null)::text as boosts,
@@ -547,6 +593,7 @@ async function main() {
     `, [gigId]);
     assert.equal(Number(databaseTruth.rows[0].users), 1);
     assert.equal(Number(databaseTruth.rows[0].performers), 1);
+    assert.equal(Number(databaseTruth.rows[0].proModeEvents), 1, 'One Pro Mode activation must create one status event.');
     assert.equal(Number(databaseTruth.rows[0].gigs), 1);
     assert.equal(Number(databaseTruth.rows[0].requests), 4);
     assert.equal(Number(databaseTruth.rows[0].boosts), 1);
@@ -659,6 +706,53 @@ async function main() {
     const history = await primary.client.get('/api/talent/rooms/history');
     assertStatus(history, 200, 'closed room history', server);
     assert.ok(history.body.rooms.some((room: JsonObject) => room.gigId === gigId));
+
+    // Owner-authorized Stripe test rehearsal: matching test-looking keys plus
+    // the explicit switch may start a paid-mode room without Connect. No
+    // provider call is made here; provider authorization/capture/refund is
+    // proven separately by the deterministic payment durability integration.
+    await server.stop();
+    server = null;
+    server = await startSwayServer(proof.databaseUrl, port, {
+      STRIPE_SECRET_KEY: 'sk_test_platform_balance_runtime_proof',
+      STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
+      VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
+      STRIPE_WEBHOOK_SECRET: 'whsec_platform_balance_runtime_proof',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'true',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS: primary.performerId
+    });
+    const testMoneyConfig = await new HttpClient(server.baseUrl).get('/api/payment/config');
+    assertStatus(testMoneyConfig, 200, 'platform test-balance runtime config', server);
+    assert.equal(testMoneyConfig.body.mode, 'test');
+    assert.equal(testMoneyConfig.body.testModePlatformBalanceEnabled, true);
+    const unapprovedTestMoneyRoom = await secondary.client.post('/api/session/start', {
+      gig_id: randomUUID(),
+      talentName: 'Secondary Performer',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: true,
+      searchScope: 'catalog'
+    });
+    assertStatus(unapprovedTestMoneyRoom, 409, 'unallowlisted performer cannot start a test paid room', server);
+    assert.equal(unapprovedTestMoneyRoom.body.code, 'seller_payout_not_ready');
+    const testMoneyGigId = randomUUID();
+    const testMoneyRoom = await primary.client.post('/api/session/start', {
+      gig_id: testMoneyGigId,
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: true,
+      searchScope: 'catalog'
+    });
+    assertStatus(testMoneyRoom, 200, 'test paid room starts without Connect', server);
+    assert.equal(testMoneyRoom.body.state.session.paymentsEnabled, true);
+    assert.equal(testMoneyRoom.body.state.session.tipsEnabled, true);
+    const endTestMoneyRoom = await primary.client.post('/api/session/end', { gig_id: testMoneyGigId });
+    assertStatus(endTestMoneyRoom, 200, 'test paid room end', server);
+    const closeTestMoneyRoom = await primary.client.post('/api/session/closeout', { gig_id: testMoneyGigId });
+    assertStatus(closeTestMoneyRoom, 200, 'test paid room closeout', server);
 
     console.log('Sway simulated live-night integration proof passed.');
   } catch (error) {

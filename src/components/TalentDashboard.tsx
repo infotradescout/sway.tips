@@ -81,6 +81,7 @@ interface TalentDashboardProps {
     payouts_enabled?: boolean;
     stripe_connected_account_id?: string | null;
     money_actions_ready?: boolean;
+    test_mode_platform_balance_allowed?: boolean;
   } | null;
   performerEmailVerified?: boolean;
 }
@@ -842,10 +843,12 @@ export default function TalentDashboard({
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
   const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
+  const [testModePlatformBalanceEnabled, setTestModePlatformBalanceEnabled] = useState(false);
 
   useEffect(() => {
     if (previewMode) {
       setLiveRoomPaymentMode('unavailable');
+      setTestModePlatformBalanceEnabled(false);
       return;
     }
     let cancelled = false;
@@ -854,6 +857,11 @@ export default function TalentDashboard({
         const response = await fetch('/api/payment/config', { cache: 'no-store' });
         const data = await response.json().catch(() => null);
         if (!cancelled) {
+          setTestModePlatformBalanceEnabled(
+            response.ok
+              && data?.mode === 'test'
+              && data?.testModePlatformBalanceEnabled === true
+          );
           setLiveRoomPaymentMode(
             response.ok
               && (data?.mode === 'test' || data?.mode === 'live')
@@ -863,14 +871,20 @@ export default function TalentDashboard({
           );
         }
       } catch {
-        if (!cancelled) setLiveRoomPaymentMode('unavailable');
+        if (!cancelled) {
+          setLiveRoomPaymentMode('unavailable');
+          setTestModePlatformBalanceEnabled(false);
+        }
       }
     })();
     return () => { cancelled = true; };
   }, [previewMode]);
 
-  const moneyReady = (liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live')
-    && Boolean(performerProfile?.money_actions_ready);
+  const testModePlatformBalanceReady = testModePlatformBalanceEnabled
+    && performerProfile?.test_mode_platform_balance_allowed === true;
+  const moneyReady = liveRoomPaymentMode === 'test'
+    ? testModePlatformBalanceReady || Boolean(performerProfile?.money_actions_ready)
+    : liveRoomPaymentMode === 'live' && Boolean(performerProfile?.money_actions_ready);
 
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -2188,6 +2202,10 @@ export default function TalentDashboard({
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
                 {liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live' ? (
                   <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because Stripe could not be verified. Free rooms remain available.</p>
+                ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceReady ? (
+                  <p className="mt-0.5 text-[11px] text-cyan-300">
+                    Stripe test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a bank.
+                  </p>
                 ) : performerProfile?.money_actions_ready ? (
                   <p className="mt-0.5 text-[11px] text-emerald-300">
                     {liveRoomPaymentMode === 'live'
@@ -2212,7 +2230,7 @@ export default function TalentDashboard({
                 {stripeConnectError ? <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
               </div>
             </div>
-            {!performerProfile?.money_actions_ready ? (
+            {!moneyReady ? (
               <button
                 type="button"
                 onClick={handleConnectStripe}

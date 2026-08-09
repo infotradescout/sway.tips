@@ -142,8 +142,8 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerPayoutReady',
-  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerPayoutReady',
+  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready',
+  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready',
   "code: 'test_payment_runtime_unavailable'",
   "code: 'room_start_id_required'",
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',

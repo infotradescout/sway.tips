@@ -375,7 +375,7 @@ for (const term of [
   "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
   "platformFeePayer === 'patron'",
   'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: payment.platformFee',
+  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
   'sway_platform_fee_cents: String(payment.platformFee)',
   "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
   "sway_platform_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
@@ -471,7 +471,13 @@ requireIncludes(performerShareMetadata, 'share-card.png?v=1', 'Performer share m
 const publicFeedRoute = sliceBetween(server, "app.get('/api/public/feed'", "app.get('/api/public/performer/:handle'", 'public feed route');
 for (const term of [
   'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['suspended'])",
+  "notInArray(performers.onboardingStatus, ['restricted', 'suspended'])",
+  "eq(performers.visibilityState, 'public')",
+  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
+  "sql`nullif(trim(${performers.handle}), '') is not null`",
+  "sql`nullif(trim(${performers.bio}), '') is not null`",
+  "sql`nullif(trim(${performers.displayName}), '') is not null`",
+  'const selectedRooms = activeRooms',
   '.filter((room) => detailsByGigId.has(room.gigId))',
   'normalizePublicProfileUrl(detail.avatarUrl)'
 ]) requireIncludes(publicFeedRoute, term, 'Public feed route');

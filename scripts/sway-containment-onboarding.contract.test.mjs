@@ -14,6 +14,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const server = read('server.ts');
 const paymentService = read('src/server/payment-service.ts');
 const paymentProvider = read('src/server/payment-provider.ts');
+const sellerReadiness = read('src/server/live-room-seller-readiness.ts');
 const talentApp = read('src/shells/TalentApp.tsx');
 const patronApp = read('src/shells/PatronApp.tsx');
 const accountAccess = read('src/components/AccountAccess.tsx');
@@ -74,15 +75,30 @@ assert.equal(talentApp.includes('/account/signup?'), true, 'Legacy performer sig
 assert.equal(talentApp.includes('TalentSignupCard'), false, 'The split performer signup surface must not remain reachable from TalentApp.');
 
 for (const required of [
-  "paymentAccountStatus === 'payouts_enabled'",
-  'destination.payoutsEnabled',
   "'seller_payout_not_ready'",
-  'destinationAccountId,',
-  'applicationFeeAmountCents: payment.platformFee'
+  'usesTestPlatformBalance ? undefined : operation.destinationAccountId',
+  'usesTestPlatformBalance ? undefined : payment.platformFee'
 ]) {
   assert.equal(paymentService.includes(required), true, `Payout gate missing: ${required}`);
 }
-assert.equal(paymentService.includes('the charge still proceeds without a destination'), false, 'Platform-balance fallback language must be removed.');
+for (const required of [
+  "seller?.paymentAccountStatus === 'payouts_enabled'",
+  'seller?.chargesEnabled',
+  'seller?.payoutsEnabled',
+  'connectedAccountId',
+  'input.allowTestPlatformBalance',
+  'isTestModePlatformBalancePerformerAllowed',
+  'SWAY_TEST_PLATFORM_BALANCE_DESTINATION'
+]) {
+  assert.equal(sellerReadiness.includes(required), true, `Seller readiness contract missing: ${required}`);
+}
+assert.match(
+  server,
+  /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds\([\s\S]+liveRoomPaymentRuntimeConfig\.mode[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS/,
+  'The platform-balance rehearsal switch must be derived from verified Stripe test mode.'
+);
+assert.match(sellerReadiness, /input\.paymentMode === 'test'[\s\S]+configuredValue\?\.trim\(\)\.toLowerCase\(\) === 'true'/);
+assert.equal(paymentService.includes('the charge still proceeds without a destination'), false, 'Implicit platform-balance fallback language must remain absent.');
 assert.equal(paymentService.includes("throw new Error(`refund_not_terminal:${result.status}`)"), true, 'Pending provider refunds must remain non-terminal.');
 assert.equal(paymentService.includes('Promise<PaymentReversalResult[]>'), true, 'Batch reversals must return every result to callers.');
 assert.equal(paymentProvider.includes("secretKey.startsWith('sk_live_')"), true, 'Live-room provider must accept sk_live_ when mode matches.');

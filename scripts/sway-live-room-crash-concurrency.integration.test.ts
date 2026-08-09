@@ -6,6 +6,7 @@ import { createPaymentService, type AuthorizeActionInput } from '../src/server/p
 import { createPaymentWebhookService } from '../src/server/payment-webhook';
 import { createDeterministicPaymentProvider } from './lib/deterministic-payment-provider';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
+import { SWAY_TEST_PLATFORM_BALANCE_DESTINATION } from '../src/server/live-room-seller-readiness';
 
 const OWNER_ID = '10000000-0000-4000-8000-000000000001';
 const PERFORMER_ID = '10000000-0000-4000-8000-000000000002';
@@ -612,6 +613,70 @@ async function main() {
       `, [unknownEvent.providerEventId]),
       /live_room_processor_terminal_state_is_immutable/
     );
+
+    // Stripe test-mode rehearsals can exercise the complete payment lifecycle
+    // before Connect is enabled. The durable row uses an explicit test-only
+    // destination, while the provider receives no transfer destination and a
+    // captured refund never attempts transfer/application-fee reversal.
+    await proof.query(`
+      update performers
+      set payment_account_status = 'not_started', kyc_status = 'not_required',
+          payouts_enabled = false, charges_enabled = false,
+          stripe_connected_account_id = null
+      where id = $1
+    `, [PERFORMER_ID]);
+    const platformTestService = createPaymentService({
+      databaseUrl: proof.databaseUrl,
+      provider: fake.provider,
+      testPlatformBalancePerformerIds: new Set([PERFORMER_ID])
+    });
+    const platformRequest = await reserveRequest({
+      label: 'platform-test-balance',
+      deviceHash: hash('platform-test-balance-device')
+    });
+    const platformAuthorization = await platformTestService.authorizeAction(platformRequest.authorizationInput);
+    assert.ok(['authorized', 'processing'].includes(platformAuthorization.status));
+    if (platformAuthorization.status === 'processing') {
+      await platformTestService.runDueOperations({ limit: 10 });
+    }
+    const platformPayment = await proof.query<{
+      id: string;
+      destination_account_id: string;
+      payment_status: string;
+      operation_status: string;
+      last_error: string | null;
+    }>(`
+      select p.id, p.destination_account_id, p.payment_status,
+             o.status as operation_status, o.last_error
+      from payments p
+      join live_room_payment_operations o on o.payment_id = p.id and o.operation_type = 'authorize'
+      where p.idempotency_key = $1
+    `, [platformRequest.idempotencyKey]);
+    assert.equal(
+      platformPayment.rows[0].payment_status,
+      'authorized',
+      `Platform test authorization failed: ${JSON.stringify(platformPayment.rows[0])}`
+    );
+    assert.equal(platformPayment.rows[0].destination_account_id, SWAY_TEST_PLATFORM_BALANCE_DESTINATION);
+    assert.equal(fake.calls.lastAuthorizeInput?.destinationAccountId, undefined);
+    assert.equal(fake.calls.lastAuthorizeInput?.applicationFeeAmountCents, undefined);
+    assert.equal(fake.calls.lastAuthorizeInput?.metadata?.sway_settlement_mode, 'platform_test_balance');
+    await proof.query(`
+      update requests
+      set status = 'approved', runtime_request_state = jsonb_set(runtime_request_state, '{status}', '"approved"'::jsonb)
+      where id = $1
+    `, [platformRequest.requestId]);
+    const disabledPilotDrainService = createPaymentService({
+      databaseUrl: proof.databaseUrl,
+      provider: fake.provider,
+      testPlatformBalancePerformerIds: new Set()
+    });
+    const platformCapture = await disabledPilotDrainService.captureAuthorization(platformPayment.rows[0].id);
+    assert.equal(platformCapture.status, 'captured');
+    const platformRefund = await disabledPilotDrainService.voidOrRefund(platformPayment.rows[0].id);
+    assert.equal(platformRefund.status, 'refunded');
+    assert.equal(fake.calls.lastRefundInput?.reverseTransfer, false);
+    assert.equal(fake.calls.lastRefundInput?.refundApplicationFee, false);
 
     // Two closeout workers race through the real business store. Exactly one
     // establishes the admission barrier; the other observes it.

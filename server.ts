@@ -34,6 +34,11 @@ import {
   type SettleResult
 } from "./src/server/payment-service";
 import { resolveProposedPlatformFee } from "./src/server/fee-policy";
+import {
+  isTestModePlatformBalancePerformerAllowed,
+  resolveLiveRoomSellerMoneyReadiness,
+  resolveTestModePlatformBalancePerformerIds
+} from "./src/server/live-room-seller-readiness";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
@@ -308,16 +313,23 @@ const performerLoginMailer = createPerformerLoginMailer({
   isProduction
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
-const paymentService = createPaymentService({
-  databaseUrl: process.env.DATABASE_URL,
-  provider: paymentProvider
-});
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
   paymentProviderConfigured: Boolean(paymentProvider),
   stripeConnectConfigured: Boolean(stripeConnectService),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
+});
+const testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds({
+  paymentMode: liveRoomPaymentRuntimeConfig.mode,
+  configuredValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED,
+  performerIdsValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS
+});
+const testModePlatformBalanceEnabled = testModePlatformBalancePerformerIds.size > 0;
+const paymentService = createPaymentService({
+  databaseUrl: process.env.DATABASE_URL,
+  provider: paymentProvider,
+  testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({
@@ -2094,6 +2106,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         && performerRow.payouts_enabled
         && performerRow.stripe_connected_account_id?.trim()
         && !performerRow.payout_hold_reason
+      ),
+      test_mode_platform_balance_allowed: isTestModePlatformBalancePerformerAllowed(
+        performerRow.performer_id,
+        testModePlatformBalancePerformerIds
       )
     };
   } catch (error) {
@@ -3734,14 +3750,16 @@ app.get('/api/payment/config', (_req, res) => {
           ? 'Stripe publishable and secret keys must both be test or both be live.'
           : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
-      liveRoomMoneyEnabled: false
+      liveRoomMoneyEnabled: false,
+      testModePlatformBalanceEnabled: false
     });
   }
 
   return res.json({
     publishableKey: liveRoomPaymentRuntimeConfig.publishableKey,
     mode: liveRoomPaymentRuntimeConfig.mode,
-    liveRoomMoneyEnabled: true
+    liveRoomMoneyEnabled: true,
+    testModePlatformBalanceEnabled
   });
 });
 
@@ -10857,13 +10875,12 @@ app.get('/api/public/feed', async (_req, res) => {
     const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
-    const selectedRooms = activeRooms.slice(0, roomLimit);
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
-    const gigIds = selectedRooms.map((room) => room.gigId);
+    const gigIds = activeRooms.map((room) => room.gigId);
     const [details, publicEvents] = await Promise.all([
       gigIds.length
         ? businessDb
@@ -10883,21 +10900,28 @@ app.get('/api/public/feed', async (_req, res) => {
             })
             .from(gigSessions)
             .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+            .innerJoin(users, eq(users.id, performers.ownerUserId))
             .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
             .where(and(
               inArray(gigSessions.id, gigIds),
               eq(performers.isActive, true),
-              notInArray(performers.onboardingStatus, ['suspended'])
+              notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+              eq(performers.visibilityState, 'public'),
+              sql`nullif(trim(${performers.handle}), '') is not null`,
+              sql`nullif(trim(${performers.bio}), '') is not null`,
+              sql`nullif(trim(${performers.displayName}), '') is not null`
             ))
         : Promise.resolve([]),
       performerEventService.listPublicEvents({ limit: eventLimit })
     ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
+    const selectedRooms = activeRooms
+      .filter((room) => detailsByGigId.has(room.gigId))
+      .slice(0, roomLimit);
 
     return res.json({
       rooms: selectedRooms
-        .filter((room) => detailsByGigId.has(room.gigId))
         .map((room) => {
         const detail = detailsByGigId.get(room.gigId)!;
         return {
@@ -11639,7 +11663,8 @@ app.post("/api/session/start", async (req, res) => {
   }
 
   const [seller] = businessDb && actor.actorId
-    ? await businessDb.select({
+      ? await businessDb.select({
+        id: performers.id,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
         paymentAccountStatus: performers.paymentAccountStatus,
@@ -11650,18 +11675,15 @@ app.post("/api/session/start", async (req, res) => {
         payoutHoldReason: performers.payoutHoldReason
       }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
-  const sellerPayoutReady = Boolean(
-    seller?.isActive
-    && seller.onboardingStatus !== 'suspended'
-    && seller.paymentAccountStatus === 'payouts_enabled'
-    && ['not_required', 'verified'].includes(seller.kycStatus)
-    && seller.chargesEnabled
-    && seller.payoutsEnabled
-    && seller.stripeConnectedAccountId?.trim()
-    && !seller.payoutHoldReason
-  );
+  const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
+    seller,
+    allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+      seller?.id,
+      testModePlatformBalancePerformerIds
+    )
+  });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
-  if (requestedPaymentsEnabled && !sellerPayoutReady) {
+  if (requestedPaymentsEnabled && !sellerMoneyReadiness.ready) {
     return res.status(409).json({
       error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
       code: 'seller_payout_not_ready'
@@ -11695,8 +11717,8 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: requestedRoomConfig.searchScope,
-    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerPayoutReady,
-    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerPayoutReady,
+    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
+    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -11980,6 +12002,7 @@ app.post("/api/session/payments-enabled", async (req, res) => {
     }
     const [seller] = businessDb && actor.actorId
       ? await businessDb.select({
+          id: performers.id,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
           paymentAccountStatus: performers.paymentAccountStatus,
@@ -11990,17 +12013,14 @@ app.post("/api/session/payments-enabled", async (req, res) => {
           payoutHoldReason: performers.payoutHoldReason
         }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
       : [];
-    const payoutReady = Boolean(
-      seller?.isActive
-      && seller.onboardingStatus !== 'suspended'
-      && seller.paymentAccountStatus === 'payouts_enabled'
-      && ['not_required', 'verified'].includes(seller.kycStatus)
-      && seller.chargesEnabled
-      && seller.payoutsEnabled
-      && seller.stripeConnectedAccountId?.trim()
-      && !seller.payoutHoldReason
-    );
-    if (!payoutReady) {
+    const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
+      seller,
+      allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+        seller?.id,
+        testModePlatformBalancePerformerIds
+      )
+    });
+    if (!sellerMoneyReadiness.ready) {
       return res.status(409).json({
         error: 'Complete Stripe identity, charge, and payout setup before enabling paid requests.',
         code: 'seller_payout_not_ready'

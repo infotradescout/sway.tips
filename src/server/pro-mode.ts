@@ -134,17 +134,6 @@ export async function activateProModeWithPerformer(
       .where(eq(performers.ownerUserId, input.userId))
       .limit(1);
 
-    const performer = existingPerformer ?? (await tx
-      .insert(performers)
-      .values({
-        ownerUserId: input.userId,
-        handle: input.handle,
-        displayName: input.displayName,
-        isActive: true,
-        onboardingStatus: 'gig_ready'
-      })
-      .returning({ id: performers.id, handle: performers.handle, displayName: performers.displayName }))[0];
-
     if (transition.changed) {
       await tx
         .update(users)
@@ -158,6 +147,23 @@ export async function activateProModeWithPerformer(
         actorUserId: input.actorUserId
       });
     }
+
+    // Set Pro Mode before creating the performer. Migration 0022 keeps an
+    // AFTER INSERT compatibility trigger for an older server that might
+    // create performers while users.pro_mode_status is still disabled. If
+    // the current path inserts first, that trigger and this function both
+    // record the same activation. Updating first makes the compatibility
+    // trigger a no-op while the whole operation remains atomic.
+    const performer = existingPerformer ?? (await tx
+      .insert(performers)
+      .values({
+        ownerUserId: input.userId,
+        handle: input.handle,
+        displayName: input.displayName,
+        isActive: true,
+        onboardingStatus: 'gig_ready'
+      })
+      .returning({ id: performers.id, handle: performers.handle, displayName: performers.displayName }))[0];
 
     return { allowed: true as const, changed: transition.changed, nextStatus: transition.nextStatus, performer };
   });
