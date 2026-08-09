@@ -661,6 +661,12 @@ async function main() {
     assert.equal(fake.calls.lastAuthorizeInput?.destinationAccountId, undefined);
     assert.equal(fake.calls.lastAuthorizeInput?.applicationFeeAmountCents, undefined);
     assert.equal(fake.calls.lastAuthorizeInput?.metadata?.sway_settlement_mode, 'platform_test_balance');
+    assert.equal(typeof fake.calls.lastAuthorizeInput?.metadata?.sway_fee_charged_to_patron_cents, 'string');
+    assert.deepEqual(
+      Object.keys(fake.calls.lastAuthorizeInput?.metadata ?? {}).filter((key) => key.length > 40),
+      [],
+      'Every Stripe metadata key must stay within Stripe\'s 40-character limit.'
+    );
     await proof.query(`
       update requests
       set status = 'approved', runtime_request_state = jsonb_set(runtime_request_state, '{status}', '"approved"'::jsonb)

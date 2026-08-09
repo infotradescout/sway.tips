@@ -603,7 +603,7 @@ export function createPaymentService(config: {
         sway_action_type: payment.actionType ?? 'request',
         sway_platform_fee_cents: String(payment.platformFee),
         sway_platform_fee_payer: recordString(payload, 'platformFeePayer') ?? 'patron',
-        sway_platform_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents') ?? 0),
+        sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents') ?? 0),
         sway_settlement_mode: usesTestPlatformBalance ? 'platform_test_balance' : 'connected_account',
         ...(recordNumber(payload, 'platformFeeCapCents') === null ? {} : { sway_platform_fee_cap_cents: String(recordNumber(payload, 'platformFeeCapCents')) }),
         ...(recordString(payload, 'partnerTermsVersion') ? { sway_partner_terms_version: recordString(payload, 'partnerTermsVersion')! } : {}),

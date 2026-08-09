@@ -378,8 +378,13 @@ for (const term of [
   'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
   'sway_platform_fee_cents: String(payment.platformFee)',
   "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
-  "sway_platform_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
+  "sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
+requireExcludes(
+  paymentService,
+  'sway_platform_fee_charged_to_patron_cents',
+  'Stripe metadata key length safety'
+);
 
 const requestCreateRoute = sliceBetween(
   server,
