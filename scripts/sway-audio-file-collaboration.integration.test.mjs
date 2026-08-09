@@ -4,12 +4,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createSwayDb } from '../src/db/client.ts';
 import {
   audioFileAccessGrants,
   audioFileConnections,
   audioProjectAccessGrants,
+  audioReviewEvents,
   auditEvents,
   musicRecordingCredits,
   musicRecordings,
@@ -24,12 +25,17 @@ import { createAudioFileCollaborationService } from '../src/server/audio-file-co
 import { createAudioFilePairingService } from '../src/server/audio-file-pairing-service.ts';
 import { createAudioPublishingService } from '../src/server/audio-publishing-service.ts';
 import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
+import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 if (process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
   throw new Error('Audio collaboration integration requires SWAY_DISPOSABLE_MIGRATION_PROOF=1.');
 }
-const databaseUrl = process.env.DATABASE_URL?.trim();
-if (!databaseUrl) throw new Error('DATABASE_URL is required.');
+const configuredDatabaseUrl = process.env.DATABASE_URL?.trim();
+const embeddedProof = configuredDatabaseUrl
+  ? null
+  : await startEmbeddedPostgresProof('audio_file_collaboration');
+const databaseUrl = configuredDatabaseUrl || embeddedProof?.databaseUrl;
+if (!databaseUrl) throw new Error('A disposable collaboration database is required.');
 assertDisposableDatabaseTarget({ databaseUrl, approval: 'true', label: 'Audio collaboration integration proof' });
 
 async function streamToBuffer(stream) {
@@ -42,7 +48,7 @@ const db = createSwayDb(databaseUrl);
 const objectRoot = mkdtempSync(join(tmpdir(), 'sway-file-collaboration-'));
 
 try {
-  await migrate(db, { migrationsFolder: 'drizzle' });
+  if (!embeddedProof) await migrate(db, { migrationsFolder: 'drizzle' });
 
   const actorIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()].sort();
   const [ownerId, reviewerId, outsiderId, noAccessUserId, expiredReviewerId] = actorIds;
@@ -757,7 +763,232 @@ try {
     eventType: 'resolved',
     supersedesEventId: comment.id
   });
-  assert.equal((await collaboration.listReviewEvents({ grantId: shared.grant.id, userId: ownerId })).length, 3);
+  const firstGrantReviewEvents = await collaboration.listReviewEvents({ grantId: shared.grant.id, userId: ownerId });
+  assert.equal(firstGrantReviewEvents.length, 3);
+  const [legacyAttributedReviewAudit] = await db
+    .update(auditEvents)
+    .set({ actorType: 'performer' })
+    .where(and(
+      eq(auditEvents.entityType, 'audio_review_event'),
+      eq(auditEvents.entityId, comment.id),
+      eq(auditEvents.eventType, 'audio_review.comment')
+    ))
+    .returning({ eventId: auditEvents.eventId, actorType: auditEvents.actorType });
+  assert.equal(legacyAttributedReviewAudit?.actorType, 'performer');
+  assert.ok(
+    (await collaboration.listReviewEvents({ grantId: shared.grant.id, userId: ownerId }))
+      .some((event) => event.id === comment.id),
+    'Grant-scoped review history must retain correctly bound legacy performer-attributed audits.'
+  );
+
+  const [secondReviewConnection] = await db.insert(audioFileConnections).values({
+    memberOneUserId: ownerId,
+    memberTwoUserId: noAccessUserId,
+    createdByUserId: ownerId,
+    createdFromPurpose: 'send_files'
+  }).returning();
+  const secondShared = await collaboration.shareVersion({
+    connectionId: secondReviewConnection.id,
+    versionId: version.id,
+    grantedByUserId: ownerId,
+    canDownloadOriginal: false,
+    canComment: true,
+    canApprove: false
+  });
+  const secondGrantComment = await collaboration.addReviewEvent({
+    grantId: secondShared.grant.id,
+    userId: noAccessUserId,
+    eventType: 'comment',
+    body: 'This note belongs only to the second file grant.'
+  });
+  const secondGrantResolved = await collaboration.addReviewEvent({
+    grantId: secondShared.grant.id,
+    userId: ownerId,
+    eventType: 'resolved',
+    supersedesEventId: secondGrantComment.id
+  });
+  const ownerFirstThread = await collaboration.listReviewEvents({ grantId: shared.grant.id, userId: ownerId });
+  const ownerSecondThread = await collaboration.listReviewEvents({ grantId: secondShared.grant.id, userId: ownerId });
+  const firstReviewerThread = await collaboration.listReviewEvents({ grantId: shared.grant.id, userId: reviewerId });
+  const secondReviewerThread = await collaboration.listReviewEvents({ grantId: secondShared.grant.id, userId: noAccessUserId });
+  assert.deepEqual(ownerFirstThread.map((event) => event.id), firstGrantReviewEvents.map((event) => event.id));
+  assert.deepEqual(firstReviewerThread.map((event) => event.id), firstGrantReviewEvents.map((event) => event.id));
+  assert.deepEqual(ownerSecondThread.map((event) => event.id), [secondGrantComment.id, secondGrantResolved.id]);
+  assert.deepEqual(secondReviewerThread.map((event) => event.id), [secondGrantComment.id, secondGrantResolved.id]);
+  await assert.rejects(
+    collaboration.listReviewEvents({ grantId: secondShared.grant.id, userId: reviewerId }),
+    /File grant access denied/
+  );
+
+  const reviewCountBeforeCrossGrantAttempt = (await db.select().from(audioReviewEvents)).length;
+  const auditCountBeforeCrossGrantAttempt = (await db.select().from(auditEvents)).length;
+  await assert.rejects(
+    collaboration.addReviewEvent({
+      grantId: secondShared.grant.id,
+      userId: ownerId,
+      eventType: 'resolved',
+      supersedesEventId: comment.id
+    }),
+    /Superseded review event must belong to this file grant/,
+    'Cross-grant supersede must fail.'
+  );
+  await assert.rejects(
+    collaboration.addReviewEvent({
+      grantId: secondShared.grant.id,
+      userId: noAccessUserId,
+      eventType: 'comment',
+      body: 'Malformed supersede must fail.',
+      supersedesEventId: 'not-a-uuid'
+    }),
+    /supersedesEventId must be a UUID/
+  );
+  await assert.rejects(
+    collaboration.addReviewEvent({
+      grantId: secondShared.grant.id,
+      userId: noAccessUserId,
+      eventType: 'comment',
+      body: 'Unknown supersede must fail.',
+      supersedesEventId: randomUUID()
+    }),
+    /Superseded review event must belong to this file grant/
+  );
+  assert.equal((await db.select().from(audioReviewEvents)).length, reviewCountBeforeCrossGrantAttempt);
+  assert.equal((await db.select().from(auditEvents)).length, auditCountBeforeCrossGrantAttempt);
+
+  await db.insert(audioReviewEvents).values({
+    assetVersionId: version.id,
+    actorUserId: noAccessUserId,
+    eventType: 'comment',
+    body: 'Orphan row without a grant audit binding.'
+  });
+  assert.deepEqual(
+    (await collaboration.listReviewEvents({ grantId: secondShared.grant.id, userId: noAccessUserId }))
+      .map((event) => event.id),
+    [secondGrantComment.id, secondGrantResolved.id],
+    'Review rows without the exact durable grant audit binding must remain invisible.'
+  );
+  const secondCommentAudit = await db
+    .select()
+    .from(auditEvents)
+    .where(and(
+      eq(auditEvents.entityType, 'audio_review_event'),
+      eq(auditEvents.entityId, secondGrantComment.id)
+    ));
+  assert.equal(secondCommentAudit.length, 1, 'A successful review event must have exactly one grant audit binding.');
+  assert.equal(secondCommentAudit[0].metadata?.grantId, secondShared.grant.id);
+  assert.equal(secondCommentAudit[0].metadata?.versionId, version.id);
+
+  await db.execute(sql.raw(`
+    CREATE OR REPLACE FUNCTION sway_test_reject_review_audit()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $test$
+    BEGIN
+      IF NEW.entity_type = 'audio_review_event' THEN
+        RAISE EXCEPTION 'forced review audit failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $test$
+  `));
+  await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_review_audit_trigger ON audit_events'));
+  await db.execute(sql.raw(`
+    CREATE TRIGGER sway_test_reject_review_audit_trigger
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION sway_test_reject_review_audit()
+  `));
+  const reviewCountBeforeForcedAuditFailure = (await db.select().from(audioReviewEvents)).length;
+  const auditCountBeforeForcedAuditFailure = (await db.select().from(auditEvents)).length;
+  try {
+    await assert.rejects(
+      collaboration.addReviewEvent({
+        grantId: secondShared.grant.id,
+        userId: noAccessUserId,
+        eventType: 'comment',
+        body: 'The review insert must roll back with its failed audit.'
+      }),
+      (error) => {
+        assert.match(error?.cause?.message || '', /forced review audit failure/);
+        return true;
+      }
+    );
+  } finally {
+    await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_review_audit_trigger ON audit_events'));
+    await db.execute(sql.raw('DROP FUNCTION IF EXISTS sway_test_reject_review_audit()'));
+  }
+  assert.equal((await db.select().from(audioReviewEvents)).length, reviewCountBeforeForcedAuditFailure);
+  assert.equal((await db.select().from(auditEvents)).length, auditCountBeforeForcedAuditFailure);
+
+  await db.execute(sql.raw(`
+    CREATE OR REPLACE FUNCTION sway_test_reject_grant_revoke_audit()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $test$
+    BEGIN
+      IF NEW.event_type = 'audio_file_access.revoke' THEN
+        RAISE EXCEPTION 'forced grant revoke audit failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $test$
+  `));
+  await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_grant_revoke_audit_trigger ON audit_events'));
+  await db.execute(sql.raw(`
+    CREATE TRIGGER sway_test_reject_grant_revoke_audit_trigger
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION sway_test_reject_grant_revoke_audit()
+  `));
+  const revokeAuditWhere = and(
+    eq(auditEvents.entityType, 'audio_file_access_grant'),
+    eq(auditEvents.entityId, secondShared.grant.id),
+    eq(auditEvents.eventType, 'audio_file_access.revoke')
+  );
+  const revokeAuditCountBeforeForcedFailure = (await db.select().from(auditEvents).where(revokeAuditWhere)).length;
+  assert.equal(revokeAuditCountBeforeForcedFailure, 0);
+  try {
+    await assert.rejects(
+      collaboration.revokeGrant({
+        grantId: secondShared.grant.id,
+        userId: ownerId,
+        reason: 'This revoke must roll back with its failed audit.'
+      }),
+      (error) => {
+        assert.match(error?.cause?.message || '', /forced grant revoke audit failure/);
+        return true;
+      }
+    );
+  } finally {
+    await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_grant_revoke_audit_trigger ON audit_events'));
+    await db.execute(sql.raw('DROP FUNCTION IF EXISTS sway_test_reject_grant_revoke_audit()'));
+  }
+  const [grantAfterForcedRevokeAuditFailure] = await db
+    .select({
+      revokedAt: audioFileAccessGrants.revokedAt,
+      revokedByUserId: audioFileAccessGrants.revokedByUserId,
+      revocationReason: audioFileAccessGrants.revocationReason
+    })
+    .from(audioFileAccessGrants)
+    .where(eq(audioFileAccessGrants.id, secondShared.grant.id))
+    .limit(1);
+  assert.ok(grantAfterForcedRevokeAuditFailure, 'The rollback proof grant must still exist.');
+  assert.equal(grantAfterForcedRevokeAuditFailure.revokedAt, null, 'Failed revoke audit must roll back revokedAt.');
+  assert.equal(grantAfterForcedRevokeAuditFailure.revokedByUserId, null, 'Failed revoke audit must roll back revokedByUserId.');
+  assert.equal(grantAfterForcedRevokeAuditFailure.revocationReason, null, 'Failed revoke audit must roll back its reason.');
+  assert.equal(
+    (await db.select().from(auditEvents).where(revokeAuditWhere)).length,
+    revokeAuditCountBeforeForcedFailure,
+    'Failed revoke audit must leave no durable revoke audit row.'
+  );
+  assert.ok(
+    (await collaboration.listSharedByMe({ userId: ownerId }))
+      .some((file) => file.grantId === secondShared.grant.id),
+    'The rolled-back grant must remain active and visible to its grantor.'
+  );
+  await collaboration.revokeGrant({
+    grantId: secondShared.grant.id,
+    userId: ownerId,
+    reason: 'Second grant isolation proof complete.'
+  });
 
   const downloaded = await collaboration.downloadGrantedOriginal({ grantId: shared.grant.id, userId: reviewerId });
   assert.equal(downloaded.byteSize, body.byteLength);
@@ -787,6 +1018,11 @@ try {
     grantedByUserId: ownerId
   });
   assert.equal(reshared.reused, false);
+  assert.deepEqual(
+    await collaboration.listReviewEvents({ grantId: reshared.grant.id, userId: ownerId }),
+    [],
+    'Revoking and re-sharing the same immutable version must begin a new empty review thread.'
+  );
   const pairing = createAudioFilePairingService({ db });
   await pairing.revokeConnection({ userId: reviewerId, connectionId: connection.id, reason: 'Connection proof complete.' });
   await assert.rejects(
@@ -838,6 +1074,30 @@ try {
       `${eventType} must be emitted exactly once per successful manifest mutation.`
     );
   }
+  for (const [eventType, expectedActorType] of [
+    ['audio_file_access.share', 'performer'],
+    ['audio_file_access.download', 'account'],
+    ['audio_review.approved', 'account'],
+    ['audio_review.resolved', 'account'],
+    ['audio_file_access.revoke', 'account'],
+    ['audio_file_pairing.connection_revoked', 'account']
+  ]) {
+    const matchingEvents = collaborationAudit.filter((event) => event.eventType === eventType);
+    assert.ok(matchingEvents.length > 0, `Missing actor-attribution proof for ${eventType}.`);
+    assert.ok(
+      matchingEvents.every((event) => event.actorType === expectedActorType),
+      `${eventType} must identify its actor as ${expectedActorType}.`
+    );
+  }
+  const reviewCommentActorTypes = collaborationAudit
+    .filter((event) => event.eventType === 'audio_review.comment')
+    .map((event) => event.actorType);
+  assert.ok(reviewCommentActorTypes.includes('account'), 'New review comments must use account attribution.');
+  assert.ok(reviewCommentActorTypes.includes('performer'), 'Legacy performer-attributed review comments must remain readable.');
+  assert.ok(
+    reviewCommentActorTypes.every((actorType) => actorType === 'account' || actorType === 'performer'),
+    'Review comment attribution must remain within the supported account and legacy performer values.'
+  );
   for (const eventType of [
     'music_rights_declaration.evidence_access',
     'music_rights_declaration.verified',
@@ -849,8 +1109,9 @@ try {
     );
   }
 
-  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, and exact audit behavior are durable.');
+  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, grant-isolated review threads, audit rollback, and exact audit behavior are durable.');
 } finally {
-  await db.$client.end();
+  if (embeddedProof) await embeddedProof.close();
+  else await db.$client.end();
   rmSync(objectRoot, { recursive: true, force: true });
 }

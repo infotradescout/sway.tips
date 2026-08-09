@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import {
   audioFileAccessGrants,
@@ -20,8 +20,16 @@ const REVIEW_EVENT_TYPES = [
   'approval_withdrawn',
   'resolved'
 ] as const;
+const REVIEW_AUDIT_EVENT_TYPES = REVIEW_EVENT_TYPES.map((eventType) => `audio_review.${eventType}`);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ReviewEventType = typeof REVIEW_EVENT_TYPES[number];
+type ReviewGrantScope = {
+  id: string;
+  assetVersionId: string;
+  grantedByUserId: string;
+  granteeUserId: string;
+};
 
 function isReviewEventType(value: unknown): value is ReviewEventType {
   return typeof value === 'string' && REVIEW_EVENT_TYPES.includes(value as ReviewEventType);
@@ -45,6 +53,29 @@ function isConnectionMember(
   return connection.memberOneUserId === userId || connection.memberTwoUserId === userId;
 }
 
+function reviewAuditBindingWhere(grant: ReviewGrantScope) {
+  return and(
+    eq(auditEvents.entityType, 'audio_review_event'),
+    eq(auditEvents.entityId, audioReviewEvents.id),
+    eq(auditEvents.actorId, audioReviewEvents.actorUserId),
+    inArray(auditEvents.eventType, REVIEW_AUDIT_EVENT_TYPES),
+    sql`${auditEvents.eventType} = ('audio_review.' || ${audioReviewEvents.eventType})`,
+    sql`${auditEvents.metadata}->>'grantId' = ${grant.id}`,
+    sql`${auditEvents.metadata}->>'versionId' = ${grant.assetVersionId}`
+  );
+}
+
+function reviewEventGrantWhere(grant: ReviewGrantScope) {
+  return and(
+    eq(audioReviewEvents.assetVersionId, grant.assetVersionId),
+    inArray(audioReviewEvents.eventType, REVIEW_EVENT_TYPES.map((eventType) => eventType)),
+    or(
+      eq(audioReviewEvents.actorUserId, grant.granteeUserId),
+      eq(audioReviewEvents.actorUserId, grant.grantedByUserId)
+    )
+  );
+}
+
 async function writeAudit(
   db: SwayDb,
   input: {
@@ -56,7 +87,7 @@ async function writeAudit(
   }
 ) {
   await db.insert(auditEvents).values({
-    actorType: 'performer',
+    actorType: 'account',
     actorId: input.actorId,
     entityType: input.entityType,
     entityId: input.entityId,
@@ -309,7 +340,7 @@ export function createAudioFileCollaborationService(config: {
   async function listReviewEvents(input: { grantId: string; userId: string }) {
     const grant = await requireActiveGrantForUser(input.grantId, input.userId);
     return db
-      .select({
+      .selectDistinct({
         id: audioReviewEvents.id,
         actorUserId: audioReviewEvents.actorUserId,
         eventType: audioReviewEvents.eventType,
@@ -319,8 +350,9 @@ export function createAudioFileCollaborationService(config: {
         createdAt: audioReviewEvents.createdAt
       })
       .from(audioReviewEvents)
-      .where(eq(audioReviewEvents.assetVersionId, grant.assetVersionId))
-      .orderBy(asc(audioReviewEvents.createdAt));
+      .innerJoin(auditEvents, reviewAuditBindingWhere(grant))
+      .where(reviewEventGrantWhere(grant))
+      .orderBy(asc(audioReviewEvents.createdAt), asc(audioReviewEvents.id));
   }
 
   async function addReviewEvent(input: {
@@ -332,73 +364,105 @@ export function createAudioFileCollaborationService(config: {
     supersedesEventId?: unknown;
   }) {
     const grant = await requireActiveGrantForUser(input.grantId, input.userId);
-    if (!isReviewEventType(input.eventType)) {
+    const eventType = input.eventType;
+    if (!isReviewEventType(eventType)) {
       throw Object.assign(new Error('Unsupported review event type.'), { status: 422 });
     }
 
     const isGrantee = grant.granteeUserId === input.userId;
-    if (input.eventType === 'resolved') {
+    if (eventType === 'resolved') {
       if (grant.grantedByUserId !== input.userId) {
         throw Object.assign(new Error('Only the file owner can resolve review items.'), { status: 403 });
       }
     } else if (!isGrantee) {
       throw Object.assign(new Error('Only the selected reviewer can submit this review event.'), { status: 403 });
-    } else if ((input.eventType === 'approved' || input.eventType === 'approval_withdrawn') && !grant.canApprove) {
+    } else if ((eventType === 'approved' || eventType === 'approval_withdrawn') && !grant.canApprove) {
       throw Object.assign(new Error('Approval permission required.'), { status: 403 });
-    } else if ((input.eventType === 'comment' || input.eventType === 'changes_requested') && !grant.canComment) {
+    } else if ((eventType === 'comment' || eventType === 'changes_requested') && !grant.canComment) {
       throw Object.assign(new Error('Comment permission required.'), { status: 403 });
     }
 
     const body = typeof input.body === 'string' ? input.body.trim().slice(0, 4000) : '';
-    if ((input.eventType === 'comment' || input.eventType === 'changes_requested') && !body) {
+    if ((eventType === 'comment' || eventType === 'changes_requested') && !body) {
       throw Object.assign(new Error('Review text is required.'), { status: 422 });
     }
     const timecodeMs = input.timecodeMs == null ? null : Number(input.timecodeMs);
     if (timecodeMs != null && (!Number.isInteger(timecodeMs) || timecodeMs < 0)) {
       throw Object.assign(new Error('timecodeMs must be a non-negative integer.'), { status: 422 });
     }
-    const supersedesEventId = typeof input.supersedesEventId === 'string' && input.supersedesEventId
-      ? input.supersedesEventId
-      : null;
+    const rawSupersedesEventId = input.supersedesEventId;
+    if (rawSupersedesEventId != null
+      && (typeof rawSupersedesEventId !== 'string' || !UUID_PATTERN.test(rawSupersedesEventId))) {
+      throw Object.assign(new Error('supersedesEventId must be a UUID.'), { status: 422 });
+    }
+    const supersedesEventId = typeof rawSupersedesEventId === 'string' ? rawSupersedesEventId : null;
+    if (eventType === 'resolved' && !supersedesEventId) {
+      throw Object.assign(new Error('Resolved review events must reference the item they resolve.'), { status: 422 });
+    }
 
-    const [event] = await db.insert(audioReviewEvents).values({
-      assetVersionId: grant.assetVersionId,
-      actorUserId: input.userId,
-      eventType: input.eventType,
-      timecodeMs,
-      body: body || null,
-      supersedesEventId
-    }).returning();
-    await writeAudit(db, {
-      actorId: input.userId,
-      entityType: 'audio_review_event',
-      entityId: event.id,
-      eventType: `audio_review.${input.eventType}`,
-      metadata: { grantId: grant.id, versionId: grant.assetVersionId }
+    return db.transaction(async (tx) => {
+      if (supersedesEventId) {
+        const [supersededEvent] = await tx
+          .select({ id: audioReviewEvents.id })
+          .from(audioReviewEvents)
+          .innerJoin(auditEvents, reviewAuditBindingWhere(grant))
+          .where(and(
+            reviewEventGrantWhere(grant),
+            eq(audioReviewEvents.id, supersedesEventId)
+          ))
+          .limit(1);
+        if (!supersededEvent) {
+          throw Object.assign(new Error('Superseded review event must belong to this file grant.'), { status: 422 });
+        }
+      }
+
+      const [event] = await tx.insert(audioReviewEvents).values({
+        assetVersionId: grant.assetVersionId,
+        actorUserId: input.userId,
+        eventType,
+        timecodeMs,
+        body: body || null,
+        supersedesEventId
+      }).returning();
+      await tx.insert(auditEvents).values({
+        actorType: 'account',
+        actorId: input.userId,
+        entityType: 'audio_review_event',
+        entityId: event.id,
+        eventType: `audio_review.${eventType}`,
+        previousStatus: null,
+        nextStatus: null,
+        metadata: { grantId: grant.id, versionId: grant.assetVersionId }
+      });
+      return event;
     });
-    return event;
   }
 
   async function revokeGrant(input: { grantId: string; userId: string; reason?: string | null }) {
     const grant = await requireActiveGrantForUser(input.grantId, input.userId);
-    const [revoked] = await db
-      .update(audioFileAccessGrants)
-      .set({
-        revokedAt: new Date(),
-        revokedByUserId: input.userId,
-        revocationReason: input.reason?.trim().slice(0, 240) || null
-      })
-      .where(activeGrantWhere(grant.id))
-      .returning();
-    if (!revoked) throw Object.assign(new Error('Active file grant required.'), { status: 410 });
-    await writeAudit(db, {
-      actorId: input.userId,
-      entityType: 'audio_file_access_grant',
-      entityId: revoked.id,
-      eventType: 'audio_file_access.revoke',
-      metadata: { reason: revoked.revocationReason }
+    return db.transaction(async (tx) => {
+      const [revoked] = await tx
+        .update(audioFileAccessGrants)
+        .set({
+          revokedAt: new Date(),
+          revokedByUserId: input.userId,
+          revocationReason: input.reason?.trim().slice(0, 240) || null
+        })
+        .where(activeGrantWhere(grant.id))
+        .returning();
+      if (!revoked) throw Object.assign(new Error('Active file grant required.'), { status: 410 });
+      await tx.insert(auditEvents).values({
+        actorType: 'account',
+        actorId: input.userId,
+        entityType: 'audio_file_access_grant',
+        entityId: revoked.id,
+        eventType: 'audio_file_access.revoke',
+        previousStatus: null,
+        nextStatus: null,
+        metadata: { reason: revoked.revocationReason }
+      });
+      return { grantId: revoked.id, revokedAt: revoked.revokedAt!.toISOString() };
     });
-    return { grantId: revoked.id, revokedAt: revoked.revokedAt!.toISOString() };
   }
 
   return {

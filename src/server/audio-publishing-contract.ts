@@ -266,7 +266,7 @@ export const AUDIO_FILE_CONNECTION_QR_CONTRACT = {
   tokenUse: 'single_use_pairing',
   connectionLifetime: 'persistent_until_revoked',
   claimAuthentication: 'authenticated_user_required',
-  pairingPath: '/talent/connect/files',
+  pairingPath: '/account/collaboration/connect',
   claimSecretGeneration: 'client_web_crypto_256_bit',
   claimSecretTransport: 'url_fragment_then_authenticated_post_body',
   claimSecretHashAtRest: 'sha256_lowercase_hex',

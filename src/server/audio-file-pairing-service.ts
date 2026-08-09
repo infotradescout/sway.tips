@@ -78,6 +78,7 @@ function isPairingPurpose(value: unknown): value is AudioFilePairingPurpose {
 async function writeAudit(
   db: SwayDb,
   input: {
+    actorType?: 'performer' | 'account';
     actorId: string;
     entityType: string;
     entityId: string;
@@ -86,7 +87,7 @@ async function writeAudit(
   }
 ) {
   await db.insert(auditEvents).values({
-    actorType: 'performer',
+    actorType: input.actorType ?? 'performer',
     actorId: input.actorId,
     entityType: input.entityType,
     entityId: input.entityId,
@@ -328,7 +329,7 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
         }
 
         await tx.insert(auditEvents).values({
-          actorType: 'performer',
+          actorType: 'account',
           actorId: input.claimingUserId,
           entityType: 'audio_file_connection',
           entityId: connection.id,
@@ -360,6 +361,7 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
       const denial = error as PairingClaimDenial;
       if (denial.pairingTokenId) {
         await writeAudit(db, {
+          actorType: 'account',
           actorId: input.claimingUserId,
           entityType: 'audio_file_pairing_token',
           entityId: denial.pairingTokenId,
@@ -456,7 +458,7 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
         metadata: { reason: revoked.revocationReason }
       });
       await tx.insert(auditEvents).values({
-        actorType: 'performer',
+        actorType: 'account',
         actorId: input.userId,
         entityType: 'audio_file_connection',
         entityId: revoked.id,

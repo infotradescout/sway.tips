@@ -67,7 +67,7 @@ export default function PerformerFilePairing() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not create pairing QR.');
 
-      const pairingPath = typeof data.pairingPath === 'string' ? data.pairingPath : '/talent/connect/files';
+      const pairingPath = typeof data.pairingPath === 'string' ? data.pairingPath : '/account/collaboration/connect';
       const url = `${window.location.origin}${pairingPath}#token=${encodeURIComponent(token)}`;
       setQrUrl(url);
       setExpiresAt(typeof data.expiresAt === 'string' ? data.expiresAt : null);

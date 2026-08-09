@@ -149,6 +149,8 @@ async function main() {
   assert.equal(resolvePerformerLoginRedirectPath('https://evil.com'), '/talent', 'External redirect URLs must be ignored.');
   assert.equal(resolvePerformerLoginRedirectPath('/talent/gigs?room=1'), '/talent/gigs?room=1', 'Allowlisted internal talent redirects may pass through.');
   assert.equal(resolvePerformerLoginRedirectPath('/talent/login'), '/talent/login', 'Talent login redirect path must remain local.');
+  assert.equal(resolvePerformerLoginRedirectPath('/talent/connect/files#token=secret'), '/talent', 'Performer redirects must reject secret-bearing URL fragments.');
+  assert.equal(resolvePerformerLoginRedirectPath('/talent-impersonator'), '/talent', 'Performer redirects must enforce a path boundary.');
   assert.equal(resolvePerformerLoginBaseUrl({ SWAY_APP_BASE_URL: 'https://app.sway.tips', APP_URL: 'https://fallback.sway.tips' }), 'https://app.sway.tips');
   assert.equal(resolvePerformerLoginBaseUrl({ PORT: '4899' }), 'http://localhost:4899', 'Local performer email links must follow the active server port.');
 

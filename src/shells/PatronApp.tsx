@@ -37,6 +37,9 @@ import TicketOrderReturnPage from '../components/TicketOrderReturnPage';
 import TicketPassPage from '../components/TicketPassPage';
 import TicketWalletPage from '../components/TicketWalletPage';
 import { LIVE_ROOM_ACTION_LIST, LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import CollaboratorInbox from '../components/CollaboratorInbox';
+import FileConnectCard from '../components/FileConnectCard';
+import { FILE_COLLABORATION_PATHS } from '../file-collaboration-routing';
 
 type PatronRoute =
   | { name: 'patron-gig'; gigId: string }
@@ -48,6 +51,8 @@ type PatronRoute =
   | { name: 'ticket-order-return'; orderId: string }
   | { name: 'ticket-pass'; ticketId: string }
   | { name: 'account-home' }
+  | { name: 'account-collaboration' }
+  | { name: 'account-collaboration-connect' }
   | { name: 'account-rights-review' }
   | { name: 'account-login' }
   | { name: 'account-signup' }
@@ -62,6 +67,8 @@ function resolvePatronRoute(pathname: string): PatronRoute {
   if (pathname === '/account/recover') return { name: 'account-recover' };
   if (pathname === '/account/resend-verification') return { name: 'account-resend-verification' };
   if (pathname === '/account/password-reset') return { name: 'account-password-reset' };
+  if (pathname === FILE_COLLABORATION_PATHS.connect) return { name: 'account-collaboration-connect' };
+  if (pathname === FILE_COLLABORATION_PATHS.inbox) return { name: 'account-collaboration' };
   if (pathname === '/account/reviews') return { name: 'account-rights-review' };
   if (pathname === '/account') return { name: 'account-home' };
   if (pathname === '/tickets') return { name: 'ticket-wallet' };
@@ -505,6 +512,8 @@ export default function PatronApp() {
   if (route.name === 'account-recover') return <AccountRecovery kind="password" />;
   if (route.name === 'account-resend-verification') return <AccountRecovery kind="verification" />;
   if (route.name === 'account-password-reset') return <TalentInviteAcceptCard />;
+  if (route.name === 'account-collaboration-connect') return <FileConnectCard />;
+  if (route.name === 'account-collaboration') return <CollaboratorInbox />;
   if (route.name === 'account-rights-review') return <PerformerRightsReviewQueue backHref="/account" backLabel="Back to account" />;
   if (route.name === 'account-home') return <AccountHome />;
 

@@ -1,14 +1,15 @@
 # Sway Audio Publishing Foundation
 
 Date: 2026-07-18
+Updated: 2026-08-09
 
 ## Decision
 
-Sway will build an audio publishing and collaboration foundation for musicians, producers, engineers, comedians, podcasters, and other audio creators. The first slice defines how original files must be preserved, records project-scoped access and rights evidence, models release delivery and catalog transfers, and defines a fail-closed Continuum connector.
+Sway is building an audio publishing and collaboration foundation for musicians, producers, engineers, comedians, podcasters, and other audio creators. The foundation defines how original files must be preserved, records project-scoped access and rights evidence, models release delivery and catalog transfers, and defines a fail-closed Continuum connector.
 
-This is a schema-and-contract slice with Slice 1 upload/share runtime and live file-pairing QR routes. It does **not** make DistroKid/DSP cutover, playback, creator-deal execution, store delivery, sales, or royalties live. Capability flags stay false until each remaining capability has durable implementation and production evidence.
+The current implementation includes private original-file storage and upload foundations, one-time file-pairing claims, explicit selected-version share grants, exact-original download, grant-scoped review actions, revocation, and a universal account Collaborator Inbox. It does **not** make DistroKid/DSP cutover, public playback, creator-deal execution, store delivery, sales, or royalties live. Capability flags stay false until each remaining capability has durable implementation and production evidence.
 
-Sway still has two public sides: performer and customer. Producer, engineer, collaborator, and reviewer are private project-scoped roles on the performer side, not a third public side.
+Sway still has two public sides: performer and customer. Producer, engineer, collaborator, and reviewer remain private collaboration roles, not a third public side. A collaborator may use the same authenticated Sway account without activating Pro Mode; performer authority is still required to create pairing tokens and share creator-owned files.
 
 ## Product Truth
 
@@ -45,17 +46,17 @@ The required file-pairing QR flow is separate from Sway's static room QR. Privat
 | QR | Scope | Reuse | Result |
 | --- | --- | --- | --- |
 | Room QR | Public `/g/{gigId}` live room | Reusable while that room is shared | Opens Request, Tip, and Boost |
-| Request-files QR | Private account pairing | Token may be claimed once | Will connect the scanner so they can send files to the creator |
-| Send-files QR | Private account pairing | Token may be claimed once | Will connect the scanner so the creator can send files to them |
+| Request-files QR | Private account pairing | Token may be claimed once | Records that the creator is requesting files; it does not grant the scanner Catalog upload/share authority |
+| Send-files QR | Private account pairing | Token may be claimed once | Records that the creator intends to share selected files with the scanner; pairing itself transfers nothing |
 
-The one-time rule will apply to the QR claim, not to the resulting connection. A successful future claim will create a private connection that remains available until either participant removes it. It will not be tied to a gig or room. The pairing purpose will record the immediate request/send intent; after pairing, either participant may initiate an explicit file request or share through that connection. A file connection must not silently grant access to every project, asset, master, or release; each share or project grant will remain explicit and least-privileged.
+The one-time rule applies to the QR claim, not to the resulting connection. A successful claim creates a private connection that remains available until either participant removes it. It is not tied to a gig or room. The pairing purpose records request/send direction as provenance only. It does not let an ordinary account upload or send from a creator Catalog; each later selected-file share requires performer authority and remains an explicit action. A file connection does not grant access to every project, asset, master, or release; each share or project grant remains explicit and least-privileged.
 
 Required pairing behavior:
 
 1. The creator chooses `request_files` or `send_files`.
 2. The authenticated client creates a 256-bit secret with Web Crypto, submits only its SHA-256 hash plus a client request ID, and retains the raw secret only long enough to render the short-lived QR. The server never stores or echoes the raw claim secret.
-3. The QR uses the dedicated `/talent/connect/files#token={opaque-token}` path, with the opaque token in its URL fragment, separate from the static `/g/{gigId}` room path. The fragment is not sent automatically in the HTTP request or referrer; after authentication and confirmation, the client submits the token in an authenticated POST body. The URL contains no email address, storage key, project secret, or room identifier.
-4. The authenticated scanner sees the creator identity, pairing purpose, and direction before confirming.
+3. The QR uses the dedicated `/account/collaboration/connect#token={opaque-token}` path, with the opaque token in its URL fragment, separate from the static `/g/{gigId}` room path. The fragment is not sent automatically in the HTTP request or referrer; after authentication and confirmation, the client submits the token in an authenticated POST body. The URL contains no email address, storage key, project secret, or room identifier.
+4. The authenticated scanner sees the signed-in account display name or email, the creator identity, pairing purpose, and direction before confirming.
 5. The server must atomically claim the unused token and create the connection or return the already-active connection for the same two people. A previously removed connection must never be silently restored.
 6. The claim fails closed if the token is expired, consumed, revoked, malformed, or scanned by its creator.
 7. Token creation, claim, replay denial, connection creation, and revocation are auditable events.
@@ -64,20 +65,28 @@ Required connection behavior:
 
 - a connection identifies both user accounts and records who initiated it;
 - the pairing purpose is retained as connection provenance and does not itself transfer a file;
-- each later request or send is an explicit, authorized, auditable action;
+- each later selected-file share, review, or revocation is an explicit, authorized, auditable action;
 - either participant can revoke the connection immediately;
 - revocation blocks new sends and requests but does not delete immutable transfer/audit evidence;
 - reconnecting requires a new one-time pairing token;
 - room membership, performer profile visibility, and file connection status never imply one another;
 - unauthenticated scanners may be asked to sign in, but token consumption occurs only after authentication and confirmation.
 
-`audio_file_connections`, pairing-token records, and append-only connection events will be the durable pairing boundary. The UI QR will only transport the one-time claim secret and must never become an authorization boundary by itself.
+`audio_file_connections`, pairing-token records, and append-only connection events are the durable pairing boundary. The UI QR only transports the one-time claim secret and never becomes an authorization boundary by itself.
 
 ### Selected-file access after pairing
 
-Pairing alone will grant no project or file access. When one connected person shares a file in the future runtime, Sway must create an `audio_file_access_grants` record for one selected immutable asset version and one grantee. The grant must record preview, exact-original download, and new-version upload permissions independently, and it may be expired or revoked.
+Pairing alone grants no project or file access. In the current selected-file runtime, a performer-authorized creator can share one immutable asset version with one connected account. Sway creates an `audio_file_access_grants` record for that version and grantee. The grant records its permissions independently and may expire or be revoked; the Collaborator Inbox exposes exact-original download, review notes/change requests, and approval only when the corresponding grant permission allows the action.
 
 Sharing references the selected version's existing storage identity and SHA-256 digest. It does not copy, relocate, rename, or transcode the original object. Revoking access removes the recipient's authorization without deleting the original or its audit evidence. Sharing a project, a different version, or another file requires its own explicit grant.
+
+### Universal Collaborator Inbox
+
+`/account/collaboration` is the authenticated Collaborator Inbox for any Sway account; it does not require a performer profile, Pro Mode, payout readiness, or an active live room. It lists the account's private connections plus files shared with and by that account. Within an active grant, the UI and server enforce the selected download, comment/change-request, and approval permissions. Pairing does not add a Catalog or send control for an ordinary account. Either participant can remove a connection, and an authorized grant participant can revoke selected-file access. Review history is scoped to the selected grant rather than inferred from the asset version alone.
+
+`/account/collaboration/connect` is the canonical pairing-claim route. Its ready confirmation names the signed-in account by display name or email before that account irreversibly consumes the one-time claim. The legacy `/talent/connect/files` entry performs a client-side replacement so the private fragment survives without moving into a query string. An unauthenticated scanner uses `/account/login?next=/account/collaboration/connect` while the raw token remains only in the URL fragment; account creation requires verification followed by a fresh scan rather than persisting the secret in a query, log, email link, or browser storage.
+
+This inbox slice reuses the existing connection, pairing-token, selected-file grant, review-event, and audit boundaries. It adds account-universal routing, authorization, and UI; it introduces no new schema or migration and no distribution fee, sale, royalty, payout, Stripe, or live-room money behavior.
 
 ## Catalog Transfer Contract
 
@@ -201,8 +210,8 @@ Sway's existing live-room revenue and future merch fulfillment, ticketed shows, 
 1. Apply and verify the schema in a non-production database.
 2. Select private versioned object storage and define retention, encryption, malware scanning, and restore behavior.
 3. Build authenticated project access plus resumable upload and exact-byte download routes.
-4. Build one-time request/send pairing claims and revocable private file connections. (live for connection create/claim/revoke; selected-file grants after pairing still pending)
-5. Build immutable version, derivative, review, and approval workflows.
+4. Build one-time request/send pairing claims, revocable private file connections, and explicit selected-version shares. (implemented in the current runtime and universal Collaborator Inbox)
+5. Continue the broader immutable-version and derivative workflows. Selected-file download, grant-scoped review/approval, and revocation are implemented; collaborator revision upload and wider project workflows remain incomplete.
 6. Build rights declarations, immutable creator-deal versions, authenticated acceptance evidence, and release-readiness checks after legal review.
 7. Build catalog intake, parity comparison, transition enforcement, overlap verification, and artist cutover approval.
 8. Contract with and integrate one external delivery provider.

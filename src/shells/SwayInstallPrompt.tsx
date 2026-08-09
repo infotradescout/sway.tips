@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Smartphone, X } from 'lucide-react';
 import { isMetaInAppBrowser } from '../browserEnvironment';
+import { FILE_COLLABORATION_PATHS } from '../file-collaboration-routing';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -21,29 +22,39 @@ function isiPhoneOrIPad() {
 
 const INSTALL_DISMISS_KEY = 'sway.installPromptDismissed.v2';
 
+export function isInstallPromptSuppressedRoute(pathname: string, search: string) {
+  const nextValues = new URLSearchParams(search).getAll('next');
+  const accountNext = nextValues.length === 1 ? nextValues[0] : '';
+  const ticketCheckoutRecovery = (
+    pathname === '/account/login'
+    || pathname === '/account/signup'
+  ) && (
+    accountNext.startsWith('/e/')
+    || accountNext.startsWith('/tickets')
+  );
+  const fileConnectLogin = pathname === '/account/login'
+    && accountNext === FILE_COLLABORATION_PATHS.connect;
+
+  return pathname.startsWith('/overlay')
+    || pathname.startsWith('/admin')
+    || pathname.startsWith('/talent')
+    || pathname.startsWith('/tickets')
+    || pathname.startsWith('/e/')
+    || pathname === FILE_COLLABORATION_PATHS.inbox
+    || pathname === FILE_COLLABORATION_PATHS.connect
+    || ticketCheckoutRecovery
+    || fileConnectLogin;
+}
+
 export default function SwayInstallPrompt() {
   const [metaInAppBrowser] = useState(() => isMetaInAppBrowser());
   const [suppressedRoute] = useState(() => {
     if (typeof window === 'undefined') return true;
-    const pathname = window.location.pathname;
     // The entire performer surface (setup, live cockpit) is suppressed, not just
     // login/signup: a fixed-position install nag interrupts and visually overlaps
     // the room-setup form before a performer has created a single room, i.e.
     // before they've gotten any value from the app yet.
-    const accountNext = new URLSearchParams(window.location.search).get('next') || '';
-    const ticketCheckoutRecovery = (
-      pathname === '/account/login'
-      || pathname === '/account/signup'
-    ) && (
-      accountNext.startsWith('/e/')
-      || accountNext.startsWith('/tickets')
-    );
-    return pathname.startsWith('/overlay')
-      || pathname.startsWith('/admin')
-      || pathname.startsWith('/talent')
-      || pathname.startsWith('/tickets')
-      || pathname.startsWith('/e/')
-      || ticketCheckoutRecovery;
+    return isInstallPromptSuppressedRoute(window.location.pathname, window.location.search);
   });
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {
