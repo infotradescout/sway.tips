@@ -17,6 +17,7 @@ const idempotencyStoreSource = readFileSync(join(root, 'src/server/idempotency-s
 const operationStoreSource = readFileSync(join(root, 'src/server/live-room-payment-operation-store.ts'), 'utf8');
 const paymentProviderSource = readFileSync(join(root, 'src/server/payment-provider.ts'), 'utf8');
 const paymentServiceSource = readFileSync(join(root, 'src/server/payment-service.ts'), 'utf8');
+const sellerReadinessSource = readFileSync(join(root, 'src/server/live-room-seller-readiness.ts'), 'utf8');
 const paymentWebhookSource = readFileSync(join(root, 'src/server/payment-webhook.ts'), 'utf8');
 const paymentLifecycleSource = readFileSync(join(root, 'src/server/payment-lifecycle.ts'), 'utf8');
 const publicRoomStateSource = readFileSync(join(root, 'src/server/public-room-state.ts'), 'utf8');
@@ -126,7 +127,13 @@ assert.match(
 assert.match(renderConfigSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED[\s\S]+value: "false"/);
 assert.match(operationStoreSource, /ne\(liveRoomPaymentOperations\.id, operation\.id\)/);
 assert.match(operationStoreSource, /gt\(liveRoomPaymentOperations\.leaseExpiresAt, now\)/);
-assert.match(paymentServiceSource, /reverseTransfer: true,[\s\S]+refundApplicationFee: true/);
+assert.match(paymentServiceSource, /reverseConnectedTransfer = !isSwayTestPlatformBalanceDestination/);
+assert.match(paymentServiceSource, /reverseTransfer: reverseConnectedTransfer,[\s\S]+refundApplicationFee: reverseConnectedTransfer/);
+assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : operation\.destinationAccountId/);
+assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : payment\.platformFee/);
+assert.match(sellerReadinessSource, /baseEligible && input\.allowTestPlatformBalance/);
+assert.match(serverSource, /testModePlatformBalanceEnabled = resolveTestModePlatformBalanceEnabled/);
+assert.match(sellerReadinessSource, /input\.paymentMode === 'test'/);
 assert.match(paymentWebhookSource, /ignored_out_of_order'[\s\S]+retry after predecessor state/);
 assert.match(paymentWebhookSource, /\{ terminal: true \}/);
 

@@ -25,6 +25,7 @@ export function createDeterministicPaymentProvider() {
     retrieve: 0,
     void: 0,
     uniqueAuthorizations: 0,
+    lastAuthorizeInput: null as ProviderAuthorizeInput | null,
     lastRefundInput: null as ProviderRefundInput | null
   };
   let sequence = 0;
@@ -74,6 +75,7 @@ export function createDeterministicPaymentProvider() {
 
     async authorizePayment(input: ProviderAuthorizeInput) {
       calls.authorize += 1;
+      calls.lastAuthorizeInput = input;
       const existingId = intentIdByKey.get(input.idempotencyKey);
       let intent = existingId ? requireIntent(existingId) : null;
       if (!intent) {

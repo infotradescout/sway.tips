@@ -34,6 +34,10 @@ import {
   type SettleResult
 } from "./src/server/payment-service";
 import { resolveProposedPlatformFee } from "./src/server/fee-policy";
+import {
+  resolveLiveRoomSellerMoneyReadiness,
+  resolveTestModePlatformBalanceEnabled
+} from "./src/server/live-room-seller-readiness";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
@@ -308,16 +312,21 @@ const performerLoginMailer = createPerformerLoginMailer({
   isProduction
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
-const paymentService = createPaymentService({
-  databaseUrl: process.env.DATABASE_URL,
-  provider: paymentProvider
-});
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
   paymentProviderConfigured: Boolean(paymentProvider),
   stripeConnectConfigured: Boolean(stripeConnectService),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
+});
+const testModePlatformBalanceEnabled = resolveTestModePlatformBalanceEnabled({
+  paymentMode: liveRoomPaymentRuntimeConfig.mode,
+  configuredValue: process.env.SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED
+});
+const paymentService = createPaymentService({
+  databaseUrl: process.env.DATABASE_URL,
+  provider: paymentProvider,
+  allowTestPlatformBalance: testModePlatformBalanceEnabled
 });
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({
@@ -3734,14 +3743,16 @@ app.get('/api/payment/config', (_req, res) => {
           ? 'Stripe publishable and secret keys must both be test or both be live.'
           : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
-      liveRoomMoneyEnabled: false
+      liveRoomMoneyEnabled: false,
+      testModePlatformBalanceEnabled: false
     });
   }
 
   return res.json({
     publishableKey: liveRoomPaymentRuntimeConfig.publishableKey,
     mode: liveRoomPaymentRuntimeConfig.mode,
-    liveRoomMoneyEnabled: true
+    liveRoomMoneyEnabled: true,
+    testModePlatformBalanceEnabled
   });
 });
 
@@ -11650,18 +11661,12 @@ app.post("/api/session/start", async (req, res) => {
         payoutHoldReason: performers.payoutHoldReason
       }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
-  const sellerPayoutReady = Boolean(
-    seller?.isActive
-    && seller.onboardingStatus !== 'suspended'
-    && seller.paymentAccountStatus === 'payouts_enabled'
-    && ['not_required', 'verified'].includes(seller.kycStatus)
-    && seller.chargesEnabled
-    && seller.payoutsEnabled
-    && seller.stripeConnectedAccountId?.trim()
-    && !seller.payoutHoldReason
-  );
+  const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
+    seller,
+    allowTestPlatformBalance: testModePlatformBalanceEnabled
+  });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
-  if (requestedPaymentsEnabled && !sellerPayoutReady) {
+  if (requestedPaymentsEnabled && !sellerMoneyReadiness.ready) {
     return res.status(409).json({
       error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
       code: 'seller_payout_not_ready'
@@ -11695,8 +11700,8 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: requestedRoomConfig.searchScope,
-    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerPayoutReady,
-    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerPayoutReady,
+    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
+    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -11990,17 +11995,11 @@ app.post("/api/session/payments-enabled", async (req, res) => {
           payoutHoldReason: performers.payoutHoldReason
         }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
       : [];
-    const payoutReady = Boolean(
-      seller?.isActive
-      && seller.onboardingStatus !== 'suspended'
-      && seller.paymentAccountStatus === 'payouts_enabled'
-      && ['not_required', 'verified'].includes(seller.kycStatus)
-      && seller.chargesEnabled
-      && seller.payoutsEnabled
-      && seller.stripeConnectedAccountId?.trim()
-      && !seller.payoutHoldReason
-    );
-    if (!payoutReady) {
+    const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
+      seller,
+      allowTestPlatformBalance: testModePlatformBalanceEnabled
+    });
+    if (!sellerMoneyReadiness.ready) {
       return res.status(409).json({
         error: 'Complete Stripe identity, charge, and payout setup before enabling paid requests.',
         code: 'seller_payout_not_ready'

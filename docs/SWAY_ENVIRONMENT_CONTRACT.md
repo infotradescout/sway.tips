@@ -25,6 +25,9 @@ Production:
 - `SWAY_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_WINDOW_MS` optional
 - payment processor keys
 - payout processor or connected-account configuration
+- `SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED=true` only for an authorized Stripe
+  test-mode rehearsal that must run before connected-account onboarding; the
+  switch is ignored with live keys and proves no performer bank payout
 - published Privacy Policy URL
 - published Terms URL
 - published Support URL
@@ -35,6 +38,10 @@ Production:
 
 - Production business routes must not mutate in-memory state.
 - Production payment routes must not use simulated checkout state.
+- The platform test-balance lane may use real Stripe test PaymentIntents only.
+  It must stay behind `SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED=true`, must
+  identify its durable destination as `sway_test_platform_balance`, must omit
+  Connect transfer instructions, and must never activate under live keys.
 - Production catalog routes must not return AI-generated or hardcoded song facts.
 - Moderation must remain deterministic and active when external services are unavailable.
 - Missing production infrastructure must fail closed with a clear server error.

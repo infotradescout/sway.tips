@@ -131,6 +131,7 @@ async function main() {
     SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX: '100',
     SWAY_PERFORMER_LOGIN_RATE_LIMIT_MAX: '100',
     SWAY_PERFORMER_PASSWORD_LOGIN_RATE_LIMIT_MAX: '100',
+    DISABLE_HMR: 'true',
     NODE_ENV: 'test'
   };
 
@@ -272,36 +273,54 @@ async function main() {
       assert.ok(roleActivateBody.performer?.id, `${role} activation must create its owned performer identity.`);
     }
 
-    // ---- Real performer signup + real admin soft-delete route ----
+    // ---- Real universal-account signup + Pro Mode activation + real admin
+    // soft-delete route ----
     const stamp = Date.now();
     const performerEmail = `lifecycle-performer-${stamp}@example.test`;
-    const signupRes = await fetch(`${BASE}/api/talent/signup`, {
+    const performerHandle = `lifecycleperformer${stamp}`;
+    const signupRes = await fetch(`${BASE}/api/account/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         email: performerEmail,
-        handle: `lifecycleperformer${stamp}`,
         displayName: 'Lifecycle Performer',
         password: 'Sway-Lifecycle-Pass1!',
         confirmPassword: 'Sway-Lifecycle-Pass1!',
-        termsAccepted: true
+        termsAccepted: true,
+        next: '/account?intent=performer'
       })
     });
     const signupBody = await signupRes.json();
     assert.equal(signupRes.status, 202);
     const verifyRes = await fetch(signupBody.verificationLink);
     assert.ok(verifyRes.ok);
-    const loginRes = await fetch(`${BASE}/api/talent/login`, {
+    const loginRes = await fetch(`${BASE}/api/account/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: performerEmail, password: 'Sway-Lifecycle-Pass1!' })
+      body: JSON.stringify({
+        email: performerEmail,
+        password: 'Sway-Lifecycle-Pass1!',
+        next: '/account?intent=performer'
+      })
     });
     assert.ok(loginRes.ok);
+    const performerCookieHeader = loginRes.headers.get('set-cookie');
+    assert.ok(performerCookieHeader, 'Universal account login must set a session cookie.');
+    const performerCookie = performerCookieHeader.split(';')[0];
+    const activateRes = await fetch(`${BASE}/api/account/pro-mode/activate`, {
+      method: 'POST',
+      headers: { cookie: performerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Lifecycle Performer', handle: performerHandle })
+    });
+    const activateBody = await activateRes.json();
+    assert.equal(activateRes.status, 200, `Universal account must activate Pro Mode: ${JSON.stringify(activateBody)}`);
+    assert.equal(activateBody.status, 'active');
+    assert.equal(activateBody.performer.handle, performerHandle);
 
     const performerRow = await setupClient.query(`SELECT id FROM users WHERE email = $1`, [performerEmail]);
     const performerUserId = performerRow.rows[0].id;
     const performerEventsBeforeDeletion = await setupClient.query(`SELECT count(*)::int AS count FROM pro_mode_status_events WHERE user_id = $1`, [performerUserId]);
-    assert.equal(performerEventsBeforeDeletion.rows[0].count, 1, 'Performer signup must have written exactly one initialization event.');
+    assert.equal(performerEventsBeforeDeletion.rows[0].count, 1, 'Pro Mode activation must write exactly one status event.');
     const eventBeforeDeletion = await setupClient.query(`SELECT id, user_id, actor_user_id, previous_status, next_status, reason FROM pro_mode_status_events WHERE user_id = $1`, [performerUserId]);
     for (const key of ['email', 'display_name', 'phone', 'password_hash', 'session_token', 'payment', 'address']) {
       assert.ok(!Object.keys(eventBeforeDeletion.rows[0]).some((column) => column.toLowerCase().includes(key)), `pro_mode_status_events must not have a column resembling "${key}".`);
@@ -344,8 +363,8 @@ async function main() {
     assert.equal(scrubbedUser.rows[0].password_hash, null);
 
     const eventAfterDeletion = await setupClient.query(`SELECT id, next_status FROM pro_mode_status_events WHERE user_id = $1`, [performerUserId]);
-    assert.equal(eventAfterDeletion.rowCount, 1, 'The Pro Mode initialization event must survive admin account deletion (the users row is scrubbed, not removed).');
-    assert.equal(eventAfterDeletion.rows[0].next_status, 'onboarding');
+    assert.equal(eventAfterDeletion.rowCount, 1, 'The Pro Mode activation event must survive admin account deletion (the users row is scrubbed, not removed).');
+    assert.equal(eventAfterDeletion.rows[0].next_status, 'active');
     await assert.rejects(
       setupClient.query(`UPDATE pro_mode_status_events SET reason = 'tampered' WHERE id = $1`, [eventAfterDeletion.rows[0].id]),
       /append-only/i,
@@ -364,9 +383,8 @@ async function main() {
 
   // ================= Session 2: broken email provider (deterministic
   // delivery failure, no network call, no real credentials) =================
-  // Exercises the real hard-delete path: signup rollback when
-  // verification-email delivery fails after the account (and its Pro Mode
-  // init event) were already created in the same transaction.
+  // Exercises the real hard-delete path: universal account signup rollback
+  // when verification-email delivery fails after the account was created.
   server = await spawnServer({
     ...commonEnv,
     SWAY_EMAIL_PROVIDER: 'resend',
@@ -375,16 +393,16 @@ async function main() {
   });
   try {
     const rollbackEmail = `lifecycle-rollback-${Date.now()}@example.test`;
-    const rollbackSignupRes = await fetch(`${BASE}/api/talent/signup`, {
+    const rollbackSignupRes = await fetch(`${BASE}/api/account/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         email: rollbackEmail,
-        handle: `lifecyclerollback${Date.now()}`,
         displayName: 'Lifecycle Rollback',
         password: 'Sway-Lifecycle-Pass1!',
         confirmPassword: 'Sway-Lifecycle-Pass1!',
-        termsAccepted: true
+        termsAccepted: true,
+        next: '/account?intent=performer'
       })
     });
     assert.equal(rollbackSignupRes.status, 503, 'Signup must fail closed when email delivery is unavailable.');

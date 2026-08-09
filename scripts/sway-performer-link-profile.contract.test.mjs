@@ -375,7 +375,7 @@ for (const term of [
   "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
   "platformFeePayer === 'patron'",
   'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: payment.platformFee',
+  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
   'sway_platform_fee_cents: String(payment.platformFee)',
   "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
   "sway_platform_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"

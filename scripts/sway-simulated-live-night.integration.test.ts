@@ -73,13 +73,18 @@ type RunningServer = {
   stop: () => Promise<void>;
 };
 
-async function startSwayServer(databaseUrl: string, port: number): Promise<RunningServer> {
+async function startSwayServer(
+  databaseUrl: string,
+  port: number,
+  envOverrides: Record<string, string> = {}
+): Promise<RunningServer> {
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       NODE_ENV: 'test',
+      DISABLE_HMR: 'true',
       PORT: String(port),
       DATABASE_URL: databaseUrl,
       SWAY_APP_BASE_URL: baseUrl,
@@ -91,9 +96,11 @@ async function startSwayServer(databaseUrl: string, port: number): Promise<Runni
       STRIPE_PUBLISHABLE_KEY: '',
       VITE_STRIPE_PUBLISHABLE_KEY: '',
       STRIPE_WEBHOOK_SECRET: '',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'false',
       SWAY_EMAIL_PROVIDER: '',
       SWAY_EMAIL_API_KEY: '',
-      SWAY_EMAIL_FROM: ''
+      SWAY_EMAIL_FROM: '',
+      ...envOverrides
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }) as ChildProcessWithoutNullStreams;
@@ -530,6 +537,7 @@ async function main() {
     const databaseTruth = await proof.query<{
       users: string;
       performers: string;
+      proModeEvents: string;
       gigs: string;
       requests: string;
       boosts: string;
@@ -540,6 +548,9 @@ async function main() {
         (select count(*) from performers where owner_user_id = (
           select id from users where email = 'simulated-primary@example.test'
         ))::text as performers,
+        (select count(*) from pro_mode_status_events where user_id = (
+          select id from users where email = 'simulated-primary@example.test'
+        ))::text as "proModeEvents",
         (select count(*) from gig_sessions where id = $1)::text as gigs,
         (select count(*) from requests where gig_id = $1 and activated_at is not null)::text as requests,
         (select count(*) from request_boosts where gig_id = $1 and activated_at is not null)::text as boosts,
@@ -547,6 +558,7 @@ async function main() {
     `, [gigId]);
     assert.equal(Number(databaseTruth.rows[0].users), 1);
     assert.equal(Number(databaseTruth.rows[0].performers), 1);
+    assert.equal(Number(databaseTruth.rows[0].proModeEvents), 1, 'One Pro Mode activation must create one status event.');
     assert.equal(Number(databaseTruth.rows[0].gigs), 1);
     assert.equal(Number(databaseTruth.rows[0].requests), 4);
     assert.equal(Number(databaseTruth.rows[0].boosts), 1);
@@ -659,6 +671,41 @@ async function main() {
     const history = await primary.client.get('/api/talent/rooms/history');
     assertStatus(history, 200, 'closed room history', server);
     assert.ok(history.body.rooms.some((room: JsonObject) => room.gigId === gigId));
+
+    // Owner-authorized Stripe test rehearsal: matching test-looking keys plus
+    // the explicit switch may start a paid-mode room without Connect. No
+    // provider call is made here; provider authorization/capture/refund is
+    // proven separately by the deterministic payment durability integration.
+    await server.stop();
+    server = null;
+    server = await startSwayServer(proof.databaseUrl, port, {
+      STRIPE_SECRET_KEY: 'sk_test_platform_balance_runtime_proof',
+      STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
+      VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_platform_balance_runtime_proof',
+      STRIPE_WEBHOOK_SECRET: 'whsec_platform_balance_runtime_proof',
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'true'
+    });
+    const testMoneyConfig = await new HttpClient(server.baseUrl).get('/api/payment/config');
+    assertStatus(testMoneyConfig, 200, 'platform test-balance runtime config', server);
+    assert.equal(testMoneyConfig.body.mode, 'test');
+    assert.equal(testMoneyConfig.body.testModePlatformBalanceEnabled, true);
+    const testMoneyGigId = randomUUID();
+    const testMoneyRoom = await primary.client.post('/api/session/start', {
+      gig_id: testMoneyGigId,
+      talentName: 'DJ Simulated',
+      talentRole: 'DJ',
+      feeType: 'patron',
+      minimumTip: 5,
+      paymentsEnabled: true,
+      searchScope: 'catalog'
+    });
+    assertStatus(testMoneyRoom, 200, 'test paid room starts without Connect', server);
+    assert.equal(testMoneyRoom.body.state.session.paymentsEnabled, true);
+    assert.equal(testMoneyRoom.body.state.session.tipsEnabled, true);
+    const endTestMoneyRoom = await primary.client.post('/api/session/end', { gig_id: testMoneyGigId });
+    assertStatus(endTestMoneyRoom, 200, 'test paid room end', server);
+    const closeTestMoneyRoom = await primary.client.post('/api/session/closeout', { gig_id: testMoneyGigId });
+    assertStatus(closeTestMoneyRoom, 200, 'test paid room closeout', server);
 
     console.log('Sway simulated live-night integration proof passed.');
   } catch (error) {
