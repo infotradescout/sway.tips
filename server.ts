@@ -113,6 +113,11 @@ import {
 } from "./src/server/public-room-state";
 import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
 import { createAudioPublishingService } from "./src/server/audio-publishing-service";
+import {
+  AUDIO_UPLOAD_PART_MAX_BYTES,
+  AUDIO_UPLOAD_PART_PATH_PATTERN,
+  createAudioUploadPartBodyParser
+} from "./src/server/audio-upload-transport";
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
@@ -391,12 +396,8 @@ const buildMarker = {
 const ROOM_LOOKUP_UNAVAILABLE_COPY = 'Live room unavailable. Scan the performer QR again or request a fresh room link.';
 const ROOM_LOOKUP_ENDED_COPY = 'This live room session has ended. Thank you for supporting the performer!';
 
-// Capture the raw request body so Stripe webhook signatures can be verified.
-const AUDIO_UPLOAD_PART_PATH_PATTERN = new RegExp(['^', '/api/', 'talent/audio/uploads', '(?:/|$)'].join(''));
-app.use(AUDIO_UPLOAD_PART_PATH_PATTERN, express.raw({
-  type: 'application/octet-stream',
-  limit: '6mb'
-}));
+// Parse bounded binary upload parts before the JSON middleware sees the body.
+app.use(AUDIO_UPLOAD_PART_PATH_PATTERN, createAudioUploadPartBodyParser());
 app.use(express.json({
   verify: (req, _res, buf) => {
     (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
@@ -9951,7 +9952,7 @@ app.put('/api/talent/audio/uploads/:uploadSessionId/parts/:partNumber', async (r
     return res.status(415).json({ error: 'Upload parts require Content-Type: application/octet-stream.' });
   }
   const body = req.body;
-  if (!body.byteLength || body.byteLength > 6 * 1024 * 1024) {
+  if (!body.byteLength || body.byteLength > AUDIO_UPLOAD_PART_MAX_BYTES) {
     return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
   }
 

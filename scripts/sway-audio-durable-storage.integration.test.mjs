@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
+import express from 'express';
 
 const root = process.cwd();
 const failures = [];
@@ -22,6 +23,7 @@ function read(relativePath) {
 const dispatcher = read('src/server/audio-object-storage.ts');
 const r2Source = read('src/server/audio-object-storage-r2.ts');
 const service = read('src/server/audio-publishing-service.ts');
+const uploadTransport = read('src/server/audio-upload-transport.ts');
 const server = read('server.ts');
 const renderBlueprint = read('render.yaml');
 const envExample = read('.env.example');
@@ -89,8 +91,9 @@ if (!server.includes('await audioObjectStore.verifyReady()')
   || !server.includes("console.error('[sway.startup] server failed before accepting traffic:'")) {
   failures.push('Server startup and runtime status must require verified private bucket access.');
 }
-if (!server.includes("express.raw({")
-  || !server.includes("type: 'application/octet-stream'")
+if (!server.includes('createAudioUploadPartBodyParser()')
+  || !uploadTransport.includes('express.raw({')
+  || !uploadTransport.includes("type: 'application/octet-stream'")
   || server.includes('contentBase64 is required for this upload part.')) {
   failures.push('Audio parts must use bounded raw binary transport instead of oversized base64 JSON.');
 }
@@ -228,14 +231,76 @@ async function runBehaviorProof() {
   const tempRoot = mkdtempSync(join(tmpdir(), 'sway-audio-storage-'));
   const dispatcherBundle = join(tempRoot, 'audio-object-storage.cjs');
   const r2Bundle = join(tempRoot, 'audio-object-storage-r2.cjs');
+  const uploadTransportBundle = join(tempRoot, 'audio-upload-transport.cjs');
   try {
     await Promise.all([
       build({ entryPoints: ['src/server/audio-object-storage.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: dispatcherBundle }),
-      build({ entryPoints: ['src/server/audio-object-storage-r2.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: r2Bundle })
+      build({ entryPoints: ['src/server/audio-object-storage-r2.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: r2Bundle }),
+      build({
+        entryPoints: ['src/server/audio-upload-transport.ts'],
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        outfile: uploadTransportBundle
+      })
     ]);
     const require = createRequire(import.meta.url);
     const { createConfiguredAudioObjectStore } = require(dispatcherBundle);
     const { createR2AudioObjectStore } = require(r2Bundle);
+    const {
+      AUDIO_UPLOAD_PART_MAX_BYTES,
+      AUDIO_UPLOAD_PART_PATH_PATTERN,
+      createAudioUploadPartBodyParser
+    } = require(uploadTransportBundle);
+
+    assert.equal(AUDIO_UPLOAD_PART_MAX_BYTES, 6 * 1024 * 1024);
+    const uploadTransportApp = express();
+    uploadTransportApp.use(AUDIO_UPLOAD_PART_PATH_PATTERN, createAudioUploadPartBodyParser());
+    uploadTransportApp.use(express.json());
+    const receivePart = (request, response) => {
+      if (!Buffer.isBuffer(request.body)) {
+        return response.status(415).json({ error: 'binary body required' });
+      }
+      return response.json({ hex: request.body.toString('hex') });
+    };
+    uploadTransportApp.put('/api/talent/audio/uploads/:uploadSessionId/parts/:partNumber', receivePart);
+    uploadTransportApp.put('/api/talent/audio/uploads-sibling/:uploadSessionId/parts/:partNumber', receivePart);
+
+    const uploadTransportServer = await new Promise((resolve, reject) => {
+      const listeningServer = uploadTransportApp.listen(0, '127.0.0.1', () => resolve(listeningServer));
+      listeningServer.once('error', reject);
+    });
+    try {
+      const address = uploadTransportServer.address();
+      assert(address && typeof address === 'object');
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      const exactPart = Buffer.from([0, 1, 2, 3, 254, 255]);
+      const validResponse = await fetch(`${baseUrl}/api/talent/audio/uploads/session-1/parts/1`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: exactPart
+      });
+      assert.equal(validResponse.status, 200, 'Nested upload-part paths must reach the raw body parser.');
+      assert.deepEqual(await validResponse.json(), { hex: exactPart.toString('hex') });
+
+      const wrongTypeResponse = await fetch(`${baseUrl}/api/talent/audio/uploads/session-1/parts/1`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      assert.equal(wrongTypeResponse.status, 415, 'Non-binary upload parts must remain rejected.');
+
+      const siblingResponse = await fetch(`${baseUrl}/api/talent/audio/uploads-sibling/session-1/parts/1`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: exactPart
+      });
+      assert.equal(siblingResponse.status, 415, 'The raw parser must not attach to sibling route prefixes.');
+    } finally {
+      await new Promise((resolve, reject) => {
+        uploadTransportServer.close((error) => error ? reject(error) : resolve());
+      });
+    }
 
     const localStore = createConfiguredAudioObjectStore({
       NODE_ENV: 'development',
