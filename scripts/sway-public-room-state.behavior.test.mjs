@@ -17,7 +17,8 @@ const {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
   projectPatronBoostStatus,
-  projectPatronRequestStatus
+  projectPatronRequestStatus,
+  selectPatronPaymentEvidence
 } = await tsImport('../src/server/patron-status-receipt.ts', import.meta.url);
 
 const root = process.cwd();
@@ -183,6 +184,25 @@ assert.notEqual(issuedReceipt.receipt, secondReceipt.receipt, 'Each patron recei
 assert.equal(matchesPatronStatusReceipt(issuedReceipt.receipt, issuedReceipt.receiptHash), true);
 assert.equal(matchesPatronStatusReceipt(secondReceipt.receipt, issuedReceipt.receiptHash), false);
 assert.equal(matchesPatronStatusReceipt('not-a-valid-receipt', issuedReceipt.receiptHash), false);
+
+const duplicatePaymentCandidates = [
+  { id: 'payment-stale', paymentStatus: 'captured', refundStatus: 'not_refunded' },
+  { id: 'payment-canonical', paymentStatus: 'refunded', refundStatus: 'refunded' }
+];
+assert.deepEqual(selectPatronPaymentEvidence({
+  runtimePaymentId: 'payment-canonical',
+  candidates: duplicatePaymentCandidates
+}), { paymentStatus: 'refunded', refundStatus: 'refunded' });
+assert.deepEqual(selectPatronPaymentEvidence({
+  runtimePaymentId: 'payment-missing',
+  candidates: duplicatePaymentCandidates
+}), {}, 'A missing runtime payment identity must fail closed rather than select stale evidence.');
+assert.deepEqual(selectPatronPaymentEvidence({
+  candidates: duplicatePaymentCandidates
+}), {}, 'Ambiguous legacy action payments must fail closed.');
+assert.deepEqual(selectPatronPaymentEvidence({
+  candidates: [duplicatePaymentCandidates[0]]
+}), { paymentStatus: 'captured', refundStatus: 'not_refunded' });
 
 const pendingStatus = projectPatronRequestStatus(pendingRequest);
 assert.deepEqual(pendingStatus, {

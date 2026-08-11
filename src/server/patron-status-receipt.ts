@@ -30,6 +30,26 @@ export type PatronPaymentEvidence = {
   refundStatus?: string | null;
 };
 
+export type PatronPaymentEvidenceCandidate = PatronPaymentEvidence & { id: string };
+
+export function selectPatronPaymentEvidence(input: {
+  runtimePaymentId?: string | null;
+  candidates: PatronPaymentEvidenceCandidate[];
+}): PatronPaymentEvidence | undefined {
+  if (input.runtimePaymentId) {
+    const exact = input.candidates.find((candidate) => candidate.id === input.runtimePaymentId);
+    return exact
+      ? { paymentStatus: exact.paymentStatus, refundStatus: exact.refundStatus }
+      : {};
+  }
+  if (input.candidates.length === 0) return undefined;
+  if (input.candidates.length !== 1) return {};
+  return {
+    paymentStatus: input.candidates[0].paymentStatus,
+    refundStatus: input.candidates[0].refundStatus
+  };
+}
+
 export function projectPatronPaymentStatus(evidence?: PatronPaymentEvidence): PatronPaymentStatus {
   if (evidence?.refundStatus === 'pending') return 'refund_pending';
   if (evidence?.refundStatus === 'refunded' || evidence?.paymentStatus === 'refunded') return 'refunded';

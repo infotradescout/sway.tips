@@ -86,7 +86,7 @@ for (const term of [
   "eventType: 'request.triage.approve_payment_failed'",
   "payment_status: 'capture_failed'"
 ]) requireTerm(server, term, 'Durable closeout and payment truth');
-for (const term of ['Payment volume and recaps', 'capturedAmount', 'Stripe test volume — no real money or bank payout', 'completedActions']) {
+for (const term of ['Payment volume and recaps', "typeof room.capturedAmount === 'number'", 'room.capturedEarnings', 'Stripe test volume — no real money or bank payout', 'completedActions']) {
   requireTerm(history, term, 'Durable recap UI');
 }
 

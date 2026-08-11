@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -106,7 +106,8 @@ import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
   projectPatronBoostStatus,
-  projectPatronRequestStatus
+  projectPatronRequestStatus,
+  selectPatronPaymentEvidence
 } from "./src/server/patron-status-receipt";
 import {
   projectPublicRoomState,
@@ -1795,6 +1796,7 @@ async function loadPatronPaymentEvidence(input: {
   gigId: string;
   requestId?: string | null;
   requestBoostId?: string | null;
+  paymentId?: string | null;
 }) {
   if (!businessDb) return undefined;
   const actionCondition = input.requestId
@@ -1804,15 +1806,23 @@ async function loadPatronPaymentEvidence(input: {
       : null;
   if (!actionCondition) return undefined;
 
-  const [payment] = await businessDb
+  const paymentCandidates = await businessDb
     .select({
+      id: payments.id,
       paymentStatus: payments.paymentStatus,
       refundStatus: payments.refundStatus
     })
     .from(payments)
-    .where(and(eq(payments.gigId, input.gigId), actionCondition))
-    .limit(1);
-  return payment;
+    .where(and(
+      eq(payments.gigId, input.gigId),
+      actionCondition,
+      ...(input.paymentId ? [eq(payments.id, input.paymentId)] : [])
+    ))
+    .limit(input.paymentId ? 1 : 2);
+  return selectPatronPaymentEvidence({
+    runtimePaymentId: input.paymentId,
+    candidates: paymentCandidates
+  });
 }
 
 async function refreshBusinessState() {
@@ -11390,7 +11400,8 @@ app.post("/api/patron/request-status", async (req, res) => {
   if (request) {
     const paymentEvidence = await loadPatronPaymentEvidence({
       gigId: requestedGigId,
-      requestId: request.durableRequestId
+      requestId: request.durableRequestId,
+      paymentId: request.paymentId
     });
     return res.json({ patron_status: projectPatronRequestStatus(request, paymentEvidence) });
   }
@@ -11402,7 +11413,8 @@ app.post("/api/patron/request-status", async (req, res) => {
     if (boost) {
       const paymentEvidence = await loadPatronPaymentEvidence({
         gigId: requestedGigId,
-        requestBoostId: boost.durableBoostId
+        requestBoostId: boost.durableBoostId,
+        paymentId: boost.paymentId
       });
       return res.json({ patron_status: projectPatronBoostStatus(boost, candidate, paymentEvidence) });
     }
@@ -11454,7 +11466,12 @@ app.get('/api/talent/rooms/history', async (req, res) => {
   const roomIds = rows.map((row) => row.gigId);
   const roomPaymentRows = roomIds.length
     ? await businessDb.select({
+        id: payments.id,
         gigId: payments.gigId,
+        requestId: payments.requestId,
+        requestBoostId: payments.requestBoostId,
+        actionType: payments.actionType,
+        legacyUnlinked: payments.legacyUnlinked,
         paymentStatus: payments.paymentStatus,
         refundStatus: payments.refundStatus,
         amountSubtotal: payments.amountSubtotal,
@@ -11462,11 +11479,73 @@ app.get('/api/talent/rooms/history', async (req, res) => {
         destinationAccountId: payments.destinationAccountId
       }).from(payments).where(inArray(payments.gigId, roomIds))
     : [];
+  const roomRequestRows = roomIds.length
+    ? await businessDb.select({
+        id: requests.id,
+        gigId: requests.gigId,
+        status: requests.status,
+        runtimeRequestState: requests.runtimeRequestState,
+        activatedAt: requests.activatedAt
+      }).from(requests).where(inArray(requests.gigId, roomIds))
+    : [];
+  const roomBoostRows = roomIds.length
+    ? await businessDb.select({
+        id: requestBoosts.id,
+        gigId: requestBoosts.gigId,
+        requestId: requestBoosts.requestId,
+        runtimeBoostState: requestBoosts.runtimeBoostState,
+        activatedAt: requestBoosts.activatedAt
+      }).from(requestBoosts).where(inArray(requestBoosts.gigId, roomIds))
+    : [];
   const paymentsByGig = new Map<string, Array<(typeof roomPaymentRows)[number]>>();
   for (const payment of roomPaymentRows) {
     const bucket = paymentsByGig.get(payment.gigId) ?? [];
     bucket.push(payment);
     paymentsByGig.set(payment.gigId, bucket);
+  }
+  const recapRequestsByGig = new Map<string, Array<{
+    id: string;
+    type: string;
+    title: string;
+    status: string;
+    hidden: boolean;
+    removed: boolean;
+    paymentId: string | null;
+  }>>();
+  for (const request of roomRequestRows) {
+    if (!request.activatedAt) continue;
+    const runtime = request.runtimeRequestState && typeof request.runtimeRequestState === 'object'
+      ? request.runtimeRequestState as Record<string, unknown>
+      : {};
+    const bucket = recapRequestsByGig.get(request.gigId) ?? [];
+    bucket.push({
+      id: request.id,
+      type: runtime.type === 'request' || runtime.type === 'tip' ? runtime.type : 'unknown',
+      title: typeof runtime.title === 'string' ? runtime.title : 'Untitled request',
+      status: request.status,
+      hidden: runtime.hidden === true,
+      removed: runtime.removed === true,
+      paymentId: typeof runtime.paymentId === 'string' ? runtime.paymentId : null
+    });
+    recapRequestsByGig.set(request.gigId, bucket);
+  }
+  const recapBoostsByGig = new Map<string, Array<{
+    id: string;
+    requestId: string;
+    paymentId: string | null;
+  }>>();
+  for (const boost of roomBoostRows) {
+    if (!boost.activatedAt) continue;
+    const runtime = boost.runtimeBoostState && typeof boost.runtimeBoostState === 'object'
+      ? boost.runtimeBoostState as Record<string, unknown>
+      : {};
+    const bucket = recapBoostsByGig.get(boost.gigId) ?? [];
+    bucket.push({
+      id: boost.id,
+      requestId: boost.requestId,
+      paymentId: typeof runtime.paymentId === 'string' ? runtime.paymentId : null
+    });
+    recapBoostsByGig.set(boost.gigId, bucket);
   }
 
   const rooms = rows.map((row) => {
@@ -11480,7 +11559,9 @@ app.get('/api/talent/rooms/history', async (req, res) => {
       startedAt: session.startedAt || row.startedAt?.toISOString() || null,
       closedAt: session.closedAt || row.closedAt?.toISOString() || row.updatedAt.toISOString(),
       runtimeSessionState: session,
-      payments: durablePayments
+      payments: durablePayments,
+      requests: recapRequestsByGig.get(row.gigId) ?? [],
+      boosts: recapBoostsByGig.get(row.gigId) ?? []
     });
   });
   return res.json({ rooms });

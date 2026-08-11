@@ -34,6 +34,9 @@ export default function PerformerRoomHistory() {
       {!loading && !error && rooms.length === 0 ? <p className="mt-4 text-xs text-slate-400">Your completed rooms will stay available here.</p> : null}
       <div className="mt-4 space-y-2">
         {rooms.map((room) => {
+          const capturedAmount = typeof room.capturedAmount === 'number'
+            ? room.capturedAmount
+            : Number(room.capturedEarnings || 0);
           const isTestVolume = room.paymentEnvironment === 'test' || room.settlementMode === 'platform_test_balance';
           const isVerifiedLive = room.paymentEnvironment === 'live' && room.settlementMode === 'connected_account';
           const paymentTruth = isTestVolume
@@ -46,7 +49,7 @@ export default function PerformerRoomHistory() {
           return <article key={room.gigId} className="rounded-2xl border border-white/10 bg-slate-950 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0"><p className="truncate text-sm font-black text-white">{room.performerName}</p><p className="mt-1 text-[10px] text-slate-500">{room.closedAt ? new Date(room.closedAt).toLocaleString() : 'Completed room'}</p></div>
-              <p className={`font-mono text-lg font-black ${isTestVolume ? 'text-amber-300' : 'text-emerald-300'}`}>{money(room.capturedAmount)}</p>
+              <p className={`font-mono text-lg font-black ${isTestVolume ? 'text-amber-300' : 'text-emerald-300'}`}>{money(capturedAmount)}</p>
             </div>
             <p className={`mt-2 text-[10px] font-bold ${isTestVolume ? 'text-amber-200' : 'text-slate-400'}`}>{paymentTruth}</p>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">

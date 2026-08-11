@@ -246,7 +246,9 @@ export interface PerformerRoomRecap {
   performerName: string;
   startedAt: string | null;
   closedAt: string | null;
-  capturedAmount: number;
+  capturedAmount?: number;
+  /** @deprecated One-release compatibility alias; use capturedAmount. */
+  capturedEarnings?: number;
   platformFees: number;
   completedActions: number;
   topRequest: string;
