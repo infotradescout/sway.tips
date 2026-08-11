@@ -10755,6 +10755,7 @@ app.post("/api/payment/webhook", async (req, res) => {
   );
   if (
     eventTicketService
+    && eventTicketService.canVerifyWebhook()
     && sharedTicketWebhookSecret
   ) {
     try {

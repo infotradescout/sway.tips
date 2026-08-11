@@ -135,7 +135,9 @@ assert.match(sellerReadinessSource, /baseEligible && input\.allowTestPlatformBal
 assert.match(serverSource, /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds/);
 assert.match(serverSource, /SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS/);
 assert.match(sellerReadinessSource, /input\.paymentMode === 'test'/);
-assert.match(paymentWebhookSource, /ignored_out_of_order'[\s\S]+retry after predecessor state/);
+assert.match(paymentLifecycleSource, /export function isKnownPredecessorPaymentState/);
+assert.match(paymentWebhookSource, /ignored_out_of_order'[\s\S]+isKnownPredecessorPaymentState[\s\S]+status: 'ignored'[\s\S]+stale_predecessor_event/);
+assert.match(paymentWebhookSource, /concurrent_noop'[\s\S]+retry after predecessor state/);
 assert.match(paymentWebhookSource, /\{ terminal: true \}/);
 
 const terminalProcessorClassifier = paymentServiceSource.slice(

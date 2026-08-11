@@ -558,6 +558,53 @@ async function main() {
     });
     assert.equal(duplicateRefundEvent.status, 'duplicate');
 
+    // A distinct predecessor event first delivered after the payment has
+    // reached a later terminal state is stale, not retryable. Persist it once
+    // as ignored without regressing the payment or writing a transition.
+    const staleAuthorizationEvent = {
+      providerEventId: `evt_stale_authorization_${randomUUID()}`,
+      providerType: 'payment_intent.amount_capturable_updated',
+      livemode: false,
+      processorPaymentIntentId: earlyRefundIntent.processorPaymentIntentId,
+      processorChargeId: earlyRefundIntent.processorChargeId,
+      providerStatus: 'requires_capture',
+      amountCents: earlyRefundIntent.amountCents,
+      metadata: {
+        ...(earlyRefundIntent.metadata ?? {}),
+        sway_payment_id: earlyRefundAuthorization.paymentId
+      }
+    };
+    const rawStaleAuthorizationEvent = JSON.stringify(staleAuthorizationEvent);
+    const staleAuthorizationResult = await webhookB.ingestWebhook({
+      rawBody: rawStaleAuthorizationEvent,
+      signatureHeader: 'deterministic-test-signature'
+    });
+    assert.equal(staleAuthorizationResult.status, 'ignored');
+    assert.equal(staleAuthorizationResult.reason, 'stale_predecessor_event');
+    const staleAuthorizationTruth = await proof.query<{
+      payment_status: string;
+      inbox_status: string;
+      inbox_rows: string;
+      transition_rows: string;
+    }>(`
+      select p.payment_status,
+             e.status as inbox_status,
+             (select count(*) from live_room_processor_events where processor_event_id = $2)::text as inbox_rows,
+             (select count(*) from payment_events where processor_event_id = $2)::text as transition_rows
+      from payments p
+      join live_room_processor_events e on e.processor_event_id = $2
+      where p.id = $1
+    `, [earlyRefundAuthorization.paymentId, staleAuthorizationEvent.providerEventId]);
+    assert.equal(staleAuthorizationTruth.rows[0].payment_status, 'refunded');
+    assert.equal(staleAuthorizationTruth.rows[0].inbox_status, 'ignored');
+    assert.equal(Number(staleAuthorizationTruth.rows[0].inbox_rows), 1);
+    assert.equal(Number(staleAuthorizationTruth.rows[0].transition_rows), 0);
+    const duplicateStaleAuthorizationEvent = await webhookB.ingestWebhook({
+      rawBody: rawStaleAuthorizationEvent,
+      signatureHeader: 'deterministic-test-signature'
+    });
+    assert.equal(duplicateStaleAuthorizationEvent.status, 'duplicate');
+
     // A stale webhook worker cannot overwrite the terminal outcome produced
     // by the worker that reclaimed its lease.
     let releaseStaleWorker!: (error: Error) => void;

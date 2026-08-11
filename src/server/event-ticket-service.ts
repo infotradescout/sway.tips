@@ -677,6 +677,10 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
   const clock = options.now ?? (() => new Date());
   const defaultWorkerId = options.workerId ?? `ticket-worker-${randomUUID()}`;
 
+  function canVerifyWebhook() {
+    return provider !== null;
+  }
+
   function requireCheckoutAvailability() {
     const config = requireSalesConfiguration(runtimeConfig);
     if (!provider) {
@@ -4464,6 +4468,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
   }
 
   return {
+    canVerifyWebhook,
     getNativeTicketSalesCapability,
     getOwnerNativeTicketSalesCapability,
     getOwnerTicketOffer,
