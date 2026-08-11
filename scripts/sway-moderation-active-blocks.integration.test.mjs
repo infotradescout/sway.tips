@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { Client } from 'pg';
-import { build } from 'esbuild';
+import { closeDisposableSwayDbProof } from '../src/db/client.ts';
+import { createModerationService } from '../src/server/moderation-service.ts';
 import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
+import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
-function getDatabaseUrl() {
-  const value = process.env.DATABASE_URL;
-  if (!value) {
-    throw new Error('DATABASE_URL is required for live Postgres moderation integration test.');
-  }
-  return assertDisposableDatabaseTarget({ databaseUrl: value, label: 'Moderation active-blocks integration test' });
+function getConfiguredDatabaseUrl() {
+  const value = process.env.DATABASE_URL?.trim();
+  if (!value) return null;
+  return assertDisposableDatabaseTarget({
+    databaseUrl: value,
+    label: 'Moderation active-blocks integration test'
+  });
 }
 
 function splitStatements(sql) {
@@ -45,59 +47,54 @@ async function applyMigrations(client) {
   }
 }
 
-async function loadModerationServiceFactory() {
-  const tempDir = join(process.cwd(), '.tmp');
-  const outfile = join(tempDir, 'moderation-service.integration.bundle.cjs');
-  const require = createRequire(import.meta.url);
-  mkdirSync(tempDir, { recursive: true });
-
-  await build({
-    entryPoints: ['src/server/moderation-service.ts'],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    outfile,
-    sourcemap: false
-  });
-
-  const loaded = require(outfile);
-  return loaded.createModerationService;
-}
-
 async function main() {
-  const databaseUrl = getDatabaseUrl();
-  const createModerationService = await loadModerationServiceFactory();
-  const adminClient = new Client({ connectionString: databaseUrl });
+  const configuredDatabaseUrl = getConfiguredDatabaseUrl();
+  const embeddedProof = configuredDatabaseUrl
+    ? null
+    : await startEmbeddedPostgresProof('moderation_active_blocks');
+  const databaseUrl = configuredDatabaseUrl || embeddedProof?.databaseUrl;
+  if (!databaseUrl) throw new Error('A disposable moderation database is required.');
 
-  await adminClient.connect();
   try {
-    await resetDatabase(adminClient);
-    await applyMigrations(adminClient);
+    if (!embeddedProof) {
+      const adminClient = new Client({ connectionString: databaseUrl });
+      await adminClient.connect();
+      try {
+        await resetDatabase(adminClient);
+        await applyMigrations(adminClient);
+      } finally {
+        await adminClient.end();
+      }
+    }
+
+    const firstService = createModerationService(databaseUrl);
+    await firstService.addBlockRule({
+      scope: 'patron_device_id_hash',
+      value: 'device-live-999',
+      reason: 'Integration durability proof'
+    });
+
+    const secondService = createModerationService(databaseUrl);
+    const outcome = await secondService.evaluateSubmission({
+      senderName: 'Any Sender',
+      text: 'safe message',
+      patronDeviceIdHash: 'device-live-999'
+    });
+
+    assert.equal(
+      outcome.decision,
+      'block_submission',
+      'Expected block_submission after service reinitialization when active block exists in Postgres.'
+    );
+
+    console.log(`Moderation active_blocks Postgres integration test passed (${embeddedProof?.kind ?? 'configured-disposable-postgres'}).`);
   } finally {
-    await adminClient.end();
+    if (embeddedProof) {
+      await embeddedProof.close();
+    } else {
+      await closeDisposableSwayDbProof(databaseUrl);
+    }
   }
-
-  const firstService = createModerationService(databaseUrl);
-  await firstService.addBlockRule({
-    scope: 'patron_device_id_hash',
-    value: 'device-live-999',
-    reason: 'Integration durability proof'
-  });
-
-  const secondService = createModerationService(databaseUrl);
-  const outcome = await secondService.evaluateSubmission({
-    senderName: 'Any Sender',
-    text: 'safe message',
-    patronDeviceIdHash: 'device-live-999'
-  });
-
-  assert.equal(
-    outcome.decision,
-    'block_submission',
-    'Expected block_submission after service reinitialization when active block exists in Postgres.'
-  );
-
-  console.log('Moderation active_blocks Postgres integration test passed.');
 }
 
 main().catch((error) => {
