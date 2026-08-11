@@ -85,6 +85,9 @@ import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from 
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
 import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
+import { handleStripeConnectReturn } from "./src/server/stripe-connect-return";
+import { reconcileStripeConnectPerformerStatus } from "./src/server/stripe-connect-status";
+import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-connect-webhook";
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
@@ -2334,7 +2337,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       displayName: performers.displayName,
       handle: performers.handle,
       bio: performers.bio,
-      visibilityState: performers.visibilityState
+      visibilityState: performers.visibilityState,
+      stripeAccountId: performers.stripeConnectedAccountId
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -10685,8 +10689,36 @@ app.get('/talent/connect/refresh', async (req, res) => {
   }
 });
 
-app.get('/talent/connect/return', (_req, res) => {
-  res.redirect('/talent');
+app.get('/talent/connect/return', async (req, res) => {
+  applyNoStoreHeaders(res);
+  return handleStripeConnectReturn({
+    req,
+    res,
+    runtimeAvailable: Boolean(
+      businessDb
+      && stripeConnectService
+      && liveRoomPaymentRuntimeConfig.connectEnabled
+    ),
+    requireTalentAccess: (request) => accessControl.requireTalentAccess(request),
+    loadOwnedPerformer: loadOwnedPerformerByActorUserId,
+    getAccountStatus: (accountId) => stripeConnectService!.getAccountStatus(accountId),
+    applyStatus: ({ performerId, ownerUserId, accountId, providerStatus }) => (
+      reconcileStripeConnectPerformerStatus({
+        db: businessDb!,
+        accountId,
+        status: providerStatus,
+        source: 'return',
+        actorId: ownerUserId,
+        expectedPerformerId: performerId,
+        expectedOwnerUserId: ownerUserId
+      })
+    ),
+    logError: (error) => {
+      console.error('Stripe Connect return reconciliation failed.', {
+        message: error instanceof Error ? error.message : 'unknown_error'
+      });
+    }
+  });
 });
 
 app.post('/api/library/sync', async (req, res) => {
@@ -10804,19 +10836,18 @@ app.post("/api/payment/webhook", async (req, res) => {
     try {
       const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
       if (accountEvent) {
-        const { chargesEnabled, payoutsEnabled, detailsSubmitted } = accountEvent.status;
-        const paymentAccountStatus = payoutsEnabled
-          ? 'payouts_enabled'
-          : chargesEnabled
-            ? 'charges_enabled'
-            : detailsSubmitted
-              ? 'created'
-              : 'not_started';
-        await businessDb
-          .update(performers)
-          .set({ chargesEnabled, payoutsEnabled, paymentAccountStatus })
-          .where(eq(performers.stripeConnectedAccountId, accountEvent.accountId));
-        return res.json({ received: true, result: { type: 'account.updated' } });
+        return handleStripeConnectAccountStatusWebhook({
+          res,
+          accountEvent,
+          applyStatus: (event) => reconcileStripeConnectPerformerStatus({
+            db: businessDb,
+            accountId: event.accountId,
+            status: event.status,
+            source: event.eventType.startsWith('v2.') ? 'webhook_v2' : 'webhook_v1',
+            providerEventId: event.providerEventId,
+            actorId: null
+          })
+        });
       }
     } catch (error) {
       return res.status(400).json({

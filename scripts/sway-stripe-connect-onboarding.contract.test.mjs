@@ -13,7 +13,22 @@ const migrationName = readdirSync(join(root, 'drizzle'))
   .filter((name) => /^\d{4}_.+\.sql$/.test(name))
   .find((name) => readFileSync(join(root, 'drizzle', name), 'utf8').includes('stripe_connect_onboarding_operations'));
 const migrationSource = migrationName ? readFileSync(join(root, 'drizzle', migrationName), 'utf8') : '';
+const accountUniqueMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .find((name) => readFileSync(join(root, 'drizzle', name), 'utf8').includes('performers_stripe_connected_account_id_unique'));
+const accountUniqueMigrationSource = accountUniqueMigrationName
+  ? readFileSync(join(root, 'drizzle', accountUniqueMigrationName), 'utf8')
+  : '';
+const statusFreshnessMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .find((name) => readFileSync(join(root, 'drizzle', name), 'utf8').includes('stripe_connect_status_checked_at'));
+const statusFreshnessMigrationSource = statusFreshnessMigrationName
+  ? readFileSync(join(root, 'drizzle', statusFreshnessMigrationName), 'utf8')
+  : '';
 const talentDashboardSource = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const connectStatusSource = readFileSync(join(root, 'src/server/stripe-connect-status.ts'), 'utf8');
+const connectReturnSource = readFileSync(join(root, 'src/server/stripe-connect-return.ts'), 'utf8');
+const connectWebhookSource = readFileSync(join(root, 'src/server/stripe-connect-webhook.ts'), 'utf8');
 
 const failures = [];
 
@@ -31,7 +46,20 @@ const requiredServerTerms = [
   'liveRoomPaymentRuntimeConfig.connectEnabled',
   "console.error('Stripe Connect onboarding failed.'",
   'Stripe Connect onboarding could not be started',
-  'return res.status(502).json'
+  'return res.status(502).json',
+  "app.get('/talent/connect/return', async (req, res)",
+  'applyNoStoreHeaders(res)',
+  'handleStripeConnectReturn({',
+  'requireTalentAccess: (request) => accessControl.requireTalentAccess(request)',
+  'loadOwnedPerformer: loadOwnedPerformerByActorUserId',
+  'reconcileStripeConnectPerformerStatus({',
+  "source: 'return'",
+  'expectedPerformerId: performerId',
+  'expectedOwnerUserId: ownerUserId',
+  "console.error('Stripe Connect return reconciliation failed.'",
+  'handleStripeConnectAccountStatusWebhook({',
+  "source: event.eventType.startsWith('v2.') ? 'webhook_v2' : 'webhook_v1'",
+  'providerEventId: event.providerEventId'
 ];
 
 for (const term of requiredServerTerms) {
@@ -59,7 +87,10 @@ const requiredConnectTerms = [
   "dashboard: 'express'",
   'stripe.parseEventNotification',
   'v2.core.account_link.returned',
-  "event.type !== 'account.updated'"
+  "event.type !== 'account.updated'",
+  'status: await getAccountStatus(account.id)',
+  'providerEventId: event.id',
+  'providerEventId: notification.id'
 ];
 
 for (const term of requiredConnectTerms) {
@@ -75,9 +106,51 @@ for (const term of [
   'stripeAccountId',
   'leaseToken',
   'leaseExpiresAt',
-  'attemptCount'
+  'attemptCount',
+  'performers_stripe_connected_account_id_unique',
+  'stripeConnectStatusCheckedAt'
 ]) {
   if (!schemaSource.includes(term)) failures.push(`Connect provisioning schema missing durable term: ${term}`);
+}
+
+for (const term of [
+  'chargesEnabled: status.chargesEnabled',
+  'payoutsEnabled: status.payoutsEnabled',
+  "'not_started'",
+  "'created'",
+  "'charges_enabled'",
+  "'payouts_enabled'",
+  ".for('update')",
+  ".limit(2)",
+  'stripe_connect_account_binding_conflict',
+  'stripeConnectStatusCheckedAt: checkedAt',
+  'updatedAt: checkedAt',
+  'stripe_connect.readiness_changed',
+  'writeAuditEvent(tx',
+  "source: 'return' | 'webhook_v1' | 'webhook_v2'"
+]) {
+  if (!connectStatusSource.includes(term)) failures.push(`Connect status mapper missing term: ${term}`);
+}
+
+for (const term of [
+  'requireTalentAccess(input.req)',
+  "redirect(303, '/talent?connect=auth')",
+  "redirect(303, '/talent?connect=pending')",
+  "'/talent?connect=return'",
+  'loadOwnedPerformer(ownerUserId)',
+  'getAccountStatus(performerOwner.stripeAccountId)',
+  'result.kind === \'not_found\''
+]) {
+  if (!connectReturnSource.includes(term)) failures.push(`Connect return handler missing term: ${term}`);
+}
+
+for (const term of [
+  'input.applyStatus(input.accountEvent)',
+  "throw new Error('stripe_connect_account_not_bound')",
+  'input.res.status(400).json',
+  "result: { type: 'account.updated' }"
+]) {
+  if (!connectWebhookSource.includes(term)) failures.push(`Connect webhook handler missing term: ${term}`);
 }
 
 for (const term of [
@@ -96,6 +169,17 @@ for (const term of [
   'stripe_connect_onboarding_operations_lease_consistent'
 ]) {
   if (!migrationSource.includes(term)) failures.push(`Connect provisioning migration missing term: ${term}`);
+}
+
+for (const term of [
+  'CREATE UNIQUE INDEX "performers_stripe_connected_account_id_unique"',
+  'WHERE "performers"."stripe_connected_account_id" is not null'
+]) {
+  if (!accountUniqueMigrationSource.includes(term)) failures.push(`Connect account uniqueness migration missing term: ${term}`);
+}
+
+if (!statusFreshnessMigrationSource.includes('ADD COLUMN "stripe_connect_status_checked_at" timestamp with time zone')) {
+  failures.push('Connect status freshness migration missing dedicated timestamp column.');
 }
 
 for (const term of [
@@ -132,6 +216,50 @@ if (behavior.status !== 0) {
   failures.push(`Stripe Connect provisioning behavior test failed: ${behavior.stderr || behavior.stdout || 'unknown error'}`);
 } else if (behavior.stdout) {
   process.stdout.write(behavior.stdout);
+}
+
+const statusBehavior = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-status.behavior.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (statusBehavior.status !== 0) {
+  failures.push(`Stripe Connect status behavior test failed: ${statusBehavior.stderr || statusBehavior.stdout || 'unknown error'}`);
+} else if (statusBehavior.stdout) {
+  process.stdout.write(statusBehavior.stdout);
+}
+
+const returnBehavior = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-return.behavior.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (returnBehavior.status !== 0) {
+  failures.push(`Stripe Connect return behavior test failed: ${returnBehavior.stderr || returnBehavior.stdout || 'unknown error'}`);
+} else if (returnBehavior.stdout) {
+  process.stdout.write(returnBehavior.stdout);
+}
+
+const webhookBehavior = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-webhook.behavior.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (webhookBehavior.status !== 0) {
+  failures.push(`Stripe Connect webhook behavior test failed: ${webhookBehavior.stderr || webhookBehavior.stdout || 'unknown error'}`);
+} else if (webhookBehavior.stdout) {
+  process.stdout.write(webhookBehavior.stdout);
+}
+
+const statusIntegration = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-status.integration.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (statusIntegration.status !== 0) {
+  failures.push(`Stripe Connect status integration test failed: ${statusIntegration.stderr || statusIntegration.stdout || 'unknown error'}`);
+} else if (statusIntegration.stdout) {
+  process.stdout.write(statusIntegration.stdout);
 }
 
 const integration = spawnSync(process.execPath, [

@@ -1,0 +1,1 @@
+ALTER TABLE "performers" ADD COLUMN "stripe_connect_status_checked_at" timestamp with time zone;
