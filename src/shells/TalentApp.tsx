@@ -5,7 +5,6 @@ import SplitViewShell from '../components/SplitViewShell';
 import TalentDashboard from '../components/TalentDashboard';
 import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
-import TalentFileConnectCard from '../components/TalentFileConnectCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
 import PerformerEventDoorPage from '../components/PerformerEventDoorPage';
 import VictoryScreen from '../components/VictoryScreen';
@@ -17,6 +16,13 @@ import {
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import {
+  buildFileConnectLoginHref,
+  FILE_COLLABORATION_PATHS,
+  normalizeSafeAccountNextPath,
+  readFilePairingTokenFromHash,
+  resolveLegacyFileConnectTarget
+} from '../file-collaboration-routing';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -281,8 +287,23 @@ export default function TalentApp() {
 
   if (isTalentLogin(pathname)) {
     const sourceParams = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
-    sourceParams.set('intent', 'performer');
-    if (typeof window !== 'undefined') window.location.replace(`/account/login?${sourceParams.toString()}`);
+    const legacyRedirectValues = sourceParams.getAll('redirect');
+    const legacyRedirect = legacyRedirectValues.length === 1 ? legacyRedirectValues[0] : '';
+    const outerHash = typeof window === 'undefined' ? '' : window.location.hash;
+    if (legacyRedirect === FILE_COLLABORATION_PATHS.legacyConnect && readFilePairingTokenFromHash(outerHash)) {
+      if (typeof window !== 'undefined') window.location.replace(buildFileConnectLoginHref(outerHash));
+      return <LoadingState />;
+    }
+    const targetParams = new URLSearchParams({ intent: 'performer' });
+    const safeNext = normalizeSafeAccountNextPath(
+      legacyRedirect,
+      typeof window === 'undefined' ? 'https://app.sway.tips' : window.location.origin
+    );
+    if (safeNext) targetParams.set('next', safeNext);
+    if (sourceParams.getAll('status').length === 1 && sourceParams.get('status') === 'verified') {
+      targetParams.set('verified', '1');
+    }
+    if (typeof window !== 'undefined') window.location.replace(`/account/login?${targetParams.toString()}`);
     return <LoadingState />;
   }
 
@@ -315,7 +336,10 @@ export default function TalentApp() {
   }
 
   if (isTalentFileConnect(pathname)) {
-    return <TalentFileConnectCard />;
+    if (typeof window !== 'undefined') {
+      window.location.replace(resolveLegacyFileConnectTarget(window.location.hash));
+    }
+    return <LoadingState />;
   }
 
   if (isTalentRightsReview(pathname)) {

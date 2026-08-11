@@ -103,6 +103,17 @@ for (const term of [
   if (!prompt.includes(term)) failures.push(`Install prompt missing premium tray term: ${term}`);
 }
 
+for (const term of [
+  'export function isInstallPromptSuppressedRoute',
+  "new URLSearchParams(search).getAll('next')",
+  'pathname === FILE_COLLABORATION_PATHS.inbox',
+  'pathname === FILE_COLLABORATION_PATHS.connect',
+  "pathname === '/account/login'",
+  'accountNext === FILE_COLLABORATION_PATHS.connect'
+]) {
+  if (!prompt.includes(term)) failures.push(`Install prompt missing collaboration suppression term: ${term}`);
+}
+
 for (const term of ['isMetaInAppBrowser', 'FBAN', 'FBAV', 'FB_IAB', 'MessengerForiOS']) {
   if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing Meta in-app detection term: ${term}`);
 }

@@ -313,7 +313,7 @@ for (const term of [
   "tokenUse: 'single_use_pairing'",
   "connectionLifetime: 'persistent_until_revoked'",
   "roomQrRelationship: 'separate_from_static_sway_room_qr'",
-  "pairingPath: '/talent/connect/files'",
+  "pairingPath: '/account/collaboration/connect'",
   "claimSecretTransport: 'url_fragment_then_authenticated_post_body'",
   'roomOrGigAccessGranted: false',
   'projectAccessGrantedAtPairing: false',
@@ -340,25 +340,29 @@ for (const term of [
 }
 
 for (const term of [
-  'This is a schema-and-contract slice with Slice 1 upload/share runtime and live file-pairing QR routes.',
+  'The current implementation includes private original-file storage and upload foundations',
   'Sway preserves everything the stores allow us to preserve',
   'An accepted original asset version is immutable evidence.',
   'bind the sealed row to its upload session, verifier, verification timestamp, and non-empty evidence',
   'whose SHA-256 digest matches the accepted source version',
   "The required file-pairing QR flow is separate from Sway's static room QR.",
   'Private file-pairing QR routes are live for one-time connection claims',
-  'The one-time rule will apply to the QR claim, not to the resulting connection.',
-  '/talent/connect/files#token={opaque-token}',
+  'The one-time rule applies to the QR claim, not to the resulting connection.',
+  '/account/collaboration/connect#token={opaque-token}',
   'opaque token in its URL fragment',
   'client submits the token in an authenticated POST body',
   '`request_files`',
   '`send_files`',
   'remains available until either participant removes it',
-  'Pairing alone will grant no project or file access.',
+  'Pairing alone grants no project or file access.',
   '`audio_file_access_grants`',
-  'one selected immutable asset version and one grantee',
+  'one immutable asset version with one connected account',
   'It does not copy, relocate, rename, or transcode the original object.',
-  'A file connection must not silently grant access to every project',
+  'A file connection does not grant access to every project',
+  '`/account/collaboration` is the authenticated Collaborator Inbox for any Sway account',
+  '`/account/collaboration/connect` is the canonical pairing-claim route',
+  'It does not let an ordinary account upload or send from a creator Catalog',
+  'it introduces no new schema or migration and no distribution fee, sale, royalty, payout, Stripe, or live-room money behavior',
   'Any hold blocks old-provider takedown.',
   'A database trigger validates every status edge',
   'Music distribution and composition publishing administration are different services.',
@@ -429,6 +433,7 @@ if (!revokeRoute) {
 for (const forbidden of [
   'request_files',
   'send_files',
+  '/account/collaboration/connect',
   '/talent/connect/files',
   'audio_file_connections',
   'AUDIO_FILE_CONNECTION_QR_CONTRACT'
@@ -584,6 +589,7 @@ if (contract && schema && migration) {
     );
     assert.equal(replayAudits.length, 1, 'A consumed-token replay must write one durable denial audit.');
     assert.equal(replayAudits[0].eventType, 'audio_file_pairing.claim_denied');
+    assert.equal(replayAudits[0].actorType, 'account', 'A generic-account claimant must not be attributed as a performer.');
     assert.equal(replayAudits[0].entityId, consumedToken.id);
     assert.equal(replayAudits[0].metadata?.reason, 'consumed_token_replay');
 
@@ -628,12 +634,17 @@ if (contract && schema && migration) {
     });
     assert.equal(revoked.connectionId, connectionForUniversalMember.id);
     assert.equal(revokeEvents.length, 2, 'A non-talent connection member revoke must emit connection and audit evidence.');
+    assert.equal(
+      revokeEvents.find((event) => event.eventType === 'audio_file_pairing.connection_revoked')?.actorType,
+      'account',
+      'A generic-account connection revoke must be attributed to an account actor.'
+    );
 
     if (AUDIO_FILE_CONNECTION_QR_CONTRACT.claimSecretTransport !== 'url_fragment_then_authenticated_post_body') {
       throw new Error('File-pairing claim secrets must be separated from room paths and ordinary HTTP URL transport.');
     }
-    if (AUDIO_FILE_CONNECTION_QR_CONTRACT.pairingPath !== '/talent/connect/files') {
-      throw new Error('File pairing must use its dedicated performer-side path.');
+    if (AUDIO_FILE_CONNECTION_QR_CONTRACT.pairingPath !== '/account/collaboration/connect') {
+      throw new Error('File pairing must use its universal account collaboration path.');
     }
     if (AUDIO_FILE_CONNECTION_QR_CONTRACT.projectAccessGrantedAtPairing !== false) {
       throw new Error('Pairing must not grant project access.');

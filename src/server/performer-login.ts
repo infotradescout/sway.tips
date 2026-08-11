@@ -128,8 +128,9 @@ export function resolvePerformerLoginRedirectPath(rawValue: unknown) {
   try {
     const parsed = new URL(trimmed, 'https://sway.tips');
     if (parsed.origin !== 'https://sway.tips') return '/talent';
-    if (!parsed.pathname.startsWith('/talent')) return '/talent';
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    if (parsed.hash) return '/talent';
+    if (parsed.pathname !== '/talent' && !parsed.pathname.startsWith('/talent/')) return '/talent';
+    return `${parsed.pathname}${parsed.search}`;
   } catch {
     return '/talent';
   }

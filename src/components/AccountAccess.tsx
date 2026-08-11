@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowRight, CheckCircle2, LogOut, QrCode, Radio, ShieldCheck, Ticket, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { ArrowRight, CheckCircle2, FolderOpen, LogOut, QrCode, Radio, ShieldCheck, Ticket, UserRound } from 'lucide-react';
 import AppBackdrop from './AppBackdrop';
+import {
+  FILE_COLLABORATION_PATHS,
+  normalizeSafeAccountNextPath,
+  preserveFileConnectFragment
+} from '../file-collaboration-routing';
 
 type AccountSession = {
   account: {
@@ -39,22 +44,10 @@ function readClaimFromLocation() {
 }
 
 function readSafeAccountNextFromLocation() {
-  const raw = new URLSearchParams(window.location.search).get('next')?.trim() || '';
-  if (!raw || raw.length > 1_024 || !raw.startsWith('/') || raw.startsWith('//')) return '';
-  try {
-    const parsed = new URL(raw, window.location.origin);
-    if (parsed.origin !== window.location.origin) return '';
-    const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
-      || parsed.pathname === '/tickets'
-      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname)
-      || parsed.pathname === '/talent'
-      || (parsed.pathname === '/account'
-        && parsed.searchParams.get('intent') === 'performer'
-        && [...parsed.searchParams.keys()].every((key) => key === 'intent'));
-    return allowed ? `${parsed.pathname}${parsed.search}` : '';
-  } catch {
-    return '';
-  }
+  const params = new URLSearchParams(window.location.search);
+  const values = params.getAll('next');
+  if (values.length !== 1) return '';
+  return normalizeSafeAccountNextPath(values[0], window.location.origin);
 }
 
 function hasPerformerIntent(params: URLSearchParams, accountNext: string) {
@@ -152,7 +145,13 @@ export function AccountLogin() {
         claimCode: claimCode.trim() || undefined,
         next: accountNext || undefined
       });
-      window.location.assign(data.redirectPath || '/account');
+      const redirectPath = typeof data.redirectPath === 'string' ? data.redirectPath : '/account';
+      const nextPath = preserveFileConnectFragment(redirectPath, window.location.hash);
+      if (fileConnectLogin || nextPath.startsWith(`${FILE_COLLABORATION_PATHS.connect}#token=`)) {
+        window.location.replace(nextPath);
+      } else {
+        window.location.assign(nextPath);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to log in.');
     } finally {
@@ -163,8 +162,14 @@ export function AccountLogin() {
   const signupParams = new URLSearchParams();
   if (performerIntent) signupParams.set('intent', 'performer');
   if (claimCode.trim()) signupParams.set('claim', claimCode.trim());
-  if (accountNext) signupParams.set('next', accountNext);
+  const fileConnectLogin = accountNext === FILE_COLLABORATION_PATHS.connect;
+  if (accountNext && !fileConnectLogin) signupParams.set('next', accountNext);
   const signupHref = `/account/signup${signupParams.size ? `?${signupParams.toString()}` : ''}`;
+  const replaceFileConnectExit = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!fileConnectLogin) return;
+    event.preventDefault();
+    window.location.replace(event.currentTarget.href);
+  };
 
   return (
     <AccessFrame>
@@ -192,10 +197,12 @@ export function AccountLogin() {
         <button type="submit" disabled={pending} aria-busy={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Logging in…' : 'Log in'}</button>
       </form>
       <div className="mt-4 flex justify-center gap-4 text-xs font-bold">
-        <a href="/account/recover" className="text-cyan-300">Forgot password?</a>
-        <a href="/account/resend-verification" className="text-slate-400">Resend verification</a>
+        <a href="/account/recover" onClick={replaceFileConnectExit} className="text-cyan-300">Forgot password?</a>
+        <a href="/account/resend-verification" onClick={replaceFileConnectExit} className="text-slate-400">Resend verification</a>
       </div>
-      <a href={signupHref} className="mt-4 block text-center text-sm font-bold text-cyan-300">Create an account</a>
+      <a href={signupHref} onClick={replaceFileConnectExit} className="mt-4 block text-center text-sm font-bold text-cyan-300">
+        {fileConnectLogin ? 'Create an account, then rescan the file QR' : 'Create an account'}
+      </a>
     </AccessFrame>
   );
 }
@@ -203,7 +210,8 @@ export function AccountLogin() {
 export function AccountSignup() {
   const signupParams = new URLSearchParams(window.location.search);
   const initialClaim = readClaimFromLocation();
-  const accountNext = readSafeAccountNextFromLocation();
+  const requestedAccountNext = readSafeAccountNextFromLocation();
+  const accountNext = requestedAccountNext === FILE_COLLABORATION_PATHS.connect ? '' : requestedAccountNext;
   const performerIntent = hasPerformerIntent(signupParams, accountNext);
   const performerNext = accountNext || (performerIntent ? '/account?intent=performer' : '');
   const [displayName, setDisplayName] = useState('');
@@ -508,6 +516,7 @@ export function AccountHome() {
       <div className="mt-5 grid gap-3">
         <a href="/home" className="flex min-h-14 items-center justify-between rounded-xl bg-fuchsia-600 px-4 text-sm font-black"><span className="inline-flex items-center gap-2"><QrCode className="h-4 w-4" /> Join or scan a room</span><ArrowRight className="h-4 w-4" /></a>
         <a href="/tickets" className="flex min-h-14 items-center justify-between rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-4 text-sm font-black text-fuchsia-100"><span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4" /> My tickets</span><ArrowRight className="h-4 w-4" /></a>
+        <a href={FILE_COLLABORATION_PATHS.inbox} className="flex min-h-14 items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" /> Collaborator Inbox</span><ArrowRight className="h-4 w-4" /></a>
         {(session?.pendingRightsReviewCount ?? 0) > 0 ? (
           <a href="/account/reviews" className="flex min-h-14 items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100"><span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Review release rights ({session?.pendingRightsReviewCount})</span><ArrowRight className="h-4 w-4" /></a>
         ) : null}

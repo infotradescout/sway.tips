@@ -15,6 +15,7 @@ import sharp from "sharp";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
+import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
 import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
@@ -5268,28 +5269,6 @@ app.post('/api/account/claim/attach', async (req, res) => {
   }
 });
 
-function normalizeSafeAccountNextPath(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const raw = value.trim();
-  if (!raw || raw.length > 1_024 || !raw.startsWith('/') || raw.startsWith('//')) return null;
-
-  try {
-    const parsed = new URL(raw, 'https://app.sway.tips');
-    if (parsed.origin !== 'https://app.sway.tips') return null;
-    const allowed = /^\/e\/[0-9a-f-]{36}$/i.test(parsed.pathname)
-      || parsed.pathname === '/tickets'
-      || /^\/tickets\/(?:orders\/[0-9a-f-]{36}\/return|[0-9a-f-]{36})$/i.test(parsed.pathname)
-      || parsed.pathname === '/talent'
-      || (parsed.pathname === '/account'
-        && parsed.searchParams.get('intent') === 'performer'
-        && [...parsed.searchParams.keys()].every((key) => key === 'intent'));
-    if (!allowed) return null;
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return null;
-  }
-}
-
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
@@ -10182,12 +10161,12 @@ app.post('/api/talent/audio/pairing/claim', async (req, res) => {
 
 app.get('/api/talent/audio/pairing/connections', async (req, res) => {
   applyNoStoreHeaders(res);
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
-  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
   if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
 
-  const connections = await audioFilePairingService.listConnections({ userId: talentAccess.actor.actorId });
+  const connections = await audioFilePairingService.listConnections({ userId: accountAccess.actor.actorId });
   return res.json({ connections });
 });
 
