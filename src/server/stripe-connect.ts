@@ -164,11 +164,16 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     },
 
     async createOnboardingLink({ accountId, refreshUrl, returnUrl }) {
-      const link = await stripe.accountLinks.create({
+      const link = await stripe.v2.core.accountLinks.create({
         account: accountId,
-        refresh_url: refreshUrl,
-        return_url: returnUrl,
-        type: 'account_onboarding'
+        use_case: {
+          type: 'account_onboarding',
+          account_onboarding: {
+            configurations: ['recipient'],
+            refresh_url: refreshUrl,
+            return_url: returnUrl
+          }
+        }
       });
       return { url: link.url };
     },

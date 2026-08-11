@@ -10601,15 +10601,27 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
 
   try {
     const [performerRow] = await businessDb
-      .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
+      .select({
+        stripeConnectedAccountId: performers.stripeConnectedAccountId,
+        ownerEmail: users.email
+      })
       .from(performers)
-      .where(eq(performers.id, performerOwner.performerId))
+      .innerJoin(users, eq(users.id, performers.ownerUserId))
+      .where(and(
+        eq(performers.id, performerOwner.performerId),
+        eq(users.id, talentAccess.actor.actorId)
+      ))
       .limit(1);
+
+    if (!performerRow?.ownerEmail) {
+      return res.status(409).json({ error: 'A verified performer account email is required before Stripe onboarding.' });
+    }
 
     let accountId = performerRow?.stripeConnectedAccountId ?? null;
     if (!accountId) {
       const created = await stripeConnectService.createRecipientAccount({
-        displayName: performerOwner.displayName
+        displayName: performerOwner.displayName,
+        contactEmail: performerRow.ownerEmail
       });
       accountId = created.accountId;
       await businessDb
