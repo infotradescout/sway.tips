@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -7,8 +7,12 @@ const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const connectSource = readFileSync(join(root, 'src/server/stripe-connect.ts'), 'utf8');
 const onboardingSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding.ts'), 'utf8');
 const onboardingStoreSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding-store.ts'), 'utf8');
+const accountClaimSource = readFileSync(join(root, 'src/server/account-claim.ts'), 'utf8');
 const schemaSource = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
-const migrationSource = readFileSync(join(root, 'drizzle/0031_needy_virginia_dare.sql'), 'utf8');
+const migrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .find((name) => readFileSync(join(root, 'drizzle', name), 'utf8').includes('stripe_connect_onboarding_operations'));
+const migrationSource = migrationName ? readFileSync(join(root, 'drizzle', migrationName), 'utf8') : '';
 const talentDashboardSource = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 
 const failures = [];
@@ -66,12 +70,22 @@ for (const term of requiredConnectTerms) {
 for (const term of [
   'stripeConnectOnboardingOperations',
   'operationKey',
+  'ownerUserId',
   'stripeAccountId',
   'leaseToken',
   'leaseExpiresAt',
   'attemptCount'
 ]) {
   if (!schemaSource.includes(term)) failures.push(`Connect provisioning schema missing durable term: ${term}`);
+}
+
+for (const term of [
+  'stripeConnectOnboardingOperations',
+  'stripe_connect_provisioning_in_progress',
+  'payment_account_configured',
+  ".for('update')"
+]) {
+  if (!accountClaimSource.includes(term)) failures.push(`Performer ownership transfer fence missing term: ${term}`);
 }
 
 for (const term of [

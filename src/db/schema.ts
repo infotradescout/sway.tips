@@ -296,6 +296,7 @@ export const performers = pgTable('performers', {
 // can reconcile instead of creating another connected account.
 export const stripeConnectOnboardingOperations = pgTable('stripe_connect_onboarding_operations', {
   performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
   operationKey: text('operation_key').notNull(),
   status: text('status').notNull().default('pending'),
   stripeAccountId: text('stripe_account_id'),

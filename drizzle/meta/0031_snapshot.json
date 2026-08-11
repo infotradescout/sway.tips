@@ -1,5 +1,5 @@
 {
-  "id": "adb080fc-6a15-4e80-9139-d568acb0cd9d",
+  "id": "1e9bd3f2-db1f-408f-8149-8534e1f27baf",
   "prevId": "c9962813-b0b6-45e9-ae86-2628b28946ec",
   "version": "7",
   "dialect": "postgresql",
@@ -13067,6 +13067,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "operation_key": {
           "name": "operation_key",
           "type": "text",
@@ -13166,6 +13172,19 @@
           "tableTo": "performers",
           "columnsFrom": [
             "performer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stripe_connect_onboarding_operations_owner_user_id_users_id_fk": {
+          "name": "stripe_connect_onboarding_operations_owner_user_id_users_id_fk",
+          "tableFrom": "stripe_connect_onboarding_operations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
           ],
           "columnsTo": [
             "id"

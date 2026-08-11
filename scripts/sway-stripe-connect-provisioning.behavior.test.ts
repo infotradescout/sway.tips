@@ -10,7 +10,7 @@ function createInMemoryStore(options: { verified?: boolean; failCompleteOnce?: b
   let leaseToken: string | null = null;
   let boundAccountId: string | null = null;
   let failCompleteOnce = options.failCompleteOnce ?? false;
-  const operationKey = `sway-connect-recipient:${performerId}:v1`;
+  const operationKey = `sway-connect-recipient:${performerId}:owner:${ownerUserId}:v1`;
 
   const store = {
     async reserve() {

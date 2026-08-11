@@ -26,8 +26,8 @@ export type StripeConnectProvisioningReservation =
 
 export type StripeConnectOnboardingStore = ReturnType<typeof createStripeConnectOnboardingStore>;
 
-function operationKeyForPerformer(performerId: string) {
-  return `sway-connect-recipient:${performerId}:v1`;
+function operationKeyForPerformerOwner(performerId: string, ownerUserId: string) {
+  return `sway-connect-recipient:${performerId}:owner:${ownerUserId}:v1`;
 }
 
 function safeError(error: unknown) {
@@ -63,9 +63,10 @@ export function createStripeConnectOnboardingStore(db: SwayDb, now = () => new D
         if (!owner) return { kind: 'not_found' } as const;
         if (!owner.contactEmail || !owner.emailVerifiedAt) return { kind: 'unverified' } as const;
 
-        const operationKey = operationKeyForPerformer(owner.performerId);
+        const operationKey = operationKeyForPerformerOwner(owner.performerId, input.ownerUserId);
         await tx.insert(stripeConnectOnboardingOperations).values({
           performerId: owner.performerId,
+          ownerUserId: input.ownerUserId,
           operationKey
         }).onConflictDoNothing({ target: stripeConnectOnboardingOperations.performerId });
 
@@ -76,7 +77,11 @@ export function createStripeConnectOnboardingStore(db: SwayDb, now = () => new D
           .for('update')
           .limit(1);
 
-        if (!operation || operation.operationKey !== operationKey) {
+        if (
+          !operation
+          || operation.ownerUserId !== input.ownerUserId
+          || operation.operationKey !== operationKey
+        ) {
           throw new Error('stripe_connect_operation_identity_conflict');
         }
 
@@ -165,7 +170,11 @@ export function createStripeConnectOnboardingStore(db: SwayDb, now = () => new D
           .for('update')
           .limit(1);
 
-        if (!operation || operation.operationKey !== input.operationKey) {
+        if (
+          !operation
+          || operation.ownerUserId !== input.ownerUserId
+          || operation.operationKey !== input.operationKey
+        ) {
           throw new Error('stripe_connect_operation_identity_conflict');
         }
         if (operation.stripeAccountId && operation.stripeAccountId !== input.accountId) {

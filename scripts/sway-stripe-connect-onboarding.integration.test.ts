@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import type { SwayDb } from '../src/db/client';
 import * as schema from '../src/db/schema';
+import { transferPerformerOwnership } from '../src/server/account-claim';
 import { createStripeConnectOnboardingStore } from '../src/server/stripe-connect-onboarding-store';
 
 const root = process.cwd();
@@ -29,7 +30,10 @@ const ids = {
   performer: '20000000-0000-4000-8000-000000000001',
   unverifiedOwner: '10000000-0000-4000-8000-000000000002',
   unverifiedPerformer: '20000000-0000-4000-8000-000000000002',
-  outsider: '10000000-0000-4000-8000-000000000003'
+  outsider: '10000000-0000-4000-8000-000000000003',
+  transferOwner: '10000000-0000-4000-8000-000000000004',
+  transferRecipient: '10000000-0000-4000-8000-000000000005',
+  transferPerformer: '20000000-0000-4000-8000-000000000004'
 } as const;
 
 const database = new PGlite();
@@ -59,6 +63,21 @@ await db.insert(schema.users).values([
     displayName: 'Outsider',
     emailVerifiedAt: new Date('2026-08-11T00:00:00Z'),
     termsAcceptedAt: new Date('2026-08-11T00:00:00Z')
+  },
+  {
+    id: ids.transferOwner,
+    email: 'transfer-owner@example.test',
+    displayName: 'Transfer Owner',
+    emailVerifiedAt: new Date('2026-08-11T00:00:00Z'),
+    termsAcceptedAt: new Date('2026-08-11T00:00:00Z'),
+    proModeStatus: 'active'
+  },
+  {
+    id: ids.transferRecipient,
+    email: 'transfer-recipient@example.test',
+    displayName: 'Transfer Recipient',
+    emailVerifiedAt: new Date('2026-08-11T00:00:00Z'),
+    termsAcceptedAt: new Date('2026-08-11T00:00:00Z')
   }
 ]);
 
@@ -78,6 +97,14 @@ await db.insert(schema.performers).values([
     handle: 'unverified-performer',
     isActive: true,
     onboardingStatus: 'gig_ready'
+  },
+  {
+    id: ids.transferPerformer,
+    ownerUserId: ids.transferOwner,
+    displayName: 'Transfer Performer',
+    handle: 'transfer-performer',
+    isActive: false,
+    onboardingStatus: 'created'
   }
 ]);
 
@@ -113,6 +140,7 @@ const [operation] = await db.select().from(schema.stripeConnectOnboardingOperati
   .where(eq(schema.stripeConnectOnboardingOperations.performerId, ids.performer));
 assert.equal(operation.status, 'bound');
 assert.equal(operation.stripeAccountId, 'acct_durable_connect_test');
+assert.equal(operation.ownerUserId, ids.owner);
 assert.equal(operation.attemptCount, 2);
 assert.equal(operation.leaseToken, null);
 assert.equal(operation.leaseExpiresAt, null);
@@ -134,6 +162,23 @@ assert.deepEqual(unverified, { kind: 'unverified' });
 
 const crossOwner = await store.reserve({ performerId: ids.performer, ownerUserId: ids.outsider });
 assert.deepEqual(crossOwner, { kind: 'not_found' });
+
+const transferReservation = await store.reserve({
+  performerId: ids.transferPerformer,
+  ownerUserId: ids.transferOwner
+});
+assert.equal(transferReservation.kind, 'reserved');
+
+const transferResult = await db.transaction((tx) => transferPerformerOwnership(tx, {
+  performerId: ids.transferPerformer,
+  fromUserId: ids.transferOwner,
+  toUserId: ids.transferRecipient
+}));
+assert.deepEqual(transferResult, { ok: false, code: 'stripe_connect_provisioning_in_progress' });
+const [transferOwner] = await db.select({ ownerUserId: schema.performers.ownerUserId })
+  .from(schema.performers)
+  .where(eq(schema.performers.id, ids.transferPerformer));
+assert.equal(transferOwner.ownerUserId, ids.transferOwner);
 
 await database.close();
 console.log(`Stripe Connect onboarding store integration test passed (${migrationFiles.length} migrations).`);

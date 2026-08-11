@@ -1,5 +1,6 @@
 CREATE TABLE "stripe_connect_onboarding_operations" (
 	"performer_id" uuid PRIMARY KEY NOT NULL,
+	"owner_user_id" uuid NOT NULL,
 	"operation_key" text NOT NULL,
 	"status" text DEFAULT 'pending' NOT NULL,
 	"stripe_account_id" text,
@@ -20,5 +21,6 @@ CREATE TABLE "stripe_connect_onboarding_operations" (
 );
 --> statement-breakpoint
 ALTER TABLE "stripe_connect_onboarding_operations" ADD CONSTRAINT "stripe_connect_onboarding_operations_performer_id_performers_id_fk" FOREIGN KEY ("performer_id") REFERENCES "public"."performers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "stripe_connect_onboarding_operations" ADD CONSTRAINT "stripe_connect_onboarding_operations_owner_user_id_users_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "stripe_connect_onboarding_operations_key_idx" ON "stripe_connect_onboarding_operations" USING btree ("operation_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "stripe_connect_onboarding_operations_account_idx" ON "stripe_connect_onboarding_operations" USING btree ("stripe_account_id") WHERE "stripe_connect_onboarding_operations"."stripe_account_id" is not null;
