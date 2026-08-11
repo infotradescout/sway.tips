@@ -126,9 +126,16 @@ try {
     granteeUserId: expiredReviewerId,
     role: 'reviewer',
     canApprove: true,
+    canManageAccess: true,
     grantedByUserId: ownerId,
     expiresAt: new Date(Date.now() - 60_000)
   });
+  const [expiredManagerConnection] = await db.insert(audioFileConnections).values({
+    memberOneUserId: ownerId,
+    memberTwoUserId: expiredReviewerId,
+    createdByUserId: ownerId,
+    createdFromPurpose: 'send_files'
+  }).returning();
   await assert.rejects(
     publishing.listProjectAssets({ projectId: project.id, actorUserId: outsiderId }),
     /Project access required/
@@ -714,6 +721,15 @@ try {
       grantedByUserId: outsiderId
     }),
     /Only connection members can share files/
+  );
+  await assert.rejects(
+    collaboration.shareVersion({
+      connectionId: expiredManagerConnection.id,
+      versionId: version.id,
+      grantedByUserId: expiredReviewerId
+    }),
+    /Project access management permission required/,
+    'Expired project-management grants must not authorize selected-file sharing.'
   );
 
   const shared = await collaboration.shareVersion({

@@ -200,6 +200,9 @@ for (const term of [
 if (!shareVersion.includes("actorType: 'performer'")) {
   failures.push('Performer-authorized selected-file sharing must retain performer audit attribution.');
 }
+if (!shareVersion.includes('or(\n            isNull(audioProjectAccessGrants.expiresAt),\n            gt(audioProjectAccessGrants.expiresAt, new Date())\n          )')) {
+  failures.push('Selected-file sharing must reject expired project-management grants.');
+}
 if (!pairing.includes('cascadedFileGrantRevocation: true') || !pairing.includes('audioFileAccessGrants')) {
   failures.push('Connection revocation must durably cascade to selected-file grants.');
 }

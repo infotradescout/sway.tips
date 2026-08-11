@@ -144,7 +144,11 @@ export function createAudioFileCollaborationService(config: {
           eq(audioProjectAccessGrants.projectId, version.projectId),
           eq(audioProjectAccessGrants.granteeUserId, input.grantedByUserId),
           eq(audioProjectAccessGrants.canManageAccess, true),
-          isNull(audioProjectAccessGrants.revokedAt)
+          isNull(audioProjectAccessGrants.revokedAt),
+          or(
+            isNull(audioProjectAccessGrants.expiresAt),
+            gt(audioProjectAccessGrants.expiresAt, new Date())
+          )
         ))
         .limit(1);
       if (!grantorAccess) {
