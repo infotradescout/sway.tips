@@ -144,6 +144,17 @@ if (integration.status !== 0) {
   process.stdout.write(integration.stdout);
 }
 
+const ownershipConcurrency = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-ownership-concurrency.integration.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (ownershipConcurrency.status !== 0) {
+  failures.push(`Stripe Connect ownership concurrency integration test failed: ${ownershipConcurrency.stderr || ownershipConcurrency.stdout || 'unknown error'}`);
+} else if (ownershipConcurrency.stdout) {
+  process.stdout.write(ownershipConcurrency.stdout);
+}
+
 const bannedConnectPatterns = [
   /accounts\.create\(\s*\{\s*type:\s*['"]express['"]/,
   /type:\s*['"]custom['"]/,
