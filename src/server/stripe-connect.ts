@@ -135,7 +135,7 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     async createRecipientAccount(input) {
       for await (const existing of stripe.v2.core.accounts.list({
         applied_configurations: ['recipient'],
-        limit: 100
+        limit: 20
       })) {
         if (existing.metadata?.sway_connect_operation_key === input.operationKey) {
           return { accountId: existing.id };

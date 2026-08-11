@@ -45,6 +45,7 @@ const requiredConnectTerms = [
   "!secretKey?.startsWith('sk_test_') && !secretKey?.startsWith('sk_live_')",
   "apiVersion: STRIPE_API_VERSION",
   'stripe.v2.core.accounts.create',
+  'limit: 20',
   'contact_email: input.contactEmail',
   'sway_connect_operation_key: input.operationKey',
   "applied_configurations: ['recipient']",
