@@ -26,7 +26,12 @@ export type StripeConnectService = {
     rawBody: string;
     signatureHeader: string | null;
     webhookSecret: string;
-  }) => Promise<{ accountId: string; status: ConnectAccountStatus } | null>;
+  }) => Promise<{
+    accountId: string;
+    status: ConnectAccountStatus;
+    providerEventId: string;
+    eventType: string;
+  } | null>;
 };
 
 /**
@@ -108,10 +113,15 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     }
 
     if (!accountId) return null;
-    return { accountId, status: await getAccountStatus(accountId) };
+    return {
+      accountId,
+      status: await getAccountStatus(accountId),
+      providerEventId: notification.id,
+      eventType: notification.type
+    };
   }
 
-  function parseV1AccountUpdatedEvent(input: {
+  async function parseV1AccountUpdatedEvent(input: {
     rawBody: string;
     signatureHeader: string | null;
     webhookSecret: string;
@@ -127,7 +137,11 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     const account = event.data.object as Stripe.Account;
     return {
       accountId: account.id,
-      status: mapV1AccountStatus(account)
+      // Webhook delivery order is not guaranteed. Resolve current provider
+      // truth instead of allowing an older event snapshot to restore readiness.
+      status: await getAccountStatus(account.id),
+      providerEventId: event.id,
+      eventType: event.type
     };
   }
 
@@ -196,7 +210,7 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     },
 
     async parseAccountUpdatedEvent(input) {
-      return await parseV2AccountStatusEvent(input) ?? parseV1AccountUpdatedEvent(input);
+      return await parseV2AccountStatusEvent(input) ?? await parseV1AccountUpdatedEvent(input);
     }
   };
 }

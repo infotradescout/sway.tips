@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "performers_stripe_connected_account_id_unique" ON "performers" USING btree ("stripe_connected_account_id") WHERE "performers"."stripe_connected_account_id" is not null;

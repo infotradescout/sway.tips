@@ -279,6 +279,7 @@ export const performers = pgTable('performers', {
   payoutsEnabled: boolean('payouts_enabled').notNull().default(false),
   chargesEnabled: boolean('charges_enabled').notNull().default(false),
   stripeConnectedAccountId: text('stripe_connected_account_id'),
+  stripeConnectStatusCheckedAt: timestamp('stripe_connect_status_checked_at', { withTimezone: true }),
   lifetimeGrossVolume: integer('lifetime_gross_volume').notNull().default(0),
   payoutHoldReason: text('payout_hold_reason'),
   verificationRequiredAtAmount: integer('verification_required_at_amount').notNull().default(10000),
@@ -286,6 +287,9 @@ export const performers = pgTable('performers', {
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
   handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
+  stripeConnectedAccountUnique: uniqueIndex('performers_stripe_connected_account_id_unique')
+    .on(table.stripeConnectedAccountId)
+    .where(sql`${table.stripeConnectedAccountId} is not null`),
   handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));

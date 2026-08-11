@@ -225,6 +225,20 @@
       "when": 1786478377517,
       "tag": "0031_magenta_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786483403472,
+      "tag": "0032_vengeful_jamie_braddock",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786484327467,
+      "tag": "0033_volatile_snowbird",
+      "breakpoints": true
     }
   ]
 }
