@@ -290,6 +290,48 @@ export const performers = pgTable('performers', {
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 
+// Durable outbox/lease for Stripe recipient provisioning. The provider call
+// runs outside the reservation transaction, while the stable operation key is
+// retained here and on the Stripe Account metadata so a post-provider crash
+// can reconcile instead of creating another connected account.
+export const stripeConnectOnboardingOperations = pgTable('stripe_connect_onboarding_operations', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  operationKey: text('operation_key').notNull(),
+  status: text('status').notNull().default('pending'),
+  stripeAccountId: text('stripe_account_id'),
+  leaseToken: uuid('lease_token'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastError: text('last_error'),
+  ...timestamps
+}, (table) => ({
+  operationKeyIdx: uniqueIndex('stripe_connect_onboarding_operations_key_idx').on(table.operationKey),
+  accountIdx: uniqueIndex('stripe_connect_onboarding_operations_account_idx')
+    .on(table.stripeAccountId)
+    .where(sql`${table.stripeAccountId} is not null`),
+  statusAllowed: check(
+    'stripe_connect_onboarding_operations_status_allowed',
+    sql`${table.status} in ('pending', 'provisioning', 'bound')`
+  ),
+  attemptCountValid: check(
+    'stripe_connect_onboarding_operations_attempt_count_valid',
+    sql`${table.attemptCount} >= 0`
+  ),
+  leaseConsistent: check(
+    'stripe_connect_onboarding_operations_lease_consistent',
+    sql`(
+      (${table.status} = 'provisioning' and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+      or
+      (${table.status} <> 'provisioning' and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)
+    )`
+  ),
+  boundAccountRequired: check(
+    'stripe_connect_onboarding_operations_bound_account_required',
+    sql`${table.status} <> 'bound' or ${table.stripeAccountId} is not null`
+  )
+}));
+
 export const performerPublicProfiles = pgTable('performer_public_profiles', {
   performerId: uuid('performer_id').primaryKey().references(() => performers.id),
   headline: text('headline'),

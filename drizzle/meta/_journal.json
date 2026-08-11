@@ -218,6 +218,13 @@
       "when": 1786203664559,
       "tag": "0030_tough_joseph",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786478377517,
+      "tag": "0031_magenta_thunderbird",
+      "breakpoints": true
     }
   ]
 }

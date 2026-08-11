@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, eq, ne } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
-import { performers, proModeStatusEvents, users } from '../db/schema';
+import { performers, proModeStatusEvents, stripeConnectOnboardingOperations, users } from '../db/schema';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,6 +26,10 @@ export function mapClaimInspectionToClientError(status: string): { status: numbe
       return { status: 410, code: 'already_used', error: 'Code already used' };
     case 'profile_already_claimed':
       return { status: 409, code: 'profile_already_claimed', error: 'Profile already claimed' };
+    case 'payment_account_configured':
+      return { status: 409, code: 'payment_account_configured', error: 'Disconnect or transfer the payout account before transferring this profile' };
+    case 'stripe_connect_provisioning_in_progress':
+      return { status: 409, code: 'stripe_connect_provisioning_in_progress', error: 'Finish or cancel Stripe onboarding before transferring this profile' };
     case 'unavailable':
       return { status: 503, code: 'unavailable', error: 'Code temporarily unavailable for validation' };
     case 'rate_limited':
@@ -102,7 +106,8 @@ export async function assertPerformerClaimableByHandoff(
       ownerUserId: performers.ownerUserId,
       displayName: performers.displayName,
       handle: performers.handle,
-      onboardingStatus: performers.onboardingStatus
+      onboardingStatus: performers.onboardingStatus,
+      stripeConnectedAccountId: performers.stripeConnectedAccountId
     })
     .from(performers)
     .where(eq(performers.id, input.performerId))
@@ -113,6 +118,9 @@ export async function assertPerformerClaimableByHandoff(
   if (performer.onboardingStatus === 'suspended') return { ok: false, code: 'unavailable' };
   if (performer.ownerUserId !== input.handoffUserId) {
     return { ok: false, code: 'profile_already_claimed' };
+  }
+  if (performer.stripeConnectedAccountId) {
+    return { ok: false, code: 'payment_account_configured' };
   }
   return { ok: true, displayName: performer.displayName, handle: performer.handle };
 }
@@ -150,6 +158,21 @@ export async function transferPerformerOwnership(
     handoffUserId: input.fromUserId
   });
   if (!claimable.ok) return claimable;
+
+  // The performer row is already locked by assertPerformerClaimableByHandoff.
+  // Lock the provisioning row second, matching the Connect store's global
+  // performer -> operation lock order, and fence even an expired/pending
+  // operation because Stripe may already hold an account created for the
+  // former owner's verified email.
+  const [connectOperation] = await tx
+    .select({ performerId: stripeConnectOnboardingOperations.performerId })
+    .from(stripeConnectOnboardingOperations)
+    .where(eq(stripeConnectOnboardingOperations.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (connectOperation) {
+    return { ok: false, code: 'stripe_connect_provisioning_in_progress' };
+  }
 
   const [updated] = await tx
     .update(performers)
