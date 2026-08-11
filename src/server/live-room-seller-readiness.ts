@@ -78,6 +78,7 @@ export function resolveLiveRoomSellerMoneyReadiness(input: {
   const baseEligible = Boolean(
     roomAcceptsMoney
     && seller?.isActive
+    && seller.onboardingStatus !== 'restricted'
     && seller.onboardingStatus !== 'suspended'
     && !seller.payoutHoldReason
   );

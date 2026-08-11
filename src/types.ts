@@ -11,6 +11,21 @@ export interface TrackReference {
   genre?: string;
 }
 
+export type LiveRoomSettlementMode = 'connected_account' | 'platform_test_balance' | 'unavailable';
+export type LiveRoomPaymentEnvironment = 'test' | 'live' | 'unavailable';
+export type PatronPaymentStatus =
+  | 'not_applicable'
+  | 'processing'
+  | 'authorized'
+  | 'captured'
+  | 'released'
+  | 'refund_pending'
+  | 'refunded'
+  | 'failed'
+  | 'disputed'
+  | 'paid_out'
+  | 'unavailable';
+
 export interface CustomMenuItem {
   id: string;
   title: string;
@@ -132,6 +147,10 @@ export interface GigSession {
   // Direct tips and every other paid room action require a payout-ready seller.
   // A genuinely free room keeps this false while requests/upvotes remain usable.
   tipsEnabled: boolean;
+  // Persisted with the room snapshot so test volume can never be presented as
+  // live connected-account earnings after closeout or a later deployment.
+  settlementMode: LiveRoomSettlementMode;
+  paymentEnvironment: LiveRoomPaymentEnvironment;
   stateRevision?: number;
   totals: {
     totalTips: number;
@@ -217,6 +236,7 @@ export interface PublicRoomState {
 export interface PatronRequestStatus {
   actionType: RequestItem['type'] | 'boost';
   status: RequestItem['status'] | 'unavailable';
+  paymentStatus: PatronPaymentStatus;
   title: string;
   submittedAt: string;
 }
@@ -226,8 +246,10 @@ export interface PerformerRoomRecap {
   performerName: string;
   startedAt: string | null;
   closedAt: string | null;
-  capturedEarnings: number;
+  capturedAmount: number;
   platformFees: number;
   completedActions: number;
   topRequest: string;
+  settlementMode: LiveRoomSettlementMode | 'mixed' | 'no_paid_activity';
+  paymentEnvironment: LiveRoomPaymentEnvironment;
 }

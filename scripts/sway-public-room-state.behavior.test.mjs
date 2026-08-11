@@ -76,8 +76,9 @@ const approvedRequest = requestFixture({
     timestamp: submittedAt,
     actorUserId: 'internal-boost-actor-secret',
     clientRequestId: 'internal-boost-client-secret',
-    idempotencyKey: 'internal-boost-idempotency-secret',
-    paymentIntentId: 'internal-boost-payment-secret'
+      idempotencyKey: 'internal-boost-idempotency-secret',
+      paymentIntentId: 'internal-boost-payment-secret',
+      paymentStatus: 'captured'
   }]
 });
 const hiddenRequest = requestFixture({ id: 'req-hidden', status: 'fulfilled', hidden: true });
@@ -187,6 +188,7 @@ const pendingStatus = projectPatronRequestStatus(pendingRequest);
 assert.deepEqual(pendingStatus, {
   actionType: 'request',
   status: 'hold',
+  paymentStatus: 'authorized',
   title: 'Public title',
   submittedAt
 });
@@ -194,9 +196,38 @@ assert.equal(projectPatronRequestStatus(hiddenRequest).status, 'unavailable');
 assert.deepEqual(projectPatronBoostStatus(approvedRequest.boosts[0], approvedRequest), {
   actionType: 'boost',
   status: 'fulfilled',
+  paymentStatus: 'captured',
   title: 'Public title',
   submittedAt
 });
+assert.deepEqual(
+  projectPatronBoostStatus(approvedRequest.boosts[0], approvedRequest, {
+    paymentStatus: 'refunded',
+    refundStatus: 'refunded'
+  }),
+  {
+    actionType: 'boost',
+    status: 'unavailable',
+    paymentStatus: 'refunded',
+    title: 'Public title',
+    submittedAt
+  },
+  'A refunded boost must never remain patron-visible as fulfilled.'
+);
+assert.deepEqual(
+  projectPatronRequestStatus({ ...fulfilledTip, paymentStatus: 'captured' }, {
+    paymentStatus: 'voided',
+    refundStatus: 'not_refunded'
+  }),
+  {
+    actionType: 'tip',
+    status: 'unavailable',
+    paymentStatus: 'released',
+    title: 'Direct Tip',
+    submittedAt
+  },
+  'A released authorization must never remain patron-visible as a fulfilled tip.'
+);
 
 const sanitizedReplay = sanitizePatronMutationResponseBody({
   success: true,

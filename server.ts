@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -41,6 +41,7 @@ import {
   resolveLiveRoomSellerMoneyReadiness,
   resolveTestModePlatformBalancePerformerIds
 } from "./src/server/live-room-seller-readiness";
+import { projectPerformerRoomRecap } from "./src/server/live-room-recap";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
@@ -1723,6 +1724,8 @@ function createInactiveSession(): GigSession {
     searchScope: 'library',
     paymentsEnabled: true,
     tipsEnabled: false,
+    settlementMode: 'unavailable',
+    paymentEnvironment: 'unavailable',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -1786,6 +1789,30 @@ function buildPatronBoostMutationResponse(input: {
     patron_status: projectPatronBoostStatus(input.boost, input.request),
     patron_status_receipt: input.receipt
   };
+}
+
+async function loadPatronPaymentEvidence(input: {
+  gigId: string;
+  requestId?: string | null;
+  requestBoostId?: string | null;
+}) {
+  if (!businessDb) return undefined;
+  const actionCondition = input.requestId
+    ? eq(payments.requestId, input.requestId)
+    : input.requestBoostId
+      ? eq(payments.requestBoostId, input.requestBoostId)
+      : null;
+  if (!actionCondition) return undefined;
+
+  const [payment] = await businessDb
+    .select({
+      paymentStatus: payments.paymentStatus,
+      refundStatus: payments.refundStatus
+    })
+    .from(payments)
+    .where(and(eq(payments.gigId, input.gigId), actionCondition))
+    .limit(1);
+  return payment;
 }
 
 async function refreshBusinessState() {
@@ -11361,7 +11388,11 @@ app.post("/api/patron/request-status", async (req, res) => {
     matchesPatronStatusReceipt(receipt, candidate.patronStatusReceiptHash)
   );
   if (request) {
-    return res.json({ patron_status: projectPatronRequestStatus(request) });
+    const paymentEvidence = await loadPatronPaymentEvidence({
+      gigId: requestedGigId,
+      requestId: request.durableRequestId
+    });
+    return res.json({ patron_status: projectPatronRequestStatus(request, paymentEvidence) });
   }
 
   for (const candidate of roomSnapshot.state.requests) {
@@ -11369,7 +11400,11 @@ app.post("/api/patron/request-status", async (req, res) => {
       matchesPatronStatusReceipt(receipt, entry.patronStatusReceiptHash)
     );
     if (boost) {
-      return res.json({ patron_status: projectPatronBoostStatus(boost, candidate) });
+      const paymentEvidence = await loadPatronPaymentEvidence({
+        gigId: requestedGigId,
+        requestBoostId: boost.durableBoostId
+      });
+      return res.json({ patron_status: projectPatronBoostStatus(boost, candidate, paymentEvidence) });
     }
   }
 
@@ -11416,20 +11451,37 @@ app.get('/api/talent/rooms/history', async (req, res) => {
     eq(gigSessions.status, 'closed')
   )).orderBy(desc(gigSessions.updatedAt)).limit(30);
 
+  const roomIds = rows.map((row) => row.gigId);
+  const roomPaymentRows = roomIds.length
+    ? await businessDb.select({
+        gigId: payments.gigId,
+        paymentStatus: payments.paymentStatus,
+        refundStatus: payments.refundStatus,
+        amountSubtotal: payments.amountSubtotal,
+        platformFee: payments.platformFee,
+        destinationAccountId: payments.destinationAccountId
+      }).from(payments).where(inArray(payments.gigId, roomIds))
+    : [];
+  const paymentsByGig = new Map<string, Array<(typeof roomPaymentRows)[number]>>();
+  for (const payment of roomPaymentRows) {
+    const bucket = paymentsByGig.get(payment.gigId) ?? [];
+    bucket.push(payment);
+    paymentsByGig.set(payment.gigId, bucket);
+  }
+
   const rooms = rows.map((row) => {
     const session = row.runtimeSessionState && typeof row.runtimeSessionState === 'object'
       ? row.runtimeSessionState as Partial<GigSession>
       : {};
-    return {
+    const durablePayments = paymentsByGig.get(row.gigId) ?? [];
+    return projectPerformerRoomRecap({
       gigId: row.gigId,
       performerName: session.talentName || performerOwner.displayName,
       startedAt: session.startedAt || row.startedAt?.toISOString() || null,
       closedAt: session.closedAt || row.closedAt?.toISOString() || row.updatedAt.toISOString(),
-      capturedEarnings: Number(session.totals?.totalTips || 0),
-      platformFees: Number(session.totals?.accumulatedFees || 0),
-      completedActions: Number(session.totals?.totalCount || 0),
-      topRequest: session.totals?.topRequest || 'No fulfilled requests'
-    };
+      runtimeSessionState: session,
+      payments: durablePayments
+    });
   });
   return res.json({ rooms });
 });
@@ -11701,6 +11753,12 @@ app.post("/api/session/start", async (req, res) => {
     searchScope: requestedRoomConfig.searchScope,
     paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
     tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
+    settlementMode: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+      ? sellerMoneyReadiness.settlementMode
+      : 'unavailable',
+    paymentEnvironment: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+      ? liveRoomPaymentRuntimeConfig.mode
+      : 'unavailable',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -11726,6 +11784,8 @@ app.post("/api/session/start", async (req, res) => {
         minimumTip: roomState.session.minimumTip,
         paymentsEnabled: roomState.session.paymentsEnabled,
         tipsEnabled: roomState.session.tipsEnabled,
+        settlementMode: roomState.session.settlementMode,
+        paymentEnvironment: roomState.session.paymentEnvironment,
         searchScope: roomState.session.searchScope
       }
     });
