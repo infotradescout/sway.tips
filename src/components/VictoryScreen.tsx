@@ -48,9 +48,20 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
   const showPaymentsNotConnectedNotice = hasUncapturedPayments && session.totals.totalTips === 0;
 
   const formattedTips = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(session.totals.totalTips);
-  const shareText = `I just wrapped a Sway night and pulled in ${formattedTips} in tips. www.sway.tips`;
+  const isTestPaymentVolume = session.paymentEnvironment === 'test'
+    || session.settlementMode === 'platform_test_balance';
+  const hasVerifiedLiveSettlement = session.paymentEnvironment === 'live'
+    && session.settlementMode === 'connected_account';
+  const canShareMoneyRecap = hasVerifiedLiveSettlement;
+  const amountLabel = isTestPaymentVolume
+    ? 'Stripe test volume'
+    : hasVerifiedLiveSettlement
+      ? 'Captured payment volume'
+      : 'Recorded room volume';
+  const shareText = `I just wrapped a Sway night with ${formattedTips} in captured room payments. Final settlement can change after refunds or disputes. www.sway.tips`;
 
   const handleShare = async () => {
+    if (!canShareMoneyRecap) return;
     setShareError(false);
     try {
       if (navigator.share) {
@@ -117,6 +128,16 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
             </div>
           )}
 
+          {isTestPaymentVolume && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-sway-test-volume="true">
+              <p className="text-xs font-bold text-amber-200">Stripe test volume — no real money</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
+                These amounts came from a test-mode rehearsal. They are not earnings, are not payable to a bank account,
+                and cannot be shared as a real-money result.
+              </p>
+            </div>
+          )}
+
           {/* Gamified Stat Grid */}
           <div className="grid grid-cols-2 gap-4">
             
@@ -126,8 +147,9 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                 <Coins className="w-5 h-5" id="victory_icon_tips" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Total Tips</div>
+                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">{amountLabel}</div>
                 <div className="text-xl font-bold font-display text-white mt-0.5">{formattedTips}</div>
+                <div className="mt-1 text-[9px] text-gray-500">Not a bank payout total</div>
               </div>
             </div>
 
@@ -159,7 +181,9 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                 <TrendingUp className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">Platform Fee</div>
+                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider">
+                  {isTestPaymentVolume ? 'Test platform fee volume' : 'Recorded platform fees'}
+                </div>
                 <div className="text-lg font-bold font-display text-white mt-0.5">${session.totals.accumulatedFees}.00</div>
               </div>
             </div>
@@ -220,12 +244,14 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                   <div className="w-20 h-20 rounded-full bg-gradient-to-br from-rose-500/10 to-indigo-500/10 border border-white/10 flex items-center justify-center mb-2 animate-pulse">
                     <AwardIcon className="w-10 h-10 text-rose-400" />
                   </div>
-                  <div className="text-[11px] text-gray-400 font-mono uppercase tracking-widest leading-none">TOTAL TIPS</div>
+                  <div className="text-[11px] text-gray-400 font-mono uppercase tracking-widest leading-none">
+                    {isTestPaymentVolume ? 'TEST VOLUME — NOT EARNINGS' : amountLabel}
+                  </div>
                   <div className="text-5xl font-black font-display text-white tracking-tight mt-1">
                     {formattedTips}
                   </div>
                   <div className="text-xs text-rose-400 font-mono font-medium tracking-wide mt-2">
-                    ROOM CLOSED SUCCESSFULLY
+                    {isTestPaymentVolume ? 'STRIPE TEST ROOM CLOSED' : 'ROOM CLOSED SUCCESSFULLY'}
                   </div>
                 </div>
 
@@ -248,7 +274,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
                 {/* Footer and taglines */}
                 <div className="mt-4 flex justify-between items-center border-t border-white/5 pt-3 text-[8px] text-gray-500 font-mono relative z-10">
                   <span>WWW.SWAY.TIPS</span>
-                  <span>TAP TO TIP ANYWHERE</span>
+                  <span>{isTestPaymentVolume ? 'NO REAL MONEY' : 'CAPTURED VOLUME IS NOT PAYOUT'}</span>
                 </div>
 
               </div>
@@ -282,9 +308,15 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
 
             <button
               onClick={handleShare}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-900 hover:bg-gray-805 text-white border border-gray-800 rounded-xl text-xs font-bold transition-all hover:border-gray-750"
+              disabled={!canShareMoneyRecap}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-900 text-white border border-gray-800 rounded-xl text-xs font-bold transition-all enabled:hover:bg-gray-800 enabled:hover:border-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {copiedStory ? (
+              {!canShareMoneyRecap ? (
+                <>
+                  <Instagram className="w-4 h-4 text-amber-400" />
+                  {isTestPaymentVolume ? 'Sharing Disabled for Test Volume' : 'Sharing Requires Verified Live Settlement'}
+                </>
+              ) : copiedStory ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-400" /> Recap Copied — Paste it Into Your Story!
                 </>

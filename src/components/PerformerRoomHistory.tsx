@@ -27,24 +27,37 @@ export default function PerformerRoomHistory() {
     <section className="mx-auto mt-4 w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:p-6" data-sway-room-history="true">
       <div className="flex items-center gap-2">
         <CalendarDays className="h-4 w-4 text-cyan-300" />
-        <div><p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Past rooms</p><h2 className="font-display text-lg font-black text-white">Earnings and recaps</h2></div>
+        <div><p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Past rooms</p><h2 className="font-display text-lg font-black text-white">Payment volume and recaps</h2></div>
       </div>
       {loading ? <p className="mt-4 text-xs text-slate-400">Loading room history…</p> : null}
       {error ? <p className="mt-4 text-xs text-rose-300">{error}</p> : null}
       {!loading && !error && rooms.length === 0 ? <p className="mt-4 text-xs text-slate-400">Your completed rooms will stay available here.</p> : null}
       <div className="mt-4 space-y-2">
-        {rooms.map((room) => (
-          <article key={room.gigId} className="rounded-2xl border border-white/10 bg-slate-950 p-4">
+        {rooms.map((room) => {
+          const capturedAmount = typeof room.capturedAmount === 'number'
+            ? room.capturedAmount
+            : Number(room.capturedEarnings || 0);
+          const isTestVolume = room.paymentEnvironment === 'test' || room.settlementMode === 'platform_test_balance';
+          const isVerifiedLive = room.paymentEnvironment === 'live' && room.settlementMode === 'connected_account';
+          const paymentTruth = isTestVolume
+            ? 'Stripe test volume — no real money or bank payout'
+            : isVerifiedLive
+              ? 'Captured live payment volume — not a payout total'
+              : room.settlementMode === 'no_paid_activity'
+                ? 'No paid activity recorded'
+                : 'Payment environment was not durably verified';
+          return <article key={room.gigId} className="rounded-2xl border border-white/10 bg-slate-950 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0"><p className="truncate text-sm font-black text-white">{room.performerName}</p><p className="mt-1 text-[10px] text-slate-500">{room.closedAt ? new Date(room.closedAt).toLocaleString() : 'Completed room'}</p></div>
-              <p className="font-mono text-lg font-black text-emerald-300">{money(room.capturedEarnings)}</p>
+              <p className={`font-mono text-lg font-black ${isTestVolume ? 'text-amber-300' : 'text-emerald-300'}`}>{money(capturedAmount)}</p>
             </div>
+            <p className={`mt-2 text-[10px] font-bold ${isTestVolume ? 'text-amber-200' : 'text-slate-400'}`}>{paymentTruth}</p>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg bg-slate-900 p-3"><Coins className="h-3.5 w-3.5 text-emerald-300" /><p className="mt-1 text-slate-500">Paid actions</p><p className="font-bold text-white">{room.completedActions}</p></div>
+              <div className="rounded-lg bg-slate-900 p-3"><Coins className="h-3.5 w-3.5 text-emerald-300" /><p className="mt-1 text-slate-500">Captured actions</p><p className="font-bold text-white">{room.completedActions}</p></div>
               <div className="rounded-lg bg-slate-900 p-3"><Music2 className="h-3.5 w-3.5 text-fuchsia-300" /><p className="mt-1 text-slate-500">Top request</p><p className="truncate font-bold text-white">{room.topRequest}</p></div>
             </div>
-          </article>
-        ))}
+          </article>;
+        })}
       </div>
     </section>
   );

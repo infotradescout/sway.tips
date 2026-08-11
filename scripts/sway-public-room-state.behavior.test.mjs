@@ -17,7 +17,8 @@ const {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
   projectPatronBoostStatus,
-  projectPatronRequestStatus
+  projectPatronRequestStatus,
+  selectPatronPaymentEvidence
 } = await tsImport('../src/server/patron-status-receipt.ts', import.meta.url);
 
 const root = process.cwd();
@@ -76,8 +77,9 @@ const approvedRequest = requestFixture({
     timestamp: submittedAt,
     actorUserId: 'internal-boost-actor-secret',
     clientRequestId: 'internal-boost-client-secret',
-    idempotencyKey: 'internal-boost-idempotency-secret',
-    paymentIntentId: 'internal-boost-payment-secret'
+      idempotencyKey: 'internal-boost-idempotency-secret',
+      paymentIntentId: 'internal-boost-payment-secret',
+      paymentStatus: 'captured'
   }]
 });
 const hiddenRequest = requestFixture({ id: 'req-hidden', status: 'fulfilled', hidden: true });
@@ -183,10 +185,30 @@ assert.equal(matchesPatronStatusReceipt(issuedReceipt.receipt, issuedReceipt.rec
 assert.equal(matchesPatronStatusReceipt(secondReceipt.receipt, issuedReceipt.receiptHash), false);
 assert.equal(matchesPatronStatusReceipt('not-a-valid-receipt', issuedReceipt.receiptHash), false);
 
+const duplicatePaymentCandidates = [
+  { id: 'payment-stale', paymentStatus: 'captured', refundStatus: 'not_refunded' },
+  { id: 'payment-canonical', paymentStatus: 'refunded', refundStatus: 'refunded' }
+];
+assert.deepEqual(selectPatronPaymentEvidence({
+  runtimePaymentId: 'payment-canonical',
+  candidates: duplicatePaymentCandidates
+}), { paymentStatus: 'refunded', refundStatus: 'refunded' });
+assert.deepEqual(selectPatronPaymentEvidence({
+  runtimePaymentId: 'payment-missing',
+  candidates: duplicatePaymentCandidates
+}), {}, 'A missing runtime payment identity must fail closed rather than select stale evidence.');
+assert.deepEqual(selectPatronPaymentEvidence({
+  candidates: duplicatePaymentCandidates
+}), {}, 'Ambiguous legacy action payments must fail closed.');
+assert.deepEqual(selectPatronPaymentEvidence({
+  candidates: [duplicatePaymentCandidates[0]]
+}), { paymentStatus: 'captured', refundStatus: 'not_refunded' });
+
 const pendingStatus = projectPatronRequestStatus(pendingRequest);
 assert.deepEqual(pendingStatus, {
   actionType: 'request',
   status: 'hold',
+  paymentStatus: 'authorized',
   title: 'Public title',
   submittedAt
 });
@@ -194,9 +216,38 @@ assert.equal(projectPatronRequestStatus(hiddenRequest).status, 'unavailable');
 assert.deepEqual(projectPatronBoostStatus(approvedRequest.boosts[0], approvedRequest), {
   actionType: 'boost',
   status: 'fulfilled',
+  paymentStatus: 'captured',
   title: 'Public title',
   submittedAt
 });
+assert.deepEqual(
+  projectPatronBoostStatus(approvedRequest.boosts[0], approvedRequest, {
+    paymentStatus: 'refunded',
+    refundStatus: 'refunded'
+  }),
+  {
+    actionType: 'boost',
+    status: 'unavailable',
+    paymentStatus: 'refunded',
+    title: 'Public title',
+    submittedAt
+  },
+  'A refunded boost must never remain patron-visible as fulfilled.'
+);
+assert.deepEqual(
+  projectPatronRequestStatus({ ...fulfilledTip, paymentStatus: 'captured' }, {
+    paymentStatus: 'voided',
+    refundStatus: 'not_refunded'
+  }),
+  {
+    actionType: 'tip',
+    status: 'unavailable',
+    paymentStatus: 'released',
+    title: 'Direct Tip',
+    submittedAt
+  },
+  'A released authorization must never remain patron-visible as a fulfilled tip.'
+);
 
 const sanitizedReplay = sanitizePatronMutationResponseBody({
   success: true,

@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile, PatronRequestStatus } from '../types';
+import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile, PatronPaymentStatus, PatronRequestStatus } from '../types';
 import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
@@ -39,6 +39,22 @@ const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-i
 const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this request.';
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
+
+export function patronPaymentStatusLabel(status: PatronPaymentStatus) {
+  switch (status) {
+    case 'not_applicable': return 'No payment required';
+    case 'processing': return 'Payment processing';
+    case 'authorized': return 'Card hold confirmed';
+    case 'captured': return 'Payment captured';
+    case 'released': return 'Payment authorization released';
+    case 'refund_pending': return 'Refund pending';
+    case 'refunded': return 'Payment refunded';
+    case 'failed': return 'Payment failed';
+    case 'disputed': return 'Payment disputed';
+    case 'paid_out': return 'Payment settled';
+    default: return 'Payment status unavailable';
+  }
+}
 
 export function resolvePausedRequestToast(tipsEnabled: boolean) {
   return tipsEnabled
@@ -368,8 +384,20 @@ export default function PatronView({
     if (!session.requestsOpen || session.status === 'ending') return { text: `Requests are ${LIVE_ROOM_LANGUAGE.paused.toLowerCase()} right now.`, tone: 'slate' };
     if (degraded || pendingAction) return { text: 'Syncing your last action...', tone: 'cyan' };
     if (!patronRequestStatus) return null;
+    if (patronRequestStatus.paymentStatus === 'refunded') {
+      return { text: 'Your payment was refunded. This action is no longer fulfilled.', tone: 'slate' };
+    }
+    if (patronRequestStatus.paymentStatus === 'refund_pending') {
+      return { text: 'Your refund is pending provider confirmation.', tone: 'slate' };
+    }
+    if (patronRequestStatus.paymentStatus === 'released') {
+      return { text: 'Your payment authorization was released. This action was not charged.', tone: 'slate' };
+    }
+    if (patronRequestStatus.paymentStatus === 'failed') {
+      return { text: 'Payment failed, so this action was not completed.', tone: 'rose' };
+    }
     if (patronRequestStatus.status === 'unavailable') {
-      return { text: 'Your last request is no longer available in this room.', tone: 'slate' };
+      return { text: 'Your last action is no longer available in this room.', tone: 'slate' };
     }
     if (patronRequestStatus.actionType === 'tip') {
       if (patronRequestStatus.status === 'fulfilled') return { text: 'Your tip submission was received.', tone: 'cyan' };
@@ -1439,6 +1467,11 @@ export default function PatronView({
           }`}
         >
           {latestRequestStatusMessage.text}
+          {patronRequestStatus ? (
+            <p className="mt-1 text-[10px] font-semibold opacity-80">
+              {patronPaymentStatusLabel(patronRequestStatus.paymentStatus)}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -1452,7 +1485,10 @@ export default function PatronView({
                   <p className="truncate font-bold text-white">{activity.title}</p>
                   <p className="text-[10px] uppercase tracking-wide text-slate-500">{activity.actionType}</p>
                 </div>
-                <span className="shrink-0 font-bold text-cyan-200">{activity.status === 'hold' ? 'Pending' : activity.status}</span>
+                <div className="shrink-0 text-right">
+                  <p className="font-bold text-cyan-200">{activity.status === 'hold' ? 'Pending' : activity.status}</p>
+                  <p className="mt-0.5 text-[9px] font-semibold text-slate-400">{patronPaymentStatusLabel(activity.paymentStatus)}</p>
+                </div>
               </div>
             ))}
           </div>

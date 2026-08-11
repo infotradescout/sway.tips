@@ -33,6 +33,8 @@ export const emptySession: GigSession = {
   searchScope: 'library',
   paymentsEnabled: true,
   tipsEnabled: false,
+  settlementMode: 'unavailable',
+  paymentEnvironment: 'unavailable',
   totals: {
     totalTips: 0,
     accumulatedFees: 0,

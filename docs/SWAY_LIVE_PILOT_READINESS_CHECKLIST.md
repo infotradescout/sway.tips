@@ -14,7 +14,7 @@ The required evidence package for a real pilot or manual QA run is `docs/SWAY_LI
 
 The pilot proves the live room money loop, not future platform expansion.
 
-**Product milestone HOLD (Live Rooms lane):** the next valid proof is a two-account **Stripe test-mode** production pilot (performer + separate audience, hosted room, request/tip/boost/refund, webhook dup/delay, closeout, earnings, receipt/history, DB reconciliation, exact deployed commit). Release-chain hardening does not authorize live Stripe. Self-Production lanes (DSP delivery, ticket sales, royalty processing, collaborator payouts, Sway.DIO) are judged separately and do not make Live Rooms unfinished. See `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md` and `docs/SWAY_PRODUCT_STRUCTURE.md`.
+**Product milestone HOLD (Live Rooms lane):** the next valid proof is a two-account **Stripe test-mode** production pilot (performer + separately authenticated audience, hosted room, request/tip/boost/void/refund, exact-duplicate plus distinct-stale webhook delivery, closeout, explicitly labeled test payment volume, action-and-payment receipts/history, DB reconciliation, shutdown drain, exact deployed commit). Release-chain hardening does not authorize live Stripe. Self-Production lanes (DSP delivery, ticket sales, royalty processing, collaborator payouts, Sway.DIO) are judged separately and do not make Live Rooms unfinished. See `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md` and `docs/SWAY_PRODUCT_STRUCTURE.md`.
 
 
 PR #44 was resumed and merged by owner override after the readiness guardrails landed. That override does not complete the live-pilot proof. New hardware/control expansion, lyrics, marketplace/browse expansion, operator/admin expansion, DJ software integrations, and new infrastructure still must not resume unless the owner explicitly reorders the lane.
@@ -94,12 +94,12 @@ Hold if:
 - Performer can complete or mark Playing/fulfilled in one tap.
 - Performer can see what is Up Next.
 - Performer can see whether intake is Paused or open.
-- Performer can see Earnings during the night.
+- Performer can see payment volume during the night, with test volume distinguished from live captured volume and either distinguished from payout.
 
 Hold if:
 - Pending items do not appear.
 - Queue actions are missing, confusing, or require an internal console.
-- Earnings are absent or misleading.
+- Payment volume is absent, labeled as earnings in test mode, or presented as a bank payout.
 
 ## 7. Money-Loop Smoke Expectations
 
@@ -140,7 +140,7 @@ Before first live night, the pilot operator verifies:
 - Performer can set room settings and create a room.
 - QR/link opens correct room on a second device.
 - Patron Request, Tip, and Boost UI loads.
-- Performer queue, QR, and Earnings UI loads.
+- Performer queue, QR, and payment-volume UI loads.
 - Patron status transitions are visible and truthful.
 - End room and recap are reachable.
 - No unsafe payment copy appears.
@@ -171,7 +171,7 @@ Hold new feature expansion if any of these remain unresolved:
 - Patron cannot find Request, Tip, or Boost.
 - Patron status language is unclear or unsafe.
 - Performer cannot manage the queue.
-- Earnings or recap are absent or misleading.
+- Payment volume or recap is absent, misleading, or shareable as real earnings in test mode.
 - No-session recovery creates venue confusion.
 - Money-loop smoke would require changing money behavior.
 - Pilot evidence is missing environment, room/gig ID, URLs, and pass/fail results.

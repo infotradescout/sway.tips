@@ -17,12 +17,15 @@ Unfinished Self-Production (DSP, tickets, royalties, collaborator payouts, Sway.
 2. One separate audience account
 3. A real production-hosted room
 4. Stripe test-mode request, tip, boost, and refund flows
-5. Duplicate and delayed webhook tests
+5. Exact duplicate webhook, distinct stale first-delivery, and terminal-aligned late-delivery tests
 6. Room closeout
-7. Performer earnings view
-8. Audience receipt and history
+7. Performer payment-volume view with explicit test/no-payout labeling and disabled real-money sharing
+8. Audience receipt and history showing both action state and durable payment/refund state
 9. Database reconciliation
 10. Exact deployed-commit evidence (`/api/build-marker` and `/api/release-health` commit match the intended SHA; `releaseActive: true`)
+11. Separate void (`voided/not_refunded`) and refund (`refunded/refunded`) proof
+12. Report/block outcome stated truthfully; a held block request is not active-block proof
+13. Closeout drain and shutdown: zero nonterminal payments/operations/webhooks, test-only switch off, allowlist cleared
 
 ## Explicit non-goals (later Self-Production / independent lanes)
 

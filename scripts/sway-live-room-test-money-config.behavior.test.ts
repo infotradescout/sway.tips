@@ -166,6 +166,15 @@ assert.equal(
 assert.equal(
   resolveLiveRoomSellerMoneyReadiness({
     roomStatus: 'active',
+    seller: { ...activeUnconnectedSeller, onboardingStatus: 'restricted' },
+    allowTestPlatformBalance: true
+  }).ready,
+  false,
+  'A restricted performer must remain blocked from money actions even in test mode.'
+);
+assert.equal(
+  resolveLiveRoomSellerMoneyReadiness({
+    roomStatus: 'active',
     seller: { ...activeUnconnectedSeller, payoutHoldReason: 'risk_hold' },
     allowTestPlatformBalance: true
   }).ready,
@@ -187,5 +196,23 @@ const connectedReadiness = resolveLiveRoomSellerMoneyReadiness({
 assert.equal(connectedReadiness.ready, true);
 assert.equal(connectedReadiness.destinationAccountId, 'acct_connected_contract');
 assert.equal(connectedReadiness.settlementMode, 'connected_account');
+
+assert.equal(
+  resolveLiveRoomSellerMoneyReadiness({
+    roomStatus: 'active',
+    seller: {
+      ...activeUnconnectedSeller,
+      onboardingStatus: 'restricted',
+      paymentAccountStatus: 'payouts_enabled',
+      kycStatus: 'verified',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      stripeConnectedAccountId: 'acct_restricted_contract'
+    },
+    allowTestPlatformBalance: false
+  }).ready,
+  false,
+  'A restricted performer must not regain money eligibility through a connected account.'
+);
 
 console.log('Sway live-room test-money configuration behavior test passed.');

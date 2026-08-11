@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -41,6 +41,7 @@ import {
   resolveLiveRoomSellerMoneyReadiness,
   resolveTestModePlatformBalancePerformerIds
 } from "./src/server/live-room-seller-readiness";
+import { projectPerformerRoomRecap } from "./src/server/live-room-recap";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
@@ -105,7 +106,8 @@ import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
   projectPatronBoostStatus,
-  projectPatronRequestStatus
+  projectPatronRequestStatus,
+  selectPatronPaymentEvidence
 } from "./src/server/patron-status-receipt";
 import {
   projectPublicRoomState,
@@ -1723,6 +1725,8 @@ function createInactiveSession(): GigSession {
     searchScope: 'library',
     paymentsEnabled: true,
     tipsEnabled: false,
+    settlementMode: 'unavailable',
+    paymentEnvironment: 'unavailable',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -1786,6 +1790,39 @@ function buildPatronBoostMutationResponse(input: {
     patron_status: projectPatronBoostStatus(input.boost, input.request),
     patron_status_receipt: input.receipt
   };
+}
+
+async function loadPatronPaymentEvidence(input: {
+  gigId: string;
+  requestId?: string | null;
+  requestBoostId?: string | null;
+  paymentId?: string | null;
+}) {
+  if (!businessDb) return undefined;
+  const actionCondition = input.requestId
+    ? eq(payments.requestId, input.requestId)
+    : input.requestBoostId
+      ? eq(payments.requestBoostId, input.requestBoostId)
+      : null;
+  if (!actionCondition) return undefined;
+
+  const paymentCandidates = await businessDb
+    .select({
+      id: payments.id,
+      paymentStatus: payments.paymentStatus,
+      refundStatus: payments.refundStatus
+    })
+    .from(payments)
+    .where(and(
+      eq(payments.gigId, input.gigId),
+      actionCondition,
+      ...(input.paymentId ? [eq(payments.id, input.paymentId)] : [])
+    ))
+    .limit(input.paymentId ? 1 : 2);
+  return selectPatronPaymentEvidence({
+    runtimePaymentId: input.paymentId,
+    candidates: paymentCandidates
+  });
 }
 
 async function refreshBusinessState() {
@@ -11361,7 +11398,12 @@ app.post("/api/patron/request-status", async (req, res) => {
     matchesPatronStatusReceipt(receipt, candidate.patronStatusReceiptHash)
   );
   if (request) {
-    return res.json({ patron_status: projectPatronRequestStatus(request) });
+    const paymentEvidence = await loadPatronPaymentEvidence({
+      gigId: requestedGigId,
+      requestId: request.durableRequestId,
+      paymentId: request.paymentId
+    });
+    return res.json({ patron_status: projectPatronRequestStatus(request, paymentEvidence) });
   }
 
   for (const candidate of roomSnapshot.state.requests) {
@@ -11369,7 +11411,12 @@ app.post("/api/patron/request-status", async (req, res) => {
       matchesPatronStatusReceipt(receipt, entry.patronStatusReceiptHash)
     );
     if (boost) {
-      return res.json({ patron_status: projectPatronBoostStatus(boost, candidate) });
+      const paymentEvidence = await loadPatronPaymentEvidence({
+        gigId: requestedGigId,
+        requestBoostId: boost.durableBoostId,
+        paymentId: boost.paymentId
+      });
+      return res.json({ patron_status: projectPatronBoostStatus(boost, candidate, paymentEvidence) });
     }
   }
 
@@ -11416,20 +11463,106 @@ app.get('/api/talent/rooms/history', async (req, res) => {
     eq(gigSessions.status, 'closed')
   )).orderBy(desc(gigSessions.updatedAt)).limit(30);
 
+  const roomIds = rows.map((row) => row.gigId);
+  const roomPaymentRows = roomIds.length
+    ? await businessDb.select({
+        id: payments.id,
+        gigId: payments.gigId,
+        requestId: payments.requestId,
+        requestBoostId: payments.requestBoostId,
+        actionType: payments.actionType,
+        legacyUnlinked: payments.legacyUnlinked,
+        paymentStatus: payments.paymentStatus,
+        refundStatus: payments.refundStatus,
+        amountSubtotal: payments.amountSubtotal,
+        platformFee: payments.platformFee,
+        destinationAccountId: payments.destinationAccountId
+      }).from(payments).where(inArray(payments.gigId, roomIds))
+    : [];
+  const roomRequestRows = roomIds.length
+    ? await businessDb.select({
+        id: requests.id,
+        gigId: requests.gigId,
+        status: requests.status,
+        runtimeRequestState: requests.runtimeRequestState,
+        activatedAt: requests.activatedAt
+      }).from(requests).where(inArray(requests.gigId, roomIds))
+    : [];
+  const roomBoostRows = roomIds.length
+    ? await businessDb.select({
+        id: requestBoosts.id,
+        gigId: requestBoosts.gigId,
+        requestId: requestBoosts.requestId,
+        runtimeBoostState: requestBoosts.runtimeBoostState,
+        activatedAt: requestBoosts.activatedAt
+      }).from(requestBoosts).where(inArray(requestBoosts.gigId, roomIds))
+    : [];
+  const paymentsByGig = new Map<string, Array<(typeof roomPaymentRows)[number]>>();
+  for (const payment of roomPaymentRows) {
+    const bucket = paymentsByGig.get(payment.gigId) ?? [];
+    bucket.push(payment);
+    paymentsByGig.set(payment.gigId, bucket);
+  }
+  const recapRequestsByGig = new Map<string, Array<{
+    id: string;
+    type: string;
+    title: string;
+    status: string;
+    hidden: boolean;
+    removed: boolean;
+    paymentId: string | null;
+  }>>();
+  for (const request of roomRequestRows) {
+    if (!request.activatedAt) continue;
+    const runtime = request.runtimeRequestState && typeof request.runtimeRequestState === 'object'
+      ? request.runtimeRequestState as Record<string, unknown>
+      : {};
+    const bucket = recapRequestsByGig.get(request.gigId) ?? [];
+    bucket.push({
+      id: request.id,
+      type: runtime.type === 'request' || runtime.type === 'tip' ? runtime.type : 'unknown',
+      title: typeof runtime.title === 'string' ? runtime.title : 'Untitled request',
+      status: request.status,
+      hidden: runtime.hidden === true,
+      removed: runtime.removed === true,
+      paymentId: typeof runtime.paymentId === 'string' ? runtime.paymentId : null
+    });
+    recapRequestsByGig.set(request.gigId, bucket);
+  }
+  const recapBoostsByGig = new Map<string, Array<{
+    id: string;
+    requestId: string;
+    paymentId: string | null;
+  }>>();
+  for (const boost of roomBoostRows) {
+    if (!boost.activatedAt) continue;
+    const runtime = boost.runtimeBoostState && typeof boost.runtimeBoostState === 'object'
+      ? boost.runtimeBoostState as Record<string, unknown>
+      : {};
+    const bucket = recapBoostsByGig.get(boost.gigId) ?? [];
+    bucket.push({
+      id: boost.id,
+      requestId: boost.requestId,
+      paymentId: typeof runtime.paymentId === 'string' ? runtime.paymentId : null
+    });
+    recapBoostsByGig.set(boost.gigId, bucket);
+  }
+
   const rooms = rows.map((row) => {
     const session = row.runtimeSessionState && typeof row.runtimeSessionState === 'object'
       ? row.runtimeSessionState as Partial<GigSession>
       : {};
-    return {
+    const durablePayments = paymentsByGig.get(row.gigId) ?? [];
+    return projectPerformerRoomRecap({
       gigId: row.gigId,
       performerName: session.talentName || performerOwner.displayName,
       startedAt: session.startedAt || row.startedAt?.toISOString() || null,
       closedAt: session.closedAt || row.closedAt?.toISOString() || row.updatedAt.toISOString(),
-      capturedEarnings: Number(session.totals?.totalTips || 0),
-      platformFees: Number(session.totals?.accumulatedFees || 0),
-      completedActions: Number(session.totals?.totalCount || 0),
-      topRequest: session.totals?.topRequest || 'No fulfilled requests'
-    };
+      runtimeSessionState: session,
+      payments: durablePayments,
+      requests: recapRequestsByGig.get(row.gigId) ?? [],
+      boosts: recapBoostsByGig.get(row.gigId) ?? []
+    });
   });
   return res.json({ rooms });
 });
@@ -11701,6 +11834,12 @@ app.post("/api/session/start", async (req, res) => {
     searchScope: requestedRoomConfig.searchScope,
     paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
     tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
+    settlementMode: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+      ? sellerMoneyReadiness.settlementMode
+      : 'unavailable',
+    paymentEnvironment: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+      ? liveRoomPaymentRuntimeConfig.mode
+      : 'unavailable',
     totals: {
       totalTips: 0,
       accumulatedFees: 0,
@@ -11726,6 +11865,8 @@ app.post("/api/session/start", async (req, res) => {
         minimumTip: roomState.session.minimumTip,
         paymentsEnabled: roomState.session.paymentsEnabled,
         tipsEnabled: roomState.session.tipsEnabled,
+        settlementMode: roomState.session.settlementMode,
+        paymentEnvironment: roomState.session.paymentEnvironment,
         searchScope: roomState.session.searchScope
       }
     });
