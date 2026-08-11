@@ -988,6 +988,19 @@ export default function TalentDashboard({
     }
   };
 
+  const confirmAndRemoveRequest = (request: RequestItem) => {
+    const paymentKind = liveRoomPaymentMode === 'live'
+      ? 'payment'
+      : liveRoomPaymentMode === 'test'
+        ? 'test payment'
+        : 'payment authorization';
+    const confirmation = session.paymentsEnabled === false
+      ? `Remove “${request.title}” from this room?`
+      : `Remove “${request.title}” from this room and reverse its ${paymentKind}? Sway will request a refund for captured payments or a release for uncaptured holds. Any pending reversal stays visible until the payment provider confirms it.`;
+    if (!window.confirm(confirmation)) return;
+    void runQueueAction(request.id, 'remove', () => onRemove(request.id));
+  };
+
   // Live request window countdown.
   const [windowTimeLeft, setWindowTimeLeft] = useState<string>('');
 
@@ -1766,6 +1779,16 @@ export default function TalentDashboard({
                       >
                         <X className="h-4 w-4" />
                       </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${request.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
+                        onClick={() => confirmAndRemoveRequest(request)}
+                        disabled={previewMode || isRequestQueueActionPending(request.id)}
+                        data-sway-queue-action-pending={isQueueActionPending(request.id, 'remove') ? 'true' : 'false'}
+                        className="border border-rose-500/30 bg-rose-950/60 text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                       <SpotifyOpenLink request={request} />
                     </>
                   )}
@@ -1840,6 +1863,16 @@ export default function TalentDashboard({
                           className="border border-white/10 bg-slate-950 text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <X className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${request.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
+                          onClick={() => confirmAndRemoveRequest(request)}
+                          disabled={previewMode || isRequestQueueActionPending(request.id)}
+                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'remove') ? 'true' : 'false'}
+                          className="border border-rose-500/30 bg-rose-950/60 text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                         <SpotifyOpenLink request={request} />
                       </>
