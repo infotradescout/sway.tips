@@ -458,7 +458,13 @@ requireTerms(webhookIngestion, 'Verified webhook persistence', [
 requireTerms(server, 'Shared versus dedicated ticket webhook routing', [
   'const sharedTicketWebhookSecret = Boolean(',
   'eventTicketService',
+  '&& eventTicketService.canVerifyWebhook()',
   '&& sharedTicketWebhookSecret'
+]);
+requireTerms(ticketService, 'Ticket webhook verification capability', [
+  'function canVerifyWebhook()',
+  'return provider !== null;',
+  'canVerifyWebhook,'
 ]);
 forbidPatterns(server, 'Shared versus dedicated ticket webhook routing', [
   /rawStripeEventHasNativeTicketMarker/,
@@ -596,6 +602,7 @@ const paymentWebhookRoute = routeBlock(server, 'post', '/api/payment/webhook');
 requireTerms(paymentWebhookRoute, 'Shared signed payment webhook route', [
   'rawBody',
   "req.header('stripe-signature')",
+  'eventTicketService.canVerifyWebhook()',
   'eventTicketService.ingestVerifiedWebhook',
   'paymentWebhookService.ingestWebhook'
 ]);

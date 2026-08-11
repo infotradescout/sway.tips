@@ -18,12 +18,36 @@ const paymentTransitionGraph: Record<PaymentState, ReadonlyArray<PaymentState>> 
   paid_out: ['refunded', 'disputed']
 };
 
+const providerTruthRecoveryTransitions: Partial<Record<PaymentState, ReadonlyArray<PaymentState>>> = {
+  failed: ['payment_pending', 'authorized', 'captured', 'voided']
+};
+
 export function isFinitePaymentState(input: string): input is PaymentState {
   return paymentStatusEnum.enumValues.includes(input as PaymentState);
 }
 
 export function canTransitionPaymentState(from: PaymentState, to: PaymentState): boolean {
   return paymentTransitionGraph[from].includes(to);
+}
+
+export function isKnownPredecessorPaymentState(candidate: PaymentState, current: PaymentState): boolean {
+  if (candidate === current) return false;
+  const pending = [candidate];
+  const visited = new Set<PaymentState>();
+
+  while (pending.length) {
+    const state = pending.shift()!;
+    if (visited.has(state)) continue;
+    visited.add(state);
+    const nextStates = [
+      ...paymentTransitionGraph[state],
+      ...(providerTruthRecoveryTransitions[state] ?? [])
+    ];
+    if (nextStates.includes(current)) return true;
+    pending.push(...nextStates.filter((nextState) => !visited.has(nextState)));
+  }
+
+  return false;
 }
 
 export function assertPaymentTransition(from: PaymentState, to: PaymentState) {
@@ -96,8 +120,7 @@ export function createPaymentLifecycleService(databaseUrl?: string) {
     }
 
     const providerTruthRecovery = input.allowProviderTruthRecovery === true
-      && previousStatus === 'failed'
-      && ['payment_pending', 'authorized', 'captured', 'voided'].includes(input.nextStatus);
+      && (providerTruthRecoveryTransitions[previousStatus] ?? []).includes(input.nextStatus);
     if (!canTransitionPaymentState(previousStatus, input.nextStatus) && !providerTruthRecovery) {
       if (input.allowOutOfOrderNoop) {
         return {

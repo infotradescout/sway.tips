@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, lte, ne, or } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { liveRoomProcessorEvents, payments } from '../db/schema';
 import type { PaymentProviderAdapter, ProviderWebhookEnvelope } from './payment-provider';
-import type { PaymentState } from './payment-lifecycle';
+import { isKnownPredecessorPaymentState, type PaymentState } from './payment-lifecycle';
 import { createPaymentService } from './payment-service';
 
 const providerEventToPaymentState: Record<string, PaymentState> = {
@@ -328,6 +328,18 @@ export function createPaymentWebhookService({
     });
     if (transition.status === 'missing' || transition.status === 'unavailable') {
       throw new Error(`Payment webhook transition ${transition.status}.`);
+    }
+    if (
+      transition.status === 'ignored_out_of_order'
+      && isKnownPredecessorPaymentState(transition.nextStatus, transition.previousStatus)
+    ) {
+      await markProcessed(event, { status: 'ignored', paymentId });
+      return {
+        status: 'ignored' as const,
+        reason: 'stale_predecessor_event' as const,
+        paymentId,
+        transition
+      };
     }
     if (transition.status === 'ignored_out_of_order' || transition.status === 'concurrent_noop') {
       throw new Error(`Payment webhook transition ${transition.status}; retry after predecessor state.`);

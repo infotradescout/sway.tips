@@ -1185,6 +1185,32 @@ try {
     now: () => new Date(currentNow),
     workerId: 'service-integration-worker'
   });
+  assert.equal(
+    service.canVerifyWebhook(),
+    true,
+    'The ticket lane must advertise webhook verification only when its provider exists.'
+  );
+  const providerlessService = createEventTicketService({
+    db: db as never,
+    provider: null,
+    runtimeConfig,
+    expectedStripeLivemode: false,
+    now: () => new Date(currentNow),
+    workerId: 'providerless-service-integration-worker'
+  });
+  assert.equal(
+    providerlessService.canVerifyWebhook(),
+    false,
+    'A providerless ticket lane must not claim shared-webhook events.'
+  );
+  await expectServiceError(
+    () => providerlessService.ingestVerifiedWebhook({
+      rawBody: '{}',
+      signatureHeader: 'verified-test-signature'
+    }),
+    'ticket_webhook_provider_unavailable',
+    503
+  );
   await runServiceProof(database, service, fake);
   console.log(
     `Native ticket service integration test passed (${migrationFiles.length} migrations).`
