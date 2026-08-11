@@ -83,6 +83,8 @@ import {
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
+import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
+import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
@@ -323,6 +325,9 @@ const performerLoginMailer = createPerformerLoginMailer({
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
+const stripeConnectOnboardingStore = businessDb
+  ? createStripeConnectOnboardingStore(businessDb)
+  : null;
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
   paymentProviderConfigured: Boolean(paymentProvider),
@@ -10582,6 +10587,20 @@ app.post('/api/talent/setlist/remove', async (req, res) => {
 // Creates (if needed) the performer's Stripe recipient connected account and
 // returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
 // existing connected account on repeat calls instead of creating duplicates.
+function resolveStripeConnectOnboardingUrls() {
+  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
+  return {
+    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
+    returnUrl: `${appBaseUrl}/talent/connect/return`
+  };
+}
+
+async function createStripeConnectOnboardingUrl(accountId: string) {
+  if (!stripeConnectService) throw new Error('stripe_connect_unavailable');
+  const { refreshUrl, returnUrl } = resolveStripeConnectOnboardingUrls();
+  return stripeConnectService.createOnboardingLink({ accountId, refreshUrl, returnUrl });
+}
+
 app.post('/api/talent/connect/onboard', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -10590,7 +10609,7 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   if (!talentAccess.actor.actorId || !businessDb) {
     return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
   }
-  if (!stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
+  if (!stripeConnectService || !stripeConnectOnboardingStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
     return res.status(503).json({ error: 'Stripe test-mode Connect onboarding is unavailable until payment execution is fully configured.' });
   }
 
@@ -10600,42 +10619,24 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   }
 
   try {
-    const [performerRow] = await businessDb
-      .select({
-        stripeConnectedAccountId: performers.stripeConnectedAccountId,
-        ownerEmail: users.email
-      })
-      .from(performers)
-      .innerJoin(users, eq(users.id, performers.ownerUserId))
-      .where(and(
-        eq(performers.id, performerOwner.performerId),
-        eq(users.id, talentAccess.actor.actorId)
-      ))
-      .limit(1);
-
-    if (!performerRow?.ownerEmail) {
+    const provisioning = await provisionStripeConnectRecipient({
+      performerId: performerOwner.performerId,
+      ownerUserId: talentAccess.actor.actorId,
+      store: stripeConnectOnboardingStore,
+      stripe: stripeConnectService
+    });
+    if (provisioning.kind === 'not_found') {
+      return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
+    }
+    if (provisioning.kind === 'unverified') {
       return res.status(409).json({ error: 'A verified performer account email is required before Stripe onboarding.' });
     }
-
-    let accountId = performerRow?.stripeConnectedAccountId ?? null;
-    if (!accountId) {
-      const created = await stripeConnectService.createRecipientAccount({
-        displayName: performerOwner.displayName,
-        contactEmail: performerRow.ownerEmail
-      });
-      accountId = created.accountId;
-      await businessDb
-        .update(performers)
-        .set({ stripeConnectedAccountId: accountId })
-        .where(eq(performers.id, performerOwner.performerId));
+    if (provisioning.kind === 'busy') {
+      res.setHeader('Retry-After', '2');
+      return res.status(409).json({ error: 'Stripe onboarding is already being prepared. Retry in a moment.' });
     }
 
-    const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-    const { url } = await stripeConnectService.createOnboardingLink({
-      accountId,
-      refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
-      returnUrl: `${appBaseUrl}/talent/connect/return`
-    });
+    const { url } = await createStripeConnectOnboardingUrl(provisioning.accountId);
 
     return res.json({ success: true, url });
   } catch (error) {
@@ -10648,8 +10649,40 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   }
 });
 
-app.get('/talent/connect/refresh', (_req, res) => {
-  res.redirect('/talent');
+app.get('/talent/connect/refresh', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).send('Authenticate as the performer owner to restart Stripe onboarding.');
+  }
+  if (!talentAccess.actor.actorId || !businessDb || !stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
+    return res.status(503).send('Stripe onboarding is temporarily unavailable.');
+  }
+
+  const [owner] = await businessDb.select({
+    stripeAccountId: performers.stripeConnectedAccountId,
+    emailVerifiedAt: users.emailVerifiedAt
+  }).from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
+    .limit(1);
+
+  if (!owner?.emailVerifiedAt) {
+    return res.status(409).send('Verify the performer owner email before restarting Stripe onboarding.');
+  }
+  if (!owner.stripeAccountId) {
+    return res.status(409).send('Start Stripe onboarding from the performer account first.');
+  }
+
+  try {
+    const { url } = await createStripeConnectOnboardingUrl(owner.stripeAccountId);
+    return res.redirect(303, url);
+  } catch (error) {
+    console.error('Stripe Connect onboarding refresh failed.', {
+      message: error instanceof Error ? error.message : 'unknown_error'
+    });
+    return res.status(502).send('Stripe onboarding could not be restarted. Return to the performer account and try again.');
+  }
 });
 
 app.get('/talent/connect/return', (_req, res) => {

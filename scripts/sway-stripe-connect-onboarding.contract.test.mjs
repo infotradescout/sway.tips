@@ -1,21 +1,29 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const connectSource = readFileSync(join(root, 'src/server/stripe-connect.ts'), 'utf8');
+const onboardingSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding.ts'), 'utf8');
+const onboardingStoreSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding-store.ts'), 'utf8');
+const schemaSource = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
+const migrationSource = readFileSync(join(root, 'drizzle/0031_needy_virginia_dare.sql'), 'utf8');
 const talentDashboardSource = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 
 const failures = [];
 
 const requiredServerTerms = [
   "app.post('/api/talent/connect/onboard'",
-  'stripeConnectService.createRecipientAccount',
   'stripeConnectService.createOnboardingLink',
-  'ownerEmail: users.email',
-  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
-  'contactEmail: performerRow.ownerEmail',
+  'provisionStripeConnectRecipient',
+  'createStripeConnectOnboardingUrl',
   'A verified performer account email is required before Stripe onboarding.',
+  "app.get('/talent/connect/refresh', async (req, res)",
+  'accessControl.requireTalentAccess(req)',
+  'emailVerifiedAt: users.emailVerifiedAt',
+  'createStripeConnectOnboardingUrl(owner.stripeAccountId)',
+  'res.redirect(303, url)',
   'liveRoomPaymentRuntimeConfig.connectEnabled',
   "console.error('Stripe Connect onboarding failed.'",
   'Stripe Connect onboarding could not be started',
@@ -34,6 +42,9 @@ const requiredConnectTerms = [
   "apiVersion: STRIPE_API_VERSION",
   'stripe.v2.core.accounts.create',
   'contact_email: input.contactEmail',
+  'sway_connect_operation_key: input.operationKey',
+  "applied_configurations: ['recipient']",
+  '{ idempotencyKey: input.operationKey }',
   'stripe.v2.core.accountLinks.create',
   "type: 'account_onboarding'",
   "configurations: ['recipient']",
@@ -50,6 +61,73 @@ for (const term of requiredConnectTerms) {
   if (!connectSource.includes(term)) {
     failures.push(`Connect service missing required Accounts v2 term: ${term}`);
   }
+}
+
+for (const term of [
+  'stripeConnectOnboardingOperations',
+  'operationKey',
+  'stripeAccountId',
+  'leaseToken',
+  'leaseExpiresAt',
+  'attemptCount'
+]) {
+  if (!schemaSource.includes(term)) failures.push(`Connect provisioning schema missing durable term: ${term}`);
+}
+
+for (const term of [
+  'CREATE TABLE "stripe_connect_onboarding_operations"',
+  'stripe_connect_onboarding_operations_key_idx',
+  'stripe_connect_onboarding_operations_account_idx',
+  'stripe_connect_onboarding_operations_lease_consistent'
+]) {
+  if (!migrationSource.includes(term)) failures.push(`Connect provisioning migration missing term: ${term}`);
+}
+
+for (const term of [
+  'if (!owner.contactEmail || !owner.emailVerifiedAt)',
+  ".for('update')",
+  'onConflictDoNothing',
+  "status: 'provisioning'",
+  "status: 'bound'",
+  'stripe_connect.account_bound',
+  'stripe_connect_operation_lease_conflict'
+]) {
+  if (!onboardingStoreSource.includes(term)) failures.push(`Connect provisioning store missing term: ${term}`);
+}
+
+for (const term of [
+  'input.store.reserve',
+  'input.stripe.createRecipientAccount',
+  'input.store.complete',
+  'input.store.fail'
+]) {
+  if (!onboardingSource.includes(term)) failures.push(`Connect provisioning coordinator missing term: ${term}`);
+}
+
+if (/app\.get\('\/talent\/connect\/refresh',\s*\(_req,\s*res\)\s*=>\s*\{\s*res\.redirect\('\/talent'\)/.test(serverSource)) {
+  failures.push('Expired Stripe Account Links must not refresh to a dead-end performer redirect.');
+}
+
+const behavior = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-provisioning.behavior.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (behavior.status !== 0) {
+  failures.push(`Stripe Connect provisioning behavior test failed: ${behavior.stderr || behavior.stdout || 'unknown error'}`);
+} else if (behavior.stdout) {
+  process.stdout.write(behavior.stdout);
+}
+
+const integration = spawnSync(process.execPath, [
+  '--import',
+  'tsx',
+  join(root, 'scripts/sway-stripe-connect-onboarding.integration.test.ts')
+], { cwd: root, encoding: 'utf8' });
+if (integration.status !== 0) {
+  failures.push(`Stripe Connect onboarding store integration test failed: ${integration.stderr || integration.stdout || 'unknown error'}`);
+} else if (integration.stdout) {
+  process.stdout.write(integration.stdout);
 }
 
 const bannedConnectPatterns = [
@@ -70,8 +148,8 @@ const connectRouteSource = connectRouteStart >= 0 && connectRouteEnd > connectRo
   ? serverSource.slice(connectRouteStart, connectRouteEnd)
   : '';
 
-if (!/try\s*\{[\s\S]*createRecipientAccount[\s\S]*createOnboardingLink[\s\S]*\}\s*catch\s*\(error\)/.test(connectRouteSource)) {
-  failures.push('Connect onboarding Stripe account/link creation must be wrapped in try/catch.');
+if (!/try\s*\{[\s\S]*provisionStripeConnectRecipient[\s\S]*createStripeConnectOnboardingUrl[\s\S]*\}\s*catch\s*\(error\)/.test(connectRouteSource)) {
+  failures.push('Connect onboarding durable provisioning and link creation must be wrapped in try/catch.');
 }
 
 if (!talentDashboardSource.includes('await response.json().catch(() => null)')) {

@@ -8,9 +8,10 @@ export type ConnectAccountStatus = {
 };
 
 export type StripeConnectService = {
-  createRecipientAccount: (input?: {
+  createRecipientAccount: (input: {
     displayName?: string | null;
-    contactEmail?: string | null;
+    contactEmail: string;
+    operationKey: string;
   }) => Promise<{ accountId: string }>;
   createOnboardingLink: (input: {
     accountId: string;
@@ -131,11 +132,23 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
   }
 
   return {
-    async createRecipientAccount(input = {}) {
+    async createRecipientAccount(input) {
+      for await (const existing of stripe.v2.core.accounts.list({
+        applied_configurations: ['recipient'],
+        limit: 100
+      })) {
+        if (existing.metadata?.sway_connect_operation_key === input.operationKey) {
+          return { accountId: existing.id };
+        }
+      }
+
       const account = await stripe.v2.core.accounts.create({
         dashboard: 'express',
         ...(input.displayName ? { display_name: input.displayName } : {}),
-        ...(input.contactEmail ? { contact_email: input.contactEmail } : {}),
+        contact_email: input.contactEmail,
+        metadata: {
+          sway_connect_operation_key: input.operationKey
+        },
         identity: {
           country: connectCountry
         },
@@ -159,7 +172,7 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
           }
         },
         include: ['configuration.recipient', 'requirements', 'identity', 'defaults']
-      });
+      }, { idempotencyKey: input.operationKey });
       return { accountId: account.id };
     },
 
