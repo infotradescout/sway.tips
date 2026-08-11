@@ -4,6 +4,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const serviceSource = readFileSync(join(root, 'src/server/payment-service.ts'), 'utf8');
+const talentDashboardSource = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 
 const failures = [];
 
@@ -66,6 +67,34 @@ for (const term of [
   if (!serverSource.includes(term)) {
     failures.push(`Closeout must preserve non-terminal reversal truth: ${term}`);
   }
+}
+
+// The canonical performer cockpit must expose the already protected
+// remove-and-reverse path on both desktop and mobile approved queues. Hiding
+// an item alone is not a customer refund control.
+for (const term of [
+  'const confirmAndRemoveRequest = (request: RequestItem)',
+  "liveRoomPaymentMode === 'test'",
+  ": 'payment authorization'",
+  'Sway will request a refund for captured payments or a release for uncaptured holds.',
+  'Any pending reversal stays visible until the payment provider confirms it.',
+  "runQueueAction(request.id, 'remove', () => onRemove(request.id))",
+  "isQueueActionPending(request.id, 'remove')",
+  "' and reverse payment'"
+]) {
+  if (!talentDashboardSource.includes(term)) {
+    failures.push(`Performer remove-and-refund control missing required term: ${term}`);
+  }
+}
+
+if ((talentDashboardSource.match(/onClick=\{\(\) => confirmAndRemoveRequest\(request\)\}/g) ?? []).length !== 2) {
+  failures.push('Desktop and mobile approved queues must both expose the confirmed remove-and-refund action.');
+}
+
+const confirmationIndex = talentDashboardSource.indexOf('if (!window.confirm(confirmation)) return;');
+const removalIndex = talentDashboardSource.indexOf("runQueueAction(request.id, 'remove', () => onRemove(request.id))");
+if (confirmationIndex < 0 || removalIndex < 0 || confirmationIndex > removalIndex) {
+  failures.push('Performer removal must require confirmation before invoking the protected refund action.');
 }
 
 if (failures.length) {
