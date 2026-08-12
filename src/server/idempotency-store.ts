@@ -1,12 +1,37 @@
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { clientPendingActions, idempotencyKeys, payments, requestBoosts, requests } from '../db/schema';
 import { hashPatronStatusReceipt, isPatronStatusReceipt } from './patron-status-receipt';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const PENDING_ACTION_LEASE_MS = 30 * 1000;
+const PENDING_ACTION_OWNER_LEASE_MS = 15 * 1000;
 const IDEMPOTENCY_TTL_HOURS = 48;
+
+export type PendingActionOwner = {
+  token: string;
+  generation: number;
+  leaseExpiresAt: Date;
+};
+
+type PendingActionOwnerResult =
+  | { status: 'acquired'; owner: PendingActionOwner }
+  | { status: 'busy'; retryAfterMs: number }
+  | { status: 'missing' | 'expired' | 'reconciled' | 'unavailable' | 'misuse' };
+
+function matchesPendingActionOwner(
+  pending: { ownerToken: string | null; ownerGeneration: number; ownerLeaseExpiresAt?: Date | null } | undefined,
+  owner: PendingActionOwner
+) {
+  return Boolean(
+    pending
+    && pending.ownerToken === owner.token
+    && pending.ownerGeneration === owner.generation
+    && Boolean(pending.ownerLeaseExpiresAt)
+    && pending.ownerLeaseExpiresAt!.getTime() > Date.now()
+  );
+}
 
 export type DurableActionInput = {
   clientRequestId: string;
@@ -268,6 +293,161 @@ export function createIdempotencyStore(databaseUrl?: string) {
     return { kind: 'new' };
   }
 
+  async function claimPendingActionOwner(input: {
+    clientRequestId: string;
+    idempotencyKey: string;
+    expected?: {
+      gigId: string;
+      actionType: 'request' | 'tip' | 'boost';
+      patronDeviceIdHash: string;
+    };
+  }): Promise<PendingActionOwnerResult> {
+    if (!db) return { status: 'unavailable' };
+
+    return db.transaction(async (tx): Promise<PendingActionOwnerResult> => {
+      const [pending] = await tx
+        .select({
+          status: clientPendingActions.status,
+          expiresAt: clientPendingActions.expiresAt,
+          createdAt: clientPendingActions.createdAt,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt,
+          gigId: clientPendingActions.gigId,
+          actionType: clientPendingActions.actionType,
+          patronDeviceIdHash: idempotencyKeys.patronDeviceIdHash
+        })
+        .from(clientPendingActions)
+        .innerJoin(idempotencyKeys, eq(clientPendingActions.idempotencyKey, idempotencyKeys.idempotencyKey))
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey)
+        ))
+        .for('update')
+        .limit(1);
+      if (!pending) return { status: 'missing' };
+      if (
+        input.expected
+        && (
+          pending.gigId !== input.expected.gigId
+          || pending.actionType !== input.expected.actionType
+          || pending.patronDeviceIdHash !== input.expected.patronDeviceIdHash
+        )
+      ) return { status: 'misuse' };
+      if (pending.status === 'reconciled') return { status: 'reconciled' };
+
+      const now = new Date();
+      const effectiveDeadline = Math.min(
+        pending.expiresAt.getTime(),
+        pending.createdAt.getTime() + PENDING_ACTION_TTL_MS
+      );
+      if (effectiveDeadline <= now.getTime()) return { status: 'expired' };
+      if (pending.ownerLeaseExpiresAt && pending.ownerLeaseExpiresAt.getTime() > now.getTime()) {
+        return {
+          status: 'busy',
+          retryAfterMs: pending.ownerLeaseExpiresAt.getTime() - now.getTime()
+        };
+      }
+
+      const token = randomUUID();
+      const leaseExpiresAt = new Date(Math.min(
+        effectiveDeadline,
+        now.getTime() + PENDING_ACTION_OWNER_LEASE_MS
+      ));
+      const [claimed] = await tx
+        .update(clientPendingActions)
+        .set({
+          ownerToken: token,
+          ownerGeneration: sql`${clientPendingActions.ownerGeneration} + 1`,
+          ownerLeaseExpiresAt: leaseExpiresAt,
+          lastAttemptAt: now,
+          attemptCount: sql`${clientPendingActions.attemptCount} + 1`
+        })
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey),
+          inArray(clientPendingActions.status, ['pending', 'retrying'])
+        ))
+        .returning({ generation: clientPendingActions.ownerGeneration });
+      if (!claimed) return { status: 'reconciled' };
+      return {
+        status: 'acquired',
+        owner: { token, generation: claimed.generation, leaseExpiresAt }
+      };
+    });
+  }
+
+  async function releasePendingActionOwner(input: {
+    clientRequestId: string;
+    idempotencyKey: string;
+    owner: PendingActionOwner;
+  }) {
+    if (!db) return false;
+    const released = await db
+      .update(clientPendingActions)
+      .set({ ownerToken: null, ownerLeaseExpiresAt: null })
+      .where(and(
+        eq(clientPendingActions.clientRequestId, input.clientRequestId),
+        eq(clientPendingActions.idempotencyKey, input.idempotencyKey),
+        eq(clientPendingActions.ownerToken, input.owner.token),
+        eq(clientPendingActions.ownerGeneration, input.owner.generation)
+      ))
+      .returning({ id: clientPendingActions.id });
+    return released.length === 1;
+  }
+
+  async function refreshPendingActionOwner(input: {
+    clientRequestId: string;
+    idempotencyKey: string;
+    owner: PendingActionOwner;
+  }): Promise<PendingActionOwner | null> {
+    if (!db) return null;
+    return db.transaction(async (tx) => {
+      const [pending] = await tx
+        .select({
+          status: clientPendingActions.status,
+          expiresAt: clientPendingActions.expiresAt,
+          createdAt: clientPendingActions.createdAt,
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
+        })
+        .from(clientPendingActions)
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey)
+        ))
+        .for('update')
+        .limit(1);
+      if (
+        !pending
+        || !['pending', 'retrying'].includes(pending.status)
+        || pending.ownerToken !== input.owner.token
+        || pending.ownerGeneration !== input.owner.generation
+      ) return null;
+      const now = new Date();
+      const effectiveDeadline = Math.min(
+        pending.expiresAt.getTime(),
+        pending.createdAt.getTime() + PENDING_ACTION_TTL_MS
+      );
+      if (effectiveDeadline <= now.getTime()) return null;
+      const leaseExpiresAt = new Date(Math.min(
+        effectiveDeadline,
+        now.getTime() + PENDING_ACTION_OWNER_LEASE_MS
+      ));
+      const refreshed = await tx
+        .update(clientPendingActions)
+        .set({ ownerLeaseExpiresAt: leaseExpiresAt, lastAttemptAt: now })
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey),
+          eq(clientPendingActions.ownerToken, input.owner.token),
+          eq(clientPendingActions.ownerGeneration, input.owner.generation)
+        ))
+        .returning({ id: clientPendingActions.id });
+      if (refreshed.length !== 1) return null;
+      return { ...input.owner, leaseExpiresAt };
+    });
+  }
+
   async function completePendingAction(input: {
     clientRequestId: string;
     idempotencyKey: string;
@@ -276,6 +456,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
     receiptHash: string;
     status: number;
     body: unknown;
+    owner?: PendingActionOwner;
   }) {
     if (!db) return { status: input.status, body: input.body, completed: true };
 
@@ -319,6 +500,24 @@ export function createIdempotencyStore(databaseUrl?: string) {
           completed: false
         };
       }
+
+      const [pendingOwner] = await tx
+        .select({
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
+        })
+        .from(clientPendingActions)
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey)
+        ))
+        .for('update')
+        .limit(1);
+      if (
+        input.owner
+        && !matchesPendingActionOwner(pendingOwner, input.owner)
+      ) throw new Error('pending_action_owner_fenced');
 
       const updatedAction = input.actionType === 'boost'
         ? await tx
@@ -368,6 +567,8 @@ export function createIdempotencyStore(databaseUrl?: string) {
       await tx.update(clientPendingActions)
         .set({
           status: 'reconciled',
+          ownerToken: null,
+          ownerLeaseExpiresAt: null,
           lastAttemptAt: now,
           lastError: null
         })
@@ -399,6 +600,111 @@ export function createIdempotencyStore(databaseUrl?: string) {
       .where(eq(idempotencyKeys.idempotencyKey, input.idempotencyKey));
   }
 
+  async function fencePendingActionFailure(input: {
+    clientRequestId: string;
+    idempotencyKey: string;
+    gigId: string;
+    actionType: 'request' | 'tip' | 'boost';
+    owner: PendingActionOwner;
+  }) {
+    if (!db) return { status: 'unavailable' as const };
+    return db.transaction(async (tx) => {
+      const now = new Date();
+      const [pending] = await tx
+        .select({
+          id: clientPendingActions.id,
+          gigId: clientPendingActions.gigId,
+          actionType: clientPendingActions.actionType,
+          status: clientPendingActions.status,
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
+        })
+        .from(clientPendingActions)
+        .where(and(
+          eq(clientPendingActions.clientRequestId, input.clientRequestId),
+          eq(clientPendingActions.idempotencyKey, input.idempotencyKey)
+        ))
+        .for('update')
+        .limit(1);
+      if (
+        !pending
+        || pending.gigId !== input.gigId
+        || pending.actionType !== input.actionType
+      ) throw new Error('pending_action_completion_identity_conflict');
+      if (!matchesPendingActionOwner(pending, input.owner)) {
+        throw new Error('pending_action_owner_fenced');
+      }
+      if (pending.status === 'reconciled') return { status: 'reconciled' as const };
+
+      const [action] = input.actionType === 'boost'
+        ? await tx
+          .select({ id: requestBoosts.id, activatedAt: requestBoosts.activatedAt, status: requestBoosts.status })
+          .from(requestBoosts)
+          .where(and(
+            eq(requestBoosts.gigId, input.gigId),
+            eq(requestBoosts.clientRequestId, input.clientRequestId),
+            eq(requestBoosts.idempotencyKey, input.idempotencyKey)
+          ))
+          .for('update')
+          .limit(1)
+        : await tx
+          .select({ id: requests.id, activatedAt: requests.activatedAt, status: requests.status })
+          .from(requests)
+          .where(and(
+            eq(requests.gigId, input.gigId),
+            eq(requests.clientRequestId, input.clientRequestId),
+            eq(requests.idempotencyKey, input.idempotencyKey)
+          ))
+          .for('update')
+          .limit(1);
+      if (action?.activatedAt) return { status: 'already_visible' as const };
+      if (action && !['payment_pending', 'denied'].includes(action.status)) {
+        throw new Error('pending_action_terminal_state_conflict');
+      }
+      if (action?.status === 'payment_pending') {
+        const fenced = input.actionType === 'boost'
+          ? await tx
+            .update(requestBoosts)
+            .set({
+              status: 'denied',
+              stateRevision: sql`${requestBoosts.stateRevision} + 1`,
+              updatedAt: now
+            })
+            .where(and(
+              eq(requestBoosts.id, action.id),
+              eq(requestBoosts.status, 'payment_pending'),
+              isNull(requestBoosts.activatedAt)
+            ))
+            .returning({ id: requestBoosts.id })
+          : await tx
+            .update(requests)
+            .set({
+              status: 'denied',
+              stateRevision: sql`${requests.stateRevision} + 1`,
+              updatedAt: now
+            })
+            .where(and(
+              eq(requests.id, action.id),
+              eq(requests.status, 'payment_pending'),
+              isNull(requests.activatedAt)
+            ))
+            .returning({ id: requests.id });
+        if (fenced.length !== 1) throw new Error('pending_action_terminal_state_conflict');
+      }
+
+      await tx
+        .update(clientPendingActions)
+        .set({
+          status: 'retrying',
+          lastAttemptAt: now,
+          lastError: 'payment_reversal_pending'
+        })
+        .where(eq(clientPendingActions.id, pending.id));
+      return { status: 'fenced' as const };
+    });
+  }
+
   async function completePendingActionFailure(input: {
     clientRequestId: string;
     idempotencyKey: string;
@@ -406,6 +712,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
     actionType: 'request' | 'tip' | 'boost';
     status: number;
     body: unknown;
+    owner?: PendingActionOwner;
   }) {
     if (!db) return { status: input.status, body: input.body, completed: true };
 
@@ -440,7 +747,10 @@ export function createIdempotencyStore(databaseUrl?: string) {
         .select({
           clientRequestId: clientPendingActions.clientRequestId,
           gigId: clientPendingActions.gigId,
-          actionType: clientPendingActions.actionType
+          actionType: clientPendingActions.actionType,
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
         })
         .from(clientPendingActions)
         .where(eq(clientPendingActions.idempotencyKey, input.idempotencyKey))
@@ -452,6 +762,10 @@ export function createIdempotencyStore(databaseUrl?: string) {
         || pendingAction.gigId !== input.gigId
         || pendingAction.actionType !== input.actionType
       ) throw new Error('pending_action_completion_identity_conflict');
+      if (
+        input.owner
+        && !matchesPendingActionOwner(pendingAction, input.owner)
+      ) throw new Error('pending_action_owner_fenced');
 
       const [action] = input.actionType === 'boost'
         ? await tx
@@ -533,6 +847,8 @@ export function createIdempotencyStore(databaseUrl?: string) {
         .update(clientPendingActions)
         .set({
           status: 'reconciled',
+          ownerToken: null,
+          ownerLeaseExpiresAt: null,
           lastAttemptAt: now,
           lastError: null
         })
@@ -690,6 +1006,9 @@ export function createIdempotencyStore(databaseUrl?: string) {
           .update(clientPendingActions)
           .set({
             status: 'retrying',
+            ownerToken: null,
+            ownerGeneration: sql`${clientPendingActions.ownerGeneration} + 1`,
+            ownerLeaseExpiresAt: null,
             lastAttemptAt: now,
             lastError: payment ? 'expired_payment_reversal_pending' : 'expired_before_payment_creation'
           })
@@ -797,9 +1116,13 @@ export function createIdempotencyStore(databaseUrl?: string) {
     reservePendingAction,
     reserveDurableActorAction,
     completePendingAction,
+    fencePendingActionFailure,
     completePendingActionFailure,
     expireStalePendingActions,
     completeDurableActorAction,
-    reconcilePendingAction
+    reconcilePendingAction,
+    claimPendingActionOwner,
+    releasePendingActionOwner,
+    refreshPendingActionOwner
   };
 }

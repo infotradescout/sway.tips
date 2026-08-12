@@ -7,6 +7,7 @@ import { createPaymentWebhookService } from '../src/server/payment-webhook';
 import { createDeterministicPaymentProvider } from './lib/deterministic-payment-provider';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
 import { SWAY_TEST_PLATFORM_BALANCE_DESTINATION } from '../src/server/live-room-seller-readiness';
+import { issuePatronStatusReceipt } from '../src/server/patron-status-receipt';
 
 const OWNER_ID = '10000000-0000-4000-8000-000000000001';
 const PERFORMER_ID = '10000000-0000-4000-8000-000000000002';
@@ -254,11 +255,236 @@ async function main() {
     `, [concurrentOwner.idempotencyKey]);
     assert.equal(concurrentOwnerPayment.rows[0].payment_status, 'authorized');
 
+    // The live finalization request owns visibility while it is in flight.
+    // The worker must wait, then reclaim after a simulated crash, and the
+    // stale HTTP owner must be fenced from committing or reversing the hold.
+    const ownerFenceAction = await reserveRequest({
+      label: 'http-worker-owner-fence',
+      deviceHash: hash('http-worker-owner-fence-device')
+    });
+    const ownerFenceAuthorization = await restartedPaymentService.authorizeAction(
+      ownerFenceAction.authorizationInput
+    );
+    assert.equal(ownerFenceAuthorization.status, 'authorized');
+    const liveOwnership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: ownerFenceAction.clientRequestId,
+      idempotencyKey: ownerFenceAction.idempotencyKey
+    });
+    assert.equal(liveOwnership.status, 'acquired');
+    if (liveOwnership.status !== 'acquired') throw new Error('owner_fence_fixture_not_acquired');
+    const blockedRecovery = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(blockedRecovery.requestsActivated, 2, 'Only the two older recoverable fixtures may activate.');
+    const blockedTruth = await proof.query<{ activated_at: Date | null; payment_status: string }>(`
+      select r.activated_at, p.payment_status
+      from requests r join payments p on p.request_id = r.id
+      where r.id = $1
+    `, [ownerFenceAction.requestId]);
+    assert.equal(blockedTruth.rows[0].activated_at, null);
+    assert.equal(blockedTruth.rows[0].payment_status, 'authorized');
+
+    await proof.query(`
+      update client_pending_actions
+      set owner_lease_expires_at = now() - interval '1 second'
+      where idempotency_key = $1
+    `, [ownerFenceAction.idempotencyKey]);
+    const recoveredVisibility = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(recoveredVisibility.requestsActivated, 1);
+    const recoveredTruth = await proof.query<{ activated_at: Date | null; payment_status: string }>(`
+      select r.activated_at, p.payment_status
+      from requests r join payments p on p.request_id = r.id
+      where r.id = $1
+    `, [ownerFenceAction.requestId]);
+    assert.ok(recoveredTruth.rows[0].activated_at);
+    assert.equal(recoveredTruth.rows[0].payment_status, 'authorized');
+
+    const staleRuntime = {
+      ...ownerFenceAction.runtimeState,
+      durableRequestId: ownerFenceAction.requestId,
+      paymentId: ownerFenceAuthorization.paymentId,
+      paymentIntentId: ownerFenceAuthorization.processorPaymentIntentId,
+      paymentStatus: 'authorized'
+    };
+    await assert.rejects(
+      businessStore.activateRequestAction(GIG_ID, staleRuntime as never, liveOwnership.owner),
+      /pending_action_owner_fenced/
+    );
+
+    // A token whose generation still matches is nevertheless stale once its
+    // lease deadline passes; it cannot activate before another owner reclaims.
+    const leaseDeadlineAction = await reserveRequest({
+      label: 'expired-owner-token',
+      deviceHash: hash('expired-owner-token-device')
+    });
+    const leaseDeadlineAuthorization = await restartedPaymentService.authorizeAction(
+      leaseDeadlineAction.authorizationInput
+    );
+    assert.equal(leaseDeadlineAuthorization.status, 'authorized');
+    const leaseDeadlineOwner = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: leaseDeadlineAction.clientRequestId,
+      idempotencyKey: leaseDeadlineAction.idempotencyKey
+    });
+    assert.equal(leaseDeadlineOwner.status, 'acquired');
+    if (leaseDeadlineOwner.status !== 'acquired') throw new Error('expired_owner_fixture_not_acquired');
+    await proof.query(`
+      update client_pending_actions
+      set owner_lease_expires_at = now() - interval '1 second'
+      where idempotency_key = $1
+    `, [leaseDeadlineAction.idempotencyKey]);
+    const expiredOwnerRuntime = {
+      ...leaseDeadlineAction.runtimeState,
+      durableRequestId: leaseDeadlineAction.requestId,
+      paymentId: leaseDeadlineAuthorization.paymentId,
+      paymentIntentId: leaseDeadlineAuthorization.processorPaymentIntentId,
+      paymentStatus: 'authorized'
+    };
+    await assert.rejects(
+      businessStore.activateRequestAction(GIG_ID, expiredOwnerRuntime as never, leaseDeadlineOwner.owner),
+      /pending_action_owner_fenced/
+    );
+    const expiredOwnerRecovery = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(expiredOwnerRecovery.requestsActivated, 1);
+
+    // Success receipt completion is fenced independently from visibility.
+    // An expired owner cannot publish the canonical success even when the
+    // business row is already visible.
+    const expiredCompletionAction = await reserveRequest({
+      label: 'expired-success-completion',
+      deviceHash: hash('expired-success-completion-device')
+    });
+    const expiredCompletionAuthorization = await restartedPaymentService.authorizeAction(
+      expiredCompletionAction.authorizationInput
+    );
+    assert.equal(expiredCompletionAuthorization.status, 'authorized');
+    const expiredCompletionOwner = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: expiredCompletionAction.clientRequestId,
+      idempotencyKey: expiredCompletionAction.idempotencyKey
+    });
+    assert.equal(expiredCompletionOwner.status, 'acquired');
+    if (expiredCompletionOwner.status !== 'acquired') throw new Error('expired_completion_fixture_not_acquired');
+    const expiredCompletionRuntime = {
+      ...expiredCompletionAction.runtimeState,
+      durableRequestId: expiredCompletionAction.requestId,
+      paymentId: expiredCompletionAuthorization.paymentId,
+      paymentIntentId: expiredCompletionAuthorization.processorPaymentIntentId,
+      paymentStatus: 'authorized'
+    };
+    await businessStore.activateRequestAction(
+      GIG_ID,
+      expiredCompletionRuntime as never,
+      expiredCompletionOwner.owner
+    );
+    await proof.query(`
+      update client_pending_actions
+      set owner_lease_expires_at = now() - interval '1 second'
+      where idempotency_key = $1
+    `, [expiredCompletionAction.idempotencyKey]);
+    const expiredCompletionReceipt = issuePatronStatusReceipt();
+    await assert.rejects(
+      idempotencyStore.completePendingAction({
+        clientRequestId: expiredCompletionAction.clientRequestId,
+        idempotencyKey: expiredCompletionAction.idempotencyKey,
+        gigId: GIG_ID,
+        actionType: 'request',
+        receiptHash: expiredCompletionReceipt.receiptHash,
+        status: 200,
+        body: {
+          success: true,
+          patron_status_receipt: expiredCompletionReceipt.receipt
+        },
+        owner: expiredCompletionOwner.owner
+      }),
+      /pending_action_owner_fenced/
+    );
+
+    // Failure fencing happens before a potentially slow provider reversal.
+    // Once fenced, no recovery worker can make the action visible even if the
+    // owner lease expires while the provider is still responding.
+    const reversalFenceAction = await reserveRequest({
+      label: 'reversal-before-provider',
+      deviceHash: hash('reversal-before-provider-device')
+    });
+    const reversalFenceAuthorization = await restartedPaymentService.authorizeAction(
+      reversalFenceAction.authorizationInput
+    );
+    assert.equal(reversalFenceAuthorization.status, 'authorized');
+    const reversalFenceOwner = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: reversalFenceAction.clientRequestId,
+      idempotencyKey: reversalFenceAction.idempotencyKey
+    });
+    assert.equal(reversalFenceOwner.status, 'acquired');
+    if (reversalFenceOwner.status !== 'acquired') throw new Error('reversal_fence_fixture_not_acquired');
+    const reversalFence = await idempotencyStore.fencePendingActionFailure({
+      clientRequestId: reversalFenceAction.clientRequestId,
+      idempotencyKey: reversalFenceAction.idempotencyKey,
+      gigId: GIG_ID,
+      actionType: 'request',
+      owner: reversalFenceOwner.owner
+    });
+    assert.equal(reversalFence.status, 'fenced');
+    await proof.query(`
+      update client_pending_actions
+      set owner_lease_expires_at = now() - interval '1 second'
+      where idempotency_key = $1
+    `, [reversalFenceAction.idempotencyKey]);
+    const reversalFenceRecovery = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(reversalFenceRecovery.requestsActivated, 0);
+    const reversalFenceTruth = await proof.query<{ status: string; activated_at: Date | null; payment_status: string }>(`
+      select r.status, r.activated_at, p.payment_status
+      from requests r join payments p on p.request_id = r.id
+      where r.id = $1
+    `, [reversalFenceAction.requestId]);
+    assert.equal(reversalFenceTruth.rows[0].status, 'denied');
+    assert.equal(reversalFenceTruth.rows[0].activated_at, null);
+    assert.equal(reversalFenceTruth.rows[0].payment_status, 'authorized');
+    const reversalFenceTerminal = await restartedPaymentService.voidOrRefund(reversalFenceAuthorization.paymentId);
+    assert.equal(reversalFenceTerminal.status, 'voided');
+
+    // Exercise the worker's own reversal branch: a captured request that is
+    // no longer eligible must be fenced invisible before the worker refunds.
+    const workerReversalAction = await reserveRequest({
+      label: 'worker-owned-reversal',
+      deviceHash: hash('worker-owned-reversal-device')
+    });
+    const workerReversalAuthorization = await restartedPaymentService.authorizeAction(
+      workerReversalAction.authorizationInput
+    );
+    assert.equal(workerReversalAuthorization.status, 'authorized');
+    const workerReversalCapture = await restartedPaymentService.captureAuthorization(
+      workerReversalAuthorization.paymentId
+    );
+    assert.equal(workerReversalCapture.status, 'captured');
+    await proof.query(`
+      update requests
+      set runtime_request_state = jsonb_set(runtime_request_state, '{status}', '"hold"'::jsonb)
+      where id = $1
+    `, [workerReversalAction.requestId]);
+    const workerReversalPass = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(workerReversalPass.requestsActivated, 0);
+    const workerReversalTruth = await proof.query<{
+      request_status: string;
+      activated_at: Date | null;
+      payment_status: string;
+      owner_token: string | null;
+      owner_lease_expires_at: Date | null;
+    }>(`
+      select r.status as request_status, r.activated_at, p.payment_status,
+             c.owner_token, c.owner_lease_expires_at
+      from requests r
+      join payments p on p.request_id = r.id
+      join client_pending_actions c on c.idempotency_key = r.idempotency_key
+      where r.id = $1
+    `, [workerReversalAction.requestId]);
+    assert.equal(workerReversalTruth.rows[0].request_status, 'denied');
+    assert.equal(workerReversalTruth.rows[0].activated_at, null);
+    assert.equal(workerReversalTruth.rows[0].payment_status, 'refunded');
+    assert.equal(workerReversalTruth.rows[0].owner_token, null);
+    assert.equal(workerReversalTruth.rows[0].owner_lease_expires_at, null);
+
     // Visibility can commit before the HTTP response. Even after the browser
     // deadline, that visible truth must remain recoverable and must not be
     // reversed as an orphan.
     const visibleRecovery = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
-    assert.equal(visibleRecovery.requestsActivated, 2);
+    assert.equal(visibleRecovery.requestsActivated, 0, 'The earlier reconciliation already activated both fixtures.');
     await proof.query(`
       update client_pending_actions
       set expires_at = now() - interval '1 minute', created_at = now() - interval '10 minutes'
@@ -275,10 +501,11 @@ async function main() {
       set status = 'approved', runtime_request_state = jsonb_set(runtime_request_state, '{status}', '"approved"'::jsonb)
       where id = $1
     `, [lostAuthorize.requestId]);
+    const capturesBeforeLostAuthorization = fake.calls.capture;
     fake.failOnce('capture_after_commit');
     const captured = await restartedPaymentService.captureAuthorization(recoveredPayment.rows[0].id);
     assert.equal(captured.status, 'captured');
-    assert.equal(fake.calls.capture, 1);
+    assert.equal(fake.calls.capture - capturesBeforeLostAuthorization, 1);
 
     // A nonterminal refund cannot release the liability. The retry uses the
     // same reverse operation and requires transfer/application-fee reversal.

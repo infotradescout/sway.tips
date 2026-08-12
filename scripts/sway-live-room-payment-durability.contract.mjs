@@ -62,6 +62,9 @@ assert.doesNotMatch(
   'Patron HTTP ownership must not be reclaimed without a fencing token.'
 );
 assert.match(patronReservationSource, /return replay\.kind === 'new' \? \{ kind: 'pending' \} : replay/);
+assert.match(idempotencyStoreSource, /async function claimPendingActionOwner/);
+assert.match(idempotencyStoreSource, /ownerGeneration: sql`\$\{clientPendingActions\.ownerGeneration\} \+ 1`/);
+assert.match(idempotencyStoreSource, /pending_action_owner_fenced/);
 
 const terminalFailureSource = idempotencyStoreSource.slice(
   idempotencyStoreSource.indexOf('async function completePendingActionFailure'),
@@ -262,6 +265,10 @@ const boostRouteSource = serverSource.slice(
   serverSource.indexOf('app.post("/api/request/boost"'),
   serverSource.indexOf('app.post("/api/request/triage"')
 );
+assert.match(visibilityReconcilerSource, /claimPendingActionOwner/);
+assert.match(visibilityReconcilerSource, /pending\.ownerToken !== recoveryOwner\.token/);
+assert.match(requestRouteSource, /refreshPendingActionOwner[\s\S]+activateRequestAction\(durableGigId, newItem, actionOwner\)/);
+assert.match(boostRouteSource, /refreshPendingActionOwner[\s\S]+activateBoostAction\(durableGigId, request, newBoost, actionOwner\)/);
 assert.doesNotMatch(
   requestRouteSource,
   /if \(!isStraightTip && \(!roomState\.session\.requestsOpen/,

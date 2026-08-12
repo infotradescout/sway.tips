@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
 import type { FeeAttribution } from './fee-policy';
+import type { PendingActionOwner } from './idempotency-store';
 import {
   activeRoomRegistry,
   clientPendingActions,
@@ -967,7 +968,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     });
   }
 
-  async function activateRequestAction(gigId: string, request: RequestItem) {
+  async function activateRequestAction(gigId: string, request: RequestItem, owner?: PendingActionOwner) {
     if (!db || !request.durableRequestId || !request.idempotencyKey || !request.idempotencyFingerprint) {
       throw new Error('durable_request_activation_identity_required');
     }
@@ -982,7 +983,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         .select({
           status: clientPendingActions.status,
           expiresAt: clientPendingActions.expiresAt,
-          createdAt: clientPendingActions.createdAt
+          createdAt: clientPendingActions.createdAt,
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
         })
         .from(clientPendingActions)
         .where(and(
@@ -1009,6 +1013,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         || reserved.idempotencyKey !== request.idempotencyKey
         || reserved.intentFingerprint !== request.idempotencyFingerprint
       ) throw new Error('durable_request_activation_identity_conflict');
+      if (
+        owner
+        && (
+          pending?.ownerToken !== owner.token
+          || pending.ownerGeneration !== owner.generation
+          || !pending.ownerLeaseExpiresAt
+          || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
+        )
+      ) throw new Error('pending_action_owner_fenced');
       // Reconciliation and the original HTTP request can race after Stripe
       // confirms. The same immutable action becoming visible first is success,
       // not a reason to reverse its payment.
@@ -1053,7 +1066,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     });
   }
 
-  async function activateBoostAction(gigId: string, request: RequestItem, boost: BoostContribution) {
+  async function activateBoostAction(gigId: string, request: RequestItem, boost: BoostContribution, owner?: PendingActionOwner) {
     if (!db || !request.durableRequestId || !boost.durableBoostId || !boost.idempotencyKey || !boost.idempotencyFingerprint) {
       throw new Error('durable_boost_activation_identity_required');
     }
@@ -1068,7 +1081,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         .select({
           status: clientPendingActions.status,
           expiresAt: clientPendingActions.expiresAt,
-          createdAt: clientPendingActions.createdAt
+          createdAt: clientPendingActions.createdAt,
+          ownerToken: clientPendingActions.ownerToken,
+          ownerGeneration: clientPendingActions.ownerGeneration,
+          ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
         })
         .from(clientPendingActions)
         .where(and(
@@ -1097,6 +1113,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         || reserved.idempotencyKey !== boost.idempotencyKey
         || reserved.intentFingerprint !== boost.idempotencyFingerprint
       ) throw new Error('durable_boost_activation_identity_conflict');
+      if (
+        owner
+        && (
+          pending?.ownerToken !== owner.token
+          || pending.ownerGeneration !== owner.generation
+          || !pending.ownerLeaseExpiresAt
+          || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
+        )
+      ) throw new Error('pending_action_owner_fenced');
       // A worker or the patron reconciliation poll may have committed this
       // exact boost already. Do not reinterpret that success as a stale-target
       // conflict and refund a valid captured payment.

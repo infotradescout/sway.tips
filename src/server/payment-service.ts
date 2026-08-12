@@ -13,7 +13,7 @@ import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
 import { createLiveRoomPaymentOperationStore } from './live-room-payment-operation-store';
 import { resolveSwayPlatformFeePolicyForGig } from './partner-entitlement-store';
-import { createIdempotencyStore } from './idempotency-store';
+import { createIdempotencyStore, type PendingActionOwner } from './idempotency-store';
 import {
   isTestModePlatformBalancePerformerAllowed,
   isSwayTestPlatformBalanceDestination,
@@ -1525,7 +1525,14 @@ export function createPaymentService(config: {
     return { attempted: uniquePaymentIds.length, terminal };
   }
 
-  async function reconcileActionVisibility(input: { limit?: number } = {}) {
+  async function reconcileActionVisibility(input: {
+    limit?: number;
+    ownedAction?: {
+      clientRequestId: string;
+      idempotencyKey: string;
+      owner: PendingActionOwner;
+    };
+  } = {}) {
     if (!db) return {
       authorizationsReconciled: 0,
       requestsActivated: 0,
@@ -1603,6 +1610,20 @@ export function createPaymentService(config: {
       };
     };
 
+    const fenceAndReverseOwnedInvisibleAction = async (input: {
+      clientRequestId: string;
+      idempotencyKey: string;
+      gigId: string;
+      actionType: 'request' | 'tip' | 'boost';
+      paymentId: string;
+      owner: PendingActionOwner;
+    }) => {
+      const fence = await idempotencyStore.fencePendingActionFailure(input);
+      if (fence.status === 'already_visible' || fence.status === 'reconciled') return false;
+      await voidOrRefund(input.paymentId);
+      return true;
+    };
+
     const awaitingCustomerAuthorizations = provider
       ? await db
           .select({
@@ -1661,6 +1682,7 @@ export function createPaymentService(config: {
         requestId: requests.id,
         gigId: requests.gigId,
         idempotencyKey: requests.idempotencyKey,
+        clientRequestId: requests.clientRequestId,
         stateRevision: requests.stateRevision,
         runtimeState: requests.runtimeRequestState,
         paymentId: payments.id,
@@ -1691,35 +1713,60 @@ export function createPaymentService(config: {
       .limit(limit);
 
     for (const row of pendingRequests) {
-      const runtime = asRecord(row.runtimeState);
-      const desiredStatus = recordString(runtime, 'status');
-      const requiresCapture = recordString(runtime, 'type') === 'tip' || desiredStatus === 'approved' || desiredStatus === 'fulfilled';
-      let paymentStatus = row.paymentStatus ?? recordString(runtime, 'paymentStatus');
-      if (provider && row.paymentId && requiresCapture && paymentStatus === 'authorized') {
-        const capture = await captureAuthorization(row.paymentId);
-        if (capture.status === 'captured') paymentStatus = 'captured';
+      let recoveryOwner: PendingActionOwner | null = null;
+      const suppliedOwner = input.ownedAction?.idempotencyKey === row.idempotencyKey
+        && input.ownedAction.clientRequestId === row.clientRequestId
+        ? input.ownedAction.owner
+        : null;
+      if (suppliedOwner) {
+        recoveryOwner = suppliedOwner;
+      } else {
+        const ownership = await idempotencyStore.claimPendingActionOwner({
+          clientRequestId: row.clientRequestId,
+          idempotencyKey: row.idempotencyKey!
+        });
+        if (ownership.status !== 'acquired') continue;
+        recoveryOwner = ownership.owner;
       }
-      if (provider && row.paymentId && !requiresCapture && paymentStatus === 'captured') {
-        const latest = await loadInvisibleRequestDisposition(row.requestId);
-        if (latest.stillInvisible && (!latest.eligible || !latest.requiresCapture)) {
-          await voidOrRefund(row.paymentId);
+      if (!recoveryOwner) continue;
+      try {
+        const runtime = asRecord(row.runtimeState);
+        const desiredStatus = recordString(runtime, 'status');
+        const actionType = recordString(runtime, 'type') === 'tip' ? 'tip' as const : 'request' as const;
+        const requiresCapture = actionType === 'tip' || desiredStatus === 'approved' || desiredStatus === 'fulfilled';
+        let paymentStatus = row.paymentStatus ?? recordString(runtime, 'paymentStatus');
+        if (provider && row.paymentId && requiresCapture && paymentStatus === 'authorized') {
+          const capture = await captureAuthorization(row.paymentId);
+          if (capture.status === 'captured') paymentStatus = 'captured';
         }
-        continue;
-      }
-      const isFreeAction = !row.paymentId && paymentStatus === 'not_applicable';
-      const mayActivate = isFreeAction || (requiresCapture
-        ? paymentStatus === 'captured'
-        : Boolean(paymentStatus && ['authorized', 'captured'].includes(paymentStatus)));
-      if (!mayActivate) continue;
-      const requestStatus = desiredStatus === 'approved'
-        ? 'approved'
-        : desiredStatus === 'fulfilled'
-          ? 'fulfilled'
-          : desiredStatus === 'denied'
-            ? 'denied'
-            : 'held_for_review';
-      const now = new Date();
-      const activated = await db.transaction(async (tx) => {
+        if (provider && row.paymentId && !requiresCapture && paymentStatus === 'captured') {
+          const latest = await loadInvisibleRequestDisposition(row.requestId);
+          if (latest.stillInvisible && (!latest.eligible || !latest.requiresCapture)) {
+            await fenceAndReverseOwnedInvisibleAction({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType,
+              paymentId: row.paymentId,
+              owner: recoveryOwner
+            });
+          }
+          continue;
+        }
+        const isFreeAction = !row.paymentId && paymentStatus === 'not_applicable';
+        const mayActivate = isFreeAction || (requiresCapture
+          ? paymentStatus === 'captured'
+          : Boolean(paymentStatus && ['authorized', 'captured'].includes(paymentStatus)));
+        if (!mayActivate) continue;
+        const requestStatus = desiredStatus === 'approved'
+          ? 'approved'
+          : desiredStatus === 'fulfilled'
+            ? 'fulfilled'
+            : desiredStatus === 'denied'
+              ? 'denied'
+              : 'held_for_review';
+        const now = new Date();
+        const activated = await db.transaction(async (tx) => {
         if (!row.idempotencyKey) return [];
         const [room] = await tx
           .select({ status: gigSessions.status })
@@ -1732,7 +1779,10 @@ export function createPaymentService(config: {
           .select({
             status: clientPendingActions.status,
             expiresAt: clientPendingActions.expiresAt,
-            createdAt: clientPendingActions.createdAt
+            createdAt: clientPendingActions.createdAt,
+            ownerToken: clientPendingActions.ownerToken,
+            ownerGeneration: clientPendingActions.ownerGeneration,
+            ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
           })
           .from(clientPendingActions)
           .where(eq(clientPendingActions.idempotencyKey, row.idempotencyKey))
@@ -1742,6 +1792,10 @@ export function createPaymentService(config: {
           !pending
           || !['pending', 'retrying'].includes(pending.status)
           || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000) <= Date.now()
+          || pending.ownerToken !== recoveryOwner.token
+          || pending.ownerGeneration !== recoveryOwner.generation
+          || !pending.ownerLeaseExpiresAt
+          || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
         ) return [];
         return tx
           .update(requests)
@@ -1766,12 +1820,30 @@ export function createPaymentService(config: {
             isNull(requests.activatedAt)
           ))
           .returning({ id: requests.id });
-      });
-      if (!activated.length && row.paymentId) {
-        const latest = await loadInvisibleRequestDisposition(row.requestId);
-        if (provider && latest.stillInvisible && !latest.eligible) await voidOrRefund(row.paymentId);
+        });
+        if (!activated.length && row.paymentId) {
+          const latest = await loadInvisibleRequestDisposition(row.requestId);
+          if (provider && latest.stillInvisible && !latest.eligible) {
+            await fenceAndReverseOwnedInvisibleAction({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType,
+              paymentId: row.paymentId,
+              owner: recoveryOwner
+            });
+          }
+        }
+        requestsActivated += activated.length;
+      } finally {
+        if (!suppliedOwner) {
+          await idempotencyStore.releasePendingActionOwner({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            owner: recoveryOwner
+          });
+        }
       }
-      requestsActivated += activated.length;
     }
 
     const pendingBoosts = await db
@@ -1779,6 +1851,7 @@ export function createPaymentService(config: {
         boostId: requestBoosts.id,
         gigId: requestBoosts.gigId,
         idempotencyKey: requestBoosts.idempotencyKey,
+        clientRequestId: requestBoosts.clientRequestId,
         parentId: requestBoosts.requestId,
         stateRevision: requestBoosts.stateRevision,
         runtimeState: requestBoosts.runtimeBoostState,
@@ -1812,27 +1885,53 @@ export function createPaymentService(config: {
       .limit(limit);
 
     for (const row of pendingBoosts) {
-      const runtime = asRecord(row.runtimeState);
-      const parentRuntime = asRecord(row.parentRuntime);
-      const targetEligible = row.parentStatus === 'approved'
-        && !recordBoolean(parentRuntime, 'hidden')
-        && !recordBoolean(parentRuntime, 'removed')
-        && !recordBoolean(parentRuntime, 'shadowBanned');
-      let paymentStatus = row.paymentStatus ?? recordString(runtime, 'paymentStatus');
-      if (!targetEligible) {
-        if (provider && row.paymentId && paymentStatus && !['voided', 'refunded', 'paid_out'].includes(paymentStatus)) {
-          const latest = await loadInvisibleBoostDisposition(row.boostId);
-          if (latest.stillInvisible && !latest.eligible) await voidOrRefund(row.paymentId);
+      let recoveryOwner: PendingActionOwner | null = null;
+      const suppliedOwner = input.ownedAction?.idempotencyKey === row.idempotencyKey
+        && input.ownedAction.clientRequestId === row.clientRequestId
+        ? input.ownedAction.owner
+        : null;
+      if (suppliedOwner) {
+        recoveryOwner = suppliedOwner;
+      } else {
+        const ownership = await idempotencyStore.claimPendingActionOwner({
+          clientRequestId: row.clientRequestId,
+          idempotencyKey: row.idempotencyKey!
+        });
+        if (ownership.status !== 'acquired') continue;
+        recoveryOwner = ownership.owner;
+      }
+      if (!recoveryOwner) continue;
+      try {
+        const runtime = asRecord(row.runtimeState);
+        const parentRuntime = asRecord(row.parentRuntime);
+        const targetEligible = row.parentStatus === 'approved'
+          && !recordBoolean(parentRuntime, 'hidden')
+          && !recordBoolean(parentRuntime, 'removed')
+          && !recordBoolean(parentRuntime, 'shadowBanned');
+        let paymentStatus = row.paymentStatus ?? recordString(runtime, 'paymentStatus');
+        if (!targetEligible) {
+          if (provider && row.paymentId && paymentStatus && !['voided', 'refunded', 'paid_out'].includes(paymentStatus)) {
+            const latest = await loadInvisibleBoostDisposition(row.boostId);
+            if (latest.stillInvisible && !latest.eligible) {
+              await fenceAndReverseOwnedInvisibleAction({
+                clientRequestId: row.clientRequestId,
+                idempotencyKey: row.idempotencyKey!,
+                gigId: row.gigId,
+                actionType: 'boost',
+                paymentId: row.paymentId,
+                owner: recoveryOwner
+              });
+            }
+          }
+          continue;
         }
-        continue;
-      }
-      if (provider && row.paymentId && paymentStatus === 'authorized') {
-        const capture = await captureAuthorization(row.paymentId);
-        if (capture.status === 'captured') paymentStatus = 'captured';
-      }
-      if (paymentStatus !== 'captured' && !(paymentStatus === 'not_applicable' && !row.paymentId)) continue;
-      const now = new Date();
-      const activated = await db.transaction(async (tx) => {
+        if (provider && row.paymentId && paymentStatus === 'authorized') {
+          const capture = await captureAuthorization(row.paymentId);
+          if (capture.status === 'captured') paymentStatus = 'captured';
+        }
+        if (paymentStatus !== 'captured' && !(paymentStatus === 'not_applicable' && !row.paymentId)) continue;
+        const now = new Date();
+        const activated = await db.transaction(async (tx) => {
         if (!row.idempotencyKey) return [];
         const [room] = await tx
           .select({ status: gigSessions.status })
@@ -1845,7 +1944,10 @@ export function createPaymentService(config: {
           .select({
             status: clientPendingActions.status,
             expiresAt: clientPendingActions.expiresAt,
-            createdAt: clientPendingActions.createdAt
+            createdAt: clientPendingActions.createdAt,
+            ownerToken: clientPendingActions.ownerToken,
+            ownerGeneration: clientPendingActions.ownerGeneration,
+            ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt
           })
           .from(clientPendingActions)
           .where(eq(clientPendingActions.idempotencyKey, row.idempotencyKey))
@@ -1855,6 +1957,10 @@ export function createPaymentService(config: {
           !pending
           || !['pending', 'retrying'].includes(pending.status)
           || Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000) <= Date.now()
+          || pending.ownerToken !== recoveryOwner.token
+          || pending.ownerGeneration !== recoveryOwner.generation
+          || !pending.ownerLeaseExpiresAt
+          || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
         ) return [];
         const [parent] = await tx
           .select({ status: requests.status, runtimeState: requests.runtimeRequestState })
@@ -1890,12 +1996,30 @@ export function createPaymentService(config: {
             isNull(requestBoosts.activatedAt)
           ))
           .returning({ id: requestBoosts.id });
-      });
-      if (!activated.length && row.paymentId) {
-        const latest = await loadInvisibleBoostDisposition(row.boostId);
-        if (provider && latest.stillInvisible && !latest.eligible) await voidOrRefund(row.paymentId);
+        });
+        if (!activated.length && row.paymentId) {
+          const latest = await loadInvisibleBoostDisposition(row.boostId);
+          if (provider && latest.stillInvisible && !latest.eligible) {
+            await fenceAndReverseOwnedInvisibleAction({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: 'boost',
+              paymentId: row.paymentId,
+              owner: recoveryOwner
+            });
+          }
+        }
+        boostsActivated += activated.length;
+      } finally {
+        if (!suppliedOwner) {
+          await idempotencyStore.releasePendingActionOwner({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            owner: recoveryOwner
+          });
+        }
       }
-      boostsActivated += activated.length;
     }
 
     // Performer decisions are persisted before their processor side effect.

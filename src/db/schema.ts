@@ -1501,6 +1501,9 @@ export const clientPendingActions = pgTable('client_pending_actions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
   attemptCount: integer('attempt_count').notNull().default(0),
+  ownerToken: text('owner_token'),
+  ownerGeneration: integer('owner_generation').notNull().default(0),
+  ownerLeaseExpiresAt: timestamp('owner_lease_expires_at', { withTimezone: true }),
   status: pendingActionStatusEnum('status').notNull().default('pending'),
   lastError: text('last_error')
 }, (table) => ({

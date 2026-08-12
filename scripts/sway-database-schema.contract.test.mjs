@@ -235,6 +235,9 @@ const requiredTableColumns = {
     'expires_at',
     'created_at',
     'last_attempt_at',
+    'owner_token',
+    'owner_generation',
+    'owner_lease_expires_at',
     'attempt_count',
     'status',
     'last_error'
