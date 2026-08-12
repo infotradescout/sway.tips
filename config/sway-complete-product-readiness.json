@@ -176,7 +176,7 @@
             "scripts/sway-live-room-crash-concurrency.integration.test.ts",
             "scripts/sway-public-room-state.behavior.test.mjs"
           ],
-          "holdReason": "A production Stripe test-platform-balance room proved request, tip, boost, void, refund, idempotency, closeout, and repaired webhook replay. Acceptance remains HOLD because the historical run used guests rather than a separately authenticated audience account and the corrected receipt/test-volume build still requires an exact-deployed-build rerun."
+          "holdReason": "Production Stripe test-platform-balance runs proved request, tip, boost, void, refund, idempotency, closeout, repaired webhook replay, corrected refunded receipts, and a truthful zero-captured recap. Rendered browser tests proved the payment-dialog correction, and that exact code is deployed; no production-device viewport observation is claimed. Acceptance remains HOLD because the audience evidence used anonymous receipt-based sessions rather than a separately authenticated audience account, and the remaining patron UI outcome matrix needs a bounded current-build rerun."
         },
         {
           "id": "moderation_and_access",
@@ -186,7 +186,7 @@
             "docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md",
             "scripts/sway-public-room-state.behavior.test.mjs"
           ],
-          "holdReason": "Production evidence covers anonymous protected-mutation denial, public projection containment, reporting, and a held block request. It does not prove separate authenticated audience-account isolation or an enforced durable active block."
+          "holdReason": "Production evidence covers anonymous protected-mutation denial, public projection containment, reporting, and a held block request. Disposable PostgreSQL proof covers durable active-block persistence and enforcement, but production does not yet prove separate authenticated audience-account isolation or an authorized enforced durable active block."
         },
         {
           "id": "overlay_earnings_closeout",
@@ -197,7 +197,7 @@
             "src/components/VictoryScreen.tsx",
             "src/components/PerformerRoomHistory.tsx"
           ],
-          "holdReason": "Production closeout and durable payment totals are recorded, but the historical recap mislabeled test volume. The correction makes test volume explicit and non-shareable; the exact deployed correction still requires browser verification."
+          "holdReason": "Production closeout and durable payment totals are recorded. A corrected-build rerun refunded both captured payments and truthfully showed zero captured volume and zero completed actions; test volume is explicit and non-shareable. The remaining HOLD belongs to the separate audience-account and moderation gates, not stale recap wording."
         }
       ]
     }
