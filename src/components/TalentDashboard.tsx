@@ -920,8 +920,13 @@ export default function TalentDashboard({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [queueActionPendingKey, setQueueActionPendingKey] = useState<string | null>(null);
+  const [removeConfirmationRequest, setRemoveConfirmationRequest] = useState<RequestItem | null>(null);
   const queueActionPendingRef = useRef<string | null>(null);
   const actionInFlightRef = useRef(false);
+  const removeConfirmationDialogRef = useRef<HTMLDivElement | null>(null);
+  const removeConfirmationCancelRef = useRef<HTMLButtonElement | null>(null);
+  const removeConfirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const queueActionStatusRef = useRef<HTMLDivElement | null>(null);
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
   const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(false);
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
@@ -988,17 +993,67 @@ export default function TalentDashboard({
     }
   };
 
-  const confirmAndRemoveRequest = (request: RequestItem) => {
-    const paymentKind = liveRoomPaymentMode === 'live'
-      ? 'payment'
-      : liveRoomPaymentMode === 'test'
-        ? 'test payment'
-        : 'payment authorization';
-    const confirmation = session.paymentsEnabled === false
-      ? `Remove “${request.title}” from this room?`
-      : `Remove “${request.title}” from this room and reverse its ${paymentKind}? Sway will request a refund for captured payments or a release for uncaptured holds. Any pending reversal stays visible until the payment provider confirms it.`;
-    if (!window.confirm(confirmation)) return;
-    void runQueueAction(request.id, 'remove', () => onRemove(request.id));
+  const openRemoveConfirmation = (request: RequestItem, trigger: HTMLButtonElement) => {
+    removeConfirmationTriggerRef.current = trigger;
+    setRemoveConfirmationRequest(request);
+  };
+
+  const closeRemoveConfirmation = () => {
+    setRemoveConfirmationRequest(null);
+    window.requestAnimationFrame(() => removeConfirmationTriggerRef.current?.focus());
+  };
+
+  const confirmRemoveRequest = () => {
+    const request = removeConfirmationRequest;
+    if (!request) return;
+    setRemoveConfirmationRequest(null);
+    void runQueueAction(request.id, 'remove', () => onRemove(request.id)).finally(() => {
+      window.requestAnimationFrame(() => queueActionStatusRef.current?.focus());
+    });
+  };
+
+  const handleRemoveConfirmationKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+    const focusable: HTMLElement[] = removeConfirmationDialogRef.current
+      ? Array.from(removeConfirmationDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      : [];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  useEffect(() => {
+    if (!removeConfirmationRequest) return;
+    removeConfirmationCancelRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeRemoveConfirmation();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [removeConfirmationRequest]);
+
+  const removeConfirmationPaymentKind = liveRoomPaymentMode === 'live'
+    ? 'payment'
+    : liveRoomPaymentMode === 'test'
+      ? 'test payment'
+      : 'payment authorization';
+  const removeConfirmationMessage = removeConfirmationRequest
+    ? session.paymentsEnabled === false
+      ? `Remove “${removeConfirmationRequest.title}” from this room?`
+      : `Remove “${removeConfirmationRequest.title}” from this room and reverse its ${removeConfirmationPaymentKind}? Sway will request a refund for captured payments or a release for uncaptured holds. Any pending reversal stays visible until the payment provider confirms it.`
+    : '';
+
+  const confirmAndRemoveRequest = (request: RequestItem, trigger: HTMLButtonElement) => {
+    openRemoveConfirmation(request, trigger);
   };
 
   // Live request window countdown.
@@ -1551,6 +1606,54 @@ export default function TalentDashboard({
         data-sway-performer-live-cockpit="true"
         className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
       >
+        {removeConfirmationRequest ? (
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
+            <div
+              ref={removeConfirmationDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="sway-remove-confirmation-title"
+              aria-describedby="sway-remove-confirmation-description"
+              data-sway-remove-confirmation="true"
+              data-sway-remove-confirmation-request-id={removeConfirmationRequest.id}
+              onKeyDown={handleRemoveConfirmationKeyDown}
+              className="max-h-[calc(var(--sway-viewport-height,100vh)-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-rose-500/30 bg-slate-900 p-5 shadow-2xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2 text-rose-200">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="sway-remove-confirmation-title" className="font-display text-lg font-black text-white">
+                    {session.paymentsEnabled === false ? 'Remove this request?' : 'Remove and reverse payment?'}
+                  </h2>
+                  <p id="sway-remove-confirmation-description" className="mt-2 text-sm leading-relaxed text-slate-300">
+                    {removeConfirmationMessage}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <button
+                  ref={removeConfirmationCancelRef}
+                  type="button"
+                  onClick={closeRemoveConfirmation}
+                  className="min-h-12 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-black text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  data-sway-confirm-remove="true"
+                  aria-label={`Confirm remove ${removeConfirmationRequest.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
+                  onClick={confirmRemoveRequest}
+                  className="min-h-12 rounded-xl bg-rose-500 px-4 text-sm font-black text-slate-950"
+                >
+                  {session.paymentsEnabled === false ? 'Remove' : 'Remove and reverse'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {hardwareControlsEnabled ? (
           <div
             data-sway-hardware-controls-enabled="true"
@@ -1782,7 +1885,7 @@ export default function TalentDashboard({
                       <button
                         type="button"
                         aria-label={`Remove ${request.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
-                        onClick={() => confirmAndRemoveRequest(request)}
+                        onClick={(event) => confirmAndRemoveRequest(request, event.currentTarget)}
                         disabled={previewMode || isRequestQueueActionPending(request.id)}
                         data-sway-queue-action-pending={isQueueActionPending(request.id, 'remove') ? 'true' : 'false'}
                         className="border border-rose-500/30 bg-rose-950/60 text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1867,7 +1970,7 @@ export default function TalentDashboard({
                         <button
                           type="button"
                           aria-label={`Remove ${request.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
-                          onClick={() => confirmAndRemoveRequest(request)}
+                          onClick={(event) => confirmAndRemoveRequest(request, event.currentTarget)}
                           disabled={previewMode || isRequestQueueActionPending(request.id)}
                           data-sway-queue-action-pending={isQueueActionPending(request.id, 'remove') ? 'true' : 'false'}
                           className="border border-rose-500/30 bg-rose-950/60 text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1899,7 +2002,12 @@ export default function TalentDashboard({
           </main>
 
           <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
-            <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2">
+            <div
+              ref={queueActionStatusRef}
+              tabIndex={-1}
+              aria-label="Queue action status"
+              className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
             </div>

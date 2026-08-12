@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -73,7 +74,19 @@ for (const term of [
 // remove-and-reverse path on both desktop and mobile approved queues. Hiding
 // an item alone is not a customer refund control.
 for (const term of [
-  'const confirmAndRemoveRequest = (request: RequestItem)',
+  'const openRemoveConfirmation = (request: RequestItem, trigger: HTMLButtonElement)',
+  'role="dialog"',
+  'aria-modal="true"',
+  'aria-labelledby="sway-remove-confirmation-title"',
+  'aria-describedby="sway-remove-confirmation-description"',
+  'data-sway-remove-confirmation="true"',
+  'data-sway-confirm-remove="true"',
+  "event.key !== 'Tab'",
+  "event.key !== 'Escape'",
+  'removeConfirmationCancelRef.current?.focus()',
+  'removeConfirmationTriggerRef.current?.focus()',
+  'queueActionStatusRef.current?.focus()',
+  'aria-label="Queue action status"',
   "liveRoomPaymentMode === 'test'",
   ": 'payment authorization'",
   'Sway will request a refund for captured payments or a release for uncaptured holds.',
@@ -87,14 +100,29 @@ for (const term of [
   }
 }
 
-if ((talentDashboardSource.match(/onClick=\{\(\) => confirmAndRemoveRequest\(request\)\}/g) ?? []).length !== 2) {
+if ((talentDashboardSource.match(/onClick=\{\(event\) => confirmAndRemoveRequest\(request, event\.currentTarget\)\}/g) ?? []).length !== 2) {
   failures.push('Desktop and mobile approved queues must both expose the confirmed remove-and-refund action.');
 }
 
-const confirmationIndex = talentDashboardSource.indexOf('if (!window.confirm(confirmation)) return;');
+if (talentDashboardSource.includes('window.confirm(')) {
+  failures.push('Performer removal must use the accessible in-page confirmation instead of a blocking browser dialog.');
+}
+
+const confirmationIndex = talentDashboardSource.indexOf('const confirmRemoveRequest = () =>');
 const removalIndex = talentDashboardSource.indexOf("runQueueAction(request.id, 'remove', () => onRemove(request.id))");
 if (confirmationIndex < 0 || removalIndex < 0 || confirmationIndex > removalIndex) {
   failures.push('Performer removal must require confirmation before invoking the protected refund action.');
+}
+
+if (!failures.length) {
+  const interaction = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'scripts/sway-refund-confirmation.browser.test.ts'],
+    { cwd: root, stdio: 'inherit' }
+  );
+  if (interaction.status !== 0) {
+    failures.push(`Rendered refund-confirmation interaction test failed with status ${interaction.status ?? 'unknown'}.`);
+  }
 }
 
 if (failures.length) {
