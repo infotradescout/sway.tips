@@ -103,7 +103,7 @@ for (const term of [
   "result?.status === 'pending'",
   'window.setTimeout(reconcile, 2000)',
   'if (response?.pending)',
-  'setBackendConfirmed(true)',
+  'setBackendConfirmed(matchingCheckoutIsOpen)',
   'localStorage.setItem',
   'localStorage.removeItem'
 ]) {
@@ -127,7 +127,7 @@ if (completePaymentBody.indexOf('completeCheckoutSuccess') < completePaymentBody
   failures.push('Patron client must not show success before backend confirmation.');
 }
 
-if (!/setBackendConfirmed\(true\)[\s\S]{0,260}localStorage\.removeItem/.test(completeCheckoutSuccessBody)) {
+if (!/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,320}localStorage\.removeItem/.test(completeCheckoutSuccessBody)) {
   failures.push('Patron client must clear pending action only after backend confirmation.');
 }
 
@@ -146,12 +146,12 @@ if (!pending202Body) {
   failures.push('Patron client must preserve the pending payload and checkout while HTTP 202 reconciles.');
 }
 
-if (!patron.includes('const isSubmitLocked = isPaying || isPaymentConfirmationPending || isDurableActionPending;')) {
+if (!patron.includes('const isSubmitLocked = isPaying || isStripeAuthorizing || isPaymentConfirmationPending || isDurableActionPending;')) {
   failures.push('Patron client must lock duplicate submit while a durable action is reconciling.');
 }
 
-if (!/result\?\.status === 'reconciled'[\s\S]{0,220}completeCheckoutSuccess\(parsed\.type === 'boost' \? 'boost' : 'request'\)/.test(patron)) {
-  failures.push('Patron reconciliation success must enter the normal confirmed checkout completion path.');
+if (!/result\?\.status === 'reconciled'[\s\S]{0,260}completeCheckoutSuccess\(parsed\.type === 'boost' \? 'boost' : 'request', parsed\.clientRequestId\)/.test(patron)) {
+  failures.push('Patron reconciliation success must enter the request-bound confirmed checkout completion path.');
 }
 
 if (!patronApp.includes('expires_at: expiresAt')) {

@@ -122,10 +122,14 @@ for (const term of ['installViewportEnvironment', '--sway-viewport-height', 'is-
   if (!browserEnvironment.includes(term)) failures.push(`Browser environment missing viewport handling term: ${term}`);
 }
 
-for (const forbidden of ["visualViewport?.addEventListener('scroll'", 'visualViewport?.addEventListener("scroll"', "visualViewport.addEventListener('scroll'", 'visualViewport.addEventListener("scroll"']) {
+for (const forbidden of ["visualViewport?.addEventListener('scroll', updateViewport,", 'visualViewport?.addEventListener("scroll", updateViewport,', "visualViewport.addEventListener('scroll', updateViewport,", 'visualViewport.addEventListener("scroll", updateViewport,']) {
   if (browserEnvironment.includes(forbidden) || publicHtml.includes(forbidden)) {
-    failures.push(`Viewport handling must not reframe the landing background on scroll: ${forbidden}`);
+    failures.push(`Viewport scroll handling must not recompute dimensions or reframe the landing background: ${forbidden}`);
   }
+}
+
+if (!browserEnvironment.includes("window.visualViewport?.addEventListener('scroll', updateViewportOffset")) {
+  failures.push('Viewport scroll handling must update offsets without reframing dimensions.');
 }
 
 if (!mount.includes('installViewportEnvironment();')) {

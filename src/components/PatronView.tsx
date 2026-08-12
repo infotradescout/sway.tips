@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { 
@@ -167,12 +167,16 @@ function StripeAuthorizationForm({
   disabled,
   onAuthorized,
   onError,
-  onCancel
+  onCancel,
+  cancelRef,
+  onAuthorizationStateChange
 }: {
   disabled: boolean;
   onAuthorized: (paymentIntentId: string) => Promise<void>;
   onError: (message: string) => void;
   onCancel: () => void;
+  cancelRef?: React.Ref<HTMLButtonElement>;
+  onAuthorizationStateChange: (isAuthorizing: boolean) => void;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -182,6 +186,7 @@ function StripeAuthorizationForm({
   const handleAuthorize = async () => {
     if (!stripe || !elements || disabled || isAuthorizing) return;
     setIsAuthorizing(true);
+    onAuthorizationStateChange(true);
     setLocalMessage(null);
 
     try {
@@ -218,11 +223,12 @@ function StripeAuthorizationForm({
       onError(message);
     } finally {
       setIsAuthorizing(false);
+      onAuthorizationStateChange(false);
     }
   };
 
   return (
-    <div className="space-y-3 text-left">
+    <div data-sway-payment-form-body="true" className="space-y-3 text-left">
       <div className="rounded-xl border border-white/10 bg-slate-950 p-3">
         <PaymentElement />
       </div>
@@ -239,6 +245,7 @@ function StripeAuthorizationForm({
         {isAuthorizing || disabled ? 'Authorizing...' : 'Authorize Payment'}
       </button>
       <button
+        ref={cancelRef}
         type="button"
         onClick={onCancel}
         disabled={disabled || isAuthorizing}
@@ -329,6 +336,7 @@ export default function PatronView({
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+  const [isStripeAuthorizing, setIsStripeAuthorizing] = useState(false);
   const [paymentConfirmationState, setPaymentConfirmationState] = useState<PaymentConfirmationState | null>(null);
   const [stripePublishableKey, setStripePublishableKey] = useState<string | null>(null);
   const [stripePaymentMode, setStripePaymentMode] = useState<'test' | 'live' | null>(null);
@@ -339,6 +347,14 @@ export default function PatronView({
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
   const [formToast, setFormToast] = useState<string | null>(null);
   const formToastTimeoutRef = useRef<number | null>(null);
+  const checkoutDialogRef = useRef<HTMLDivElement | null>(null);
+  const checkoutCancelRef = useRef<HTMLButtonElement | null>(null);
+  const checkoutTriggerRef = useRef<HTMLElement | null>(null);
+  const checkoutWasOpenRef = useRef(false);
+  const checkoutSuccessTimeoutRef = useRef<number | null>(null);
+  const stripeAuthorizationInFlightRef = useRef(false);
+  const checkoutPayloadRef = useRef(checkoutPayload);
+  checkoutPayloadRef.current = checkoutPayload;
   const showFormToast = (message: string) => {
     setFormToast(message);
     if (formToastTimeoutRef.current) window.clearTimeout(formToastTimeoutRef.current);
@@ -346,7 +362,7 @@ export default function PatronView({
   };
   const isPaymentConfirmationPending = paymentConfirmationState?.phase === 'PAYMENT_PENDING_CONFIRMATION';
   const isDurableActionPending = Boolean(pendingAction);
-  const isSubmitLocked = isPaying || isPaymentConfirmationPending || isDurableActionPending;
+  const isSubmitLocked = isPaying || isStripeAuthorizing || isPaymentConfirmationPending || isDurableActionPending;
   const stripePromise = useMemo(() => stripePublishableKey ? loadStripe(stripePublishableKey) : null, [stripePublishableKey]);
   const stripeElementsOptions = useMemo(() => checkoutPayload?.clientSecret
     ? {
@@ -355,18 +371,139 @@ export default function PatronView({
       }
     : null, [checkoutPayload?.clientSecret]);
 
-  const completeCheckoutSuccess = (completedActionType: 'request' | 'boost') => {
-    setBackendConfirmed(true);
+  const closeCheckout = useCallback((expectedClientRequestId?: string) => {
+    if (stripeAuthorizationInFlightRef.current) return;
+    if (expectedClientRequestId && checkoutPayloadRef.current?.clientRequestId !== expectedClientRequestId) return;
+    const trigger = checkoutTriggerRef.current;
+    if (checkoutSuccessTimeoutRef.current !== null) {
+      window.clearTimeout(checkoutSuccessTimeoutRef.current);
+      checkoutSuccessTimeoutRef.current = null;
+    }
+    setCheckoutPayload(null);
+    setBackendConfirmed(false);
+    setIsStripeAuthorizing(false);
+    setBoostingItem(null);
+    setPaymentConfirmationState(null);
+    setStripeConfigError(null);
+    window.requestAnimationFrame(() => trigger?.focus());
+  }, []);
+
+  const setStripeAuthorizationState = useCallback((next: boolean) => {
+    stripeAuthorizationInFlightRef.current = next;
+    setIsStripeAuthorizing(next);
+  }, []);
+
+  useEffect(() => () => {
+    if (checkoutSuccessTimeoutRef.current !== null) {
+      window.clearTimeout(checkoutSuccessTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!checkoutPayload) {
+      checkoutWasOpenRef.current = false;
+      return;
+    }
+
+    if (!checkoutWasOpenRef.current) {
+      checkoutTriggerRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      checkoutWasOpenRef.current = true;
+    }
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      const initialFocus = checkoutCancelRef.current ?? checkoutDialogRef.current;
+      initialFocus?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [checkoutPayload?.clientRequestId, checkoutPayload?.clientSecret]);
+
+  useEffect(() => {
+    if (!checkoutPayload) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isPaying || isStripeAuthorizing || isDurableActionPending) return;
+      event.preventDefault();
+      closeCheckout();
+    };
+
+    document.addEventListener('keydown', handleEscape, true);
+    return () => document.removeEventListener('keydown', handleEscape, true);
+  }, [checkoutPayload?.clientRequestId, closeCheckout, isDurableActionPending, isPaying, isStripeAuthorizing]);
+
+  const handleCheckoutDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+
+    const candidates = event.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])'
+    );
+    const focusable: HTMLElement[] = [];
+    candidates.forEach((element) => {
+      if (element.getClientRects().length > 0 && element.getAttribute('aria-hidden') !== 'true') {
+        focusable.push(element);
+      }
+    });
+
+    if (focusable.length === 0) {
+      event.preventDefault();
+      checkoutDialogRef.current?.focus();
+      return;
+    }
+
+    const interactive = focusable.filter((element) => (
+      element.dataset.swayPaymentFocusStart !== 'true'
+      && element.dataset.swayPaymentFocusEnd !== 'true'
+    ));
+    const first = interactive[0] ?? focusable[0];
+    const last = interactive[interactive.length - 1] ?? focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  const focusCheckoutFirst = () => {
+    const first = checkoutDialogRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe'
+    );
+    (first ?? checkoutDialogRef.current)?.focus();
+  };
+
+  const completeCheckoutSuccess = (
+    completedActionType: 'request' | 'boost',
+    completedClientRequestId = checkoutPayload?.clientRequestId
+  ) => {
+    if (!completedClientRequestId) return;
+    const matchingCheckoutIsOpen = checkoutPayloadRef.current?.clientRequestId === completedClientRequestId;
+    setBackendConfirmed(matchingCheckoutIsOpen);
     setPaymentConfirmationState(null);
     setStripeConfigError(null);
     setDegraded(false);
     setPendingAction(null);
     setPendingActionMessage('');
     localStorage.removeItem('sway.pendingAction');
-    setTimeout(() => {
-      setBackendConfirmed(false);
-      setCheckoutPayload(null);
-      setBoostingItem(null);
+    if (!matchingCheckoutIsOpen) {
+      setSelectedTrack(null);
+      setCommentMessage('');
+      setSenderName('');
+      setBoostPatronName('');
+      setTipAmount(session.minimumTip);
+      setActiveTab(completedActionType === 'boost' ? 'queue' : 'request');
+      return;
+    }
+    window.requestAnimationFrame(() => checkoutDialogRef.current?.focus());
+    if (checkoutSuccessTimeoutRef.current !== null) {
+      window.clearTimeout(checkoutSuccessTimeoutRef.current);
+    }
+    checkoutSuccessTimeoutRef.current = window.setTimeout(() => {
+      checkoutSuccessTimeoutRef.current = null;
+      if (checkoutPayloadRef.current?.clientRequestId !== completedClientRequestId) return;
+      closeCheckout(completedClientRequestId);
       setSelectedTrack(null);
       setCommentMessage('');
       setSenderName('');
@@ -472,7 +609,7 @@ export default function PatronView({
           if (cancelled) return;
           if (result?.status === 'reconciled') {
             window.dispatchEvent(new Event('re-fetch-state'));
-            completeCheckoutSuccess(parsed.type === 'boost' ? 'boost' : 'request');
+            completeCheckoutSuccess(parsed.type === 'boost' ? 'boost' : 'request', parsed.clientRequestId);
             return;
           }
           if (result?.status === 'pending' || result?.status === 'retrying' || result?.status === 'missing') {
@@ -2257,13 +2394,39 @@ export default function PatronView({
        {/* 4. TEMPORARY CONFIRMATION MODAL OVERLAY */}
       <AnimatePresence>
         {checkoutPayload && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/80 p-4 backdrop-blur-sm sm:items-center">
+          <div
+            data-sway-payment-overlay="true"
+            className="fixed z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/80 p-4 backdrop-blur-sm sm:items-center"
+            style={{
+              left: 'var(--sway-viewport-offset-left, 0px)',
+              top: 'var(--sway-viewport-offset-top, 0px)',
+              width: 'var(--sway-viewport-width, 100vw)',
+              height: 'var(--sway-viewport-height, 100vh)',
+              maxHeight: 'var(--sway-viewport-height, 100vh)'
+            }}
+          >
             <motion.div
+              ref={checkoutDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="sway-payment-dialog-title"
+              aria-describedby="sway-payment-dialog-description"
+              aria-busy={isPaying || isStripeAuthorizing || isDurableActionPending}
+              tabIndex={-1}
+              data-sway-payment-dialog="true"
+              onKeyDown={handleCheckoutDialogKeyDown}
               initial={{ scale: 0.95, y: 15, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
               exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-900 text-center font-sans shadow-2xl glass-panel"
+              className="w-full max-w-sm overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-900 text-center font-sans shadow-2xl glass-panel"
+              style={{ maxHeight: 'calc(var(--sway-viewport-height, 100vh) - 2rem)' }}
             >
+              <span
+                tabIndex={0}
+                data-sway-payment-focus-start="true"
+                className="sr-only"
+                onFocus={() => checkoutCancelRef.current?.focus()}
+              />
               
               {/* Request processing and success cards */}
               {backendConfirmed ? (
@@ -2271,14 +2434,14 @@ export default function PatronView({
                   <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center rounded-full mx-auto animate-bounce">
                     <Check className="w-8 h-8 text-cyan-400" />
                   </div>
-                  <h3 className="font-sans text-lg font-bold text-white">
+                  <h3 id="sway-payment-dialog-title" className="font-sans text-lg font-bold text-white">
                     {checkoutPayload.type === 'boost'
                       ? `${LIVE_ROOM_LANGUAGE.boost} Submitted`
                       : checkoutPayload.isTip
                         ? `${LIVE_ROOM_LANGUAGE.tip} Submitted`
                         : `${LIVE_ROOM_LANGUAGE.request} Submitted`}
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
+                  <p id="sway-payment-dialog-description" className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
                     Sent. Status: {LIVE_ROOM_LANGUAGE.pending}. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
                   </p>
                 </div>
@@ -2289,7 +2452,7 @@ export default function PatronView({
                   {/* Title and meta */}
                   <div className="space-y-1">
                     <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">{checkoutCopy?.summaryLabel ?? 'REQUEST SUMMARY'}</span>
-                    <h3 className="font-sans text-base font-bold text-white">
+                    <h3 id="sway-payment-dialog-title" className="font-sans text-base font-bold text-white">
                       {previewMode
                         ? 'Demo Only'
                         : isDurableActionPending
@@ -2301,12 +2464,12 @@ export default function PatronView({
                               : 'Confirm Boost'}
                     </h3>
                     {previewMode && (
-                      <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
+                      <p id="sway-payment-dialog-description" className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
                         Demo data. No payment or request will be recorded.
                       </p>
                     )}
                     {!previewMode && (
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                      <p id="sway-payment-dialog-description" className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                         {isDurableActionPending
                           ? (pendingActionMessage || PAYMENT_CONFIRMATION_WAITING_COPY)
                           : isPaymentConfirmationPending
@@ -2396,7 +2559,7 @@ export default function PatronView({
                   )}
 
                   {/* Submit action */}
-                  <div className="space-y-2">
+                  <div data-sway-payment-actions="true" className="space-y-2">
                     {(checkoutPayload.isTip || session.paymentsEnabled !== false) ? (
                       <p role="status" className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold leading-4 text-cyan-100">
                         {stripePaymentMode === 'live'
@@ -2408,17 +2571,14 @@ export default function PatronView({
                       <Elements stripe={stripePromise} options={stripeElementsOptions} key={checkoutPayload.clientSecret}>
                         <StripeAuthorizationForm
                           disabled={isPaying || isDurableActionPending || previewMode}
+                          cancelRef={checkoutCancelRef}
                           onAuthorized={finalizeStripeAuthorization}
+                          onAuthorizationStateChange={setStripeAuthorizationState}
                           onError={(message) => {
                             setStripeConfigError(message);
                             setPendingActionMessage(message);
                           }}
-                          onCancel={() => {
-                            setCheckoutPayload(null);
-                            setBoostingItem(null);
-                            setPaymentConfirmationState(null);
-                            setStripeConfigError(null);
-                          }}
+                          onCancel={() => closeCheckout()}
                         />
                       </Elements>
                     ) : (
@@ -2445,13 +2605,9 @@ export default function PatronView({
                         </button>
 
                         <button
+                          ref={checkoutCancelRef}
                           type="button"
-                          onClick={() => {
-                            setCheckoutPayload(null);
-                            setBoostingItem(null);
-                            setPaymentConfirmationState(null);
-                            setStripeConfigError(null);
-                          }}
+                          onClick={() => closeCheckout()}
                           disabled={isPaying || isDurableActionPending}
                           className="w-full py-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
@@ -2463,6 +2619,13 @@ export default function PatronView({
 
                 </div>
               )}
+
+              <span
+                tabIndex={0}
+                data-sway-payment-focus-end="true"
+                className="sr-only"
+                onFocus={focusCheckoutFirst}
+              />
 
             </motion.div>
           </div>

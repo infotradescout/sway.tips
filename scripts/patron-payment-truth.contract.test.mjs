@@ -91,7 +91,7 @@ function assertPaymentConfirmationState() {
 function assertDoubleSubmitGuard() {
   requireIncludes(
     patronView,
-    'const isSubmitLocked = isPaying || isPaymentConfirmationPending || isDurableActionPending;',
+    'const isSubmitLocked = isPaying || isStripeAuthorizing || isPaymentConfirmationPending || isDurableActionPending;',
     'PatronView.tsx must guard double submit while payment confirmation or submission is pending.'
   );
   requireIncludes(

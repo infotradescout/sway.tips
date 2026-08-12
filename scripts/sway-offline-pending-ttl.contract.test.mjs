@@ -32,7 +32,7 @@ if (!/const\s+PENDING_ACTION_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000\s*;/.test(patr
   failures.push('Pending action TTL must be exactly five minutes for Slice 0A guardrail.');
 }
 
-if (/setBackendConfirmed\(true\)[\s\S]{0,240}localStorage\.removeItem/.test(patron)) {
+if (/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,320}localStorage\.removeItem/.test(patron)) {
   // This is acceptable only if the pending action is removed after backend confirmation.
 } else {
   failures.push('Pending action must be cleared only on backend-confirmed completion.');
