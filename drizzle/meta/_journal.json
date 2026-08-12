@@ -239,6 +239,13 @@
       "when": 1786484327467,
       "tag": "0033_volatile_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786506576765,
+      "tag": "0034_boring_sebastian_shaw",
+      "breakpoints": true
     }
   ]
 }

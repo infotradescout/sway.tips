@@ -23,7 +23,7 @@ import {
   evaluateReleaseHealth,
   loadExpectedMigrations
 } from "./src/server/release-health";
-import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput } from "./src/server/idempotency-store";
+import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput, type PendingActionOwner } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
@@ -2943,6 +2943,7 @@ async function sendCanonicalPatronActionFailure(input: {
   actionType: 'request' | 'tip' | 'boost';
   status: number;
   body: Record<string, unknown>;
+  owner?: PendingActionOwner | null;
 }) {
   const terminalBody = {
     ...input.body,
@@ -2957,13 +2958,14 @@ async function sendCanonicalPatronActionFailure(input: {
       gigId: input.gigId,
       actionType: input.actionType,
       status: input.status,
-      body: terminalBody
+      body: terminalBody,
+      ...(input.owner ? { owner: input.owner } : {})
     });
     return input.res
       .status(completion.status)
       .json(sanitizePatronMutationResponseBody(completion.body));
   } catch (error) {
-    if (error instanceof Error && error.message === 'pending_action_already_visible') {
+    if (error instanceof Error && ['pending_action_already_visible', 'pending_action_owner_fenced'].includes(error.message)) {
       // Visibility won the race. Never overwrite it with a failure; the
       // reconciliation endpoint will mint/replay the canonical success.
       return input.res.status(202).json({
@@ -11682,17 +11684,41 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
     });
   }
 
+  let recoveryOwner: PendingActionOwner | null = null;
+
   if (
     (result.status === 'pending' || result.status === 'retrying')
     && result.gigId
     && ['request', 'tip', 'boost'].includes(result.actionType)
   ) {
     const reconciledActionType = result.actionType as 'request' | 'tip' | 'boost';
+    const ownership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key
+    });
+    if (ownership.status === 'busy') {
+      return res.status(202).json({
+        ...result,
+        pending: true,
+        retry_after_ms: ownership.retryAfterMs
+      });
+    }
+    if (ownership.status !== 'acquired') {
+      return res.status(202).json({ ...result, pending: true });
+    }
+    recoveryOwner = ownership.owner;
     // A worker may have completed the processor/database work after the
     // original HTTP request disappeared. Converge visibility first, then mint
     // a fresh private receipt and persist the exact terminal replay before
     // telling the browser that the action succeeded.
-    await paymentService.reconcileActionVisibility({ limit: 50 });
+    await paymentService.reconcileActionVisibility({
+      limit: 50,
+      ownedAction: {
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: recoveryOwner
+      }
+    });
     const snapshot = await loadRoomState(result.gigId);
     const receipt = issuePatronStatusReceipt();
     let responseBody: ReturnType<typeof buildPatronRequestMutationResponse> | ReturnType<typeof buildPatronBoostMutationResponse> | null = null;
@@ -11739,7 +11765,8 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
         actionType: reconciledActionType,
         receiptHash: receipt.receiptHash,
         status: 200,
-        body: responseBody
+        body: responseBody,
+        owner: recoveryOwner
       });
       return res.json({
         status: 'reconciled',
@@ -11771,16 +11798,22 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
           gigId: terminalOutcome.gigId,
           actionType: terminalOutcome.actionType,
           status: responseStatus,
-          body: failureBody
+          body: failureBody,
+          owner: recoveryOwner
         });
         return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
       } catch (error) {
-        if (error instanceof Error && error.message === 'pending_action_already_visible') {
+        if (error instanceof Error && ['pending_action_already_visible', 'pending_action_owner_fenced'].includes(error.message)) {
           return res.json({ ...result, status: 'retrying' });
         }
         throw error;
       }
     }
+    await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: recoveryOwner
+    });
   }
 
   return res.json(result);
@@ -12400,9 +12433,40 @@ app.post("/api/request/create", async (req, res) => {
   }
 
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
+  const durableActionType = isStraightTip ? 'tip' : 'request';
   const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
   if (preliminaryReplay.kind === 'replay') {
     return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
+  }
+  let actionOwner: PendingActionOwner | null = null;
+  if (confirmedPaymentIntentId) {
+    const ownership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      expected: {
+        gigId: durableGigId,
+        actionType: durableActionType,
+        patronDeviceIdHash: resolvedPatronDeviceIdHash
+      }
+    });
+    if (ownership.status === 'busy') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        retry_after_ms: ownership.retryAfterMs
+      });
+    }
+    if (ownership.status === 'misuse') {
+      return res.status(409).json({ error: 'The payment confirmation does not belong to this request.' });
+    }
+    if (ownership.status === 'expired') {
+      return res.status(410).json({ error: 'Pending action expired before backend confirmation.' });
+    }
+    if (ownership.status !== 'acquired') {
+      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
+    actionOwner = ownership.owner;
   }
   // Reconcile an SCA-confirmed PaymentIntent against its immutable durable
   // action identity before reading any room setting that may have changed
@@ -12418,6 +12482,11 @@ app.post("/api/request/create", async (req, res) => {
       })
     : null;
   if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
       success: false,
       error: confirmedAuthorization.status === 'disabled'
@@ -12427,6 +12496,11 @@ app.post("/api/request/create", async (req, res) => {
     });
   }
   if (confirmedAuthorization?.status === 'processing') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(202).json({
       success: false,
       pending: true,
@@ -12435,6 +12509,11 @@ app.post("/api/request/create", async (req, res) => {
     });
   }
   if (confirmedAuthorization?.status === 'requires_confirmation') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(402).json({
       success: false,
       error: 'Payment confirmation is still required before your request is submitted.',
@@ -12457,7 +12536,8 @@ app.post("/api/request/create", async (req, res) => {
       gigId: durableGigId,
       actionType: isStraightTip ? 'tip' : 'request',
       status,
-      body
+      body,
+      owner: actionOwner
     });
   };
 
@@ -12466,6 +12546,27 @@ app.post("/api/request/create", async (req, res) => {
     status: number,
     body: Record<string, unknown>
   ) => {
+    if (actionOwner) {
+      const refreshedOwner = await idempotencyStore.refreshPendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      if (!refreshedOwner) {
+        return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+      }
+      actionOwner = refreshedOwner;
+      const failureFence = await idempotencyStore.fencePendingActionFailure({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        gigId: durableGigId,
+        actionType: durableActionType,
+        owner: actionOwner
+      });
+      if (failureFence.status === 'already_visible') {
+        return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+      }
+    }
     const reversal = await paymentService.voidOrRefund(paymentId);
     const terminal = isTerminalPaymentReversal(reversal);
     const responseBody = {
@@ -12551,6 +12652,34 @@ app.post("/api/request/create", async (req, res) => {
   }
   durableReservationEstablished = true;
 
+  if (!actionOwner) {
+    const ownership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      expected: {
+        gigId: durableGigId,
+        actionType: durableActionType,
+        patronDeviceIdHash: resolvedPatronDeviceIdHash
+      }
+    });
+    if (ownership.status === 'busy') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        retry_after_ms: ownership.retryAfterMs
+      });
+    }
+    if (ownership.status !== 'acquired') {
+      return res.status(ownership.status === 'expired' ? 410 : 409).json({
+        error: ownership.status === 'expired'
+          ? 'Pending action expired before backend confirmation.'
+          : 'The pending action identity could not be owned safely.'
+      });
+    }
+    actionOwner = ownership.owner;
+  }
+
   const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
   if (existingRequest) {
     if (existingRequest.idempotencyFingerprint !== idempotencyFingerprint) {
@@ -12571,11 +12700,17 @@ app.post("/api/request/create", async (req, res) => {
       actionType: isStraightTip ? 'tip' : 'request',
       receiptHash: patronStatusReceipt.receiptHash,
       status: 200,
-      body: responseBody
+      body: responseBody,
+      owner: actionOwner
     });
     return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
   }
   if (durableReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(202).json({
       success: false,
       pending: true,
@@ -12731,6 +12866,11 @@ app.post("/api/request/create", async (req, res) => {
       // No hold yet: do NOT create the request. Return the client_secret so the
       // patron can confirm their card; the request is created only after the
       // PaymentIntent reaches requires_capture.
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
       return res.status(402).json({
         error: "Payment confirmation is required before your request is submitted.",
         payment_status: 'requires_confirmation',
@@ -12740,6 +12880,11 @@ app.post("/api/request/create", async (req, res) => {
       });
     }
     if (authorization.status === 'processing') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
       return res.status(202).json({
         success: false,
         pending: true,
@@ -12762,6 +12907,11 @@ app.post("/api/request/create", async (req, res) => {
         if (capture.status === 'captured') {
           newItem.paymentStatus = 'captured';
         } else {
+          await idempotencyStore.releasePendingActionOwner({
+            clientRequestId: client_request_id,
+            idempotencyKey: idempotency_key,
+            owner: actionOwner
+          });
           return res.status(202).json({
             success: false,
             pending: true,
@@ -12785,9 +12935,20 @@ app.post("/api/request/create", async (req, res) => {
   }
 
   try {
-    await businessStore.activateRequestAction(durableGigId, newItem);
+    const refreshedOwner = await idempotencyStore.refreshPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
+    if (!refreshedOwner) throw new Error('pending_action_owner_fenced');
+    actionOwner = refreshedOwner;
+    await businessStore.activateRequestAction(durableGigId, newItem, actionOwner);
   } catch (error) {
     const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
+    const ownerFenced = error instanceof Error && error.message === 'pending_action_owner_fenced';
+    if (ownerFenced) {
+      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
     if (newItem.paymentId) {
       return rejectAfterPaymentReversal(newItem.paymentId, pendingExpired ? 410 : 409, {
         error: pendingExpired
@@ -12825,7 +12986,8 @@ app.post("/api/request/create", async (req, res) => {
     actionType: isStraightTip ? 'tip' : 'request',
     receiptHash: patronStatusReceipt.receiptHash,
     status: 200,
-    body: responseBody
+    body: responseBody,
+    owner: actionOwner
   });
   if (isStraightTip) {
     await recordDirectTipDiscoveryOutcome({
@@ -12878,6 +13040,36 @@ app.post("/api/request/boost", async (req, res) => {
   if (preliminaryReplay.kind === 'replay') {
     return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
   }
+  let actionOwner: PendingActionOwner | null = null;
+  if (confirmedPaymentIntentId) {
+    const ownership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      expected: {
+        gigId: durableGigId,
+        actionType: 'boost',
+        patronDeviceIdHash: resolvedPatronDeviceIdHash
+      }
+    });
+    if (ownership.status === 'busy') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        retry_after_ms: ownership.retryAfterMs
+      });
+    }
+    if (ownership.status === 'misuse') {
+      return res.status(409).json({ error: 'The payment confirmation does not belong to this boost.' });
+    }
+    if (ownership.status === 'expired') {
+      return res.status(410).json({ error: 'Pending action expired before backend confirmation.' });
+    }
+    if (ownership.status !== 'acquired') {
+      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
+    actionOwner = ownership.owner;
+  }
   const confirmedAuthorization = confirmedPaymentIntentId
     ? await paymentService.confirmAuthorizedAction({
         gigId: durableGigId,
@@ -12889,6 +13081,11 @@ app.post("/api/request/boost", async (req, res) => {
       })
     : null;
   if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
       success: false,
       error: confirmedAuthorization.status === 'disabled'
@@ -12898,6 +13095,11 @@ app.post("/api/request/boost", async (req, res) => {
     });
   }
   if (confirmedAuthorization?.status === 'processing') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(202).json({
       success: false,
       pending: true,
@@ -12906,6 +13108,11 @@ app.post("/api/request/boost", async (req, res) => {
     });
   }
   if (confirmedAuthorization?.status === 'requires_confirmation') {
+    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(402).json({
       success: false,
       error: 'Payment confirmation is still required before your boost is applied.',
@@ -12928,7 +13135,8 @@ app.post("/api/request/boost", async (req, res) => {
       gigId: durableGigId,
       actionType: 'boost',
       status,
-      body
+      body,
+      owner: actionOwner
     });
   };
 
@@ -12937,6 +13145,27 @@ app.post("/api/request/boost", async (req, res) => {
     status: number,
     body: Record<string, unknown>
   ) => {
+    if (actionOwner) {
+      const refreshedOwner = await idempotencyStore.refreshPendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      if (!refreshedOwner) {
+        return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+      }
+      actionOwner = refreshedOwner;
+      const failureFence = await idempotencyStore.fencePendingActionFailure({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        gigId: durableGigId,
+        actionType: 'boost',
+        owner: actionOwner
+      });
+      if (failureFence.status === 'already_visible') {
+        return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+      }
+    }
     const reversal = await paymentService.voidOrRefund(paymentId);
     const terminal = isTerminalPaymentReversal(reversal);
     const responseBody = {
@@ -13029,6 +13258,34 @@ app.post("/api/request/boost", async (req, res) => {
   }
   durableReservationEstablished = true;
 
+  if (!actionOwner) {
+    const ownership = await idempotencyStore.claimPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      expected: {
+        gigId: durableGigId,
+        actionType: 'boost',
+        patronDeviceIdHash: resolvedPatronDeviceIdHash
+      }
+    });
+    if (ownership.status === 'busy') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        retry_after_ms: ownership.retryAfterMs
+      });
+    }
+    if (ownership.status !== 'acquired') {
+      return res.status(ownership.status === 'expired' ? 410 : 409).json({
+        error: ownership.status === 'expired'
+          ? 'Pending action expired before backend confirmation.'
+          : 'The pending boost identity could not be owned safely.'
+      });
+    }
+    actionOwner = ownership.owner;
+  }
+
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
   if (existingBoost) {
     if (existingBoost.idempotencyFingerprint !== idempotencyFingerprint) {
@@ -13050,11 +13307,17 @@ app.post("/api/request/boost", async (req, res) => {
       actionType: 'boost',
       receiptHash: replayReceipt.receiptHash,
       status: 200,
-      body: responseBody
+      body: responseBody,
+      owner: actionOwner
     });
     return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
   }
   if (durableReplay.kind === 'pending' && !confirmedPaymentIntentId) {
+    await idempotencyStore.releasePendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
     return res.status(202).json({
       success: false,
       pending: true,
@@ -13181,6 +13444,11 @@ app.post("/api/request/boost", async (req, res) => {
     if (authorization.status === 'requires_confirmation') {
       // No hold yet: do NOT create the boost. Return the client_secret so the
       // patron can confirm; the boost is created only after requires_capture.
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
       return res.status(402).json({
         error: "Payment confirmation is required before your boost is applied.",
         payment_status: 'requires_confirmation',
@@ -13190,6 +13458,11 @@ app.post("/api/request/boost", async (req, res) => {
       });
     }
     if (authorization.status === 'processing') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
       return res.status(202).json({
         success: false,
         pending: true,
@@ -13208,6 +13481,11 @@ app.post("/api/request/boost", async (req, res) => {
       if (capture.status === 'captured') {
         newBoost.paymentStatus = 'captured';
       } else {
+        await idempotencyStore.releasePendingActionOwner({
+          clientRequestId: client_request_id,
+          idempotencyKey: idempotency_key,
+          owner: actionOwner
+        });
         return res.status(202).json({
           success: false,
           pending: true,
@@ -13230,9 +13508,20 @@ app.post("/api/request/boost", async (req, res) => {
   // it into the parent projection without racing a whole-request snapshot.
   newBoost.platformFee = appliedBoostPlatformFeeCents / 100;
   try {
-    await businessStore.activateBoostAction(durableGigId, request, newBoost);
+    const refreshedOwner = await idempotencyStore.refreshPendingActionOwner({
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      owner: actionOwner
+    });
+    if (!refreshedOwner) throw new Error('pending_action_owner_fenced');
+    actionOwner = refreshedOwner;
+    await businessStore.activateBoostAction(durableGigId, request, newBoost, actionOwner);
   } catch (error) {
     const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
+    const ownerFenced = error instanceof Error && error.message === 'pending_action_owner_fenced';
+    if (ownerFenced) {
+      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
     if (newBoost.paymentId) {
       return rejectAfterPaymentReversal(newBoost.paymentId, pendingExpired ? 410 : 409, {
         error: pendingExpired
@@ -13271,7 +13560,8 @@ app.post("/api/request/boost", async (req, res) => {
     actionType: 'boost',
     receiptHash: patronStatusReceipt.receiptHash,
     status: 200,
-    body: responseBody
+    body: responseBody,
+    owner: actionOwner
   });
   res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
 });

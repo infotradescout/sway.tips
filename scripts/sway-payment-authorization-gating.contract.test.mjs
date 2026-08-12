@@ -50,7 +50,7 @@ if (/paymentStatus\s*=\s*authorization\.capturable\s*\?/.test(serverSource)) {
 // 5. Request creation must only happen after a confirmed (capturable) hold:
 //    the requires_confirmation early return must precede state mutation.
 const requestConfirmIndex = serverSource.indexOf("payment_status: 'requires_confirmation'");
-const requestActivationIndex = serverSource.indexOf('businessStore.activateRequestAction(durableGigId, newItem)');
+const requestActivationIndex = serverSource.indexOf('businessStore.activateRequestAction(durableGigId, newItem, actionOwner)');
 if (requestConfirmIndex === -1 || requestActivationIndex === -1 || requestConfirmIndex > requestActivationIndex) {
   failures.push('Request must not enter app state before the requires_confirmation gate.');
 }
@@ -65,7 +65,7 @@ if (!/newItem\.paymentStatus\s*=\s*'authorized'/.test(serverSource)) {
 
 // Boost creation must likewise be gated before the boost is pushed.
 const boostConfirmIndex = serverSource.lastIndexOf("payment_status: 'requires_confirmation'");
-const boostActivationIndex = serverSource.indexOf('businessStore.activateBoostAction(durableGigId, request, newBoost)');
+const boostActivationIndex = serverSource.indexOf('businessStore.activateBoostAction(durableGigId, request, newBoost, actionOwner)');
 if (boostConfirmIndex === -1 || boostActivationIndex === -1 || boostConfirmIndex > boostActivationIndex) {
   failures.push('Boost must not enter app state before the requires_confirmation gate.');
 }
