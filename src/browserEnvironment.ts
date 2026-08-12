@@ -8,6 +8,13 @@ export function installViewportEnvironment() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   const root = document.documentElement;
+  const updateViewportOffset = () => {
+    const viewport = window.visualViewport;
+    const offsetLeft = Math.max(0, Math.round(viewport?.offsetLeft ?? 0));
+    const offsetTop = Math.max(0, Math.round(viewport?.offsetTop ?? 0));
+    root.style.setProperty('--sway-viewport-offset-left', `${offsetLeft}px`);
+    root.style.setProperty('--sway-viewport-offset-top', `${offsetTop}px`);
+  };
   const updateViewport = () => {
     const viewport = window.visualViewport;
     const width = Math.max(1, Math.round(viewport?.width ?? window.innerWidth ?? root.clientWidth));
@@ -15,6 +22,7 @@ export function installViewportEnvironment() {
 
     root.style.setProperty('--sway-viewport-width', `${width}px`);
     root.style.setProperty('--sway-viewport-height', `${height}px`);
+    updateViewportOffset();
     root.classList.toggle('is-compact-viewport', width <= 640 && height <= 760);
     root.classList.toggle('is-compact-landscape', height <= 480 && width > height);
   };
@@ -25,4 +33,5 @@ export function installViewportEnvironment() {
   window.addEventListener('resize', updateViewport, { passive: true });
   window.addEventListener('orientationchange', updateViewport, { passive: true });
   window.visualViewport?.addEventListener('resize', updateViewport, { passive: true });
+  window.visualViewport?.addEventListener('scroll', updateViewportOffset, { passive: true });
 }
