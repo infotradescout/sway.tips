@@ -13,6 +13,7 @@
     "validate": "npm run lint && npm run build && npm run test:contracts",
     "readiness:report": "node scripts/sway-complete-product-readiness.mjs",
     "readiness:assert": "node scripts/sway-complete-product-readiness.mjs --assert-ready",
+    "fixture:audio:production": "node scripts/sway-generate-audio-proof-fixture.mjs",
     "proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs",
     "proof:tickets:production": "node scripts/sway-native-ticket-production-proof.mjs",
     "audit:audio:production-evidence": "tsx scripts/sway-production-audio-evidence-audit.mjs",

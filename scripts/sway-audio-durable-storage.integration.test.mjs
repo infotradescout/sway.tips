@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +31,7 @@ const envExample = read('.env.example');
 const filesSurface = read('src/components/PerformerAudioFiles.tsx');
 const productionProof = read('scripts/sway-production-audio-proof.mjs');
 const productionEvidenceAudit = read('scripts/sway-production-audio-evidence-audit.mjs');
+const productionFixtureGenerator = read('scripts/sway-generate-audio-proof-fixture.mjs');
 const packageJson = read('package.json');
 
 for (const term of [
@@ -85,6 +87,31 @@ for (const term of [
 ]) {
   if (!service.includes(term)) failures.push(`Upload sealing must remain monotonic and retry-safe: ${term}`);
 }
+const sharedDownload = service.slice(
+  service.indexOf('async function downloadSharedOriginal'),
+  service.indexOf('async function openOwnedVersion')
+);
+const sharedObjectOpen = sharedDownload.indexOf('const object = await store.openOriginal');
+const sharedConsumeTransaction = sharedDownload.indexOf('await db.transaction');
+const sharedUseIncrement = sharedDownload.indexOf('.update(audioShareGrants)', sharedConsumeTransaction);
+const sharedAuditWrite = sharedDownload.indexOf('tx.insert(auditEvents)', sharedUseIncrement);
+if (sharedObjectOpen < 0
+  || sharedConsumeTransaction < 0
+  || sharedUseIncrement < 0
+  || sharedAuditWrite < 0
+  || !(sharedObjectOpen < sharedConsumeTransaction
+    && sharedConsumeTransaction < sharedUseIncrement
+    && sharedUseIncrement < sharedAuditWrite)) {
+  failures.push('Share download must open storage before atomically committing its use increment and audit event.');
+}
+for (const term of [
+  'isNull(audioShareGrants.revokedAt)',
+  'gt(audioShareGrants.expiresAt, new Date())',
+  'sql`${audioShareGrants.useCount} < ${audioShareGrants.maxUses}`',
+  'object.stream.destroy()'
+]) {
+  if (!sharedDownload.includes(term)) failures.push(`One-time share consumption is missing a failure-safe control: ${term}`);
+}
 
 if (!server.includes('await audioObjectStore.verifyReady()')
   || !server.includes('objectStorageVerified: audioObjectStoreVerified')
@@ -105,6 +132,10 @@ if (!filesSurface.includes('aria-label="Add audio to Catalog"')
   || filesSurface.includes('type="file"\n            className="hidden"')) {
   failures.push('The production master picker must remain keyboard-addressable instead of hiding the file input from interaction.');
 }
+if (!filesSurface.includes('body: JSON.stringify({ maxUses: 1 })')
+  || !filesSurface.includes('Create one-time link')) {
+  failures.push('The Catalog one-time-link control must create an actual single-use share grant.');
+}
 if (!filesSurface.includes('const projectId = await refreshProjects();')
   || !filesSurface.includes('if (projectId) await refreshAssets(projectId);')) {
   failures.push('Opening Files & projects must load sealed versions for the automatically selected project.');
@@ -122,6 +153,18 @@ for (const term of [
 }
 if (!packageJson.includes('"proof:audio:production": "tsx scripts/sway-production-audio-proof.mjs"')) {
   failures.push('Package scripts must expose the fail-closed production audio proof command.');
+}
+for (const term of [
+  "wav.write('RIFF'",
+  "wav.write('WAVEfmt '",
+  "createHash('sha256')",
+  'generatedFixture: true',
+  'userOwned: false'
+]) {
+  if (!productionFixtureGenerator.includes(term)) failures.push(`Production fixture generator is missing required synthetic-audio evidence: ${term}`);
+}
+if (!packageJson.includes('"fixture:audio:production": "node scripts/sway-generate-audio-proof-fixture.mjs"')) {
+  failures.push('Package scripts must expose the generated production-audio fixture command.');
 }
 for (const term of [
   'unauthenticatedHttpDenied',
@@ -233,6 +276,19 @@ async function runBehaviorProof() {
   const r2Bundle = join(tempRoot, 'audio-object-storage-r2.cjs');
   const uploadTransportBundle = join(tempRoot, 'audio-upload-transport.cjs');
   try {
+    const generatedFixture = JSON.parse(execFileSync(
+      process.execPath,
+      [join(root, 'scripts/sway-generate-audio-proof-fixture.mjs'), '--output-dir', tempRoot],
+      { cwd: root, encoding: 'utf8' }
+    ));
+    const generatedFixtureBytes = readFileSync(generatedFixture.filePath);
+    assert.equal(generatedFixture.generatedFixture, true);
+    assert.equal(generatedFixture.userOwned, false);
+    assert.equal(generatedFixtureBytes.subarray(0, 4).toString('ascii'), 'RIFF');
+    assert.equal(generatedFixtureBytes.subarray(8, 12).toString('ascii'), 'WAVE');
+    assert.equal(generatedFixtureBytes.byteLength, generatedFixture.byteSize);
+    assert.equal(createHash('sha256').update(generatedFixtureBytes).digest('hex'), generatedFixture.sha256);
+
     await Promise.all([
       build({ entryPoints: ['src/server/audio-object-storage.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: dispatcherBundle }),
       build({ entryPoints: ['src/server/audio-object-storage-r2.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: r2Bundle }),

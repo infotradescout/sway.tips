@@ -213,7 +213,7 @@ export default function PerformerAudioFiles() {
       const response = await fetch(`/api/talent/audio/versions/${versionId}/shares`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxUses: 5 })
+        body: JSON.stringify({ maxUses: 1 })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not create share.');
