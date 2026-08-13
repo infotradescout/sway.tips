@@ -93,6 +93,9 @@ export function sanitizePatronMutationResponseBody(body: unknown): Record<string
   if (typeof body.error === 'string') sanitized.error = body.error;
   if (typeof body.code === 'string') sanitized.code = body.code;
   if (typeof body.payment_status === 'string') sanitized.payment_status = body.payment_status;
+  if (body.outage_behavior === 'block_submission' || body.outage_behavior === 'hold_for_review') {
+    sanitized.outage_behavior = body.outage_behavior;
+  }
 
   if (isRecord(body.state)
     && isRecord(body.state.session)

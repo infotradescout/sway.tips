@@ -266,6 +266,30 @@ assert.deepEqual(sanitizedReplay.patron_status, pendingStatus);
 assert.equal(sanitizedReplay.patron_status_receipt, issuedReceipt.receipt);
 assert.equal(JSON.stringify(sanitizedReplay).includes('internal-device-secret'), false);
 
+const sanitizedBlockedFailure = sanitizePatronMutationResponseBody({
+  success: false,
+  pending: false,
+  terminal: true,
+  error: 'This submission is unavailable due to an active safety restriction.',
+  outage_behavior: 'block_submission',
+  blockId: 'internal-block-secret'
+});
+assert.deepEqual(sanitizedBlockedFailure, {
+  success: false,
+  pending: false,
+  terminal: true,
+  error: 'This submission is unavailable due to an active safety restriction.',
+  outage_behavior: 'block_submission'
+}, 'The public failure sanitizer must preserve the documented safety outcome without exposing block identity.');
+
+const sanitizedSafetyOutage = sanitizePatronMutationResponseBody({
+  success: false,
+  error: 'Safety checks are temporarily unavailable. No tip was accepted.',
+  outage_behavior: 'hold_for_review'
+});
+assert.equal(sanitizedSafetyOutage.outage_behavior, 'hold_for_review');
+assert.equal('outage_behavior' in sanitizePatronMutationResponseBody({ outage_behavior: 'unexpected' }), false);
+
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const patronViewSource = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const patronAppSource = readFileSync(join(root, 'src/shells/PatronApp.tsx'), 'utf8');
