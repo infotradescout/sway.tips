@@ -1,7 +1,7 @@
 # Sway Complete Product Gap Ledger
 
-Date: 2026-07-21  
-Branch baseline: `main` at `e1317bb1`
+Date: 2026-08-12
+Production evidence baseline: `main` at `b89d4033`
 Complete-product decision: **HOLD**
 
 The machine-readable source for the current decision is `config/sway-complete-product-readiness.json`. The fail-closed launch assertion is `npm run readiness:assert`.
@@ -25,11 +25,12 @@ Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md` — Live Rooms (current) a
 
 - The performer console is deployed with focused Home, Room, Profile, and Account workspaces.
 - Production migration `0023_audio_publishing_foundation` is applied. The live migration ledger and required audio tables were inspected after the migration.
-- Pairing-token creation is production verified with the authenticated performer account: the server created a one-time QR with an expiry and no database error.
-- Pairing claim, selected-file grant, exact-original download, review/approval, replay denial, and revoke were not completed in that production smoke.
-- The repository now uses a private Cloudflare R2 adapter for production masters; Render remains only the application host. The server verifies bucket access before accepting traffic and rejects local filesystem storage in production.
-- Production commit `0fff1da9` reports verified R2 readiness and rejects an unauthenticated project-asset request with `401` plus `Cache-Control: no-store`; the sanitized packet is `docs/qa-packets/2026-07-22-audio-production-evidence.md`.
-- Deterministic storage evidence proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, and identity/traversal denial. It does not prove the live bucket, production authorization journey, or independent recovery.
+- The repository now uses a server-mediated Cloudflare R2 adapter intended for private production masters; Render remains only the application host. The server verifies bucket access before accepting traffic and rejects local filesystem storage in production, while the live bucket's actual public-access settings remain subject to the separate control below.
+- Production merge `b89d4033` reports verified R2 readiness. A generated `16,044`-byte WAV was uploaded, sealed, downloaded with its exact SHA-256 before and after application restart, exported, independently hashed, and restored into a separate production project.
+- A separately verified account was denied before sharing and after pairing; a one-use link returned exact bytes once and denied replay. Nine of the ten master-vault controls are recorded in `docs/qa-packets/2026-08-12-audio-master-storage-production-evidence.md`.
+- The operator-accessible Cloudflare account has an active R2 subscription but zero buckets. The live credentials still pass R2 health and exact-byte retrieval, but the live bucket-owning account and disabled public URL/custom-domain settings remain unverified. Durable master storage therefore remains `implemented_unverified`.
+- Two separately verified production accounts completed pairing, no-access-before-share, selected-version sharing, exact download, review, approval, grant revocation, re-share, and connection cascade-revocation. Final reconciliation found zero active connections and grants; `project_collaboration` is production verified in `docs/qa-packets/2026-08-12-audio-file-collaboration-production-evidence.md`.
+- Deterministic storage evidence also proves multipart staging, exact sealing and retrieval after store reinitialization, staging cleanup, orphan abort, identity/traversal denial, one-use audit rollback, and concurrent one-use exclusion.
 - The production build marker proves which commit is deployed. It does not prove complete-product readiness.
 
 ## Original Sway Pillar (Live Rooms — current operating product)
@@ -52,9 +53,9 @@ This pillar tracks DistroKid-class external distribution work **inside Self-Prod
 | Capability | Current truth | Readiness impact |
 |---|---|---|
 | Audio publishing foundation schema and safety contracts | On `main`; migration applied in production | Foundation only |
-| Durable exact-original master storage | Live private R2 upload/seal/download and unauthenticated HTTP denial verified | Cross-account evidence command still needs production execution; separately controlled independent recovery remains unverified |
-| Projects and Private file pairing QR | Project/pairing routes exist; QR creation verified | Full two-account production journey remains unverified |
-| Selected-file sharing, review, and approval | Durable runtime and disposable integration cover grant, exact download, review, approval, revoke, replay denial, and audit | Production two-account proof remains required |
+| Durable exact-original master storage | Nine of ten live controls pass: verified R2 health, upload/seal, exact retrieval before and after restart, cross-account denial, one-use exhaustion, and independent recovery | **HOLD:** identify the live bucket-owning Cloudflare account and verify that its public development URL and custom public domains are disabled |
+| Projects and Private file pairing QR | Production verified with two separate accounts; the recipient saw the no-access warning and pairing alone exposed no file | Preserve regression coverage; no remaining blocker in this capability row |
+| Selected-file sharing, review, and approval | Production verified for selected immutable-version grant, exact download, note, approval, grant revoke, re-share, connection revoke, and terminal replay denial | Final active connection and grant counts were zero; no remaining blocker in this capability row |
 | Release metadata, artwork, credits, territories, ISRC, and UPC | Audited editing, artwork, full recording credits, identifiers, territories, sealed rights declarations, independent review, and fail-closed readiness are implemented | Disposable PostgreSQL and production journey evidence are still required for this exact tree; store delivery remains disabled |
 | Ordered multi-recording single, EP, and album assembly | Track add, per-track metadata and credits, reorder, remove, track-count validation, optimistic conflict denial, and rights-review locking are implemented | **Implemented, unverified:** the exact disposable PostgreSQL journey and a production creator journey remain required; store delivery remains disabled |
 | DSP delivery | No contracted DSP delivery provider or live integration | Critical blocker |
@@ -80,8 +81,8 @@ Judge independently of Live Rooms. Economic law is the decision D staged all-thr
 
 ## Correct Outcome Order
 
-1. Configure durable private production object storage and prove upload, seal, exact-download, restore, and access denial.
-2. Complete the project collaboration journey: connect, claim, share one immutable version, review, approve, revoke, and replay denial.
+1. Identify the Cloudflare account that owns the live bucket and prove its public development URL and custom domains are disabled; if ownership cannot be established, migrate deliberately to a controlled private bucket and rerun the exact-byte gate.
+2. Preserve the completed production collaboration journey as a regression gate: connect, claim, share one immutable version, review, approve, revoke, and replay denial.
 3. Build the cohesive Music workspace around projects, releases, delivery, promotion, earnings, and catalog transfer.
 4. Prove release assembly and readiness end to end: ordered multi-recording metadata, identifiers, artwork, rights declarations, creator-deal evidence, and immutable approval.
 5. Contract with and integrate one external DSP delivery provider; prove sandbox then controlled production delivery.
@@ -96,6 +97,7 @@ Judge independently of Live Rooms. Economic law is the decision D staged all-thr
 - Applying migration `0023` does not ship music distribution.
 - A generated pairing QR does not prove collaboration or file transfer.
 - A configured storage path does not prove durability or restore.
+- Verified application access to R2 does not prove which account owns the bucket or whether its public-access controls are disabled.
 - A provider submission does not prove store acceptance or a live release.
 - A deployed commit does not prove a successful deployment outcome.
 - Passing contracts do not prove complete-product readiness.

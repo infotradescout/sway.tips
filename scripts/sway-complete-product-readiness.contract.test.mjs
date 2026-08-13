@@ -13,6 +13,8 @@ function requireIncludes(source, term, label) {
 const doctrine = read('docs/VIBE_ENGINEERING_DOCTRINE.md');
 const agentRules = read('AGENTS.md');
 const gapLedger = read('docs/SWAY_COMPLETE_PRODUCT_GAP.md');
+const storageEvidence = read('docs/qa-packets/2026-08-12-audio-master-storage-production-evidence.md');
+const collaborationEvidence = read('docs/qa-packets/2026-08-12-audio-file-collaboration-production-evidence.md');
 const releaseGate = read('docs/process/QA_DRY_RELEASE_GATE.md');
 const evidenceChecklist = read('docs/process/RELEASE_EVIDENCE_CHECKLIST.md');
 const packageJson = JSON.parse(read('package.json'));
@@ -50,9 +52,11 @@ for (const term of [
 for (const term of [
   'Complete-product decision: **HOLD**',
   'Production migration `0023_audio_publishing_foundation` is applied',
-  'Pairing-token creation is production verified',
-  'private Cloudflare R2 adapter',
+  'Two separately verified production accounts completed pairing',
+  'server-mediated Cloudflare R2 adapter',
   'independent recovery',
+  'Nine of the ten master-vault controls',
+  '`project_collaboration` is production verified',
   'No contracted DSP delivery provider',
   'No royalty ledger, collaborator distribution splits, or distribution payouts'
 ]) {
@@ -85,6 +89,42 @@ if (readiness.decision !== 'HOLD') failures.push('Readiness config must remain H
 const pillarIds = new Set(readiness.pillars?.map((pillar) => pillar.id));
 for (const pillarId of ['distrokid_replacement', 'original_sway']) {
   if (!pillarIds.has(pillarId)) failures.push(`Readiness config missing pillar: ${pillarId}`);
+}
+
+const selfProduction = readiness.pillars?.find((pillar) => pillar.id === 'distrokid_replacement');
+const storageCapability = selfProduction?.capabilities?.find((capability) => capability.id === 'durable_master_storage');
+const collaborationCapability = selfProduction?.capabilities?.find((capability) => capability.id === 'project_collaboration');
+
+if (storageCapability?.status !== 'implemented_unverified') {
+  failures.push('Durable master storage must remain implemented_unverified until the live bucket privacy control is proven.');
+}
+if (!storageCapability?.evidence?.includes('docs/qa-packets/2026-08-12-audio-master-storage-production-evidence.md')) {
+  failures.push('Durable master storage is missing the current production evidence packet.');
+}
+if (collaborationCapability?.status !== 'production_verified') {
+  failures.push('Project collaboration must record its completed two-account production proof.');
+}
+if (!collaborationCapability?.evidence?.includes('docs/qa-packets/2026-08-12-audio-file-collaboration-production-evidence.md')) {
+  failures.push('Project collaboration is missing the current production evidence packet.');
+}
+
+for (const term of [
+  '**HOLD — 9 of 10 production controls passed.**',
+  'available Cloudflare account\'s R2 overview showed zero buckets',
+  'active file grants and pairing connections are zero',
+  'then must be removed or scrubbed',
+  'does not prove that the signed-in Cloudflare account owns the production bucket'
+]) {
+  requireIncludes(storageEvidence, term, 'Audio master storage production evidence');
+}
+
+for (const term of [
+  '**PRODUCTION VERIFIED for private project collaboration.**',
+  'Pairing establishes a private relationship; it does not grant project or file access.',
+  'Final reconciliation showed zero active pairing connections and zero active file grants',
+  'connection removal leaves an active grant'
+]) {
+  requireIncludes(collaborationEvidence, term, 'Audio file collaboration production evidence');
 }
 
 for (const script of ['readiness:report', 'readiness:assert']) {

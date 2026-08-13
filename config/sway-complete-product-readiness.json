@@ -23,20 +23,22 @@
             "scripts/sway-production-audio-proof.mjs",
             "scripts/sway-production-audio-evidence-audit.mjs",
             "docs/qa-packets/2026-07-22-audio-production-evidence.md",
+            "docs/qa-packets/2026-08-12-audio-master-storage-production-evidence.md",
             "docs/runbooks/audio-master-vault.md"
           ],
-          "holdReason": "The private R2 adapter, live bucket, authenticated production upload/seal/share/download journey, exact-byte recovery, sealed-version UI, and unauthenticated HTTP denial are verified. The cross-account audit is implemented but still requires production database execution; separately controlled independent recovery is not configured or verified."
+          "holdReason": "Nine of ten production controls pass on deployed merge b89d4033: verified R2 runtime access, synthetic upload/seal, exact owner download before and after restart, separate-account denial, one-use exhaustion, and independently hashed export/recovery. The operator-accessible Cloudflare account has an active R2 subscription but zero buckets, so ownership of the live bucket and its disabled public URL/custom-domain settings remain unverified."
         },
         {
           "id": "project_collaboration",
           "label": "Projects, private pairing, selected-file sharing, review, and approval",
-          "status": "implemented_unverified",
+          "status": "production_verified",
           "evidence": [
             "src/server/audio-file-pairing-service.ts",
             "src/server/audio-file-collaboration-service.ts",
-            "scripts/sway-audio-file-collaboration.integration.test.mjs"
+            "scripts/sway-audio-file-collaboration.integration.test.mjs",
+            "docs/qa-packets/2026-08-12-audio-file-collaboration-production-evidence.md"
           ],
-          "holdReason": "Pairing, selected immutable-version grants, exact authorized download, review, approval, grant/connection revocation, replay denial, and audit pass in a disposable durable integration. The complete two-account journey is not yet production verified."
+          "holdReason": "Two separately verified production accounts completed the exact-build pairing, no-access-before-share, selected immutable-version grant, exact authorized download, review, approval, grant revocation, re-share, connection cascade-revocation, and terminal replay-denial journey. Final reconciliation showed zero active connections and grants."
         },
         {
           "id": "release_metadata_identifiers",
