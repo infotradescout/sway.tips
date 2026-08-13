@@ -162,6 +162,14 @@ Capture patron-visible status using Pending, Approved, Playing, Up Next, Paused,
 - Closed room public route result:
 - Report evidence:
 - Durable block evidence (a held block request is not an active block):
+- Privileged actor role and separately authenticated blocked audience identity (redacted):
+- Pre-block benign request baseline and cleanup:
+- Active block row plus moderation/audit event evidence:
+- Blocked benign submission (HTTP 403 `block_submission`, no queue item, no payment):
+- Revocation response and repeated-revoke idempotency:
+- Revocation row plus `moderation.block.revoke` audit evidence:
+- Post-revocation benign submission and cleanup:
+- Zero unrevoked proof blocks after cleanup:
 - Pass/fail:
 - Notes:
 

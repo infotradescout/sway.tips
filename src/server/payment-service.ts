@@ -1,6 +1,7 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { closeDisposableSwayDbProof, createSwayDb } from '../db/client';
 import {
+  activeBlocks,
   gigSessions,
   clientPendingActions,
   liveRoomPaymentOperations,
@@ -9,6 +10,7 @@ import {
   requestBoosts,
   requests
 } from '../db/schema';
+import { lockModerationBlockIdentities, moderationBlockIdentities } from './moderation-block-lock';
 import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
 import { createLiveRoomPaymentOperationStore } from './live-room-payment-operation-store';
@@ -1617,10 +1619,26 @@ export function createPaymentService(config: {
       actionType: 'request' | 'tip' | 'boost';
       paymentId: string;
       owner: PendingActionOwner;
+      failureReason?: string;
     }) => {
       const fence = await idempotencyStore.fencePendingActionFailure(input);
       if (fence.status === 'already_visible' || fence.status === 'reconciled') return false;
-      await voidOrRefund(input.paymentId);
+      const reversal = await voidOrRefund(input.paymentId);
+      if (!['noop', 'voided', 'refunded'].includes(reversal.status)) return false;
+      await idempotencyStore.completePendingActionFailure({
+        clientRequestId: input.clientRequestId,
+        idempotencyKey: input.idempotencyKey,
+        gigId: input.gigId,
+        actionType: input.actionType,
+        status: 403,
+        body: {
+          success: false,
+          terminal: true,
+          payment_status: 'voided_or_refunded',
+          error: input.failureReason ?? 'The action could not be completed and its payment was reversed.'
+        },
+        owner: input.owner
+      });
       return true;
     };
 
@@ -1685,6 +1703,8 @@ export function createPaymentService(config: {
         clientRequestId: requests.clientRequestId,
         stateRevision: requests.stateRevision,
         runtimeState: requests.runtimeRequestState,
+        actorUserId: requests.patronUserId,
+        patronDeviceIdHash: requests.patronDeviceIdHash,
         paymentId: payments.id,
         paymentStatus: payments.paymentStatus,
         paymentIntentId: payments.processorPaymentIntentId,
@@ -1731,6 +1751,64 @@ export function createPaymentService(config: {
       if (!recoveryOwner) continue;
       try {
         const runtime = asRecord(row.runtimeState);
+        const senderName = recordString(runtime, 'senderName');
+        const blockIdentities = moderationBlockIdentities({
+          patronUserId: row.actorUserId,
+          patronDeviceIdHash: row.patronDeviceIdHash,
+          senderName
+        });
+        const blockDecision = await db.transaction(async (tx) => {
+          await lockModerationBlockIdentities(tx, blockIdentities);
+          const [activeBlock] = await tx
+            .select({ id: activeBlocks.id })
+            .from(activeBlocks)
+            .where(and(
+              eq(activeBlocks.status, 'active'),
+              isNull(activeBlocks.revokedAt),
+              or(...blockIdentities.map((identity) => and(
+                eq(activeBlocks.scope, identity.scope),
+                eq(activeBlocks.normalizedValue, identity.normalizedValue)
+              )))
+            ))
+            .limit(1);
+          return activeBlock ?? null;
+        });
+        if (blockDecision) {
+          if (row.paymentId) {
+            await fenceAndReverseOwnedInvisibleAction({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: recordString(runtime, 'type') === 'tip' ? 'tip' : 'request',
+              paymentId: row.paymentId,
+              owner: recoveryOwner,
+              failureReason: 'This submission is unavailable due to an active safety restriction.'
+            });
+          } else {
+            await idempotencyStore.fencePendingActionFailure({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: recordString(runtime, 'type') === 'tip' ? 'tip' : 'request',
+              owner: recoveryOwner
+            });
+            await idempotencyStore.completePendingActionFailure({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: recordString(runtime, 'type') === 'tip' ? 'tip' : 'request',
+              status: 403,
+              body: {
+                success: false,
+                terminal: true,
+                payment_status: 'not_applicable',
+                error: 'This submission is unavailable due to an active safety restriction.'
+              },
+              owner: recoveryOwner
+            });
+          }
+          continue;
+        }
         const desiredStatus = recordString(runtime, 'status');
         const actionType = recordString(runtime, 'type') === 'tip' ? 'tip' as const : 'request' as const;
         const requiresCapture = actionType === 'tip' || desiredStatus === 'approved' || desiredStatus === 'fulfilled';
@@ -1766,15 +1844,29 @@ export function createPaymentService(config: {
               ? 'denied'
               : 'held_for_review';
         const now = new Date();
-        const activated = await db.transaction(async (tx) => {
-        if (!row.idempotencyKey) return [];
+        const activationDecision = await db.transaction(async (tx) => {
+        await lockModerationBlockIdentities(tx, blockIdentities);
+        const [activeBlock] = await tx
+          .select({ id: activeBlocks.id })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.status, 'active'),
+            isNull(activeBlocks.revokedAt),
+            or(...blockIdentities.map((identity) => and(
+              eq(activeBlocks.scope, identity.scope),
+              eq(activeBlocks.normalizedValue, identity.normalizedValue)
+            )))
+          ))
+          .limit(1);
+        if (activeBlock) return { blocked: true, activated: [] as Array<{ id: string }> };
+        if (!row.idempotencyKey) return { blocked: false, activated: [] as Array<{ id: string }> };
         const [room] = await tx
           .select({ status: gigSessions.status })
           .from(gigSessions)
           .where(eq(gigSessions.id, row.gigId))
           .for('update')
           .limit(1);
-        if (room?.status !== 'active') return [];
+        if (room?.status !== 'active') return { blocked: false, activated: [] as Array<{ id: string }> };
         const [pending] = await tx
           .select({
             status: clientPendingActions.status,
@@ -1796,8 +1888,8 @@ export function createPaymentService(config: {
           || pending.ownerGeneration !== recoveryOwner.generation
           || !pending.ownerLeaseExpiresAt
           || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
-        ) return [];
-        return tx
+        ) return { blocked: false, activated: [] as Array<{ id: string }> };
+        const activated = await tx
           .update(requests)
           .set({
             status: requestStatus,
@@ -1820,7 +1912,42 @@ export function createPaymentService(config: {
             isNull(requests.activatedAt)
           ))
           .returning({ id: requests.id });
+        return { blocked: false, activated };
         });
+        const activated = activationDecision.activated;
+        if (activationDecision.blocked && row.paymentId) {
+          await fenceAndReverseOwnedInvisibleAction({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType,
+            paymentId: row.paymentId,
+            owner: recoveryOwner,
+            failureReason: 'This submission is unavailable due to an active safety restriction.'
+          });
+        } else if (activationDecision.blocked) {
+          await idempotencyStore.fencePendingActionFailure({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType,
+            owner: recoveryOwner
+          });
+          await idempotencyStore.completePendingActionFailure({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType,
+            status: 403,
+            body: {
+              success: false,
+              terminal: true,
+              payment_status: 'not_applicable',
+              error: 'This submission is unavailable due to an active safety restriction.'
+            },
+            owner: recoveryOwner
+          });
+        }
         if (!activated.length && row.paymentId) {
           const latest = await loadInvisibleRequestDisposition(row.requestId);
           if (provider && latest.stillInvisible && !latest.eligible) {
@@ -1855,6 +1982,8 @@ export function createPaymentService(config: {
         parentId: requestBoosts.requestId,
         stateRevision: requestBoosts.stateRevision,
         runtimeState: requestBoosts.runtimeBoostState,
+        actorUserId: requestBoosts.actorUserId,
+        patronDeviceIdHash: requestBoosts.patronDeviceIdHash,
         parentStatus: requests.status,
         parentRuntime: requests.runtimeRequestState,
         paymentId: payments.id,
@@ -1903,6 +2032,63 @@ export function createPaymentService(config: {
       if (!recoveryOwner) continue;
       try {
         const runtime = asRecord(row.runtimeState);
+        const patronName = recordString(runtime, 'patronName');
+        const blockIdentities = moderationBlockIdentities({
+          patronUserId: row.actorUserId,
+          patronDeviceIdHash: row.patronDeviceIdHash,
+          senderName: patronName
+        });
+        const blockDecision = await db.transaction(async (tx) => {
+          await lockModerationBlockIdentities(tx, blockIdentities);
+          const [activeBlock] = await tx
+            .select({ id: activeBlocks.id })
+            .from(activeBlocks)
+            .where(and(
+              eq(activeBlocks.status, 'active'),
+              isNull(activeBlocks.revokedAt),
+              or(...blockIdentities.map((identity) => and(
+                eq(activeBlocks.scope, identity.scope),
+                eq(activeBlocks.normalizedValue, identity.normalizedValue)
+              )))
+            ))
+            .limit(1);
+          return activeBlock ?? null;
+        });
+        if (blockDecision) {
+          if (row.paymentId) {
+            await fenceAndReverseOwnedInvisibleAction({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: 'boost',
+              paymentId: row.paymentId,
+              owner: recoveryOwner
+            });
+          } else {
+            await idempotencyStore.fencePendingActionFailure({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: 'boost',
+              owner: recoveryOwner
+            });
+            await idempotencyStore.completePendingActionFailure({
+              clientRequestId: row.clientRequestId,
+              idempotencyKey: row.idempotencyKey!,
+              gigId: row.gigId,
+              actionType: 'boost',
+              status: 403,
+              body: {
+                success: false,
+                terminal: true,
+                payment_status: 'not_applicable',
+                error: 'This submission is unavailable due to an active safety restriction.'
+              },
+              owner: recoveryOwner
+            });
+          }
+          continue;
+        }
         const parentRuntime = asRecord(row.parentRuntime);
         const targetEligible = row.parentStatus === 'approved'
           && !recordBoolean(parentRuntime, 'hidden')
@@ -1931,15 +2117,29 @@ export function createPaymentService(config: {
         }
         if (paymentStatus !== 'captured' && !(paymentStatus === 'not_applicable' && !row.paymentId)) continue;
         const now = new Date();
-        const activated = await db.transaction(async (tx) => {
-        if (!row.idempotencyKey) return [];
+        const activationDecision = await db.transaction(async (tx) => {
+        await lockModerationBlockIdentities(tx, blockIdentities);
+        const [activeBlock] = await tx
+          .select({ id: activeBlocks.id })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.status, 'active'),
+            isNull(activeBlocks.revokedAt),
+            or(...blockIdentities.map((identity) => and(
+              eq(activeBlocks.scope, identity.scope),
+              eq(activeBlocks.normalizedValue, identity.normalizedValue)
+            )))
+          ))
+          .limit(1);
+        if (activeBlock) return { blocked: true, activated: [] as Array<{ id: string }> };
+        if (!row.idempotencyKey) return { blocked: false, activated: [] as Array<{ id: string }> };
         const [room] = await tx
           .select({ status: gigSessions.status })
           .from(gigSessions)
           .where(eq(gigSessions.id, row.gigId))
           .for('update')
           .limit(1);
-        if (room?.status !== 'active') return [];
+        if (room?.status !== 'active') return { blocked: false, activated: [] as Array<{ id: string }> };
         const [pending] = await tx
           .select({
             status: clientPendingActions.status,
@@ -1961,7 +2161,7 @@ export function createPaymentService(config: {
           || pending.ownerGeneration !== recoveryOwner.generation
           || !pending.ownerLeaseExpiresAt
           || pending.ownerLeaseExpiresAt.getTime() <= Date.now()
-        ) return [];
+        ) return { blocked: false, activated: [] as Array<{ id: string }> };
         const [parent] = await tx
           .select({ status: requests.status, runtimeState: requests.runtimeRequestState })
           .from(requests)
@@ -1973,8 +2173,8 @@ export function createPaymentService(config: {
           && !recordBoolean(latestParentRuntime, 'hidden')
           && !recordBoolean(latestParentRuntime, 'removed')
           && !recordBoolean(latestParentRuntime, 'shadowBanned');
-        if (!stillEligible) return [];
-        return tx
+        if (!stillEligible) return { blocked: false, activated: [] as Array<{ id: string }> };
+        const activated = await tx
           .update(requestBoosts)
           .set({
             status: 'approved',
@@ -1996,7 +2196,42 @@ export function createPaymentService(config: {
             isNull(requestBoosts.activatedAt)
           ))
           .returning({ id: requestBoosts.id });
+        return { blocked: false, activated };
         });
+        const activated = activationDecision.activated;
+        if (activationDecision.blocked && row.paymentId) {
+          await fenceAndReverseOwnedInvisibleAction({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType: 'boost',
+            paymentId: row.paymentId,
+            owner: recoveryOwner,
+            failureReason: 'This submission is unavailable due to an active safety restriction.'
+          });
+        } else if (activationDecision.blocked) {
+          await idempotencyStore.fencePendingActionFailure({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType: 'boost',
+            owner: recoveryOwner
+          });
+          await idempotencyStore.completePendingActionFailure({
+            clientRequestId: row.clientRequestId,
+            idempotencyKey: row.idempotencyKey!,
+            gigId: row.gigId,
+            actionType: 'boost',
+            status: 403,
+            body: {
+              success: false,
+              terminal: true,
+              payment_status: 'not_applicable',
+              error: 'This submission is unavailable due to an active safety restriction.'
+            },
+            owner: recoveryOwner
+          });
+        }
         if (!activated.length && row.paymentId) {
           const latest = await loadInvisibleBoostDisposition(row.boostId);
           if (provider && latest.stillInvisible && !latest.eligible) {

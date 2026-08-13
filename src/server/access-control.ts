@@ -11,6 +11,8 @@ export type SwayActor = {
   patronDeviceIdHash: string | null;
 };
 
+const resolvedActors = new WeakMap<Request, SwayActor>();
+
 type ActorRole = 'patron' | 'performer' | 'admin' | 'support' | null;
 
 type GuardResult =
@@ -176,30 +178,16 @@ function resolveRawActor(req: Request): SwayActor {
 }
 
 function writeResolvedActor(req: Request, actor: SwayActor) {
-  req.headers[RESOLVED_ACTOR_HEADER] = actor.actorId ?? '';
-  req.headers[RESOLVED_SESSION_HEADER] = actor.sessionId ?? '';
-  req.headers[RESOLVED_DEVICE_HEADER] = actor.patronDeviceIdHash ?? '';
-  req.headers[HYDRATED_ACTOR_HEADER] = '1';
+  resolvedActors.set(req, actor);
 }
 
 function hasResolvedActor(req: Request) {
-  return req.headers[HYDRATED_ACTOR_HEADER] === '1';
+  return resolvedActors.has(req);
 }
 
 function resolveActor(req: Request): SwayActor {
-  if (hasResolvedActor(req)) {
-    return {
-      actorId: typeof req.headers[RESOLVED_ACTOR_HEADER] === 'string' && req.headers[RESOLVED_ACTOR_HEADER].length > 0
-        ? req.headers[RESOLVED_ACTOR_HEADER]
-        : null,
-      sessionId: typeof req.headers[RESOLVED_SESSION_HEADER] === 'string' && req.headers[RESOLVED_SESSION_HEADER].length > 0
-        ? req.headers[RESOLVED_SESSION_HEADER]
-        : null,
-      patronDeviceIdHash: typeof req.headers[RESOLVED_DEVICE_HEADER] === 'string' && req.headers[RESOLVED_DEVICE_HEADER].length > 0
-        ? req.headers[RESOLVED_DEVICE_HEADER]
-        : null
-    };
-  }
+  const resolved = resolvedActors.get(req);
+  if (resolved) return resolved;
 
   return {
     actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
@@ -238,11 +226,6 @@ function invalidFallbackAssertion(): GuardResult {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_FALLBACK_ASSERTION_MAX_AGE_MS = 5 * 60 * 1000;
-const RESOLVED_ACTOR_HEADER = 'x-sway-resolved-actor-id';
-const RESOLVED_SESSION_HEADER = 'x-sway-resolved-session-id';
-const RESOLVED_DEVICE_HEADER = 'x-sway-resolved-device-id-hash';
-const HYDRATED_ACTOR_HEADER = 'x-sway-actor-hydrated';
-
 function parseFallbackActorIds(rawValue: string | undefined) {
   if (!rawValue) return new Set<string>();
 

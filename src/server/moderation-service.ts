@@ -1,7 +1,8 @@
 import { createHash } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { activeBlocks, moderationEvents } from '../db/schema';
+import { lockModerationBlockIdentities } from './moderation-block-lock';
 
 export type ModerationOutageBehavior =
   | 'allow_with_local_filter'
@@ -15,6 +16,7 @@ type LocalSignal = 'allow' | 'review' | 'block';
 type AiAssistiveSignal = 'allow' | 'review' | 'block' | 'unavailable';
 
 type BlockRule = {
+  id?: string;
   scope: BlockScope;
   value: string;
   reason: string;
@@ -24,6 +26,8 @@ type BlockLookupResult = {
   match: BlockRule | null;
   outage: boolean;
 };
+
+const BLOCK_LOOKUP_UNAVAILABLE_REASON = 'Moderation block store is unavailable; submission held for review.';
 
 type ModerationServiceOverrides = {
   hasDurableStore?: boolean;
@@ -130,18 +134,20 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
         if (!rawValue) continue;
         const normalizedValue = normalizeKey(rawValue);
         const [existing] = await db
-          .select({ scope: activeBlocks.scope, normalizedValue: activeBlocks.normalizedValue, reason: activeBlocks.reason })
+          .select({ id: activeBlocks.id, scope: activeBlocks.scope, normalizedValue: activeBlocks.normalizedValue, reason: activeBlocks.reason })
           .from(activeBlocks)
           .where(and(
             eq(activeBlocks.scope, scope),
             eq(activeBlocks.normalizedValue, normalizedValue),
-            eq(activeBlocks.status, 'active')
+            eq(activeBlocks.status, 'active'),
+            isNull(activeBlocks.revokedAt)
           ))
           .limit(1);
 
         if (existing) {
           return {
             match: {
+              id: existing.id,
               scope,
               value: existing.normalizedValue,
               reason: existing.reason
@@ -205,7 +211,8 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     if (blockLookup.outage) {
       return {
         decision: 'hold_for_review' as ModerationOutageBehavior,
-        reason: 'Moderation block store is unavailable; submission held for review.',
+        reason: BLOCK_LOOKUP_UNAVAILABLE_REASON,
+        blockStoreAvailable: false,
         aiAssistiveUsed: false,
         aiAvailable: false
       };
@@ -215,6 +222,8 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
       return {
         decision: 'block_submission' as ModerationOutageBehavior,
         reason: `Blocked by ${blockLookup.match.scope} rule: ${blockLookup.match.reason}`,
+        blockId: blockLookup.match.id ?? null,
+        blockStoreAvailable: true,
         aiAssistiveUsed: false,
         aiAvailable: false
       };
@@ -240,7 +249,8 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     if (mergedSignal === 'block') {
       return {
         decision: 'block_submission' as ModerationOutageBehavior,
-        reason: localSignal.reason ?? 'Submission blocked by moderation policy.',
+      reason: localSignal.reason ?? 'Submission blocked by moderation policy.',
+      blockStoreAvailable: true,
         aiAssistiveUsed,
         aiAvailable
       };
@@ -249,7 +259,8 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     if (mergedSignal === 'review') {
       return {
         decision: 'hold_for_review' as ModerationOutageBehavior,
-        reason: localSignal.reason ?? 'Submission held for review by moderation policy.',
+      reason: localSignal.reason ?? 'Submission held for review by moderation policy.',
+      blockStoreAvailable: true,
         aiAssistiveUsed,
         aiAvailable
       };
@@ -258,6 +269,7 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     return {
       decision: 'allow_with_local_filter' as ModerationOutageBehavior,
       reason: 'Submission allowed after deterministic local filter.',
+      blockStoreAvailable: true,
       aiAssistiveUsed,
       aiAvailable
     };
@@ -284,27 +296,46 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
         actorUserId: input.actorUserId ?? null
       });
     } else if (db) {
-      await db
-        .insert(activeBlocks)
-        .values({
-          scope: input.scope,
-          normalizedValue,
-          reason: input.reason,
-          actorUserId: input.actorUserId ?? null,
-          status: 'active',
-          revokedAt: null,
-          metadata: { source: 'moderation.block' }
-        })
-        .onConflictDoUpdate({
-          target: [activeBlocks.scope, activeBlocks.normalizedValue, activeBlocks.status],
-          set: {
+      await db.transaction(async (tx) => {
+        await lockModerationBlockIdentities(tx, [{ scope: input.scope, normalizedValue }]);
+        const existingRows = await tx
+          .select({ id: activeBlocks.id, status: activeBlocks.status })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.scope, input.scope),
+            eq(activeBlocks.normalizedValue, normalizedValue)
+          ))
+          .for('update');
+        const existing = existingRows.find((row) => row.status === 'active') ?? existingRows[0];
+        if (existingRows.length > 1 && existing) {
+          for (const duplicate of existingRows.filter((row) => row.id !== existing.id)) {
+            await tx.delete(activeBlocks).where(eq(activeBlocks.id, duplicate.id));
+          }
+        }
+        if (existing) {
+          await tx
+            .update(activeBlocks)
+            .set({
+              reason: input.reason,
+              actorUserId: input.actorUserId ?? null,
+              status: 'active',
+              revokedAt: null,
+              metadata: { source: 'moderation.block' },
+              updatedAt: new Date()
+            })
+            .where(eq(activeBlocks.id, existing.id));
+        } else {
+          await tx.insert(activeBlocks).values({
+            scope: input.scope,
+            normalizedValue,
             reason: input.reason,
             actorUserId: input.actorUserId ?? null,
+            status: 'active',
             revokedAt: null,
-            metadata: { source: 'moderation.block' },
-            updatedAt: new Date()
-          }
-        });
+            metadata: { source: 'moderation.block' }
+          });
+        }
+      });
     }
 
     await writeModerationEvent({
@@ -340,6 +371,24 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
         details: input.details ?? null,
         patronDeviceIdHash: input.patronDeviceIdHash ?? null,
         source: 'moderation.report'
+      }
+    });
+  }
+
+  async function recordBlockEnforcement(input: {
+    entityId: string;
+    actorUserId?: string | null;
+    blockId?: string | null;
+  }) {
+    return writeModerationEvent({
+      actorUserId: input.actorUserId ?? null,
+      entityType: 'block_enforcement',
+      entityId: input.entityId,
+      status: 'blocked',
+      reason: 'Submission denied by an active moderation rule.',
+      metadata: {
+        blockId: input.blockId ?? null,
+        source: 'moderation.block.enforcement'
       }
     });
   }
@@ -412,6 +461,7 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     evaluateSubmission,
     addBlockRule,
     recordPatronReport,
+    recordBlockEnforcement,
     recordPatronBlockRequest,
     hideRequest,
     removeRequest,

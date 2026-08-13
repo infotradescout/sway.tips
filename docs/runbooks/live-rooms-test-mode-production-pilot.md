@@ -107,6 +107,21 @@ ORDER BY status;
 
 Pass when payment rows, processor events, payment-volume UI, and audience receipts agree; refunded and voided outcomes are reported separately; no `livemode=true` rows exist; and no payment, operation, or webhook row remains nonterminal.
 
+## Authorized active-block proof
+
+Run this only with an existing administrator session. Support and patron sessions are intentionally denied. Do not promote a pilot identity, reset another person's credential, or treat a patron `held_for_review` block request as active enforcement.
+
+1. Use the separate authenticated audience account as the exact `patron_user_id` target. Do not use `sender_name` or a shared device hash for this bounded proof.
+2. Establish a benign free-request baseline in the production-hosted room; record the request ID, then remove it before activation.
+3. From the privileged session, `POST /api/moderation/block` with `scope`, the exact audience user ID as `value`, a bounded proof reason, and a unique `idempotency_key`.
+4. Reconcile one `active_blocks` row with `status='active'` and `revoked_at IS NULL`, plus actor-attributed `moderation_events` and `audit_events` entries.
+5. From the separate audience session, submit a benign free request. Pass only on HTTP 403 with `outage_behavior='block_submission'`, no queue item, and no payment row.
+6. Immediately `POST /api/moderation/block/revoke` with the same scope/value, a cleanup reason, and a unique `idempotency_key`. Replaying the same request must return the same canonical response; a new key against an already inactive rule must return `block_already_inactive`.
+7. Reconcile `revoked_at IS NOT NULL`, the `moderation.block.revoke` audit transition from `blocked` to `revoked`, and zero unrevoked proof blocks.
+8. Prove the same audience account can submit after revocation; remove that request during shutdown.
+
+If activation succeeds but revocation does not, stop the proof, keep the synthetic identity contained, and retain HOLD. Direct SQL is emergency recovery, not normal closeout evidence.
+
 ## Required shutdown and drain
 
 1. Close the room and verify the room registry is `closed` with an end timestamp.
@@ -116,6 +131,7 @@ Pass when payment rows, processor events, payment-volume UI, and audience receip
 5. If the platform-balance lane was enabled, set the switch to false and clear the performer allowlist in the confirmed Render workspace; wait for the resulting deploy and recheck runtime configuration.
 6. Revoke pilot sessions or credentials that should not remain active.
 7. Recheck that the pilot performer/profile/room is absent from public discovery and that no active or closing pilot rooms remain.
+8. Verify zero unrevoked active-block rows for every synthetic proof identity and revoke the privileged proof session when it should not remain active.
 
 ## Automations available in-repo
 

@@ -480,6 +480,50 @@ async function main() {
     assert.equal(workerReversalTruth.rows[0].owner_token, null);
     assert.equal(workerReversalTruth.rows[0].owner_lease_expires_at, null);
 
+    // A block that commits while recovery owns an invisible free action must
+    // win the shared target lock, produce a canonical 403, and leave nothing
+    // visible or pending for the expiry worker.
+    const blockedFreeAction = await reserveRequest({
+      label: 'blocked-free-recovery',
+      amountCents: 0,
+      deviceHash: hash('blocked-free-recovery-device')
+    });
+    await proof.query(`
+      update requests
+      set runtime_request_state = jsonb_set(runtime_request_state, '{paymentStatus}', '"not_applicable"'::jsonb)
+      where id = $1
+    `, [blockedFreeAction.requestId]);
+    await proof.query(`
+      insert into active_blocks (scope, normalized_value, reason, status, revoked_at)
+      values ('patron_device_id_hash', $1, 'Concurrent recovery safety proof', 'active', null)
+    `, [hash('blocked-free-recovery-device')]);
+    const blockedFreeRecovery = await restartedPaymentService.reconcileActionVisibility({ limit: 25 });
+    assert.equal(blockedFreeRecovery.requestsActivated, 0);
+    const blockedFreeTruth = await proof.query<{
+      request_status: string;
+      activated_at: Date | null;
+      pending_status: string;
+      response_status: number;
+      response_error: string;
+    }>(`
+      select r.status as request_status, r.activated_at,
+             c.status as pending_status, i.first_response_status as response_status,
+             i.first_response_body->>'error' as response_error
+      from requests r
+      join client_pending_actions c on c.idempotency_key = r.idempotency_key
+      join idempotency_keys i on i.idempotency_key = r.idempotency_key
+      where r.id = $1
+    `, [blockedFreeAction.requestId]);
+    assert.equal(blockedFreeTruth.rows[0].request_status, 'denied');
+    assert.equal(blockedFreeTruth.rows[0].activated_at, null);
+    assert.equal(blockedFreeTruth.rows[0].pending_status, 'reconciled');
+    assert.equal(blockedFreeTruth.rows[0].response_status, 403);
+    assert.match(blockedFreeTruth.rows[0].response_error, /active safety restriction/i);
+    await proof.query(`
+      update active_blocks set status = 'revoked', revoked_at = now()
+      where scope = 'patron_device_id_hash' and normalized_value = $1 and status = 'active'
+    `, [hash('blocked-free-recovery-device')]);
+
     // Visibility can commit before the HTTP response. Even after the browser
     // deadline, that visible truth must remain recoverable and must not be
     // reversed as an orphan.

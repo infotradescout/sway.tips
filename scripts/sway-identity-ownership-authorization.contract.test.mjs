@@ -19,6 +19,7 @@ for (const term of [
   'hydrateRequestActor',
   'resolveServerActor',
   'requireAdminOrSupportAccess',
+  'requireAdminAccess',
   'requireGigMutationAccess',
   'requireTalentAccess',
   'ownerActorUserId',
@@ -42,6 +43,7 @@ for (const term of [
   '/api/request/triage',
   '/api/request/fulfill',
   '/api/moderation/block',
+  '/api/moderation/block/revoke',
   '/api/moderation/hide',
   '/api/moderation/remove'
 ]) {
@@ -74,6 +76,7 @@ for (const eventType of [
   'request.triage.',
   'request.fulfill',
   'moderation.block',
+  'moderation.block.revoke',
   'moderation.hide',
   'moderation.remove'
 ]) {
