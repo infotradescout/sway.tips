@@ -82,6 +82,16 @@ Broader than distribution. Path from original file to independent creator busine
 
 External distribution (including any DistroKid-class DSP cutover work) is **one outlet** inside Self-Production — not the definition of Sway, and not the definition of Self-Production.
 
+### Working-storage and release-count boundary
+
+Sway is a release workspace, not a general-purpose cloud drive. The number of releases a creator may prepare or publish is **not numerically capped**. Storage abuse is controlled separately through a configurable per-performer working-storage pool (default: 5 GiB): active multipart reservations plus sealed files that are not named in an immutable, validated release-package manifest consume that pool.
+
+Creating a draft, attaching a file to a draft, placing a release in rights review, or directly changing a release or delivery status does not exempt bytes from the working pool. A release-package file graduates only when Sway atomically records an immutable manifest after independent readiness validation. The manifest names each exact version ID, hash, byte size, and release role; later attachments do not inherit the exemption. A future provider-delivery path must create the same manifest from a coupled immutable submission event rather than trusting a mutable `submitted` status. Only one exact master per release recording, the exact artwork, and the latest independently verified rights document for each declaration scope may graduate; superseded, rejected, revoked, merely proposed documents and creator deals remain working storage. Existing package manifests remain preserved through takedown. Legally or operationally restricted files remain preserved, but restriction alone does not increase the account's available workspace. Graduation is accounting policy, not deletion or a claim that store delivery is live.
+
+Manifest eligibility reopens and parses the sealed package: masters must be playable audio matching their declared container, artwork must decode and end at its image boundary, and bounded rights documents must be valid text/Markdown or non-embedded paged PDFs. Individual master, artwork, and rights-document size ceilings protect the release lane without imposing any numerical limit on releases.
+
+Sway must count active upload reservations atomically, cap active plus sealed working-file records to prevent tiny-object/database abuse (default: 10,000), expire abandoned multipart sessions, reject unsupported or obviously disguised file content, and keep quota enforcement server-side. It must not enforce this boundary by limiting release count, silently deleting sealed originals, weakening rights review, or treating a client-side check as authority.
+
 Later independent lanes (not Live Rooms unfinished-proof): DSP delivery, ticket sales, royalty processing, collaborator payouts.
 
 ## Sway.DIO naming honesty

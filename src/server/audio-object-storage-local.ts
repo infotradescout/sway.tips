@@ -79,6 +79,11 @@ export function createLocalAudioObjectStore(env: NodeJS.ProcessEnv): AudioObject
       if (!identity.providerUploadId) throw new Error('Object upload identity is missing.');
       rmSync(dirname(objectPath(root, identity)), { recursive: true, force: true });
     },
+    async discardUpload(identity) {
+      assertIdentity(identity, bucket);
+      if (!identity.providerUploadId) throw new Error('Object upload identity is missing.');
+      rmSync(dirname(objectPath(root, identity)), { recursive: true, force: true });
+    },
     async writePart({ identity, partNumber, body }) {
       assertIdentity(identity, bucket);
       if (!identity.providerUploadId) throw new Error('Object upload identity is missing.');

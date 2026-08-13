@@ -2065,6 +2065,7 @@ export const musicReleases = pgTable('music_releases', {
 }, (table) => ({
   upcIdx: uniqueIndex('music_releases_upc_idx').on(table.upc).where(sql`${table.upc} is not null`),
   idProjectIdx: uniqueIndex('music_releases_id_project_idx').on(table.id, table.projectId),
+  idPerformerIdx: uniqueIndex('music_releases_id_performer_idx').on(table.id, table.performerId),
   performerStatusIdx: index('music_releases_performer_status_idx').on(table.performerId, table.status),
   releaseTypeAllowed: check('music_releases_release_type_allowed', sql`${table.releaseType} in ('single', 'ep', 'album', 'comedy_special', 'spoken_word', 'other')`),
   upcValid: check('music_releases_upc_valid', sql`${table.upc} is null or ${table.upc} ~ '^[0-9]{8,14}$'`),
@@ -2157,6 +2158,55 @@ export const musicRightsDeclarationEvents = pgTable('music_rights_declaration_ev
     columns: [table.declarationId, table.declarationSha256],
     foreignColumns: [musicRightsDeclarations.id, musicRightsDeclarations.declarationSha256],
     name: 'music_rights_declaration_events_declaration_sha_fk'
+  })
+}));
+
+export const musicReleaseStorageManifests = pgTable('music_release_storage_manifests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  releaseId: uuid('release_id').notNull().references(() => musicReleases.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
+  sourceType: text('source_type').notNull(),
+  sourceEventId: uuid('source_event_id').notNull(),
+  packageRevision: integer('package_revision').notNull(),
+  packageFingerprint: text('package_fingerprint').notNull(),
+  assets: jsonb('assets').$type<Array<{
+    assetVersionId: string;
+    sha256: string;
+    byteSize: number;
+    roles: string[];
+  }>>().notNull(),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  releaseRevisionIdx: uniqueIndex('music_release_storage_manifests_release_revision_idx')
+    .on(table.releaseId, table.packageRevision),
+  releaseFingerprintIdx: uniqueIndex('music_release_storage_manifests_release_fingerprint_idx')
+    .on(table.releaseId, table.packageFingerprint),
+  sourceEventIdx: uniqueIndex('music_release_storage_manifests_source_event_idx')
+    .on(table.sourceType, table.sourceEventId),
+  performerCreatedIdx: index('music_release_storage_manifests_performer_created_idx')
+    .on(table.performerId, table.createdAt),
+  sourceTypeAllowed: check(
+    'music_release_storage_manifests_source_type_allowed',
+    sql`${table.sourceType} in ('readiness_pass', 'delivery_submission')`
+  ),
+  revisionValid: check(
+    'music_release_storage_manifests_revision_valid',
+    sql`${table.packageRevision} > 0`
+  ),
+  fingerprintValid: check(
+    'music_release_storage_manifests_fingerprint_valid',
+    sql`${table.packageFingerprint} ~ '^[0-9a-f]{64}$'`
+  ),
+  assetsRequired: check(
+    'music_release_storage_manifests_assets_required',
+    sql`jsonb_typeof(${table.assets}) = 'array' and jsonb_array_length(${table.assets}) > 0`
+  ),
+  releasePerformerFk: foreignKey({
+    columns: [table.releaseId, table.performerId],
+    foreignColumns: [musicReleases.id, musicReleases.performerId],
+    name: 'music_release_storage_manifests_release_performer_fk'
   })
 }));
 

@@ -127,6 +127,32 @@ export function createR2AudioObjectStore(
         UploadId: identity.providerUploadId
       }));
     },
+    async discardUpload(identity) {
+      assertIdentity(identity, bucket);
+      if (!identity.providerUploadId) throw new Error('R2 multipart upload identity is missing.');
+      const cleanupErrors: unknown[] = [];
+      try {
+        await client.send(new AbortMultipartUploadCommand({
+          Bucket: bucket,
+          Key: stagingKey(identity.storageKey),
+          UploadId: identity.providerUploadId
+        }));
+      } catch (error) {
+        // A completed multipart upload no longer exists as multipart state;
+        // the two object deletes below are still required and authoritative.
+        if (!isNotFound(error)) cleanupErrors.push(error);
+      }
+      for (const key of [stagingKey(identity.storageKey), identity.storageKey]) {
+        try {
+          await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+        } catch (error) {
+          if (!isNotFound(error)) cleanupErrors.push(error);
+        }
+      }
+      if (cleanupErrors.length) {
+        throw new AggregateError(cleanupErrors, 'R2 could not fully discard a failed audio upload.');
+      }
+    },
     async writePart({ identity, partNumber, body }) {
       assertIdentity(identity, bucket);
       if (!identity.providerUploadId) throw new Error('R2 multipart upload identity is missing.');

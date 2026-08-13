@@ -17,6 +17,10 @@ authenticated Sway server
 
 PostgreSQL remains authoritative for projects, ownership, access grants, upload sessions, immutable asset-version identity, checksums, rights evidence, and audit history. R2 contains only opaque object keys and bytes. The bucket must remain private; never enable an `r2.dev` URL or public custom domain for the master bucket.
 
+The vault is not an unlimited general-purpose file locker. PostgreSQL calculates a per-performer working-storage balance from active multipart reservations and sealed versions that are not named in an immutable, validated release-package manifest. The default pool is 5 GiB with at most 10,000 working-file records, preventing both byte-volume and tiny-object abuse. Release count is unlimited. Exact package versions graduate from working-pool accounting without moving or deleting their immutable objects; a mutable release or delivery status, a later attachment, or a provisional document never grants that exemption.
+
+Manifest creation must re-open the exact object and pass the release parser. Masters are limited to 4 GiB and must report matching playable audio metadata; artwork is limited to 50 MiB and must decode with a strict container ending; rights documents are limited to 10 MiB and may not contain PDF attachments, portfolios, scripts, or launch actions. A parser failure rolls back the final readiness review and leaves every byte charged to working storage so the creator can replace the bad file and retry.
+
 The application performs `HeadBucket` before accepting traffic. Missing credentials, an inaccessible bucket, or a configured local filesystem in production fails startup.
 
 ## Required Cloudflare Setup
@@ -35,6 +39,8 @@ SWAY_AUDIO_R2_ACCOUNT_ID=<Cloudflare account ID>
 SWAY_AUDIO_R2_ACCESS_KEY_ID=<bucket-scoped R2 access key>
 SWAY_AUDIO_R2_SECRET_ACCESS_KEY=<bucket-scoped R2 secret>
 SWAY_AUDIO_R2_BUCKET=sway-audio-originals
+SWAY_AUDIO_WORKSPACE_LIMIT_BYTES=5368709120
+SWAY_AUDIO_WORKING_OBJECT_LIMIT=10000
 ```
 
 The three credential values are declared `sync: false` in `render.yaml`; Git never contains them. They must be installed in the live Render service's secret environment.
@@ -46,7 +52,11 @@ The three credential values are declared `sync: false` in `render.yaml`; Git nev
   "audioStorage": {
     "enabled": true,
     "provider": "r2",
-    "objectStorageVerified": true
+    "objectStorageVerified": true,
+    "workingStorageBounded": true,
+    "workspaceLimitBytes": 5368709120,
+    "workingObjectLimit": 10000,
+    "releaseCountLimit": null
   }
 }
 ```
@@ -75,6 +85,10 @@ The deterministic R2-compatible proof covers:
 - retrieval through a new store instance;
 - bucket/identity and traversal denial;
 - orphaned multipart abort;
+- atomic working-storage reservations under concurrent upload starts;
+- expiry and provider abort for abandoned multipart sessions;
+- supported release-package MIME/signature validation and disguised-file rejection;
+- unlimited release-count policy with draft attachment unable to bypass working-storage accounting;
 - production rejection of the local filesystem adapter.
 
 It does not prove the live Cloudflare account, live Render secrets, recovery copy, or customer authorization path.
@@ -101,5 +115,7 @@ The complete-product readiness entry remains below `production_verified` until a
 ## Rollback
 
 Rollback the application commit without deleting the R2 bucket, credentials, multipart uploads, or sealed objects. If the provider is unavailable or integrity/access is in doubt, disable the provider so audio routes fail closed while preserving R2 and PostgreSQL evidence.
+
+Do not lower `SWAY_AUDIO_WORKSPACE_LIMIT_BYTES` as an emergency deletion mechanism. Lowering it may stop new working-file reservations for performers already over the new limit, but must not remove sealed originals, cancel releases, or erase rights/takedown evidence. Restore the prior value to roll back the policy change while preserving bytes and audit state.
 
 Credential rotation is not object deletion. Rotate the bucket-scoped token, update Render secrets, redeploy, and re-run `HeadBucket` plus exact-download verification.

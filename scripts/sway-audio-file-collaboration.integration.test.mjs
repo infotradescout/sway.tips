@@ -16,6 +16,7 @@ import {
   musicRecordingCredits,
   musicRecordings,
   musicReleases,
+  musicReleaseStorageManifests,
   musicRightsDeclarationEvents,
   musicRightsDeclarations,
   performers,
@@ -43,6 +44,33 @@ async function streamToBuffer(stream) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks);
+}
+
+function wavFixture(label) {
+  const dataSize = 800;
+  const body = Buffer.alloc(44 + dataSize, 0x80);
+  body.write('RIFF', 0, 'ascii');
+  body.writeUInt32LE(body.byteLength - 8, 4);
+  body.write('WAVE', 8, 'ascii');
+  body.write('fmt ', 12, 'ascii');
+  body.writeUInt32LE(16, 16);
+  body.writeUInt16LE(1, 20);
+  body.writeUInt16LE(1, 22);
+  body.writeUInt32LE(8_000, 24);
+  body.writeUInt32LE(8_000, 28);
+  body.writeUInt16LE(1, 32);
+  body.writeUInt16LE(8, 34);
+  body.write('data', 36, 'ascii');
+  body.writeUInt32LE(dataSize, 40);
+  Buffer.from(label).copy(body, 44, 0, dataSize);
+  return body;
+}
+
+function pngFixture() {
+  return Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64'
+  );
 }
 
 const db = createSwayDb(databaseUrl);
@@ -163,7 +191,7 @@ try {
   assert.equal(renewedReviewerGrant.grant.canManageRelease, false);
   assert.equal(renewedReviewerGrant.grant.expiresAt, null);
   assert.ok((await db.select().from(audioProjectAccessGrants).where(eq(audioProjectAccessGrants.id, expiredGrant.id)))[0].revokedAt);
-  const body = Buffer.from('RIFF selected-file collaboration exact original proof');
+  const body = wavFixture('selected-file collaboration exact original proof');
   const sha256 = createHash('sha256').update(body).digest('hex');
   const upload = await publishing.initiateUpload({
     projectId: project.id,
@@ -355,11 +383,12 @@ try {
     return publishing.completeAndSealUpload({ uploadSessionId: session.id, actorUserId: ownerId, performerId: performer.id });
   }
 
+  const artworkBody = pngFixture('verified artwork bytes');
   const artworkVersion = await sealSupportingFile({
     title: 'release-artwork.png',
     assetKind: 'artwork',
     mimeType: 'image/png',
-    body: Buffer.from('verified artwork bytes')
+    body: artworkBody
   });
   const rightsDocumentBody = Buffer.from('immutable rights terms version one');
   const rightsDocumentVersion = await sealSupportingFile({
@@ -372,19 +401,19 @@ try {
     title: 'second-track.wav',
     assetKind: 'master_audio',
     mimeType: 'audio/wav',
-    body: Buffer.from('RIFF second immutable album master')
+    body: wavFixture('second immutable album master')
   });
   const thirdMasterVersion = await sealSupportingFile({
     title: 'third-track.wav',
     assetKind: 'master_audio',
     mimeType: 'audio/wav',
-    body: Buffer.from('RIFF third immutable album master')
+    body: wavFixture('third immutable album master')
   });
   const postRightsMasterVersion = await sealSupportingFile({
     title: 'post-rights-track.wav',
     assetKind: 'master_audio',
     mimeType: 'audio/wav',
-    body: Buffer.from('RIFF unused master for sealed-release denial')
+    body: wavFixture('unused master for sealed-release denial')
   });
 
   const releaseId = randomUUID();
@@ -773,12 +802,45 @@ try {
   assert.deepEqual(mainRelease?.recordings.map((recording) => recording.rightsStatus), ['cleared', 'cleared']);
   assert.equal((await db.select().from(musicRightsDeclarations)).length, 6);
   assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 6);
+  const [storageManifest] = await db.select().from(musicReleaseStorageManifests)
+    .where(eq(musicReleaseStorageManifests.releaseId, releaseId));
+  assert.ok(storageManifest, 'Final readiness must atomically append an immutable exact storage manifest.');
+  assert.equal(storageManifest.sourceType, 'readiness_pass');
+  assert.equal(storageManifest.packageRevision, 1);
+  assert.deepEqual(
+    storageManifest.assets.map((asset) => asset.assetVersionId).sort(),
+    [artworkVersion.id, rightsDocumentVersion.id, secondMasterVersion.id, thirdMasterVersion.id].sort()
+  );
+  assert.equal(
+    storageManifest.assets.find((asset) => asset.assetVersionId === rightsDocumentVersion.id)?.roles.length,
+    requiredDeclarations.length,
+    'A shared rights document must be retained once with exact declaration roles, not blanket document fan-out.'
+  );
+  assert.equal(
+    storageManifest.assets.some((asset) => asset.assetVersionId === postRightsMasterVersion.id),
+    false,
+    'Unattached working files must not enter the release storage manifest.'
+  );
+  const protectedUsage = await publishing.getStorageUsage({ performerId: performer.id });
+  assert.equal(
+    protectedUsage.releaseProtectedBytes,
+    artworkVersion.byteSize + rightsDocumentVersion.byteSize + secondMasterVersion.byteSize + thirdMasterVersion.byteSize
+  );
+  await assert.rejects(
+    db.delete(musicReleaseStorageManifests)
+      .where(eq(musicReleaseStorageManifests.id, storageManifest.id)),
+    (error) => /immutable/i.test(`${error?.message ?? ''} ${error?.cause?.message ?? ''}`)
+  );
   assert.equal((await publishing.listRightsReviewQueue({ actorUserId: reviewerId })).length, 0);
   const evidenceOpenCount = openOriginalCount;
+  const releaseValidationOpenCount = storageManifest.assets.length
+    + storageManifest.assets.filter((asset) => (
+      asset.roles.some((role) => role.startsWith('recording_master:'))
+    )).length;
   assert.equal(
     evidenceOpenCount,
-    rightsEvidenceOpenBaseline + requiredDeclarations.length,
-    'Each recording- or release-scoped declaration must open its exact sealed evidence once.'
+    rightsEvidenceOpenBaseline + requiredDeclarations.length + releaseValidationOpenCount,
+    'Each declaration must open its evidence once, and final readiness must reopen every exact package object for parsing.'
   );
   const publicRelease = await publishing.getPublicRelease({ releaseId });
   assert.equal(publicRelease?.status, 'ready');
@@ -789,7 +851,7 @@ try {
   );
   assert.deepEqual(publicRelease?.recordings.map((recording) => recording.credits.length), [3, 2]);
   const publicArtwork = await publishing.openPublicReleaseArtwork({ releaseId });
-  assert.deepEqual(await streamToBuffer(publicArtwork.stream), Buffer.from('verified artwork bytes'));
+  assert.deepEqual(await streamToBuffer(publicArtwork.stream), artworkBody);
   assert.equal(openOriginalCount, evidenceOpenCount + 1, 'Public artwork must open exactly one stored original.');
 
   const sealedUpdatedAt = mainRelease?.updatedAt;
@@ -1292,7 +1354,7 @@ try {
     );
   }
 
-  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, grant-isolated review threads, audit rollback, and exact audit behavior are durable.');
+  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, parsed immutable storage manifest, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, grant-isolated review threads, audit rollback, and exact audit behavior are durable.');
 } finally {
   if (embeddedProof) await embeddedProof.close();
   else await db.$client.end();
