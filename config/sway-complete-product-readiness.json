@@ -169,35 +169,35 @@
         {
           "id": "live_room_core",
           "label": "Live room, QR, requests, tips, boosts, and queue control",
-          "status": "implemented_unverified",
+          "status": "production_verified",
           "evidence": [
             "docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md",
             "docs/runbooks/live-rooms-test-mode-production-pilot.md",
             "scripts/sway-live-room-crash-concurrency.integration.test.ts",
             "scripts/sway-public-room-state.behavior.test.mjs"
           ],
-          "holdReason": "Production Stripe test-platform-balance runs proved request, tip, boost, void, refund, idempotency, closeout, repaired webhook replay, corrected refunded receipts, and a truthful zero-captured recap. Rendered browser tests proved the payment-dialog correction, and that exact code is deployed; no production-device viewport observation is claimed. Acceptance remains HOLD because the audience evidence used anonymous receipt-based sessions rather than a separately authenticated audience account, and the remaining patron UI outcome matrix needs a bounded current-build rerun."
+          "holdReason": "Production Stripe test-platform-balance runs and a separately authenticated audience rerun proved request, tip, boost, void, refund, idempotency, closeout, webhook replay, durable receipts, truthful test-volume recap, and shutdown drain. Optional short-lived patron label observations do not block the proven durable outcomes."
         },
         {
           "id": "moderation_and_access",
           "label": "Role isolation, moderation, reporting, blocking, and fail-closed access",
-          "status": "implemented_unverified",
+          "status": "production_verified",
           "evidence": [
             "docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md",
             "scripts/sway-public-room-state.behavior.test.mjs"
           ],
-          "holdReason": "Production evidence covers anonymous protected-mutation denial, public projection containment, reporting, and a held block request. Disposable PostgreSQL proof covers durable active-block persistence and enforcement, but production does not yet prove separate authenticated audience-account isolation or an authorized enforced durable active block."
+          "holdReason": "Production exact-build evidence proves admin-only durable activation, idempotent replay, target-account enforcement with generic terminal HTTP 403 and no request/payment, unaffected control-account behavior, audited revocation, restored target access, and zero unrevoked proof blocks after cleanup."
         },
         {
           "id": "overlay_earnings_closeout",
           "label": "Overlay, payment volume, end-room closeout, and recap",
-          "status": "implemented_unverified",
+          "status": "production_verified",
           "evidence": [
             "docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md",
             "src/components/VictoryScreen.tsx",
             "src/components/PerformerRoomHistory.tsx"
           ],
-          "holdReason": "Production closeout and durable payment totals are recorded. A corrected-build rerun refunded both captured payments and truthfully showed zero captured volume and zero completed actions; test volume is explicit and non-shareable. The remaining HOLD belongs to the separate audience-account and moderation gates, not stale recap wording."
+          "holdReason": "Production closeout, durable payment totals, explicitly non-payable test volume, disabled test-volume sharing, terminal drains, and closed room registries are recorded."
         }
       ]
     }

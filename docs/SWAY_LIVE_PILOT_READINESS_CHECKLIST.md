@@ -14,7 +14,7 @@ The required evidence package for a real pilot or manual QA run is `docs/SWAY_LI
 
 The pilot proves the live room money loop, not future platform expansion.
 
-**Product milestone HOLD (Live Rooms lane):** the next valid proof is a two-account **Stripe test-mode** production pilot (performer + separately authenticated audience, hosted room, request/tip/boost/void/refund, exact-duplicate plus distinct-stale webhook delivery, closeout, explicitly labeled test payment volume, action-and-payment receipts/history, DB reconciliation, shutdown drain, exact deployed commit). Release-chain hardening does not authorize live Stripe. Self-Production lanes (DSP delivery, ticket sales, royalty processing, collaborator payouts, Sway.DIO) are judged separately and do not make Live Rooms unfinished. See `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md` and `docs/SWAY_PRODUCT_STRUCTURE.md`.
+**Product milestone PASS (Live Rooms lane):** the two-account **Stripe test-mode** production pilot and authorized active-block proof are recorded in `docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md`, ending on exact production commit `a0b2186ce08ab210c07bb42d5e17058102370dfd`. This does not authorize live Stripe. Self-Production lanes (DSP delivery, ticket sales, royalty processing, collaborator payouts, Sway.DIO) remain separate.
 
 
 PR #44 was resumed and merged by owner override after the readiness guardrails landed. That override does not complete the live-pilot proof. New hardware/control expansion, lyrics, marketplace/browse expansion, operator/admin expansion, DJ software integrations, and new infrastructure still must not resume unless the owner explicitly reorders the lane.

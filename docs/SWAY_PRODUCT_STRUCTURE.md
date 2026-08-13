@@ -58,7 +58,7 @@ During a real performance:
 
 **Payment boundary:** Stripe test-only today; live money is a separate release gate. That boundary must not be confused with Live Rooms being a “future idea.” Live Rooms is the current product; live money is a later Live Rooms gate.
 
-**Next Live Rooms product milestone (HOLD before live Stripe):** one performer + one audience account, production-hosted room, Stripe **test-mode** request/tip/boost/refund, duplicate + delayed webhooks, closeout, earnings view, audience receipt/history, DB reconciliation, exact deployed-commit evidence. See `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
+**Live Rooms test-mode production milestone: PASS.** The production-hosted money loop, webhook behavior, closeout, receipts, reconciliation, and authorized active-block lifecycle are recorded in `docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md`. Live Stripe remains a separate owner-authorized release gate.
 
 ## Self-Production (creator ownership system)
 
@@ -124,7 +124,7 @@ This economic lock does **not** authorize Sway.DIO launch, streaming/royalty run
 ## Related docs
 
 - Live Rooms pilot: `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md`
-- Test-mode milestone HOLD: `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`
+- Test-mode milestone record: `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`
 - Gap ledger (capability detail): `docs/SWAY_COMPLETE_PRODUCT_GAP.md`
 - Release chain: `RELEASE_CONTROL.md`
 - Agent rules: `AGENTS.md`

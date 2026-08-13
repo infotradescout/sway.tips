@@ -1,6 +1,6 @@
-# Live Rooms test-mode production pilot milestone — HOLD
+# Live Rooms test-mode production pilot milestone — PASS
 
-**Status:** HOLD until proven with real production-hosted evidence.  
+**Status:** PASS as of 2026-08-12 America/Chicago on production commit `a0b2186ce08ab210c07bb42d5e17058102370dfd`.
 **Lane:** Live Rooms (current operating product). Self-Production progress is judged separately — see `docs/SWAY_PRODUCT_STRUCTURE.md`.
 
 ## Binding rule
@@ -26,6 +26,8 @@ Unfinished Self-Production (DSP, tickets, royalties, collaborator payouts, Sway.
 11. Separate void (`voided/not_refunded`) and refund (`refunded/refunded`) proof
 12. Report/block outcome stated truthfully; a held block request is not active-block proof
 13. Closeout drain and shutdown: zero nonterminal payments/operations/webhooks, test-only switch off, allowlist cleared
+
+All thirteen items are evidenced in `docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md`. This closes the test-mode pilot milestone only. It does not authorize live Stripe, live money, App Store readiness, or whole-product launch.
 
 ## Explicit non-goals (later Self-Production / independent lanes)
 
