@@ -12,13 +12,15 @@ const requiredServiceTerms = [
   'evaluateSubmission',
   'addBlockRule',
   'recordPatronReport',
+  'recordBlockEnforcement',
   'hideRequest',
   'removeRequest',
   'writeModerationEvent',
   'activeBlocks',
   'findMatchingBlock',
   "eq(activeBlocks.status, 'active')",
-  'onConflictDoUpdate',
+  'isNull(activeBlocks.revokedAt)',
+  'lockModerationBlockIdentities',
   'moderationEvents',
   "allow_with_local_filter",
   "hold_for_review",
@@ -40,6 +42,7 @@ const requiredServerTerms = [
   'createModerationService',
   '/api/moderation/report',
   '/api/moderation/block',
+  '/api/moderation/block/revoke',
   '/api/moderation/hide',
   '/api/moderation/remove',
   '/api/moderation/placeholders',
@@ -48,6 +51,28 @@ const requiredServerTerms = [
   'moderationOutcome.decision',
   "outage_behavior: 'block_submission'"
 ];
+
+for (const term of [
+  'requireAdminOrSupportAccess',
+  'requireAdminAccess',
+  'executeModerationMutation',
+  'moderationMutationKeys',
+  "eventType: 'moderation.block.revoke'",
+  "moderation_action: 'block_already_inactive'",
+  "error: 'This submission is unavailable due to an active safety restriction.'"
+]) {
+  if (!server.includes(term)) {
+    failures.push(`Server moderation revocation path missing required term: ${term}`);
+  }
+}
+
+if (/req\.headers\[[^\]]*resolved/i.test(readFileSync(join(root, 'src/server/access-control.ts'), 'utf8'))) {
+  failures.push('Server-resolved actor identity must not be stored in or read from inbound request headers.');
+}
+
+if (/recordPatronReport\([\s\S]{0,240}block_submission/.test(server)) {
+  failures.push('Active-block enforcement must not be misreported as a patron report.');
+}
 
 for (const term of requiredServerTerms) {
   if (!server.includes(term)) {

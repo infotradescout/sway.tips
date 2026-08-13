@@ -20,6 +20,60 @@ for (const term of [
   }
 }
 
+for (const term of [
+  'newItem.paymentId\n        ? rejectAfterPaymentReversal(newItem.paymentId, 403, blockedBody)',
+  'newBoost.paymentId\n        ? rejectAfterPaymentReversal(newBoost.paymentId, 403, blockedBody)'
+]) {
+  if (!serverSource.includes(term)) {
+    failures.push(`Direct activation block race must reverse its durable payment before canonical failure: ${term}`);
+  }
+}
+
+for (const term of [
+  'activeBlocks',
+  "eq(activeBlocks.status, 'active')",
+  'isNull(activeBlocks.revokedAt)',
+  "actionType: recordString(runtime, 'type') === 'tip' ? 'tip' : 'request'",
+  "actionType: 'boost'"
+]) {
+  if (!serviceSource.includes(term)) {
+    failures.push(`Payment recovery missing active-block safety fence: ${term}`);
+  }
+}
+
+const pendingRequestBlockCheck = serviceSource.indexOf('const blockDecision = await db.transaction', serviceSource.indexOf('const pendingRequests'));
+const pendingRequestCapture = serviceSource.indexOf('const capture = await captureAuthorization(row.paymentId)', pendingRequestBlockCheck);
+if (pendingRequestBlockCheck === -1 || pendingRequestCapture === -1 || pendingRequestBlockCheck > pendingRequestCapture) {
+  failures.push('Pending request/tip recovery must recheck active blocks before capture.');
+}
+
+const pendingBoostBlockCheck = serviceSource.indexOf('const blockDecision = await db.transaction', serviceSource.indexOf('const pendingBoosts'));
+const pendingBoostCapture = serviceSource.indexOf('const capture = await captureAuthorization(row.paymentId)', pendingBoostBlockCheck);
+if (pendingBoostBlockCheck === -1 || pendingBoostCapture === -1 || pendingBoostBlockCheck > pendingBoostCapture) {
+  failures.push('Pending boost recovery must recheck active blocks before capture.');
+}
+
+for (const requiredFence of [
+  'lockModerationBlockIdentities(tx, blockIdentities)',
+  "payment_status: 'not_applicable'",
+  "status: 403"
+]) {
+  if (!serviceSource.includes(requiredFence)) {
+    failures.push(`Payment recovery missing serialized/free active-block term: ${requiredFence}`);
+  }
+}
+
+if (/!requiresCapture[\s\S]{0,700}failureReason: 'This submission is unavailable due to an active safety restriction\.'/s.test(serviceSource)) {
+  failures.push('Generic non-block recovery must not claim an active safety restriction.');
+}
+
+const recoveryFenceStart = serviceSource.indexOf('const fenceAndReverseOwnedInvisibleAction');
+const recoveryFenceEnd = serviceSource.indexOf('const awaitingCustomerAuthorizations', recoveryFenceStart);
+const recoveryFenceSource = serviceSource.slice(recoveryFenceStart, recoveryFenceEnd);
+if (!/const reversal = await voidOrRefund\(input\.paymentId\);[\s\S]+if \(!\['noop', 'voided', 'refunded'\]\.includes\(reversal\.status\)\) return false;[\s\S]+completePendingActionFailure/.test(recoveryFenceSource)) {
+  failures.push('Recovery must publish terminal failure only after terminal payment reversal truth.');
+}
+
 // The 'authorized' result must not advertise a capturable boolean that callers
 // could misread as "authorized regardless of hold state".
 if (/status:\s*'authorized'[\s\S]{0,160}capturable/.test(serviceSource)) {

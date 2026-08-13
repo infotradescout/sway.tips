@@ -12,12 +12,12 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { readFileSync } from "fs";
 import { existsSync } from "fs";
 import sharp from "sharp";
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribution } from "./src/types";
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -25,6 +25,7 @@ import {
 } from "./src/server/release-health";
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput, type PendingActionOwner } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
+import { lockModerationBlockIdentities } from "./src/server/moderation-block-lock";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
@@ -2223,25 +2224,27 @@ async function resolveProtectedMutationActor(req: express.Request, res: express.
 }
 
 async function resolveBootstrapTalentActor(actorUserId: string): Promise<ProtectedMutationActor | null> {
-  const bootstrapReq = {
-    headers: {
-      'x-sway-resolved-actor-id': actorUserId,
-      'x-sway-resolved-session-id': '',
-      'x-sway-resolved-device-id-hash': '',
-      'x-sway-actor-hydrated': '1'
-    },
-    path: '/api/talent/session/bootstrap',
-    ip: null
-  } as unknown as express.Request;
-
-  const talentAccess = await accessControl.requireTalentAccess(bootstrapReq);
-  if (talentAccess.allowed === false || !talentAccess.actor.actorId) {
-    return null;
-  }
+  if (!businessDb) return null;
+  const [persistedTalent] = await businessDb
+    .select({ actorId: users.id, role: users.role })
+    .from(users)
+    .leftJoin(performers, eq(performers.ownerUserId, users.id))
+    .leftJoin(performerMemberships, eq(performerMemberships.userId, users.id))
+    .leftJoin(gigAccessGrants, eq(gigAccessGrants.userId, users.id))
+    .where(and(
+      eq(users.id, actorUserId),
+      or(
+        isNotNull(performers.id),
+        isNotNull(performerMemberships.id),
+        isNotNull(gigAccessGrants.id)
+      )
+    ))
+    .limit(1);
+  if (!persistedTalent) return null;
 
   return {
-    actorId: talentAccess.actor.actorId,
-    actorType: talentAccess.role ?? 'performer'
+    actorId: persistedTalent.actorId,
+    actorType: persistedTalent.role ?? 'performer'
   };
 }
 
@@ -2926,6 +2929,69 @@ function sendDurableMutationReplay(
     return true;
   }
   return false;
+}
+
+type ModerationMutationAction = 'block' | 'block_revoke';
+
+function moderationMutationKeyHash(input: { actorId: string; actionType: ModerationMutationAction; idempotencyKey: string }) {
+  return createHash('sha256')
+    .update(`${input.actorId}:${input.actionType}:${input.idempotencyKey}`)
+    .digest('hex');
+}
+
+async function executeModerationMutation(input: {
+  actorId: string;
+  actionType: ModerationMutationAction;
+  idempotencyKey: string;
+  intent: Record<string, unknown>;
+  mutate: (tx: any) => Promise<{ status: number; body: Record<string, unknown> }>;
+}) {
+  if (!businessDb) throw new Error('moderation_mutation_store_unavailable');
+  const keyHash = moderationMutationKeyHash(input);
+  const intentFingerprint = hashPayload(input.intent);
+
+  return businessDb.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(moderationMutationKeys)
+      .values({
+        keyHash,
+        actorUserId: input.actorId,
+        actionType: input.actionType,
+        intentFingerprint
+      })
+      .onConflictDoNothing()
+      .returning({ id: moderationMutationKeys.id });
+
+    const [keyRecord] = await tx
+      .select({
+        intentFingerprint: moderationMutationKeys.intentFingerprint,
+        firstResponseStatus: moderationMutationKeys.firstResponseStatus,
+        firstResponseBody: moderationMutationKeys.firstResponseBody
+      })
+      .from(moderationMutationKeys)
+      .where(eq(moderationMutationKeys.keyHash, keyHash))
+      .for('update')
+      .limit(1);
+
+    if (!keyRecord) throw new Error('moderation_mutation_key_missing');
+    if (keyRecord.intentFingerprint !== intentFingerprint) {
+      return { status: 409, body: { error: 'idempotency misuse: the same key was submitted with a different moderation intent.' } };
+    }
+    if (!inserted && keyRecord.firstResponseStatus && keyRecord.firstResponseBody) {
+      return { status: keyRecord.firstResponseStatus, body: keyRecord.firstResponseBody as Record<string, unknown> };
+    }
+
+    const response = await input.mutate(tx);
+    await tx
+      .update(moderationMutationKeys)
+      .set({
+        firstResponseStatus: response.status,
+        firstResponseBody: response.body,
+        updatedAt: new Date()
+      })
+      .where(eq(moderationMutationKeys.keyHash, keyHash));
+    return response;
+  });
 }
 
 type RoomMutationContext = { gigId: string; state: BackendState };
@@ -12745,15 +12811,21 @@ app.post("/api/request/create", async (req, res) => {
   });
 
   if (moderationOutcome.decision === 'block_submission') {
-    await moderationService.recordPatronReport({
-      requestId: client_request_id,
-      reason: moderationOutcome.reason,
+    await moderationService.recordBlockEnforcement({
+      entityId: client_request_id,
       actorUserId: resolveActorUserId(req),
-      patronDeviceIdHash: resolvedPatronDeviceIdHash
+      blockId: moderationOutcome.blockId
     });
     return rejectAfterConfirmedAuthorization(403, {
-      error: moderationOutcome.reason,
+      error: 'This submission is unavailable due to an active safety restriction.',
       outage_behavior: 'block_submission'
+    });
+  }
+
+  if (moderationOutcome.blockStoreAvailable === false && isStraightTip) {
+    return rejectAfterConfirmedAuthorization(503, {
+      error: 'Safety checks are temporarily unavailable. No tip was accepted.',
+      outage_behavior: 'hold_for_review'
     });
   }
 
@@ -12946,8 +13018,22 @@ app.post("/api/request/create", async (req, res) => {
   } catch (error) {
     const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
     const ownerFenced = error instanceof Error && error.message === 'pending_action_owner_fenced';
+    const activelyBlocked = error instanceof Error && error.message === 'active_moderation_block';
     if (ownerFenced) {
       return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
+    if (activelyBlocked) {
+      await moderationService.recordBlockEnforcement({
+        entityId: client_request_id,
+        actorUserId: resolveActorUserId(req)
+      });
+      const blockedBody = {
+        error: 'This submission is unavailable due to an active safety restriction.',
+        outage_behavior: 'block_submission'
+      };
+      return newItem.paymentId
+        ? rejectAfterPaymentReversal(newItem.paymentId, 403, blockedBody)
+        : completeReservedFailure(403, blockedBody);
     }
     if (newItem.paymentId) {
       return rejectAfterPaymentReversal(newItem.paymentId, pendingExpired ? 410 : 409, {
@@ -13333,14 +13419,13 @@ app.post("/api/request/boost", async (req, res) => {
   });
 
   if (moderationOutcome.decision === 'block_submission') {
-    await moderationService.recordPatronReport({
-      requestId,
-      reason: moderationOutcome.reason,
+    await moderationService.recordBlockEnforcement({
+      entityId: client_request_id,
       actorUserId: resolveActorUserId(req),
-      patronDeviceIdHash: resolvedPatronDeviceIdHash
+      blockId: moderationOutcome.blockId
     });
     return rejectAfterConfirmedAuthorization(403, {
-      error: moderationOutcome.reason,
+      error: 'This submission is unavailable due to an active safety restriction.',
       outage_behavior: 'block_submission'
     });
   }
@@ -13519,8 +13604,22 @@ app.post("/api/request/boost", async (req, res) => {
   } catch (error) {
     const pendingExpired = error instanceof Error && error.message === 'pending_action_expired';
     const ownerFenced = error instanceof Error && error.message === 'pending_action_owner_fenced';
+    const activelyBlocked = error instanceof Error && error.message === 'active_moderation_block';
     if (ownerFenced) {
       return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
+    }
+    if (activelyBlocked) {
+      await moderationService.recordBlockEnforcement({
+        entityId: client_request_id,
+        actorUserId: resolveActorUserId(req)
+      });
+      const blockedBody = {
+        error: 'This submission is unavailable due to an active safety restriction.',
+        outage_behavior: 'block_submission'
+      };
+      return newBoost.paymentId
+        ? rejectAfterPaymentReversal(newBoost.paymentId, 403, blockedBody)
+        : completeReservedFailure(403, blockedBody);
     }
     if (newBoost.paymentId) {
       return rejectAfterPaymentReversal(newBoost.paymentId, pendingExpired ? 410 : 409, {
@@ -13728,7 +13827,7 @@ app.post("/api/moderation/patron-block", async (req, res) => {
 
 app.post("/api/moderation/block", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
-  const privilegedActor = await accessControl.requireAdminOrSupportAccess(req);
+  const privilegedActor = await accessControl.requireAdminAccess(req);
   if (privilegedActor.allowed === false) {
     return res.status(privilegedActor.status).json({ error: privilegedActor.reason });
   }
@@ -13737,61 +13836,108 @@ app.post("/api/moderation/block", async (req, res) => {
     return res.status(401).json({ error: 'Sway actor resolution required.' });
   }
 
-  const { scope, value, reason } = req.body;
+  const { scope, value, reason, idempotency_key } = req.body;
   const allowedScopes: BlockScope[] = ['patron_user_id', 'patron_device_id_hash', 'sender_name'];
+  const normalizedValue = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const blockReason = typeof reason === 'string' ? reason.trim() : '';
+  const idempotencyKey = typeof idempotency_key === 'string' ? idempotency_key.trim() : '';
+  const validValue = scope === 'patron_user_id'
+    ? UUID_PATTERN.test(normalizedValue)
+    : scope === 'patron_device_id_hash'
+      ? PATRON_DEVICE_ID_HASH_PATTERN.test(normalizedValue)
+      : scope === 'sender_name'
+        ? normalizedValue.length > 0 && normalizedValue.length <= 120
+        : false;
 
-  if (!allowedScopes.includes(scope) || !value || !reason) {
+  if (!allowedScopes.includes(scope) || !validValue || !blockReason || blockReason.length > 500 || !idempotencyKey || idempotencyKey.length > 200) {
     return res.status(400).json({
-      error: "scope, value, and reason are required. scope must be patron_user_id, patron_device_id_hash, or sender_name."
+      error: "A valid scope, value, bounded reason, and idempotency_key are required."
     });
   }
 
-  const normalizedValue = String(value).trim().toLowerCase();
   // Always attribute to the authenticated actor -- never trust a client-supplied
   // actor id, or any caller could falsify who performed a moderation action.
   const actorId = privilegedActor.actor.actorId;
+  if (!businessDb) return res.status(503).json({ error: 'Persistent moderation store is not configured.' });
 
-  if (!businessDb) {
-    await moderationService.addBlockRule({
-      scope,
-      value: String(value),
-      reason: String(reason),
-      actorUserId: actorId
-    });
-  } else {
-    await businessDb.transaction(async (tx) => {
-      await tx
-        .insert(activeBlocks)
-        .values({
-          scope,
-          normalizedValue,
-          reason: String(reason),
-          actorUserId: actorId,
-          status: 'active',
-          revokedAt: null,
-          metadata: { source: 'moderation.block' }
+  const mutation = await executeModerationMutation({
+    actorId,
+    actionType: 'block',
+    idempotencyKey,
+    intent: { scope, normalizedValue, reason: blockReason },
+    mutate: async (tx) => {
+      await lockModerationBlockIdentities(tx, [{ scope, normalizedValue }]);
+      const existingBlocks = await tx
+        .select({
+          id: activeBlocks.id,
+          reason: activeBlocks.reason,
+          actorUserId: activeBlocks.actorUserId,
+          status: activeBlocks.status
         })
-        .onConflictDoUpdate({
-          target: [activeBlocks.scope, activeBlocks.normalizedValue, activeBlocks.status],
-          set: {
-            reason: String(reason),
+        .from(activeBlocks)
+        .where(and(
+          eq(activeBlocks.scope, scope),
+          eq(activeBlocks.normalizedValue, normalizedValue)
+        ))
+        .for('update');
+
+      const existingBlock = existingBlocks.find((row: { status: string }) => row.status === 'active')
+        ?? existingBlocks.find((row: { status: string }) => row.status === 'revoked');
+
+      const moderationAction = !existingBlock
+        ? 'block_added'
+        : existingBlock.status === 'active'
+          ? 'block_updated'
+          : 'block_reactivated';
+      const eventSource = moderationAction === 'block_added'
+        ? 'moderation.block'
+        : moderationAction === 'block_updated'
+          ? 'moderation.block.update'
+          : 'moderation.block.reactivate';
+      if (existingBlocks.length > 1 && existingBlock) {
+        await tx.delete(activeBlocks).where(and(
+          eq(activeBlocks.scope, scope),
+          eq(activeBlocks.normalizedValue, normalizedValue),
+          ne(activeBlocks.id, existingBlock.id)
+        ));
+      }
+
+      const [activatedBlock] = existingBlock
+        ? await tx
+          .update(activeBlocks)
+          .set({
+            reason: blockReason,
             actorUserId: actorId,
+            status: 'active',
             revokedAt: null,
-            metadata: { source: 'moderation.block' },
+            metadata: { source: eventSource },
             updatedAt: new Date()
-          }
-        });
+          })
+          .where(eq(activeBlocks.id, existingBlock.id))
+          .returning({ id: activeBlocks.id })
+        : await tx
+          .insert(activeBlocks)
+          .values({
+            scope,
+            normalizedValue,
+            reason: blockReason,
+            actorUserId: actorId,
+            status: 'active',
+            revokedAt: null,
+            metadata: { source: eventSource }
+          })
+          .returning({ id: activeBlocks.id });
 
       await tx.insert(moderationEvents).values({
         actorUserId: actorId,
         entityType: 'block_rule',
-        entityId: toAuditEntityUuid(`${scope}:${normalizedValue}`),
+        entityId: activatedBlock.id,
         status: 'blocked',
-        reason: String(reason),
+        reason: blockReason,
         metadata: {
           scope,
           value: normalizedValue,
-          source: 'moderation.block'
+          source: eventSource
         }
       });
 
@@ -13800,19 +13946,159 @@ app.post("/api/moderation/block", async (req, res) => {
         actorType: privilegedActor.role ?? 'unknown',
         entityType: 'moderation_block',
         entityId: `${scope}:${normalizedValue}`,
-        eventType: 'moderation.block',
-        previousStatus: null,
+        eventType: eventSource,
+        previousStatus: existingBlock
+          ? existingBlock.status === 'active' ? 'blocked' : 'revoked'
+          : null,
         nextStatus: 'blocked',
         metadata: {
           scope,
           value: normalizedValue,
-          reason: String(reason)
+          reason: blockReason,
+          previous_reason: existingBlock?.reason ?? null,
+          previous_actor_user_id: existingBlock?.actorUserId ?? null
         }
       });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          moderation_action: moderationAction,
+          changed: true
+        }
+      };
+    }
+  });
+
+  return res.status(mutation.status).json(mutation.body);
+});
+
+app.post("/api/moderation/block/revoke", async (req, res) => {
+  if (!requirePersistentBusinessStore(res)) return;
+  const privilegedActor = await accessControl.requireAdminAccess(req);
+  if (privilegedActor.allowed === false) {
+    return res.status(privilegedActor.status).json({ error: privilegedActor.reason });
+  }
+
+  if (!privilegedActor.actor.actorId) {
+    return res.status(401).json({ error: 'Sway actor resolution required.' });
+  }
+
+  const { scope, value, reason, idempotency_key } = req.body;
+  const allowedScopes: BlockScope[] = ['patron_user_id', 'patron_device_id_hash', 'sender_name'];
+  const normalizedValue = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const revocationReason = typeof reason === 'string' ? reason.trim() : '';
+  const idempotencyKey = typeof idempotency_key === 'string' ? idempotency_key.trim() : '';
+  const validValue = scope === 'patron_user_id'
+    ? UUID_PATTERN.test(normalizedValue)
+    : scope === 'patron_device_id_hash'
+      ? PATRON_DEVICE_ID_HASH_PATTERN.test(normalizedValue)
+      : scope === 'sender_name'
+        ? normalizedValue.length > 0 && normalizedValue.length <= 120
+        : false;
+
+  if (!allowedScopes.includes(scope) || !validValue || !revocationReason || revocationReason.length > 500 || !idempotencyKey || idempotencyKey.length > 200) {
+    return res.status(400).json({
+      error: "A valid scope, value, bounded reason, and idempotency_key are required."
     });
   }
 
-  return res.json({ success: true, moderation_action: 'block_added' });
+  if (!businessDb) {
+    return res.status(503).json({ error: 'Persistent moderation store is not configured.' });
+  }
+
+  const actorId = privilegedActor.actor.actorId;
+  const revokedAt = new Date();
+  const mutation = await executeModerationMutation({
+    actorId,
+    actionType: 'block_revoke',
+    idempotencyKey,
+    intent: { scope, normalizedValue, reason: revocationReason },
+    mutate: async (tx) => {
+      await lockModerationBlockIdentities(tx, [{ scope, normalizedValue }]);
+      const existingBlocks = await tx
+        .select({ id: activeBlocks.id, status: activeBlocks.status })
+        .from(activeBlocks)
+        .where(and(
+          eq(activeBlocks.scope, scope),
+          eq(activeBlocks.normalizedValue, normalizedValue)
+        ))
+        .for('update');
+      const activeBlock = existingBlocks.find((row: { status: string }) => row.status === 'active');
+      if (activeBlock && existingBlocks.length > 1) {
+        await tx.delete(activeBlocks).where(and(
+          eq(activeBlocks.scope, scope),
+          eq(activeBlocks.normalizedValue, normalizedValue),
+          ne(activeBlocks.id, activeBlock.id)
+        ));
+      }
+      const [revokedBlock] = await tx
+      .update(activeBlocks)
+      .set({
+        status: 'revoked',
+        revokedAt,
+        metadata: {
+          source: 'moderation.block.revoke',
+          revoked_by_actor_user_id: actorId,
+          revocation_reason: revocationReason
+        },
+        updatedAt: revokedAt
+      })
+      .where(and(
+        eq(activeBlocks.scope, scope),
+        eq(activeBlocks.normalizedValue, normalizedValue),
+        eq(activeBlocks.id, activeBlock?.id ?? '00000000-0000-0000-0000-000000000000'),
+        eq(activeBlocks.status, 'active')
+      ))
+      .returning({ id: activeBlocks.id, reason: activeBlocks.reason });
+
+      if (!revokedBlock) {
+        return {
+          status: 200,
+          body: { success: true, moderation_action: 'block_already_inactive', changed: false }
+        };
+      }
+
+    await tx.insert(moderationEvents).values({
+      actorUserId: actorId,
+      entityType: 'block_rule',
+      entityId: revokedBlock.id,
+      status: 'allowed',
+      reason: revocationReason,
+      metadata: {
+        action: 'revoke',
+        scope,
+        value: normalizedValue,
+        previous_reason: revokedBlock.reason,
+        source: 'moderation.block.revoke'
+      }
+    });
+
+    await writeAuditEvent(tx, {
+      actorId,
+      actorType: privilegedActor.role ?? 'unknown',
+      entityType: 'moderation_block',
+      entityId: `${scope}:${normalizedValue}`,
+      eventType: 'moderation.block.revoke',
+      previousStatus: 'blocked',
+      nextStatus: 'revoked',
+      metadata: {
+        scope,
+        value: normalizedValue,
+        reason: revocationReason,
+        previous_reason: revokedBlock.reason
+      }
+    });
+
+      return {
+        status: 200,
+        body: { success: true, moderation_action: 'block_revoked', changed: true }
+      };
+    }
+  });
+
+  return res.status(mutation.status).json(mutation.body);
 });
 
 app.post("/api/moderation/hide", async (req, res) => {

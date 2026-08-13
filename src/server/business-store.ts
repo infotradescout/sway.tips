@@ -5,6 +5,7 @@ import { createSwayDb, type SwayDb } from '../db/client';
 import type { FeeAttribution } from './fee-policy';
 import type { PendingActionOwner } from './idempotency-store';
 import {
+  activeBlocks,
   activeRoomRegistry,
   clientPendingActions,
   gigSessions,
@@ -15,6 +16,7 @@ import {
   promotionCampaigns,
   requestStatusEnum
 } from '../db/schema';
+import { lockModerationBlockIdentities, moderationBlockIdentities } from './moderation-block-lock';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 
@@ -973,6 +975,27 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       throw new Error('durable_request_activation_identity_required');
     }
     return db.transaction(async (tx) => {
+      const requestBlockIdentities = moderationBlockIdentities({
+        patronUserId: request.actorUserId,
+        patronDeviceIdHash: request.patronDeviceIdHash,
+        senderName: request.senderName
+      });
+      await lockModerationBlockIdentities(tx, requestBlockIdentities);
+      const [activeBlock] = requestBlockIdentities.length
+        ? await tx
+          .select({ id: activeBlocks.id })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.status, 'active'),
+            isNull(activeBlocks.revokedAt),
+            or(...requestBlockIdentities.map((identity) => and(
+              eq(activeBlocks.scope, identity.scope),
+              eq(activeBlocks.normalizedValue, identity.normalizedValue)
+            )))
+          ))
+          .limit(1)
+        : [];
+      if (activeBlock) throw new Error('active_moderation_block');
       const [room] = await tx
         .select({ status: gigSessions.status })
         .from(gigSessions)
@@ -1071,6 +1094,27 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       throw new Error('durable_boost_activation_identity_required');
     }
     return db.transaction(async (tx) => {
+      const boostBlockIdentities = moderationBlockIdentities({
+        patronUserId: boost.actorUserId ?? request.actorUserId,
+        patronDeviceIdHash: boost.patronDeviceIdHash,
+        senderName: boost.patronName
+      });
+      await lockModerationBlockIdentities(tx, boostBlockIdentities);
+      const [activeBlock] = boostBlockIdentities.length
+        ? await tx
+          .select({ id: activeBlocks.id })
+          .from(activeBlocks)
+          .where(and(
+            eq(activeBlocks.status, 'active'),
+            isNull(activeBlocks.revokedAt),
+            or(...boostBlockIdentities.map((identity) => and(
+              eq(activeBlocks.scope, identity.scope),
+              eq(activeBlocks.normalizedValue, identity.normalizedValue)
+            )))
+          ))
+          .limit(1)
+        : [];
+      if (activeBlock) throw new Error('active_moderation_block');
       const [room] = await tx
         .select({ status: gigSessions.status })
         .from(gigSessions)

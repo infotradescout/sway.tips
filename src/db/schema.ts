@@ -1446,7 +1446,22 @@ export const activeBlocks = pgTable('active_blocks', {
   ...timestamps
 }, (table) => ({
   scopeValueStatusIdx: uniqueIndex('active_blocks_scope_value_status_idx').on(table.scope, table.normalizedValue, table.status),
-  activeLookupIdx: index('active_blocks_scope_value_idx').on(table.scope, table.normalizedValue)
+  activeLookupIdx: index('active_blocks_scope_value_idx').on(table.scope, table.normalizedValue),
+  lifecycleShape: check('active_blocks_lifecycle_shape', sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`)
+}));
+
+export const moderationMutationKeys = pgTable('moderation_mutation_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  keyHash: text('key_hash').notNull(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  actionType: text('action_type').notNull(),
+  intentFingerprint: text('intent_fingerprint').notNull(),
+  firstResponseStatus: integer('first_response_status'),
+  firstResponseBody: jsonb('first_response_body'),
+  ...timestamps
+}, (table) => ({
+  keyHashIdx: uniqueIndex('moderation_mutation_keys_key_hash_idx').on(table.keyHash),
+  actionTypeAllowed: check('moderation_mutation_keys_action_type_allowed', sql`${table.actionType} in ('block', 'block_revoke')`)
 }));
 
 export const auditEvents = pgTable('audit_events', {
