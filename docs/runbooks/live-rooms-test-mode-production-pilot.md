@@ -155,4 +155,4 @@ Browser automation may assist, but the packet must still prove two independently
 
 ## Exit
 
-Fill the QA packet. Decision is **HOLD** until every required proof in `TEST_MODE_PILOT_MILESTONE_HOLD.md` is evidenced on the corrected deployed build. Passing this pilot does **not** authorize live Stripe or make test volume payable.
+Fill the QA packet. Before the milestone passes, decision is **HOLD** until every required proof in `TEST_MODE_PILOT_MILESTONE_HOLD.md` is evidenced on the corrected deployed build. The completed 2026-08-12 run is recorded separately; passing this pilot does **not** authorize live Stripe or make test volume payable.

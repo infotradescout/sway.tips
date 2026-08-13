@@ -43,7 +43,7 @@ Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md`.
 - Unfinished Self-Production does **not** make Live Rooms unfinished; judge lanes independently.
 - Release-chain hardening does **not** authorize live Stripe.
 
-**Next valid Live Rooms product milestone (HOLD until proven on production-hosted test mode):**
+**Completed Live Rooms product milestone (production-hosted test mode):**
 
 1. One performer account
 2. One separate audience account
@@ -56,11 +56,11 @@ Governing structure: `docs/SWAY_PRODUCT_STRUCTURE.md`.
 9. Database reconciliation
 10. Exact deployed-commit evidence
 
-Only after that milestone is proven may Sway consider live Stripe for Live Rooms.
+That milestone is proven in `docs/qa-packets/2026-08-11-live-rooms-test-mode-pilot.md`. Live Stripe remains HOLD pending a separate explicit owner authorization and release decision.
 
 **Out of scope for this Live Rooms gate (later Self-Production / independent lanes):** DSP delivery, ticket sales, royalty processing, collaborator payouts. Those gaps do not redefine Live Rooms as incomplete.
 
-Pilot hold criteria live in `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md` and `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
+Pilot criteria and completed evidence live in `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md` and `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`.
 
 ## Minimum release contract (local/optional evidence — NOT an Actions gate)
 

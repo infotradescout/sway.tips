@@ -4,7 +4,7 @@ Release evidence must use real command outputs only.
 
 No simulated validation is allowed. Simulated validation, invented command output, or soft-pass language is release-blocking.
 
-Release-chain evidence does **not** authorize live Stripe. The Live Rooms two-account Stripe test-mode production pilot remains HOLD — see `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`. Dual-lane product truth: `docs/SWAY_PRODUCT_STRUCTURE.md` (Live Rooms current; Self-Production in progress; DistroKid-class distribution is one Self-Production outlet, not Sway’s identity).
+Release-chain evidence does **not** authorize live Stripe. The Live Rooms two-account Stripe test-mode production pilot is PASS, while live Stripe remains a separate owner-authorized release gate — see `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`. Dual-lane product truth: `docs/SWAY_PRODUCT_STRUCTURE.md`.
 
 ## Minimum release contract checklist
 
@@ -136,4 +136,3 @@ Rollback or safe roll-forward record (required before accepting the deploy):
 - Decision:
 - Date:
 - Conditions:
-

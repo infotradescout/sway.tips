@@ -40,9 +40,9 @@ Judge this lane independently of Self-Production progress.
 |---|---|---|
 | Performer signup, login, and session | Implemented | Needs a current production role/access evidence packet |
 | Creator home and public profile | Implemented and deployed | Full audience-to-creator account journey remains unverified |
-| Live room, QR, requests, tips, boosts, and queue | Implemented with contracts and historical QA | Needs current production transaction proof for the complete loop |
-| Moderation, idempotency, and payment lifecycle | Implemented in code and contracts | Code/contracts alone are not production outcome evidence |
-| Overlay, earnings, closeout, and recap | Implemented | Needs current production live-night closeout evidence |
+| Live room, QR, requests, tips, boosts, and queue | Production verified in Stripe test mode | Test-mode milestone passed; live Stripe remains a separate release gate |
+| Moderation, idempotency, and payment lifecycle | Production verified for the test-mode pilot | Authorized active-block lifecycle, isolated control account, terminal denial, and zero-payment enforcement are recorded |
+| Overlay, earnings, closeout, and recap | Production verified for the test-mode pilot | Closed registry, terminal drain, and truthful non-payable test volume are recorded |
 | Unified account for audience and creator | Universal signup, login, session, logout, audience access, and Pro Mode activation are implemented | Full production audience-to-creator journey remains unverified |
 
 ## DistroKid-Replacement Pillar (Self-Production external-distribution outlet)

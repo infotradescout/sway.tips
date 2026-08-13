@@ -2,7 +2,7 @@
 
 ## Decision
 
-**PAYMENT/ROOM PILOT PASS; OVERALL MILESTONE HOLD.** The exact-current production build passed a separately authenticated two-account rehearsal for paid request authorization, performer approval and capture, paid boost capture, direct-tip capture, request-plus-boost refund isolation, terminal room closeout, and truthful test-volume recap. The broader milestone remains held only because production still lacks an authorized durable active-block enforcement proof.
+**LIVE ROOMS TEST-MODE PRODUCTION PILOT PASS.** The production evidence now covers the separately authenticated money-loop rehearsal and the final authorized durable active-block proof. This closes the test-mode pilot milestone; it does not authorize live Stripe.
 
 Passing items in this packet do not authorize live Stripe.
 
@@ -18,6 +18,8 @@ Passing items in this packet do not authorize live Stripe.
 - Exact-build health observed 2026-08-11 America/Chicago (2026-08-12 UTC): `/api/build-marker` and `/api/release-health` both reported `746ba8ef7b133e74d8e241db8e9fe01166c94eda`; the database was reachable, all 34 expected migrations were applied, and `releaseActive` was `true`.
 - Durable HTTP-versus-worker ownership fencing: source `b41fb2af2d3efd31495a9cd6101ccbf31390fedb`, merged as `042f528005a1ae57c66572ab8238b6b2bf23866b` (PR #193).
 - Exact-current-build health observed 2026-08-11 America/Chicago (2026-08-12 UTC): `/api/build-marker` and `/api/release-health` both reported `042f528005a1ae57c66572ab8238b6b2bf23866b`; release health additionally reported a reachable database, 35 of 35 expected migrations applied through `0034_boring_sebastian_shaw`, and `releaseActive: true`.
+- Active-block lifecycle hardening merged as `0609a891aa36e93d054bbaa9ad802eb872ee66d6` (PR #195). The first production probe correctly enforced a terminal HTTP 403 with no request or payment, and exposed that the public response sanitizer omitted the documented `outage_behavior` field.
+- Public moderation-outcome correction merged as `a0b2186ce08ab210c07bb42d5e17058102370dfd` (PR #196). Render deployed it as `dep-d9uhk03m8hqs7390s07g`; `/api/build-marker` and `/api/release-health` matched that exact commit, `releaseActive` was `true`, the database was reachable, and all 36 expected migrations were compatible and applied through `0035_active-block-lifecycle`.
 - Operator: repository owner with Codex-assisted browser, Stripe Dashboard, Render, and database verification.
 - Room/gig ID: `825b02fc-e8a9-4ece-9957-efa4bca8ed91`.
 - Room URL: `https://app.sway.tips/g/825b02fc-e8a9-4ece-9957-efa4bca8ed91`.
@@ -145,7 +147,7 @@ After more than three worker cycles, webhook nonterminal count was 0 and neither
 
 ## Moderation, Report, And Block
 
-**PARTIAL / HOLD.**
+**PASS on the exact corrected production build.**
 
 - The pilot window contains three held-for-review moderation events: request visibility, request report, and patron block request.
 - The report path returned evidence.
@@ -154,7 +156,12 @@ After more than three worker cycles, webhook nonterminal count was 0 and neither
 - The durable active-block database path is implemented and independently passed its disposable-PostgreSQL enforcement proof after PR #188. That is implementation evidence, not production evidence.
 - Production activation requires an authorized administrator. The available pilot identities do not carry that authority, and no account was impersonated, reset, or elevated to manufacture proof.
 
-Required rerun: prove either the intended held-for-review product contract explicitly, or complete an authorized durable block and verify enforcement from a separate audience account. Do not call the existing evidence an active block.
+- An existing administrator session activated the exact authenticated target account by `patron_user_id`; no account was promoted, reset, or impersonated.
+- The activation and exact replay both returned HTTP 200 with the same canonical `block_reactivated` response. Production reconciliation found one active row, one actor-attributed admin reactivation audit, and the expected moderation evidence.
+- The target account received terminal HTTP 403 with `outage_behavior: block_submission` and generic customer-safe copy. Reconciliation found zero blocked request rows, zero payment rows, and zero payment operations.
+- A newly created, separately verified control patron remained allowed and created exactly one free request while the target block was active.
+- Revocation and exact replay returned the same canonical `block_revoked` response; a new idempotency key returned `block_already_inactive` without changing state.
+- The target account could submit again after revocation. Both allowed proof requests were denied during cleanup.
 
 ## Shutdown And Drain
 
@@ -172,6 +179,8 @@ Required rerun: prove either the intended held-for-review product contract expli
 
 **PASS for the exact-current-build rerun.** The room and registry are closed, closeout is complete, the approved queue is empty, every payment and operation is terminal, all selected processor events are terminal without errors, and no payout started. The recap rendered `Stripe test volume — no real money`, `Not a bank payout total`, and disabled sharing for test volume.
 
+**PASS for the active-block proof shutdown.** The corrected-build proof room and registry are `closed`; pending/approved proof requests are zero; payments and payment operations are zero; the proof block is revoked; the target, control, and performer proof sessions were revoked; and zero unrevoked proof blocks remain.
+
 - After the bounded run, Render deployed the same exact merge with `SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED=false` and an empty performer allowlist. `/api/payment/config` then reported `testModePlatformBalanceEnabled: false`.
 - `/api/build-marker` and `/api/release-health` still matched `042f528005a1ae57c66572ab8238b6b2bf23866b`; release health remained active with a reachable database and 35 of 35 migrations applied.
 - The performer logged out and the protected browser returned to the public Sway entry surface. A redacted database query found zero active unexpired sessions for the bounded test identities.
@@ -187,17 +196,16 @@ Required rerun: prove either the intended held-for-review product contract expli
 - The earlier corrected production rerun exercised the refund confirmation dialog on PR #190. The visual-viewport hardening itself is bound to exact deployed source plus rendered browser proof; this packet does not pretend that local rendered coverage is a production-device observation.
 - The exact-current-build two-account browser run used the production payment dialog for request, boost, and direct tip authorization, then used the production remove-and-reverse confirmation dialog. All controls remained usable in the tested desktop browser contexts.
 
-## Required Next Proof
+## Optional Follow-Up Evidence
 
-1. Prove production active-block enforcement with an authorized administrator, or obtain product-owner acceptance that the intended production outcome remains held-for-review.
-2. If needed for complete patron-label coverage, separately re-observe the short-lived `released` and `refund_pending` UI states; do not conflate that display-matrix gap with the durable terminal void/refund proof already established.
+If useful for a broader UI evidence matrix, separately re-observe the short-lived `released` and `refund_pending` labels. That optional display observation is not a blocker for the already proven durable void/refund outcomes or this completed test-mode pilot milestone.
 
 ## Explicit Non-Claims
 
 - This packet does not claim App Store readiness.
 - This packet does not claim live Stripe readiness or live-money behavior.
 - Stripe test volume is not earnings, a payout, or transferable money.
-- This exact-current-build two-account proof does not authorize test accounts for live operation or prove any privileged administrator workflow.
-- A held block request does not prove a durable active block.
+- This exact-current-build proof does not authorize test accounts for live operation.
+- Earlier held-for-review patron block requests remain distinct from the later authorized durable active-block proof.
 - Local tests, a deploy status, or a build marker alone do not complete the pilot.
 - The rendered visual-viewport test does not claim a production-device screenshot.
