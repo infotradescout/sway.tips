@@ -58,8 +58,11 @@ The endpoint intentionally exposes no account ID, bucket name, key, secret, obje
 Run:
 
 ```powershell
+npm run fixture:audio:production
 npm run test:integration:audio-durable-storage
 ```
+
+The fixture command creates a deterministic, synthetic one-second WAV in the operating-system temporary directory and reports only its path, byte count, and SHA-256. It must be used instead of a creator-owned master for browser and recovery proof.
 
 The deterministic R2-compatible proof covers:
 
@@ -78,7 +81,7 @@ It does not prove the live Cloudflare account, live Render secrets, recovery cop
 
 ## Production Evidence Gate
 
-Use a generated, non-user-owned audio fixture and record:
+Use the generated, non-user-owned audio fixture from `npm run fixture:audio:production` and record:
 
 1. deployed commit marker;
 2. runtime config status showing verified R2 access;

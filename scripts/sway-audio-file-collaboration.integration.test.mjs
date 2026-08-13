@@ -10,6 +10,7 @@ import {
   audioFileAccessGrants,
   audioFileConnections,
   audioProjectAccessGrants,
+  audioShareGrants,
   audioReviewEvents,
   auditEvents,
   musicRecordingCredits,
@@ -69,11 +70,21 @@ try {
     SWAY_AUDIO_LOCAL_BUCKET: 'collaboration-proof'
   });
   let openOriginalCount = 0;
+  let failNextOriginalOpen = false;
+  let waitAfterOriginalOpen = null;
+  const openedOriginalStreams = [];
   const countedStore = {
     ...localStore,
     async openOriginal(identity) {
       openOriginalCount += 1;
-      return localStore.openOriginal(identity);
+      if (failNextOriginalOpen) {
+        failNextOriginalOpen = false;
+        throw new Error('forced object storage open failure');
+      }
+      const object = await localStore.openOriginal(identity);
+      openedOriginalStreams.push(object.stream);
+      if (waitAfterOriginalOpen) await waitAfterOriginalOpen();
+      return object;
     }
   };
   await countedStore.verifyReady();
@@ -176,6 +187,156 @@ try {
     actorUserId: ownerId,
     performerId: performer.id
   });
+
+  const oneTimeShare = await publishing.createShareGrant({
+    versionId: version.id,
+    actorUserId: ownerId,
+    maxUses: 1,
+    recipientLabel: 'single-use recovery proof'
+  });
+  const oneTimeDownloadAuditWhere = and(
+    eq(auditEvents.entityType, 'audio_share_grant'),
+    eq(auditEvents.entityId, oneTimeShare.grant.id),
+    eq(auditEvents.eventType, 'audio_share_grant.download')
+  );
+  failNextOriginalOpen = true;
+  await assert.rejects(
+    publishing.downloadSharedOriginal({ rawToken: oneTimeShare.rawToken, actorUserId: ownerId }),
+    /forced object storage open failure/
+  );
+  assert.equal(
+    (await db.select({ useCount: audioShareGrants.useCount })
+      .from(audioShareGrants)
+      .where(eq(audioShareGrants.id, oneTimeShare.grant.id)))[0]?.useCount,
+    0,
+    'A storage-provider failure must not consume the only permitted download.'
+  );
+  assert.equal(
+    (await db.select().from(auditEvents).where(oneTimeDownloadAuditWhere)).length,
+    0,
+    'A storage-provider failure must not record a completed download.'
+  );
+
+  await db.execute(sql.raw(`
+    CREATE OR REPLACE FUNCTION sway_test_reject_share_download_audit()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $test$
+    BEGIN
+      IF NEW.event_type = 'audio_share_grant.download' THEN
+        RAISE EXCEPTION 'forced share download audit failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $test$
+  `));
+  await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_share_download_audit_trigger ON audit_events'));
+  await db.execute(sql.raw(`
+    CREATE TRIGGER sway_test_reject_share_download_audit_trigger
+    BEFORE INSERT ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION sway_test_reject_share_download_audit()
+  `));
+  const failedAuditStreamIndex = openedOriginalStreams.length;
+  try {
+    await assert.rejects(
+      publishing.downloadSharedOriginal({ rawToken: oneTimeShare.rawToken, actorUserId: ownerId }),
+      (error) => {
+        assert.match(`${error?.message || ''} ${error?.cause?.message || ''}`, /forced share download audit failure/);
+        return true;
+      }
+    );
+  } finally {
+    await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_reject_share_download_audit_trigger ON audit_events'));
+    await db.execute(sql.raw('DROP FUNCTION IF EXISTS sway_test_reject_share_download_audit()'));
+  }
+  assert.equal(openedOriginalStreams[failedAuditStreamIndex]?.destroyed, true, 'Rolled-back downloads must close the opened object stream.');
+  assert.equal(
+    (await db.select({ useCount: audioShareGrants.useCount })
+      .from(audioShareGrants)
+      .where(eq(audioShareGrants.id, oneTimeShare.grant.id)))[0]?.useCount,
+    0,
+    'A failed audit write must roll back the use increment.'
+  );
+  assert.equal((await db.select().from(auditEvents).where(oneTimeDownloadAuditWhere)).length, 0);
+
+  const oneTimeDownload = await publishing.downloadSharedOriginal({
+    rawToken: oneTimeShare.rawToken,
+    actorUserId: ownerId
+  });
+  assert.deepEqual(await streamToBuffer(oneTimeDownload.stream), body);
+  assert.equal(oneTimeDownload.version.sha256, sha256);
+  assert.equal(
+    (await db.select({ useCount: audioShareGrants.useCount })
+      .from(audioShareGrants)
+      .where(eq(audioShareGrants.id, oneTimeShare.grant.id)))[0]?.useCount,
+    1
+  );
+  assert.equal((await db.select().from(auditEvents).where(oneTimeDownloadAuditWhere)).length, 1);
+  const exhaustedOpenBaseline = openOriginalCount;
+  await assert.rejects(
+    publishing.downloadSharedOriginal({ rawToken: oneTimeShare.rawToken, actorUserId: ownerId }),
+    /Share grant exhausted/
+  );
+  assert.equal(openOriginalCount, exhaustedOpenBaseline, 'An exhausted token must fail before object storage.');
+
+  const concurrentShare = await publishing.createShareGrant({
+    versionId: version.id,
+    actorUserId: ownerId,
+    maxUses: 1,
+    recipientLabel: 'concurrent single-use proof'
+  });
+  let concurrentOpenArrivals = 0;
+  let releaseConcurrentOpens = () => {};
+  const concurrentOpensReleased = new Promise((resolve) => {
+    releaseConcurrentOpens = resolve;
+  });
+  waitAfterOriginalOpen = async () => {
+    concurrentOpenArrivals += 1;
+    if (concurrentOpenArrivals === 2) releaseConcurrentOpens();
+    await concurrentOpensReleased;
+  };
+  const concurrentStreamBaseline = openedOriginalStreams.length;
+  let concurrentAttempts;
+  const concurrentBarrierTimeout = setTimeout(releaseConcurrentOpens, 5_000);
+  try {
+    concurrentAttempts = await Promise.allSettled([
+      publishing.downloadSharedOriginal({ rawToken: concurrentShare.rawToken, actorUserId: ownerId }),
+      publishing.downloadSharedOriginal({ rawToken: concurrentShare.rawToken, actorUserId: ownerId })
+    ]);
+  } finally {
+    clearTimeout(concurrentBarrierTimeout);
+    waitAfterOriginalOpen = null;
+  }
+  assert.equal(concurrentOpenArrivals, 2, 'Both concurrent attempts must reach the storage-open barrier.');
+  assert.equal(concurrentAttempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+  assert.equal(concurrentAttempts.filter((attempt) => attempt.status === 'rejected').length, 1);
+  assert.equal(
+    openedOriginalStreams.slice(concurrentStreamBaseline).filter((stream) => stream.destroyed).length,
+    1,
+    'The losing concurrent attempt must close its opened object stream.'
+  );
+  const concurrentSuccess = concurrentAttempts.find((attempt) => attempt.status === 'fulfilled');
+  assert.deepEqual(await streamToBuffer(concurrentSuccess.value.stream), body);
+  assert.match(
+    String(concurrentAttempts.find((attempt) => attempt.status === 'rejected').reason),
+    /Share grant could not be consumed/
+  );
+  assert.equal(
+    (await db.select({ useCount: audioShareGrants.useCount })
+      .from(audioShareGrants)
+      .where(eq(audioShareGrants.id, concurrentShare.grant.id)))[0]?.useCount,
+    1,
+    'Concurrent one-time downloads must consume exactly one use.'
+  );
+  assert.equal(
+    (await db.select().from(auditEvents).where(and(
+      eq(auditEvents.entityType, 'audio_share_grant'),
+      eq(auditEvents.entityId, concurrentShare.grant.id),
+      eq(auditEvents.eventType, 'audio_share_grant.download')
+    ))).length,
+    1,
+    'Concurrent one-time downloads must commit exactly one audit event.'
+  );
 
   async function sealSupportingFile({ title, assetKind, mimeType, body }) {
     const digest = createHash('sha256').update(body).digest('hex');
@@ -533,6 +694,7 @@ try {
     { declarationType: 'artwork_control', recordingId: null },
     { declarationType: 'distribution_authorization', recordingId: null }
   ];
+  const rightsEvidenceOpenBaseline = openOriginalCount;
   for (const [declarationIndex, requiredDeclaration] of requiredDeclarations.entries()) {
     const declaration = await publishing.createRightsDeclaration({
       releaseId,
@@ -569,6 +731,7 @@ try {
       /Open the exact sealed rights document/
     );
     if (declarationIndex === 0) {
+      const deniedRightsOpenBaseline = openOriginalCount;
       await assert.rejects(
         publishing.openRightsReviewDocument({ declarationId: declaration.id, actorUserId: ownerId }),
         /independent project reviewer/
@@ -581,7 +744,7 @@ try {
         publishing.openRightsReviewDocument({ declarationId: declaration.id, actorUserId: expiredReviewerId }),
         /Release review permission required/
       );
-      assert.equal(openOriginalCount, 0, 'Denied rights-document access must not reach object storage.');
+      assert.equal(openOriginalCount, deniedRightsOpenBaseline, 'Denied rights-document access must not reach object storage.');
     }
     const openedEvidence = await publishing.openRightsReviewDocument({
       declarationId: declaration.id,
@@ -612,7 +775,11 @@ try {
   assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 6);
   assert.equal((await publishing.listRightsReviewQueue({ actorUserId: reviewerId })).length, 0);
   const evidenceOpenCount = openOriginalCount;
-  assert.equal(evidenceOpenCount, 6, 'Each recording- or release-scoped declaration must open its exact sealed evidence once.');
+  assert.equal(
+    evidenceOpenCount,
+    rightsEvidenceOpenBaseline + requiredDeclarations.length,
+    'Each recording- or release-scoped declaration must open its exact sealed evidence once.'
+  );
   const publicRelease = await publishing.getPublicRelease({ releaseId });
   assert.equal(publicRelease?.status, 'ready');
   assert.deepEqual(

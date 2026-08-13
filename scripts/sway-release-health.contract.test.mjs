@@ -95,7 +95,8 @@ for (const term of [
 }
 
 for (const term of [
-  'HOLD until proven',
+  'Live Rooms test-mode production pilot milestone — PASS',
+  '**Status:** PASS as of',
   'does **not** authorize live Stripe',
   'One performer account',
   'One separate audience account',

@@ -747,29 +747,49 @@ export function createAudioPublishingService(config: {
       .limit(1);
     if (!version) throw new Error('Shared asset version not found.');
 
-    const updated = await db
-      .update(audioShareGrants)
-      .set({ useCount: grant.useCount + 1 })
-      .where(and(
-        eq(audioShareGrants.id, grant.id),
-        eq(audioShareGrants.useCount, grant.useCount)
-      ))
-      .returning();
-    if (!updated[0]) throw new Error('Share grant could not be consumed.');
-
-    await writeAudit(db, {
-      actorId: input.actorUserId,
-      entityType: 'audio_share_grant',
-      entityId: grant.id,
-      eventType: 'audio_share_grant.download',
-      metadata: { versionId: version.id, sha256: version.sha256 }
-    });
-
     const object = await store.openOriginal({
       storageProvider: parseAudioStorageProvider(version.storageProvider),
       storageBucket: version.storageBucket,
       storageKey: version.storageKey
     });
+
+    try {
+      await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(audioShareGrants)
+          .set({ useCount: grant.useCount + 1 })
+          .where(and(
+            eq(audioShareGrants.id, grant.id),
+            eq(audioShareGrants.assetVersionId, version.id),
+            eq(audioShareGrants.useCount, grant.useCount),
+            isNull(audioShareGrants.revokedAt),
+            or(
+              isNull(audioShareGrants.expiresAt),
+              gt(audioShareGrants.expiresAt, new Date())
+            ),
+            or(
+              isNull(audioShareGrants.maxUses),
+              sql`${audioShareGrants.useCount} < ${audioShareGrants.maxUses}`
+            )
+          ))
+          .returning();
+        if (!updated) throw new Error('Share grant could not be consumed.');
+
+        await tx.insert(auditEvents).values({
+          actorType: 'performer',
+          actorId: input.actorUserId,
+          entityType: 'audio_share_grant',
+          entityId: grant.id,
+          eventType: 'audio_share_grant.download',
+          previousStatus: null,
+          nextStatus: null,
+          metadata: { versionId: version.id, sha256: version.sha256 }
+        });
+      });
+    } catch (error) {
+      object.stream.destroy();
+      throw error;
+    }
 
     return { version, ...object };
   }
