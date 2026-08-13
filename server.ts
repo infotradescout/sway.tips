@@ -122,6 +122,11 @@ import {
 import { createConfiguredAudioObjectStore } from "./src/server/audio-object-storage";
 import { createAudioPublishingService } from "./src/server/audio-publishing-service";
 import {
+  AudioStorageObjectLimitError,
+  AudioStorageQuotaError,
+  createAudioStoragePolicy
+} from "./src/server/audio-storage-policy";
+import {
   AUDIO_UPLOAD_PART_MAX_BYTES,
   AUDIO_UPLOAD_PART_PATH_PATTERN,
   createAudioUploadPartBodyParser
@@ -218,9 +223,15 @@ const audioObjectStore = (() => {
     return null;
   }
 })();
+const audioStoragePolicy = createAudioStoragePolicy({ env: process.env });
 let audioObjectStoreVerified = false;
 const audioPublishingService = businessDb && audioObjectStore
-  ? createAudioPublishingService({ db: businessDb, store: audioObjectStore })
+  ? createAudioPublishingService({
+      db: businessDb,
+      store: audioObjectStore,
+      workspaceLimitBytes: audioStoragePolicy.workspaceLimitBytes,
+      workingObjectLimit: audioStoragePolicy.workingObjectLimit
+    })
   : null;
 const audioFilePairingService = businessDb
   ? createAudioFilePairingService({ db: businessDb })
@@ -3846,7 +3857,11 @@ app.get('/api/runtime-config-status', (_req, res) => {
     audioStorage: {
       enabled: Boolean(audioObjectStore?.isEnabled),
       provider: audioObjectStore?.provider ?? null,
-      objectStorageVerified: audioObjectStoreVerified
+      objectStorageVerified: audioObjectStoreVerified,
+      workingStorageBounded: true,
+      workspaceLimitBytes: audioStoragePolicy.workspaceLimitBytes,
+      workingObjectLimit: audioStoragePolicy.workingObjectLimit,
+      releaseCountLimit: audioStoragePolicy.releaseCountLimit
     },
     liveRoomDurabilityWritesEnabled,
     liveRoomDurabilityKillSwitchActive,
@@ -9585,6 +9600,28 @@ function requireAudioPublishingRuntime(res: express.Response): boolean {
   return true;
 }
 
+app.get('/api/talent/audio/storage-usage', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) return res.status(403).json({ error: 'Only the performer owner can view release workspace usage.' });
+
+  try {
+    const storageUsage = await audioPublishingService.getStorageUsage({
+      performerId: performerOwner.performerId
+    });
+    return res.json({ storageUsage });
+  } catch (error) {
+    return res.status(503).json({
+      error: error instanceof Error ? error.message : 'Release workspace usage is temporarily unavailable.'
+    });
+  }
+});
+
 app.get('/api/talent/audio/projects', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
@@ -10050,6 +10087,26 @@ app.post('/api/talent/audio/projects/:projectId/uploads', async (req, res) => {
     }
     return res.status(201).json({ uploadSession: session });
   } catch (error) {
+    if (error instanceof AudioStorageQuotaError) {
+      return res.status(413).json({
+        error: 'This file does not fit in the performer release workspace.',
+        code: error.code,
+        workspaceLimitBytes: error.workspaceLimitBytes,
+        workingBytes: error.workingBytes,
+        requestedBytes: error.requestedBytes,
+        availableWorkspaceBytes: error.availableWorkspaceBytes,
+        releaseCountLimit: null
+      });
+    }
+    if (error instanceof AudioStorageObjectLimitError) {
+      return res.status(429).json({
+        error: 'This performer has reached the working-file count safeguard. Ready releases are not limited.',
+        code: error.code,
+        workingObjectCount: error.workingObjectCount,
+        workingObjectLimit: error.workingObjectLimit,
+        releaseCountLimit: null
+      });
+    }
     return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not start upload.' });
   }
 });
@@ -14752,6 +14809,35 @@ function startLiveRoomPaymentWorker() {
   timer.unref();
 }
 
+function startAudioUploadCleanupWorker() {
+  if (!audioPublishingService) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const result = await audioPublishingService.expireStaleUploadSessions({ limit: 100 });
+      if (result.failedCount > 0) {
+        console.warn(
+          `[sway.audio] ${result.failedCount} expired multipart upload(s) could not be aborted and will retry.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        '[sway.audio] expired multipart cleanup failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, 15 * 60 * 1000);
+  timer.unref();
+}
+
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
   if (audioObjectStore) {
@@ -14762,6 +14848,7 @@ async function startServer() {
   await refreshBusinessState();
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
+  startAudioUploadCleanupWorker();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

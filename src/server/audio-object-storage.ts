@@ -29,6 +29,9 @@ export type AudioObjectStore = {
     mimeType: string;
   }) => Promise<AudioObjectIdentity>;
   abortUpload: (identity: AudioObjectIdentity) => Promise<void>;
+  // Failure-only cleanup. Unlike abortUpload, this may remove a temporary
+  // completed object and an unsealed target created before integrity failed.
+  discardUpload?: (identity: AudioObjectIdentity) => Promise<void>;
   writePart: (input: {
     identity: AudioObjectIdentity;
     partNumber: number;

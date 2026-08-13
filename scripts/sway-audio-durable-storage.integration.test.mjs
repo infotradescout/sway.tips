@@ -39,6 +39,7 @@ for (const term of [
   "Production audio storage requires SWAY_AUDIO_STORAGE_PROVIDER=r2.",
   'beginUpload:',
   'abortUpload:',
+  'discardUpload?:',
   'verifyReady:'
 ]) {
   if (!dispatcher.includes(term)) failures.push(`Audio storage contract is missing provider-neutral control: ${term}`);
@@ -72,7 +73,7 @@ if (service.includes("storageProvider: 'local_private_fs'")) {
   failures.push('Publishing service must never relabel provider-backed identities as local filesystem objects.');
 }
 const sealTransaction = service.slice(
-  service.indexOf('return db.transaction(async (tx) => {', service.indexOf('async function completeAndSealUpload')),
+  service.indexOf('const outcome = await db.transaction(async (tx) => {', service.indexOf('async function completeAndSealUpload')),
   service.indexOf('async function createShareGrant')
 );
 const completedSessionWrite = sealTransaction.indexOf("uploadStatus: 'completed'");
@@ -457,6 +458,38 @@ async function runBehaviorProof() {
     assert.equal(client.uploads.has(orphan.providerUploadId), true);
     await store.abortUpload(orphan);
     assert.equal(client.uploads.has(orphan.providerUploadId), false, 'Aborted database work must not leave an R2 multipart upload.');
+
+    const failedIntegrity = await store.beginUpload({
+      projectId: 'project-1',
+      uploadSessionId: 'failed-integrity-1',
+      filename: 'failed.wav',
+      mimeType: 'audio/wav'
+    });
+    const failedBytes = Buffer.from('RIFF0000WAVE failed integrity proof');
+    const failedPart = await store.writePart({
+      identity: failedIntegrity,
+      partNumber: 1,
+      body: failedBytes
+    });
+    await assert.rejects(
+      store.assembleParts({
+        identity: failedIntegrity,
+        parts: [{ partNumber: 1, etag: failedPart.etag }],
+        expectedByteSize: failedBytes.byteLength,
+        expectedSha256: '0'.repeat(64),
+        mimeType: 'audio/wav'
+      }),
+      /integrity mismatch/
+    );
+    assert.equal(client.objects.has(failedIntegrity.storageKey), true, 'A provider copy may exist before final integrity verification fails.');
+    await store.discardUpload(failedIntegrity);
+    assert.equal(client.uploads.has(failedIntegrity.providerUploadId), false, 'Failed-upload discard must remove multipart state.');
+    assert.equal(client.objects.has(failedIntegrity.storageKey), false, 'Failed-upload discard must remove the unsealed target object.');
+    assert.equal(
+      [...client.objects.keys()].some((key) => key.includes('/failed-integrity-1/')),
+      false,
+      'Failed-upload discard must remove completed staging bytes.'
+    );
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

@@ -47,6 +47,12 @@ services:
         value: r2
       - key: SWAY_AUDIO_R2_BUCKET
         value: sway-audio-originals
+      # Working uploads and unreleased files are bounded without limiting the
+      # number of releases or deleting immutable release-package originals.
+      - key: SWAY_AUDIO_WORKSPACE_LIMIT_BYTES
+        value: "5368709120"
+      - key: SWAY_AUDIO_WORKING_OBJECT_LIMIT
+        value: "10000"
       - key: SWAY_AUDIO_R2_ACCOUNT_ID
         sync: false
       - key: SWAY_AUDIO_R2_ACCESS_KEY_ID

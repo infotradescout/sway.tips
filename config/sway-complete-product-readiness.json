@@ -20,6 +20,8 @@
           "status": "implemented_unverified",
           "evidence": [
             "scripts/sway-audio-durable-storage.integration.test.mjs",
+            "scripts/sway-audio-storage-policy.integration.test.mjs",
+            "scripts/sway-audio-storage-policy.contract.test.mjs",
             "scripts/sway-production-audio-proof.mjs",
             "scripts/sway-production-audio-evidence-audit.mjs",
             "docs/qa-packets/2026-07-22-audio-production-evidence.md",

@@ -34,6 +34,27 @@ type Version = {
   sha256: string;
   mimeType: string;
 };
+
+type StorageUsage = {
+  workspaceLimitBytes: number;
+  workingBytes: number;
+  sealedWorkingBytes: number;
+  reservedBytes: number;
+  releaseProtectedBytes: number;
+  availableWorkspaceBytes: number;
+  workingObjectCount: number;
+  workingObjectLimit: number;
+  releaseCountLimit: null;
+};
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** unitIndex);
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
+}
+
 export default function PerformerAudioFiles() {
   const [open, setOpen] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -47,6 +68,7 @@ export default function PerformerAudioFiles() {
   const [connections, setConnections] = useState<FileConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [collaborationRefreshKey, setCollaborationRefreshKey] = useState(0);
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
 
   const refreshProjects = async () => {
     const response = await fetch('/api/talent/audio/projects', { cache: 'no-store' });
@@ -69,6 +91,15 @@ export default function PerformerAudioFiles() {
     setVersions(data.versions || []);
   };
 
+  const refreshStorageUsage = async () => {
+    const response = await fetch('/api/talent/audio/storage-usage', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Could not load release workspace usage.');
+    const nextUsage = data.storageUsage as StorageUsage;
+    setStorageUsage(nextUsage);
+    return nextUsage;
+  };
+
   const handleConnectionsLoaded = useCallback((nextConnections: FileConnection[]) => {
     setConnections(nextConnections);
     setSelectedConnectionId((current) => nextConnections.some((connection) => connection.connectionId === current)
@@ -82,6 +113,7 @@ export default function PerformerAudioFiles() {
     setBusy(true);
     try {
       const projectId = await refreshProjects();
+      await refreshStorageUsage();
       if (projectId) await refreshAssets(projectId);
       else setVersions([]);
       setStatus(null);
@@ -119,6 +151,14 @@ export default function PerformerAudioFiles() {
 
   const uploadFile = async (file: File | null) => {
     if (!file) return;
+    if (storageUsage && file.size > storageUsage.availableWorkspaceBytes) {
+      setStatus(`This file needs ${formatBytes(file.size)}, but ${formatBytes(storageUsage.availableWorkspaceBytes)} remains in your release workspace.`);
+      return;
+    }
+    if (storageUsage && storageUsage.workingObjectCount >= storageUsage.workingObjectLimit) {
+      setStatus('Your working-file safeguard is full. Ready releases are not limited; finish a release or contact support for retained-file review.');
+      return;
+    }
     setBusy(true);
     setStatus(`Hashing ${file.name}…`);
     setShareToken(null);
@@ -177,10 +217,11 @@ export default function PerformerAudioFiles() {
       });
       const completeData = await complete.json().catch(() => ({}));
       if (!complete.ok) throw new Error(completeData?.error || 'Could not seal upload.');
-      await refreshAssets(projectId);
+      await Promise.all([refreshAssets(projectId), refreshStorageUsage()]);
       setStatus(`Sealed v${completeData.version.versionNumber} · ${completeData.version.sha256.slice(0, 12)}…`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Upload failed.');
+      void refreshStorageUsage().catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -278,6 +319,34 @@ export default function PerformerAudioFiles() {
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" /> : null}
       </div>
 
+      {storageUsage ? (
+        <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-black text-cyan-100">Release workspace</span>
+            <span className="font-bold text-slate-300">
+              {formatBytes(storageUsage.workingBytes)} of {formatBytes(storageUsage.workspaceLimitBytes)} working storage
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800" aria-hidden="true">
+            <div
+              className="h-full rounded-full bg-cyan-400 transition-[width]"
+              style={{ width: `${Math.min(100, (storageUsage.workingBytes / storageUsage.workspaceLimitBytes) * 100)}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+            Release count is unlimited. Draft files and active uploads use this working pool. Only the exact file versions in an immutable, validated release-package manifest leave the pool; changing a release or delivery status is not enough. Sway preserves sealed originals and does not silently delete them to make room.
+          </p>
+          <p className="mt-1 text-[10px] text-slate-500">
+            {storageUsage.workingObjectCount.toLocaleString()} of {storageUsage.workingObjectLimit.toLocaleString()} working-file records. This safeguard limits storage abuse, not releases.
+          </p>
+          {storageUsage.releaseProtectedBytes > 0 ? (
+            <p className="mt-1 text-[10px] font-bold text-emerald-300">
+              {formatBytes(storageUsage.releaseProtectedBytes)} preserved in validated release-package manifests outside the working pool.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <label className="relative mt-4 inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white focus-within:ring-2 focus-within:ring-fuchsia-300 disabled:opacity-50">
           <Upload className="h-4 w-4" aria-hidden="true" />
           Add Catalog file
@@ -286,7 +355,9 @@ export default function PerformerAudioFiles() {
             accept="audio/*,image/*,application/pdf,text/plain"
             aria-label="Add audio to Catalog"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-            disabled={busy}
+            disabled={busy
+              || storageUsage?.availableWorkspaceBytes === 0
+              || (storageUsage != null && storageUsage.workingObjectCount >= storageUsage.workingObjectLimit)}
             onChange={(event) => uploadFile(event.target.files?.[0] ?? null)}
           />
       </label>
