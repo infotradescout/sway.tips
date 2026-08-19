@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { auditEvents } from '../db/schema';
+import { SWAY_INTERNAL_QA_JOURNEY_PREFIX } from '../traffic-truth-contract';
 import { writeAuditEvent } from './audit-log';
 import {
   SWAY_DISCOVERY_EXPERIMENTS,
@@ -273,6 +274,9 @@ export function createDiscoveryObservatoryStore(db: any) {
       .from(auditEvents)
       .where(and(
         gte(auditEvents.createdAt, input.since),
+        // Explicit internal QA remains durable for audit, but it must never
+        // inflate the operator-facing discovery and conversion funnels.
+        sql`coalesce(${auditEvents.metadata}->>'journey_id', '') not like ${`${SWAY_INTERNAL_QA_JOURNEY_PREFIX}%`}`,
         sql`(
           ${auditEvents.eventType} like 'discovery_%'
           or ${auditEvents.eventType} in (
