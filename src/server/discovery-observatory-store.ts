@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { auditEvents } from '../db/schema';
+import { projectHumanTrafficAuditRows } from '../traffic-truth';
 import { writeAuditEvent } from './audit-log';
 import {
   SWAY_DISCOVERY_EXPERIMENTS,
@@ -261,7 +262,7 @@ export function createDiscoveryObservatoryStore(db: any) {
 
   async function listDiscoveryAuditRows(input: { since: Date; limit?: number }) {
     const limit = Math.max(1, Math.min(20_000, Math.trunc(input.limit ?? 10_000)));
-    return db
+    const rawRows = await db
       .select({
         eventId: auditEvents.eventId,
         entityType: auditEvents.entityType,
@@ -277,13 +278,17 @@ export function createDiscoveryObservatoryStore(db: any) {
           ${auditEvents.eventType} like 'discovery_%'
           or ${auditEvents.eventType} in (
             'room_entry_viewed', 'room_entry_attempted', 'room_entry_completed', 'request_started',
-            'tip_action_completed',
+            'boost_started', 'tip_action_completed',
             'internal_search_zero_result'
           )
         )`
       ))
       .orderBy(desc(auditEvents.createdAt), desc(auditEvents.eventId))
       .limit(limit);
+
+    const projection = projectHumanTrafficAuditRows(rawRows);
+    console.info('Sway traffic-truth observatory projection.', projection.summary);
+    return projection.rows;
   }
 
   return {
