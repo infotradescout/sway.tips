@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
 import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
+import { beginTrafficTruthObservation } from './traffic-truth';
 
 export type SwayActor = {
   actorId: string | null;
@@ -705,6 +706,19 @@ export function createAccessControl({
 
 export function routeFamilyGuard(accessControl: AccessControl) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    const trafficTruth = beginTrafficTruthObservation(req, res);
+    if (trafficTruth.blockAsScanner) {
+      res
+        .status(404)
+        .set({
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff'
+        })
+        .send('Not found.');
+      return;
+    }
+
     const shell = req.headers['x-sway-shell'];
     const demoPreviewShellAllowed =
       process.env.NODE_ENV !== 'production' &&
