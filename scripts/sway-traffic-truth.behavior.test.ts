@@ -104,38 +104,72 @@ assert.equal(botRequest.body.attribution_channel, 'known_bot:direct');
 const qaRequest = {
   method: 'POST',
   path: '/api/analytics/shell',
-  originalU\›ˆ	ËØ\KØ[˜[]XÜËÜÚ[	ËˆXY\œÎˆÈ	Ý\Ù\‹XYÙ[	Îˆ[X[•XHKˆ\ˆ	ÌNNLKŒLŽIËˆ›ÙNˆÈ]šX][Û—ØÚ[›™[ˆ	Ù\™XÝ	ÈBŸNÂ˜\ÜÙ\™\]X[
-Û\ÜÚYžU˜Y™šXÔ™\]Y\Ý
-XT™\]Y\Ý\È™]™\‹ÈÕÐVWÕQ‘’P×Õ•UÔPWÒTÎˆ	ÌNNLKŒLŽIÈJK	ÜXWØ]]ÛX][Û‰ÊNÂ˜\ÜÙ\™\]X[
-\U˜Y™šXÕ]Õ[[Y]žT™\]Y\Ý
-XT™\]Y\Ý\È™]™\‹ÈÕÐVWÕQ‘’P×Õ•UÔPWÒTÎˆ	ÌNNLKŒLŽIÈJK	ÜXWØ]]ÛX][Û‰ÊNÂ˜\ÜÙ\™\]X[
-XT™\]Y\Ý˜›ÙK˜]šX][Û—ØÚ[›™[	ÜXWØ]]ÛX][ÛŽ™\™XÝ	ÊNÂ‚˜ÛÛœÝXSX\šÙ\”™\]Y\ÝHÂˆY]Ùˆ	ÔÔÕ	Ëˆ]ˆ	ËØ\KØ[˜[]XÜËÜÚ[	ËˆÜšYÚ[˜[\›ˆ	ËØ\KØ[˜[]XÜËÜÚ[ÜÝØ^WÜXOLIËˆXY\œÎˆÈ	Ý\Ù\‹XYÙ[	Îˆ[X[•XHKˆ\ˆ	ÌŒËŒŒLLËŒLÉËˆ›ÙNˆÈ]šX][Û—ØÚ[›™[ˆ	Ù\™XÝ	ÈBŸNÂ˜\ÜÙ\™\]X[
-Û\ÜÚYžU˜Y™šXÔ™\]Y\Ý
-XSX\šÙ\”™\]Y\Ý\È™]™\‹ßJK	ÜXWØ]]ÛX][Û‰ÊNÂ‚˜\ÜÙ\™\]X[
-ÚÝ[\™ØØ[›™\”™\]Y\Ý
-È]ˆ	ËË™[‰ËÜšYÚ[˜[\›ˆ	ËË™[‰ÈH\È™]™\ŠKYJNÂ˜\ÜÙ\™\]X[
-ÚÝ[\™ØØ[›™\”™\]Y\Ý
-È]ˆ	ËÙËÜ™X[\›ÛÛIËÜšYÚ[˜[\›ˆ	ËÙËÜ™X[\›ÛÛIÈH\È™]™\ŠK˜[ÙJNÂ‚™[˜Ý[Ûˆ›ÝÊˆ]™[YˆÝš[™Ëˆ[]RYˆÝš[™Ëˆ]™[\NˆÝš[™ËˆÛÝ\˜ÙNˆÝš[™È[ˆ[]U\HH	ÜÚ[ÙœšXÝ[Û‰ÂŠNˆ˜Y™šXÕ]]Y]›ÝÈÂˆ™]\›ˆÂˆ]™[Yˆ[]RYˆ[]U\Kˆ]™[\KˆY]Y]NˆÛÝ\˜ÙHOOH[ÈßHˆÈÛÝ\˜ÙHKˆÜ™X]Y]ˆ	ÌŒ‹LLNUŽŒŒŒ‰ÂˆNÂŸB‚˜ÛÛœÝ˜]Ô›ÝÜÎˆ˜Y™šXÕ]]Y]›ÝÖ×HHÂˆ›ÝÊ	Ú[X[‹Y[žIË	Ú›Ý\›™^KZ[X[‰Ë	Ü›ÛÛWÙ[žWÝšY]ÙY	Ë	Ú[X[—ØØ[™Y]N™ÛÛÙÛIÊKˆ›ÝÊ	Ú[X[‹[Ý]ÛÛYIË	Ú›Ý\›™^KZ[X[‰Ë	Ü›ÛÛWÙ[žWØÛÛ\]Y	Ë	Ù\™XÝ	ÊKˆ›ÝÊ	Ú[X[‹X\ÜÚYÛ›Y[	Ë	Ú›Ý\›™^KZ[X[‰Ë	Ù\ØÛÝ™\žWÙ^\š[Y[˜\ÜÚYÛ›Y[	Ë[
-Kˆ›ÝÊ	ÜXKY[žIË	Ú›Ý\›™^K\XIË	Ü›ÛÛWÙ[žWÝšY]ÙY	Ë	ÜXWØ]]ÛX][ÛŽ™\™XÝ	ÊKˆ›ÝÊ	ÜXK[Ý]ÛÛYIË	Ú›Ý\›™^K\XIË	Ü›ÛÛWÙ[žWØÛÛ\]Y	Ë	Ù\™XÝ	ÊKˆ›ÝÊ	Ø›ÝY[žIË	Ú›Ý\›™^KX›Ý	Ë	Ù\ØÛÝ™\žWÛ[™[™ÉË	ÚÛ›ÝÛ—Ø›Ý™ÛÛÙÛIÊKˆ›ÝÊ	ÜØØ[›™\‹Y[žIË	Ú›Ý\›™^K\ØØ[›™\‰Ë	Ù\ØÛÝ™\žWÛ[™[™ÉË	ÜØØ[›™\Ž[šÛ›ÝÛ‰ÊKˆ›ÝÊ	ÛYØXÞKY[žIË	Ú›Ý\›™^K[YØXÞIË	Ù\ØÛÝ™\žWÛ[™[™ÉË	Ù\™XÝ	ÊKˆ›ÝÊ	ÝZ[YZ[X[‰Ë	Ú›Ý\›™^K]Z[Y	Ë	Ù\ØÛÝ™\žWÛ[™[™ÉË	Ú[X[—ØØ[™Y]N™\™XÝ	ÊKˆ›ÝÊ	ÝZ[Y\XIË	Ú›Ý\›™^K]Z[Y	Ë	Ü™\]Y\ÝÜÝ\Y	Ë	ÜXWØ]]ÛX][ÛŽ™\™XÝ	ÊKˆ›ÝÊ	ÛØœÙ\˜][Û‰Ë	ÛØœÙ\˜][Û‹LIË	Ù\ØÛÝ™\žWÛØœÙ\˜][Û‹œ™XÛÜ™Y	Ë	ÝÙX—ÜÙX\˜Ú	Ë	Ù\ØÛÝ™\žWÛØœÙ\˜][Û‰ÊB—NÂ‚˜ÛÛœÝ›Ú™XÝ[ÛˆH›Ú™XÝ[X[•˜Y™šXÐ]Y]›ÝÜÊ˜]Ô›ÝÜÊNÂ˜\ÜÙ\™Y\\]X[
-ˆ›Ú™XÝ[Û‹œ›ÝÜË›X\
+  originalUrl: '/api/analytics/shell',
+  headers: { 'user-agent': humanUa },
+  ip: '198.51.100.9',
+  body: { attribution_channel: 'direct' }
+};
+assert.equal(classifyTrafficRequest(qaRequest as never, { SWAY_TRAFFIC_TRUTH_QA_IPS: '198.51.100.9' }), 'qa_automation');
+assert.equal(applyTrafficTruthToTelemetryRequest(qaRequest as never, { SWAY_TRAFFIC_TRUTH_QA_IPS: '198.51.100.9' }), 'qa_automation');
+assert.equal(qaRequest.body.attribution_channel, 'qa_automation:direct');
 
-˜[YJHOˆ˜[YK™]™[Y
-KœÛÜ
+const qaMarkerRequest = {
+  method: 'POST',
+  path: '/api/analytics/shell',
+  originalUrl: '/api/analytics/shell?sway_qa=1',
+  headers: { 'user-agent': humanUa },
+  ip: '203.0.113.13',
+  body: { attribution_channel: 'direct' }
+};
+assert.equal(classifyTrafficRequest(qaMarkerRequest as never, {}), 'qa_automation');
 
-KˆÉÚ[X[‹X\ÜÚYÛ›Y[	Ë	Ú[X[‹Y[žIË	Ú[X[‹[Ý]ÛÛYIË	ÛØœÙ\˜][Û‰×KœÛÜ
+assert.equal(shouldHard404ScannerRequest({ path: '/.env', originalUrl: '/.env' } as never), true);
+assert.equal(shouldHard404ScannerRequest({ path: '/g/real-room', originalUrl: '/g/real-room' } as never), false);
 
-BŠNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œ›ÝÜË™š[™
+function row(
+  eventId: string,
+  entityId: string,
+  eventType: string,
+  source: string | null,
+  entityType = 'shell_friction'
+): TrafficTruthAuditRow {
+  return {
+    eventId,
+    entityId,
+    entityType,
+    eventType,
+    metadata: source === null ? {} : { source },
+    createdAt: '2026-08-19T06:00:00.000Z'
+  };
+}
 
-˜[YJHOˆ˜[YK™]™[YOOH	Ú[X[‹Y[žIÊOË›Y]Y]OËœÛÝ\˜ÙK	ÙÛÛÙÛIÊNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œ›ÝÜË™š[™
+const rawRows: TrafficTruthAuditRow[] = [
+  row('human-entry', 'journey-human', 'room_entry_viewed', 'human_candidate:google'),
+  row('human-outcome', 'journey-human', 'room_entry_completed', 'direct'),
+  row('human-assignment', 'journey-human', 'discovery_experiment.assignment', null),
+  row('qa-entry', 'journey-qa', 'room_entry_viewed', 'qa_automation:direct'),
+  row('qa-outcome', 'journey-qa', 'room_entry_completed', 'direct'),
+  row('bot-entry', 'journey-bot', 'discovery_landing', 'known_bot:google'),
+  row('scanner-entry', 'journey-scanner', 'discovery_landing', 'scanner:unknown'),
+  row('legacy-entry', 'journey-legacy', 'discovery_landing', 'direct'),
+  row('tainted-human', 'journey-tainted', 'discovery_landing', 'human_candidate:direct'),
+  row('tainted-qa', 'journey-tainted', 'request_started', 'qa_automation:direct'),
+  row('observation', 'observation-1', 'discovery_observation.recorded', 'web_search', 'discovery_observation')
+];
 
-˜[YJHOˆ˜[YK™]™[YOOH	Ú[X[‹[Ý]ÛÛYIÊOË›Y]Y]OËœÛÝ\˜ÙK	Ù\™XÝ	ÊNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žKš[X[Ø[™Y]R›Ý\›™^\ËJNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žKšÛ›ÝÛ›Ý›Ý\›™^\ËJNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žKœØØ[›™\’›Ý\›™^\ËJNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žKœXP]]ÛX][Û’›Ý\›™^\ËŠNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žK˜]]ÛX]Y›Ý\›™^\Ñ^ÛYY
-NÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žKZ[Y›Ý\›™^\Ñ^ÛYYJNÂ˜\ÜÙ\™\]X[
-›Ú™XÝ[Û‹œÝ[[X\žK›YØXÞR›Ý\›™^\Ñ^ÛYYJNÂ‚˜ÛÛœÛÛK›ÙÊ	ÔÝØ^H˜Y™šXË]]™Z]š[Üˆ\ÜÙY‰ÊNÂ
+const projection = projectHumanTrafficAuditRows(rawRows);
+assert.deepEqual(
+  projection.rows.map((value) => value.eventId).sort(),
+  ['human-assignment', 'human-entry', 'human-outcome', 'observation'].sort()
+);
+assert.equal(projection.rows.find((value) => value.eventId === 'human-entry')?.metadata?.source, 'google');
+assert.equal(projection.rows.find((value) => value.eventId === 'human-outcome')?.metadata?.source, 'direct');
+assert.equal(projection.summary.humanCandidateJourneys, 1);
+assert.equal(projection.summary.knownBotJourneys, 1);
+assert.equal(projection.summary.scannerJourneys, 1);
+assert.equal(projection.summary.qaAutomationJourneys, 2);
+assert.equal(projection.summary.automatedJourneysExcluded, 4);
+assert.equal(projection.summary.taintedJourneysExcluded, 1);
+assert.equal(projection.summary.legacyJourneysExcluded, 1);
+
+console.log('Sway traffic-truth behavior passed.');
