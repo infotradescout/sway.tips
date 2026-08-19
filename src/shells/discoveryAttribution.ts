@@ -6,10 +6,20 @@
  * a stronger recorded first-touch channel.
  */
 
+import {
+  SWAY_TRAFFIC_TRUTH_LIVE_QUERY_VALUE,
+  SWAY_TRAFFIC_TRUTH_QA_COOKIE,
+  SWAY_TRAFFIC_TRUTH_QA_QUERY_KEY,
+  SWAY_TRAFFIC_TRUTH_QA_QUERY_VALUE,
+  isInternalQaJourneyId,
+  namespaceInternalQaJourneyId
+} from '../traffic-truth-contract';
+
 const FIRST_TOUCH_KEY = 'sway.discovery.firstTouch';
 const LATEST_TOUCH_KEY = 'sway.discovery.latestTouch';
 const OFFLINE_FIND_US_KEY = 'sway.discovery.offlineFindUs';
 const JOURNEY_ID_KEY = 'sway.discovery.journeyId';
+const TRAFFIC_TRUTH_MODE_KEY = 'sway.trafficTruth.mode';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DiscoveryChannel =
@@ -64,6 +74,51 @@ function writeJson(storage: Storage, key: string, value: unknown) {
   } catch {
     // Storage may be blocked; attribution must never break the page.
   }
+}
+
+function writeTrafficTruthQaCookie(enabled: boolean) {
+  if (typeof document === 'undefined') return;
+  const secure = typeof window !== 'undefined' && window.location.protocol === 'https:'
+    ? '; Secure'
+    : '';
+  document.cookie = enabled
+    ? `${SWAY_TRAFFIC_TRUTH_QA_COOKIE}=qa; Path=/; Max-Age=31536000; SameSite=Lax${secure}`
+    : `${SWAY_TRAFFIC_TRUTH_QA_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+}
+
+function queryTrafficTruthMode() {
+  if (typeof window === 'undefined') return null;
+  const value = new URLSearchParams(window.location.search)
+    .get(SWAY_TRAFFIC_TRUTH_QA_QUERY_KEY)
+    ?.trim()
+    .toLowerCase();
+  if (value === SWAY_TRAFFIC_TRUTH_QA_QUERY_VALUE) return 'qa';
+  if (value === SWAY_TRAFFIC_TRUTH_LIVE_QUERY_VALUE) return 'live';
+  return null;
+}
+
+export function isInternalQaTrafficMode() {
+  if (typeof window === 'undefined') return false;
+  const queryMode = queryTrafficTruthMode();
+  try {
+    if (queryMode === 'qa') {
+      window.localStorage.setItem(TRAFFIC_TRUTH_MODE_KEY, 'qa');
+      writeTrafficTruthQaCookie(true);
+      return true;
+    }
+    if (queryMode === 'live') {
+      window.localStorage.removeItem(TRAFFIC_TRUTH_MODE_KEY);
+      window.sessionStorage.removeItem(JOURNEY_ID_KEY);
+      writeTrafficTruthQaCookie(false);
+      return false;
+    }
+    if (window.localStorage.getItem(TRAFFIC_TRUTH_MODE_KEY) === 'qa') return true;
+  } catch {
+    // The query marker and cookie still provide a bounded fallback when storage is blocked.
+  }
+  return queryMode === 'qa'
+    || (typeof document !== 'undefined'
+      && document.cookie.split(';').some((part) => part.trim().toLowerCase() === `${SWAY_TRAFFIC_TRUTH_QA_COOKIE}=qa`));
 }
 
 function normalizeSource(raw: string | null | undefined): DiscoveryChannel {
@@ -184,23 +239,36 @@ function fallbackJourneyUuid() {
  * Pseudonymous browser journey key scoped to one browser-tab session. It is
  * reused within that session, rotates when the session storage boundary ends,
  * contains no account/contact/payment data, and is hashed again by the server.
+ * Explicit internal QA uses a reserved UUID namespace so operator evidence can
+ * be retained without inflating audience funnels.
  */
 export function getOrCreateDiscoveryJourneyId(): string {
   if (typeof window === 'undefined') return '00000000-0000-4000-8000-000000000000';
+  const internalQa = isInternalQaTrafficMode();
   try {
     // Remove the pre-Observatory persistent key if an older build left one.
     window.localStorage.removeItem(JOURNEY_ID_KEY);
     const existing = window.sessionStorage.getItem(JOURNEY_ID_KEY);
-    if (existing && UUID_PATTERN.test(existing)) return existing.toLowerCase();
-    const created = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    if (
+      existing
+      && UUID_PATTERN.test(existing)
+      && isInternalQaJourneyId(existing) === internalQa
+    ) {
+      return existing.toLowerCase();
+    }
+    const rawJourneyId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : fallbackJourneyUuid();
+    const created = internalQa
+      ? namespaceInternalQaJourneyId(rawJourneyId)
+      : rawJourneyId;
     window.sessionStorage.setItem(JOURNEY_ID_KEY, created);
     return created.toLowerCase();
   } catch {
     // Blocked storage still receives a valid per-page identifier. Attribution
     // can degrade to client-correlated without breaking the public journey.
-    return fallbackJourneyUuid();
+    const fallback = fallbackJourneyUuid();
+    return internalQa ? namespaceInternalQaJourneyId(fallback) : fallback;
   }
 }
 
