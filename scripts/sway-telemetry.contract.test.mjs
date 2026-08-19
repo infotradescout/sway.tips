@@ -1,10 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const patronApp = readFileSync(join(root, 'src/shells/PatronApp.tsx'), 'utf8');
 const telemetryClient = readFileSync(join(root, 'src/shells/frictionClient.ts'), 'utf8');
+const trafficTruth = readFileSync(join(root, 'src/traffic-truth.ts'), 'utf8');
+const trafficTruthRequest = readFileSync(join(root, 'src/server/traffic-truth-request.ts'), 'utf8');
+const trafficTruthClient = readFileSync(join(root, 'src/shells/trafficTruthClient.ts'), 'utf8');
+const accessControl = readFileSync(join(root, 'src/server/access-control.ts'), 'utf8');
+const observatoryStore = readFileSync(join(root, 'src/server/discovery-observatory-store.ts'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -112,11 +118,90 @@ for (const term of [
   requireIncludes(telemetryClient, term, `telemetry client must remain non-throwing and non-blocking: ${term}`);
 }
 
+for (const term of [
+  "'human_candidate'",
+  "'known_bot'",
+  "'scanner'",
+  "'qa_automation'",
+  'projectHumanTrafficAuditRows',
+  'isScannerTrafficPath',
+  'SWAY_TRAFFIC_TRUTH_VERSION'
+]) {
+  requireIncludes(trafficTruth, term, `Traffic truth core contract missing: ${term}`);
+}
+
+for (const term of [
+  'classifyBrowserTraffic',
+  "'X-Sway-Traffic-Class'",
+  'getOrCreateDiscoveryJourneyId()'
+]) {
+  requireIncludes(telemetryClient, term, `Telemetry client must attach traffic truth without replacing journey evidence: ${term}`);
+}
+
+for (const term of [
+  'navigator.webdriver',
+  "hostname === 'localhost'",
+  "url.searchParams.get('sway_qa') === '1'"
+]) {
+  requireIncludes(trafficTruthClient, term, `Browser traffic classifier missing QA protection: ${term}`);
+}
+
+for (const term of [
+  'applyTrafficTruthToTelemetryRequest',
+  'shouldHard404ScannerRequest',
+  "'X-Robots-Tag': 'noindex, nofollow'",
+  "'X-Content-Type-Options': 'nosniff'",
+  ".send('Not found.')"
+]) {
+  requireIncludes(accessControl, term, `Global request guard missing traffic-truth enforcement: ${term}`);
+}
+
+for (const term of [
+  'encodeTrafficTruthSource',
+  "value === 'known_bot' || value === 'scanner' || value === 'qa_automation'",
+  "normalizeTrafficPath(req.path || req.originalUrl || '/') !== '/api/analytics/shell'",
+  'SWAY_TRAFFIC_TRUTH_QA_IPS'
+]) {
+  requireIncludes(trafficTruthRequest, term, `Server traffic classifier missing fail-closed protection: ${term}`);
+}
+
+for (const term of [
+  "'boost_started'",
+  'projectHumanTrafficAuditRows(rawRows)',
+  'return projection.rows'
+]) {
+  requireIncludes(observatoryStore, term, `Discovery observatory must use filtered traffic truth: ${term}`);
+}
+
+for (const forbidden of [
+  'raw_user_agent',
+  'user_agent',
+  'ip_address',
+  'x-forwarded-for:'
+]) {
+  if (trafficTruth.includes(forbidden) || trafficTruthClient.includes(forbidden)) {
+    failures.push(`Traffic truth must not persist raw visitor identity data: ${forbidden}`);
+  }
+}
+
 requireIncludes(
   packageJson.scripts?.['test:contracts'] ?? '',
   'node scripts/sway-telemetry.contract.test.mjs',
   'test:contracts must include the shell telemetry contract.'
 );
+
+if (!failures.length) {
+  const behavior = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'scripts/sway-traffic-truth.behavior.test.ts'],
+    { cwd: root, encoding: 'utf8' }
+  );
+  if (behavior.status !== 0) {
+    failures.push(
+      `Traffic-truth behavior contract failed.\n${behavior.stdout ?? ''}${behavior.stderr ?? ''}`
+    );
+  }
+}
 
 if (failures.length) {
   console.error('Sway telemetry contract failed:');

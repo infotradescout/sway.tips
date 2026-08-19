@@ -2,6 +2,7 @@ import {
   getDiscoveryEntryPath,
   getOrCreateDiscoveryJourneyId
 } from './discoveryAttribution';
+import { classifyBrowserTraffic } from './trafficTruthClient';
 
 const ALLOWED_PAYLOAD_KEYS = [
   'shell',
@@ -121,9 +122,13 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
     if (!hasOnlyAllowedPayloadKeys(payload)) return;
     if (!isValidPayload(payload)) return;
 
+    const trafficClass = classifyBrowserTraffic();
     void fetch('/api/analytics/shell', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sway-Traffic-Class': trafficClass
+      },
       body: JSON.stringify({
         event,
         shell: payload.shell,
