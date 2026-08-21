@@ -1,22 +1,16 @@
+import {
+  PROFESSIONAL_IDENTITY_OPTIONS,
+  type ProfessionalIdentityKind
+} from '../talent-capability-catalog';
+
 export const PUBLIC_PROFILE_MAX_LINKS = 12;
 export const PUBLIC_PROFILE_MAX_FEATURED_MEDIA = 4;
 
 const SUPPRESSED_PUBLIC_PROFILE_DOMAINS = ['djthreeex.com'];
 
-export const PUBLIC_PERFORMER_PRIMARY_ROLES = [
-  { id: 'dj', label: 'DJ' },
-  { id: 'musician', label: 'Musician' },
-  { id: 'comedian', label: 'Comedian' },
-  { id: 'host', label: 'Host / MC' },
-  { id: 'creator', label: 'Creator' },
-  { id: 'dancer', label: 'Dancer' },
-  { id: 'magician', label: 'Magician' },
-  { id: 'speaker', label: 'Speaker' },
-  { id: 'producer', label: 'Producer' },
-  { id: 'other', label: 'Other' }
-] as const;
+export const PUBLIC_PERFORMER_PRIMARY_ROLES = PROFESSIONAL_IDENTITY_OPTIONS;
 
-export type PublicPerformerPrimaryRoleId = typeof PUBLIC_PERFORMER_PRIMARY_ROLES[number]['id'];
+export type PublicPerformerPrimaryRoleId = ProfessionalIdentityKind;
 
 const PUBLIC_PERFORMER_PRIMARY_ROLE_IDS = new Set(
   PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => role.id)

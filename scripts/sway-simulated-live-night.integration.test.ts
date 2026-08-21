@@ -421,6 +421,14 @@ async function main() {
       false,
       'A draft performer room must never enter public discovery.'
     );
+    const professionalSetup = await primary.client.post('/api/talent/professional-setup', {
+      clientMutationId: randomUUID(),
+      primaryIdentity: { kind: 'dj', customLabel: null },
+      secondaryIdentities: [],
+      earningModes: ['live_tips', 'audience_requests'],
+      desiredCapabilities: ['profile_publication', 'live_rooms']
+    });
+    assertStatus(professionalSetup, 202, 'save disposable professional identity', server);
     const publishPrimary = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'public' });
     assertStatus(publishPrimary, 200, 'publish performer for public-room feed proof', server);
     const thinPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
@@ -433,7 +441,6 @@ async function main() {
     const completePublicProfile = await primary.client.post('/api/talent/profile/public', {
       bio: 'Disposable integration performer used only to prove complete public eligibility.',
       headline: 'Disposable public eligibility proof',
-      primaryRole: 'DJ',
       specialties: ['Integration testing']
     });
     assertStatus(completePublicProfile, 202, 'complete disposable public profile facts', server);

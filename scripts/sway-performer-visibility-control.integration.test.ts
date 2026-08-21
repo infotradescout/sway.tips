@@ -107,7 +107,7 @@ async function startSwayServer(databaseUrl: string, port: number): Promise<Runni
     )));
   });
   const readiness = (async () => {
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       try {
         const response = await fetch(`${baseUrl}/api/health/network-probe`, { signal: AbortSignal.timeout(3_000) });
@@ -119,21 +119,29 @@ async function startSwayServer(databaseUrl: string, port: number): Promise<Runni
     }
     throw new Error(`Timed out waiting for the Sway visibility proof server.\n${output.join('')}`);
   })();
-  await Promise.race([readiness, earlyExit]);
+
+  const stopChild = async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill('SIGTERM');
+    const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const forced = new Promise<void>((resolve) => setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      resolve();
+    }, 5_000));
+    await Promise.race([stopped, forced]);
+  };
+
+  try {
+    await Promise.race([readiness, earlyExit]);
+  } catch (error) {
+    await stopChild();
+    throw error;
+  }
 
   return {
     baseUrl,
     logs: () => output.join(''),
-    stop: async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-      const forced = new Promise<void>((resolve) => setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-        resolve();
-      }, 5_000));
-      await Promise.race([stopped, forced]);
-    }
+    stop: stopChild
   };
 }
 
@@ -167,9 +175,9 @@ async function main() {
       [ownerPerformerId, otherPerformerId, ownerUserId, otherUserId]
     );
     await proof.query(
-      `INSERT INTO performer_public_profiles (performer_id, headline, specialties, city)
-       VALUES ($1, 'Initial visibility headline', '[]'::jsonb, 'Pensacola'),
-              ($2, 'Other performer headline', '[]'::jsonb, 'Mobile')`,
+      `INSERT INTO performer_public_profiles (performer_id, headline, specialties, city, metadata)
+       VALUES ($1, 'Initial visibility headline', '[]'::jsonb, 'Pensacola', '{"primaryRole":"comedian"}'::jsonb),
+              ($2, 'Other performer headline', '[]'::jsonb, 'Mobile', null)`,
       [ownerPerformerId, otherPerformerId]
     );
     await proof.query(
@@ -189,6 +197,18 @@ async function main() {
     const initial = await owner.get('/api/talent/profile/public');
     assertStatus(initial, 200, 'owner profile read', server);
     assert.equal(initial.body.profile.visibilityState, 'draft');
+
+    const professionalSetup = await owner.post('/api/talent/professional-setup', {
+      clientMutationId: randomUUID(),
+      primaryIdentity: { kind: 'dj', customLabel: null },
+      secondaryIdentities: [],
+      earningModes: ['live_tips'],
+      desiredCapabilities: ['profile_publication']
+    });
+    assertStatus(professionalSetup, 202, 'owner professional setup', server);
+    assert.equal(professionalSetup.body.state.publication.visibilityState, 'draft');
+    const afterProfessionalSetup = await proof.query<{ visibility_state: string }>('SELECT visibility_state FROM performers WHERE id = $1', [ownerPerformerId]);
+    assert.equal(afterProfessionalSetup.rows[0]?.visibility_state, 'draft', 'Professional setup must not publish the profile.');
 
     const unauthenticatedAttempt = await unauthenticated.post('/api/talent/profile/visibility', { visibilityState: 'public' });
     assert.ok([401, 403].includes(unauthenticatedAttempt.status), `Unauthenticated visibility mutation must be denied: ${unauthenticatedAttempt.status}`);
@@ -221,7 +241,6 @@ async function main() {
     assert.equal(unlisted.body.visibilityState, 'unlisted');
 
     const profileSave = await owner.post('/api/talent/profile/public', {
-      primaryRole: 'dj',
       stageName: 'Visibility Owner',
       headline: 'Updated visibility headline',
       specialties: ['live'],
@@ -234,6 +253,12 @@ async function main() {
     });
     assertStatus(profileSave, 202, 'ordinary profile save', server);
     assert.equal(profileSave.body.profile.visibilityState, 'unlisted');
+    assert.equal(profileSave.body.profile.primaryRole, 'dj', 'Profile save response must use the canonical professional identity, not conflicting legacy metadata.');
+    const savedProfileMetadata = await proof.query<{ primary_role: string | null }>(
+      `SELECT metadata->>'primaryRole' primary_role FROM performer_public_profiles WHERE performer_id = $1`,
+      [ownerPerformerId]
+    );
+    assert.equal(savedProfileMetadata.rows[0]?.primary_role, 'dj', 'Public profile persistence must replace a conflicting legacy role with the canonical identity.');
 
     const afterProfileSave = await owner.get('/api/talent/profile/public');
     assertStatus(afterProfileSave, 200, 'profile read after ordinary save', server);

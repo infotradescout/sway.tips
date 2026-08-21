@@ -106,6 +106,10 @@ import {
   type PerformerVisibilityState
 } from "./src/server/public-profile";
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
+import {
+  createTalentProfessionalSetupService,
+  TalentProfessionalSetupError
+} from "./src/server/talent-professional-setup-service";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 import {
@@ -209,6 +213,9 @@ const businessStore = createBusinessStore(process.env.DATABASE_URL, createInacti
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
 const discoveryObservatoryStore = businessDb
   ? createDiscoveryObservatoryStore(businessDb)
+  : null;
+const talentProfessionalSetupService = businessDb
+  ? createTalentProfessionalSetupService(businessDb)
   : null;
 const audioObjectStore = (() => {
   try {
@@ -8728,6 +8735,47 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
   }
 });
 
+app.get('/api/talent/professional-setup', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional setup requires durable authenticated persistence.' });
+  }
+  try {
+    return res.json({ setup: await talentProfessionalSetupService.getState(talentAccess.actor.actorId) });
+  } catch (error) {
+    if (error instanceof TalentProfessionalSetupError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('Professional setup read failed', error);
+    return res.status(500).json({ error: 'Unable to load professional setup.' });
+  }
+});
+
+app.post('/api/talent/professional-setup', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional setup requires durable authenticated persistence.' });
+  }
+  try {
+    const result = await talentProfessionalSetupService.save(talentAccess.actor.actorId, req.body);
+    return res.status(result.replayed || !result.changed ? 200 : 202).json(result);
+  } catch (error) {
+    if (error instanceof TalentProfessionalSetupError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('Professional setup update failed', error);
+    return res.status(500).json({ error: 'Unable to save professional setup.' });
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -8742,7 +8790,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
-  const [[profileRow], linkRows, partnerState] = await Promise.all([
+  const [[profileRow], linkRows, partnerState, professionalSetup] = await Promise.all([
     businessDb
       .select({
         performerId: performerPublicProfiles.performerId,
@@ -8777,7 +8825,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       .from(performerProfileLinks)
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
-    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
+    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId),
+    talentProfessionalSetupService!.getState(talentAccess.actor.actorId)
   ]);
 
   const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
@@ -8793,7 +8842,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       visibilityState: performerOwner.visibilityState,
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
-      primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
+      primaryRole: professionalSetup.primaryIdentity?.kind ?? resolvePublicPrimaryRole(profileRow?.metadata),
+      professionalIdentity: professionalSetup.primaryIdentity,
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -8996,12 +9046,25 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
+  if (!talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional identity persistence is unavailable.' });
+  }
+  const professionalSetup = await talentProfessionalSetupService.getState(talentAccess.actor.actorId);
+  const primaryRole = normalizePublicProfilePrimaryRole(professionalSetup.primaryIdentity?.kind);
+  if (!primaryRole || !professionalSetup.primaryIdentity) {
+    return res.status(409).json({ error: 'Choose and save your primary professional identity before editing the public page.' });
+  }
+  if (req.body?.primaryRole !== undefined) {
+    const requestedLegacyRole = normalizePublicProfilePrimaryRole(req.body.primaryRole);
+    if (requestedLegacyRole !== primaryRole) {
+      return res.status(409).json({ error: 'Professional identity changed. Reload and use Professional setup before saving the public page.' });
+    }
+  }
 
   const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
   const stageNameProvided = req.body?.stageName !== undefined;
   const stageName = normalizePublicProfileText(req.body?.stageName, 80);
-  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -9019,10 +9082,6 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
   }
-  if (!primaryRole) {
-    return res.status(422).json({ error: 'Choose your primary role.' });
-  }
-
   const invalidUrlField = [
     ['Avatar URL', req.body?.avatarUrl, avatarUrl],
     ['Facebook URL', req.body?.socialLinks?.facebook, facebookUrl],
@@ -9173,7 +9232,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
           : null,
         80
       ),
-      primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
+      primaryRole,
+      professionalIdentity: professionalSetup.primaryIdentity,
       specialties: specialties ?? [],
       city,
       avatarUrl,

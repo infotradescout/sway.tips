@@ -36,6 +36,7 @@ const requiredFiles = [
   'src/server/performer-login.ts',
   'src/components/PerformerPublicProfilePage.tsx',
   'src/components/PerformerPublicProfileEditor.tsx',
+  'src/components/PerformerProfessionalSetup.tsx',
   'src/components/PerformerAccountHome.tsx',
   'src/components/TalentDashboard.tsx',
   'src/components/TalentInviteAcceptCard.tsx',
@@ -63,6 +64,7 @@ const paymentService = read('src/server/payment-service.ts');
 const performerLogin = read('src/server/performer-login.ts');
 const publicPage = read('src/components/PerformerPublicProfilePage.tsx');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
+const professionalSetup = read('src/components/PerformerProfessionalSetup.tsx');
 const accountHome = read('src/components/PerformerAccountHome.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const inviteCard = read('src/components/TalentInviteAcceptCard.tsx');
@@ -559,12 +561,12 @@ for (const term of [
   'Accept exact Brand Partner terms'
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
 for (const term of [
-  'What kind of performer are you?',
-  'PUBLIC_PERFORMER_PRIMARY_ROLES',
-  'primaryRole: form.primaryRole || null',
+  'Tell Sway what you do and what you want to use',
+  'PROFESSIONAL_IDENTITY_OPTIONS',
+  'primaryIdentity',
   'Stage name — optional',
   'Your @handle is the main public name'
-]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
+]) requireIncludes(term === 'Stage name — optional' || term === 'Your @handle is the main public name' ? editor : professionalSetup, term, 'Authenticated profile identity fields');
 
 for (const term of [
   'mergePublicProfileMetadata',
@@ -577,7 +579,8 @@ for (const term of [
   '.leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))',
   '.leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))',
   ': performerRow.preview_specialties ?? []',
-  "return res.status(422).json({ error: 'Choose your primary role.' })"
+  'professionalSetup.primaryIdentity',
+  'Choose and save your primary professional identity before editing the public page.'
 ]) requireIncludes(server, term, 'Profile identity API and console state');
 
 for (const term of [
