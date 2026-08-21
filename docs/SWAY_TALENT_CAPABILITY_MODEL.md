@@ -21,6 +21,8 @@ The account model must keep these persisted concepts separate:
 
 Labels never grant money, ticketing, publication, venue, catalog, payout, moderation, or administrative authority. Client routing and client-selected roles are not security boundaries. Every consequential action must be authorized by persisted server state.
 
+A capability grant alone is never sufficient for a consequential action. The action route must also verify the grant is current, the exact subject authority is current, the referenced domain record exists and belongs to that performer, and every capability-specific gate is satisfied in the same server transaction. Live-money and native-ticket actions remain separately gated even when a capability-request or grant record exists.
+
 ## Publication and discovery
 
 A shareable profile is not automatically index eligible. Publication must be an explicit owner action; no onboarding control may preselect `Public`. Public profile eligibility still requires owner intent, a claimed account with an owner, sufficient unique real information, an unrestricted active state, a valid canonical identity, and agreement between visible and structured content.

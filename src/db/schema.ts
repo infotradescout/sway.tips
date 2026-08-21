@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigint,
+  bigserial,
   boolean,
   check,
   date,
@@ -212,6 +213,112 @@ export const ticketPaymentOperationStatusEnum = pgEnum('ticket_payment_operation
 // signup; performer signup moves straight to 'onboarding'. 'suspended' and
 // 'revoked' are administrative-only transitions (see proModeStatusEvents).
 export const proModeStatusEnum = pgEnum('pro_mode_status', ['disabled', 'onboarding', 'active', 'suspended', 'revoked']);
+
+export const professionalIdentityKindEnum = pgEnum('professional_identity_kind', [
+  'comedian',
+  'singer',
+  'songwriter',
+  'dj',
+  'musician',
+  'band',
+  'producer',
+  'host',
+  'emcee',
+  'bartender',
+  'dancer',
+  'actor',
+  'speaker',
+  'podcaster',
+  'magician',
+  'event_professional',
+  'vendor',
+  'service_professional',
+  'creator',
+  'other'
+]);
+
+export const performerIntentTypeEnum = pgEnum('performer_intent_type', [
+  'earning_mode',
+  'desired_capability'
+]);
+
+export const performerEarningModeEnum = pgEnum('performer_earning_mode', [
+  'live_tips',
+  'audience_requests',
+  'bookings',
+  'partnerships',
+  'services',
+  'releases',
+  'events',
+  'ticket_sales',
+  'audio_sales',
+  'sponsorships',
+  'merchandise'
+]);
+
+export const performerCapabilityEnum = pgEnum('performer_capability', [
+  'profile_publication',
+  'public_discovery',
+  'non_money_inquiries',
+  'live_rooms',
+  'live_money',
+  'event_publication',
+  'external_ticket_links',
+  'native_ticket_sales',
+  'private_collaboration',
+  'release_preparation',
+  'audio_publication',
+  'audio_sales',
+  'dsp_delivery',
+  'royalty_processing',
+  'partnership_inquiries',
+  'service_inquiries'
+]);
+
+export const performerCapabilityDecisionEnum = pgEnum('performer_capability_decision', [
+  'granted',
+  'revoked',
+  'expired',
+  'denied'
+]);
+
+export const performerAuthorityKindEnum = pgEnum('performer_authority_kind', [
+  'seller',
+  'event_organizer',
+  'venue_representative',
+  'ticket_inventory',
+  'catalog_controller',
+  'payout_controller',
+  'brand_representative'
+]);
+
+export const acquisitionSourceClassEnum = pgEnum('acquisition_source_class', [
+  'organic_unpaid',
+  'paid',
+  'direct',
+  'referral',
+  'unknown'
+]);
+
+export const attributionEvidenceStrengthEnum = pgEnum('attribution_evidence_strength', [
+  'direct_server_observed',
+  'client_correlated_unverified',
+  'offline_self_reported',
+  'unknown_unavailable'
+]);
+
+export const growthMilestoneKindEnum = pgEnum('growth_milestone_kind', [
+  'qualified_signup',
+  'first_value'
+]);
+
+export const growthValueKindEnum = pgEnum('growth_value_kind', [
+  'profile_published',
+  'event_published',
+  'inquiry_received',
+  'live_room_completed',
+  'release_ready'
+]);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1478,6 +1585,206 @@ export const auditEvents = pgTable('audit_events', {
 }, (table) => ({
   entityIdx: index('audit_events_entity_idx').on(table.entityType, table.entityId),
   createdAtIdx: index('audit_events_created_at_idx').on(table.createdAt)
+}));
+
+// Wave 1 keeps professional self-description, earning intent, server grants,
+// and subject authority in separate append-only ledgers. Identity and intent
+// rows are never authorization records.
+export const performerIdentityEvents = pgTable('performer_identity_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  identityRole: text('identity_role').notNull(),
+  identityKind: professionalIdentityKindEnum('identity_kind').notNull(),
+  customLabel: text('custom_label'),
+  eventType: text('event_type').notNull(),
+  actorUserId: uuid('actor_user_id').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_identity_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_identity_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_identity_events_current_idx').on(table.performerId, table.identityRole, table.eventSequence),
+  identityRoleAllowed: check('performer_identity_events_role_allowed', sql`${table.identityRole} in ('primary', 'secondary')`),
+  eventTypeAllowed: check('performer_identity_events_type_allowed', sql`${table.eventType} in ('selected', 'withdrawn')`),
+  customLabelValid: check('performer_identity_events_custom_label_valid', sql`(
+    (${table.identityKind} = 'other' and nullif(trim(${table.customLabel}), '') is not null and length(trim(${table.customLabel})) <= 80)
+    or
+    (${table.identityKind} <> 'other' and (${table.customLabel} is null or (length(trim(${table.customLabel})) between 1 and 80)))
+  )`),
+  idempotencyHashValid: check('performer_identity_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerIntentEvents = pgTable('performer_intent_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  intentType: performerIntentTypeEnum('intent_type').notNull(),
+  earningMode: performerEarningModeEnum('earning_mode'),
+  desiredCapability: performerCapabilityEnum('desired_capability'),
+  eventType: text('event_type').notNull(),
+  actorUserId: uuid('actor_user_id').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_intent_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_intent_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_intent_events_current_idx').on(table.performerId, table.intentType, table.eventSequence),
+  eventTypeAllowed: check('performer_intent_events_type_allowed', sql`${table.eventType} in ('selected', 'withdrawn')`),
+  payloadMatchesType: check('performer_intent_events_payload_matches_type', sql`(
+    (${table.intentType} = 'earning_mode' and ${table.earningMode} is not null and ${table.desiredCapability} is null)
+    or
+    (${table.intentType} = 'desired_capability' and ${table.desiredCapability} is not null and ${table.earningMode} is null)
+  )`),
+  idempotencyHashValid: check('performer_intent_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerCapabilityGrantEvents = pgTable('performer_capability_grant_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  capability: performerCapabilityEnum('capability').notNull(),
+  decision: performerCapabilityDecisionEnum('decision').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorUserId: uuid('actor_user_id'),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_capability_grant_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_capability_grant_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_capability_grant_events_current_idx').on(table.performerId, table.capability, table.eventSequence),
+  actorShapeValid: check('performer_capability_grant_events_actor_shape_valid', sql`(
+    (${table.actorType} = 'admin' and ${table.actorUserId} is not null)
+    or
+    (${table.actorType} = 'system' and ${table.actorUserId} is null)
+  )`),
+  reasonValid: check('performer_capability_grant_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('performer_capability_grant_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('performer_capability_grant_events_expiry_valid', sql`(
+    (${table.decision} = 'granted' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} <> 'granted' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('performer_capability_grant_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerAuthorityEvents = pgTable('performer_authority_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  authorityKind: performerAuthorityKindEnum('authority_kind').notNull(),
+  subjectType: text('subject_type').notNull(),
+  subjectId: text('subject_id').notNull(),
+  decision: performerCapabilityDecisionEnum('decision').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorUserId: uuid('actor_user_id'),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_authority_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_authority_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_authority_events_current_idx').on(
+    table.performerId,
+    table.authorityKind,
+    table.subjectType,
+    table.subjectId,
+    table.eventSequence
+  ),
+  subjectTypeAllowed: check('performer_authority_events_subject_type_allowed', sql`${table.subjectType} in ('platform', 'seller', 'event', 'venue', 'ticket_offer', 'catalog', 'payout_account', 'brand')`),
+  subjectIdValid: check('performer_authority_events_subject_id_valid', sql`${table.subjectId} ~ '^[a-z0-9][a-z0-9_.:-]{0,254}$'`),
+  actorShapeValid: check('performer_authority_events_actor_shape_valid', sql`(
+    (${table.actorType} = 'admin' and ${table.actorUserId} is not null)
+    or
+    (${table.actorType} = 'system' and ${table.actorUserId} is null)
+  )`),
+  reasonValid: check('performer_authority_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('performer_authority_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('performer_authority_events_expiry_valid', sql`(
+    (${table.decision} = 'granted' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} <> 'granted' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('performer_authority_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+// One immutable first-touch link per account. It snapshots already-recorded
+// discovery evidence; it does not trust a settings edit or overwrite the
+// source with an optional offline answer.
+export const accountDiscoveryAttributions = pgTable('account_discovery_attributions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull(),
+  sourceEventId: uuid('source_event_id').notNull(),
+  journeyEntityId: uuid('journey_entity_id').notNull(),
+  sourceChannel: text('source_channel').notNull(),
+  sourceClass: acquisitionSourceClassEnum('source_class').notNull(),
+  utmSource: text('utm_source'),
+  utmMedium: text('utm_medium'),
+  utmCampaign: text('utm_campaign'),
+  landingPath: text('landing_path').notNull(),
+  entityKind: text('entity_kind'),
+  entityKey: text('entity_key'),
+  offlineSource: text('offline_source'),
+  firstTouchAt: timestamp('first_touch_at', { withTimezone: true }).notNull(),
+  linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+  evidenceStrength: attributionEvidenceStrengthEnum('evidence_strength').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('account_discovery_attributions_user_idx').on(table.userId),
+  journeyIdx: uniqueIndex('account_discovery_attributions_journey_idx').on(table.journeyEntityId),
+  sourceEventIdx: uniqueIndex('account_discovery_attributions_source_event_idx').on(table.sourceEventId),
+  idempotencyIdx: uniqueIndex('account_discovery_attributions_idempotency_idx').on(table.idempotencyKeyHash),
+  sourceChannelValid: check('account_discovery_attributions_source_channel_valid', sql`${table.sourceChannel} ~ '^[a-z0-9][a-z0-9_.:-]{0,79}$'`),
+  landingPathValid: check('account_discovery_attributions_landing_path_valid', sql`length(${table.landingPath}) between 1 and 300 and ${table.landingPath} like '/%' and ${table.landingPath} !~ '[?#]'`),
+  entityPairValid: check('account_discovery_attributions_entity_pair_valid', sql`(
+    (${table.entityKind} is null and ${table.entityKey} is null)
+    or
+    (${table.entityKind} in ('performer', 'event', 'release', 'live_room') and ${table.entityKey} ~ '^[a-z0-9][a-z0-9_.:-]{0,127}$')
+  )`),
+  utmValuesValid: check('account_discovery_attributions_utm_values_valid', sql`(
+    (${table.utmSource} is null or (length(${table.utmSource}) between 1 and 100 and ${table.utmSource} !~ '[?&#=]'))
+    and (${table.utmMedium} is null or (length(${table.utmMedium}) between 1 and 100 and ${table.utmMedium} !~ '[?&#=]'))
+    and (${table.utmCampaign} is null or (length(${table.utmCampaign}) between 1 and 160 and ${table.utmCampaign} !~ '[?&#=]'))
+  )`),
+  offlineSourceValid: check('account_discovery_attributions_offline_source_valid', sql`${table.offlineSource} is null or length(trim(${table.offlineSource})) between 1 and 80`),
+  chronologyValid: check('account_discovery_attributions_chronology_valid', sql`${table.firstTouchAt} <= ${table.linkedAt}`),
+  idempotencyHashValid: check('account_discovery_attributions_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const growthMilestones = pgTable('growth_milestones', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  userId: uuid('user_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  attributionId: uuid('attribution_id').notNull().references(() => accountDiscoveryAttributions.id),
+  milestoneKind: growthMilestoneKindEnum('milestone_kind').notNull(),
+  valueKind: growthValueKindEnum('value_kind'),
+  evidenceEventId: uuid('evidence_event_id').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  environment: text('environment').notNull(),
+  qualificationSnapshot: jsonb('qualification_snapshot').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('growth_milestones_sequence_idx').on(table.eventSequence),
+  milestoneIdx: uniqueIndex('growth_milestones_user_kind_environment_idx').on(table.userId, table.milestoneKind, table.environment),
+  idempotencyIdx: uniqueIndex('growth_milestones_idempotency_idx').on(table.idempotencyKeyHash),
+  performerIdx: index('growth_milestones_performer_occurred_idx').on(table.performerId, table.occurredAt),
+  milestoneShapeValid: check('growth_milestones_shape_valid', sql`(
+    (${table.milestoneKind} = 'qualified_signup' and ${table.valueKind} is null)
+    or
+    (${table.milestoneKind} = 'first_value' and ${table.valueKind} is not null)
+  )`),
+  environmentAllowed: check('growth_milestones_environment_allowed', sql`${table.environment} in ('production', 'test', 'development')`),
+  snapshotRequired: check('growth_milestones_snapshot_required', sql`jsonb_typeof(${table.qualificationSnapshot}) = 'object' and ${table.qualificationSnapshot} <> '{}'::jsonb`),
+  chronologyValid: check('growth_milestones_chronology_valid', sql`${table.occurredAt} <= ${table.createdAt}`),
+  idempotencyHashValid: check('growth_milestones_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
 }));
 
 export const idempotencyKeys = pgTable('idempotency_keys', {

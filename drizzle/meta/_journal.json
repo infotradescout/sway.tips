@@ -260,6 +260,13 @@
       "when": 1786599613422,
       "tag": "0036_wet_susan_delgado",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787337919067,
+      "tag": "0037_talent_capability_foundation",
+      "breakpoints": true
     }
   ]
 }
