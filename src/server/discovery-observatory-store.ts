@@ -11,8 +11,16 @@ import {
   type DiscoveryJourneyEventInput,
   type DiscoveryObservationInput
 } from './discovery-observatory';
+import type { ServerObservedAttributionEvidence } from './account-discovery-attribution';
 
 const EXPERIMENT_DECISIONS = new Set(['approve', 'activate', 'pause', 'complete', 'rollback', 'reject']);
+
+export class AttributionReceiptConflictError extends Error {
+  constructor() {
+    super('Discovery attribution receipt was already consumed by another journey.');
+    this.name = 'AttributionReceiptConflictError';
+  }
+}
 
 function experimentExists(key: string) {
   return SWAY_DISCOVERY_EXPERIMENTS.some((experiment) => experiment.key === key);
@@ -208,9 +216,28 @@ export function createDiscoveryObservatoryStore(db: any) {
   async function recordJourneyEvent(
     input: DiscoveryJourneyEventInput,
     now?: Date,
-    options?: { idempotencyKey?: string }
+    options?: {
+      idempotencyKey?: string;
+      attributionEvidence?: ServerObservedAttributionEvidence;
+    }
   ) {
     const normalized = normalizeDiscoveryJourneyEvent(input, now);
+    const persisted = options?.attributionEvidence
+      ? {
+          ...normalized,
+          source: options.attributionEvidence.source,
+          source_class: options.attributionEvidence.sourceClass,
+          claimed_source_class: options.attributionEvidence.claimedSourceClass,
+          link_strength: options.attributionEvidence.linkStrength,
+          utm_source: options.attributionEvidence.utmSource,
+          utm_medium: options.attributionEvidence.utmMedium,
+          utm_campaign: options.attributionEvidence.utmCampaign,
+          offline_source: options.attributionEvidence.offlineSource,
+          referrer_host: options.attributionEvidence.referrerHost,
+          attribution_receipt: options.attributionEvidence.attributionReceipt,
+          attribution_receipt_id: options.attributionEvidence.attributionReceiptId
+        }
+      : normalized;
     if (Boolean(normalized.entity_kind) !== Boolean(normalized.entity_key)) {
       throw new Error('entityKind and entityKey must be supplied together.');
     }
@@ -231,6 +258,41 @@ export function createDiscoveryObservatoryStore(db: any) {
         occurredAt: normalized.occurred_at
       });
     }
+    const attributionReceiptId = options?.attributionEvidence?.attributionReceiptId ?? null;
+    if (attributionReceiptId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attributionReceiptId)) {
+        throw new Error('Server attribution receipt ID is invalid.');
+      }
+      const eventId = discoveryEntityUuid(`attribution-receipt:${attributionReceiptId.toLowerCase()}`);
+      const entityId = discoveryEntityUuid(normalized.journey_id);
+      const inserted = await db.insert(auditEvents).values({
+        eventId,
+        actorId: null,
+        actorType: 'anonymous',
+        entityType: 'shell_friction',
+        entityId,
+        eventType: normalized.event_type,
+        metadata: persisted
+      }).onConflictDoNothing({ target: auditEvents.eventId }).returning({ eventId: auditEvents.eventId });
+      if (!inserted[0]) {
+        const [existing] = await db
+          .select({ entityId: auditEvents.entityId, eventType: auditEvents.eventType, metadata: auditEvents.metadata })
+          .from(auditEvents)
+          .where(eq(auditEvents.eventId, eventId))
+          .limit(1);
+        if (!existing
+          || existing.entityId !== entityId
+          || existing.eventType !== normalized.event_type
+          || metadataValue(existing.metadata, 'attribution_receipt_id') !== attributionReceiptId
+          || metadataValue(existing.metadata, 'journey_id') !== normalized.journey_id
+          || metadataValue(existing.metadata, 'entry_path') !== normalized.entry_path
+          || metadataValue(existing.metadata, 'entity_kind') !== normalized.entity_kind
+          || metadataValue(existing.metadata, 'entity_key') !== normalized.entity_key) {
+          throw new AttributionReceiptConflictError();
+        }
+      }
+      return persisted;
+    }
     if (options?.idempotencyKey) {
       if (!/^[a-z0-9][a-z0-9_.:-]{0,159}$/i.test(options.idempotencyKey)) {
         throw new Error('idempotencyKey is invalid.');
@@ -244,7 +306,7 @@ export function createDiscoveryObservatoryStore(db: any) {
         entityType: 'shell_friction',
         entityId: discoveryEntityUuid(normalized.journey_id),
         eventType: normalized.event_type,
-        metadata: normalized
+        metadata: persisted
       }).onConflictDoNothing({ target: auditEvents.eventId });
     } else {
       await writeAuditEvent(db, {
@@ -253,10 +315,10 @@ export function createDiscoveryObservatoryStore(db: any) {
         entityType: 'shell_friction',
         entityId: normalized.journey_id,
         eventType: normalized.event_type,
-        metadata: normalized
+        metadata: persisted
       });
     }
-    return normalized;
+    return persisted;
   }
 
   async function listDiscoveryAuditRows(input: { since: Date; limit?: number }) {

@@ -150,7 +150,18 @@ import {
   createEventTicketService,
   EventTicketServiceError
 } from "./src/server/event-ticket-service";
-import { createDiscoveryObservatoryStore } from "./src/server/discovery-observatory-store";
+import {
+  AttributionReceiptConflictError,
+  createDiscoveryObservatoryStore
+} from "./src/server/discovery-observatory-store";
+import {
+  createAccountDiscoveryAttributionService,
+  createDiscoveryAttributionReceipt,
+  DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE,
+  DISCOVERY_ATTRIBUTION_RECEIPT_TTL_MS,
+  readDiscoveryAttributionReceiptCookie,
+  resolveReceiptBackedAttributionEvidence
+} from "./src/server/account-discovery-attribution";
 import {
   buildDiscoveryObservatorySnapshot,
   buildSwayDiscoveryQueryCollection,
@@ -199,6 +210,7 @@ const hasPerformerLoginEmailConfig = Boolean(
   && hasSwayEmailFrom
   && hasSwayEmailBaseUrl
 );
+const discoveryAttributionReceiptSecret = process.env.SWAY_DISCOVERY_ATTRIBUTION_SECRET?.trim() || null;
 const IDEMPOTENCY_TTL_HOURS = 48;
 const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
 const MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION = 4;
@@ -213,6 +225,11 @@ const businessStore = createBusinessStore(process.env.DATABASE_URL, createInacti
 const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_URL) : null;
 const discoveryObservatoryStore = businessDb
   ? createDiscoveryObservatoryStore(businessDb)
+  : null;
+const accountDiscoveryAttributionService = businessDb
+  ? createAccountDiscoveryAttributionService(businessDb, {
+      receiptSecret: discoveryAttributionReceiptSecret
+    })
   : null;
 const talentProfessionalSetupService = businessDb
   ? createTalentProfessionalSetupService(businessDb)
@@ -488,6 +505,70 @@ function normalizeHost(rawHost: string | undefined): string {
 const CANONICAL_APP_HOST = 'app.sway.tips';
 const CANONICAL_APP_ORIGIN = `https://${CANONICAL_APP_HOST}`;
 const SHARE_REDIRECT_HOSTS = new Set(['sway.tips', 'www.sway.tips']);
+
+function resolveTrustedDiscoveryAttributionOrigins() {
+  const origins = new Set([CANONICAL_APP_ORIGIN]);
+  if (!isProduction) {
+    for (const configured of [process.env.SWAY_APP_BASE_URL, process.env.APP_BASE_URL]) {
+      if (!configured?.trim()) continue;
+      try {
+        origins.add(new URL(configured.trim()).origin);
+      } catch {
+        // Invalid non-production app URLs do not become trusted origins.
+      }
+    }
+  }
+  return [...origins];
+}
+
+const TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS = resolveTrustedDiscoveryAttributionOrigins();
+
+function resolveTrustedDiscoveryRequestOrigin(req: express.Request) {
+  const host = req.get('host')?.trim();
+  if (!host) return null;
+  const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol = isProduction ? 'https' : (forwardedProto || req.protocol || 'http');
+  try {
+    const origin = new URL(`${protocol}://${host}`).origin;
+    return TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS.includes(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPublicDiscoveryLandingPath(pathname: string) {
+  return pathname === '/discover'
+    || /^\/(?:p|e|r)\/[^/]+$/i.test(pathname);
+}
+
+function issueDiscoveryAttributionReceipt(req: express.Request, res: express.Response) {
+  if (req.method !== 'GET'
+    || !isPublicDiscoveryLandingPath(req.path)
+    || !discoveryAttributionReceiptSecret
+    || readDiscoveryAttributionReceiptCookie(req.get('cookie'))) {
+    return;
+  }
+  const trustedOrigin = resolveTrustedDiscoveryRequestOrigin(req);
+  if (!trustedOrigin) return;
+  const receipt = createDiscoveryAttributionReceipt({
+    landingUrl: new URL(req.originalUrl, trustedOrigin).toString(),
+    allowedOrigins: TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS,
+    entryPath: req.path,
+    secret: discoveryAttributionReceiptSecret,
+    referrer: req.get('referer'),
+    fetchSite: req.get('sec-fetch-site'),
+    fetchMode: req.get('sec-fetch-mode'),
+    fetchDest: req.get('sec-fetch-dest')
+  });
+  if (!receipt) return;
+  res.cookie(DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE, receipt, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: DISCOVERY_ATTRIBUTION_RECEIPT_TTL_MS
+  });
+}
 
 function shouldRedirectToAppHost(rawHost: string | undefined) {
   return SHARE_REDIRECT_HOSTS.has(normalizeHost(rawHost));
@@ -1706,6 +1787,11 @@ app.use((req, res, next) => {
     return;
   }
   req.headers['x-sway-shell'] = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
+  next();
+});
+
+app.use((req, res, next) => {
+  issueDiscoveryAttributionReceipt(req, res);
   next();
 });
 
@@ -5414,6 +5500,19 @@ app.post('/api/account/claim/attach', async (req, res) => {
   }
 });
 
+async function linkSignupDiscoveryAttribution(accountId: string, journeyId: string | null) {
+  if (!journeyId || !accountDiscoveryAttributionService) return;
+  try {
+    await accountDiscoveryAttributionService.linkFromJourney({ userId: accountId, journeyId });
+  } catch (error) {
+    // Attribution is evidence about a signup, not authority to create one. A
+    // missing or conflicting journey must never deny an otherwise valid account.
+    console.warn('Account signup attribution link was not recorded.', {
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
@@ -5426,6 +5525,13 @@ app.post('/api/account/signup', async (req, res) => {
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
   const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
   const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
+  const rawDiscoveryJourneyId = typeof req.body?.discoveryJourneyId === 'string'
+    ? req.body.discoveryJourneyId.trim().toLowerCase()
+    : '';
+  if (req.body?.discoveryJourneyId !== undefined && !UUID_PATTERN.test(rawDiscoveryJourneyId)) {
+    return res.status(422).json({ error: 'Discovery journey context is invalid.' });
+  }
+  const discoveryJourneyId = rawDiscoveryJourneyId || null;
   if (!email || !displayName || !password) {
     return res.status(422).json({ error: 'Name, email, and password are required.' });
   }
@@ -5544,6 +5650,7 @@ app.post('/api/account/signup', async (req, res) => {
         });
 
         return {
+          accountId: claim.actorUserId,
           issuedSession,
           performerId,
           displayName: claimable.displayName
@@ -5557,6 +5664,7 @@ app.post('/api/account/signup', async (req, res) => {
         path: '/',
         expires: outcome.issuedSession.expiresAt
       });
+      await linkSignupDiscoveryAttribution(outcome.accountId, discoveryJourneyId);
       return res.status(200).json({
         success: true,
         message: 'Account created. Performer profile claimed and Pro Mode activated.',
@@ -5630,6 +5738,8 @@ app.post('/api/account/signup', async (req, res) => {
     });
     return res.status(503).json({ error: 'Verification email could not be delivered. Please try again.' });
   }
+
+  await linkSignupDiscoveryAttribution(outcome.accountId, discoveryJourneyId);
 
   return res.status(202).json({
     success: true,
@@ -7859,6 +7969,15 @@ app.post("/api/analytics/shell", async (req, res) => {
   try {
     const stage = discoveryStageForTelemetryEvent(payload.event);
     if (stage && payload.journey_id && discoveryObservatoryStore) {
+      const attributionEvidence = stage === 'entry'
+        ? resolveReceiptBackedAttributionEvidence({
+            receipt: readDiscoveryAttributionReceiptCookie(req.get('cookie')),
+            secret: discoveryAttributionReceiptSecret,
+            entryPath: payload.entry_path,
+            clientChannel: payload.attribution_channel,
+            now: new Date()
+          })
+        : null;
       const visibilityEligibility = await resolveDiscoveryEntityVisibilityEligibility({
         entityKind: payload.entity_kind,
         entityKey: payload.entity_key
@@ -7867,7 +7986,7 @@ app.post("/api/analytics/shell", async (req, res) => {
         journeyId: payload.journey_id,
         stage,
         eventType: payload.event,
-        source: payload.attribution_channel ?? 'unknown',
+        source: attributionEvidence?.source ?? payload.attribution_channel ?? 'unknown',
         surface: payload.surface,
         entryPath: payload.entry_path ?? null,
         entityKind: payload.entity_kind as DiscoveryJourneyEventInput['entityKind'],
@@ -7885,9 +8004,17 @@ app.post("/api/analytics/shell", async (req, res) => {
         // Client eligibility is never trusted for funnel inclusion. Resolve
         // it from current public server state or keep it explicitly unknown.
         visibilityEligibility,
-        linkStrength: 'client_correlated_unverified',
+        linkStrength: attributionEvidence?.linkStrength ?? 'client_correlated_unverified',
         searchPhrase: payload.search_phrase ?? null
-      });
+      }, undefined, attributionEvidence ? { attributionEvidence } : undefined);
+      if (attributionEvidence?.attributionReceiptId) {
+        res.clearCookie(DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax',
+          path: '/'
+        });
+      }
       return res.status(202).json({ accepted: true });
     }
     await businessDb.transaction(async (tx) => {
@@ -7901,7 +8028,10 @@ app.post("/api/analytics/shell", async (req, res) => {
       });
     });
     return res.status(202).json({ accepted: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof AttributionReceiptConflictError) {
+      return res.status(409).json({ error: 'Discovery attribution receipt has already been used.' });
+    }
     return res.status(500).json({ error: 'Unable to capture shell telemetry event.' });
   }
 });
