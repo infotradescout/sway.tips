@@ -255,11 +255,12 @@ async function createPerformerAccount(input: {
   suffix: string;
   displayName: string;
   handle: string;
+  email?: string;
   discoveryJourneyId?: string;
 }) {
   const client = new HttpClient(input.server.baseUrl);
-  const email = `simulated-${input.suffix}@example.test`;
-    const password = `Sway!${input.suffix}-Pilot-2026-Long`;
+  const email = input.email ?? `simulated-${input.suffix}@example.test`;
+  const password = `Sway!${input.suffix}-Pilot-2026-Long`;
   if (input.discoveryJourneyId) {
     const landing = await client.navigate('/discover?utm_source=google&utm_medium=organic&utm_campaign=simulated-live-night', {
       referer: 'https://www.google.com/search?q=sway+tips',
@@ -463,6 +464,7 @@ async function main() {
       suffix: 'primary',
       displayName: 'DJ Simulated',
       handle: 'dj-simulated',
+      email: 'simulated-primary@example.com',
       discoveryJourneyId: primaryDiscoveryJourneyId
     });
     const primaryAttribution = await proof.query<{
@@ -648,6 +650,21 @@ async function main() {
       specialties: ['Integration testing']
     });
     assertStatus(completePublicProfile, 202, 'complete disposable public profile facts', server);
+    const ungrantedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(ungrantedPublicFeed, 200, 'server grant requirement for public discovery', server);
+    assert.equal(
+      ungrantedPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A complete public profile must not self-award its server publication grant.'
+    );
+    await proof.query(
+      `insert into performer_capability_grant_events (
+         performer_id, capability, decision, actor_type, reason, evidence, idempotency_key_hash
+       ) values ($1, 'profile_publication', 'granted', 'system',
+         'Disposable server-controlled public discovery proof',
+         '{"reference":"simulated-live-night-profile-publication"}'::jsonb, $2)`,
+      [primary.performerId, hash('simulated-live-night-profile-publication-grant')]
+    );
     const publishedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
     assertStatus(publishedPublicFeed, 200, 'public performer room discovery', server);
     assert.equal(
@@ -790,12 +807,12 @@ async function main() {
       payments: string;
     }>(`
       select
-        (select count(*) from users where email = 'simulated-primary@example.test')::text as users,
+        (select count(*) from users where email = 'simulated-primary@example.com')::text as users,
         (select count(*) from performers where owner_user_id = (
-          select id from users where email = 'simulated-primary@example.test'
+          select id from users where email = 'simulated-primary@example.com'
         ))::text as performers,
         (select count(*) from pro_mode_status_events where user_id = (
-          select id from users where email = 'simulated-primary@example.test'
+          select id from users where email = 'simulated-primary@example.com'
         ))::text as "proModeEvents",
         (select count(*) from gig_sessions where id = $1)::text as gigs,
         (select count(*) from requests where gig_id = $1 and activated_at is not null)::text as requests,

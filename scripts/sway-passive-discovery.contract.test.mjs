@@ -8,6 +8,7 @@ const capabilityModel = read('docs/SWAY_TALENT_CAPABILITY_MODEL.md');
 const copyTruth = read('docs/SWAY_PUBLIC_COPY_TRUTH_MATRIX.md');
 const productStructure = read('docs/SWAY_PRODUCT_STRUCTURE.md');
 const accountAccess = read('src/components/AccountAccess.tsx');
+const publicProfilePolicy = read('src/server/public-profile.ts');
 const server = read('server.ts');
 const organicDiscoveryContract = read('scripts/sway-organic-performer-discovery.contract.test.mjs');
 const failures = [];
@@ -67,9 +68,11 @@ requireText(productStructure, 'docs/SWAY_PUBLIC_COPY_TRUTH_MATRIX.md', 'product 
 
 rejectText(accountAccess, "useState<PerformerVisibilityState>('public')", 'publication intent');
 rejectText(accountAccess, 'Public is selected', 'publication intent');
-requireText(server, "sql`nullif(trim(${performers.bio}), '') is not null`", 'public profile sufficient-information boundary');
-rejectText(server, 'listEligiblePublicPerformers', 'public directory implementation boundary');
-rejectText(server, 'public-performer-directory', 'public directory implementation boundary');
+requireText(publicProfilePolicy, 'evaluatePublicProfessionalDirectoryEligibility', 'shared professional directory policy');
+requireText(publicProfilePolicy, "reason: 'profile_incomplete'", 'public profile sufficient-information boundary');
+requireText(publicProfilePolicy, "reason: 'reserved_test_record'", 'reserved test-record containment');
+requireText(server, 'loadQualifiedPublicProfessionalDirectory', 'qualified public professional directory');
+requireText(server, 'PUBLIC_DISCOVERY_QUALIFIED_PROFILE_THRESHOLD = 3', 'qualified public profile threshold');
 
 const routeBlock = (needle) => {
   const start = server.indexOf(needle);
@@ -81,18 +84,23 @@ const routeBlock = (needle) => {
 const publicFeed = routeBlock("app.get('/api/public/feed'");
 requireText(publicFeed, 'rooms:', 'public feed live-room boundary');
 requireText(publicFeed, 'events:', 'public feed event boundary');
-if (/(?:^|\n)\s*performers\s*:/.test(publicFeed)) {
-  failures.push('public feed boundary: a top-level performer directory was coupled into the live-room and event feed');
-}
+requireText(publicFeed, 'professionals:', 'public feed professional directory boundary');
+rejectText(publicFeed, 'qualifiedProfileCount:', 'public feed internal threshold containment');
+rejectText(publicFeed, 'discoverIndexEligible:', 'public feed internal threshold containment');
 
 const sitemap = routeBlock("app.get('/sitemap.xml'");
 if (/const staticPaths\s*=\s*\[[^\]]*['"]\/discover['"]/.test(sitemap)) {
   failures.push('public discovery index hold: /discover must stay out of the static sitemap before the eligible-supply threshold is implemented');
 }
 requireText(server, 'function applyPublicDiscoveryIndexHold', 'public discovery index hold');
-requireText(server, "req.path === '/discover'", 'public discovery index hold');
+requireText(server, "isPublicDiscoverPath(req.path) && metadata.robots === 'noindex, follow'", 'public discovery index hold');
 requireText(server, "res.setHeader('X-Robots-Tag', 'noindex, follow')", 'public discovery index hold');
-const indexHoldCallCount = (server.match(/applyPublicDiscoveryIndexHold\(req, res\);/g) ?? []).length;
+requireText(server, "robots: directory.discoverIndexEligible ? undefined : 'noindex, follow'", 'public discovery index threshold enforcement');
+requireText(server, 'id="sway-professional-directory"', 'server-rendered professional directory');
+requireText(server, "'@type': 'ItemList'", 'server-rendered professional directory structured data');
+requireText(sitemap, 'directory.discoverIndexEligible', 'sitemap discovery threshold enforcement');
+requireText(sitemap, 'loadQualifiedPublicProfessionalDirectory()', 'sitemap shared professional directory');
+const indexHoldCallCount = (server.match(/applyPublicDiscoveryIndexHold\(req, res, metadata\);/g) ?? []).length;
 if (indexHoldCallCount !== 2) {
   failures.push(`public discovery index hold: expected dev and production shell enforcement, found ${indexHoldCallCount}`);
 }

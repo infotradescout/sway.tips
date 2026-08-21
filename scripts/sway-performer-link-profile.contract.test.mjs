@@ -477,17 +477,22 @@ requireIncludes(performerShareMetadata, 'share-card.png?v=1', 'Performer share m
 
 const publicFeedRoute = sliceBetween(server, "app.get('/api/public/feed'", "app.get('/api/public/performer/:handle'", 'public feed route');
 for (const term of [
-  'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['restricted', 'suspended'])",
-  "eq(performers.visibilityState, 'public')",
-  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
-  "sql`nullif(trim(${performers.handle}), '') is not null`",
-  "sql`nullif(trim(${performers.bio}), '') is not null`",
-  "sql`nullif(trim(${performers.displayName}), '') is not null`",
-  'const selectedRooms = activeRooms',
-  '.filter((room) => detailsByGigId.has(room.gigId))',
-  'normalizePublicProfileUrl(detail.avatarUrl)'
+  'loadQualifiedPublicProfessionalDirectory()',
+  'const roomCandidates = activeRooms.slice',
+  'professionalsById.has(detail.performerId)',
+  'const selectedRooms = roomCandidates',
+  'normalizePublicProfileUrl(detail.avatarUrl)',
+  'professionals: directory.professionals'
 ]) requireIncludes(publicFeedRoute, term, 'Public feed route');
+for (const term of ['qualifiedProfileCount:', 'discoverIndexEligible:']) {
+  requireExcludes(publicFeedRoute, term, 'Public feed internal index-threshold containment');
+}
+for (const term of [
+  'evaluatePublicProfessionalDirectoryEligibility',
+  "ownerProModeStatus !== 'active'",
+  "reason: 'profile_incomplete'",
+  "reason: 'reserved_test_record'"
+]) requireIncludes(normalizers, term, 'Public feed shared qualification policy');
 
 const publicPerformerRoute = sliceBetween(server, "app.get('/api/public/performer/:handle'", 'app.get("/api/lyrics"', 'public performer route');
 for (const term of [

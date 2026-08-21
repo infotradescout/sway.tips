@@ -49,6 +49,7 @@ type PublicPerformerProfile = {
   displayName: string;
   stageName: string | null;
   primaryRole: string | null;
+  primaryRoleLabel: string | null;
   handle: string | null;
   bio: string | null;
   headline: string | null;
@@ -323,7 +324,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     stageName: profile.stageName,
     displayName: profile.displayName
   });
-  const pageKindLabel = resolvePublicProfilePageKindLabel({
+  const pageKindLabel = profile.primaryRoleLabel || resolvePublicProfilePageKindLabel({
     primaryRole: profile.primaryRole,
     specialties: profile.specialties,
     isPreview: profile.isPreview

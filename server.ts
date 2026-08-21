@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerCapabilityGrantEvents, performerEvents, performerIdentityEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -92,6 +92,7 @@ import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-con
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
+  evaluatePublicProfessionalDirectoryEligibility,
   mergePublicProfileMetadata,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
@@ -108,8 +109,10 @@ import {
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import {
   createTalentProfessionalSetupService,
+  resolveCurrentProfessionalIdentities,
   TalentProfessionalSetupError
 } from "./src/server/talent-professional-setup-service";
+import { professionalIdentityLabel, type ProfessionalIdentityKind } from "./src/talent-capability-catalog";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 import {
@@ -411,10 +414,12 @@ function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Surrogate-Control', 'no-store');
 }
 
-function applyPublicDiscoveryIndexHold(req: express.Request, res: express.Response) {
-  // Wave 0B holds the aggregate discovery page out of search until Wave 3 can
-  // prove the eligible-supply threshold from durable public records.
-  if (req.path === '/discover') {
+function applyPublicDiscoveryIndexHold(
+  req: express.Request,
+  res: express.Response,
+  metadata: ShareMetadata
+) {
+  if (isPublicDiscoverPath(req.path) && metadata.robots === 'noindex, follow') {
     res.setHeader('X-Robots-Tag', 'noindex, follow');
   }
 }
@@ -579,6 +584,10 @@ function buildAppHostRedirectUrl(originalUrl: string) {
   return `${CANONICAL_APP_ORIGIN}${pathAndQuery}`;
 }
 
+function isPublicDiscoverPath(urlPath: string) {
+  return urlPath.toLowerCase().replace(/\/+$/, '') === '/discover';
+}
+
 function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
   if (urlPath === '/') return 'public';
   if (urlPath === '/home') return 'patron';
@@ -587,7 +596,7 @@ function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
   if (urlPath.startsWith('/admin')) return 'admin';
   if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
   if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
-  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover') return 'patron';
+  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || isPublicDiscoverPath(urlPath)) return 'patron';
   return 'patron';
 }
 
@@ -600,7 +609,7 @@ function isShellAllowed(shell: SwayShell): boolean {
 }
 
 type DiscoveryFacts = {
-  entityType: 'performer' | 'event' | 'release' | 'live_room';
+  entityType: 'performer' | 'event' | 'release' | 'live_room' | 'directory';
   entityName: string;
   heading: string;
   summary: string;
@@ -609,6 +618,12 @@ type DiscoveryFacts = {
   primaryActionLabel: string;
   primaryActionHref: string;
   relatedLinks: Array<{ label: string; href: string }>;
+  directoryItems?: Array<{
+    name: string;
+    roleLabel: string;
+    profileHref: string;
+    city?: string | null;
+  }>;
   lastUpdated?: string | null;
 };
 
@@ -618,9 +633,10 @@ type ShareMetadata = {
   url: string;
   image: string;
   imageAlt: string;
-  robots?: 'noindex, nofollow';
+  robots?: 'noindex, nofollow' | 'noindex, follow';
   structuredData?: Record<string, unknown>;
   discoveryFacts?: DiscoveryFacts;
+  responseStatus?: 503;
 };
 
 type PublicShareProfile = {
@@ -631,6 +647,8 @@ type PublicShareProfile = {
   city: string | null;
   avatarUrl: string | null;
   specialties: string[] | null;
+  primaryRole: ProfessionalIdentityKind | null;
+  primaryRoleLabel: string | null;
   updatedAt: Date | null;
   visibility: 'public' | 'unlisted';
 };
@@ -650,6 +668,8 @@ type PublicPerformerDiscoveryProfile = {
   city: string | null;
   avatarUrl: string | null;
   metadata: unknown;
+  primaryRole: ProfessionalIdentityKind | null;
+  primaryRoleLabel: string | null;
   bookingEmail: string | null;
   bookingPhone: string | null;
   facebookUrl: string | null;
@@ -666,8 +686,31 @@ type PublicPerformerDiscoveryResolution =
   | { kind: 'public' | 'unlisted'; profile: PublicPerformerDiscoveryProfile }
   | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
+type PublicProfessionalDirectoryItem = {
+  performerId: string;
+  displayName: string;
+  handle: string;
+  profilePath: string;
+  bio: string;
+  headline: string | null;
+  specialties: string[];
+  city: string | null;
+  avatarUrl: string | null;
+  primaryRole: string;
+  primaryRoleLabel: string;
+  updatedAt: string | null;
+};
+
+type PublicProfessionalDirectorySnapshot = {
+  professionals: PublicProfessionalDirectoryItem[];
+  qualifiedProfileCount: number;
+  discoverIndexEligible: boolean;
+};
+
+const PUBLIC_DISCOVERY_QUALIFIED_PROFILE_THRESHOLD = 3;
+
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
-const DEFAULT_SHARE_DESCRIPTION = 'Sway gives performers one place for public profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.';
+const DEFAULT_SHARE_DESCRIPTION = 'Sway gives independent talent, creators, and gig professionals one place for public profiles, releases, events, external ticket links, live rooms, Requests, Tips, Boosts, and direct audience support.';
 const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=4';
 const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
 const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
@@ -717,7 +760,8 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
     imageAlt: overrides.imageAlt || 'Sway approved neon brand artwork',
     robots: overrides.robots,
     structuredData: overrides.structuredData,
-    discoveryFacts: overrides.discoveryFacts
+    discoveryFacts: overrides.discoveryFacts,
+    responseStatus: overrides.responseStatus
   };
 }
 
@@ -744,6 +788,20 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
   const categoryHtml = categories.length
     ? `<p data-discovery="categories">${categories.map((value) => escapeDiscoveryHtmlText(value)).join(' · ')}</p>`
     : '';
+  const directoryHtml = facts.directoryItems?.length
+    ? [
+        '<section id="sway-professional-directory" data-discovery="professional-directory">',
+        '  <h2>Qualified public profiles</h2>',
+        '  <ul>',
+        ...facts.directoryItems.map((item) => (
+          `    <li><a href="${escapeDiscoveryHtmlText(item.profileHref)}">${escapeDiscoveryHtmlText(item.name)}</a>`
+          + ` <span data-discovery="professional-role">${escapeDiscoveryHtmlText(item.roleLabel)}</span>`
+          + `${item.city?.trim() ? ` <span data-discovery="professional-city">${escapeDiscoveryHtmlText(item.city.trim())}</span>` : ''}</li>`
+        )),
+        '  </ul>',
+        '</section>'
+      ].join('\n')
+    : '';
 
   return [
     '<main id="sway-discovery-first-response" data-sway-discovery="server-rendered">',
@@ -752,6 +810,7 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
     `  <p data-discovery="entity"><span data-discovery="entity-name">${escapeDiscoveryHtmlText(facts.entityName)}</span> · <span data-discovery="entity-type">${escapeDiscoveryHtmlText(facts.entityType)}</span></p>`,
     location,
     categoryHtml,
+    directoryHtml,
     `  <p data-discovery="primary-action"><a href="${escapeDiscoveryHtmlText(facts.primaryActionHref)}">${escapeDiscoveryHtmlText(facts.primaryActionLabel)}</a></p>`,
     related ? `  <ul data-discovery="related-links">${related}</ul>` : '',
     lastUpdated,
@@ -816,6 +875,159 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   );
 }
 
+async function loadQualifiedPublicProfessionalDirectory(): Promise<PublicProfessionalDirectorySnapshot> {
+  if (!businessDb) throw new Error('Public professional directory requires a durable database connection.');
+  const rows = await businessDb
+    .select({
+      performerId: performers.id,
+      ownerUserId: performers.ownerUserId,
+      ownerPerformerCount: sql<number>`(
+        select count(*)::int
+        from performers as owner_profiles
+        where owner_profiles.owner_user_id = ${performers.ownerUserId}
+      )`,
+      ownerEmail: users.email,
+      ownerEmailVerifiedAt: users.emailVerifiedAt,
+      ownerRole: users.role,
+      ownerProModeStatus: users.proModeStatus,
+      displayName: performers.displayName,
+      handle: performers.handle,
+      bio: performers.bio,
+      visibilityState: performers.visibilityState,
+      isActive: performers.isActive,
+      onboardingStatus: performers.onboardingStatus,
+      publicProfilePerformerId: performerPublicProfiles.performerId,
+      headline: performerPublicProfiles.headline,
+      specialties: performerPublicProfiles.specialties,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      updatedAt: performerPublicProfiles.updatedAt
+    })
+    .from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(eq(performers.visibilityState, 'public'));
+
+  const performerIds = [...new Set(rows.map((row) => row.performerId))];
+  const identityRows = performerIds.length
+    ? await businessDb
+        .select({
+          performerId: performerIdentityEvents.performerId,
+          identityRole: performerIdentityEvents.identityRole,
+          identityKind: performerIdentityEvents.identityKind,
+          customLabel: performerIdentityEvents.customLabel,
+          eventType: performerIdentityEvents.eventType
+        })
+        .from(performerIdentityEvents)
+        .where(inArray(performerIdentityEvents.performerId, performerIds))
+        .orderBy(asc(performerIdentityEvents.performerId), asc(performerIdentityEvents.eventSequence))
+    : [];
+  const profilePublicationGrantRows = performerIds.length
+    ? await businessDb
+        .select({
+          performerId: performerCapabilityGrantEvents.performerId,
+          decision: performerCapabilityGrantEvents.decision,
+          expiresAt: performerCapabilityGrantEvents.expiresAt
+        })
+        .from(performerCapabilityGrantEvents)
+        .where(and(
+          inArray(performerCapabilityGrantEvents.performerId, performerIds),
+          eq(performerCapabilityGrantEvents.capability, 'profile_publication')
+        ))
+        .orderBy(
+          asc(performerCapabilityGrantEvents.performerId),
+          asc(performerCapabilityGrantEvents.eventSequence)
+        )
+    : [];
+  const identityRowsByPerformer = new Map<string, typeof identityRows>();
+  for (const row of identityRows) {
+    const existing = identityRowsByPerformer.get(row.performerId) ?? [];
+    existing.push(row);
+    identityRowsByPerformer.set(row.performerId, existing);
+  }
+  const latestProfilePublicationGrantByPerformer = new Map<
+    string,
+    (typeof profilePublicationGrantRows)[number]
+  >();
+  for (const row of profilePublicationGrantRows) {
+    latestProfilePublicationGrantByPerformer.set(row.performerId, row);
+  }
+  const grantEvaluationTime = Date.now();
+
+  const rowsByHandle = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (!isDiscoveryEligibleHandle(row.handle)) continue;
+    const handle = normalizePerformerHandle(row.handle)?.toLowerCase();
+    if (!handle) continue;
+    const existing = rowsByHandle.get(handle) ?? [];
+    existing.push(row);
+    rowsByHandle.set(handle, existing);
+  }
+
+  const professionals: PublicProfessionalDirectoryItem[] = [];
+  for (const [handle, matchingRows] of rowsByHandle) {
+    if (matchingRows.length !== 1) continue;
+    const row = matchingRows[0];
+    const primaryIdentity = resolveCurrentProfessionalIdentities(
+      (identityRowsByPerformer.get(row.performerId) ?? []).map((identityRow) => ({
+        ...identityRow,
+        identityKind: identityRow.identityKind as ProfessionalIdentityKind
+      }))
+    ).primaryIdentity;
+    const profilePublicationGrant = latestProfilePublicationGrantByPerformer.get(row.performerId);
+    const profilePublicationGrantCurrent = profilePublicationGrant?.decision === 'granted'
+      && (
+        profilePublicationGrant.expiresAt === null
+        || profilePublicationGrant.expiresAt.getTime() > grantEvaluationTime
+      );
+    const eligibility = evaluatePublicProfessionalDirectoryEligibility({
+      claimed: true,
+      hasOwner: Boolean(row.ownerUserId),
+      isActive: row.isActive,
+      onboardingStatus: row.onboardingStatus,
+      visibilityState: row.visibilityState,
+      handle,
+      displayName: row.displayName,
+      bio: row.bio,
+      hasPublicProfile: Boolean(row.publicProfilePerformerId),
+      ownerEmail: row.ownerEmail,
+      ownerEmailVerifiedAt: row.ownerEmailVerifiedAt,
+      ownerRole: row.ownerRole,
+      ownerProModeStatus: row.ownerProModeStatus,
+      profilePublicationGrantCurrent,
+      primaryRole: primaryIdentity?.kind ?? null,
+      conflicted: Number(row.ownerPerformerCount) !== 1
+    });
+    if (!eligibility.eligible) continue;
+
+    professionals.push({
+      performerId: row.performerId,
+      displayName: row.displayName.trim(),
+      handle,
+      profilePath: `/p/${encodeURIComponent(handle)}`,
+      bio: row.bio!.trim(),
+      headline: normalizePublicProfileText(row.headline, 160),
+      specialties: normalizePublicProfileSpecialties(row.specialties) ?? [],
+      city: normalizePublicProfileText(row.city, 120),
+      avatarUrl: normalizePublicProfileUrl(row.avatarUrl),
+      primaryRole: eligibility.primaryRole,
+      primaryRoleLabel: professionalIdentityLabel(eligibility.primaryRole, primaryIdentity?.customLabel),
+      updatedAt: row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
+        ? row.updatedAt.toISOString()
+        : null
+    });
+  }
+
+  professionals.sort((left, right) => (
+    left.displayName.localeCompare(right.displayName) || left.handle.localeCompare(right.handle)
+  ));
+  return {
+    professionals,
+    qualifiedProfileCount: professionals.length,
+    discoverIndexEligible: professionals.length >= PUBLIC_DISCOVERY_QUALIFIED_PROFILE_THRESHOLD
+  };
+}
+
 async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<PublicPerformerDiscoveryResolution> {
   const normalizedHandle = normalizePerformerHandle(rawHandle);
   if (!normalizedHandle) return { kind: 'not_resolvable', profile: null };
@@ -877,11 +1089,32 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
       return { kind: 'not_resolvable', profile: null };
     }
 
+    const identityRows = await businessDb
+      .select({
+        identityRole: performerIdentityEvents.identityRole,
+        identityKind: performerIdentityEvents.identityKind,
+        customLabel: performerIdentityEvents.customLabel,
+        eventType: performerIdentityEvents.eventType
+      })
+      .from(performerIdentityEvents)
+      .where(eq(performerIdentityEvents.performerId, candidate.performerId))
+      .orderBy(asc(performerIdentityEvents.eventSequence));
+    const primaryIdentity = resolveCurrentProfessionalIdentities(
+      identityRows.map((identityRow) => ({
+        ...identityRow,
+        identityKind: identityRow.identityKind as ProfessionalIdentityKind
+      }))
+    ).primaryIdentity;
+
     return {
       kind: policy.kind,
       profile: {
         ...candidate,
-        handle: storedHandle?.toLowerCase() ?? null
+        handle: storedHandle?.toLowerCase() ?? null,
+        primaryRole: primaryIdentity?.kind ?? null,
+        primaryRoleLabel: primaryIdentity
+          ? professionalIdentityLabel(primaryIdentity.kind, primaryIdentity.customLabel)
+          : null
       }
     };
   } catch (error) {
@@ -902,6 +1135,8 @@ function toPublicShareProfile(
     city: profile.city,
     avatarUrl: profile.avatarUrl,
     specialties: profile.specialties,
+    primaryRole: profile.primaryRole,
+    primaryRoleLabel: profile.primaryRoleLabel,
     updatedAt: profile.updatedAt,
     visibility
   };
@@ -937,6 +1172,7 @@ function buildPublicPerformerShareMetadata(
           description: profile.bio?.trim() || undefined,
           url: canonicalProfileUrl,
           image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
+          jobTitle: profile.primaryRoleLabel || undefined,
           homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
           mainEntityOfPage: canonicalProfileUrl,
           knowsAbout: categories.length ? categories : undefined
@@ -947,7 +1183,7 @@ function buildPublicPerformerShareMetadata(
       entityName: profile.displayName || `@${profile.handle}`,
       heading: profile.displayName || `@${profile.handle}`,
       summary: description,
-      categories: categories.length ? categories : ['Performer'],
+      categories: [profile.primaryRoleLabel, ...categories].filter((value): value is string => Boolean(value)).slice(0, 8),
       location: profile.city,
       primaryActionLabel: 'View performer page',
       primaryActionHref: canonicalProfileUrl,
@@ -1115,6 +1351,94 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
 async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata> {
   const pathParts = req.path.split('/').filter(Boolean);
   const defaultMetadata = defaultShareMetadata(req);
+
+  if (isPublicDiscoverPath(req.path)) {
+    const unavailableMetadata = () => defaultShareMetadata(req, {
+      title: 'Discover independent professionals on Sway',
+      description: 'Discover public professional pages, active live rooms, and upcoming events on Sway.',
+      url: '/discover',
+      robots: 'noindex, follow',
+      responseStatus: 503,
+      discoveryFacts: {
+        entityType: 'directory',
+        entityName: 'Sway professional directory',
+        heading: 'Discover independent professionals on Sway',
+        summary: 'Qualified public profiles are temporarily unavailable. No sample or preview profiles are substituted.',
+        categories: ['Comedians', 'Singers', 'Songwriters', 'DJs', 'Bartenders', 'Hosts', 'Creators', 'Gig and service professionals'],
+        primaryActionLabel: 'Create a professional Sway page',
+        primaryActionHref: canonicalPublicUrl('/account/signup?intent=performer'),
+        relatedLinks: [{ label: 'About Sway', href: canonicalPublicUrl('/about') }],
+        directoryItems: [],
+        lastUpdated: null
+      }
+    });
+    if (!businessDb) return unavailableMetadata();
+
+    try {
+      const directory = await loadQualifiedPublicProfessionalDirectory();
+      const visibleProfessionals = directory.professionals.slice(0, 24);
+      const description = directory.qualifiedProfileCount
+        ? `Discover ${directory.qualifiedProfileCount} qualified public professional ${directory.qualifiedProfileCount === 1 ? 'profile' : 'profiles'}, plus current live rooms and upcoming events on Sway.`
+        : 'No qualified public professional profiles are listed right now. Sway does not substitute sample or preview profiles.';
+      const latestUpdatedAt = directory.professionals
+        .map((professional) => professional.updatedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null;
+      return defaultShareMetadata(req, {
+        title: 'Discover independent professionals on Sway',
+        description,
+        url: '/discover',
+        robots: directory.discoverIndexEligible ? undefined : 'noindex, follow',
+        structuredData: {
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: 'Discover independent professionals on Sway',
+          description,
+          url: canonicalPublicUrl('/discover'),
+          mainEntity: {
+            '@type': 'ItemList',
+            numberOfItems: directory.qualifiedProfileCount,
+            itemListElement: visibleProfessionals.map((professional, index) => ({
+              '@type': 'ListItem',
+              position: index + 1,
+              item: {
+                '@type': 'ProfilePage',
+                name: professional.displayName,
+                url: canonicalPublicUrl(professional.profilePath),
+                about: {
+                  '@type': 'Thing',
+                  name: professional.primaryRoleLabel
+                }
+              }
+            }))
+          }
+        },
+        discoveryFacts: {
+          entityType: 'directory',
+          entityName: 'Sway professional directory',
+          heading: 'Discover independent professionals on Sway',
+          summary: description,
+          categories: ['Comedians', 'Singers', 'Songwriters', 'DJs', 'Bartenders', 'Hosts', 'Creators', 'Gig and service professionals'],
+          primaryActionLabel: visibleProfessionals.length ? 'Open a public professional profile' : 'Create a professional Sway page',
+          primaryActionHref: visibleProfessionals.length
+            ? canonicalPublicUrl(visibleProfessionals[0].profilePath)
+            : canonicalPublicUrl('/account/signup?intent=performer'),
+          relatedLinks: [{ label: 'About Sway', href: canonicalPublicUrl('/about') }],
+          directoryItems: visibleProfessionals.map((professional) => ({
+            name: professional.displayName,
+            roleLabel: professional.primaryRoleLabel,
+            profileHref: canonicalPublicUrl(professional.profilePath),
+            city: professional.city
+          })),
+          lastUpdated: latestUpdatedAt?.slice(0, 10) ?? null
+        }
+      });
+    } catch (error) {
+      console.error('[sway.discovery] discover document lookup failed:', error);
+      return unavailableMetadata();
+    }
+  }
 
   if (!businessDb) return defaultMetadata;
 
@@ -11290,64 +11614,63 @@ app.get('/api/public/feed', async (_req, res) => {
   applyNoStoreHeaders(res);
 
   try {
-    const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
+    const professionalLimit = Math.max(1, Math.min(60, Number(_req.query?.professionalLimit) || 24));
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
-    const gigIds = activeRooms.map((room) => room.gigId);
-    const [details, publicEvents] = await Promise.all([
-      gigIds.length
-        ? businessDb
-            .select({
-              gigId: gigSessions.id,
-              performerName: performers.displayName,
-              performerHandle: performers.handle,
-              headline: performerPublicProfiles.headline,
-              city: performerPublicProfiles.city,
-              avatarUrl: performerPublicProfiles.avatarUrl,
-              facebookUrl: performerPublicProfiles.facebookUrl,
-              instagramUrl: performerPublicProfiles.instagramUrl,
-              tiktokUrl: performerPublicProfiles.tiktokUrl,
-              youtubeUrl: performerPublicProfiles.youtubeUrl,
-              soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-              websiteUrl: performerPublicProfiles.websiteUrl
-            })
-            .from(gigSessions)
-            .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-            .innerJoin(users, eq(users.id, performers.ownerUserId))
-            .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-            .where(and(
-              inArray(gigSessions.id, gigIds),
-              eq(performers.isActive, true),
-              notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
-              eq(performers.visibilityState, 'public'),
-              sql`nullif(trim(${performers.handle}), '') is not null`,
-              sql`nullif(trim(${performers.bio}), '') is not null`,
-              sql`nullif(trim(${performers.displayName}), '') is not null`
-            ))
-        : Promise.resolve([]),
+    const [activeRooms, directory, publicEvents] = await Promise.all([
+      listReadableActiveRooms(),
+      loadQualifiedPublicProfessionalDirectory(),
       performerEventService.listPublicEvents({ limit: eventLimit })
     ]);
+    const roomCandidates = activeRooms.slice(0, Math.max(30, Math.min(120, roomLimit * 4)));
+    const gigIds = roomCandidates.map((room) => room.gigId);
+    const details = gigIds.length
+      ? await businessDb
+          .select({
+            gigId: gigSessions.id,
+            performerId: performers.id,
+            performerName: performers.displayName,
+            headline: performerPublicProfiles.headline,
+            city: performerPublicProfiles.city,
+            avatarUrl: performerPublicProfiles.avatarUrl,
+            facebookUrl: performerPublicProfiles.facebookUrl,
+            instagramUrl: performerPublicProfiles.instagramUrl,
+            tiktokUrl: performerPublicProfiles.tiktokUrl,
+            youtubeUrl: performerPublicProfiles.youtubeUrl,
+            soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+            websiteUrl: performerPublicProfiles.websiteUrl
+          })
+          .from(gigSessions)
+          .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+          .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+          .where(inArray(gigSessions.id, gigIds))
+      : [];
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
-    const selectedRooms = activeRooms
-      .filter((room) => detailsByGigId.has(room.gigId))
+    const professionalsById = new Map(directory.professionals.map((professional) => [professional.performerId, professional]));
+    const selectedRooms = roomCandidates
+      .filter((room) => {
+        const detail = detailsByGigId.get(room.gigId);
+        return Boolean(detail && professionalsById.has(detail.performerId));
+      })
       .slice(0, roomLimit);
 
     return res.json({
       rooms: selectedRooms
         .map((room) => {
         const detail = detailsByGigId.get(room.gigId)!;
+        const professional = professionalsById.get(detail.performerId)!;
         return {
           gigId: room.gigId,
           routePath: room.routePath,
-          performerName: detail.performerName || room.performerName,
-          performerHandle: detail.performerHandle || null,
-          performerPath: detail.performerHandle ? `/p/${detail.performerHandle}` : null,
+          performerName: professional.displayName || detail.performerName || room.performerName,
+          performerHandle: professional.handle,
+          performerPath: professional.profilePath,
           talentRole: room.talentRole,
           requestCount: room.requestCount,
           startedAt: room.startedAt,
@@ -11366,7 +11689,8 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
-      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket)),
+      professionals: directory.professionals.slice(0, professionalLimit)
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -11528,7 +11852,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       performer: {
         displayName: profile.displayName,
         stageName,
-        primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
+        primaryRole: profile.primaryRole,
+        primaryRoleLabel: profile.primaryRoleLabel,
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,
@@ -14500,6 +14825,13 @@ function escapeXml(value: string) {
     .replace(/'/g, '&apos;');
 }
 
+app.get(/^\/discover\/*$/i, (req, res, next) => {
+  if (req.path === '/discover') return next();
+  const queryIndex = req.originalUrl.indexOf('?');
+  const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : '';
+  return res.redirect(308, `/discover${query}`);
+});
+
 app.get('/robots.txt', (_req, res) => {
   // Canonical host for sitemap locs and HTML <link rel="canonical"> is app.sway.tips.
   // Apex/www may serve the same crawler files; they must keep pointing at the app host.
@@ -14519,19 +14851,19 @@ app.get('/llms.txt', (_req, res) => {
   res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send([
     '# Sway',
     '',
-    '> Sway gives working performers one public home for profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.',
+    '> Sway gives independent talent, creators, and gig professionals one public home for profiles, releases, events, external ticket links, live rooms, Requests, Tips, Boosts, and direct audience support.',
     '',
     `Canonical public host: ${CANONICAL_APP_ORIGIN}`,
     'Apex and www may redirect or mirror; permanent addresses and sitemap locs use the app host.',
     '',
     '## Public surfaces',
     `- [About Sway](${CANONICAL_APP_ORIGIN}/about)`,
-    `- [Discover performers, shows, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
+    `- [Discover comedians, singers, songwriters, DJs, bartenders, hosts, creators, gig professionals, events, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
     `- [FAQ](${CANONICAL_APP_ORIGIN}/faq)`,
     `- [Terms](${CANONICAL_APP_ORIGIN}/terms)`,
     `- [Privacy](${CANONICAL_APP_ORIGIN}/privacy)`,
     '',
-    'Performer pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
+    'Professional public pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
     'Venue/location facts appear on event pages when published; Sway does not invent standalone venue catalog pages.',
     'Live Rooms (/g/{id}) are operating product pages when a room is active; Self-Production releases are a separate lane.',
     'Sway.DIO is not a live discovery surface.',
@@ -14557,28 +14889,8 @@ app.get('/sitemap.xml', async (_req, res) => {
 
   if (businessDb) {
     try {
-    const [profileRows, eventRows, releaseRows] = await Promise.all([
-      businessDb.select({
-        ownerUserId: performers.ownerUserId,
-        handle: performers.handle,
-        displayName: performers.displayName,
-        bio: performers.bio,
-        visibilityState: performers.visibilityState,
-        isActive: performers.isActive,
-        onboardingStatus: performers.onboardingStatus,
-        updatedAt: performerPublicProfiles.updatedAt
-      })
-        .from(performers)
-        .innerJoin(users, eq(users.id, performers.ownerUserId))
-        .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-        .where(and(
-          eq(performers.visibilityState, 'public'),
-          eq(performers.isActive, true),
-          notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
-          sql`nullif(trim(${performers.handle}), '') is not null`,
-          sql`nullif(trim(${performers.bio}), '') is not null`,
-          sql`nullif(trim(${performers.displayName}), '') is not null`
-        )),
+    const [directory, eventRows, releaseRows] = await Promise.all([
+      loadQualifiedPublicProfessionalDirectory(),
       // Venue/location is event context only — no fake /v/ venue URLs.
       businessDb.select({
         id: performerEvents.id,
@@ -14606,34 +14918,13 @@ app.get('/sitemap.xml', async (_req, res) => {
         ))
     ]);
 
-    const rowsByHandle = new Map<string, typeof profileRows>();
-    for (const row of profileRows) {
-      if (!isDiscoveryEligibleHandle(row.handle)) continue;
-      const normalizedHandle = normalizePerformerHandle(row.handle)?.toLowerCase();
-      if (!normalizedHandle) continue;
-      const existing = rowsByHandle.get(normalizedHandle) ?? [];
-      existing.push(row);
-      rowsByHandle.set(normalizedHandle, existing);
+    if (directory.discoverIndexEligible) {
+      const discoverLoc = `${CANONICAL_APP_ORIGIN}/discover`;
+      entries.set(discoverLoc, { loc: discoverLoc });
     }
-    for (const [normalizedHandle, rows] of rowsByHandle) {
-      if (rows.length !== 1) continue;
-      const row = rows[0];
-      const policy = evaluatePublicPerformerVisibility({
-        claimed: true,
-        hasOwner: Boolean(row.ownerUserId),
-        isActive: row.isActive,
-        onboardingStatus: row.onboardingStatus,
-        visibilityState: row.visibilityState,
-        handle: normalizedHandle,
-        displayName: row.displayName,
-        conflicted: false
-      });
-      if (policy.kind !== 'public') continue;
-      const loc = `${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(normalizedHandle)}`;
-      const lastmod = row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
-        ? row.updatedAt.toISOString()
-        : null;
-      entries.set(loc, { loc, lastmod });
+    for (const professional of directory.professionals) {
+      const loc = `${CANONICAL_APP_ORIGIN}${professional.profilePath}`;
+      entries.set(loc, { loc, lastmod: professional.updatedAt });
     }
     for (const row of eventRows) {
       const loc = `${CANONICAL_APP_ORIGIN}/e/${row.id}`;
@@ -15079,10 +15370,12 @@ async function startServer() {
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
         const template = readFileSync(templatePath, 'utf8');
         const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
-        const html = injectShareMetadata(transformedHtml, await resolveShareMetadata(req));
+        const metadata = await resolveShareMetadata(req);
+        const html = injectShareMetadata(transformedHtml, metadata);
         applyNoStoreHeaders(res);
-        applyPublicDiscoveryIndexHold(req, res);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        applyPublicDiscoveryIndexHold(req, res, metadata);
+        if (metadata.responseStatus === 503) res.setHeader('Retry-After', '300');
+        res.status(metadata.responseStatus ?? 200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
       }
@@ -15116,10 +15409,12 @@ async function startServer() {
       try {
         const htmlPath = path.join(distPath, shellHtmlRelativePath(shell));
         const template = readFileSync(htmlPath, 'utf8');
-        const html = injectShareMetadata(template, await resolveShareMetadata(req));
+        const metadata = await resolveShareMetadata(req);
+        const html = injectShareMetadata(template, metadata);
         applyNoStoreHeaders(res);
-        applyPublicDiscoveryIndexHold(req, res);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        applyPublicDiscoveryIndexHold(req, res, metadata);
+        if (metadata.responseStatus === 503) res.setHeader('Retry-After', '300');
+        res.status(metadata.responseStatus ?? 200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
       }

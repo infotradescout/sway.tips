@@ -30,12 +30,21 @@ for (const term of [
   'twitter:card',
   'twitter:image',
   'vite.transformIndexHtml(req.originalUrl, template)',
-  'injectShareMetadata(transformedHtml, await resolveShareMetadata(req))',
-  'injectShareMetadata(template, await resolveShareMetadata(req))'
+  'const metadata = await resolveShareMetadata(req);',
+  'injectShareMetadata(transformedHtml, metadata)',
+  'injectShareMetadata(template, metadata)',
+  'applyPublicDiscoveryIndexHold(req, res, metadata)',
+  'res.status(metadata.responseStatus ?? 200)'
 ]) {
   if (!server.includes(term)) {
     failures.push(`Server link-preview metadata missing required term: ${term}`);
   }
+}
+
+const metadataSnapshotCount = (server.match(/const metadata = await resolveShareMetadata\(req\);/g) ?? []).length;
+const indexPolicyCount = (server.match(/applyPublicDiscoveryIndexHold\(req, res, metadata\);/g) ?? []).length;
+if (metadataSnapshotCount !== 2 || indexPolicyCount !== 2) {
+  failures.push(`Dev and production shells must each reuse one metadata snapshot (metadata ${metadataSnapshotCount}, robots ${indexPolicyCount}).`);
 }
 
 for (const term of [

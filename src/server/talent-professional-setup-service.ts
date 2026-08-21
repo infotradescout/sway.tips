@@ -103,6 +103,32 @@ function identityOrder(identity: ProfessionalIdentitySelection) {
   return `${String(index).padStart(3, '0')}:${identity.customLabel ?? ''}`;
 }
 
+export type ProfessionalIdentityEventProjection = {
+  identityRole: string;
+  identityKind: ProfessionalIdentityKind;
+  customLabel: string | null;
+  eventType: string;
+};
+
+export function resolveCurrentProfessionalIdentities(rows: ProfessionalIdentityEventProjection[]) {
+  let primaryIdentity: ProfessionalIdentitySelection | null = null;
+  const secondaryIdentities = new Map<string, ProfessionalIdentitySelection>();
+  for (const row of rows) {
+    const identity = { kind: row.identityKind, customLabel: row.customLabel ?? null };
+    if (row.identityRole === 'primary') {
+      primaryIdentity = row.eventType === 'selected' ? identity : null;
+    } else if (row.identityRole === 'secondary' && row.eventType === 'selected') {
+      secondaryIdentities.set(identityKey(identity), identity);
+    } else if (row.identityRole === 'secondary' && row.eventType === 'withdrawn') {
+      secondaryIdentities.delete(identityKey(identity));
+    }
+  }
+  return {
+    primaryIdentity,
+    secondaryIdentities: [...secondaryIdentities.values()].sort((a, b) => identityOrder(a).localeCompare(identityOrder(b)))
+  };
+}
+
 export function parseProfessionalSetupMutation(value: unknown): ProfessionalSetupMutation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TalentProfessionalSetupError(422, 'invalid_setup', 'Professional setup must be a JSON object.');
@@ -194,18 +220,12 @@ async function loadLedgerState(executor: any, actorUserId: string, now: Date) {
     .where(eq(performerCapabilityGrantEvents.performerId, performer.performerId))
     .orderBy(asc(performerCapabilityGrantEvents.eventSequence));
 
-  let primaryIdentity: ProfessionalIdentitySelection | null = null;
-  const secondaryIdentities = new Map<string, ProfessionalIdentitySelection>();
-  for (const row of identityRows) {
-    const identity = { kind: row.identityKind as ProfessionalIdentityKind, customLabel: row.customLabel ?? null };
-    if (row.identityRole === 'primary') {
-      primaryIdentity = row.eventType === 'selected' ? identity : null;
-    } else if (row.eventType === 'selected') {
-      secondaryIdentities.set(identityKey(identity), identity);
-    } else {
-      secondaryIdentities.delete(identityKey(identity));
-    }
-  }
+  const { primaryIdentity, secondaryIdentities } = resolveCurrentProfessionalIdentities(
+    identityRows.map((row) => ({
+      ...row,
+      identityKind: row.identityKind as ProfessionalIdentityKind
+    }))
+  );
 
   const earningModes = new Set<PerformerEarningMode>();
   const desiredCapabilities = new Set<PerformerCapability>();
@@ -240,7 +260,7 @@ async function loadLedgerState(executor: any, actorUserId: string, now: Date) {
   return {
     performerId: performer.performerId,
     primaryIdentity,
-    secondaryIdentities: [...secondaryIdentities.values()].sort((a, b) => identityOrder(a).localeCompare(identityOrder(b))),
+    secondaryIdentities,
     earningModes: PERFORMER_EARNING_MODES.filter((mode) => earningModes.has(mode)),
     desiredCapabilities: PERFORMER_CAPABILITIES.filter((capability) => desiredCapabilities.has(capability)),
     capabilityStatuses,

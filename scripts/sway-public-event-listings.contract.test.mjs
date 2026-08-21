@@ -207,7 +207,7 @@ if (server.includes('recordPublicEventAudit')) {
 }
 
 requireTerms(server, 'Public event shell and share metadata', [
-  "urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover'",
+  "urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || isPublicDiscoverPath(urlPath)",
   "pathParts[0] === 'e'",
   'performerEventService.getPublicEvent(pathParts[1])',
   'title: `${event.title} on Sway`',
@@ -278,8 +278,9 @@ requireTerms(eventPage, 'Public event page', [
 requireTerms(discoverPage, 'Public discovery page', [
   "fetch('/api/public/feed'",
   'Array.isArray(data.events)',
+  'Array.isArray(data.professionals)',
   '<PublicEventCard',
-  'No live rooms or upcoming shows right now'
+  'No qualified public profiles, live rooms, or upcoming events right now'
 ]);
 requireTerms(profilePage, 'Public performer profile events', [
   'events?: PublicEventDto[]',
