@@ -387,6 +387,14 @@ function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Surrogate-Control', 'no-store');
 }
 
+function applyPublicDiscoveryIndexHold(req: express.Request, res: express.Response) {
+  // Wave 0B holds the aggregate discovery page out of search until Wave 3 can
+  // prove the eligible-supply threshold from durable public records.
+  if (req.path === '/discover') {
+    res.setHeader('X-Robots-Tag', 'noindex, follow');
+  }
+}
+
 function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
   const parsed = Number(rawValue);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -14350,7 +14358,7 @@ app.get('/sitemap.xml', async (_req, res) => {
       .send('Sitemap temporarily unavailable.');
   }
 
-  const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
+  const staticPaths = ['/', '/about', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
   type SitemapEntry = { loc: string; lastmod?: string | null };
   const entries = new Map<string, SitemapEntry>();
   for (const route of staticPaths) {
@@ -14883,6 +14891,7 @@ async function startServer() {
         const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
         const html = injectShareMetadata(transformedHtml, await resolveShareMetadata(req));
         applyNoStoreHeaders(res);
+        applyPublicDiscoveryIndexHold(req, res);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
@@ -14919,6 +14928,7 @@ async function startServer() {
         const template = readFileSync(htmlPath, 'utf8');
         const html = injectShareMetadata(template, await resolveShareMetadata(req));
         applyNoStoreHeaders(res);
+        applyPublicDiscoveryIndexHold(req, res);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
