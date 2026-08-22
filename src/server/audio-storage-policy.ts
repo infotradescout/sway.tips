@@ -187,11 +187,29 @@ export async function loadAudioStorageUsage(
       where manifest.performer_id = ${input.performerId}
     ), sealed_usage as (
       select
-        coalesce(sum(version.byte_size) filter (where protected.asset_version_id is null), 0)::text
+        (
+          coalesce(sum(version.byte_size) filter (where protected.asset_version_id is null), 0)
+          + coalesce((
+            select sum(candidate.byte_size)
+            from audio_candidate_revisions candidate
+            where candidate.performer_id = ${input.performerId}
+              and candidate.sealed_at is not null
+              and candidate.original_preserved = true
+          ), 0)
+        )::text
           as sealed_working_bytes,
         coalesce(sum(version.byte_size) filter (where protected.asset_version_id is not null), 0)::text
           as release_protected_bytes,
-        count(version.id) filter (where protected.asset_version_id is null)::text
+        (
+          count(version.id) filter (where protected.asset_version_id is null)
+          + (
+            select count(candidate.id)
+            from audio_candidate_revisions candidate
+            where candidate.performer_id = ${input.performerId}
+              and candidate.sealed_at is not null
+              and candidate.original_preserved = true
+          )
+        )::text
           as sealed_working_object_count
       from audio_project_asset_versions version
       left join protected_versions protected on protected.asset_version_id = version.id

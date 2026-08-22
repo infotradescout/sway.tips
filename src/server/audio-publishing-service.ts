@@ -7,7 +7,10 @@ import sharp from 'sharp';
 import type { SwayDb } from '../db/client';
 import {
   audioAssets,
+  audioCandidateRevisions,
+  audioFileAccessGrants,
   audioFileConnections,
+  audioObjectCleanupReceipts,
   audioProjectAccessGrants,
   audioProjectAssetVersions,
   audioProjects,
@@ -416,21 +419,53 @@ export function createAudioPublishingService(config: {
   store: AudioObjectStore;
   workspaceLimitBytes?: number;
   workingObjectLimit?: number;
+  collaboratorRevisionUploadsEnabled?: boolean;
   env?: NodeJS.ProcessEnv;
 }) {
   const { db, store } = config;
+  const collaboratorRevisionUploadsEnabled = config.collaboratorRevisionUploadsEnabled === true;
   const storagePolicy = createAudioStoragePolicy({
     workspaceLimitBytes: config.workspaceLimitBytes,
     workingObjectLimit: config.workingObjectLimit,
     env: config.env
   });
 
-  function sessionObjectIdentity(session: {
-    storageProvider: string;
-    storageBucket: string;
-    storageKey: string;
-    providerUploadId: string;
-  }): AudioObjectIdentity {
+  async function requireActiveCollaboratorRevisionGrant(
+    executor: Pick<SwayDb, 'execute'>,
+    input: {
+      grantId: string;
+      projectId: string;
+      actorUserId: string;
+      assetId: string;
+      sourceAssetVersionId: string;
+    }
+  ) {
+    try {
+      await executor.execute(sql`select sway_require_active_collaborator_revision_grant(
+        ${input.grantId}::uuid,
+        ${input.projectId}::uuid,
+        ${input.actorUserId}::uuid,
+        ${input.assetId}::uuid,
+        ${input.sourceAssetVersionId}::uuid
+      )`);
+    } catch (error) {
+      throw Object.assign(new Error('Private candidate upload authority is no longer active.', { cause: error }), {
+        status: 410,
+        code: 'candidate_upload_authority_ended'
+      });
+    }
+  }
+
+  function sessionObjectIdentity(session: Record<string, unknown>): AudioObjectIdentity {
+    if (typeof session.storageProvider !== 'string'
+      || typeof session.storageBucket !== 'string'
+      || typeof session.storageKey !== 'string'
+      || typeof session.providerUploadId !== 'string'
+      || !session.storageBucket
+      || !session.storageKey
+      || !session.providerUploadId) {
+      throw new Error('Upload session is missing its exact object-store identity.');
+    }
     return {
       storageProvider: parseAudioStorageProvider(session.storageProvider),
       storageBucket: session.storageBucket,
@@ -444,20 +479,318 @@ export function createAudioPublishingService(config: {
     executor: Pick<SwayDb, 'execute'> = db
   ) {
     const sealed = await executor.execute(sql<{ id: string }>`
-      select id
-      from audio_project_asset_versions
-      where storage_provider = ${identity.storageProvider}
-        and storage_bucket = ${identity.storageBucket}
-        and storage_key = ${identity.storageKey}
-        and original_preserved = true
-        and sealed_at is not null
+      select sealed_object.id
+      from (
+        select id, storage_provider, storage_bucket, storage_key, original_preserved, sealed_at
+        from audio_project_asset_versions
+        union all
+        select id, storage_provider, storage_bucket, storage_key, original_preserved, sealed_at
+        from audio_candidate_revisions
+      ) sealed_object
+      where sealed_object.storage_provider = ${identity.storageProvider}
+        and sealed_object.storage_bucket = ${identity.storageBucket}
+        and sealed_object.storage_key = ${identity.storageKey}
+        and sealed_object.original_preserved = true
+        and sealed_object.sealed_at is not null
       limit 1
     `);
     if (sealed.rows.length > 0) {
-      throw new Error('Refusing to discard an object referenced by a sealed preserved asset version.');
+      throw new Error('Refusing to discard an object referenced by a sealed preserved asset version. Private candidates are protected too.');
     }
     const discardUpload = store.discardUpload ?? store.abortUpload;
     await discardUpload.call(store, identity);
+  }
+
+  type AudioCleanupReason =
+    | 'orphaned_owner_initiation'
+    | 'orphaned_candidate_initiation'
+    | 'owner_integrity_validation_failed'
+    | 'candidate_technical_validation_failed'
+    | 'candidate_grant_revoked'
+    | 'candidate_connection_revoked';
+
+  async function recordPendingAudioObjectCleanup(input: {
+    projectId: string;
+    actorUserId: string;
+    uploadSessionId?: string | null;
+    identity: AudioObjectIdentity;
+    cleanupReason: AudioCleanupReason;
+    lastError: string;
+  }, executor: Pick<SwayDb, 'insert' | 'select' | 'update'> = db) {
+    const now = new Date();
+    const lastError = input.lastError.trim().slice(0, 4000) || 'Unknown object-store cleanup failure.';
+    const inserted = await executor
+      .insert(audioObjectCleanupReceipts)
+      .values({
+        projectId: input.projectId,
+        actorUserId: input.actorUserId,
+        uploadSessionId: input.uploadSessionId ?? null,
+        storageProvider: input.identity.storageProvider,
+        storageBucket: input.identity.storageBucket,
+        storageKey: input.identity.storageKey,
+        providerUploadId: input.identity.providerUploadId ?? null,
+        cleanupReason: input.cleanupReason,
+        cleanupStatus: 'pending',
+        attemptCount: 1,
+        lastError,
+        requestedAt: now,
+        lastAttemptAt: now,
+        completedAt: null
+      })
+      .onConflictDoNothing()
+      .returning({ id: audioObjectCleanupReceipts.id });
+    if (inserted.length > 0) return inserted[0];
+
+    const [existing] = await executor
+      .select()
+      .from(audioObjectCleanupReceipts)
+      .where(and(
+        eq(audioObjectCleanupReceipts.storageProvider, input.identity.storageProvider),
+        eq(audioObjectCleanupReceipts.storageBucket, input.identity.storageBucket),
+        eq(audioObjectCleanupReceipts.storageKey, input.identity.storageKey)
+      ))
+      .limit(1);
+    if (!existing
+      || existing.projectId !== input.projectId
+      || existing.uploadSessionId !== (input.uploadSessionId ?? null)
+      || existing.providerUploadId !== (input.identity.providerUploadId ?? null)) {
+      throw new Error('Audio cleanup receipt storage identity collision refused.');
+    }
+    if (existing.cleanupStatus === 'completed') {
+      throw new Error('A completed audio cleanup receipt cannot be reopened.');
+    }
+    const [updated] = await executor
+      .update(audioObjectCleanupReceipts)
+      .set({
+        attemptCount: sql`${audioObjectCleanupReceipts.attemptCount} + 1`,
+        lastError,
+        lastAttemptAt: now
+      })
+      .where(and(
+        eq(audioObjectCleanupReceipts.id, existing.id),
+        eq(audioObjectCleanupReceipts.cleanupStatus, 'pending')
+      ))
+      .returning({ id: audioObjectCleanupReceipts.id });
+    if (!updated) throw new Error('Audio cleanup receipt changed before retry evidence could be recorded.');
+    return updated;
+  }
+
+  async function retryPendingAudioObjectCleanupReceipts(input: { limit?: number } = {}) {
+    const limit = input.limit ?? 100;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('limit must be an integer from 1 through 500.');
+    }
+    const pending = await db
+      .select({ id: audioObjectCleanupReceipts.id })
+      .from(audioObjectCleanupReceipts)
+      .where(eq(audioObjectCleanupReceipts.cleanupStatus, 'pending'))
+      .orderBy(asc(audioObjectCleanupReceipts.requestedAt), asc(audioObjectCleanupReceipts.id))
+      .limit(limit);
+    const completedReceiptIds: string[] = [];
+    const failures: Array<{ receiptId: string; error: string }> = [];
+
+    for (const candidate of pending) {
+      const outcome = await db.transaction(async (tx) => {
+        const [snapshot] = await tx
+          .select()
+          .from(audioObjectCleanupReceipts)
+          .where(and(
+            eq(audioObjectCleanupReceipts.id, candidate.id),
+            eq(audioObjectCleanupReceipts.cleanupStatus, 'pending')
+          ))
+          .limit(1);
+        if (!snapshot) return { kind: 'skipped' as const };
+
+        if (snapshot.uploadSessionId) {
+          const [boundSession] = await tx
+            .select()
+            .from(audioUploadSessions)
+            .where(eq(audioUploadSessions.id, snapshot.uploadSessionId))
+            .for('update')
+            .limit(1);
+          if (!boundSession
+            || boundSession.projectId !== snapshot.projectId
+            || boundSession.storageProvider !== snapshot.storageProvider
+            || boundSession.storageBucket !== snapshot.storageBucket
+            || boundSession.storageKey !== snapshot.storageKey
+            || boundSession.providerUploadId !== snapshot.providerUploadId
+            || boundSession.uploadStatus === 'completed') {
+            throw new Error('Cleanup receipt no longer matches an unsealed upload session.');
+          }
+        }
+        const [receipt] = await tx
+          .select()
+          .from(audioObjectCleanupReceipts)
+          .where(and(
+            eq(audioObjectCleanupReceipts.id, snapshot.id),
+            eq(audioObjectCleanupReceipts.cleanupStatus, 'pending')
+          ))
+          .for('update', { skipLocked: true })
+          .limit(1);
+        if (!receipt) return { kind: 'skipped' as const };
+
+        const attemptedAt = new Date();
+        try {
+          await discardUnsealedUpload({
+            storageProvider: parseAudioStorageProvider(receipt.storageProvider),
+            storageBucket: receipt.storageBucket,
+            storageKey: receipt.storageKey,
+            providerUploadId: receipt.providerUploadId ?? undefined
+          }, tx);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Object-store cleanup retry failed.';
+          await tx
+            .update(audioObjectCleanupReceipts)
+            .set({
+              attemptCount: sql`${audioObjectCleanupReceipts.attemptCount} + 1`,
+              lastError: message.slice(0, 4000),
+              lastAttemptAt: attemptedAt
+            })
+            .where(eq(audioObjectCleanupReceipts.id, receipt.id));
+          return { kind: 'failed' as const, receiptId: receipt.id, error: message };
+        }
+
+        await tx
+          .update(audioObjectCleanupReceipts)
+          .set({
+            cleanupStatus: 'completed',
+            attemptCount: sql`${audioObjectCleanupReceipts.attemptCount} + 1`,
+            lastAttemptAt: attemptedAt,
+            completedAt: attemptedAt
+          })
+          .where(eq(audioObjectCleanupReceipts.id, receipt.id));
+        if (receipt.uploadSessionId) {
+          await tx
+            .update(audioUploadSessions)
+            .set({ uploadStatus: 'aborted', updatedAt: attemptedAt })
+            .where(and(
+              eq(audioUploadSessions.id, receipt.uploadSessionId),
+              inArray(audioUploadSessions.uploadStatus, [...EXPIRABLE_AUDIO_UPLOAD_STATUSES])
+            ));
+        }
+        await tx.insert(auditEvents).values({
+          actorType: 'system',
+          actorId: null,
+          entityType: 'audio_object_cleanup_receipt',
+          entityId: receipt.id,
+          eventType: 'audio_object_cleanup.completed',
+          previousStatus: 'pending',
+          nextStatus: 'completed',
+          metadata: {
+            cleanupReason: receipt.cleanupReason,
+            projectId: receipt.projectId,
+            uploadSessionId: receipt.uploadSessionId,
+            storageProvider: receipt.storageProvider,
+            storageBucket: receipt.storageBucket,
+            storageKey: receipt.storageKey,
+            attemptCount: receipt.attemptCount + 1
+          }
+        });
+        return { kind: 'completed' as const, receiptId: receipt.id };
+      });
+
+      if (outcome.kind === 'completed') completedReceiptIds.push(outcome.receiptId);
+      if (outcome.kind === 'failed') failures.push({ receiptId: outcome.receiptId, error: outcome.error });
+    }
+
+    return {
+      examinedCount: pending.length,
+      completedCount: completedReceiptIds.length,
+      failedCount: failures.length,
+      completedReceiptIds,
+      failures
+    };
+  }
+
+  async function validatePlayableAudioOriginal(version: {
+    mimeType: string;
+    byteSize: number;
+    storageProvider: string;
+    storageBucket: string;
+    storageKey: string;
+  }, purpose: 'private_candidate' | 'release_master' = 'private_candidate') {
+    const validationMessages = purpose === 'release_master'
+      ? {
+          declaration: 'Release recording masters must be declared audio media.',
+          maximum: `Release recording masters may not exceed ${MAX_RELEASE_MASTER_BYTES} bytes each.`,
+          sizeMismatch: 'Release package object size no longer matches its sealed version.',
+          incompleteHeader: 'Release master container header is incomplete.',
+          boundary: 'Release master must end exactly at its declared RIFF/FORM container boundary.',
+          parseFailure: 'Release master did not parse as complete playable audio matching its declared MIME type.'
+        }
+      : {
+          declaration: 'Private candidate must be declared audio media.',
+          maximum: `Audio files may not exceed ${MAX_RELEASE_MASTER_BYTES} bytes each.`,
+          sizeMismatch: 'Stored audio size no longer matches its verified upload.',
+          incompleteHeader: 'Audio container header is incomplete.',
+          boundary: 'Audio must end exactly at its declared RIFF/FORM container boundary.',
+          parseFailure: 'Audio did not parse as complete playable audio matching its declared MIME type.'
+        };
+    if (!version.mimeType.startsWith('audio/')) {
+      throw new Error(validationMessages.declaration);
+    }
+    if (version.byteSize > MAX_RELEASE_MASTER_BYTES) {
+      throw new Error(validationMessages.maximum);
+    }
+    const identity = {
+      storageProvider: parseAudioStorageProvider(version.storageProvider),
+      storageBucket: version.storageBucket,
+      storageKey: version.storageKey
+    };
+    const openExactOriginal = async () => {
+      const opened = await store.openOriginal(identity);
+      if (opened.byteSize !== version.byteSize) {
+        opened.stream.destroy();
+        throw new Error(validationMessages.sizeMismatch);
+      }
+      return opened;
+    };
+
+    if (['audio/wav', 'audio/x-wav', 'audio/aiff', 'audio/x-aiff'].includes(version.mimeType)) {
+      const prefixObject = await openExactOriginal();
+      const prefix = await readStreamPrefix(prefixObject.stream, 12);
+      if (prefix.byteLength < 12) throw new Error(validationMessages.incompleteHeader);
+      const declaredSize = version.mimeType.includes('aiff')
+        ? prefix.readUInt32BE(4) + 8
+        : prefix.readUInt32LE(4) + 8;
+      if (declaredSize !== version.byteSize) {
+        throw new Error(validationMessages.boundary);
+      }
+    }
+
+    const opened = await openExactOriginal();
+    try {
+      let metadata;
+      try {
+        metadata = await parseStream(
+          opened.stream,
+          { mimeType: version.mimeType, size: version.byteSize },
+          { duration: true, skipCovers: true }
+        );
+      } catch (cause) {
+        throw new Error(validationMessages.parseFailure, { cause });
+      }
+      const duration = metadata.format.duration;
+      const container = metadata.format.container ?? '';
+      if (!audioContainerMatchesMime(version.mimeType, container)
+        || !metadata.format.codec
+        || !Number.isFinite(duration)
+        || (duration ?? 0) <= 0
+        || (metadata.format.sampleRate ?? 0) <= 0
+        || (metadata.format.numberOfChannels ?? 0) <= 0) {
+        throw new Error(validationMessages.parseFailure);
+      }
+      return {
+        container,
+        codec: metadata.format.codec,
+        durationMs: Math.max(1, Math.round((duration ?? 0) * 1000)),
+        sampleRateHz: metadata.format.sampleRate ?? null,
+        bitDepth: metadata.format.bitsPerSample ?? null,
+        channelCount: metadata.format.numberOfChannels ?? null
+      };
+    } finally {
+      if (!opened.stream.destroyed) opened.stream.destroy();
+    }
   }
 
   async function validateReleasePackageAsset(input: {
@@ -500,61 +833,17 @@ export function createAudioPublishingService(config: {
     };
 
     if (roleKind === 'master') {
-      if (!version.mimeType.startsWith('audio/')) {
-        throw new Error('Release recording masters must be declared audio media.');
-      }
-      if (version.byteSize > MAX_RELEASE_MASTER_BYTES) {
-        throw new Error(`Release recording masters may not exceed ${MAX_RELEASE_MASTER_BYTES} bytes each.`);
-      }
-      if (['audio/wav', 'audio/x-wav', 'audio/aiff', 'audio/x-aiff'].includes(version.mimeType)) {
-        const prefixObject = await openExactOriginal();
-        const prefix = await readStreamPrefix(prefixObject.stream, 12);
-        if (prefix.byteLength < 12) throw new Error('Release master container header is incomplete.');
-        const declaredSize = version.mimeType.includes('aiff')
-          ? prefix.readUInt32BE(4) + 8
-          : prefix.readUInt32LE(4) + 8;
-        if (declaredSize !== version.byteSize) {
-          throw new Error('Release master must end exactly at its declared RIFF/FORM container boundary.');
-        }
-      }
-      const opened = await openExactOriginal();
-      try {
-        let metadata;
-        try {
-          metadata = await parseStream(
-            opened.stream,
-            { mimeType: version.mimeType, size: version.byteSize },
-            { duration: true, skipCovers: true }
-          );
-        } catch (cause) {
-          throw new Error(
-            'Release master did not parse as complete playable audio matching its declared MIME type.',
-            { cause }
-          );
-        }
-        const duration = metadata.format.duration;
-        const container = metadata.format.container ?? '';
-        if (!audioContainerMatchesMime(version.mimeType, container)
-          || !metadata.format.codec
-          || !Number.isFinite(duration)
-          || (duration ?? 0) <= 0
-          || (metadata.format.sampleRate ?? 0) <= 0
-          || (metadata.format.numberOfChannels ?? 0) <= 0) {
-          throw new Error('Release master did not parse as complete playable audio matching its declared MIME type.');
-        }
-        return {
-          assetVersionId: version.id,
-          validatorKey: RELEASE_PACKAGE_VALIDATOR_KEY,
-          roleKind,
-          container,
-          codec: metadata.format.codec,
-          durationSeconds: duration,
-          sampleRateHz: metadata.format.sampleRate,
-          channelCount: metadata.format.numberOfChannels
-        };
-      } finally {
-        if (!opened.stream.destroyed) opened.stream.destroy();
-      }
+      const validation = await validatePlayableAudioOriginal(version, 'release_master');
+      return {
+        assetVersionId: version.id,
+        validatorKey: RELEASE_PACKAGE_VALIDATOR_KEY,
+        roleKind,
+        container: validation.container,
+        codec: validation.codec,
+        durationSeconds: validation.durationMs / 1000,
+        sampleRateHz: validation.sampleRateHz,
+        channelCount: validation.channelCount
+      };
     }
 
     if (roleKind === 'artwork') {
@@ -732,6 +1021,211 @@ export function createAudioPublishingService(config: {
     return loadAudioStorageUsage(db, storagePolicy, input);
   }
 
+  async function initiateCollaboratorRevisionUpload(input: {
+    grantId: string;
+    actorUserId: string;
+    originalFilename: string;
+    mimeType: string;
+    expectedByteSize: number;
+    expectedSha256: string;
+    idempotencyKey: string;
+    partSizeBytes?: number;
+  }) {
+    if (!collaboratorRevisionUploadsEnabled) {
+      throw Object.assign(new Error('Private candidate uploads are disabled.'), {
+        status: 503,
+        code: 'candidate_uploads_disabled'
+      });
+    }
+    const expectedSha256 = input.expectedSha256.trim().toLowerCase();
+    const idempotencyKey = input.idempotencyKey.trim();
+    const originalFilename = input.originalFilename.trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) throw new Error('idempotencyKey is required and must not exceed 200 characters.');
+    if (!originalFilename || originalFilename.length > 255) throw new Error('originalFilename is required and must not exceed 255 characters.');
+    if (!/^[0-9a-f]{64}$/.test(expectedSha256)) throw new Error('expectedSha256 must be a 64-char hex digest.');
+    if (!Number.isSafeInteger(input.expectedByteSize) || input.expectedByteSize <= 0) {
+      throw new Error('expectedByteSize must be a positive integer.');
+    }
+    const partSizeBytes = input.partSizeBytes ?? DEFAULT_PART_SIZE;
+    if (!Number.isSafeInteger(partSizeBytes) || partSizeBytes < DEFAULT_PART_SIZE || partSizeBytes > 6 * 1024 * 1024) {
+      throw new Error('partSizeBytes must be an integer from 5 MiB through 6 MiB.');
+    }
+    if (Math.ceil(input.expectedByteSize / partSizeBytes) > 10_000) {
+      throw new Error('Upload requires more than the provider maximum of 10000 parts.');
+    }
+
+    let objectIdentity: AudioObjectIdentity | null = null;
+    let orphanCleanupContext: { projectId: string; uploadSessionId: string } | null = null;
+    try {
+      return await db.transaction(async (tx) => {
+        const [scope] = await tx
+          .select({
+            grantId: audioFileAccessGrants.id,
+            projectId: audioFileAccessGrants.projectId,
+            sourceAssetVersionId: audioFileAccessGrants.assetVersionId,
+            granteeUserId: audioFileAccessGrants.granteeUserId,
+            maxCandidateBytes: audioFileAccessGrants.maxCandidateBytes,
+            assetId: audioProjectAssetVersions.assetId,
+            assetKind: audioAssets.assetKind,
+            performerId: audioProjects.performerId
+          })
+          .from(audioFileAccessGrants)
+          .innerJoin(audioProjectAssetVersions, eq(audioProjectAssetVersions.id, audioFileAccessGrants.assetVersionId))
+          .innerJoin(audioAssets, eq(audioAssets.id, audioProjectAssetVersions.assetId))
+          .innerJoin(audioProjects, eq(audioProjects.id, audioFileAccessGrants.projectId))
+          .where(eq(audioFileAccessGrants.id, input.grantId))
+          .limit(1);
+        if (!scope || scope.granteeUserId !== input.actorUserId) {
+          throw Object.assign(new Error('Exact collaborator revision grant required.'), { status: 403 });
+        }
+        if (!scope.maxCandidateBytes
+          || input.expectedByteSize > scope.maxCandidateBytes) {
+          throw Object.assign(new Error('Private candidate exceeds the creator-approved byte ceiling.'), {
+            status: 413,
+            code: 'candidate_byte_ceiling_exceeded',
+            maxCandidateBytes: scope.maxCandidateBytes ?? 0,
+            requestedBytes: input.expectedByteSize
+          });
+        }
+
+        await requireActiveCollaboratorRevisionGrant(tx, {
+          grantId: scope.grantId,
+          projectId: scope.projectId,
+          actorUserId: input.actorUserId,
+          assetId: scope.assetId,
+          sourceAssetVersionId: scope.sourceAssetVersionId
+        });
+
+        const uploadType = normalizeAudioAssetUploadType({
+          assetKind: scope.assetKind,
+          mimeType: input.mimeType
+        });
+        if (!uploadType.mimeType.startsWith('audio/')) {
+          throw new Error('Private candidate revisions must be audio files.');
+        }
+        const requestFingerprint = sha256Hex(JSON.stringify({
+          purpose: 'collaborator_revision',
+          grantId: scope.grantId,
+          actorUserId: input.actorUserId,
+          projectId: scope.projectId,
+          assetId: scope.assetId,
+          sourceAssetVersionId: scope.sourceAssetVersionId,
+          originalFilename,
+          mimeType: uploadType.mimeType,
+          expectedByteSize: input.expectedByteSize,
+          expectedSha256,
+          partSizeBytes,
+          maxCandidateBytes: scope.maxCandidateBytes
+        }));
+
+        await tx.execute(sql`
+          select set_config('sway.audio_storage_performer_transaction', ${scope.performerId}, true)
+        `);
+        await lockAudioStorageForPerformer(tx, scope.performerId);
+
+        const [existing] = await tx
+          .select()
+          .from(audioUploadSessions)
+          .where(eq(audioUploadSessions.collaboratorFileGrantId, scope.grantId))
+          .limit(1);
+        if (existing) {
+          if (existing.requestFingerprint !== requestFingerprint) {
+            throw Object.assign(new Error('This candidate grant is already bound to a different upload intent.'), {
+              status: 409,
+              code: 'candidate_upload_intent_conflict'
+            });
+          }
+          return existing;
+        }
+
+        const workspaceUsage = await loadAudioStorageUsage(tx, storagePolicy, {
+          performerId: scope.performerId
+        });
+        assertAudioWorkingObjectAvailable(workspaceUsage);
+        assertAudioStorageReservationAvailable(workspaceUsage, input.expectedByteSize);
+
+        const uploadSessionId = randomUUID();
+        orphanCleanupContext = { projectId: scope.projectId, uploadSessionId };
+        objectIdentity = await store.beginUpload({
+          projectId: scope.projectId,
+          uploadSessionId,
+          filename: originalFilename,
+          mimeType: uploadType.mimeType
+        });
+        if (!objectIdentity.providerUploadId) {
+          throw new Error('Audio object store did not return a multipart upload ID.');
+        }
+
+        await tx.insert(audioUploadSessions).values({
+          id: uploadSessionId,
+          projectId: scope.projectId,
+          assetId: scope.assetId,
+          initiatedByUserId: input.actorUserId,
+          uploadPurpose: 'collaborator_revision',
+          collaboratorFileGrantId: scope.grantId,
+          sourceAssetVersionId: scope.sourceAssetVersionId,
+          requestFingerprint,
+          idempotencyKey: `candidate:${sha256Hex(`${scope.grantId}:${idempotencyKey}`)}`,
+          storageProvider: objectIdentity.storageProvider,
+          storageBucket: objectIdentity.storageBucket,
+          providerUploadId: objectIdentity.providerUploadId,
+          storageKey: objectIdentity.storageKey,
+          originalFilename,
+          expectedMimeType: uploadType.mimeType,
+          expectedByteSize: input.expectedByteSize,
+          expectedSha256,
+          partSizeBytes,
+          uploadStatus: 'initiated',
+          expiresAt: new Date(Date.now() + UPLOAD_TTL_MS)
+        });
+        const [session] = await tx
+          .select()
+          .from(audioUploadSessions)
+          .where(eq(audioUploadSessions.id, uploadSessionId))
+          .limit(1);
+        if (!session) throw new Error('Private candidate upload session was not persisted.');
+
+        await tx.insert(auditEvents).values({
+          actorType: 'account',
+          actorId: input.actorUserId,
+          entityType: 'audio_upload_session',
+          entityId: session.id,
+          eventType: 'audio_candidate_revision.upload_initiated',
+          previousStatus: null,
+          nextStatus: 'initiated',
+          metadata: {
+            grantId: scope.grantId,
+            sourceAssetVersionId: scope.sourceAssetVersionId,
+            requestFingerprint,
+            expectedByteSize: input.expectedByteSize,
+            expectedSha256,
+            maxCandidateBytes: scope.maxCandidateBytes
+          }
+        });
+        return session;
+      });
+    } catch (error) {
+      if (objectIdentity) {
+        try {
+          await store.abortUpload(objectIdentity);
+        } catch (abortError) {
+          console.error('[sway.audio] failed to abort orphaned candidate upload:', abortError);
+          if (orphanCleanupContext) {
+            await recordPendingAudioObjectCleanup({
+              projectId: orphanCleanupContext.projectId,
+              actorUserId: input.actorUserId,
+              uploadSessionId: null,
+              identity: objectIdentity,
+              cleanupReason: 'orphaned_candidate_initiation',
+              lastError: abortError instanceof Error ? abortError.message : 'Unknown orphaned candidate cleanup failure.'
+            });
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
   async function initiateUpload(input: {
     projectId: string;
     actorUserId: string;
@@ -772,6 +1266,7 @@ export function createAudioPublishingService(config: {
     });
 
     let objectIdentity: AudioObjectIdentity | null = null;
+    let orphanCleanupContext: { projectId: string; uploadSessionId: string } | null = null;
     try {
       return await db.transaction(async (tx) => {
         const [project] = await tx
@@ -812,6 +1307,7 @@ export function createAudioPublishingService(config: {
         }).returning();
 
         const uploadSessionId = randomUUID();
+        orphanCleanupContext = { projectId: input.projectId, uploadSessionId };
         objectIdentity = await store.beginUpload({
           projectId: input.projectId,
           uploadSessionId,
@@ -822,7 +1318,7 @@ export function createAudioPublishingService(config: {
           throw new Error('Audio object store did not return a multipart upload ID.');
         }
 
-        const [session] = await tx.insert(audioUploadSessions).values({
+        await tx.insert(audioUploadSessions).values({
           id: uploadSessionId,
           projectId: input.projectId,
           assetId: asset.id,
@@ -839,7 +1335,13 @@ export function createAudioPublishingService(config: {
           partSizeBytes,
           uploadStatus: 'initiated',
           expiresAt: new Date(Date.now() + UPLOAD_TTL_MS)
-        }).returning();
+        });
+        const [session] = await tx
+          .select()
+          .from(audioUploadSessions)
+          .where(eq(audioUploadSessions.id, uploadSessionId))
+          .limit(1);
+        if (!session) throw new Error('Audio upload session was not persisted.');
 
         return session;
       });
@@ -849,15 +1351,100 @@ export function createAudioPublishingService(config: {
           await store.abortUpload(objectIdentity);
         } catch (abortError) {
           console.error('[sway.audio] failed to abort orphaned provider upload:', abortError);
+          if (orphanCleanupContext) {
+            await recordPendingAudioObjectCleanup({
+              projectId: orphanCleanupContext.projectId,
+              actorUserId: input.actorUserId,
+              uploadSessionId: null,
+              identity: objectIdentity,
+              cleanupReason: 'orphaned_owner_initiation',
+              lastError: abortError instanceof Error ? abortError.message : 'Unknown orphaned owner cleanup failure.'
+            });
+          }
         }
       }
       throw error;
     }
   }
 
+  async function authorizeCollaboratorRevisionUploadPart(input: {
+    grantId: string;
+    uploadSessionId: string;
+    actorUserId: string;
+    partNumber: number;
+  }) {
+    if (!collaboratorRevisionUploadsEnabled) {
+      throw Object.assign(new Error('Private candidate uploads are disabled.'), {
+        status: 503,
+        code: 'candidate_uploads_disabled'
+      });
+    }
+    if (!Number.isSafeInteger(input.partNumber) || input.partNumber < 1) {
+      throw Object.assign(new Error('partNumber must be a positive integer.'), { status: 422 });
+    }
+
+    return db.transaction(async (tx) => {
+      const [scope] = await tx
+        .select()
+        .from(audioUploadSessions)
+        .where(eq(audioUploadSessions.id, input.uploadSessionId))
+        .limit(1);
+      if (!scope
+        || scope.uploadPurpose !== 'collaborator_revision'
+        || scope.collaboratorFileGrantId !== input.grantId
+        || scope.initiatedByUserId !== input.actorUserId
+        || !scope.assetId
+        || !scope.sourceAssetVersionId) {
+        throw Object.assign(new Error('Exact collaborator revision upload authority required.'), { status: 403 });
+      }
+
+      await requireActiveCollaboratorRevisionGrant(tx, {
+        grantId: scope.collaboratorFileGrantId,
+        projectId: scope.projectId,
+        actorUserId: input.actorUserId,
+        assetId: scope.assetId,
+        sourceAssetVersionId: scope.sourceAssetVersionId
+      });
+      const [session] = await tx
+        .select()
+        .from(audioUploadSessions)
+        .where(eq(audioUploadSessions.id, input.uploadSessionId))
+        .for('update')
+        .limit(1);
+      if (!session
+        || session.collaboratorFileGrantId !== input.grantId
+        || session.initiatedByUserId !== input.actorUserId) {
+        throw Object.assign(new Error('Exact collaborator revision upload authority required.'), { status: 403 });
+      }
+      if (session.expiresAt.getTime() <= Date.now()) {
+        throw Object.assign(new Error('Upload session expired.'), { status: 410 });
+      }
+      if (!['initiated', 'uploading'].includes(session.uploadStatus)) {
+        throw Object.assign(new Error(`Upload session is ${session.uploadStatus} and cannot accept parts.`), { status: 409 });
+      }
+      const expectedPartCount = Math.ceil(session.expectedByteSize / session.partSizeBytes);
+      if (input.partNumber > expectedPartCount) {
+        throw Object.assign(
+          new Error(`partNumber must be from 1 through ${expectedPartCount} for this upload.`),
+          { status: 422 }
+        );
+      }
+      const expectedPartBytes = input.partNumber === expectedPartCount
+        ? session.expectedByteSize - (expectedPartCount - 1) * session.partSizeBytes
+        : session.partSizeBytes;
+      return {
+        uploadSessionId: session.id,
+        expectedPartBytes,
+        expectedPartCount,
+        expiresAt: session.expiresAt
+      };
+    });
+  }
+
   async function writeUploadPart(input: {
     uploadSessionId: string;
     actorUserId: string;
+    grantId?: string;
     partNumber: number;
     body: Buffer;
   }) {
@@ -867,89 +1454,159 @@ export function createAudioPublishingService(config: {
     if (!Buffer.isBuffer(input.body) || input.body.length === 0) {
       throw new Error('Upload part body must contain bytes.');
     }
-    const [session] = await db
+    const [scope] = await db
       .select()
       .from(audioUploadSessions)
       .where(eq(audioUploadSessions.id, input.uploadSessionId))
       .limit(1);
-    if (!session) throw new Error('Upload session not found.');
-    if (session.expiresAt.getTime() <= Date.now()) throw new Error('Upload session expired.');
-    if (!['initiated', 'uploading'].includes(session.uploadStatus)) {
-      throw new Error(`Upload session is ${session.uploadStatus} and cannot accept parts.`);
-    }
-
-    const expectedPartCount = Math.ceil(session.expectedByteSize / session.partSizeBytes);
-    if (input.partNumber > expectedPartCount) {
-      throw new Error(`partNumber must be from 1 through ${expectedPartCount} for this upload.`);
-    }
-    const expectedPartBytes = input.partNumber === expectedPartCount
-      ? session.expectedByteSize - (expectedPartCount - 1) * session.partSizeBytes
-      : session.partSizeBytes;
-    if (input.body.byteLength !== expectedPartBytes) {
-      throw new Error(
-        `Upload part ${input.partNumber} must contain exactly ${expectedPartBytes} bytes for the declared upload geometry.`
-      );
-    }
-
-    const access = await requireProjectAccess({
-      projectId: session.projectId,
-      userId: input.actorUserId,
-      needUpload: true
-    });
-    if (!access) throw new Error('Upload permission required.');
-
-    if (input.partNumber === 1) {
-      const [asset] = await db
-        .select({ assetKind: audioAssets.assetKind })
-        .from(audioAssets)
-        .where(and(
-          eq(audioAssets.id, session.assetId!),
-          eq(audioAssets.projectId, session.projectId)
-        ))
-        .limit(1);
-      if (!asset) throw new Error('Upload session asset not found.');
-      assertAudioUploadFirstPartSignature({
-        assetKind: asset.assetKind,
-        mimeType: session.expectedMimeType,
-        body: input.body
+    if (!scope) throw new Error('Upload session not found.');
+    if (scope.uploadPurpose === 'collaborator_revision' && !collaboratorRevisionUploadsEnabled) {
+      throw Object.assign(new Error('Private candidate uploads are disabled.'), {
+        status: 503,
+        code: 'candidate_uploads_disabled'
       });
-    } else {
-      const [firstPart] = await db
-        .select({ id: audioUploadParts.id })
+    }
+
+    return db.transaction(async (tx) => {
+      if (scope.uploadPurpose === 'collaborator_revision') {
+        if (scope.initiatedByUserId !== input.actorUserId
+          || !scope.collaboratorFileGrantId
+          || !input.grantId
+          || scope.collaboratorFileGrantId !== input.grantId
+          || !scope.assetId
+          || !scope.sourceAssetVersionId) {
+          throw Object.assign(new Error('Exact collaborator revision upload authority required.'), { status: 403 });
+        }
+        await requireActiveCollaboratorRevisionGrant(tx, {
+          grantId: scope.collaboratorFileGrantId,
+          projectId: scope.projectId,
+          actorUserId: input.actorUserId,
+          assetId: scope.assetId,
+          sourceAssetVersionId: scope.sourceAssetVersionId
+        });
+      }
+
+      const [session] = await tx
+        .select()
+        .from(audioUploadSessions)
+        .where(eq(audioUploadSessions.id, input.uploadSessionId))
+        .for('update')
+        .limit(1);
+      if (!session) throw new Error('Upload session not found.');
+      if (session.initiatedByUserId !== input.actorUserId) {
+        throw Object.assign(new Error('Upload session actor mismatch.'), { status: 403 });
+      }
+      if (session.uploadPurpose === 'collaborator_revision'
+        && (!input.grantId || session.collaboratorFileGrantId !== input.grantId)) {
+        throw Object.assign(new Error('Exact collaborator revision upload authority required.'), { status: 403 });
+      }
+      if (session.expiresAt.getTime() <= Date.now()) throw new Error('Upload session expired.');
+
+      if (session.uploadPurpose === 'owner_asset') {
+        const [access] = await tx
+          .select({ id: audioProjectAccessGrants.id })
+          .from(audioProjectAccessGrants)
+          .where(and(
+            eq(audioProjectAccessGrants.projectId, session.projectId),
+            eq(audioProjectAccessGrants.granteeUserId, input.actorUserId),
+            eq(audioProjectAccessGrants.canUploadVersions, true),
+            isNull(audioProjectAccessGrants.revokedAt),
+            or(isNull(audioProjectAccessGrants.expiresAt), gt(audioProjectAccessGrants.expiresAt, new Date()))
+          ))
+          .limit(1);
+        if (!access) throw new Error('Upload permission required.');
+      }
+
+      const expectedPartCount = Math.ceil(session.expectedByteSize / session.partSizeBytes);
+      if (input.partNumber > expectedPartCount) {
+        throw new Error(`partNumber must be from 1 through ${expectedPartCount} for this upload.`);
+      }
+      const expectedPartBytes = input.partNumber === expectedPartCount
+        ? session.expectedByteSize - (expectedPartCount - 1) * session.partSizeBytes
+        : session.partSizeBytes;
+      if (input.body.byteLength !== expectedPartBytes) {
+        throw new Error(
+          `Upload part ${input.partNumber} must contain exactly ${expectedPartBytes} bytes for the declared upload geometry.`
+        );
+      }
+
+      const [existingPart] = await tx
+        .select()
         .from(audioUploadParts)
         .where(and(
           eq(audioUploadParts.uploadSessionId, session.id),
-          eq(audioUploadParts.partNumber, 1)
+          eq(audioUploadParts.partNumber, input.partNumber)
         ))
         .limit(1);
-      if (!firstPart) throw new Error('Upload part 1 must pass file-signature validation before later parts.');
-    }
+      if (existingPart) {
+        const checksum = sha256Hex(input.body);
+        if (existingPart.byteSize !== input.body.byteLength || existingPart.providerChecksum !== checksum) {
+          throw Object.assign(new Error('Upload part replay does not match the originally stored bytes.'), {
+            status: 409,
+            code: 'upload_part_replay_conflict'
+          });
+        }
+        if (['aborted', 'expired', 'rejected', 'quarantined'].includes(session.uploadStatus)) {
+          throw new Error(`Upload session is ${session.uploadStatus} and cannot accept part replays.`);
+        }
+        return {
+          etag: existingPart.providerEtag,
+          checksum: existingPart.providerChecksum,
+          byteSize: existingPart.byteSize
+        };
+      }
+      if (!['initiated', 'uploading'].includes(session.uploadStatus)) {
+        throw new Error(`Upload session is ${session.uploadStatus} and cannot accept parts.`);
+      }
 
-    const written = await store.writePart({
-      identity: sessionObjectIdentity(session),
-      partNumber: input.partNumber,
-      body: input.body
-    });
+      if (input.partNumber === 1) {
+        const [asset] = await tx
+          .select({ assetKind: audioAssets.assetKind })
+          .from(audioAssets)
+          .where(and(
+            eq(audioAssets.id, session.assetId!),
+            eq(audioAssets.projectId, session.projectId)
+          ))
+          .limit(1);
+        if (!asset) throw new Error('Upload session asset not found.');
+        assertAudioUploadFirstPartSignature({
+          assetKind: asset.assetKind,
+          mimeType: session.expectedMimeType,
+          body: input.body
+        });
+      } else {
+        const [firstPart] = await tx
+          .select({ id: audioUploadParts.id })
+          .from(audioUploadParts)
+          .where(and(
+            eq(audioUploadParts.uploadSessionId, session.id),
+            eq(audioUploadParts.partNumber, 1)
+          ))
+          .limit(1);
+        if (!firstPart) throw new Error('Upload part 1 must pass file-signature validation before later parts.');
+      }
 
-    await db
-      .insert(audioUploadParts)
-      .values({
+      const written = await store.writePart({
+        identity: sessionObjectIdentity(session),
+        partNumber: input.partNumber,
+        body: input.body
+      });
+      await tx.insert(audioUploadParts).values({
         uploadSessionId: session.id,
         partNumber: input.partNumber,
         byteSize: written.byteSize,
         providerEtag: written.etag,
         providerChecksum: written.checksum
-      })
-      .onConflictDoNothing();
+      });
 
-    if (session.uploadStatus === 'initiated') {
-      await db
-        .update(audioUploadSessions)
-        .set({ uploadStatus: 'uploading', updatedAt: new Date() })
-        .where(eq(audioUploadSessions.id, session.id));
-    }
-
-    return written;
+      if (session.uploadStatus === 'initiated') {
+        await tx
+          .update(audioUploadSessions)
+          .set({ uploadStatus: 'uploading', updatedAt: new Date() })
+          .where(eq(audioUploadSessions.id, session.id));
+      }
+      return written;
+    });
   }
 
   async function expireStaleUploadSessions(input: { limit?: number; now?: Date } = {}) {
@@ -1056,6 +1713,392 @@ export function createAudioPublishingService(config: {
     };
   }
 
+  async function abortCollaboratorRevisionUploadSessions(input: {
+    actorUserId: string;
+    grantId?: string;
+    connectionId?: string;
+    cleanupReason: 'candidate_grant_revoked' | 'candidate_connection_revoked';
+  }) {
+    if (Boolean(input.grantId) === Boolean(input.connectionId)) {
+      throw new Error('Exactly one candidate cleanup scope is required.');
+    }
+    const candidates = await db
+      .select({ id: audioUploadSessions.id })
+      .from(audioUploadSessions)
+      .innerJoin(
+        audioFileAccessGrants,
+        eq(audioFileAccessGrants.id, audioUploadSessions.collaboratorFileGrantId)
+      )
+      .where(and(
+        eq(audioUploadSessions.uploadPurpose, 'collaborator_revision'),
+        inArray(audioUploadSessions.uploadStatus, [...EXPIRABLE_AUDIO_UPLOAD_STATUSES]),
+        input.grantId
+          ? eq(audioFileAccessGrants.id, input.grantId)
+          : eq(audioFileAccessGrants.connectionId, input.connectionId!)
+      ))
+      .orderBy(asc(audioUploadSessions.createdAt), asc(audioUploadSessions.id));
+
+    const abortedSessionIds: string[] = [];
+    const pendingReceiptSessionIds: string[] = [];
+    const failures: Array<{ uploadSessionId: string; error: string }> = [];
+    for (const candidate of candidates) {
+      const outcome = await db.transaction(async (tx) => {
+        const [session] = await tx
+          .select()
+          .from(audioUploadSessions)
+          .where(and(
+            eq(audioUploadSessions.id, candidate.id),
+            eq(audioUploadSessions.uploadPurpose, 'collaborator_revision'),
+            inArray(audioUploadSessions.uploadStatus, [...EXPIRABLE_AUDIO_UPLOAD_STATUSES])
+          ))
+          .for('update', { skipLocked: true })
+          .limit(1);
+        if (!session || !session.collaboratorFileGrantId) return { kind: 'skipped' as const };
+
+        const [grant] = await tx
+          .select({ id: audioFileAccessGrants.id, connectionId: audioFileAccessGrants.connectionId })
+          .from(audioFileAccessGrants)
+          .where(eq(audioFileAccessGrants.id, session.collaboratorFileGrantId))
+          .limit(1);
+        if (!grant
+          || (input.grantId && grant.id !== input.grantId)
+          || (input.connectionId && grant.connectionId !== input.connectionId)) {
+          return { kind: 'skipped' as const };
+        }
+
+        const identity = sessionObjectIdentity(session);
+        try {
+          await discardUnsealedUpload(identity, tx);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Candidate authority-revocation cleanup failed.';
+          try {
+            await recordPendingAudioObjectCleanup({
+              projectId: session.projectId,
+              actorUserId: input.actorUserId,
+              uploadSessionId: session.id,
+              identity,
+              cleanupReason: input.cleanupReason,
+              lastError: message
+            }, tx);
+          } catch (receiptError) {
+            return {
+              kind: 'failed' as const,
+              uploadSessionId: session.id,
+              error: `Provider cleanup failed and durable receipt recording failed: ${receiptError instanceof Error ? receiptError.message : message}`
+            };
+          }
+          await tx.insert(auditEvents).values({
+            actorType: 'account',
+            actorId: input.actorUserId,
+            entityType: 'audio_upload_session',
+            entityId: session.id,
+            eventType: 'audio_candidate_revision.authority_cleanup_pending',
+            previousStatus: session.uploadStatus,
+            nextStatus: session.uploadStatus,
+            metadata: {
+              grantId: grant.id,
+              connectionId: grant.connectionId,
+              cleanupReason: input.cleanupReason,
+              providerError: message
+            }
+          });
+          return { kind: 'pending' as const, uploadSessionId: session.id };
+        }
+
+        const abortedAt = new Date();
+        await tx
+          .update(audioUploadSessions)
+          .set({ uploadStatus: 'aborted', updatedAt: abortedAt })
+          .where(eq(audioUploadSessions.id, session.id));
+        await tx.insert(auditEvents).values({
+          actorType: 'account',
+          actorId: input.actorUserId,
+          entityType: 'audio_upload_session',
+          entityId: session.id,
+          eventType: 'audio_candidate_revision.authority_cleanup_completed',
+          previousStatus: session.uploadStatus,
+          nextStatus: 'aborted',
+          metadata: {
+            grantId: grant.id,
+            connectionId: grant.connectionId,
+            cleanupReason: input.cleanupReason,
+            providerCleanupMethod: store.discardUpload ? 'discardUpload' : 'abortUpload'
+          }
+        });
+        return { kind: 'aborted' as const, uploadSessionId: session.id };
+      });
+
+      if (outcome.kind === 'aborted') abortedSessionIds.push(outcome.uploadSessionId);
+      if (outcome.kind === 'pending') pendingReceiptSessionIds.push(outcome.uploadSessionId);
+      if (outcome.kind === 'failed') failures.push({
+        uploadSessionId: outcome.uploadSessionId,
+        error: outcome.error
+      });
+    }
+
+    return {
+      examinedCount: candidates.length,
+      abortedCount: abortedSessionIds.length,
+      pendingReceiptCount: pendingReceiptSessionIds.length,
+      failedCount: failures.length,
+      abortedSessionIds,
+      pendingReceiptSessionIds,
+      failures
+    };
+  }
+
+  async function completeAndSealCollaboratorRevision(input: {
+    grantId: string;
+    uploadSessionId: string;
+    actorUserId: string;
+  }) {
+    if (!collaboratorRevisionUploadsEnabled) {
+      throw Object.assign(new Error('Private candidate uploads are disabled.'), {
+        status: 503,
+        code: 'candidate_uploads_disabled'
+      });
+    }
+    const [scope] = await db
+      .select()
+      .from(audioUploadSessions)
+      .where(eq(audioUploadSessions.id, input.uploadSessionId))
+      .limit(1);
+    if (!scope
+      || scope.uploadPurpose !== 'collaborator_revision'
+      || scope.collaboratorFileGrantId !== input.grantId
+      || scope.initiatedByUserId !== input.actorUserId
+      || !scope.assetId
+      || !scope.sourceAssetVersionId) {
+      throw Object.assign(new Error('Exact collaborator revision upload session required.'), { status: 403 });
+    }
+    if (scope.uploadStatus === 'completed') {
+      const [sealedReceipt] = await db
+        .select()
+        .from(audioCandidateRevisions)
+        .where(and(
+          eq(audioCandidateRevisions.uploadSessionId, scope.id),
+          eq(audioCandidateRevisions.fileAccessGrantId, input.grantId),
+          eq(audioCandidateRevisions.uploadedByUserId, input.actorUserId)
+        ))
+        .limit(1);
+      if (sealedReceipt) return sealedReceipt;
+      throw new Error('Completed private candidate upload is missing its sealed receipt.');
+    }
+
+    const outcome = await db.transaction(async (tx) => {
+      await requireActiveCollaboratorRevisionGrant(tx, {
+        grantId: input.grantId,
+        projectId: scope.projectId,
+        actorUserId: input.actorUserId,
+        assetId: scope.assetId,
+        sourceAssetVersionId: scope.sourceAssetVersionId
+      });
+
+      const [session] = await tx
+        .select()
+        .from(audioUploadSessions)
+        .where(eq(audioUploadSessions.id, input.uploadSessionId))
+        .for('update')
+        .limit(1);
+      if (!session || !session.assetId || !session.sourceAssetVersionId || !session.collaboratorFileGrantId) {
+        throw new Error('Private candidate upload session is incomplete.');
+      }
+      if (session.expiresAt.getTime() <= Date.now()) throw new Error('Upload session expired.');
+
+      if (session.uploadStatus === 'completed') {
+        const [existing] = await tx
+          .select()
+          .from(audioCandidateRevisions)
+          .where(and(
+            eq(audioCandidateRevisions.uploadSessionId, session.id),
+            eq(audioCandidateRevisions.fileAccessGrantId, input.grantId)
+          ))
+          .limit(1);
+        if (existing) return { kind: 'sealed' as const, candidate: existing };
+      }
+      if (!['initiated', 'uploading', 'uploaded', 'verifying'].includes(session.uploadStatus)) {
+        throw new Error(`Upload session is ${session.uploadStatus} and cannot be finalized.`);
+      }
+
+      const parts = await tx
+        .select()
+        .from(audioUploadParts)
+        .where(eq(audioUploadParts.uploadSessionId, session.id))
+        .orderBy(asc(audioUploadParts.partNumber));
+      if (!parts.length) throw new Error('No upload parts found.');
+      const expectedPartCount = Math.ceil(session.expectedByteSize / session.partSizeBytes);
+      if (parts.length !== expectedPartCount) throw new Error('Every declared upload part is required before finalization.');
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index];
+        if (part.partNumber !== index + 1) throw new Error('Upload parts must be contiguous starting at 1.');
+        const expectedPartBytes = part.partNumber === expectedPartCount
+          ? session.expectedByteSize - (expectedPartCount - 1) * session.partSizeBytes
+          : session.partSizeBytes;
+        if (part.byteSize !== expectedPartBytes) {
+          throw new Error(`Upload part ${part.partNumber} does not match the declared upload geometry.`);
+        }
+      }
+
+      if (session.uploadStatus === 'initiated' || session.uploadStatus === 'uploading') {
+        await tx
+          .update(audioUploadSessions)
+          .set({ uploadStatus: 'uploaded', updatedAt: new Date() })
+          .where(eq(audioUploadSessions.id, session.id));
+      }
+      if (session.uploadStatus !== 'verifying') {
+        await tx
+          .update(audioUploadSessions)
+          .set({ uploadStatus: 'verifying', updatedAt: new Date() })
+          .where(eq(audioUploadSessions.id, session.id));
+      }
+
+      let assembled: { byteSize: number; sha256: string };
+      let technicalValidation: Awaited<ReturnType<typeof validatePlayableAudioOriginal>>;
+      try {
+        assembled = await store.assembleParts({
+          identity: sessionObjectIdentity(session),
+          parts: parts.map((part) => ({
+            partNumber: part.partNumber,
+            etag: part.providerEtag
+          })),
+          expectedByteSize: session.expectedByteSize,
+          expectedSha256: session.expectedSha256,
+          mimeType: session.expectedMimeType
+        });
+        technicalValidation = await validatePlayableAudioOriginal({
+          mimeType: session.expectedMimeType,
+          byteSize: assembled.byteSize,
+          storageProvider: session.storageProvider,
+          storageBucket: session.storageBucket,
+          storageKey: session.storageKey
+        });
+      } catch (error) {
+        const objectIdentity = sessionObjectIdentity(session);
+        let providerDiscardSucceeded = false;
+        let providerDiscardError: string | null = null;
+        try {
+          await discardUnsealedUpload(objectIdentity, tx);
+          providerDiscardSucceeded = true;
+        } catch (cleanupError) {
+          providerDiscardError = cleanupError instanceof Error
+            ? cleanupError.message
+            : 'Unknown object-store discard failure.';
+          console.error('[sway.audio] candidate validation cleanup could not discard provider upload:', {
+            uploadSessionId: session.id,
+            providerDiscardError
+          });
+        }
+        if (providerDiscardError) {
+          await recordPendingAudioObjectCleanup({
+            projectId: session.projectId,
+            actorUserId: input.actorUserId,
+            uploadSessionId: session.id,
+            identity: objectIdentity,
+            cleanupReason: 'candidate_technical_validation_failed',
+            lastError: providerDiscardError
+          }, tx);
+        }
+        const terminalStatus = providerDiscardSucceeded ? 'rejected' : 'quarantined';
+        await tx
+          .update(audioUploadSessions)
+          .set({ uploadStatus: terminalStatus, updatedAt: new Date() })
+          .where(eq(audioUploadSessions.id, session.id));
+        await tx.insert(auditEvents).values({
+          actorType: 'account',
+          actorId: input.actorUserId,
+          entityType: 'audio_upload_session',
+          entityId: session.id,
+          eventType: 'audio_candidate_revision.technical_validation_failed',
+          previousStatus: 'verifying',
+          nextStatus: terminalStatus,
+          metadata: {
+            grantId: input.grantId,
+            sourceAssetVersionId: session.sourceAssetVersionId,
+            expectedByteSize: session.expectedByteSize,
+            expectedSha256: session.expectedSha256,
+            validationError: error instanceof Error ? error.message : 'Unknown candidate validation failure.',
+            providerCleanupMethod: store.discardUpload ? 'discardUpload' : 'abortUpload',
+            providerDiscardSucceeded,
+            providerDiscardError
+          }
+        });
+        return { kind: 'failed' as const, error };
+      }
+
+      const [project] = await tx
+        .select({ performerId: audioProjects.performerId })
+        .from(audioProjects)
+        .where(eq(audioProjects.id, session.projectId))
+        .limit(1);
+      if (!project) throw new Error('Candidate audio project not found.');
+
+      const verifiedAt = new Date();
+      await tx
+        .update(audioUploadSessions)
+        .set({ uploadStatus: 'completed', completedAt: verifiedAt, updatedAt: verifiedAt })
+        .where(eq(audioUploadSessions.id, session.id));
+
+      const [candidate] = await tx.insert(audioCandidateRevisions).values({
+        projectId: session.projectId,
+        performerId: project.performerId,
+        assetId: session.assetId,
+        sourceAssetVersionId: session.sourceAssetVersionId,
+        fileAccessGrantId: session.collaboratorFileGrantId,
+        uploadedByUserId: input.actorUserId,
+        uploadSessionId: session.id,
+        originalFilename: session.originalFilename,
+        storageProvider: session.storageProvider,
+        storageBucket: session.storageBucket,
+        storageKey: session.storageKey,
+        mimeType: session.expectedMimeType,
+        byteSize: assembled.byteSize,
+        sha256: assembled.sha256,
+        durationMs: technicalValidation.durationMs,
+        codec: technicalValidation.codec,
+        sampleRateHz: technicalValidation.sampleRateHz,
+        bitDepth: technicalValidation.bitDepth,
+        channelCount: technicalValidation.channelCount,
+        integrityStatus: 'verified',
+        integrityVerifierKey: `sway.${store.provider}.sha256+playable-audio`,
+        integrityVerifiedAt: verifiedAt,
+        integrityEvidence: {
+          expectedSha256: session.expectedSha256,
+          assembledSha256: assembled.sha256,
+          expectedByteSize: session.expectedByteSize,
+          assembledByteSize: assembled.byteSize,
+          partCount: parts.length,
+          requestFingerprint: session.requestFingerprint,
+          technicalValidation
+        },
+        intakeStatus: 'private_review',
+        originalPreserved: true,
+        sealedAt: verifiedAt
+      }).returning();
+
+      await tx.insert(auditEvents).values({
+        actorType: 'account',
+        actorId: input.actorUserId,
+        entityType: 'audio_candidate_revision',
+        entityId: candidate.id,
+        eventType: 'audio_candidate_revision.sealed_private',
+        previousStatus: 'verifying',
+        nextStatus: 'private_review',
+        metadata: {
+          grantId: input.grantId,
+          sourceAssetVersionId: session.sourceAssetVersionId,
+          uploadSessionId: session.id,
+          requestFingerprint: session.requestFingerprint,
+          sha256: candidate.sha256,
+          byteSize: candidate.byteSize
+        }
+      });
+      return { kind: 'sealed' as const, candidate };
+    });
+
+    if (outcome.kind === 'failed') throw outcome.error;
+    return outcome.candidate;
+  }
+
   async function completeAndSealUpload(input: {
     uploadSessionId: string;
     actorUserId: string;
@@ -1067,6 +2110,9 @@ export function createAudioPublishingService(config: {
       .where(eq(audioUploadSessions.id, input.uploadSessionId))
       .limit(1);
     if (!accessSession) throw new Error('Upload session not found.');
+    if (accessSession.uploadPurpose !== 'owner_asset' || accessSession.initiatedByUserId !== input.actorUserId) {
+      throw Object.assign(new Error('Owner upload session required.'), { status: 403 });
+    }
 
     const access = await requireProjectAccess({
       projectId: accessSession.projectId,
@@ -1158,10 +2204,21 @@ export function createAudioPublishingService(config: {
             providerDiscardError
           });
         }
-        const quarantinedAt = new Date();
+        if (providerDiscardError) {
+          await recordPendingAudioObjectCleanup({
+            projectId: session.projectId,
+            actorUserId: input.actorUserId,
+            uploadSessionId: session.id,
+            identity: objectIdentity,
+            cleanupReason: 'owner_integrity_validation_failed',
+            lastError: providerDiscardError
+          }, tx);
+        }
+        const failedAt = new Date();
+        const terminalStatus = providerDiscardSucceeded ? 'rejected' : 'quarantined';
         await tx
           .update(audioUploadSessions)
-          .set({ uploadStatus: 'quarantined', updatedAt: quarantinedAt })
+          .set({ uploadStatus: terminalStatus, updatedAt: failedAt })
           .where(eq(audioUploadSessions.id, session.id));
         await tx.insert(auditEvents).values({
           actorType: 'performer',
@@ -1170,7 +2227,7 @@ export function createAudioPublishingService(config: {
           entityId: session.id,
           eventType: 'audio_upload_session.integrity_failed',
           previousStatus: 'verifying',
-          nextStatus: 'quarantined',
+          nextStatus: terminalStatus,
           metadata: {
             expectedByteSize: session.expectedByteSize,
             expectedSha256: session.expectedSha256,
@@ -1200,7 +2257,7 @@ export function createAudioPublishingService(config: {
         })
         .where(eq(audioUploadSessions.id, session.id));
 
-      const [version] = await tx.insert(audioProjectAssetVersions).values({
+      await tx.insert(audioProjectAssetVersions).values({
         projectId: session.projectId,
         performerId: input.performerId,
         assetId: session.assetId!,
@@ -1227,7 +2284,13 @@ export function createAudioPublishingService(config: {
         },
         originalPreserved: true,
         sealedAt: verifiedAt
-      }).returning();
+      });
+      const [version] = await tx
+        .select()
+        .from(audioProjectAssetVersions)
+        .where(eq(audioProjectAssetVersions.uploadSessionId, session.id))
+        .limit(1);
+      if (!version) throw new Error('Sealed audio asset version was not persisted.');
 
       await tx.insert(auditEvents).values({
         actorType: 'performer',
@@ -2884,11 +3947,16 @@ export function createAudioPublishingService(config: {
     listProjects,
     listProjectAssets,
     getStorageUsage,
+    initiateCollaboratorRevisionUpload,
     initiateUpload,
+    authorizeCollaboratorRevisionUploadPart,
     writeUploadPart,
+    completeAndSealCollaboratorRevision,
     completeAndSealUpload,
     validateReleasePackageAsset,
+    retryPendingAudioObjectCleanupReceipts,
     expireStaleUploadSessions,
+    abortCollaboratorRevisionUploadSessions,
     createShareGrant,
     openOwnedVersion,
     listReleaseWorkspace,

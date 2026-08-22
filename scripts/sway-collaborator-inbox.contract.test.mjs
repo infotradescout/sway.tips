@@ -228,7 +228,10 @@ for (const forbidden of [
 }
 
 for (const term of [
-  "import CollaboratorInbox, { type FileConnection } from './CollaboratorInbox';",
+  'import CollaboratorInbox, {',
+  'type CollaborationCapabilities,',
+  'type FileConnection',
+  "} from './CollaboratorInbox';",
   '<CollaboratorInbox',
   'embedded',
   'refreshKey={collaborationRefreshKey}',
@@ -250,7 +253,7 @@ const connectionListRoute = sourceBetween(
 const shareRoute = sourceBetween(
   server,
   "app.post('/api/talent/audio/pairing/connections/:connectionId/shares'",
-  "app.get('/api/talent/audio/files/shared-with-me'"
+  "app.post('/api/talent/audio/pairing/connections/:connectionId/candidate-revision-grants'"
 );
 if (!tokenRoute || !connectionListRoute || !shareRoute) {
   failures.push('Unable to locate all pairing authorization route blocks.');

@@ -281,6 +281,27 @@
       "when": 1787352575442,
       "tag": "0039_silky_richard_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787382174877,
+      "tag": "0040_new_maria_hill",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787383809649,
+      "tag": "0041_majestic_otto_octavius",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787394137698,
+      "tag": "0042_bizarre_sersi",
+      "breakpoints": true
     }
   ]
 }

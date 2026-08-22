@@ -138,7 +138,7 @@ if (!filesSurface.includes('body: JSON.stringify({ maxUses: 1 })')
   failures.push('The Catalog one-time-link control must create an actual single-use share grant.');
 }
 if (!filesSurface.includes('const projectId = await refreshProjects();')
-  || !filesSurface.includes('if (projectId) await refreshAssets(projectId);')) {
+  || !filesSurface.includes('if (projectId && selectedProjectIdRef.current === projectId) await refreshAssets(projectId);')) {
   failures.push('Opening Files & projects must load sealed versions for the automatically selected project.');
 }
 for (const term of [
