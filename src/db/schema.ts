@@ -65,6 +65,13 @@ export const gigSessionStatusEnum = pgEnum('gig_session_status', [
   'canceled'
 ]);
 
+export const liveRoomTypeEnum = pgEnum('live_room_type', [
+  'music',
+  'comedy',
+  'service',
+  'general'
+]);
+
 export const requestStatusEnum = pgEnum('request_status', [
   'submitted',
   'payment_pending',
@@ -130,6 +137,12 @@ export const performerEventVisibilityEnum = pgEnum('performer_event_visibility',
 export const performerEventTicketingModeEnum = pgEnum('performer_event_ticketing_mode', [
   'external',
   'native_ga'
+]);
+export const performerEventAttendanceModeEnum = pgEnum('performer_event_attendance_mode', [
+  'walk_in',
+  'external_rsvp',
+  'external_ticket',
+  'native_ticket'
 ]);
 export const eventTicketOfferStatusEnum = pgEnum('event_ticket_offer_status', [
   'draft',
@@ -602,6 +615,7 @@ export const performerEvents = pgTable('performer_events', {
   locationIsTba: boolean('location_is_tba').notNull().default(false),
   coverImageUrl: text('cover_image_url'),
   ticketingMode: performerEventTicketingModeEnum('ticketing_mode').notNull().default('external'),
+  attendanceMode: performerEventAttendanceModeEnum('attendance_mode').notNull().default('external_ticket'),
   externalTicketUrl: text('external_ticket_url'),
   externalTicketLabel: text('external_ticket_label'),
   visibility: performerEventVisibilityEnum('visibility').notNull().default('unlisted'),
@@ -642,9 +656,21 @@ export const performerEvents = pgTable('performer_events', {
     'performer_events_published_has_timestamp',
     sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`
   ),
-  publishedHasExternalTicket: check(
-    'performer_events_published_has_external_ticket',
-    sql`${table.status} <> 'published' OR ${table.ticketingMode} = 'native_ga' OR ${table.externalTicketUrl} IS NOT NULL`
+  publishedAttendanceReady: check(
+    'performer_events_published_attendance_ready',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} IN ('walk_in', 'native_ticket') OR ${table.externalTicketUrl} IS NOT NULL`
+  ),
+  publishedWalkInHasLocation: check(
+    'performer_events_published_walk_in_has_location',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} <> 'walk_in' OR (
+      ${table.locationIsTba} = false
+      AND ${table.locationName} IS NOT NULL
+      AND length(trim(${table.locationName})) > 0
+      AND (
+        (${table.locationAddress} IS NOT NULL AND length(trim(${table.locationAddress})) > 0)
+        OR (${table.city} IS NOT NULL AND length(trim(${table.city})) > 0)
+      )
+    )`
   ),
   cancelledHasTimestamp: check(
     'performer_events_cancelled_has_timestamp',
@@ -673,6 +699,34 @@ export const performerEvents = pgTable('performer_events', {
   ticketingModeExclusive: check(
     'performer_events_ticketing_mode_exclusive',
     sql`${table.ticketingMode} = 'external' OR (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)`
+  ),
+  attendanceModeShape: check(
+    'performer_events_attendance_mode_shape',
+    sql`(
+      ${table.attendanceMode} = 'walk_in'
+      AND ${table.ticketingMode} = 'external'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    ) OR (
+      ${table.attendanceMode} = 'external_rsvp'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} = 'RSVP')
+      )
+    ) OR (
+      ${table.attendanceMode} = 'external_ticket'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} IN ('Get tickets', 'View details'))
+      )
+    ) OR (
+      ${table.attendanceMode} = 'native_ticket'
+      AND ${table.ticketingMode} = 'native_ga'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    )`
   ),
   externalTicketLabelAllowed: check(
     'performer_events_external_ticket_label_allowed',
@@ -1116,6 +1170,17 @@ export const gigSessions = pgTable('gig_sessions', {
   ownerActorUserId: uuid('owner_actor_user_id').references(() => users.id),
   lastMutationActorUserId: uuid('last_mutation_actor_user_id').references(() => users.id),
   status: gigSessionStatusEnum('status').notNull().default('draft'),
+  roomType: liveRoomTypeEnum('room_type').notNull().default('music'),
+  moneyEnabled: boolean('money_enabled').notNull().default(false),
+  moneyDestinationAccountId: text('money_destination_account_id'),
+  moneyEnvironment: text('money_environment'),
+  linkedEventId: uuid('linked_event_id'),
+  requestMenu: jsonb('request_menu').$type<Array<{
+    id: string;
+    title: string;
+    description: string;
+    targetType: 'music' | 'custom';
+  }>>().notNull().default([]),
   title: text('title'),
   venueName: text('venue_name'),
   runtimeSessionState: jsonb('runtime_session_state'),
@@ -1131,7 +1196,59 @@ export const gigSessions = pgTable('gig_sessions', {
   ...timestamps
 }, (table) => ({
   performerStatusIdx: index('gig_sessions_performer_status_idx').on(table.performerId, table.status),
-  autoCloseoutIdx: index('gig_sessions_auto_closeout_at_idx').on(table.autoCloseoutAt)
+  autoCloseoutIdx: index('gig_sessions_auto_closeout_at_idx').on(table.autoCloseoutAt),
+  activeLinkedEventIdx: uniqueIndex('gig_sessions_active_linked_event_idx')
+    .on(table.linkedEventId)
+    .where(sql`${table.linkedEventId} is not null and ${table.status} in ('active', 'closeout_pending')`),
+  linkedEventOwnerFk: foreignKey({
+    columns: [table.linkedEventId, table.performerId],
+    foreignColumns: [performerEvents.id, performerEvents.performerId],
+    name: 'gig_sessions_linked_event_owner_fk'
+  }),
+  requestMenuShape: check(
+    'gig_sessions_request_menu_shape',
+    sql`sway_request_menu_is_valid(${table.requestMenu}, ${table.roomType})`
+  ),
+  moneyRequiresMusic: check(
+    'gig_sessions_money_requires_music',
+    sql`(
+      ${table.moneyEnabled} = false
+      and ${table.moneyDestinationAccountId} is null
+      and ${table.moneyEnvironment} is null
+    ) or (
+      ${table.moneyEnabled} = true
+      and ${table.roomType} = 'music'
+      and ${table.moneyDestinationAccountId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$'
+      and ${table.moneyEnvironment} in ('test', 'live')
+    )`
+  )
+}));
+
+export const liveRoomMoneyReleaseEvents = pgTable('live_room_money_release_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  environment: text('environment').notNull(),
+  decision: text('decision').notNull(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('live_room_money_release_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('live_room_money_release_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('live_room_money_release_events_current_idx').on(table.environment, table.eventSequence),
+  environmentAllowed: check('live_room_money_release_events_environment_allowed', sql`${table.environment} in ('test', 'live')`),
+  decisionAllowed: check('live_room_money_release_events_decision_allowed', sql`${table.decision} in ('enabled', 'disabled')`),
+  reasonValid: check('live_room_money_release_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('live_room_money_release_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('live_room_money_release_events_expiry_valid', sql`(
+    (${table.decision} = 'enabled' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} = 'disabled' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('live_room_money_release_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
 }));
 
 export const gigAccessGrants = pgTable('gig_access_grants', {
@@ -1308,6 +1425,7 @@ export const requests = pgTable('requests', {
   patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
   requestType: text('request_type').notNull(),
+  moneyRequired: boolean('money_required').notNull().default(false),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   message: text('message'),
@@ -1339,6 +1457,7 @@ export const requestBoosts = pgTable('request_boosts', {
   intentFingerprint: text('intent_fingerprint'),
   patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
+  moneyRequired: boolean('money_required').notNull().default(false),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   runtimeBoostState: jsonb('runtime_boost_state'),
@@ -1428,6 +1547,11 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   idempotencyKey: text('idempotency_key').notNull(),
   destinationAccountId: text('destination_account_id').notNull(),
   requestPayload: jsonb('request_payload').notNull(),
+  // Positive money work is executable only by a binary generation that knows
+  // the current database-enforced admission contract. Older rolling binaries
+  // omit leaseExecutorGeneration and are rejected before provider entry.
+  minimumExecutorGeneration: integer('minimum_executor_generation').notNull().default(1),
+  leaseExecutorGeneration: integer('lease_executor_generation'),
   processorObjectId: text('processor_object_id'),
   resultPayload: jsonb('result_payload'),
   attemptCount: integer('attempt_count').notNull().default(0),
@@ -1447,6 +1571,13 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   requestIdx: index('live_room_payment_operations_request_idx').on(table.requestId, table.operationType),
   requestBoostIdx: index('live_room_payment_operations_boost_idx').on(table.requestBoostId, table.operationType),
   requestPayloadValid: check('live_room_payment_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object'`),
+  minimumExecutorGenerationValid: check('live_room_payment_operations_min_executor_generation_valid', sql`${table.minimumExecutorGeneration} >= 1`),
+  leaseExecutorGenerationValid: check('live_room_payment_operations_lease_executor_generation_valid', sql`
+    ${table.leaseExecutorGeneration} is null or ${table.leaseExecutorGeneration} >= 1
+  `),
+  releasedLeaseExecutorGeneration: check('live_room_payment_operations_released_executor_generation', sql`
+    ${table.status} = 'leased' or ${table.leaseExecutorGeneration} is null
+  `),
   actionLink: check('live_room_payment_operations_action_link', sql`
     ((${table.requestId} is not null)::int + (${table.requestBoostId} is not null)::int) = 1
     or (
@@ -1530,6 +1661,11 @@ export const payouts = pgTable('payouts', {
 
 export const moderationEvents = pgTable('moderation_events', {
   id: uuid('id').primaryKey().defaultRandom(),
+  dedupeKey: text('dedupe_key'),
+  reporterFingerprint: text('reporter_fingerprint'),
+  requesterIpHash: text('requester_ip_hash'),
+  reportWindowStartedAt: timestamp('report_window_started_at', { withTimezone: true }),
+  retentionExpiresAt: timestamp('retention_expires_at', { withTimezone: true }),
   actorUserId: uuid('actor_user_id').references(() => users.id),
   entityType: text('entity_type').notNull(),
   entityId: uuid('entity_id').notNull(),
@@ -1538,7 +1674,44 @@ export const moderationEvents = pgTable('moderation_events', {
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
-  entityIdx: index('moderation_events_entity_idx').on(table.entityType, table.entityId)
+  entityIdx: index('moderation_events_entity_idx').on(table.entityType, table.entityId),
+  reportWindowIdx: index('moderation_events_report_window_idx').on(table.entityType, table.createdAt),
+  dedupeKeyIdx: uniqueIndex('moderation_events_dedupe_key_idx').on(table.dedupeKey),
+  roomMenuReportIdentityIdx: uniqueIndex('moderation_events_room_menu_report_identity_idx')
+    .on(table.entityId, table.reporterFingerprint, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportReporterWindowIdx: index('moderation_events_room_menu_report_reporter_window_idx')
+    .on(table.reporterFingerprint, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportIpWindowIdx: index('moderation_events_room_menu_report_ip_window_idx')
+    .on(table.requesterIpHash, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportEntityWindowIdx: index('moderation_events_room_menu_report_entity_window_idx')
+    .on(table.entityId, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportExpiryIdx: index('moderation_events_room_menu_report_expiry_idx')
+    .on(table.retentionExpiresAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportShape: check('moderation_events_room_menu_report_shape', sql`(
+    ${table.entityType} <> 'room_menu_item_report'
+    and ${table.reporterFingerprint} is null
+    and ${table.requesterIpHash} is null
+    and ${table.reportWindowStartedAt} is null
+    and ${table.retentionExpiresAt} is null
+  ) or (
+    ${table.entityType} = 'room_menu_item_report'
+    and ${table.reporterFingerprint} ~ '^[0-9a-f]{64}$'
+    and ${table.requesterIpHash} ~ '^[0-9a-f]{64}$'
+    and ${table.status} = 'held_for_review'
+    and ${table.reason} is not null
+    and length(trim(${table.reason})) between 1 and 500
+    and jsonb_typeof(${table.metadata}) = 'object'
+    and octet_length(${table.metadata}::text) <= 4096
+    and length(coalesce(${table.metadata}->>'details', '')) <= 2000
+    and ${table.reportWindowStartedAt} is not null
+    and ${table.retentionExpiresAt} > ${table.createdAt}
+    and ${table.retentionExpiresAt} <= ${table.createdAt} + interval '180 days'
+  )`)
 }));
 
 export const activeBlocks = pgTable('active_blocks', {
@@ -1697,7 +1870,7 @@ export const performerAuthorityEvents = pgTable('performer_authority_events', {
     table.eventSequence
   ),
   subjectTypeAllowed: check('performer_authority_events_subject_type_allowed', sql`${table.subjectType} in ('platform', 'seller', 'event', 'venue', 'ticket_offer', 'catalog', 'payout_account', 'brand')`),
-  subjectIdValid: check('performer_authority_events_subject_id_valid', sql`${table.subjectId} ~ '^[a-z0-9][a-z0-9_.:-]{0,254}$'`),
+  subjectIdValid: check('performer_authority_events_subject_id_valid', sql`${table.subjectId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$'`),
   actorShapeValid: check('performer_authority_events_actor_shape_valid', sql`(
     (${table.actorType} = 'admin' and ${table.actorUserId} is not null)
     or

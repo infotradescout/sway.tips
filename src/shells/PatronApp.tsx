@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { motion } from 'motion/react';
 import AppBackdrop from '../components/AppBackdrop';
-import PatronView from '../components/PatronView';
+import PatronView, { patronRoomLanguageFor } from '../components/PatronView';
 import PerformerPublicProfilePage from '../components/PerformerPublicProfilePage';
 import PublicDiscoverPage from '../components/PublicDiscoverPage';
 import PublicEventPage from '../components/PublicEventPage';
@@ -170,7 +170,7 @@ function PatronNoSessionRecovery({
           <div className="mb-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-center">
             <p className="text-sm font-black uppercase tracking-wide text-rose-200">Room not found</p>
             <p className="mt-2 text-xs leading-5 text-rose-100/90">
-              This link doesn&apos;t match a live room right now. Ask the performer for a fresh QR code or link,
+              This link doesn&apos;t match a live room right now. Ask the room host for a fresh QR code or link,
               or scan again below.
             </p>
           </div>
@@ -353,16 +353,13 @@ export default function PatronApp() {
     }
   };
 
-  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string) => {
+  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string, expectedGigId: string) => {
     if (demoMode) return rejectDemoMutation();
     const data = await postJson('/api/pending-action/reconcile', {
       client_request_id: clientRequestId,
-      idempotency_key: idempotencyKey
+      idempotency_key: idempotencyKey,
+      expected_gig_id: expectedGigId
     });
-
-    if (data.status === 'reconciled' && data.responseBody?.state) {
-      applyPatronMutationResponse(data.responseBody);
-    }
 
     return data;
   };
@@ -370,6 +367,16 @@ export default function PatronApp() {
   const handleReportContent = async (requestId: string, reason: string, details?: string) => {
     if (demoMode) return rejectDemoMutation();
     return postJson('/api/moderation/report', { requestId, reason, details });
+  };
+
+  const handleReportMenuItem = async (gigId: string, menuItemId: string, reason: string, details?: string) => {
+    if (demoMode) return rejectDemoMutation();
+    return postJson('/api/moderation/report', {
+      gig_id: gigId,
+      menu_item_id: menuItemId,
+      reason,
+      details
+    });
   };
 
   const handleBlockFoundation = async (
@@ -408,6 +415,8 @@ export default function PatronApp() {
 
   const { session, requests } = bState;
   const performers = bState.performers || [];
+  const roomLanguage = patronRoomLanguageFor(session.roomType);
+  const roomActionList = session.roomType === 'music' ? LIVE_ROOM_ACTION_LIST : 'Request • Upvote';
   const hasPatronRouteContext = Boolean(routeGigId);
   const hasSessionContext =
     session.status !== 'inactive' ||
@@ -425,7 +434,9 @@ export default function PatronApp() {
   const routeFamily = routeGigId ? 'patron-gig' : 'patron-root';
   const patronTopbarSubtitle = shouldShowNoSessionRecovery
     ? 'Scan or paste a room link to join'
-    : `${LIVE_ROOM_ACTION_LIST} live`;
+    : session.roomType === 'music'
+      ? `${LIVE_ROOM_ACTION_LIST} live`
+      : `${roomActionList} live`;
   const topRequest = requests
     .filter((request) => request.status === 'approved')
     .sort((a, b) => b.amount - a.amount)[0];
@@ -557,13 +568,17 @@ export default function PatronApp() {
               title={LIVE_ROOM_LANGUAGE.liveRoom}
               eyebrow={LIVE_ROOM_LANGUAGE.liveRoom}
               showHeader={false}
-              primaryLabel={`${LIVE_ROOM_ACTION_LIST} — then track status`}
+              primaryLabel={`${roomActionList} — then follow status`}
               secondaryLabel={LIVE_ROOM_LANGUAGE.roomStatus}
               isEmpty={requests.length === 0 && performers.length === 0}
               emptyState={
                 <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
                   <p className="text-sm font-bold text-white">No room activity yet</p>
-                  <p className="mt-2 text-xs text-slate-400">Requests and boosts will appear when this Live Room starts.</p>
+                  <p className="mt-2 text-xs text-slate-400">
+                    {session.roomType === 'music'
+                      ? 'Requests and boosts will appear when this Live Room starts.'
+                      : 'Requests and upvotes will appear when this Live Room starts.'}
+                  </p>
                 </div>
               }
               primary={
@@ -578,6 +593,7 @@ export default function PatronApp() {
                   onBoostRequest={handleBoostRequest}
                   onReconcilePendingAction={handleReconcilePendingAction}
                   onReportContent={handleReportContent}
+                  onReportMenuItem={handleReportMenuItem}
                   onBlockFoundation={handleBlockFoundation}
                   onSupportContact={handleSupportContact}
                   onDataDeletionPlaceholder={handleDataDeletionPlaceholder}
@@ -587,8 +603,8 @@ export default function PatronApp() {
               secondary={
                 <div className="hidden space-y-4 text-sm lg:block">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Performer</p>
-                    <p className="mt-1 font-bold text-white">{session.talentName || 'No active performer'}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{roomLanguage.hostTitle}</p>
+                    <p className="mt-1 font-bold text-white">{session.talentName || `No active ${roomLanguage.hostNoun}`}</p>
                     <p className="text-xs text-slate-400">Live Room host</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
@@ -597,7 +613,7 @@ export default function PatronApp() {
                       <p className="mt-1 font-mono text-lg font-black text-white">{requests.length}</p>
                     </div>
                     <div className="rounded-lg bg-slate-950 p-3">
-                      <p className="text-slate-500">Performers</p>
+                      <p className="text-slate-500">{roomLanguage.hostPluralTitle}</p>
                       <p className="mt-1 font-mono text-lg font-black text-white">{performers.length}</p>
                     </div>
                   </div>

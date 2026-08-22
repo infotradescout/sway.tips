@@ -311,7 +311,9 @@ async function main() {
     const restoredPage = await context.newPage();
     restoredPage.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
     await restoredPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-payment-modal-viewport.html?restored-reconciliation=1`, { waitUntil: 'domcontentloaded' });
-    await restoredPage.waitForFunction(() => !localStorage.getItem('sway.pendingAction'));
+    await restoredPage.waitForFunction(
+      () => !localStorage.getItem('sway.pendingAction:55555555-5555-4555-8555-555555555555')
+    );
     assert.equal(await restoredPage.locator('[data-sway-payment-dialog="true"]').count(), 0, 'Restored reconciliation must not open a stale success dialog.');
     await restoredPage.getByRole('button', { name: 'Request', exact: true }).first().click();
     await restoredPage.getByLabel('Your Name / Group').fill('Restored QA');

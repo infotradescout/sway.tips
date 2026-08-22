@@ -23,6 +23,7 @@ const service = read('src/server/performer-event-service.ts');
 const server = read('server.ts');
 const manager = read('src/components/PerformerEventsManager.tsx');
 const eventPage = read('src/components/PublicEventPage.tsx');
+const roomSetup = read('src/components/PerformerRoomSetup.tsx');
 const discoverPage = read('src/components/PublicDiscoverPage.tsx');
 const profilePage = read('src/components/PerformerPublicProfilePage.tsx');
 const dashboard = read('src/components/TalentDashboard.tsx');
@@ -31,6 +32,7 @@ const publicLanding = read('shells/public.html');
 const laneRegistry = read('docs/REPO_LANES.md');
 const eventPlan = read('docs/SWAY_EVENT_TICKETS_AND_PUBLIC_FEED_PLAN.md');
 const laneMemo = read('docs/SWAY_FUTURE_LANE_EVENT_TICKET_SALES.md');
+const lifecycleProof = read('scripts/sway-performer-event-lifecycle.integration.test.ts');
 
 const migrationName = readdirSync(join(root, 'drizzle'))
   .filter((name) => /^\d{4}_.+\.sql$/.test(name))
@@ -39,6 +41,15 @@ if (!migrationName) {
   failures.push('Generated performer_events migration is missing.');
 }
 const migration = migrationName ? read(`drizzle/${migrationName}`) : '';
+const attendanceMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .find((name) => read(`drizzle/${name}`).includes('performer_event_attendance_mode'));
+if (!attendanceMigrationName) {
+  failures.push('Generated performer event attendance migration is missing.');
+}
+const attendanceMigration = attendanceMigrationName
+  ? read(`drizzle/${attendanceMigrationName}`)
+  : '';
 
 const eventSchemaStart = schema.indexOf("export const performerEvents = pgTable('performer_events'");
 const eventSchemaEnd = schema.indexOf('// Native paid GA tickets', eventSchemaStart);
@@ -57,7 +68,10 @@ requireTerms(schema, 'Event schema', [
   "uniqueIndex('performer_events_performer_client_request_idx')",
   "'performer_events_ends_after_starts'",
   "'performer_events_published_has_timestamp'",
-  "'performer_events_published_has_external_ticket'",
+  "pgEnum('performer_event_attendance_mode', [",
+  "'performer_events_published_attendance_ready'",
+  "'performer_events_published_walk_in_has_location'",
+  "'performer_events_attendance_mode_shape'",
   "'performer_events_cancelled_has_timestamp'",
   "'performer_events_cancelled_was_published'",
   "'performer_events_cancelled_has_reason'",
@@ -65,6 +79,36 @@ requireTerms(schema, 'Event schema', [
   "'performer_events_external_ticket_uses_https'",
   "'performer_events_external_ticket_shape'",
   "'performer_events_external_ticket_label_allowed'"
+]);
+
+requireTerms(attendanceMigration, 'Generated attendance migration', [
+  'CONSTRAINT "performer_events_published_walk_in_has_location"',
+  '"performer_events"."location_is_tba" = false',
+  'length(trim("performer_events"."location_name")) > 0',
+  'length(trim("performer_events"."location_address")) > 0',
+  'length(trim("performer_events"."city")) > 0',
+  'CREATE FUNCTION "sway_try_event_room_link_lock"',
+  'pg_try_advisory_xact_lock',
+  "ERRCODE = '40001'",
+  "CONSTRAINT = 'gig_sessions_event_lifecycle_retry'",
+  'clock_timestamp()'
+]);
+
+const directEventGuard = attendanceMigration.slice(
+  attendanceMigration.indexOf('CREATE FUNCTION "sway_guard_active_room_event_mutation"'),
+  attendanceMigration.indexOf('CREATE TRIGGER "performer_events_active_room_link_guard"')
+);
+if (/sway_event_room_link_lock\(OLD\.id\)/.test(directEventGuard)) {
+  failures.push('A direct event row trigger must not wait row -> advisory and recreate the lifecycle deadlock.');
+}
+
+requireTerms(lifecycleProof, 'Event lifecycle concurrency proof', [
+  'proveStarvationFreeReconciliation',
+  'provePublishUpdateLockOrder',
+  'proveLinkedRoomMutationFailsFastWithoutDeadlock',
+  "assert.equal((error as { code?: string }).code, '40001')",
+  'proveEventExpiryAfterLifecycleLockWait',
+  "if (proof.kind === 'real-postgres')"
 ]);
 
 requireTerms(migration, 'Generated event migration', [
@@ -101,6 +145,14 @@ forbidPatterns(`${eventSchema}\n${migration}`, 'Event persistence', [
 
 requireTerms(service, 'Event service', [
   'function normalizeEventValues',
+  'PERFORMER_EVENT_ROOM_LINK_OPEN_BEFORE_MS = 24 * 60 * 60 * 1_000',
+  'PERFORMER_EVENT_ROOM_LINK_DEFAULT_DURATION_MS = 4 * 60 * 60 * 1_000',
+  'export function resolvePerformerEventRoomLinkWindow',
+  'export function isPerformerEventWithinRoomLinkWindow',
+  'nowEpoch >= window.opensAt',
+  'nowEpoch < window.closesAt',
+  'export function hasActionableWalkInLocation',
+  "'walk_in_location_required'",
   'function normalizeSafeHttpsUrl',
   "parsed.protocol !== 'https:'",
   'parsed.username',
@@ -127,10 +179,11 @@ requireTerms(service, 'Event service', [
   "eventType: 'performer_event.cancel'",
   'if (!performer.isActive)',
   "'performer_inactive'",
-  'if (!current.externalTicketUrl)',
+  "['external_rsvp', 'external_ticket'].includes(",
+  '&& !current.externalTicketUrl',
   "'external_ticket_url_required'",
   'Add a public HTTPS ticket or RSVP link before publishing.',
-  "(current.ticketingMode ?? 'external') === 'external'",
+  "current.attendanceMode ?? 'external_ticket'",
   '!normalized.externalTicketUrl',
   "'published_event_must_remain_active'",
   'const cancellationDeadline = current.endsAt ?? current.startsAt',
@@ -146,6 +199,16 @@ requireTerms(service, 'Event service', [
   "externalTicketUrl: cancelled ? null : row.event.externalTicketUrl"
 ]);
 
+requireTerms(roomSetup, 'Performer room event-link UI', [
+  'ROOM_LINK_OPEN_BEFORE_MS = 24 * 60 * 60 * 1_000',
+  'ROOM_LINK_DEFAULT_DURATION_MS = 4 * 60 * 60 * 1_000',
+  'export function isEventWithinRoomLinkWindow',
+  'now >= startsAt - ROOM_LINK_OPEN_BEFORE_MS',
+  'now < closesAt',
+  'isEventWithinRoomLinkWindow(event, now)',
+  'becomes linkable 24 hours before it starts'
+]);
+
 forbidPatterns(service, 'Event service', [
   /\bdeleteEvent\b/,
   /\bStripe\b/,
@@ -159,6 +222,7 @@ forbidPatterns(service, 'Event service', [
 ]);
 
 requireTerms(server, 'Performer event API', [
+  'isPerformerEventRoomLinkEligible,',
   'async function requirePerformerEventOwner',
   'applyNoStoreHeaders(res)',
   "console.error('Performer event owner lookup failed:', error)",
@@ -173,6 +237,11 @@ requireTerms(server, 'Performer event API', [
   'clientRequestId: req.body?.clientRequestId',
   'expectedUpdatedAt: req.body?.expectedUpdatedAt',
   'idempotentReplay: !result.created'
+]);
+
+requireTerms(server, 'Live-room event-link timing gate', [
+  '!isPerformerEventRoomLinkEligible(ownedEvent)',
+  "code: 'linked_event_not_eligible'"
 ]);
 
 requireTerms(server, 'Public event API', [
@@ -198,7 +267,9 @@ requireTerms(server, 'Public event API', [
 requireTerms(server, 'Public event response', [
   'eventPath: `/e/${event.id}`',
   "const externalTicketIsOpen = event.status === 'published'",
+  'attendanceMode: event.attendanceMode',
   'externalTicket: externalTicketIsOpen && event.externalTicketUrl',
+  'activeRoom: activeRoom',
   'isPublicEventExternalTicketLabel(event.externalTicketLabel)',
   'performerPath: event.performer.handle ? `/p/${event.performer.handle}` : null',
 ]);
@@ -248,10 +319,11 @@ requireTerms(manager, 'Performer event manager', [
   "fetch('/api/talent/events'",
   '`/api/talent/events/${encodeURIComponent(event.id)}/publish`',
   '`/api/talent/events/${encodeURIComponent(event.id)}/cancel`',
-  'Sway is not selling this ticket or verifying the provider.',
-  'Sway links customers to another provider.',
-  "const EXTERNAL_TICKET_LABELS = ['Get tickets', 'RSVP', 'View details']",
-  'does not cancel tickets, issue refunds',
+  "['walk_in', 'Walk-in', 'No Sway reservation or external link.']",
+  "['external_rsvp', 'RSVP elsewhere', 'Sway opens your external RSVP page.']",
+  "['external_ticket', 'Tickets elsewhere', 'Sway opens your external ticket page.']",
+  "const EXTERNAL_TICKET_LABELS = ['Get tickets', 'View details']",
+  'does not cancel external registrations or tickets, issue refunds',
   'externalProviderConfirmed',
   '`/api/public/events/${encodeURIComponent(event.id)}/ticket`'
 ]);
@@ -270,7 +342,10 @@ requireTerms(eventPage, 'Public event page', [
   'return `/api/public/events/${encodeURIComponent(eventId)}/ticket`',
   'You are leaving Sway.',
   'handled under the external ticket provider',
-  'No ticket checkout is available for this event right now.',
+  'Walk in · no ticket required',
+  'No Sway ticket or RSVP is required.',
+  'Join live room',
+  'function cancelledEventSupportCopy',
   'function externalTicketCtaLabel',
   'opens in a new tab',
   'isEventCancelled'
@@ -337,7 +412,8 @@ if (failures.length) {
 
 for (const [label, script] of [
   ['behavior', 'scripts/sway-public-event-listings.behavior.test.ts'],
-  ['integration', 'scripts/sway-public-event-listings.integration.test.ts']
+  ['integration', 'scripts/sway-public-event-listings.integration.test.ts'],
+  ['lifecycle', 'scripts/sway-performer-event-lifecycle.integration.test.ts']
 ]) {
   const result = spawnSync(
     process.execPath,

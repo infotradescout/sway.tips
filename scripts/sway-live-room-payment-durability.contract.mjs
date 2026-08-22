@@ -10,8 +10,11 @@ const migrationFiles = readdirSync(migrationDirectory)
   .sort();
 const migration0028 = migrationFiles.find((name) => name.startsWith('0028_'));
 assert.ok(migration0028, 'Live-room payment durability migration 0028 is required.');
+const migration0039 = migrationFiles.find((name) => name.startsWith('0039_'));
+assert.ok(migration0039, 'Wave 4 live-money hardening migration 0039 is required.');
 
 const migrationSql = readFileSync(join(migrationDirectory, migration0028), 'utf8');
+const wave4MigrationSql = readFileSync(join(migrationDirectory, migration0039), 'utf8');
 const businessStoreSource = readFileSync(join(root, 'src/server/business-store.ts'), 'utf8');
 const idempotencyStoreSource = readFileSync(join(root, 'src/server/idempotency-store.ts'), 'utf8');
 const operationStoreSource = readFileSync(join(root, 'src/server/live-room-payment-operation-store.ts'), 'utf8');
@@ -24,6 +27,22 @@ const publicRoomStateSource = readFileSync(join(root, 'src/server/public-room-st
 const patronViewSource = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
 const renderConfigSource = readFileSync(join(root, 'render.yaml'), 'utf8');
+assert.match(wave4MigrationSql, /ADD COLUMN "minimum_executor_generation" integer DEFAULT 1 NOT NULL/);
+assert.match(wave4MigrationSql, /ADD COLUMN "lease_executor_generation" integer/);
+assert.match(wave4MigrationSql, /"live_room_payment_operations_released_executor_generation" CHECK \("status" = 'leased' OR "lease_executor_generation" IS NULL\)/);
+assert.match(
+  wave4MigrationSql,
+  /CREATE FUNCTION "sway_live_money_release_admission_lock"[\s\S]+pg_advisory_xact_lock_shared/
+);
+assert.match(
+  wave4MigrationSql,
+  /CREATE FUNCTION "sway_require_current_live_money_authority"[\s\S]+sway_live_money_release_admission_lock\(expected_environment\)[\s\S]+evaluated_at := clock_timestamp\(\)/
+);
+assert.match(wave4MigrationSql, /CREATE TRIGGER "live_room_payment_operations_05_positive_executor_fence"/);
+assert.match(wave4MigrationSql, /CREATE TRIGGER "payments_05_financial_identity_immutable"/);
+assert.match(wave4MigrationSql, /CONSTRAINT = 'payments_financial_identity_immutable'/);
+assert.match(wave4MigrationSql, /CREATE TRIGGER "live_room_payment_operations_00_identity_immutable"/);
+assert.match(wave4MigrationSql, /CONSTRAINT = 'live_room_payment_operations_identity_immutable'/);
 assert.doesNotMatch(migrationSql, /\bDROP\b|\bRENAME\b/i, 'Migration 0028 must be expand-only.');
 assert.match(migrationSql, /legacy_unlinked[^;]+DEFAULT true[^;]+NOT NULL/is);
 assert.match(migrationSql, /UPDATE "request_boosts"[\s\S]+SET "client_request_id" = 'legacy-'/);
@@ -100,7 +119,17 @@ assert.equal(
   'Expiry fencing must never deny a visible request or boost.'
 );
 assert.doesNotMatch(serverSource, /businessStore\.setPatronStatusReceipt/);
-assert.match(serverSource, /responseStatus: completion\.status/);
+const legacyReconciliationSource = serverSource.slice(
+  serverSource.indexOf('app.post("/api/pending-action/reconcile"'),
+  serverSource.indexOf('app.post("/api/session/start"')
+);
+assert.match(legacyReconciliationSource, /recovery: 'resubmit_original_action'/);
+assert.match(legacyReconciliationSource, /room_scope_source:/);
+assert.doesNotMatch(
+  legacyReconciliationSource,
+  /(?:responseStatus|responseBody|patron_status_receipt)\s*:/,
+  'Legacy reconciliation must stay status-only; canonical action resubmission owns completion replay.'
+);
 assert.match(serverSource, /Object\.assign\(inputState, refreshed\.state\)/);
 assert.match(serverSource, /Room maintenance cycle failed; it will retry safely\./);
 assert.match(serverSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED/);
@@ -130,10 +159,25 @@ assert.match(
 assert.match(renderConfigSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED[\s\S]+value: "false"/);
 assert.match(operationStoreSource, /ne\(liveRoomPaymentOperations\.id, operation\.id\)/);
 assert.match(operationStoreSource, /gt\(liveRoomPaymentOperations\.leaseExpiresAt, now\)/);
-assert.match(paymentServiceSource, /reverseConnectedTransfer = !isSwayTestPlatformBalanceDestination/);
+assert.match(operationStoreSource, /CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION = 1/);
+assert.match(operationStoreSource, /operation\.minimumExecutorGeneration > CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION/);
+assert.match(operationStoreSource, /leaseExecutorGeneration: positiveOperation[\s\S]+CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION/);
+assert.match(paymentServiceSource, /async function withCurrentLiveMoneyAdmission/);
+assert.match(paymentServiceSource, /lockedOperation\.minimumExecutorGeneration > CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION/);
+assert.equal(
+  paymentServiceSource.match(/await withCurrentLiveMoneyAdmission\(/g)?.length,
+  3,
+  'Authorize, confirm, and capture must all cross the same current live-money admission boundary.'
+);
+assert.match(paymentServiceSource, /const reverseConnectedTransfer = recordBoolean\(reversalPayload, 'reverseTransfer'\)/);
+assert.match(
+  paymentServiceSource,
+  /reverseConnectedTransfer !== !isSwayTestPlatformBalanceDestination\(operation\.destinationAccountId\)[\s\S]+operation\.destinationAccountId !== payment\.destinationAccountId/,
+  'Refund routing must come from the immutable operation payload and match the immutable payment destination.'
+);
 assert.match(paymentServiceSource, /reverseTransfer: reverseConnectedTransfer,[\s\S]+refundApplicationFee: reverseConnectedTransfer/);
-assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : operation\.destinationAccountId/);
-assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : payment\.platformFee/);
+assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : admittedOperation\.destinationAccountId/);
+assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : admittedPayment\.platformFee/);
 assert.match(sellerReadinessSource, /baseEligible && input\.allowTestPlatformBalance/);
 assert.match(sellerReadinessSource, /seller\.onboardingStatus !== 'restricted'/);
 assert.match(serverSource, /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds/);
@@ -190,7 +234,18 @@ assert.match(serverSource, /if \(paymentService\.isEnabled\(\)\) \{[\s\S]+runDue
 assert.match(paymentServiceSource, /loadInvisibleActionTerminalOutcome/);
 assert.match(paymentServiceSource, /eq\(payments\.paymentStatus, 'failed'\)[\s\S]+isNull\(payments\.processorPaymentIntentId\)/);
 assert.match(idempotencyStoreSource, /completePendingActionFailure/);
-assert.match(serverSource, /loadInvisibleActionTerminalOutcome[\s\S]+completePendingActionFailure/);
+const canonicalTerminalRecoverySource = serverSource.slice(
+  serverSource.indexOf('async function sendCanonicalTerminalPaymentOutcome'),
+  serverSource.indexOf('function applyPaymentReversalTruth')
+);
+assert.match(canonicalTerminalRecoverySource, /loadInvisibleActionTerminalOutcome/);
+assert.match(canonicalTerminalRecoverySource, /sendCanonicalPatronActionFailure/);
+assert.match(serverSource, /sendCanonicalPatronActionFailure[\s\S]+completePendingActionFailure/);
+assert.equal(
+  serverSource.match(/await sendCanonicalTerminalPaymentOutcome\(/g)?.length,
+  2,
+  'Canonical request and boost resubmission must both recover terminal invisible payments.'
+);
 assert.match(serverSource, /pending_action_already_visible/);
 assert.match(serverSource, /sendCanonicalPatronActionFailure/);
 assert.equal(
@@ -204,7 +259,10 @@ assert.equal(
   'A request or boost reversal must remain pending until provider truth is terminal.'
 );
 assert.match(publicRoomStateSource, /body\.terminal[\s\S]+body\.payment_status/);
-assert.match(patronViewSource, /error\?\.body\?\.terminal === true[\s\S]+removeItem\('sway\.pendingAction'\)/);
+assert.match(
+  patronViewSource,
+  /error\?\.body\?\.terminal === true[\s\S]+removePendingAction\(localStorage, pendingActionStorageKey\)/
+);
 
 const reserveRequestSection = businessStoreSource.slice(
   businessStoreSource.indexOf('async function reserveRequestAction'),

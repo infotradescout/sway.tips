@@ -377,10 +377,10 @@ for (const term of [
   "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
   "platformFeePayer === 'patron'",
   'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
-  'sway_platform_fee_cents: String(payment.platformFee)',
-  "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
-  "sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
+  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : admittedPayment.platformFee',
+  'sway_platform_fee_cents: String(admittedPayment.platformFee)',
+  "sway_platform_fee_payer: recordString(admittedPayload, 'platformFeePayer')",
+  "sway_fee_charged_to_patron_cents: String(recordNumber(admittedPayload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
 requireExcludes(
   paymentService,

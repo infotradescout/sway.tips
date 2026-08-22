@@ -76,8 +76,8 @@ assert.equal(talentApp.includes('TalentSignupCard'), false, 'The split performer
 
 for (const required of [
   "'seller_payout_not_ready'",
-  'usesTestPlatformBalance ? undefined : operation.destinationAccountId',
-  'usesTestPlatformBalance ? undefined : payment.platformFee'
+  'usesTestPlatformBalance ? undefined : admittedOperation.destinationAccountId',
+  'usesTestPlatformBalance ? undefined : admittedPayment.platformFee'
 ]) {
   assert.equal(paymentService.includes(required), true, `Payout gate missing: ${required}`);
 }

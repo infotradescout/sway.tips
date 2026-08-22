@@ -12,6 +12,10 @@ const emptySession: GigSession = {
   closedAt: null,
   talentName: '',
   talentRole: 'DJ',
+  roomType: 'music',
+  requestMenu: [],
+  linkedEventId: null,
+  linkedEvent: null,
   feeType: 'patron',
   minimumTip: 5,
   endGigTimerStartedAt: null,
@@ -241,7 +245,7 @@ export default function App() {
     }
   };
 
-  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string) => {
+  const handleReconcilePendingAction = async (clientRequestId: string, idempotencyKey: string, expectedGigId: string) => {
     if (isDemoMode) {
       return { status: 'pending' };
     }
@@ -250,7 +254,8 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_request_id: clientRequestId,
-        idempotency_key: idempotencyKey
+        idempotency_key: idempotencyKey,
+        expected_gig_id: expectedGigId
       })
     });
     const data = await response.json();
@@ -259,9 +264,6 @@ export default function App() {
         status: response.status,
         body: data
       });
-    }
-    if (data.status === 'reconciled' && data.responseBody?.state) {
-      setBState(data.responseBody.state);
     }
     return data;
   };

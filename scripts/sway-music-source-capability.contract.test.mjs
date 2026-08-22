@@ -105,8 +105,8 @@ for (const term of [
   'sourceProvider?: string',
   'spotifyUri?: string',
   'spotifyUrl?: string',
-  'sourceProvider: selectedTrack?.sourceProvider',
-  'spotifyUrl: selectedTrack?.spotifyUrl'
+  "sourceProvider: type === 'request' ? (selectedTrack?.sourceProvider ?? null) : null",
+  "spotifyUrl: type === 'request' ? (selectedTrack?.spotifyUrl ?? null) : null"
 ]) {
   if (!patronView.includes(term)) failures.push(`PatronView missing provider metadata propagation term: ${term}`);
 }

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile } from '../types';
+import type { ActiveRoomSummary, BackendState, RequestItem, BoostContribution, GigSession, PerformerProfile, LiveRoomType, RoomRequestMenuItem } from '../types';
 import { createSwayDb, type SwayDb } from '../db/client';
 import type { FeeAttribution } from './fee-policy';
 import type { PendingActionOwner } from './idempotency-store';
@@ -9,6 +9,7 @@ import {
   activeRoomRegistry,
   clientPendingActions,
   gigSessions,
+  performerEvents,
   requestBoosts,
   requests,
   users,
@@ -17,8 +18,15 @@ import {
   requestStatusEnum
 } from '../db/schema';
 import { lockModerationBlockIdentities, moderationBlockIdentities } from './moderation-block-lock';
+import { normalizeLiveRoomType, normalizeRoomRequestMenu } from './live-room-menu-policy';
+import { isPerformerEventRoomLinkEligible } from './performer-event-service';
+import { SWAY_TEST_PLATFORM_BALANCE_DESTINATION } from './live-room-seller-readiness';
+import { writeAuditEvent } from './audit-log';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+const ROOM_CLOSEOUT_EVENT_LIFECYCLE_RETRY_DELAYS_MS = [15, 30, 60, 120] as const;
+const EVENT_LIFECYCLE_RETRY_SQLSTATE = '40001';
+const EVENT_LIFECYCLE_RETRY_CONSTRAINT = 'gig_sessions_event_lifecycle_retry';
 
 export type BusinessStoreRoomStatus = 'missing' | 'active' | 'inactive' | 'ended' | 'legacy_safe_empty';
 
@@ -37,10 +45,33 @@ type PersistOptions = {
   executor?: SwayDb;
 };
 
+type RoomCloseoutAudit = {
+  actorId: string | null;
+  actorType: string;
+  eventType: string;
+  metadata?: Record<string, unknown>;
+};
+
 type PersistedSessionRow = {
   id: string;
   runtimeSessionState: unknown;
   status: string;
+  roomType: LiveRoomType;
+  moneyEnabled: boolean;
+  moneyDestinationAccountId: string | null;
+  moneyEnvironment: string | null;
+  linkedEventId: string | null;
+  requestMenu: RoomRequestMenuItem[];
+  linkedEventTitle: string | null;
+  linkedEventStartsAt: Date | null;
+  linkedEventEndsAt: Date | null;
+  linkedEventTicketingMode: string | null;
+  linkedEventAttendanceMode: string | null;
+  linkedEventStatus: string | null;
+  linkedEventLocationIsTba: boolean | null;
+  linkedEventLocationName: string | null;
+  linkedEventLocationAddress: string | null;
+  linkedEventCity: string | null;
   startedAt: Date | null;
   autoCloseoutAt: Date;
   manualCloseoutCompletedAt: Date | null;
@@ -101,6 +132,25 @@ function coerceRequestStatus(value: unknown): RequestItem['status'] {
   return 'hold';
 }
 
+function isEventLifecycleRetryConflict(error: unknown) {
+  const seen = new Set<unknown>();
+  let candidate: unknown = error;
+  while (candidate && typeof candidate === 'object' && !seen.has(candidate)) {
+    seen.add(candidate);
+    const databaseError = candidate as { code?: string; constraint?: string; cause?: unknown };
+    if (
+      databaseError.code === EVENT_LIFECYCLE_RETRY_SQLSTATE
+      && databaseError.constraint === EVENT_LIFECYCLE_RETRY_CONSTRAINT
+    ) return true;
+    candidate = databaseError.cause;
+  }
+  return false;
+}
+
+function waitForRoomCloseoutRetry(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
 function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
   if (!raw || typeof raw !== 'object') return fallback;
   const input = raw as Partial<GigSession>;
@@ -113,6 +163,23 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     lastMutationActorUserId: input.lastMutationActorUserId ?? fallback.lastMutationActorUserId ?? null,
     talentName: input.talentName ?? fallback.talentName,
     talentRole: input.talentRole ?? fallback.talentRole,
+    roomType: normalizeLiveRoomType(input.roomType ?? fallback.roomType),
+    requestMenu: (() => {
+      try {
+        return normalizeRoomRequestMenu(
+          input.requestMenu ?? fallback.requestMenu,
+          normalizeLiveRoomType(input.roomType ?? fallback.roomType)
+        );
+      } catch {
+        return [];
+      }
+    })(),
+    linkedEventId: typeof input.linkedEventId === 'string'
+      ? input.linkedEventId
+      : fallback.linkedEventId ?? null,
+    linkedEvent: input.linkedEvent && typeof input.linkedEvent === 'object'
+      ? input.linkedEvent
+      : fallback.linkedEvent ?? null,
     feeType: input.feeType ?? fallback.feeType,
     minimumTip: Number(input.minimumTip ?? fallback.minimumTip),
     endGigTimerStartedAt: input.endGigTimerStartedAt ?? fallback.endGigTimerStartedAt,
@@ -188,6 +255,7 @@ function coerceRequest(raw: unknown): RequestItem | null {
     stateRevision: input.stateRevision,
     type: input.type ?? 'request',
     targetType: input.targetType ?? 'music',
+    menuItemId: input.menuItemId ?? null,
     title: input.title ?? 'Request',
     subtitle: input.subtitle ?? '',
     albumArt: input.albumArt,
@@ -407,6 +475,59 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     restoredSession.startedAt = durableFallback.startedAt;
     restoredSession.autoCloseoutAt = durableFallback.autoCloseoutAt;
     restoredSession.closedAt = durableFallback.closedAt;
+    restoredSession.roomType = normalizeLiveRoomType(sessionRow.roomType);
+    const relationalMoneyEnabled = restoredSession.roomType === 'music'
+      && sessionRow.moneyEnabled === true
+      && Boolean(sessionRow.moneyDestinationAccountId)
+      && (sessionRow.moneyEnvironment === 'test' || sessionRow.moneyEnvironment === 'live');
+    restoredSession.paymentsEnabled = relationalMoneyEnabled && restoredSession.paymentsEnabled !== false;
+    restoredSession.tipsEnabled = relationalMoneyEnabled && restoredSession.tipsEnabled === true;
+    if (relationalMoneyEnabled) {
+      restoredSession.settlementMode = sessionRow.moneyDestinationAccountId === SWAY_TEST_PLATFORM_BALANCE_DESTINATION
+        ? 'platform_test_balance'
+        : 'connected_account';
+      restoredSession.paymentEnvironment = sessionRow.moneyEnvironment as 'test' | 'live';
+    } else {
+      restoredSession.settlementMode = 'unavailable';
+      restoredSession.paymentEnvironment = 'unavailable';
+    }
+    try {
+      restoredSession.requestMenu = normalizeRoomRequestMenu(
+        sessionRow.requestMenu,
+        restoredSession.roomType
+      );
+    } catch {
+      restoredSession.requestMenu = [];
+    }
+    restoredSession.linkedEventId = sessionRow.linkedEventId;
+    restoredSession.linkedEvent = sessionRow.linkedEventId
+      && isPerformerEventRoomLinkEligible({
+        status: sessionRow.linkedEventStatus,
+        ticketingMode: sessionRow.linkedEventTicketingMode,
+        attendanceMode: sessionRow.linkedEventAttendanceMode,
+        startsAt: sessionRow.linkedEventStartsAt,
+        endsAt: sessionRow.linkedEventEndsAt,
+        locationIsTba: sessionRow.linkedEventLocationIsTba,
+        locationName: sessionRow.linkedEventLocationName,
+        locationAddress: sessionRow.linkedEventLocationAddress,
+        city: sessionRow.linkedEventCity
+      })
+      && sessionRow.linkedEventTitle
+      && sessionRow.linkedEventStartsAt
+      && (
+        sessionRow.linkedEventAttendanceMode === 'walk_in'
+        || sessionRow.linkedEventAttendanceMode === 'external_rsvp'
+        || sessionRow.linkedEventAttendanceMode === 'external_ticket'
+        || sessionRow.linkedEventAttendanceMode === 'native_ticket'
+      )
+      ? {
+          id: sessionRow.linkedEventId,
+          title: sessionRow.linkedEventTitle,
+          startsAt: sessionRow.linkedEventStartsAt.toISOString(),
+          eventPath: `/e/${sessionRow.linkedEventId}`,
+          attendanceMode: sessionRow.linkedEventAttendanceMode
+        }
+      : null;
     restoredSession.stateRevision = sessionRow.stateRevision;
     // 'ending' (the 5-minute post-gig sweep) must still resolve as a live,
     // readable room -- both the performer's own dashboard and the patron
@@ -490,6 +611,22 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         id: gigSessions.id,
         runtimeSessionState: gigSessions.runtimeSessionState,
         status: gigSessions.status,
+        roomType: gigSessions.roomType,
+        moneyEnabled: gigSessions.moneyEnabled,
+        moneyDestinationAccountId: gigSessions.moneyDestinationAccountId,
+        moneyEnvironment: gigSessions.moneyEnvironment,
+        linkedEventId: gigSessions.linkedEventId,
+        requestMenu: gigSessions.requestMenu,
+        linkedEventTitle: performerEvents.title,
+        linkedEventStartsAt: performerEvents.startsAt,
+        linkedEventEndsAt: performerEvents.endsAt,
+        linkedEventTicketingMode: performerEvents.ticketingMode,
+        linkedEventAttendanceMode: performerEvents.attendanceMode,
+        linkedEventStatus: performerEvents.status,
+        linkedEventLocationIsTba: performerEvents.locationIsTba,
+        linkedEventLocationName: performerEvents.locationName,
+        linkedEventLocationAddress: performerEvents.locationAddress,
+        linkedEventCity: performerEvents.city,
         startedAt: gigSessions.startedAt,
         autoCloseoutAt: gigSessions.autoCloseoutAt,
         manualCloseoutCompletedAt: gigSessions.manualCloseoutCompletedAt,
@@ -497,6 +634,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         updatedAt: gigSessions.updatedAt
       })
       .from(gigSessions)
+      .leftJoin(performerEvents, and(
+        eq(performerEvents.id, gigSessions.linkedEventId),
+        eq(performerEvents.performerId, gigSessions.performerId)
+      ))
       .where(eq(gigSessions.id, gigId))
       .limit(1);
 
@@ -574,6 +715,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         gigId: row.gigId,
         performerName: row.performerName || 'Unassigned performer',
         talentRole: row.talentRole as ActiveRoomSummary['talentRole'],
+        roomType: snapshot.state.session.roomType,
+        linkedEventId: snapshot.state.session.linkedEventId,
         routePath: row.routePath,
         startedAt: row.startedAt ? row.startedAt.toISOString() : null,
         requestCount
@@ -592,11 +735,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     if (!request.clientRequestId || !request.idempotencyKey || !request.idempotencyFingerprint) {
       throw new Error('durable_request_identity_required');
     }
+    const moneyRequired = request.type === 'tip'
+      || Number(request.amountCents ?? Math.round(Number(request.amount ?? 0) * 100)) > 0;
 
     return db.transaction(async (tx) => {
       const [room] = await tx
         .select({
           status: gigSessions.status,
+          roomType: gigSessions.roomType,
+          moneyEnabled: gigSessions.moneyEnabled,
           runtimeSessionState: gigSessions.runtimeSessionState
         })
         .from(gigSessions)
@@ -611,6 +758,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           clientRequestId: requests.clientRequestId,
           idempotencyKey: requests.idempotencyKey,
           intentFingerprint: requests.intentFingerprint,
+          moneyRequired: requests.moneyRequired,
           activatedAt: requests.activatedAt,
           stateRevision: requests.stateRevision
         })
@@ -628,6 +776,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           || existing.clientRequestId !== request.clientRequestId
           || existing.idempotencyKey !== request.idempotencyKey
           || existing.intentFingerprint !== request.idempotencyFingerprint
+          || existing.moneyRequired !== moneyRequired
         ) {
           throw new Error('durable_request_identity_conflict');
         }
@@ -641,10 +790,16 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           return { durableId: existing.id, created: false, activated: true };
         }
         if (!room || room.status !== 'active') throw new Error('room_not_accepting_money');
+        if (moneyRequired && (room.roomType !== 'music' || !room.moneyEnabled)) {
+          throw new Error('room_money_not_enabled');
+        }
         return { durableId: existing.id, created: false, activated: false };
       }
 
       if (!room || room.status !== 'active') throw new Error('room_not_accepting_money');
+      if (moneyRequired && (room.roomType !== 'music' || !room.moneyEnabled)) {
+        throw new Error('room_money_not_enabled');
+      }
       const lockedSession = coerceGigSession(room.runtimeSessionState, createInactiveSession());
       if (request.type !== 'tip' && !lockedSession.requestsOpen) {
         throw new Error('room_not_accepting_requests');
@@ -690,6 +845,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           patronDeviceIdHash: request.patronDeviceIdHash ?? null,
           status: 'payment_pending',
           requestType: deriveRequestType(request),
+          moneyRequired,
           amountCents: request.amountCents ?? Math.round(Number(request.amount ?? 0) * 100),
           currency: request.currency ?? 'USD',
           message: request.message ?? null,
@@ -708,6 +864,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
               clientRequestId: requests.clientRequestId,
               idempotencyKey: requests.idempotencyKey,
               intentFingerprint: requests.intentFingerprint,
+              moneyRequired: requests.moneyRequired,
               activatedAt: requests.activatedAt,
               stateRevision: requests.stateRevision
             })
@@ -725,6 +882,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         || ('clientRequestId' in row && row.clientRequestId !== request.clientRequestId)
         || ('idempotencyKey' in row && row.idempotencyKey !== request.idempotencyKey)
         || ('intentFingerprint' in row && row.intentFingerprint !== request.idempotencyFingerprint)
+        || ('moneyRequired' in row && row.moneyRequired !== moneyRequired)
       ) {
         throw new Error('durable_request_identity_conflict');
       }
@@ -745,10 +903,15 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     if (!boost.clientRequestId || !boost.idempotencyKey || !boost.idempotencyFingerprint) {
       throw new Error('durable_boost_identity_required');
     }
+    const moneyRequired = boost.paymentStatus !== 'not_applicable';
 
     return db.transaction(async (tx) => {
       const [room] = await tx
-        .select({ status: gigSessions.status })
+        .select({
+          status: gigSessions.status,
+          roomType: gigSessions.roomType,
+          moneyEnabled: gigSessions.moneyEnabled
+        })
         .from(gigSessions)
         .where(eq(gigSessions.id, gigId))
         .for('update')
@@ -778,6 +941,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           clientRequestId: requestBoosts.clientRequestId,
           idempotencyKey: requestBoosts.idempotencyKey,
           intentFingerprint: requestBoosts.intentFingerprint,
+          moneyRequired: requestBoosts.moneyRequired,
           activatedAt: requestBoosts.activatedAt,
           stateRevision: requestBoosts.stateRevision
         })
@@ -797,6 +961,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           || existing.clientRequestId !== boost.clientRequestId
           || existing.idempotencyKey !== boost.idempotencyKey
           || existing.intentFingerprint !== boost.idempotencyFingerprint
+          || existing.moneyRequired !== moneyRequired
         ) {
           throw new Error('durable_boost_identity_conflict');
         }
@@ -810,6 +975,9 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           return { durableId: existing.id, created: false, activated: true };
         }
         if (!room || room.status !== 'active') throw new Error('room_not_accepting_money');
+        if (moneyRequired && (room.roomType !== 'music' || !room.moneyEnabled)) {
+          throw new Error('room_money_not_enabled');
+        }
         if (
           !parent.activatedAt
           || parent.status !== 'approved'
@@ -823,6 +991,9 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       }
 
       if (!room || room.status !== 'active') throw new Error('room_not_accepting_money');
+      if (moneyRequired && (room.roomType !== 'music' || !room.moneyEnabled)) {
+        throw new Error('room_money_not_enabled');
+      }
       if (
         !parent
         || parent.gigId !== gigId
@@ -864,7 +1035,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           intentFingerprint: boost.idempotencyFingerprint,
           patronDeviceIdHash: boost.patronDeviceIdHash ?? null,
           status: 'payment_pending',
-          amountCents: Math.round(Number(boost.amount ?? 0) * 100),
+          moneyRequired,
+          amountCents: moneyRequired ? Math.round(Number(boost.amount ?? 0) * 100) : 0,
           currency: request.currency ?? 'USD',
           runtimeBoostState: boost,
           activatedAt: null
@@ -882,6 +1054,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
               clientRequestId: requestBoosts.clientRequestId,
               idempotencyKey: requestBoosts.idempotencyKey,
               intentFingerprint: requestBoosts.intentFingerprint,
+              moneyRequired: requestBoosts.moneyRequired,
               activatedAt: requestBoosts.activatedAt,
               stateRevision: requestBoosts.stateRevision
             })
@@ -900,6 +1073,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         || ('clientRequestId' in row && row.clientRequestId !== boost.clientRequestId)
         || ('idempotencyKey' in row && row.idempotencyKey !== boost.idempotencyKey)
         || ('intentFingerprint' in row && row.intentFingerprint !== boost.idempotencyFingerprint)
+        || ('moneyRequired' in row && row.moneyRequired !== moneyRequired)
       ) {
         throw new Error('durable_boost_identity_conflict');
       }
@@ -1143,6 +1317,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           requestId: requestBoosts.requestId,
           idempotencyKey: requestBoosts.idempotencyKey,
           intentFingerprint: requestBoosts.intentFingerprint,
+          moneyRequired: requestBoosts.moneyRequired,
           status: requestBoosts.status,
           activatedAt: requestBoosts.activatedAt,
           stateRevision: requestBoosts.stateRevision
@@ -1205,7 +1380,11 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           patronUserId: boost.actorUserId ?? request.actorUserId ?? null,
           actorUserId: boost.actorUserId ?? request.actorUserId ?? null,
           status: 'approved',
-          amountCents: Math.round(Number(boost.amount ?? 0) * 100),
+          // A free-room boost carries one unit of ranking weight in the
+          // runtime projection, but it must remain zero money durably.
+          amountCents: reserved.moneyRequired
+            ? Math.round(Number(boost.amount ?? 0) * 100)
+            : 0,
           currency: request.currency ?? 'USD',
           runtimeBoostState: boost,
           activatedAt: now,
@@ -1227,58 +1406,95 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     });
   }
 
-  async function beginRoomCloseout(gigId: string) {
+  async function beginRoomCloseout(gigId: string, audit?: RoomCloseoutAudit) {
     if (!db) return { status: 'unavailable' as const };
-    return db.transaction(async (tx) => {
-      const [row] = await tx
-        .select({
-          status: gigSessions.status,
-          runtimeSessionState: gigSessions.runtimeSessionState,
-          stateRevision: gigSessions.stateRevision
-        })
-        .from(gigSessions)
-        .where(eq(gigSessions.id, gigId))
-        .for('update')
-        .limit(1);
-      if (!row) return { status: 'missing' as const };
-      if (row.status === 'closed') return { status: 'closed' as const, stateRevision: row.stateRevision };
-      if (row.status === 'closeout_pending') {
-        return { status: 'already_pending' as const, stateRevision: row.stateRevision };
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // Every retry starts a new transaction and reloads the room after any
+        // winning event lifecycle mutation has committed. Reusing a stale
+        // room snapshot here could reattach an event or overwrite its revision.
+        return await db.transaction(async (tx) => {
+          const [row] = await tx
+            .select({
+              status: gigSessions.status,
+              runtimeSessionState: gigSessions.runtimeSessionState,
+              stateRevision: gigSessions.stateRevision
+            })
+            .from(gigSessions)
+            .where(eq(gigSessions.id, gigId))
+            .for('update')
+            .limit(1);
+          if (!row) return { status: 'missing' as const };
+          if (row.status === 'closed') return { status: 'closed' as const, stateRevision: row.stateRevision };
+          if (row.status === 'closeout_pending') {
+            return { status: 'already_pending' as const, stateRevision: row.stateRevision };
+          }
+          if (!['active', 'closeout_pending'].includes(row.status)) {
+            return { status: 'not_closeable' as const };
+          }
+
+          const now = new Date();
+          const runtimeSession = coerceGigSession(row.runtimeSessionState, createInactiveSession());
+          runtimeSession.status = 'ending';
+          runtimeSession.requestsOpen = false;
+          runtimeSession.endGigTimerStartedAt = runtimeSession.endGigTimerStartedAt ?? now.toISOString();
+          if (audit) runtimeSession.lastMutationActorUserId = audit.actorId;
+
+          const [updated] = await tx
+            .update(gigSessions)
+            .set({
+              status: 'closeout_pending',
+              runtimeSessionState: runtimeSession,
+              ...(audit ? { lastMutationActorUserId: audit.actorId } : {}),
+              manualCloseoutStartedAt: sql`coalesce(${gigSessions.manualCloseoutStartedAt}, ${now})`,
+              lastActivityAt: now,
+              stateRevision: sql`${gigSessions.stateRevision} + 1`,
+              updatedAt: now
+            })
+            .where(and(eq(gigSessions.id, gigId), eq(gigSessions.stateRevision, row.stateRevision)))
+            .returning({ stateRevision: gigSessions.stateRevision });
+          if (!updated) throw new Error('gig_session_state_revision_conflict');
+          await tx
+            .update(activeRoomRegistry)
+            .set({
+              registryStatus: 'ending',
+              lastActivityAt: now,
+              updatedAt: now
+            })
+            .where(eq(activeRoomRegistry.gigId, gigId));
+
+          if (audit) {
+            await writeAuditEvent(tx, {
+              actorId: audit.actorId,
+              actorType: audit.actorType,
+              entityType: 'gig_session',
+              entityId: gigId,
+              eventType: audit.eventType,
+              previousStatus: row.status,
+              nextStatus: 'closeout_pending',
+              metadata: {
+                ...(audit.metadata ?? {}),
+                gigId,
+                closeoutBarrier: true
+              }
+            });
+          }
+
+          return { status: 'started' as const, stateRevision: updated.stateRevision };
+        });
+      } catch (error) {
+        if (!isEventLifecycleRetryConflict(error)) throw error;
+        const retryDelayMs = ROOM_CLOSEOUT_EVENT_LIFECYCLE_RETRY_DELAYS_MS[attempt];
+        if (retryDelayMs === undefined) {
+          return {
+            status: 'retryable_conflict' as const,
+            code: EVENT_LIFECYCLE_RETRY_CONSTRAINT,
+            retryAfterMs: ROOM_CLOSEOUT_EVENT_LIFECYCLE_RETRY_DELAYS_MS.at(-1)!
+          };
+        }
+        await waitForRoomCloseoutRetry(retryDelayMs);
       }
-      if (!['active', 'closeout_pending'].includes(row.status)) {
-        return { status: 'not_closeable' as const };
-      }
-
-      const now = new Date();
-      const runtimeSession = coerceGigSession(row.runtimeSessionState, createInactiveSession());
-      runtimeSession.status = 'ending';
-      runtimeSession.requestsOpen = false;
-      runtimeSession.endGigTimerStartedAt = runtimeSession.endGigTimerStartedAt ?? now.toISOString();
-
-      const [updated] = await tx
-        .update(gigSessions)
-        .set({
-          status: 'closeout_pending',
-          runtimeSessionState: runtimeSession,
-          manualCloseoutStartedAt: sql`coalesce(${gigSessions.manualCloseoutStartedAt}, ${now})`,
-          lastActivityAt: now,
-          stateRevision: sql`${gigSessions.stateRevision} + 1`,
-          updatedAt: now
-        })
-        .where(and(eq(gigSessions.id, gigId), eq(gigSessions.stateRevision, row.stateRevision)))
-        .returning({ stateRevision: gigSessions.stateRevision });
-      if (!updated) throw new Error('gig_session_state_revision_conflict');
-      await tx
-        .update(activeRoomRegistry)
-        .set({
-          registryStatus: 'ending',
-          lastActivityAt: now,
-          updatedAt: now
-        })
-        .where(eq(activeRoomRegistry.gigId, gigId));
-
-      return { status: 'started' as const, stateRevision: updated.stateRevision };
-    });
+    }
   }
 
   async function persistState(input: PersistInput, options?: PersistOptions) {
@@ -1296,12 +1512,39 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     const performerId = (await ensurePerformerForActor(executor, session.ownerActorUserId ?? null)) ?? runtimePerformerId;
     const registryStatus = deriveRegistryStatus(session.status);
     const routePath = `/g/${input.activeGigId}`;
+    const moneyEnabled = session.roomType === 'music'
+      && (session.paymentsEnabled === true || session.tipsEnabled === true);
+    const moneyEnvironment = moneyEnabled
+      && (session.paymentEnvironment === 'test' || session.paymentEnvironment === 'live')
+      ? session.paymentEnvironment
+      : null;
+    let moneyDestinationAccountId: string | null = null;
+    if (moneyEnabled) {
+      if (!moneyEnvironment) throw new Error('room_money_environment_unavailable');
+      if (session.settlementMode === 'platform_test_balance' && moneyEnvironment === 'test') {
+        moneyDestinationAccountId = SWAY_TEST_PLATFORM_BALANCE_DESTINATION;
+      } else if (session.settlementMode === 'connected_account' && performerId) {
+        const [seller] = await executor
+          .select({ stripeConnectedAccountId: performers.stripeConnectedAccountId })
+          .from(performers)
+          .where(eq(performers.id, performerId))
+          .limit(1);
+        moneyDestinationAccountId = seller?.stripeConnectedAccountId?.trim() || null;
+      }
+      if (!moneyDestinationAccountId) throw new Error('room_money_destination_unavailable');
+    }
 
     const sessionValues = {
       performerId,
       ownerActorUserId: session.ownerActorUserId ?? null,
       lastMutationActorUserId: session.lastMutationActorUserId ?? null,
       status: deriveSessionStatus(session.status),
+      roomType: session.roomType,
+      moneyEnabled,
+      moneyDestinationAccountId,
+      moneyEnvironment,
+      linkedEventId: session.linkedEventId,
+      requestMenu: session.requestMenu,
       title: `runtime_room:${input.activeGigId}`,
       venueName: 'runtime',
       runtimeSessionState: session,
@@ -1364,6 +1607,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
 
     for (const request of input.state.requests) {
       const clientRequestId = request.clientRequestId ?? `legacy-${request.id}`;
+      const requestMoneyRequired = request.type === 'tip'
+        || Number(request.amountCents ?? Math.round(Number(request.amount ?? 0) * 100)) > 0;
       const requestValues = {
         patronUserId: request.actorUserId ?? null,
         lastMutationActorUserId: request.lastMutationActorUserId ?? request.actorUserId ?? null,
@@ -1372,6 +1617,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
         patronDeviceIdHash: request.patronDeviceIdHash ?? null,
         status: deriveRequestStatus(request),
         requestType: deriveRequestType(request),
+        moneyRequired: requestMoneyRequired,
         amountCents: request.amountCents ?? Math.round(Number(request.amount ?? 0) * 100),
         currency: request.currency ?? 'USD',
         message: request.message ?? null,
@@ -1418,6 +1664,7 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
 
       for (const boost of request.boosts) {
         const clientRequestId = boost.clientRequestId ?? `legacy-${boost.id}`;
+        const boostMoneyRequired = boost.paymentStatus !== 'not_applicable';
         const boostValues = {
           patronUserId: boost.actorUserId ?? request.actorUserId ?? null,
           actorUserId: boost.actorUserId ?? request.actorUserId ?? null,
@@ -1425,7 +1672,8 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
           intentFingerprint: boost.idempotencyFingerprint ?? null,
           patronDeviceIdHash: boost.patronDeviceIdHash ?? null,
           status: deriveRequestStatus(request),
-          amountCents: Math.round(Number(boost.amount ?? 0) * 100),
+          moneyRequired: boostMoneyRequired,
+          amountCents: boostMoneyRequired ? Math.round(Number(boost.amount ?? 0) * 100) : 0,
           currency: request.currency ?? 'USD',
           runtimeBoostState: boost,
           updatedAt: now

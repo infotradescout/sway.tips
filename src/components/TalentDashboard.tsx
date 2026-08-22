@@ -2437,7 +2437,7 @@ export default function TalentDashboard({
         <div id="sway-start-room" className="order-3">
           <PerformerRoomSetup
             performerName={welcomePerformerName}
-            talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
+            talentRole={performerProfile?.primary_role === 'dj' ? 'DJ' : 'Performer'}
             performerEmailVerified={performerEmailVerified}
             payoutReady={moneyReady}
             paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}

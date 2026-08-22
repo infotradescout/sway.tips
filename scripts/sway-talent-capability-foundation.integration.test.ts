@@ -98,7 +98,11 @@ async function insertAuditEvent(database: PGlite, input: {
 
 async function runProof(database: PGlite) {
   await applyMigrations(database);
-  assert.equal(migrationFiles.at(-1), '0037_talent_capability_foundation.sql');
+  assert.equal(
+    migrationFiles.includes('0037_talent_capability_foundation.sql'),
+    true,
+    'The capability foundation migration must remain in the complete migration chain.'
+  );
 
   await database.query(
     `insert into users (id, email, display_name, role, email_verified_at, pro_mode_status, created_at, updated_at)
@@ -569,7 +573,7 @@ async function runProof(database: PGlite) {
   assert.deepEqual(retained.rows[0], {
     identities: 3,
     intents: 2,
-    grants: 4,
+    grants: 7,
     authorities: 4,
     attributions: 1,
     milestones: 2

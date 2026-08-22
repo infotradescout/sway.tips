@@ -35,11 +35,17 @@ export type PublicEventDto = {
     isTba: boolean;
   };
   coverImageUrl: string | null;
+  attendanceMode: 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket';
   externalTicket: {
     url: string;
     label: string | null;
   } | null;
   nativeTicket: NativeAdmissionOffer | null;
+  activeRoom: {
+    gigId: string;
+    routePath: string;
+    roomType: 'music' | 'comedy' | 'service' | 'general';
+  } | null;
   status: string;
   visibility: string;
   cancellationReason?: string | null;
@@ -152,6 +158,25 @@ function externalTicketCtaLabel(label: string | null | undefined) {
   return label === 'RSVP' || label === 'View details' ? label : 'Get tickets';
 }
 
+function externalAttendancePolicy(event: Pick<PublicEventDto, 'attendanceMode'>) {
+  return event.attendanceMode === 'external_rsvp'
+    ? 'Registration and attendance policies are handled by the external RSVP site.'
+    : 'Checkout, charges, and refund policies are handled by the external ticket site.';
+}
+
+function cancelledEventSupportCopy(event: Pick<PublicEventDto, 'attendanceMode' | 'nativeTicket'>) {
+  if (event.nativeTicket) {
+    return 'Sway queues full refunds for eligible unused native tickets. Admitted tickets keep their recorded settlement, and disputed payments remain under support review.';
+  }
+  if (event.attendanceMode === 'external_rsvp') {
+    return 'Contact the external RSVP provider or event organizer for next steps.';
+  }
+  if (event.attendanceMode === 'external_ticket') {
+    return 'Contact the external ticket provider or event organizer for refund and support policies.';
+  }
+  return 'No Sway ticket or RSVP was required. Contact the event organizer for next steps.';
+}
+
 function formatUsd(cents: number) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -230,6 +255,14 @@ export function PublicEventCard({
         >
           Event details
         </a>
+        {event.activeRoom && !cancelled ? (
+          <a
+            href={event.activeRoom.routePath}
+            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl bg-cyan-500 px-4 text-xs font-black text-slate-950 transition hover:bg-cyan-300"
+          >
+            Join live room
+          </a>
+        ) : null}
         {event.externalTicket && !cancelled && !started ? (
           <a
             href={externalTicketRedirectPath(event.id)}
@@ -263,11 +296,16 @@ export function PublicEventCard({
             {ended ? 'Event ended' : event.endsAt ? 'Event in progress' : 'Event started'}
           </span>
         ) : null}
+        {event.attendanceMode === 'walk_in' && !cancelled && !started ? (
+          <span className="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl border border-emerald-300/25 bg-emerald-400/10 px-4 text-center text-xs font-black text-emerald-100">
+            Walk in · no ticket required
+          </span>
+        ) : null}
       </div>
 
       {showExternalPolicy && event.externalTicket && !cancelled && !started ? (
         <p className="border-t border-white/10 px-4 py-3 text-xs leading-5 text-slate-400">
-          Checkout, charges, and refund policies are handled by the external ticket site.
+          {externalAttendancePolicy(event)}
         </p>
       ) : null}
     </article>
@@ -443,9 +481,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   <p className="font-black">This event has been cancelled.</p>
                   <p className="mt-1 text-xs leading-5 text-rose-100/80">
                     {event.cancellationReason || 'Ticket checkout is unavailable.'}{' '}
-                    {event.nativeTicket
-                      ? 'Sway queues full refunds for eligible unused native tickets. Admitted tickets keep their recorded settlement, and disputed payments remain under support review.'
-                      : 'Contact the external ticket provider for its refund and support policies.'}
+                    {cancelledEventSupportCopy(event)}
                   </p>
                 </div>
               </div>
@@ -486,6 +522,21 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
               <div className="mt-6 whitespace-pre-line text-sm leading-7 text-slate-300">{event.description}</div>
             ) : null}
 
+            {event.activeRoom && !cancelled ? (
+              <div className="mt-7 rounded-2xl border border-cyan-300/25 bg-cyan-400/[0.08] p-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">Live now on Sway</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Join the organizer&apos;s live room for requests and room updates.
+                </p>
+                <a
+                  href={event.activeRoom.routePath}
+                  className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-cyan-400 px-5 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
+                >
+                  Join live room
+                </a>
+              </div>
+            ) : null}
+
             {event.externalTicket && !cancelled && !started ? (
               <div className="mt-7 rounded-2xl border border-fuchsia-300/20 bg-fuchsia-500/[0.07] p-4">
                 <a
@@ -505,8 +556,9 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                 </a>
                 <p className="mt-3 text-xs leading-5 text-slate-400">
-                  You are leaving Sway. Checkout, charges, ticket delivery, admission, transfers, cancellations,
-                  refunds, and support are handled under the external ticket provider&apos;s policies.
+                  {event.attendanceMode === 'external_rsvp'
+                    ? 'You are leaving Sway. Registration, admission, cancellations, and support are handled under the external RSVP provider’s policies.'
+                    : 'You are leaving Sway. Checkout, charges, ticket delivery, admission, transfers, cancellations, refunds, and support are handled under the external ticket provider’s policies.'}
                 </p>
               </div>
             ) : event.nativeTicket && !cancelled && !started ? (
@@ -516,9 +568,13 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                 eventTitle={event.title}
                 offer={event.nativeTicket}
               />
+            ) : event.attendanceMode === 'walk_in' && !cancelled && !started ? (
+              <div className="mt-7 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4 text-sm text-emerald-100">
+                Walk in at the listed place and time. No Sway ticket or RSVP is required.
+              </div>
             ) : !cancelled && !started ? (
               <div className="mt-7 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm text-amber-100">
-                No ticket checkout is available for this event right now.
+                Attendance details are temporarily unavailable. Check with the event organizer before going.
               </div>
             ) : started && !cancelled ? (
               <div className="mt-7 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-300">
