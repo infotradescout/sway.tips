@@ -109,13 +109,27 @@ const candidateInitiation = between(
 );
 for (const [text, label] of [
   ['requireActiveCollaboratorRevisionGrant', 'initiation grant recheck'],
-  ["uploadPurpose: 'collaborator_revision'", 'purpose-bound upload session'],
+  ["purpose: 'collaborator_revision'", 'purpose-bound provider initiation intent'],
   ['requestFingerprint', 'material upload intent binding'],
   ['assertAudioStorageReservationAvailable', 'working-byte quota gate'],
   ['assertAudioWorkingObjectAvailable', 'working-object count gate'],
   ['scope.maxCandidateBytes', 'creator-approved byte-ceiling gate'],
-  ["cleanupReason: 'orphaned_candidate_initiation'", 'orphan cleanup receipt']
+  ["operationType: 'initiate_multipart'", 'durable multipart initiation intent'],
+  ['runInitiationProviderOperation', 'lost-response initiation reconciliation']
 ]) requireText(candidateInitiation, text, label);
+const initiationFinalizer = between(
+  publishing,
+  'async function finalizeInitiationDomain',
+  'async function runInitiationProviderOperation'
+);
+for (const [text, label] of [
+  ["purpose === 'collaborator_revision'", 'candidate initiation finalization branch'],
+  ['requireActiveCollaboratorRevisionGrant', 'finalization-time grant recheck'],
+  ["uploadPurpose: 'collaborator_revision'", 'purpose-bound upload session'],
+  ['collaboratorFileGrantId: grantId', 'finalized exact grant binding'],
+  ['sourceAssetVersionId', 'finalized exact source binding'],
+  ['requestFingerprint', 'finalized intent binding']
+]) requireText(initiationFinalizer, text, label);
 const candidateStorageLockIndex = candidateInitiation.indexOf('lockAudioStorageForPerformer');
 const candidateExistingSessionLookupIndex = candidateInitiation.indexOf('.from(audioUploadSessions)');
 if (candidateStorageLockIndex < 0
@@ -130,7 +144,7 @@ for (const [text, label] of [
   ['scope.collaboratorFileGrantId !== input.grantId', 'pre-lock exact route-grant binding'],
   ['session.collaboratorFileGrantId !== input.grantId', 'locked-session exact route-grant binding'],
   ["code: 'upload_part_replay_conflict'", 'changed-byte replay denial'],
-  ['existingPart.providerChecksum !== checksum', 'exact-byte part replay'],
+  ['existingPart.providerChecksum !== bodySha256', 'exact-byte part replay'],
   ["Upload part 1 must pass file-signature validation", 'first-part ordering and signature gate']
 ]) requireText(partWriter, text, label);
 

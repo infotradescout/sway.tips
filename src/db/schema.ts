@@ -2201,7 +2201,7 @@ export const audioUploadSessions = pgTable('audio_upload_sessions', {
   expectedByteSizeValid: check('audio_upload_sessions_expected_byte_size_valid', sql`${table.expectedByteSize} > 0`),
   expectedShaValid: check('audio_upload_sessions_expected_sha_valid', sql`${table.expectedSha256} ~ '^[0-9a-f]{64}$'`),
   purposeAllowed: check('audio_upload_sessions_purpose_allowed', sql`${table.uploadPurpose} in ('owner_asset', 'collaborator_revision')`),
-  collaboratorPurposeCoherent: check('audio_upload_sessions_collaborator_purpose_coherent', sql`(${table.uploadPurpose} = 'owner_asset' and ${table.collaboratorFileGrantId} is null and ${table.sourceAssetVersionId} is null and ${table.requestFingerprint} is null) or (${table.uploadPurpose} = 'collaborator_revision' and ${table.collaboratorFileGrantId} is not null and ${table.sourceAssetVersionId} is not null and ${table.requestFingerprint} ~ '^[0-9a-f]{64}$')`),
+  collaboratorPurposeCoherent: check('audio_upload_sessions_collaborator_purpose_coherent', sql`(${table.uploadPurpose} = 'owner_asset' and ${table.collaboratorFileGrantId} is null and ${table.sourceAssetVersionId} is null and (${table.requestFingerprint} is null or ${table.requestFingerprint} ~ '^[0-9a-f]{64}$')) or (${table.uploadPurpose} = 'collaborator_revision' and ${table.collaboratorFileGrantId} is not null and ${table.sourceAssetVersionId} is not null and ${table.requestFingerprint} ~ '^[0-9a-f]{64}$')`),
   statusAllowed: check('audio_upload_sessions_status_allowed', sql`${table.uploadStatus} in ('initiated', 'uploading', 'uploaded', 'verifying', 'completed', 'quarantined', 'rejected', 'aborted', 'expired')`),
   completionCoherent: check('audio_upload_sessions_completion_coherent', sql`(${table.uploadStatus} = 'completed' and ${table.completedAt} is not null) or (${table.uploadStatus} <> 'completed' and ${table.completedAt} is null)`),
   assetProjectFk: foreignKey({
@@ -2219,6 +2219,139 @@ export const audioUploadSessions = pgTable('audio_upload_sessions', {
     foreignColumns: [audioProjectAssetVersions.id, audioProjectAssetVersions.projectId],
     name: 'audio_upload_sessions_source_version_project_fk'
   })
+}));
+
+// Durable provider-operation outbox for every private audio byte mutation.
+// Initiation is reserved before the provider call and may intentionally have
+// no upload-session row yet; its reservation remains chargeable until either
+// an exact session is linked or provider cleanup is durably confirmed.
+export const audioProviderOperations = pgTable('audio_provider_operations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => audioProjects.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  requestedByUserId: uuid('requested_by_user_id').references(() => users.id),
+  uploadSessionId: uuid('upload_session_id').references(() => audioUploadSessions.id),
+  plannedUploadSessionId: uuid('planned_upload_session_id').notNull(),
+  operationType: text('operation_type').notNull(),
+  operationKey: text('operation_key').notNull(),
+  intentFingerprint: text('intent_fingerprint').notNull(),
+  requestOrigin: text('request_origin').notNull().default('user'),
+  status: text('status').notNull().default('pending'),
+  storageProvider: text('storage_provider').notNull(),
+  storageBucket: text('storage_bucket').notNull(),
+  storageKey: text('storage_key').notNull(),
+  providerUploadId: text('provider_upload_id'),
+  partNumber: integer('part_number'),
+  bodySha256: text('body_sha256'),
+  bodyMd5: text('body_md5'),
+  bodyByteSize: bigint('body_byte_size', { mode: 'number' }),
+  reservedByteSize: bigint('reserved_byte_size', { mode: 'number' }).notNull().default(0),
+  reservedObjectCount: integer('reserved_object_count').notNull().default(0),
+  requestPayload: jsonb('request_payload').$type<Record<string, unknown>>().notNull(),
+  resultPayload: jsonb('result_payload').$type<Record<string, unknown>>(),
+  resultFingerprint: text('result_fingerprint'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(20),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseToken: uuid('lease_token'),
+  leaseOwner: text('lease_owner'),
+  leaseMode: text('lease_mode'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  lastErrorCode: text('last_error_code'),
+  providerStartedAt: timestamp('provider_started_at', { withTimezone: true }),
+  providerConfirmedAt: timestamp('provider_confirmed_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  operationKeyIdx: uniqueIndex('audio_provider_operations_operation_key_idx').on(table.operationKey),
+  subjectOperationIdx: uniqueIndex('audio_provider_operations_subject_operation_idx')
+    .on(table.plannedUploadSessionId, table.operationType, sql`coalesce(${table.partNumber}, 0)`),
+  claimIdx: index('audio_provider_operations_claim_idx').on(table.status, table.availableAt, table.leaseExpiresAt),
+  projectStatusIdx: index('audio_provider_operations_project_status_idx').on(table.projectId, table.status),
+  performerReservationIdx: index('audio_provider_operations_performer_reservation_idx')
+    .on(table.performerId, table.status),
+  uploadSessionIdx: index('audio_provider_operations_upload_session_idx').on(table.uploadSessionId),
+  projectPerformerFk: foreignKey({
+    columns: [table.projectId, table.performerId],
+    foreignColumns: [audioProjects.id, audioProjects.performerId],
+    name: 'audio_provider_operations_project_performer_fk'
+  }),
+  operationTypeAllowed: check('audio_provider_operations_type_allowed', sql`${table.operationType} in ('initiate_multipart', 'upload_part', 'complete_multipart', 'discard_upload', 'abort_upload')`),
+  statusAllowed: check('audio_provider_operations_status_allowed', sql`${table.status} in ('pending', 'leased', 'reconcile_required', 'awaiting_client_retry', 'succeeded', 'canceled', 'dead_letter')`),
+  operationKeyRequired: check('audio_provider_operations_key_required', sql`${table.operationKey} = 'audio-provider:v1:' || ${table.projectId}::text || ':' || ${table.plannedUploadSessionId}::text || ':' || ${table.operationType} || ':' || coalesce(${table.partNumber}::text, '0')`),
+  requestOriginCoherent: check('audio_provider_operations_request_origin_coherent', sql`(${table.requestOrigin} = 'user' and ${table.requestedByUserId} is not null) or (${table.requestOrigin} in ('system_cleanup', 'system_recovery') and ${table.requestedByUserId} is null)`),
+  storageIdentityRequired: check('audio_provider_operations_storage_identity_required', sql`length(btrim(${table.storageProvider})) between 1 and 80 and length(btrim(${table.storageBucket})) between 1 and 240 and length(btrim(${table.storageKey})) between 1 and 1024 and (${table.providerUploadId} is null or length(btrim(${table.providerUploadId})) between 1 and 1024)`),
+  intentFingerprintValid: check('audio_provider_operations_intent_fingerprint_valid', sql`${table.intentFingerprint} ~ '^[0-9a-f]{64}$'`),
+  requestPayloadValid: check('audio_provider_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object' and ${table.requestPayload} <> '{}'::jsonb`),
+  resultEvidenceValid: check('audio_provider_operations_result_evidence_valid', sql`(${table.resultPayload} is null and ${table.resultFingerprint} is null) or (${table.resultPayload} is not null and jsonb_typeof(${table.resultPayload}) = 'object' and ${table.resultPayload} <> '{}'::jsonb and ${table.resultFingerprint} is not null and ${table.resultFingerprint} ~ '^[0-9a-f]{64}$')`),
+  attemptsValid: check('audio_provider_operations_attempts_valid', sql`${table.attemptCount} >= 0 and ${table.maxAttempts} between 1 and 100 and ${table.attemptCount} <= ${table.maxAttempts}`),
+  reservationValid: check('audio_provider_operations_reservation_valid', sql`(${table.operationType} = 'initiate_multipart' and ${table.reservedByteSize} > 0 and ${table.reservedObjectCount} = 1 and ${table.requestPayload} ? 'expectedByteSize' and jsonb_typeof(${table.requestPayload}->'expectedByteSize') = 'number' and coalesce(${table.requestPayload}->>'expectedByteSize' ~ '^[1-9][0-9]*$', false) and (${table.requestPayload}->>'expectedByteSize')::numeric = ${table.reservedByteSize}) or (${table.operationType} <> 'initiate_multipart' and ${table.reservedByteSize} = 0 and ${table.reservedObjectCount} = 0)`),
+  uploadSessionCoherent: check('audio_provider_operations_upload_session_coherent', sql`${table.uploadSessionId} is null or ${table.uploadSessionId} = ${table.plannedUploadSessionId}`),
+  operationSessionRequired: check('audio_provider_operations_session_required', sql`${table.operationType} = 'initiate_multipart' or ${table.uploadSessionId} is not null`),
+  partShape: check('audio_provider_operations_part_shape', sql`(${table.operationType} = 'upload_part' and ${table.partNumber} is not null and ${table.partNumber} between 1 and 10000 and ${table.bodySha256} is not null and ${table.bodySha256} ~ '^[0-9a-f]{64}$' and ${table.bodyMd5} is not null and ${table.bodyMd5} ~ '^[0-9a-f]{32}$' and ${table.bodyByteSize} is not null and ${table.bodyByteSize} > 0) or (${table.operationType} <> 'upload_part' and ${table.partNumber} is null and ${table.bodySha256} is null and ${table.bodyMd5} is null and ${table.bodyByteSize} is null)`),
+  providerIdentityShape: check('audio_provider_operations_provider_identity_shape', sql`(${table.operationType} = 'initiate_multipart' and (${table.providerUploadId} is null or ${table.providerStartedAt} is not null)) or (${table.operationType} <> 'initiate_multipart' and ${table.providerUploadId} is not null)`),
+  leaseCoherent: check('audio_provider_operations_lease_coherent', sql`(${table.status} = 'leased' and ${table.leaseToken} is not null and ${table.leaseOwner} is not null and length(btrim(${table.leaseOwner})) > 0 and ${table.leaseMode} in ('execute', 'reconcile') and ${table.leaseExpiresAt} is not null) or (${table.status} <> 'leased' and ${table.leaseToken} is null and ${table.leaseOwner} is null and ${table.leaseMode} is null and ${table.leaseExpiresAt} is null)`),
+  errorCodeValid: check('audio_provider_operations_error_code_valid', sql`${table.lastErrorCode} is null or ${table.lastErrorCode} ~ '^[a-z0-9][a-z0-9._-]{0,79}$'`),
+  completionCoherent: check('audio_provider_operations_completion_coherent', sql`(${table.status} in ('succeeded', 'canceled') and ${table.completedAt} is not null) or (${table.status} not in ('succeeded', 'canceled') and ${table.completedAt} is null)`),
+  providerConfirmationCoherent: check('audio_provider_operations_provider_confirmation_coherent', sql`${table.providerConfirmedAt} is null or (${table.providerStartedAt} is not null and ${table.resultPayload} is not null)`)
+}));
+
+// One row per lease generation. Active rows may be finalized once; prior
+// attempts are never overwritten or deleted, so process-kill and reconciliation
+// history remains independently inspectable.
+export const audioProviderOperationAttempts = pgTable('audio_provider_operation_attempts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  operationId: uuid('operation_id').notNull().references(() => audioProviderOperations.id),
+  attemptNumber: integer('attempt_number').notNull(),
+  fencingToken: uuid('fencing_token').notNull(),
+  mode: text('mode').notNull(),
+  leaseOwner: text('lease_owner').notNull(),
+  leaseStartedAt: timestamp('lease_started_at', { withTimezone: true }).notNull(),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  providerStartedAt: timestamp('provider_started_at', { withTimezone: true }),
+  providerResultFingerprint: text('provider_result_fingerprint'),
+  errorCode: text('error_code'),
+  outcome: text('outcome').notNull().default('active'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  operationAttemptIdx: uniqueIndex('audio_provider_operation_attempts_operation_attempt_idx')
+    .on(table.operationId, table.attemptNumber),
+  fencingTokenIdx: uniqueIndex('audio_provider_operation_attempts_fencing_token_idx')
+    .on(table.fencingToken),
+  outcomeIdx: index('audio_provider_operation_attempts_outcome_idx').on(table.outcome, table.leaseExpiresAt),
+  modeAllowed: check('audio_provider_operation_attempts_mode_allowed', sql`${table.mode} in ('execute', 'reconcile')`),
+  leaseOwnerRequired: check('audio_provider_operation_attempts_lease_owner_required', sql`length(btrim(${table.leaseOwner})) between 1 and 160`),
+  leaseWindowValid: check('audio_provider_operation_attempts_lease_window_valid', sql`${table.leaseExpiresAt} > ${table.leaseStartedAt}`),
+  requestFingerprintValid: check('audio_provider_operation_attempts_request_fingerprint_valid', sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`),
+  providerResultFingerprintValid: check('audio_provider_operation_attempts_result_fingerprint_valid', sql`${table.providerResultFingerprint} is null or ${table.providerResultFingerprint} ~ '^[0-9a-f]{64}$'`),
+  errorCodeValid: check('audio_provider_operation_attempts_error_code_valid', sql`${table.errorCode} is null or ${table.errorCode} ~ '^[a-z0-9][a-z0-9._-]{0,79}$'`),
+  outcomeAllowed: check('audio_provider_operation_attempts_outcome_allowed', sql`${table.outcome} in ('active', 'released', 'reconcile_required', 'awaiting_client_retry', 'succeeded', 'canceled', 'dead_letter', 'stale')`),
+  completionCoherent: check('audio_provider_operation_attempts_completion_coherent', sql`(${table.outcome} = 'active' and ${table.completedAt} is null) or (${table.outcome} <> 'active' and ${table.completedAt} is not null)`)
+}));
+
+// Dead letters stay immutable. Resolution is a separate append-only fact that
+// may release their reservation only after exact session recovery or confirmed
+// absence of multipart, staging, and sealed provider state.
+export const audioProviderOperationResolutions = pgTable('audio_provider_operation_resolutions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  operationId: uuid('operation_id').notNull().references(() => audioProviderOperations.id),
+  resolutionType: text('resolution_type').notNull(),
+  uploadSessionId: uuid('upload_session_id').references(() => audioUploadSessions.id),
+  resolvedByUserId: uuid('resolved_by_user_id').references(() => users.id),
+  providerObservedAt: timestamp('provider_observed_at', { withTimezone: true }).notNull(),
+  evidenceFingerprint: text('evidence_fingerprint').notNull(),
+  evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  operationIdx: uniqueIndex('audio_provider_operation_resolutions_operation_idx').on(table.operationId),
+  resolutionTypeAllowed: check('audio_provider_operation_resolutions_type_allowed', sql`${table.resolutionType} in ('cleanup_confirmed', 'session_recovered')`),
+  evidenceFingerprintValid: check('audio_provider_operation_resolutions_evidence_fingerprint_valid', sql`${table.evidenceFingerprint} ~ '^[0-9a-f]{64}$'`),
+  evidenceRequired: check('audio_provider_operation_resolutions_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  sessionCoherent: check('audio_provider_operation_resolutions_session_coherent', sql`(${table.resolutionType} = 'cleanup_confirmed' and ${table.uploadSessionId} is null) or (${table.resolutionType} = 'session_recovered' and ${table.uploadSessionId} is not null)`)
 }));
 
 export const audioUploadParts = pgTable('audio_upload_parts', {

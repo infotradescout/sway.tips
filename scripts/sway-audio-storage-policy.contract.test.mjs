@@ -106,41 +106,62 @@ for (const term of [
   'storagePackageFingerprint',
   "set_config('sway.audio_storage_performer_transaction'",
   'Refusing to discard an object referenced by a sealed preserved asset version.',
-  'await store.abortUpload',
-  'await store.beginUpload'
+  'store.discardUpload ?? store.abortUpload',
+  'store.beginUpload({'
 ]) {
   if (!service.includes(term)) failures.push(`Publishing service storage control is missing: ${term}`);
 }
+const initiationRunner = service.slice(
+  service.indexOf('async function runInitiationProviderOperation'),
+  service.indexOf('async function runAssemblyProviderOperation')
+);
 const initiateUpload = service.slice(
   service.indexOf('async function initiateUpload'),
   service.indexOf('async function writeUploadPart')
 );
-if (initiateUpload.indexOf('beginUpload') < 0
-  || initiateUpload.indexOf('workspace') < 0
-  || initiateUpload.indexOf('workspace') > initiateUpload.indexOf('beginUpload')) {
-  failures.push('Working-storage admission must run before object-store multipart initiation.');
+if (!initiateUpload.includes('lockAudioStorageForPerformer')
+  || !initiateUpload.includes('assertAudioStorageReservationAvailable')
+  || !initiateUpload.includes('providerOperations.reserveOperation')
+  || initiationRunner.indexOf('markProviderStarted') < 0
+  || initiationRunner.indexOf('store.beginUpload') < initiationRunner.indexOf('markProviderStarted')) {
+  failures.push('Working-storage admission and durable intent must precede fenced object-store multipart initiation.');
 }
 
 const completeUpload = service.slice(
   service.indexOf('async function completeAndSealUpload'),
   service.indexOf('async function createShareGrant')
 );
-const completionRowLock = completeUpload.indexOf(".for('update')");
-const completionAssembly = completeUpload.indexOf('store.assembleParts');
-if (completionRowLock < 0 || completionAssembly < 0 || completionRowLock > completionAssembly) {
-  failures.push('Upload completion must lock the upload-session row before provider assembly.');
+if (!completeUpload.includes(".for('update')")
+  || !completeUpload.includes('providerOperations.reserveOperation')
+  || !completeUpload.includes('runAssemblyProviderOperation')
+  || !completeUpload.includes('cleanupIntent')) {
+  failures.push('Upload completion must lock its session, exclude cleanup intent, and reserve durable assembly before provider I/O.');
 }
-if (!completeUpload.includes('discardUnsealedUpload(objectIdentity, tx)')) {
-  failures.push('Completion failure cleanup must check sealed-object identity inside the locking transaction.');
+const assemblyRunner = service.slice(
+  service.indexOf('async function runAssemblyProviderOperation'),
+  service.indexOf('async function assertUnsealedUploadIdentity')
+);
+if (!assemblyRunner.includes('discardUnsealedUpload(identity, db, { signal })')
+  || !assemblyRunner.includes('finalizeCanceledAfterCleanup')
+  || !assemblyRunner.includes('applyCleanupPending')) {
+  failures.push('Completion failure cleanup must reconcile provider absence before atomic cancellation or durable pending cleanup.');
 }
 
 const staleCleanup = service.slice(
   service.indexOf('async function expireStaleUploadSessions'),
   service.indexOf('async function completeAndSealUpload')
 );
+const cleanupPreparation = service.slice(
+  service.indexOf('async function prepareSessionCleanupProviderOperation'),
+  service.indexOf('async function cancelSessionMutationOperationsAfterCleanup')
+);
 if (!staleCleanup.includes(".for('update', { skipLocked: true })")
-  || !staleCleanup.includes('discardUnsealedUpload(sessionObjectIdentity(session), tx)')) {
-  failures.push('Stale cleanup must share the upload-session row lock and sealed-object transaction guard.');
+  || !staleCleanup.includes('prepareSessionCleanupProviderOperation')
+  || !cleanupPreparation.includes('reserveSessionCleanupProviderOperation')
+  || !cleanupPreparation.includes("['discard_upload', 'abort_upload'].includes(operation.operationType)")
+  || !staleCleanup.includes('runCleanupProviderOperation')
+  || !staleCleanup.includes('runAssemblyCleanupRecovery')) {
+  failures.push('Stale cleanup must lock its session and run through durable cleanup or assembly-cancellation reconciliation.');
 }
 
 for (const term of [

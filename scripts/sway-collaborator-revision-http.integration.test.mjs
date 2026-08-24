@@ -6,11 +6,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createSwayDb } from '../src/db/client.ts';
 import {
   audioCandidateRevisions,
   audioFileConnections,
+  audioObjectCleanupReceipts,
+  audioProviderOperations,
   audioUploadParts,
   audioUploadSessions,
   performerCapabilityGrantEvents,
@@ -677,6 +679,128 @@ try {
     'Outsiders must receive the same message for existing and missing private candidates.'
   );
 
+  // The real revoke route must atomically leave cleanup intent even when the
+  // provider created multipart state but the upload session does not exist yet.
+  // A response may not say cleanup is complete until due recovery proves the
+  // exact provider identity absent.
+  const revocationRaceSourceBody = wavFixture('route revocation race source');
+  const revocationRaceSourceUpload = await publishing.initiateUpload({
+    projectId: project.id,
+    actorUserId: ownerUserId,
+    title: 'route-revocation-source.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'route-revocation-source.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: revocationRaceSourceBody.byteLength,
+    expectedSha256: sha256(revocationRaceSourceBody),
+    idempotencyKey: 'wave5b-http-revocation-source'
+  });
+  await publishing.writeUploadPart({
+    uploadSessionId: revocationRaceSourceUpload.id,
+    actorUserId: ownerUserId,
+    partNumber: 1,
+    body: revocationRaceSourceBody
+  });
+  const revocationRaceSource = await publishing.completeAndSealUpload({
+    uploadSessionId: revocationRaceSourceUpload.id,
+    actorUserId: ownerUserId,
+    performerId: performer.id
+  });
+  const revocationRaceGrantResponse = await request(
+    enabledServer,
+    '/api/talent/audio/pairing/connections/' + connection.id + '/candidate-revision-grants',
+    {
+      method: 'POST',
+      token: ownerSession.token,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        versionId: revocationRaceSource.id,
+        idempotencyKey: 'wave5b-http-sessionless-revocation-grant',
+        maxCandidateBytes: MAX_CANDIDATE_BYTES,
+        expiresInHours: 24
+      })
+    }
+  );
+  assertStatus(revocationRaceGrantResponse, 201, 'Sessionless revocation race grant', enabledServer);
+  const revocationRaceGrantId = String(revocationRaceGrantResponse.body.grant.id);
+  let releaseRevocationRaceInitiation;
+  let signalRevocationRaceInitiated;
+  const revocationRaceInitiated = new Promise((resolveStarted) => {
+    signalRevocationRaceInitiated = resolveStarted;
+  });
+  const revocationRaceBarrier = new Promise((resolveRelease) => {
+    releaseRevocationRaceInitiation = resolveRelease;
+  });
+  const revocationRaceStore = {
+    ...store,
+    async beginUpload(input) {
+      const identity = await store.beginUpload(input);
+      signalRevocationRaceInitiated(identity);
+      await revocationRaceBarrier;
+      return identity;
+    }
+  };
+  const revocationRacePublishing = createAudioPublishingService({
+    db,
+    store: revocationRaceStore,
+    collaboratorRevisionUploadsEnabled: true,
+    workspaceLimitBytes: 64 * MIB,
+    workingObjectLimit: 100
+  });
+  const revocationRaceBody = wavFixture('route sessionless revocation race');
+  const revocationRaceInitiation = revocationRacePublishing.initiateCollaboratorRevisionUpload({
+    grantId: revocationRaceGrantId,
+    actorUserId: collaboratorUserId,
+    originalFilename: 'route-sessionless-race.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: revocationRaceBody.byteLength,
+    expectedSha256: sha256(revocationRaceBody),
+    idempotencyKey: 'wave5b-http-sessionless-revocation-upload'
+  });
+  const revocationRaceIdentity = await revocationRaceInitiated;
+  const revokeDuringSessionlessInitiation = await request(
+    enabledServer,
+    '/api/talent/audio/file-grants/' + revocationRaceGrantId + '/revoke',
+    {
+      method: 'POST',
+      token: ownerSession.token,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'Route-bound sessionless initiation cleanup proof.' })
+    }
+  );
+  assertStatus(revokeDuringSessionlessInitiation, 202, 'Sessionless revoke cleanup must remain pending', enabledServer);
+  assert.notEqual(revokeDuringSessionlessInitiation.body.candidateUploadCleanup.state, 'complete');
+  assert.ok(revokeDuringSessionlessInitiation.body.candidateUploadCleanup.examinedCount >= 1);
+  assert.ok(revokeDuringSessionlessInitiation.body.candidateUploadCleanup.pendingReceiptCount >= 1);
+  assertRecursivelyExcludesInternals(
+    revokeDuringSessionlessInitiation.body,
+    'Sessionless revoke cleanup response'
+  );
+  releaseRevocationRaceInitiation();
+  await assert.rejects(revocationRaceInitiation, /authority is no longer active/i);
+  const [revocationRaceOperation] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.operationType, 'initiate_multipart'),
+      sql`${audioProviderOperations.requestPayload}->>'collaboratorFileGrantId' = ${revocationRaceGrantId}`
+    ));
+  assert.equal(revocationRaceOperation.uploadSessionId, null);
+  const dueRevocationRace = await revocationRacePublishing.reconcileDueAudioProviderOperations({ limit: 100 });
+  assert.ok(dueRevocationRace.canceledOperationIds.includes(revocationRaceOperation.id));
+  await revocationRacePublishing.retryPendingAudioObjectCleanupReceipts({ limit: 100 });
+  const [revocationRaceReceipt] = await db
+    .select()
+    .from(audioObjectCleanupReceipts)
+    .where(eq(audioObjectCleanupReceipts.storageKey, revocationRaceIdentity.storageKey));
+  assert.equal(revocationRaceReceipt.cleanupStatus, 'completed');
+  assert.deepEqual(await store.reconcileCleanup(revocationRaceIdentity), {
+    status: 'absent',
+    multipartPresent: false,
+    stagingPresent: false,
+    sealedPresent: false
+  });
+
   await db.insert(performerCapabilityGrantEvents).values({
     performerId: performer.id,
     capability: 'private_collaboration',
@@ -774,11 +898,12 @@ try {
   }
 
   console.log(
-    'Sway Wave 5A real Express HTTP trust-boundary proof passed: flag-off, anonymous, '
+    'Sway Wave 5A/5B real Express HTTP trust-boundary proof passed: flag-off, anonymous, '
       + 'wrong-actor, wrong-grant, and wrong-session binary requests were rejected before '
       + 'parser/storage mutation; existing and missing candidates were indistinguishable to an '
       + 'outsider; authority revocation removed collaborator list/playback while preserving creator '
-      + 'review; quota denial and provider failure responses and logs remained private; '
+      + 'review; sessionless provider-initiation revocation returned 202 with durable pending cleanup; '
+      + 'quota denial and provider failure responses and logs remained private; '
       + 'exact actor routes returned allowlisted initiation, part, and completion DTOs without '
       + 'provider or idempotency internals.'
   );

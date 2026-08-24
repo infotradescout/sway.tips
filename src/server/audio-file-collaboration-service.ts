@@ -31,6 +31,7 @@ function sha256Hex(value: string) {
 }
 
 type ReviewEventType = typeof REVIEW_EVENT_TYPES[number];
+type AudioCollaborationTransaction = Parameters<Parameters<SwayDb['transaction']>[0]>[0];
 type ReviewGrantScope = {
   id: string;
   assetVersionId: string;
@@ -157,9 +158,14 @@ export function createAudioFileCollaborationService(config: {
   db: SwayDb;
   store: AudioObjectStore;
   collaboratorRevisionUploadsEnabled?: boolean;
+  beforeGrantRevocation?: (
+    tx: AudioCollaborationTransaction,
+    input: { grantId: string; actorUserId: string }
+  ) => Promise<void>;
 }) {
   const { db, store } = config;
   const collaboratorRevisionUploadsEnabled = config.collaboratorRevisionUploadsEnabled === true;
+  const beforeGrantRevocation = config.beforeGrantRevocation;
 
   function assertCollaboratorRevisionUploadsEnabled() {
     if (!collaboratorRevisionUploadsEnabled) {
@@ -945,6 +951,16 @@ export function createAudioFileCollaborationService(config: {
   async function revokeGrant(input: { grantId: string; userId: string; reason?: string | null }) {
     const grant = await requireActiveGrantForUser(input.grantId, input.userId);
     return db.transaction(async (tx) => {
+      const [lockedGrant] = await tx
+        .select({ id: audioFileAccessGrants.id })
+        .from(audioFileAccessGrants)
+        .where(activeGrantWhere(grant.id))
+        .for('update')
+        .limit(1);
+      if (!lockedGrant) throw Object.assign(new Error('Active file grant required.'), { status: 410 });
+      if (beforeGrantRevocation) {
+        await beforeGrantRevocation(tx, { grantId: lockedGrant.id, actorUserId: input.userId });
+      }
       const [revoked] = await tx
         .update(audioFileAccessGrants)
         .set({

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { createSwayDb } from '../src/db/client.ts';
 import {
@@ -11,6 +11,8 @@ import {
   audioFileAccessGrants,
   audioFileConnections,
   audioObjectCleanupReceipts,
+  audioProviderOperationAttempts,
+  audioProviderOperations,
   audioProjectAccessGrants,
   audioProjectAssetVersions,
   audioUploadSessions,
@@ -133,6 +135,21 @@ function errorChainMatches(error, pattern) {
   return false;
 }
 
+function createProviderBarrier() {
+  let signalStarted;
+  let release;
+  const started = new Promise((resolve) => { signalStarted = resolve; });
+  const blocked = new Promise((resolve) => { release = resolve; });
+  return {
+    started,
+    release: () => release(),
+    async wait(identity) {
+      signalStarted(identity);
+      await blocked;
+    }
+  };
+}
+
 const db = createSwayDb(databaseUrl);
 const objectRoot = mkdtempSync(join(tmpdir(), 'sway-audio-candidates-'));
 
@@ -161,8 +178,25 @@ try {
     SWAY_AUDIO_LOCAL_BUCKET: 'candidate-proof'
   });
   let failNextDiscard = false;
+  let beginAfterSuccessBarrier = null;
+  let writeBeforeProviderBarrier = null;
+  let assemblyAfterSuccessBarrier = null;
   const store = {
     ...localStore,
+    async beginUpload(input) {
+      const identity = await localStore.beginUpload(input);
+      if (beginAfterSuccessBarrier) await beginAfterSuccessBarrier.wait(identity);
+      return identity;
+    },
+    async writePart(input) {
+      if (writeBeforeProviderBarrier) await writeBeforeProviderBarrier.wait(input.identity);
+      return localStore.writePart(input);
+    },
+    async assembleParts(input) {
+      const result = await localStore.assembleParts(input);
+      if (assemblyAfterSuccessBarrier) await assemblyAfterSuccessBarrier.wait(input.identity);
+      return result;
+    },
     async discardUpload(identity) {
       if (failNextDiscard) {
         failNextDiscard = false;
@@ -184,7 +218,14 @@ try {
   const collaboration = createAudioFileCollaborationService({
     db,
     store,
-    collaboratorRevisionUploadsEnabled: true
+    collaboratorRevisionUploadsEnabled: true,
+    beforeGrantRevocation: (tx, input) => publishing
+      .reserveCollaboratorRevisionAuthorityCleanupIntent(tx, {
+        actorUserId: input.actorUserId,
+        grantId: input.grantId,
+        cleanupReason: 'candidate_grant_revoked'
+      })
+      .then(() => undefined)
   });
   const disabledCollaboration = createAudioFileCollaborationService({ db, store });
 
@@ -776,6 +817,260 @@ try {
     (error) => errorChainMatches(error, /active exact-file upload grant/i)
   );
 
+  // If CreateMultipart succeeds but grant authority ends before the session
+  // transaction commits, the durable worker reconciles the exact sessionless
+  // intent, deletes provider state, terminalizes the attempt, and releases its
+  // reservation without requiring the revoked collaborator to replay.
+  const initiationRaceGrant = await collaboration.grantCandidateRevisionUpload({
+    connectionId: connection.id,
+    versionId: sourceVersion.id,
+    grantedByUserId: ownerUserId,
+    idempotencyKey: 'initiation-finalization-revocation-race',
+    maxCandidateBytes: MAX_CANDIDATE_BYTES,
+    expiresInHours: 24
+  });
+  const initiationRaceBody = wavFixture('sessionless initiation authority race', 1_300);
+  beginAfterSuccessBarrier = createProviderBarrier();
+  const initiationRacePromise = publishing.initiateCollaboratorRevisionUpload({
+    grantId: initiationRaceGrant.grant.id,
+    actorUserId: collaboratorUserId,
+    originalFilename: 'sessionless-race.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: initiationRaceBody.byteLength,
+    expectedSha256: sha256(initiationRaceBody),
+    idempotencyKey: 'sessionless-race-upload'
+  });
+  const initiationRaceIdentity = await beginAfterSuccessBarrier.started;
+  const usageWithSessionlessReservation = await publishing.getStorageUsage({ performerId: performer.id });
+  await collaboration.revokeGrant({
+    grantId: initiationRaceGrant.grant.id,
+    userId: ownerUserId,
+    reason: 'Revoke after provider initiation but before DB finalization.'
+  });
+  const [sessionlessReceiptBeforeRecovery] = await db
+    .select()
+    .from(audioObjectCleanupReceipts)
+    .where(eq(audioObjectCleanupReceipts.storageKey, initiationRaceIdentity.storageKey));
+  assert.equal(sessionlessReceiptBeforeRecovery.cleanupStatus, 'pending');
+  assert.equal(sessionlessReceiptBeforeRecovery.uploadSessionId, null);
+  beginAfterSuccessBarrier.release();
+  beginAfterSuccessBarrier = null;
+  await assert.rejects(initiationRacePromise, (error) => errorChainMatches(error, /authority is no longer active/i));
+  const [sessionlessOperationBeforeRecovery] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.operationType, 'initiate_multipart'),
+      sql`${audioProviderOperations.requestPayload}->>'collaboratorFileGrantId' = ${initiationRaceGrant.grant.id}`
+    ));
+  assert.equal(sessionlessOperationBeforeRecovery.status, 'reconcile_required');
+  assert.equal(sessionlessOperationBeforeRecovery.uploadSessionId, null);
+  const sessionlessRecovery = await publishing.reconcileDueAudioProviderOperations({ limit: 100 });
+  assert.ok(sessionlessRecovery.canceledOperationIds.includes(sessionlessOperationBeforeRecovery.id));
+  const [sessionlessOperationAfterRecovery] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(eq(audioProviderOperations.id, sessionlessOperationBeforeRecovery.id));
+  assert.equal(sessionlessOperationAfterRecovery.status, 'canceled');
+  const [sessionlessReceiptAfterRecovery] = await db
+    .select()
+    .from(audioObjectCleanupReceipts)
+    .where(eq(audioObjectCleanupReceipts.id, sessionlessReceiptBeforeRecovery.id));
+  assert.equal(sessionlessReceiptAfterRecovery.cleanupStatus, 'completed');
+  assert.deepEqual(await store.reconcileCleanup(initiationRaceIdentity), {
+    status: 'absent',
+    multipartPresent: false,
+    stagingPresent: false,
+    sealedPresent: false
+  });
+  const sessionlessAttempts = await db
+    .select()
+    .from(audioProviderOperationAttempts)
+    .where(eq(audioProviderOperationAttempts.operationId, sessionlessOperationBeforeRecovery.id));
+  assert.ok(sessionlessAttempts.length >= 2);
+  assert.ok(sessionlessAttempts.every((attempt) => attempt.outcome !== 'active'));
+  const usageAfterSessionlessRecovery = await publishing.getStorageUsage({ performerId: performer.id });
+  assert.ok(usageAfterSessionlessRecovery.reservedBytes < usageWithSessionlessReservation.reservedBytes);
+
+  // Grant revocation installs a durable cleanup operation and receipt while a
+  // part provider call is already leased. The late provider write cannot be
+  // retried after the fence; cleanup then removes it and terminalizes the part.
+  const partRaceGrant = await collaboration.grantCandidateRevisionUpload({
+    connectionId: connection.id,
+    versionId: sourceVersion.id,
+    grantedByUserId: ownerUserId,
+    idempotencyKey: 'part-revocation-cleanup-barrier',
+    maxCandidateBytes: MAX_CANDIDATE_BYTES,
+    expiresInHours: 24
+  });
+  const partRaceBody = wavFixture('part authority cleanup barrier', 1_400);
+  const partRaceSession = await publishing.initiateCollaboratorRevisionUpload({
+    grantId: partRaceGrant.grant.id,
+    actorUserId: collaboratorUserId,
+    originalFilename: 'part-race.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: partRaceBody.byteLength,
+    expectedSha256: sha256(partRaceBody),
+    idempotencyKey: 'part-race-upload'
+  });
+  writeBeforeProviderBarrier = createProviderBarrier();
+  const latePartPromise = publishing.writeUploadPart({
+    grantId: partRaceGrant.grant.id,
+    uploadSessionId: partRaceSession.id,
+    actorUserId: collaboratorUserId,
+    partNumber: 1,
+    body: partRaceBody
+  });
+  await writeBeforeProviderBarrier.started;
+  await collaboration.revokeGrant({
+    grantId: partRaceGrant.grant.id,
+    userId: ownerUserId,
+    reason: 'Revoke while part provider I/O is leased.'
+  });
+  const usageBeforePartRaceCleanup = await publishing.getStorageUsage({ performerId: performer.id });
+  const deferredPartCleanup = await publishing.abortCollaboratorRevisionUploadSessions({
+    actorUserId: ownerUserId,
+    grantId: partRaceGrant.grant.id,
+    cleanupReason: 'candidate_grant_revoked'
+  });
+  assert.equal(deferredPartCleanup.abortedCount, 0);
+  assert.equal(deferredPartCleanup.pendingReceiptCount, 1);
+  const [partCleanupFence] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.uploadSessionId, partRaceSession.id),
+      eq(audioProviderOperations.operationType, 'discard_upload')
+    ));
+  assert.equal(partCleanupFence.status, 'pending');
+  writeBeforeProviderBarrier.release();
+  writeBeforeProviderBarrier = null;
+  await assert.rejects(latePartPromise, (error) => errorChainMatches(error, /authority is no longer active/i));
+  const retriedPartCleanup = await publishing.retryPendingAudioObjectCleanupReceipts({ limit: 100 });
+  assert.ok(retriedPartCleanup.completedCount >= 1);
+  assert.equal((await db.select().from(audioUploadSessions).where(eq(audioUploadSessions.id, partRaceSession.id)))[0].uploadStatus, 'aborted');
+  assert.deepEqual(await store.reconcileCleanup({
+    storageProvider: partRaceSession.storageProvider,
+    storageBucket: partRaceSession.storageBucket,
+    storageKey: partRaceSession.storageKey,
+    providerUploadId: partRaceSession.providerUploadId
+  }), {
+    status: 'absent',
+    multipartPresent: false,
+    stagingPresent: false,
+    sealedPresent: false
+  });
+  const partRaceOperations = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(eq(audioProviderOperations.uploadSessionId, partRaceSession.id));
+  assert.ok(partRaceOperations.every((operation) => ['succeeded', 'canceled', 'dead_letter'].includes(operation.status)));
+  const partRaceAttempts = await db
+    .select()
+    .from(audioProviderOperationAttempts)
+    .where(inArray(audioProviderOperationAttempts.operationId, partRaceOperations.map((operation) => operation.id)));
+  assert.ok(partRaceAttempts.every((attempt) => attempt.outcome !== 'active'));
+  const usageAfterPartRaceCleanup = await publishing.getStorageUsage({ performerId: performer.id });
+  assert.ok(usageAfterPartRaceCleanup.reservedBytes < usageBeforePartRaceCleanup.reservedBytes);
+
+  // CompleteMultipart may succeed before revocation wins the atomic DB
+  // authorization recheck. The pending receipt owns the session immediately;
+  // the retry worker then deletes assembled bytes and cancels the assembly op.
+  const assemblyRaceGrant = await collaboration.grantCandidateRevisionUpload({
+    connectionId: connection.id,
+    versionId: sourceVersion.id,
+    grantedByUserId: ownerUserId,
+    idempotencyKey: 'assembly-finalization-revocation-race',
+    maxCandidateBytes: MAX_CANDIDATE_BYTES,
+    expiresInHours: 24
+  });
+  const assemblyRaceBody = wavFixture('assembly finalization authority race', 1_500);
+  const assemblyRaceSession = await publishing.initiateCollaboratorRevisionUpload({
+    grantId: assemblyRaceGrant.grant.id,
+    actorUserId: collaboratorUserId,
+    originalFilename: 'assembly-race.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: assemblyRaceBody.byteLength,
+    expectedSha256: sha256(assemblyRaceBody),
+    idempotencyKey: 'assembly-race-upload'
+  });
+  await publishing.writeUploadPart({
+    grantId: assemblyRaceGrant.grant.id,
+    uploadSessionId: assemblyRaceSession.id,
+    actorUserId: collaboratorUserId,
+    partNumber: 1,
+    body: assemblyRaceBody
+  });
+  assemblyAfterSuccessBarrier = createProviderBarrier();
+  const assemblyRacePromise = publishing.completeAndSealCollaboratorRevision({
+    grantId: assemblyRaceGrant.grant.id,
+    uploadSessionId: assemblyRaceSession.id,
+    actorUserId: collaboratorUserId
+  });
+  await assemblyAfterSuccessBarrier.started;
+  await collaboration.revokeGrant({
+    grantId: assemblyRaceGrant.grant.id,
+    userId: ownerUserId,
+    reason: 'Revoke after CompleteMultipart but before DB finalization.'
+  });
+  const usageBeforeAssemblyRaceCleanup = await publishing.getStorageUsage({ performerId: performer.id });
+  const [atomicAssemblyReceipt] = await db
+    .select()
+    .from(audioObjectCleanupReceipts)
+    .where(eq(audioObjectCleanupReceipts.uploadSessionId, assemblyRaceSession.id));
+  assert.equal(atomicAssemblyReceipt.cleanupStatus, 'pending');
+  const [atomicAssemblyCleanup] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.uploadSessionId, assemblyRaceSession.id),
+      eq(audioProviderOperations.operationType, 'discard_upload')
+    ));
+  assert.equal(atomicAssemblyCleanup.status, 'pending');
+  assemblyAfterSuccessBarrier.release();
+  assemblyAfterSuccessBarrier = null;
+  await assert.rejects(assemblyRacePromise, (error) => errorChainMatches(error, /authority is no longer active/i));
+  const [assemblyBeforeCleanup] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.uploadSessionId, assemblyRaceSession.id),
+      eq(audioProviderOperations.operationType, 'complete_multipart')
+    ));
+  assert.equal(assemblyBeforeCleanup.status, 'reconcile_required');
+  assert.equal(assemblyBeforeCleanup.lastErrorCode, 'assembly_finalization_failed');
+  const retriedAssemblyCleanup = await publishing.retryPendingAudioObjectCleanupReceipts({ limit: 100 });
+  assert.ok(retriedAssemblyCleanup.completedCount >= 1);
+  const [assemblyAfterCleanup] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(eq(audioProviderOperations.id, assemblyBeforeCleanup.id));
+  assert.equal(assemblyAfterCleanup.status, 'canceled');
+  const [atomicAssemblyReceiptAfterCleanup] = await db
+    .select()
+    .from(audioObjectCleanupReceipts)
+    .where(eq(audioObjectCleanupReceipts.id, atomicAssemblyReceipt.id));
+  assert.equal(atomicAssemblyReceiptAfterCleanup.cleanupStatus, 'completed');
+  assert.equal((await db.select().from(audioUploadSessions).where(eq(audioUploadSessions.id, assemblyRaceSession.id)))[0].uploadStatus, 'aborted');
+  assert.deepEqual(await store.reconcileCleanup({
+    storageProvider: assemblyRaceSession.storageProvider,
+    storageBucket: assemblyRaceSession.storageBucket,
+    storageKey: assemblyRaceSession.storageKey,
+    providerUploadId: assemblyRaceSession.providerUploadId
+  }), {
+    status: 'absent',
+    multipartPresent: false,
+    stagingPresent: false,
+    sealedPresent: false
+  });
+  const assemblyAttempts = await db
+    .select()
+    .from(audioProviderOperationAttempts)
+    .where(eq(audioProviderOperationAttempts.operationId, assemblyBeforeCleanup.id));
+  assert.ok(assemblyAttempts.every((attempt) => attempt.outcome !== 'active'));
+  const usageAfterAssemblyRaceCleanup = await publishing.getStorageUsage({ performerId: performer.id });
+  assert.ok(usageAfterAssemblyRaceCleanup.reservedBytes < usageBeforeAssemblyRaceCleanup.reservedBytes);
+
   const sealedGrant = await collaboration.grantCandidateRevisionUpload({
     connectionId: connection.id,
     versionId: sourceVersion.id,
@@ -1342,7 +1637,7 @@ try {
     && !grant.canApprove
     && grant.maxCandidateBytes === MAX_CANDIDATE_BYTES));
 
-  console.log(`Audio candidate revision integration passed on ${managedDatabaseProof?.kind || 'configured-postgres'}: disabled flag, creator byte ceiling, project/capability/exact-grant checks, two-part geometry and exact replay conflict, post-revocation completion replay, issuing-authority/grant/connection revocation reads, playable-media seal, append-only private candidate isolation, current-manager retained access, bounded storage, successful and retried cleanup quota transitions, and quota denial are proven.`);
+  console.log(`Audio candidate revision integration passed on ${managedDatabaseProof?.kind || 'configured-postgres'}: disabled flag, creator byte ceiling, project/capability/exact-grant checks, two-part geometry and exact replay conflict, post-revocation completion replay, sessionless initiation recovery, atomic pre-revocation cleanup intent and receipt, revocation-versus-part and revocation-versus-assembly cleanup barriers, issuing-authority/grant/connection revocation reads, playable-media seal, append-only private candidate isolation, current-manager retained access, bounded storage, successful and retried cleanup quota transitions, and quota denial are proven.`);
 } finally {
   if (managedDatabaseProof) await managedDatabaseProof.close();
   else await db.$client.end();

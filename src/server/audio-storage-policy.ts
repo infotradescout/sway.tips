@@ -216,7 +216,7 @@ export async function loadAudioStorageUsage(
       where version.performer_id = ${input.performerId}
         and version.sealed_at is not null
         and version.original_preserved = true
-    ), reservation_usage as (
+    ), session_reservation_usage as (
       select
         coalesce(sum(upload.expected_byte_size), 0)::text as reserved_bytes,
         count(upload.id)::text as reserved_object_count
@@ -224,6 +224,38 @@ export async function loadAudioStorageUsage(
       inner join audio_projects project on project.id = upload.project_id
       where project.performer_id = ${input.performerId}
         and upload.upload_status in (${sql.join(ACTIVE_AUDIO_UPLOAD_RESERVATION_STATUSES.map((status) => sql`${status}`), sql`, `)})
+    ), provider_operation_reservation_usage as (
+      select
+        coalesce(sum(operation.reserved_byte_size), 0)::text as reserved_bytes,
+        coalesce(sum(operation.reserved_object_count), 0)::text as reserved_object_count
+      from audio_provider_operations operation
+      where operation.performer_id = ${input.performerId}
+        and operation.operation_type = 'initiate_multipart'
+        and operation.status not in ('succeeded', 'canceled')
+        and not exists (
+          select 1
+          from audio_provider_operation_resolutions resolution
+          where resolution.operation_id = operation.id
+            and resolution.resolution_type in ('cleanup_confirmed', 'session_recovered')
+        )
+        and not exists (
+          select 1
+          from audio_upload_sessions upload
+          where upload.id = operation.upload_session_id
+            and upload.upload_status in (${sql.join(ACTIVE_AUDIO_UPLOAD_RESERVATION_STATUSES.map((status) => sql`${status}`), sql`, `)})
+        )
+    ), reservation_usage as (
+      select
+        (
+          session_reservation_usage.reserved_bytes::bigint
+          + provider_operation_reservation_usage.reserved_bytes::bigint
+        )::text as reserved_bytes,
+        (
+          session_reservation_usage.reserved_object_count::bigint
+          + provider_operation_reservation_usage.reserved_object_count::bigint
+        )::text as reserved_object_count
+      from session_reservation_usage
+      cross join provider_operation_reservation_usage
     )
     select
       sealed_usage.sealed_working_bytes,

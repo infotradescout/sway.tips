@@ -606,9 +606,13 @@ if (contract && schema && migration) {
     const revokeDb = {
       select: () => ({
         from: () => ({
-          where: () => ({
-            limit: async () => [connectionForUniversalMember]
-          })
+          where: () => {
+            const query = {
+              for: () => query,
+              limit: async () => [connectionForUniversalMember]
+            };
+            return query;
+          }
         })
       }),
       update: () => ({

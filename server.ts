@@ -293,13 +293,29 @@ const audioPublishingService = businessDb && audioObjectStore
     })
   : null;
 const audioFilePairingService = businessDb
-  ? createAudioFilePairingService({ db: businessDb })
+  ? createAudioFilePairingService({
+      db: businessDb,
+      beforeConnectionRevocation: audioPublishingService
+        ? (tx, input) => audioPublishingService.reserveCollaboratorRevisionAuthorityCleanupIntent(tx, {
+            actorUserId: input.actorUserId,
+            connectionId: input.connectionId,
+            cleanupReason: 'candidate_connection_revoked'
+          }).then(() => undefined)
+        : undefined
+    })
   : null;
 const audioFileCollaborationService = businessDb && audioObjectStore
   ? createAudioFileCollaborationService({
       db: businessDb,
       store: audioObjectStore,
-      collaboratorRevisionUploadsEnabled
+      collaboratorRevisionUploadsEnabled,
+      beforeGrantRevocation: audioPublishingService
+        ? (tx, input) => audioPublishingService.reserveCollaboratorRevisionAuthorityCleanupIntent(tx, {
+            actorUserId: input.actorUserId,
+            grantId: input.grantId,
+            cleanupReason: 'candidate_grant_revoked'
+          }).then(() => undefined)
+        : undefined
     })
   : null;
 const performerEventService = businessDb
@@ -11752,7 +11768,7 @@ app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
       if (cleanup.failedCount > 0) {
         console.error('[sway.audio] grant revocation candidate cleanup needs operator attention.', cleanup.failures);
       }
-      const status = cleanup.pendingReceiptCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
+      const status = cleanup.pendingReceiptCount > 0 || cleanup.inProgressCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
       return res.status(status).json({
         ...revoked,
         candidateUploadCleanup: {
@@ -11760,10 +11776,13 @@ app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
             ? 'attention_required'
             : cleanup.pendingReceiptCount > 0
               ? 'retry_pending'
-              : 'complete',
+              : cleanup.inProgressCount > 0
+                ? 'in_progress'
+                : 'complete',
           examinedCount: cleanup.examinedCount,
           abortedCount: cleanup.abortedCount,
           pendingReceiptCount: cleanup.pendingReceiptCount,
+          inProgressCount: cleanup.inProgressCount,
           failedCount: cleanup.failedCount
         }
       });
@@ -11807,7 +11826,7 @@ app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (re
       if (cleanup.failedCount > 0) {
         console.error('[sway.audio] connection revocation candidate cleanup needs operator attention.', cleanup.failures);
       }
-      const status = cleanup.pendingReceiptCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
+      const status = cleanup.pendingReceiptCount > 0 || cleanup.inProgressCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
       return res.status(status).json({
         ...revoked,
         candidateUploadCleanup: {
@@ -11815,10 +11834,13 @@ app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (re
             ? 'attention_required'
             : cleanup.pendingReceiptCount > 0
               ? 'retry_pending'
-              : 'complete',
+              : cleanup.inProgressCount > 0
+                ? 'in_progress'
+                : 'complete',
           examinedCount: cleanup.examinedCount,
           abortedCount: cleanup.abortedCount,
           pendingReceiptCount: cleanup.pendingReceiptCount,
+          inProgressCount: cleanup.inProgressCount,
           failedCount: cleanup.failedCount
         }
       });
@@ -16438,6 +16460,12 @@ function startAudioUploadCleanupWorker() {
       if (receiptResult.failedCount > 0) {
         console.warn(
           `[sway.audio] ${receiptResult.failedCount} durable object-cleanup receipt(s) remain pending and will retry.`
+        );
+      }
+      const providerResult = await audioPublishingService.reconcileDueAudioProviderOperations({ limit: 100 });
+      if (providerResult.failedCount > 0) {
+        console.warn(
+          `[sway.audio] ${providerResult.failedCount} durable provider operation(s) remain unresolved and will retry.`
         );
       }
       const result = await audioPublishingService.expireStaleUploadSessions({ limit: 100 });

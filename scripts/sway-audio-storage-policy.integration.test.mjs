@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { createSwayDb } from '../src/db/client.ts';
 import {
   audioAssets,
   audioCreatorDeals,
+  audioProviderOperationAttempts,
+  audioProviderOperations,
   audioProjectAccessGrants,
   audioProjectAssetVersions,
   audioProjects,
@@ -82,26 +84,46 @@ class CountingAudioObjectStore {
   beginDelayMs = 0;
   assembleDelayMs = 0;
   onAssembleStart = null;
+  onWriteStart = null;
+  writeBarrier = null;
   uploads = new Map();
   objects = new Map();
   abortFailuresRemaining = new Map();
   integrityFailuresRemaining = new Map();
+  lostAssemblyResponsesRemaining = new Map();
+  lostCleanupResponsesRemaining = new Map();
 
   async verifyReady() {}
 
-  async beginUpload({ projectId, uploadSessionId, filename }) {
+  planUploadIdentity({ projectId, uploadSessionId, filename }) {
+    return {
+      storageProvider: 'local_private_fs',
+      storageBucket: this.bucket,
+      storageKey: `proof/${projectId}/${uploadSessionId}/${filename}`
+    };
+  }
+
+  async beginUpload({ projectId, uploadSessionId, filename, identity }) {
     this.beginCount += 1;
     if (this.beginDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.beginDelayMs));
     }
-    const identity = {
-      storageProvider: 'local_private_fs',
-      storageBucket: this.bucket,
-      storageKey: `proof/${projectId}/${uploadSessionId}/${filename}`,
+    const planned = this.planUploadIdentity({ projectId, uploadSessionId, filename });
+    const createdIdentity = {
+      ...(identity ?? planned),
       providerUploadId: uploadSessionId
     };
-    this.uploads.set(uploadSessionId, { identity, parts: new Map() });
-    return identity;
+    this.uploads.set(uploadSessionId, { identity: createdIdentity, parts: new Map() });
+    return createdIdentity;
+  }
+
+  async reconcileUpload({ identity }) {
+    const matches = [...this.uploads.values()]
+      .filter((upload) => upload.identity.storageKey === identity.storageKey)
+      .map((upload) => upload.identity);
+    if (matches.length === 0) return { status: 'absent' };
+    if (matches.length === 1) return { status: 'found', identity: matches[0] };
+    return { status: 'ambiguous', identities: matches };
   }
 
   async abortUpload(identity) {
@@ -123,17 +145,38 @@ class CountingAudioObjectStore {
       this.abortFailuresRemaining.set(identity.providerUploadId, remaining - 1);
       throw new Error('forced provider discard failure');
     }
+    const lostResponses = this.lostCleanupResponsesRemaining.get(identity.providerUploadId) ?? 0;
+    if (lostResponses > 0) {
+      this.lostCleanupResponsesRemaining.set(identity.providerUploadId, lostResponses - 1);
+      this.uploads.delete(identity.providerUploadId);
+      this.objects.delete(identity.storageKey);
+      throw new Error('forced lost provider cleanup response');
+    }
     this.uploads.delete(identity.providerUploadId);
     this.objects.delete(identity.storageKey);
   }
 
   async writePart({ identity, partNumber, body }) {
     this.writeCount += 1;
+    this.onWriteStart?.();
+    if (this.writeBarrier) await this.writeBarrier;
     const upload = this.uploads.get(identity.providerUploadId);
     if (!upload) throw new Error('Proof multipart upload not found.');
     const checksum = sha256(body);
     upload.parts.set(partNumber, Buffer.from(body));
     return { etag: checksum, checksum, byteSize: body.byteLength };
+  }
+
+  async reconcilePart({ identity, partNumber, expectedByteSize, expectedMd5 }) {
+    const upload = this.uploads.get(identity.providerUploadId);
+    const body = upload?.parts.get(partNumber);
+    if (!body) return { status: 'absent' };
+    const md5 = createHash('md5').update(body).digest('hex');
+    const etag = sha256(body);
+    if (body.byteLength !== expectedByteSize || md5 !== expectedMd5) {
+      return { status: 'mismatch', etag, byteSize: body.byteLength };
+    }
+    return { status: 'confirmed', etag, byteSize: body.byteLength };
   }
 
   async assembleParts({ identity, parts, expectedByteSize, expectedSha256 }) {
@@ -152,8 +195,15 @@ class CountingAudioObjectStore {
     const forcedFailures = this.integrityFailuresRemaining.get(identity.providerUploadId) ?? 0;
     if (forcedFailures > 0) {
       this.integrityFailuresRemaining.set(identity.providerUploadId, forcedFailures - 1);
-      this.objects.set(identity.storageKey, body);
+      this.objects.set(identity.storageKey, Buffer.concat([body, Buffer.from('forced-integrity-mismatch')]));
       throw new Error('forced post-assembly hash failure');
+    }
+    const lostResponses = this.lostAssemblyResponsesRemaining.get(identity.providerUploadId) ?? 0;
+    if (lostResponses > 0) {
+      this.lostAssemblyResponsesRemaining.set(identity.providerUploadId, lostResponses - 1);
+      this.objects.set(identity.storageKey, body);
+      this.uploads.delete(identity.providerUploadId);
+      throw new Error('forced lost assembly response');
     }
     if (body.byteLength !== expectedByteSize || sha256(body) !== expectedSha256) {
       throw new Error('Proof upload integrity mismatch.');
@@ -161,6 +211,30 @@ class CountingAudioObjectStore {
     this.objects.set(identity.storageKey, body);
     this.uploads.delete(identity.providerUploadId);
     return { byteSize: body.byteLength, sha256: expectedSha256 };
+  }
+
+  async reconcileAssembly({ identity, expectedByteSize, expectedSha256 }) {
+    const body = this.objects.get(identity.storageKey);
+    if (body) {
+      const observed = { byteSize: body.byteLength, sha256: sha256(body) };
+      return observed.byteSize === expectedByteSize && observed.sha256 === expectedSha256
+        ? { status: 'sealed', ...observed }
+        : { status: 'mismatch', location: 'sealed', ...observed };
+    }
+    return this.uploads.has(identity.providerUploadId)
+      ? { status: 'multipart_open' }
+      : { status: 'absent' };
+  }
+
+  async reconcileCleanup(identity) {
+    const multipartPresent = this.uploads.has(identity.providerUploadId);
+    const sealedPresent = this.objects.has(identity.storageKey);
+    return {
+      status: multipartPresent || sealedPresent ? 'present' : 'absent',
+      multipartPresent,
+      stagingPresent: false,
+      sealedPresent
+    };
   }
 
   async openOriginal(identity) {
@@ -775,6 +849,371 @@ try {
   // provider bytes are written. Unsupported combinations fail before begin.
   const guardService = createAudioPublishingService({ db, store, workspaceLimitBytes: 30 * MIB });
   const guardWorkspace = await createPerformerWorkspace(guardService, 'guards');
+
+  // Owner idempotency is actor-and-intent bound before provider dispatch.
+  // Exact replay returns the same session; changed input and another authorized
+  // actor cannot observe or reuse it.
+  const idempotentBody = wavBody('owner idempotency binding', 1_100);
+  const idempotentInput = {
+    projectId: guardWorkspace.project.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    title: 'owner-idempotency.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'owner-idempotency.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: idempotentBody.byteLength,
+    expectedSha256: sha256(idempotentBody),
+    idempotencyKey: 'owner-actor-intent-binding'
+  };
+  const beginBeforeOwnerIntent = store.beginCount;
+  const idempotentSession = await guardService.initiateUpload(idempotentInput);
+  const exactOwnerReplay = await guardService.initiateUpload(idempotentInput);
+  assert.equal(exactOwnerReplay.id, idempotentSession.id);
+  assert.equal(store.beginCount, beginBeforeOwnerIntent + 1);
+  await assert.rejects(
+    guardService.initiateUpload({
+      ...idempotentInput,
+      title: 'changed-owner-intent.wav'
+    }),
+    (error) => error?.status === 409 && error?.code === 'owner_upload_intent_conflict'
+  );
+  const secondUploaderId = randomUUID();
+  await db.insert(users).values({
+    id: secondUploaderId,
+    email: `owner-idempotency-second-${secondUploaderId}@example.test`,
+    emailVerifiedAt: new Date()
+  });
+  await db.insert(audioProjectAccessGrants).values({
+    projectId: guardWorkspace.project.id,
+    granteeUserId: secondUploaderId,
+    role: 'collaborator',
+    canUploadVersions: true,
+    grantedByUserId: guardWorkspace.ownerUserId
+  });
+  await assert.rejects(
+    guardService.initiateUpload({ ...idempotentInput, actorUserId: secondUploaderId }),
+    (error) => error?.status === 409 && error?.code === 'owner_upload_intent_conflict'
+  );
+  assert.equal(store.beginCount, beginBeforeOwnerIntent + 1, 'Rejected owner replay must not dispatch provider I/O.');
+  await guardService.expireStaleUploadSessions({ now: new Date(idempotentSession.expiresAt.getTime() + 1) });
+
+  // Expiry installs a durable cleanup fence while a part provider call is in
+  // flight. It keeps quota charged, blocks any later dispatch, and deletes the
+  // late part only after that lease settles.
+  const expiryRaceBody = wavBody('expiry part cleanup barrier', 1_200);
+  const expiryRaceSession = await guardService.initiateUpload({
+    projectId: guardWorkspace.project.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    title: 'expiry-race.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'expiry-race.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: expiryRaceBody.byteLength,
+    expectedSha256: sha256(expiryRaceBody),
+    idempotencyKey: 'expiry-part-cleanup-barrier'
+  });
+  let signalWriteStarted;
+  let releaseWrite;
+  const writeStarted = new Promise((resolve) => { signalWriteStarted = resolve; });
+  store.onWriteStart = () => signalWriteStarted();
+  store.writeBarrier = new Promise((resolve) => { releaseWrite = resolve; });
+  const expiryRacePart = guardService.writeUploadPart({
+    uploadSessionId: expiryRaceSession.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    partNumber: 1,
+    body: expiryRaceBody
+  });
+  await writeStarted;
+  const usageBeforeExpiryFence = await guardService.getStorageUsage({ performerId: guardWorkspace.performer.id });
+  const deferredExpiry = await guardService.expireStaleUploadSessions({
+    now: new Date(expiryRaceSession.expiresAt.getTime() + 1)
+  });
+  assert.equal(deferredExpiry.expiredCount, 0);
+  assert.equal(deferredExpiry.failedCount, 0);
+  const [expiryCleanupFence] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.uploadSessionId, expiryRaceSession.id),
+      eq(audioProviderOperations.operationType, 'discard_upload')
+    ));
+  assert.equal(expiryCleanupFence.status, 'pending', 'Expiry must persist cleanup intent before the part lease settles.');
+  await assert.rejects(
+    guardService.writeUploadPart({
+      uploadSessionId: expiryRaceSession.id,
+      actorUserId: guardWorkspace.ownerUserId,
+      partNumber: 1,
+      body: expiryRaceBody
+    }),
+    (error) => error?.code === 'audio_provider_operation_in_progress'
+  );
+  const usageWhileExpiryDeferred = await guardService.getStorageUsage({ performerId: guardWorkspace.performer.id });
+  assert.equal(usageWhileExpiryDeferred.reservedBytes, usageBeforeExpiryFence.reservedBytes);
+  releaseWrite();
+  store.writeBarrier = null;
+  store.onWriteStart = null;
+  await expiryRacePart;
+  const completedExpiry = await guardService.expireStaleUploadSessions({
+    now: new Date(expiryRaceSession.expiresAt.getTime() + 1)
+  });
+  assert.deepEqual(completedExpiry.expiredSessionIds, [expiryRaceSession.id]);
+  assert.equal(store.uploads.has(expiryRaceSession.providerUploadId), false);
+  const expiryOperations = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(eq(audioProviderOperations.uploadSessionId, expiryRaceSession.id));
+  assert.ok(expiryOperations.every((operation) => ['succeeded', 'canceled', 'dead_letter'].includes(operation.status)));
+  const expiryAttempts = await db
+    .select()
+    .from(audioProviderOperationAttempts)
+    .where(inArray(audioProviderOperationAttempts.operationId, expiryOperations.map((operation) => operation.id)));
+  assert.ok(expiryAttempts.every((attempt) => attempt.outcome !== 'active'));
+  const usageAfterExpiryBarrier = await guardService.getStorageUsage({ performerId: guardWorkspace.performer.id });
+  assert.ok(usageAfterExpiryBarrier.reservedBytes < usageWhileExpiryDeferred.reservedBytes);
+
+  // A provider call that ignores abort and outlives its original short lease
+  // remains fenced by the durable heartbeat. Cleanup cannot infer safety from
+  // the original expiry; quota releases only after the late write settles and
+  // exact provider absence is re-established.
+  const timeoutFenceService = createAudioPublishingService({
+    db,
+    store,
+    workspaceLimitBytes: 30 * MIB,
+    providerOperationLeaseDurationMs: 1_000,
+    providerOperationCallTimeoutMs: 500
+  });
+  const timeoutFenceBody = wavBody('provider timeout heartbeat fence', 1_300);
+  const timeoutFenceSession = await timeoutFenceService.initiateUpload({
+    projectId: guardWorkspace.project.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    title: 'provider-timeout-fence.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'provider-timeout-fence.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: timeoutFenceBody.byteLength,
+    expectedSha256: sha256(timeoutFenceBody),
+    idempotencyKey: 'provider-timeout-heartbeat-fence'
+  });
+  let signalTimeoutWriteStarted;
+  let releaseTimeoutWrite;
+  const timeoutWriteStarted = new Promise((resolve) => { signalTimeoutWriteStarted = resolve; });
+  store.onWriteStart = () => signalTimeoutWriteStarted();
+  store.writeBarrier = new Promise((resolve) => { releaseTimeoutWrite = resolve; });
+  const timedOutPart = timeoutFenceService.writeUploadPart({
+    uploadSessionId: timeoutFenceSession.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    partNumber: 1,
+    body: timeoutFenceBody
+  });
+  await timeoutWriteStarted;
+  await assert.rejects(
+    timedOutPart,
+    (error) => error?.code === 'audio_provider_operation_in_progress'
+  );
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const usageBeforeTimedOutCleanup = await timeoutFenceService.getStorageUsage({
+    performerId: guardWorkspace.performer.id
+  });
+  const deferredTimedOutCleanup = await timeoutFenceService.expireStaleUploadSessions({
+    now: new Date(timeoutFenceSession.expiresAt.getTime() + 1)
+  });
+  assert.equal(deferredTimedOutCleanup.expiredCount, 0);
+  const [timedOutMutation] = await db
+    .select()
+    .from(audioProviderOperations)
+    .where(and(
+      eq(audioProviderOperations.uploadSessionId, timeoutFenceSession.id),
+      eq(audioProviderOperations.operationType, 'upload_part')
+    ));
+  assert.equal(timedOutMutation.status, 'leased');
+  assert.ok(timedOutMutation.leaseExpiresAt.getTime() > Date.now());
+  const usageDuringTimedOutCleanup = await timeoutFenceService.getStorageUsage({
+    performerId: guardWorkspace.performer.id
+  });
+  assert.equal(usageDuringTimedOutCleanup.reservedBytes, usageBeforeTimedOutCleanup.reservedBytes);
+
+  releaseTimeoutWrite();
+  store.writeBarrier = null;
+  store.onWriteStart = null;
+  let settledTimedOutMutation = null;
+  for (let poll = 0; poll < 80; poll += 1) {
+    [settledTimedOutMutation] = await db
+      .select()
+      .from(audioProviderOperations)
+      .where(eq(audioProviderOperations.id, timedOutMutation.id));
+    if (settledTimedOutMutation?.status === 'reconcile_required') break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(settledTimedOutMutation?.status, 'reconcile_required');
+  const completedTimedOutCleanup = await timeoutFenceService.expireStaleUploadSessions({
+    now: new Date(timeoutFenceSession.expiresAt.getTime() + 1)
+  });
+  assert.deepEqual(completedTimedOutCleanup.expiredSessionIds, [timeoutFenceSession.id]);
+  assert.equal(store.uploads.has(timeoutFenceSession.providerUploadId), false);
+  const usageAfterTimedOutCleanup = await timeoutFenceService.getStorageUsage({
+    performerId: guardWorkspace.performer.id
+  });
+  assert.ok(usageAfterTimedOutCleanup.reservedBytes < usageDuringTimedOutCleanup.reservedBytes);
+
+  // A transient database failure during lease renewal must take the same
+  // settlement-detached path as a request timeout. Even when the provider
+  // ignores AbortSignal, later heartbeat retries keep the durable lease and
+  // quota fence alive until the provider call actually settles.
+  const heartbeatFailureService = createAudioPublishingService({
+    db,
+    store,
+    workspaceLimitBytes: 30 * MIB,
+    providerOperationLeaseDurationMs: 1_000,
+    providerOperationCallTimeoutMs: 800
+  });
+  const heartbeatFailureBody = wavBody('provider heartbeat renewal failure fence', 1_300);
+  const heartbeatFailureSession = await heartbeatFailureService.initiateUpload({
+    projectId: guardWorkspace.project.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    title: 'provider-heartbeat-failure-fence.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'provider-heartbeat-failure-fence.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: heartbeatFailureBody.byteLength,
+    expectedSha256: sha256(heartbeatFailureBody),
+    idempotencyKey: 'provider-heartbeat-renewal-failure-fence'
+  });
+  await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_fail_audio_provider_heartbeat_once_trigger ON audio_provider_operations'));
+  await db.execute(sql.raw('DROP FUNCTION IF EXISTS sway_test_fail_audio_provider_heartbeat_once()'));
+  await db.execute(sql.raw('DROP SEQUENCE IF EXISTS sway_test_audio_provider_heartbeat_fail_once_seq'));
+  await db.execute(sql.raw('CREATE SEQUENCE sway_test_audio_provider_heartbeat_fail_once_seq START WITH 1 INCREMENT BY 1'));
+  await db.execute(sql.raw(`
+    CREATE FUNCTION sway_test_fail_audio_provider_heartbeat_once()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $test$
+    BEGIN
+      IF NEW.upload_session_id = '${heartbeatFailureSession.id}'::uuid
+        AND OLD.status = 'leased'
+        AND NEW.status = 'leased'
+        AND NEW.lease_expires_at > OLD.lease_expires_at THEN
+        IF nextval('sway_test_audio_provider_heartbeat_fail_once_seq') = 1 THEN
+          RAISE EXCEPTION 'forced audio provider heartbeat renewal failure';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $test$
+  `));
+  await db.execute(sql.raw(`
+    CREATE TRIGGER sway_test_fail_audio_provider_heartbeat_once_trigger
+    BEFORE UPDATE ON audio_provider_operations
+    FOR EACH ROW EXECUTE FUNCTION sway_test_fail_audio_provider_heartbeat_once()
+  `));
+  let releaseHeartbeatFailureWrite;
+  try {
+    let signalHeartbeatFailureWriteStarted;
+    const heartbeatFailureWriteStarted = new Promise((resolve) => {
+      signalHeartbeatFailureWriteStarted = resolve;
+    });
+    store.onWriteStart = () => signalHeartbeatFailureWriteStarted();
+    store.writeBarrier = new Promise((resolve) => { releaseHeartbeatFailureWrite = resolve; });
+    const heartbeatFailurePart = heartbeatFailureService.writeUploadPart({
+      uploadSessionId: heartbeatFailureSession.id,
+      actorUserId: guardWorkspace.ownerUserId,
+      partNumber: 1,
+      body: heartbeatFailureBody
+    });
+    await heartbeatFailureWriteStarted;
+    const [initialHeartbeatMutation] = await db
+      .select()
+      .from(audioProviderOperations)
+      .where(and(
+        eq(audioProviderOperations.uploadSessionId, heartbeatFailureSession.id),
+        eq(audioProviderOperations.operationType, 'upload_part')
+      ));
+    assert.equal(initialHeartbeatMutation.status, 'leased');
+    const originalHeartbeatLeaseExpiry = initialHeartbeatMutation.leaseExpiresAt;
+    await assert.rejects(
+      heartbeatFailurePart,
+      (error) => error?.code === 'audio_provider_operation_in_progress'
+    );
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      Math.max(0, originalHeartbeatLeaseExpiry.getTime() - Date.now() + 250)
+    ));
+    const usageBeforeHeartbeatFailureCleanup = await heartbeatFailureService.getStorageUsage({
+      performerId: guardWorkspace.performer.id
+    });
+    const deferredHeartbeatFailureCleanup = await heartbeatFailureService.expireStaleUploadSessions({
+      now: new Date(heartbeatFailureSession.expiresAt.getTime() + 1)
+    });
+    assert.equal(deferredHeartbeatFailureCleanup.expiredCount, 0);
+    const [heartbeatMutationWhileProviderHeld] = await db
+      .select()
+      .from(audioProviderOperations)
+      .where(eq(audioProviderOperations.id, initialHeartbeatMutation.id));
+    assert.equal(heartbeatMutationWhileProviderHeld.status, 'leased');
+    assert.ok(heartbeatMutationWhileProviderHeld.leaseExpiresAt.getTime() > Date.now());
+    assert.ok(heartbeatMutationWhileProviderHeld.leaseExpiresAt.getTime() > originalHeartbeatLeaseExpiry.getTime());
+    const [heartbeatAttemptWhileProviderHeld] = await db
+      .select()
+      .from(audioProviderOperationAttempts)
+      .where(eq(audioProviderOperationAttempts.operationId, initialHeartbeatMutation.id));
+    assert.equal(heartbeatAttemptWhileProviderHeld.outcome, 'active');
+    assert.equal(
+      heartbeatAttemptWhileProviderHeld.leaseExpiresAt.getTime(),
+      heartbeatMutationWhileProviderHeld.leaseExpiresAt.getTime()
+    );
+    const usageDuringHeartbeatFailureCleanup = await heartbeatFailureService.getStorageUsage({
+      performerId: guardWorkspace.performer.id
+    });
+    assert.equal(
+      usageDuringHeartbeatFailureCleanup.reservedBytes,
+      usageBeforeHeartbeatFailureCleanup.reservedBytes
+    );
+
+    releaseHeartbeatFailureWrite();
+    store.writeBarrier = null;
+    store.onWriteStart = null;
+    let settledHeartbeatFailureMutation = null;
+    for (let poll = 0; poll < 80; poll += 1) {
+      [settledHeartbeatFailureMutation] = await db
+        .select()
+        .from(audioProviderOperations)
+        .where(eq(audioProviderOperations.id, initialHeartbeatMutation.id));
+      if (settledHeartbeatFailureMutation?.status === 'reconcile_required') break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(settledHeartbeatFailureMutation?.status, 'reconcile_required');
+    const completedHeartbeatFailureCleanup = await heartbeatFailureService.expireStaleUploadSessions({
+      now: new Date(heartbeatFailureSession.expiresAt.getTime() + 1)
+    });
+    assert.deepEqual(completedHeartbeatFailureCleanup.expiredSessionIds, [heartbeatFailureSession.id]);
+    assert.equal(store.uploads.has(heartbeatFailureSession.providerUploadId), false);
+    const heartbeatFailureOperations = await db
+      .select()
+      .from(audioProviderOperations)
+      .where(eq(audioProviderOperations.uploadSessionId, heartbeatFailureSession.id));
+    const heartbeatFailureAttempts = await db
+      .select()
+      .from(audioProviderOperationAttempts)
+      .where(inArray(
+        audioProviderOperationAttempts.operationId,
+        heartbeatFailureOperations.map((operation) => operation.id)
+      ));
+    assert.ok(heartbeatFailureAttempts.every((attempt) => attempt.outcome !== 'active'));
+    const usageAfterHeartbeatFailureCleanup = await heartbeatFailureService.getStorageUsage({
+      performerId: guardWorkspace.performer.id
+    });
+    assert.ok(
+      usageAfterHeartbeatFailureCleanup.reservedBytes
+      < usageDuringHeartbeatFailureCleanup.reservedBytes
+    );
+  } finally {
+    releaseHeartbeatFailureWrite?.();
+    store.writeBarrier = null;
+    store.onWriteStart = null;
+    await db.execute(sql.raw('DROP TRIGGER IF EXISTS sway_test_fail_audio_provider_heartbeat_once_trigger ON audio_provider_operations'));
+    await db.execute(sql.raw('DROP FUNCTION IF EXISTS sway_test_fail_audio_provider_heartbeat_once()'));
+    await db.execute(sql.raw('DROP SEQUENCE IF EXISTS sway_test_audio_provider_heartbeat_fail_once_seq'));
+  }
+
   const beginBeforeUnsupported = store.beginCount;
   const assetsBeforeUnsupported = await countProjectRows(audioAssets, guardWorkspace.project.id);
   for (const unsupported of [
@@ -1024,6 +1463,41 @@ try {
     1
   );
 
+  // A lost completion response is not an integrity failure. Exact provider
+  // reconciliation recovers the one correct object and seals it without a
+  // duplicate assembly call.
+  const lostAssemblyBody = wavBody('lost assembly response', 1_200);
+  const lostAssemblySession = await guardService.initiateUpload({
+    projectId: guardWorkspace.project.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    title: 'lost-assembly-response.wav',
+    assetKind: 'master_audio',
+    originalFilename: 'lost-assembly-response.wav',
+    mimeType: 'audio/wav',
+    expectedByteSize: lostAssemblyBody.byteLength,
+    expectedSha256: sha256(lostAssemblyBody),
+    idempotencyKey: 'lost-assembly-response-proof'
+  });
+  await guardService.writeUploadPart({
+    uploadSessionId: lostAssemblySession.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    partNumber: 1,
+    body: lostAssemblyBody
+  });
+  store.lostAssemblyResponsesRemaining.set(lostAssemblySession.providerUploadId, 1);
+  const assemblyCountBeforeLostResponse = store.assembleCount;
+  const recoveredLostAssembly = await guardService.completeAndSealUpload({
+    uploadSessionId: lostAssemblySession.id,
+    actorUserId: guardWorkspace.ownerUserId,
+    performerId: guardWorkspace.performer.id
+  });
+  assert.equal(store.assembleCount, assemblyCountBeforeLostResponse + 1);
+  assert.equal(recoveredLostAssembly.sha256, sha256(lostAssemblyBody));
+  assert.equal(
+    (await db.select().from(audioUploadSessions).where(eq(audioUploadSessions.id, lostAssemblySession.id)))[0].uploadStatus,
+    'completed'
+  );
+
   // A post-assembly integrity failure may leave provider bytes. Failed
   // immediate discard keeps the session quarantined and charged; the stale
   // worker retries until both provider cleanup and a terminal transition pass.
@@ -1051,7 +1525,7 @@ try {
     uploadSessionId: integritySession.id,
     actorUserId: guardWorkspace.ownerUserId,
     performerId: guardWorkspace.performer.id
-  }), /forced post-assembly hash failure/);
+  }), /failed exact sealed integrity reconciliation/);
   const [quarantinedIntegrity] = await db.select().from(audioUploadSessions)
     .where(eq(audioUploadSessions.id, integritySession.id));
   assert.equal(quarantinedIntegrity.uploadStatus, 'quarantined');
@@ -1144,6 +1618,21 @@ try {
   assert.equal(expiryAudit.nextStatus, 'expired');
   assert.equal(expiryAudit.metadata.providerDiscardSucceeded, true);
 
+  const staleLostCleanup = await createStaleSession(guardWorkspace, 'uploading');
+  store.lostCleanupResponsesRemaining.set(staleLostCleanup.identity.providerUploadId, 1);
+  const discardCountBeforeLostCleanup = store.discardCount;
+  const ambiguousCleanup = await guardService.expireStaleUploadSessions({ limit: 1 });
+  assert.equal(ambiguousCleanup.failedCount, 1);
+  assert.match(ambiguousCleanup.failures[0].error, /forced lost provider cleanup response/);
+  assert.equal(store.uploads.has(staleLostCleanup.identity.providerUploadId), false);
+  const recoveredCleanup = await guardService.expireStaleUploadSessions({ limit: 1 });
+  assert.deepEqual(recoveredCleanup.expiredSessionIds, [staleLostCleanup.sessionId]);
+  assert.equal(
+    store.discardCount,
+    discardCountBeforeLostCleanup + 1,
+    'Lost cleanup response recovery must reconcile absence without a duplicate provider delete.'
+  );
+
   const staleVerifying = await createStaleSession(guardWorkspace, 'verifying');
   const verifyingCleanup = await guardService.expireStaleUploadSessions({ limit: 1 });
   assert.equal(verifyingCleanup.staleAbortedCount, 1);
@@ -1188,6 +1677,8 @@ try {
     + 'performer-lock byte/object concurrency, synchronized idempotent replay, denied side-effect absence, exact usage JSON, '
     + 'immutable release manifests, status-forgery resistance, exact rights-document cardinality, takedown retention, '
     + 'unlimited releases, MIME/signature/archive bypass denial, completed-object media parsing, exact multipart geometry, '
+    + 'actor-and-intent-bound owner replay, expiry-versus-part cleanup fencing with quota retention, '
+    + 'provider-call timeout and transient heartbeat-renewal failure fencing beyond the original lease, '
     + 'completion/cleanup race fencing, integrity cleanup retry/audit, and sealed-object cleanup refusal.'
   );
 } finally {

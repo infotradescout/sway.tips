@@ -20,6 +20,7 @@ import {
 const PAIRING_TTL_MS = 15 * 60 * 1000;
 const TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
 const RAW_PAIRING_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+type AudioPairingTransaction = Parameters<Parameters<SwayDb['transaction']>[0]>[0];
 
 export function hashAudioFilePairingToken(rawToken: string) {
   const normalizedToken = rawToken.trim();
@@ -98,8 +99,15 @@ async function writeAudit(
   });
 }
 
-export function createAudioFilePairingService(config: { db: SwayDb }) {
+export function createAudioFilePairingService(config: {
+  db: SwayDb;
+  beforeConnectionRevocation?: (
+    tx: AudioPairingTransaction,
+    input: { connectionId: string; actorUserId: string }
+  ) => Promise<void>;
+}) {
   const { db } = config;
+  const beforeConnectionRevocation = config.beforeConnectionRevocation;
 
   async function resolveCreatorIdentity(userId: string) {
     const [row] = await db
@@ -413,6 +421,7 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
           eq(audioFileConnections.id, input.connectionId),
           isNull(audioFileConnections.revokedAt)
         ))
+        .for('update')
         .limit(1);
       if (!connection) {
         throw Object.assign(new Error('Connection not found.'), { status: 404 });
@@ -423,6 +432,12 @@ export function createAudioFilePairingService(config: { db: SwayDb }) {
 
       const revokedAt = new Date();
       const revocationReason = input.reason?.trim().slice(0, 240) || null;
+      if (beforeConnectionRevocation) {
+        await beforeConnectionRevocation(tx, {
+          connectionId: connection.id,
+          actorUserId: input.userId
+        });
+      }
       const [revoked] = await tx
         .update(audioFileConnections)
         .set({

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "index_version": "0.1.0",
-  "generated_at": "2026-08-24T02:10:41Z",
+  "generated_at": "2026-08-24T05:43:12Z",
   "source": {
     "kind": "git",
-    "revision": "de5e37a55ed6d53ac224313569f21f151865ba97",
-    "dirty": false,
-    "inventory_sha256": "7699f94bbf6063c0afb1c172996669175a51f6a0b44fbc88795ea1b6a9503b8d"
+    "revision": "40f10c2bc29ef8df896ea3197230e1cd7b677f6b",
+    "dirty": true,
+    "inventory_sha256": "b9d18c5ba515faadc4e4d74f74d26db5eb4a89d83fb507dd59dfbc7b44d112b7"
   },
   "inventory": {
     "directories": [
@@ -24,7 +24,7 @@
       },
       {
         "path": "scripts",
-        "source_file_count": 205
+        "source_file_count": 207
       },
       {
         "path": "scripts/browser-fixtures",
@@ -56,7 +56,7 @@
       },
       {
         "path": "src/server",
-        "source_file_count": 59
+        "source_file_count": 60
       },
       {
         "path": "src/shells",
@@ -273,14 +273,14 @@
       {
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
         "language": "mjs",
-        "sha256": "2c0a3d9f7a33cc3d7999f8d0844eed3b4e5c946b002a075ef8ca791442c66c9a",
-        "bytes": 56872
+        "sha256": "8febbcc9b87e2f334b136239ff46b6c8957c1e6d53c0905af4f7fec3254523b0",
+        "bytes": 70838
       },
       {
         "path": "scripts/sway-audio-durable-storage.integration.test.mjs",
         "language": "mjs",
-        "sha256": "8d35fa873198e292b73f3be8c47b785019e093deae4b0c93084006831f3471a7",
-        "bytes": 22781
+        "sha256": "67f931d0d65232712b00c8faecb29d3d55d0d969b26b6c2a63cf6632dd73408b",
+        "bytes": 31600
       },
       {
         "path": "scripts/sway-audio-file-collaboration.contract.test.mjs",
@@ -295,10 +295,22 @@
         "bytes": 58748
       },
       {
+        "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
+        "language": "mjs",
+        "sha256": "27eb328d38c951ec62865e414e2823f22b49fb72aeca726d87db445c8043f7b5",
+        "bytes": 16053
+      },
+      {
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "language": "mjs",
+        "sha256": "100b7434e81d8792549d44d470bec40ea3c9c6f35c4d3564a2aaf53624a9caec",
+        "bytes": 50768
+      },
+      {
         "path": "scripts/sway-audio-publishing-foundation.contract.test.mjs",
         "language": "mjs",
-        "sha256": "1cdf1dd0a7e9849f95014ff0ae955066200dfe101d44e3fb86141661fd4985e6",
-        "bytes": 33442
+        "sha256": "f7dd5034305d2c12c73e9c5e6a47e3b43b673322b713654ce60df3390914d4d8",
+        "bytes": 33543
       },
       {
         "path": "scripts/sway-audio-publishing-migration.contract.test.mjs",
@@ -309,14 +321,14 @@
       {
         "path": "scripts/sway-audio-storage-policy.contract.test.mjs",
         "language": "mjs",
-        "sha256": "962998d91763e792a56fc9b42d34b9fe1678a3ff1b4b77c6210e265ba10b091a",
-        "bytes": 7590
+        "sha256": "c230016da2a893fa45afd6a5690dcdc904d1e2f13c62fa31c99e2e9ef61cab29",
+        "bytes": 8831
       },
       {
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
         "language": "mjs",
-        "sha256": "e1950cdb71afcd754379f63b4d77effa5f067b18ceda9bc629f2ea400ebc3b65",
-        "bytes": 54635
+        "sha256": "8c9ffdb475846fcbdce7c50020c88123c379ac31adda4584c0c0db3d896a73e6",
+        "bytes": 77634
       },
       {
         "path": "scripts/sway-auto-closeout.contract.test.mjs",
@@ -375,14 +387,14 @@
       {
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
         "language": "mjs",
-        "sha256": "0cd7607ac73b7066ec7fbf9b9fedb113f0e9bd764d7fc2ad903eb54fe217a655",
-        "bytes": 28906
+        "sha256": "0a4b3cb39d7d3f805a299786507574a73cbfdcc89b638c5c7141264562dfe278",
+        "bytes": 34433
       },
       {
         "path": "scripts/sway-collaborator-revision-intake.contract.test.mjs",
         "language": "mjs",
-        "sha256": "f77f134b4188a3b72b1414abdf102186a8225fe2f783fefb61bf0aee05fb6de5",
-        "bytes": 18989
+        "sha256": "9f1f2bf6906214ef172fbbedb8717b1f40905f16bfcd1668c1f60b4e43b53d37",
+        "bytes": 19743
       },
       {
         "path": "scripts/sway-complete-product-readiness.contract.test.mjs",
@@ -1401,8 +1413,8 @@
       {
         "path": "server.ts",
         "language": "ts",
-        "sha256": "31e5075fe042e9672bb1a60cc1178b33e02e1567d6e2e6965badc27e1ec80157",
-        "bytes": 652910
+        "sha256": "c4a196780e099449a5fae891171b3405f42f128b2856e194bb1b345a9092ad72",
+        "bytes": 654267
       },
       {
         "path": "src/App.tsx",
@@ -1683,8 +1695,8 @@
       {
         "path": "src/db/schema.ts",
         "language": "ts",
-        "sha256": "87a971203e32ba63b4ff865b451279bf589a768e1eecc7a24d081fad184ab0bf",
-        "bytes": 185910
+        "sha256": "0dd0f5733e93521b7e0fca8fe009fc296a07e373c19b591b938ff99027375c98",
+        "bytes": 199651
       },
       {
         "path": "src/demo-mode.tsx",
@@ -1779,32 +1791,38 @@
       {
         "path": "src/server/audio-file-collaboration-service.ts",
         "language": "ts",
-        "sha256": "1069429004a1fc227a6706c72818f3ed811a399981dac93df15446bbe069ad41",
-        "bytes": 39289
+        "sha256": "153f06a0db280ecc9615bf8dbf9b17aabf1fdae906a3446d40262e938232caa3",
+        "bytes": 40035
       },
       {
         "path": "src/server/audio-file-pairing-service.ts",
         "language": "ts",
-        "sha256": "099bf02a3237ac019dc4269bde7302195f537617c85ddc4e491d9b9bf729ad56",
-        "bytes": 15796
+        "sha256": "59cc0d0f4000c09e0f4c6d9d9faa6ec5155e07bdf687174dae96c678bba036b3",
+        "bytes": 16305
       },
       {
         "path": "src/server/audio-object-storage-local.ts",
         "language": "ts",
-        "sha256": "7ae75fa93808b5ab9cabfa2fc0b11c12073d20829102c70070123cf7d633d4f2",
-        "bytes": 7048
+        "sha256": "b70a41298344f5c57a37550ef627b7a44536aa58d706f2e0864d763dea8dece2",
+        "bytes": 12592
       },
       {
         "path": "src/server/audio-object-storage-r2.ts",
         "language": "ts",
-        "sha256": "b356747b1c4ca41795066c6fa087f8fe12c44b0fe870e0f893715721ec066c97",
-        "bytes": 9897
+        "sha256": "a99972b8bc86476ee41a7af0e857e84b7075471c2ee04a385fb6a3b6eefe922f",
+        "bytes": 18072
       },
       {
         "path": "src/server/audio-object-storage.ts",
         "language": "ts",
-        "sha256": "6e77969b9b9653e46837cbd70031b26f86d7030c1085cfd42a3c9d6f1d27a9d0",
-        "bytes": 2395
+        "sha256": "e081d8ea18d8f6f20dcd0376f2041ec56cd03e91f8fbfbafd39a59a71643a6c1",
+        "bytes": 4411
+      },
+      {
+        "path": "src/server/audio-provider-operation-service.ts",
+        "language": "ts",
+        "sha256": "7f0fc51afc4aa6fe60026e4c04ab2940831b606a0d713dd8c1f7c6c0ca53d8ca",
+        "bytes": 28354
       },
       {
         "path": "src/server/audio-publishing-contract.ts",
@@ -1815,14 +1833,14 @@
       {
         "path": "src/server/audio-publishing-service.ts",
         "language": "ts",
-        "sha256": "c9e0df6938df0010c9ecccaaae5d9d8416fd00786df5d4f8833f845e5b1ffb6d",
-        "bytes": 167892
+        "sha256": "ddec5f31caf549f63d943ada7edb92e13913356941140ded25d6beadf92c2cbd",
+        "bytes": 261552
       },
       {
         "path": "src/server/audio-storage-policy.ts",
         "language": "ts",
-        "sha256": "1d02ed3f0265f7105ceed2dda64d468a653dd79aabb0ae3712c7a48079a984f8",
-        "bytes": 15127
+        "sha256": "7d6e7eaeeac06825a06f6b4d833677107613847db9752ec104a509c8a5a1cc1a",
+        "bytes": 16651
       },
       {
         "path": "src/server/audio-upload-transport.ts",
@@ -3994,63 +4012,70 @@
         "name": "sha256",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 78,
+        "line": 80,
         "exported": false
       },
       {
         "name": "wavFixture",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 82,
+        "line": 84,
         "exported": false
       },
       {
         "name": "malformedWavFixture",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 102,
+        "line": 104,
         "exported": false
       },
       {
         "name": "streamToBuffer",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 120,
+        "line": 122,
         "exported": false
       },
       {
         "name": "errorChainMatches",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 126,
+        "line": 128,
+        "exported": false
+      },
+      {
+        "name": "createProviderBarrier",
+        "kind": "function",
+        "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
+        "line": 137,
         "exported": false
       },
       {
         "name": "recordCapability",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 258,
+        "line": 299,
         "exported": false
       },
       {
         "name": "createManagerAuthority",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 273,
+        "line": 314,
         "exported": false
       },
       {
         "name": "revokeManagerAuthority",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 290,
+        "line": 331,
         "exported": false
       },
       {
         "name": "waitPast",
         "kind": "function",
         "path": "scripts/sway-audio-candidate-revisions.integration.test.mjs",
-        "line": 302,
+        "line": 343,
         "exported": false
       },
       {
@@ -4064,28 +4089,28 @@
         "name": "streamToBuffer",
         "kind": "function",
         "path": "scripts/sway-audio-durable-storage.integration.test.mjs",
-        "line": 207,
+        "line": 220,
         "exported": false
       },
       {
         "name": "InMemoryR2Client",
         "kind": "class",
         "path": "scripts/sway-audio-durable-storage.integration.test.mjs",
-        "line": 213,
+        "line": 226,
         "exported": false
       },
       {
         "name": "runBehaviorProof",
         "kind": "function",
         "path": "scripts/sway-audio-durable-storage.integration.test.mjs",
-        "line": 273,
+        "line": 342,
         "exported": false
       },
       {
         "name": "receivePart",
         "kind": "function",
         "path": "scripts/sway-audio-durable-storage.integration.test.mjs",
-        "line": 317,
+        "line": 386,
         "exported": false
       },
       {
@@ -4135,6 +4160,90 @@
         "kind": "function",
         "path": "scripts/sway-audio-file-collaboration.integration.test.mjs",
         "line": 395,
+        "exported": false
+      },
+      {
+        "name": "read",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
+        "line": 7,
+        "exported": false
+      },
+      {
+        "name": "requireTerms",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
+        "line": 25,
+        "exported": false
+      },
+      {
+        "name": "evidenceFingerprint",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 16,
+        "exported": false
+      },
+      {
+        "name": "operationKey",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 20,
+        "exported": false
+      },
+      {
+        "name": "errorChainMatches",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 24,
+        "exported": false
+      },
+      {
+        "name": "assertDatabaseRejects",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 34,
+        "exported": false
+      },
+      {
+        "name": "wait",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 41,
+        "exported": false
+      },
+      {
+        "name": "inTransaction",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 65,
+        "exported": false
+      },
+      {
+        "name": "insertInitiationOperation",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 81,
+        "exported": false
+      },
+      {
+        "name": "acquireLease",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 146,
+        "exported": false
+      },
+      {
+        "name": "insertNonInitiationOperation",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 165,
+        "exported": false
+      },
+      {
+        "name": "createDeadLetterInitiationWithSession",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
+        "line": 222,
         "exported": false
       },
       {
@@ -4197,84 +4306,84 @@
         "name": "sha256",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 38,
+        "line": 40,
         "exported": false
       },
       {
         "name": "wavBody",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 42,
+        "line": 44,
         "exported": false
       },
       {
         "name": "pngBody",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 62,
+        "line": 64,
         "exported": false
       },
       {
         "name": "CountingAudioObjectStore",
         "kind": "class",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 69,
+        "line": 71,
         "exported": false
       },
       {
         "name": "createPerformerWorkspace",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 179,
+        "line": 253,
         "exported": false
       },
       {
         "name": "sealFile",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 198,
+        "line": 272,
         "exported": false
       },
       {
         "name": "countProjectRows",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 223,
+        "line": 297,
         "exported": false
       },
       {
         "name": "createStaleSession",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 227,
+        "line": 301,
         "exported": false
       },
       {
         "name": "createDelivery",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 280,
+        "line": 354,
         "exported": false
       },
       {
         "name": "transitionDelivery",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 294,
+        "line": 368,
         "exported": false
       },
       {
         "name": "uploadInput",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 334,
+        "line": 408,
         "exported": false
       },
       {
         "name": "tinyUpload",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 445,
+        "line": 519,
         "exported": false
       },
       {
@@ -4498,112 +4607,112 @@
         "name": "sha256",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 29,
+        "line": 31,
         "exported": false
       },
       {
         "name": "wavFixture",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 33,
+        "line": 35,
         "exported": false
       },
       {
         "name": "snapshotStorageTree",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 53,
+        "line": 55,
         "exported": false
       },
       {
         "name": "visit",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 56,
+        "line": 58,
         "exported": false
       },
       {
         "name": "normalizedKey",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 76,
+        "line": 78,
         "exported": false
       },
       {
         "name": "assertRecursivelyExcludesInternals",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 80,
+        "line": 82,
         "exported": false
       },
       {
         "name": "visit",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 93,
+        "line": 95,
         "exported": false
       },
       {
         "name": "assertExactKeys",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 111,
+        "line": 113,
         "exported": false
       },
       {
         "name": "reservePort",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 116,
+        "line": 118,
         "exported": false
       },
       {
         "name": "startSwayServer",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 130,
+        "line": 132,
         "exported": false
       },
       {
         "name": "appendOutput",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 171,
+        "line": 173,
         "exported": false
       },
       {
         "name": "stopSwayServer",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 202,
+        "line": 204,
         "exported": false
       },
       {
         "name": "request",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 215,
+        "line": 217,
         "exported": false
       },
       {
         "name": "assertStatus",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 237,
+        "line": 239,
         "exported": false
       },
       {
         "name": "countUploadParts",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 245,
+        "line": 247,
         "exported": false
       },
       {
         "name": "removeExactTempRoot",
         "kind": "function",
         "path": "scripts/sway-collaborator-revision-http.integration.test.mjs",
-        "line": 253,
+        "line": 255,
         "exported": false
       },
       {
@@ -7879,1372 +7988,1372 @@
         "name": "checkDurablePasswordLoginLimit",
         "kind": "function",
         "path": "server.ts",
-        "line": 370,
+        "line": 386,
         "exported": false
       },
       {
         "name": "recordDurablePasswordLoginFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 391,
+        "line": 407,
         "exported": false
       },
       {
         "name": "resetDurablePasswordLoginFailures",
         "kind": "function",
         "path": "server.ts",
-        "line": 407,
+        "line": 423,
         "exported": false
       },
       {
         "name": "resolveGitValue",
         "kind": "function",
         "path": "server.ts",
-        "line": 459,
+        "line": 475,
         "exported": false
       },
       {
         "name": "hashPerformerLoginRequesterIp",
         "kind": "function",
         "path": "server.ts",
-        "line": 471,
+        "line": 487,
         "exported": false
       },
       {
         "name": "applyNoStoreHeaders",
         "kind": "function",
         "path": "server.ts",
-        "line": 478,
+        "line": 494,
         "exported": false
       },
       {
         "name": "applyPublicDiscoveryIndexHold",
         "kind": "function",
         "path": "server.ts",
-        "line": 485,
+        "line": 501,
         "exported": false
       },
       {
         "name": "parsePositiveInteger",
         "kind": "function",
         "path": "server.ts",
-        "line": 495,
+        "line": 511,
         "exported": false
       },
       {
         "name": "SwayShell",
         "kind": "type",
         "path": "server.ts",
-        "line": 571,
+        "line": 587,
         "exported": false
       },
       {
         "name": "normalizeHost",
         "kind": "function",
         "path": "server.ts",
-        "line": 573,
+        "line": 589,
         "exported": false
       },
       {
         "name": "resolveTrustedDiscoveryAttributionOrigins",
         "kind": "function",
         "path": "server.ts",
-        "line": 582,
+        "line": 598,
         "exported": false
       },
       {
         "name": "resolveTrustedDiscoveryRequestOrigin",
         "kind": "function",
         "path": "server.ts",
-        "line": 599,
+        "line": 615,
         "exported": false
       },
       {
         "name": "isPublicDiscoveryLandingPath",
         "kind": "function",
         "path": "server.ts",
-        "line": 612,
+        "line": 628,
         "exported": false
       },
       {
         "name": "issueDiscoveryAttributionReceipt",
         "kind": "function",
         "path": "server.ts",
-        "line": 617,
+        "line": 633,
         "exported": false
       },
       {
         "name": "shouldRedirectToAppHost",
         "kind": "function",
         "path": "server.ts",
-        "line": 646,
+        "line": 662,
         "exported": false
       },
       {
         "name": "buildAppHostRedirectUrl",
         "kind": "function",
         "path": "server.ts",
-        "line": 650,
+        "line": 666,
         "exported": false
       },
       {
         "name": "isPublicDiscoverPath",
         "kind": "function",
         "path": "server.ts",
-        "line": 655,
+        "line": 671,
         "exported": false
       },
       {
         "name": "resolveShellForRoute",
         "kind": "function",
         "path": "server.ts",
-        "line": 659,
+        "line": 675,
         "exported": false
       },
       {
         "name": "shellHtmlRelativePath",
         "kind": "function",
         "path": "server.ts",
-        "line": 671,
+        "line": 687,
         "exported": false
       },
       {
         "name": "isShellAllowed",
         "kind": "function",
         "path": "server.ts",
-        "line": 675,
+        "line": 691,
         "exported": false
       },
       {
         "name": "DiscoveryFacts",
         "kind": "type",
         "path": "server.ts",
-        "line": 679,
+        "line": 695,
         "exported": false
       },
       {
         "name": "ShareMetadata",
         "kind": "type",
         "path": "server.ts",
-        "line": 698,
+        "line": 714,
         "exported": false
       },
       {
         "name": "PublicShareProfile",
         "kind": "type",
         "path": "server.ts",
-        "line": 710,
+        "line": 726,
         "exported": false
       },
       {
         "name": "PublicPerformerDiscoveryProfile",
         "kind": "type",
         "path": "server.ts",
-        "line": 724,
+        "line": 740,
         "exported": false
       },
       {
         "name": "PublicPerformerDiscoveryResolution",
         "kind": "type",
         "path": "server.ts",
-        "line": 753,
+        "line": 769,
         "exported": false
       },
       {
         "name": "PublicProfessionalDirectoryItem",
         "kind": "type",
         "path": "server.ts",
-        "line": 757,
+        "line": 773,
         "exported": false
       },
       {
         "name": "PublicProfessionalDirectorySnapshot",
         "kind": "type",
         "path": "server.ts",
-        "line": 772,
+        "line": 788,
         "exported": false
       },
       {
         "name": "resolveRequestOrigin",
         "kind": "function",
         "path": "server.ts",
-        "line": 786,
+        "line": 802,
         "exported": false
       },
       {
         "name": "absoluteShareUrl",
         "kind": "function",
         "path": "server.ts",
-        "line": 800,
+        "line": 816,
         "exported": false
       },
       {
         "name": "canonicalPublicUrl",
         "kind": "function",
         "path": "server.ts",
-        "line": 808,
+        "line": 824,
         "exported": false
       },
       {
         "name": "defaultShareMetadata",
         "kind": "function",
         "path": "server.ts",
-        "line": 820,
+        "line": 836,
         "exported": false
       },
       {
         "name": "escapeDiscoveryHtmlText",
         "kind": "function",
         "path": "server.ts",
-        "line": 836,
+        "line": 852,
         "exported": false
       },
       {
         "name": "renderDiscoveryBodyHtml",
         "kind": "function",
         "path": "server.ts",
-        "line": 844,
+        "line": 860,
         "exported": false
       },
       {
         "name": "renderShareMetaTags",
         "kind": "function",
         "path": "server.ts",
-        "line": 889,
+        "line": 905,
         "exported": false
       },
       {
         "name": "injectShareMetadata",
         "kind": "function",
         "path": "server.ts",
-        "line": 927,
+        "line": 943,
         "exported": false
       },
       {
         "name": "loadQualifiedPublicProfessionalDirectory",
         "kind": "function",
         "path": "server.ts",
-        "line": 946,
+        "line": 962,
         "exported": false
       },
       {
         "name": "resolvePublicPerformerDiscovery",
         "kind": "function",
         "path": "server.ts",
-        "line": 1099,
+        "line": 1115,
         "exported": false
       },
       {
         "name": "toPublicShareProfile",
         "kind": "function",
         "path": "server.ts",
-        "line": 1194,
+        "line": 1210,
         "exported": false
       },
       {
         "name": "buildPublicPerformerShareMetadata",
         "kind": "function",
         "path": "server.ts",
-        "line": 1213,
+        "line": 1229,
         "exported": false
       },
       {
         "name": "findPublicShareProfile",
         "kind": "function",
         "path": "server.ts",
-        "line": 1267,
+        "line": 1283,
         "exported": false
       },
       {
         "name": "sendPublicProfileNotFound",
         "kind": "function",
         "path": "server.ts",
-        "line": 1276,
+        "line": 1292,
         "exported": false
       },
       {
         "name": "sendPublicProfileUnavailable",
         "kind": "function",
         "path": "server.ts",
-        "line": 1284,
+        "line": 1300,
         "exported": false
       },
       {
         "name": "renderPublicPerformerDocument",
         "kind": "function",
         "path": "server.ts",
-        "line": 1292,
+        "line": 1308,
         "exported": false
       },
       {
         "name": "escapeShareCardText",
         "kind": "function",
         "path": "server.ts",
-        "line": 1311,
+        "line": 1327,
         "exported": false
       },
       {
         "name": "wrapShareCardText",
         "kind": "function",
         "path": "server.ts",
-        "line": 1320,
+        "line": 1336,
         "exported": false
       },
       {
         "name": "readShareCardAvatar",
         "kind": "function",
         "path": "server.ts",
-        "line": 1339,
+        "line": 1355,
         "exported": false
       },
       {
         "name": "renderPerformerShareCard",
         "kind": "function",
         "path": "server.ts",
-        "line": 1365,
+        "line": 1381,
         "exported": false
       },
       {
         "name": "resolveShareMetadata",
         "kind": "function",
         "path": "server.ts",
-        "line": 1419,
+        "line": 1435,
         "exported": false
       },
       {
         "name": "unavailableMetadata",
         "kind": "function",
         "path": "server.ts",
-        "line": 1425,
+        "line": 1441,
         "exported": false
       },
       {
         "name": "escapeStaticDocumentText",
         "kind": "function",
         "path": "server.ts",
-        "line": 1710,
+        "line": 1726,
         "exported": false
       },
       {
         "name": "renderExactTicketTerms",
         "kind": "function",
         "path": "server.ts",
-        "line": 1719,
+        "line": 1735,
         "exported": false
       },
       {
         "name": "renderStaticDocument",
         "kind": "function",
         "path": "server.ts",
-        "line": 1726,
+        "line": 1742,
         "exported": false
       },
       {
         "name": "renderSupportPageHtml",
         "kind": "function",
         "path": "server.ts",
-        "line": 1930,
+        "line": 1946,
         "exported": false
       },
       {
         "name": "createInactiveSession",
         "kind": "function",
         "path": "server.ts",
-        "line": 2214,
+        "line": 2230,
         "exported": false
       },
       {
         "name": "createEmptyBackendState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2258,
+        "line": 2274,
         "exported": false
       },
       {
         "name": "syncActiveGigRouteContext",
         "kind": "function",
         "path": "server.ts",
-        "line": 2269,
+        "line": 2285,
         "exported": false
       },
       {
         "name": "prepareRoomState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2273,
+        "line": 2289,
         "exported": false
       },
       {
         "name": "buildPatronRequestMutationResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 2279,
+        "line": 2295,
         "exported": false
       },
       {
         "name": "buildPatronBoostMutationResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 2295,
+        "line": 2311,
         "exported": false
       },
       {
         "name": "loadPatronPaymentEvidence",
         "kind": "function",
         "path": "server.ts",
-        "line": 2312,
+        "line": 2328,
         "exported": false
       },
       {
         "name": "refreshBusinessState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2345,
+        "line": 2361,
         "exported": false
       },
       {
         "name": "persistBusinessState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2352,
+        "line": 2368,
         "exported": false
       },
       {
         "name": "loadRoomState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2357,
+        "line": 2373,
         "exported": false
       },
       {
         "name": "persistBusinessStateForRoom",
         "kind": "function",
         "path": "server.ts",
-        "line": 2386,
+        "line": 2402,
         "exported": false
       },
       {
         "name": "resolveLegacyWritableRoom",
         "kind": "function",
         "path": "server.ts",
-        "line": 2403,
+        "line": 2419,
         "exported": false
       },
       {
         "name": "findRoomStateByRequestId",
         "kind": "function",
         "path": "server.ts",
-        "line": 2436,
+        "line": 2452,
         "exported": false
       },
       {
         "name": "buildActiveRoomSummary",
         "kind": "function",
         "path": "server.ts",
-        "line": 2468,
+        "line": 2484,
         "exported": false
       },
       {
         "name": "listReadableActiveRooms",
         "kind": "function",
         "path": "server.ts",
-        "line": 2481,
+        "line": 2497,
         "exported": false
       },
       {
         "name": "requirePersistentBusinessStore",
         "kind": "function",
         "path": "server.ts",
-        "line": 2490,
+        "line": 2506,
         "exported": false
       },
       {
         "name": "hashPayload",
         "kind": "function",
         "path": "server.ts",
-        "line": 2498,
+        "line": 2514,
         "exported": false
       },
       {
         "name": "parseDurableGigId",
         "kind": "function",
         "path": "server.ts",
-        "line": 2506,
+        "line": 2522,
         "exported": false
       },
       {
         "name": "normalizePatronDeviceIdHash",
         "kind": "function",
         "path": "server.ts",
-        "line": 2514,
+        "line": 2530,
         "exported": false
       },
       {
         "name": "resolvePatronDeviceIdHash",
         "kind": "function",
         "path": "server.ts",
-        "line": 2520,
+        "line": 2536,
         "exported": false
       },
       {
         "name": "createRoomMenuReportReporterFingerprint",
         "kind": "function",
         "path": "server.ts",
-        "line": 2526,
+        "line": 2542,
         "exported": false
       },
       {
         "name": "resolveTrustedLegacyReconciliationGigId",
         "kind": "function",
         "path": "server.ts",
-        "line": 2540,
+        "line": 2556,
         "exported": false
       },
       {
         "name": "canonicalJson",
         "kind": "function",
         "path": "server.ts",
-        "line": 2555,
+        "line": 2571,
         "exported": false
       },
       {
         "name": "createIdempotencyFingerprint",
         "kind": "function",
         "path": "server.ts",
-        "line": 2571,
+        "line": 2587,
         "exported": false
       },
       {
         "name": "syncActivePerformer",
         "kind": "function",
         "path": "server.ts",
-        "line": 2598,
+        "line": 2614,
         "exported": false
       },
       {
         "name": "resolveActorUserId",
         "kind": "function",
         "path": "server.ts",
-        "line": 2623,
+        "line": 2639,
         "exported": false
       },
       {
         "name": "ProtectedMutationActor",
         "kind": "type",
         "path": "server.ts",
-        "line": 2627,
+        "line": 2643,
         "exported": false
       },
       {
         "name": "loadAuthenticatedPerformerProfile",
         "kind": "function",
         "path": "server.ts",
-        "line": 2632,
+        "line": 2648,
         "exported": false
       },
       {
         "name": "resolveProtectedMutationActor",
         "kind": "function",
         "path": "server.ts",
-        "line": 2712,
+        "line": 2728,
         "exported": false
       },
       {
         "name": "resolveBootstrapTalentActor",
         "kind": "function",
         "path": "server.ts",
-        "line": 2765,
+        "line": 2781,
         "exported": false
       },
       {
         "name": "loadAuthorizedPerformerOwnerByEmail",
         "kind": "function",
         "path": "server.ts",
-        "line": 2790,
+        "line": 2806,
         "exported": false
       },
       {
         "name": "loadPerformerPasswordAccountByEmail",
         "kind": "function",
         "path": "server.ts",
-        "line": 2808,
+        "line": 2824,
         "exported": false
       },
       {
         "name": "performerSignupEmailExists",
         "kind": "function",
         "path": "server.ts",
-        "line": 2825,
+        "line": 2841,
         "exported": false
       },
       {
         "name": "performerHandleExists",
         "kind": "function",
         "path": "server.ts",
-        "line": 2835,
+        "line": 2851,
         "exported": false
       },
       {
         "name": "loadPerformerOwnerVerificationState",
         "kind": "function",
         "path": "server.ts",
-        "line": 2856,
+        "line": 2872,
         "exported": false
       },
       {
         "name": "loadOwnedPerformerByActorUserId",
         "kind": "function",
         "path": "server.ts",
-        "line": 2873,
+        "line": 2889,
         "exported": false
       },
       {
         "name": "normalizeLibraryText",
         "kind": "function",
         "path": "server.ts",
-        "line": 2892,
+        "line": 2908,
         "exported": false
       },
       {
         "name": "toPublicSocialLinks",
         "kind": "function",
         "path": "server.ts",
-        "line": 2897,
+        "line": 2913,
         "exported": false
       },
       {
         "name": "toOwnedEventResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 2915,
+        "line": 2931,
         "exported": false
       },
       {
         "name": "toOwnedEventResponseWithTicket",
         "kind": "function",
         "path": "server.ts",
-        "line": 2924,
+        "line": 2940,
         "exported": false
       },
       {
         "name": "toPublicEventResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 2961,
+        "line": 2977,
         "exported": false
       },
       {
         "name": "toPublicEventResponseWithTicket",
         "kind": "function",
         "path": "server.ts",
-        "line": 3007,
+        "line": 3023,
         "exported": false
       },
       {
         "name": "respondToEventServiceError",
         "kind": "function",
         "path": "server.ts",
-        "line": 3043,
+        "line": 3059,
         "exported": false
       },
       {
         "name": "respondToEventTicketServiceError",
         "kind": "function",
         "path": "server.ts",
-        "line": 3051,
+        "line": 3067,
         "exported": false
       },
       {
         "name": "resolvePublicStageName",
         "kind": "function",
         "path": "server.ts",
-        "line": 3067,
+        "line": 3083,
         "exported": false
       },
       {
         "name": "resolvePublicPrimaryRole",
         "kind": "function",
         "path": "server.ts",
-        "line": 3079,
+        "line": 3095,
         "exported": false
       },
       {
         "name": "normalizeLibrarySourceKey",
         "kind": "function",
         "path": "server.ts",
-        "line": 3084,
+        "line": 3100,
         "exported": false
       },
       {
         "name": "buildLibraryExternalTrackId",
         "kind": "function",
         "path": "server.ts",
-        "line": 3089,
+        "line": 3105,
         "exported": false
       },
       {
         "name": "issueLibrarySyncKey",
         "kind": "function",
         "path": "server.ts",
-        "line": 3102,
+        "line": 3118,
         "exported": false
       },
       {
         "name": "hashLibrarySyncKey",
         "kind": "function",
         "path": "server.ts",
-        "line": 3106,
+        "line": 3122,
         "exported": false
       },
       {
         "name": "upsertPerformerLibraryTrackBatch",
         "kind": "function",
         "path": "server.ts",
-        "line": 3110,
+        "line": 3126,
         "exported": false
       },
       {
         "name": "loadRequestableCatalogTracks",
         "kind": "function",
         "path": "server.ts",
-        "line": 3205,
+        "line": 3221,
         "exported": false
       },
       {
         "name": "actorHasDurableTalentAccess",
         "kind": "function",
         "path": "server.ts",
-        "line": 3249,
+        "line": 3265,
         "exported": false
       },
       {
         "name": "performerLoginSuccessResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 3275,
+        "line": 3291,
         "exported": false
       },
       {
         "name": "performerPasswordLoginSuccessResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 3282,
+        "line": 3298,
         "exported": false
       },
       {
         "name": "performerSignupSuccessResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 3289,
+        "line": 3305,
         "exported": false
       },
       {
         "name": "performerCredentialFailureResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 3302,
+        "line": 3318,
         "exported": false
       },
       {
         "name": "performerLoginFailureRedirect",
         "kind": "function",
         "path": "server.ts",
-        "line": 3308,
+        "line": 3324,
         "exported": false
       },
       {
         "name": "performerVerifyEmailFailureRedirect",
         "kind": "function",
         "path": "server.ts",
-        "line": 3315,
+        "line": 3331,
         "exported": false
       },
       {
         "name": "performerVerifyEmailSuccessRedirect",
         "kind": "function",
         "path": "server.ts",
-        "line": 3322,
+        "line": 3338,
         "exported": false
       },
       {
         "name": "isDatabaseConstraintViolation",
         "kind": "function",
         "path": "server.ts",
-        "line": 3326,
+        "line": 3342,
         "exported": false
       },
       {
         "name": "isUniqueConstraintViolation",
         "kind": "function",
         "path": "server.ts",
-        "line": 3338,
+        "line": 3354,
         "exported": false
       },
       {
         "name": "isRoomEventLifecycleRetryConflict",
         "kind": "function",
         "path": "server.ts",
-        "line": 3344,
+        "line": 3360,
         "exported": false
       },
       {
         "name": "sendRoomEventLifecycleRetryResponse",
         "kind": "function",
         "path": "server.ts",
-        "line": 3352,
+        "line": 3368,
         "exported": false
       },
       {
         "name": "persistStateWithAudit",
         "kind": "function",
         "path": "server.ts",
-        "line": 3365,
+        "line": 3381,
         "exported": false
       },
       {
         "name": "writeMutationNoopAudit",
         "kind": "function",
         "path": "server.ts",
-        "line": 3403,
+        "line": 3419,
         "exported": false
       },
       {
         "name": "durableActorActionExpiresAt",
         "kind": "function",
         "path": "server.ts",
-        "line": 3433,
+        "line": 3449,
         "exported": false
       },
       {
         "name": "buildDurableActorActionInput",
         "kind": "function",
         "path": "server.ts",
-        "line": 3437,
+        "line": 3453,
         "exported": false
       },
       {
         "name": "reserveDurableActorMutation",
         "kind": "function",
         "path": "server.ts",
-        "line": 3490,
+        "line": 3506,
         "exported": false
       },
       {
         "name": "completeDurableActorMutation",
         "kind": "function",
         "path": "server.ts",
-        "line": 3494,
+        "line": 3510,
         "exported": false
       },
       {
         "name": "sendDurableMutationReplay",
         "kind": "function",
         "path": "server.ts",
-        "line": 3507,
+        "line": 3523,
         "exported": false
       },
       {
         "name": "ModerationMutationAction",
         "kind": "type",
         "path": "server.ts",
-        "line": 3530,
+        "line": 3546,
         "exported": false
       },
       {
         "name": "moderationMutationKeyHash",
         "kind": "function",
         "path": "server.ts",
-        "line": 3532,
+        "line": 3548,
         "exported": false
       },
       {
         "name": "executeModerationMutation",
         "kind": "function",
         "path": "server.ts",
-        "line": 3538,
+        "line": 3554,
         "exported": false
       },
       {
         "name": "RoomMutationContext",
         "kind": "type",
         "path": "server.ts",
-        "line": 3593,
+        "line": 3609,
         "exported": false
       },
       {
         "name": "RequestMutationContext",
         "kind": "type",
         "path": "server.ts",
-        "line": 3595,
+        "line": 3611,
         "exported": false
       },
       {
         "name": "isTerminalPaymentReversal",
         "kind": "function",
         "path": "server.ts",
-        "line": 3596,
+        "line": 3612,
         "exported": false
       },
       {
         "name": "sendCanonicalPatronActionFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 3600,
+        "line": 3616,
         "exported": false
       },
       {
         "name": "sendCanonicalTerminalPaymentOutcome",
         "kind": "function",
         "path": "server.ts",
-        "line": 3643,
+        "line": 3659,
         "exported": false
       },
       {
         "name": "applyPaymentReversalTruth",
         "kind": "function",
         "path": "server.ts",
-        "line": 3682,
+        "line": 3698,
         "exported": false
       },
       {
         "name": "applyStatus",
         "kind": "function",
         "path": "server.ts",
-        "line": 3691,
+        "line": 3707,
         "exported": false
       },
       {
         "name": "applyWindowToggle",
         "kind": "function",
         "path": "server.ts",
-        "line": 3709,
+        "line": 3725,
         "exported": false
       },
       {
         "name": "applyRequestTriage",
         "kind": "function",
         "path": "server.ts",
-        "line": 3745,
+        "line": 3761,
         "exported": false
       },
       {
         "name": "applyRequestFulfill",
         "kind": "function",
         "path": "server.ts",
-        "line": 3909,
+        "line": 3925,
         "exported": false
       },
       {
         "name": "applyRequestHide",
         "kind": "function",
         "path": "server.ts",
-        "line": 4028,
+        "line": 4044,
         "exported": false
       },
       {
         "name": "visibleRoomRequests",
         "kind": "function",
         "path": "server.ts",
-        "line": 4133,
+        "line": 4149,
         "exported": false
       },
       {
         "name": "topApprovedRoomRequest",
         "kind": "function",
         "path": "server.ts",
-        "line": 4137,
+        "line": 4153,
         "exported": false
       },
       {
         "name": "topPendingRoomRequest",
         "kind": "function",
         "path": "server.ts",
-        "line": 4143,
+        "line": 4159,
         "exported": false
       },
       {
         "name": "controlBridgeRequestText",
         "kind": "function",
         "path": "server.ts",
-        "line": 4164,
+        "line": 4180,
         "exported": false
       },
       {
         "name": "RoomCloseoutResult",
         "kind": "type",
         "path": "server.ts",
-        "line": 4343,
+        "line": 4359,
         "exported": false
       },
       {
         "name": "settleRoomCloseout",
         "kind": "function",
         "path": "server.ts",
-        "line": 4348,
+        "line": 4364,
         "exported": false
       },
       {
         "name": "executeAutoNuke",
         "kind": "function",
         "path": "server.ts",
-        "line": 4422,
+        "line": 4438,
         "exported": false
       },
       {
         "name": "recalculateTotals",
         "kind": "function",
         "path": "server.ts",
-        "line": 4438,
+        "line": 4454,
         "exported": false
       },
       {
         "name": "accumulatedFees",
         "kind": "function",
         "path": "server.ts",
-        "line": 4443,
+        "line": 4459,
         "exported": false
       },
       {
         "name": "linkSignupDiscoveryAttribution",
         "kind": "function",
         "path": "server.ts",
-        "line": 6048,
+        "line": 6064,
         "exported": false
       },
       {
         "name": "reserveControlBridgeMutation",
         "kind": "function",
         "path": "server.ts",
-        "line": 6715,
+        "line": 6731,
         "exported": false
       },
       {
         "name": "loadAdminAccountsBaseQuery",
         "kind": "function",
         "path": "server.ts",
-        "line": 7158,
+        "line": 7174,
         "exported": false
       },
       {
         "name": "ShellTelemetryPayload",
         "kind": "type",
         "path": "server.ts",
-        "line": 8322,
+        "line": 8338,
         "exported": false
       },
       {
         "name": "validateShellTelemetryPayload",
         "kind": "function",
         "path": "server.ts",
-        "line": 8342,
+        "line": 8358,
         "exported": false
       },
       {
         "name": "discoveryStageForTelemetryEvent",
         "kind": "function",
         "path": "server.ts",
-        "line": 8482,
+        "line": 8498,
         "exported": false
       },
       {
         "name": "loadDiscoveryPerformerSupply",
         "kind": "function",
         "path": "server.ts",
-        "line": 8592,
+        "line": 8608,
         "exported": false
       },
       {
         "name": "resolveDiscoveryEntityVisibilityEligibility",
         "kind": "function",
         "path": "server.ts",
-        "line": 8666,
+        "line": 8682,
         "exported": false
       },
       {
         "name": "loadSwayDiscoverySupply",
         "kind": "function",
         "path": "server.ts",
-        "line": 8727,
+        "line": 8743,
         "exported": false
       },
       {
         "name": "buildCurrentDiscoveryObservatory",
         "kind": "function",
         "path": "server.ts",
-        "line": 8819,
+        "line": 8835,
         "exported": false
       },
       {
         "name": "TicketBuyerContext",
         "kind": "type",
         "path": "server.ts",
-        "line": 8994,
+        "line": 9010,
         "exported": false
       },
       {
         "name": "requireTicketBuyer",
         "kind": "function",
         "path": "server.ts",
-        "line": 8998,
+        "line": 9014,
         "exported": false
       },
       {
         "name": "PerformerEventOwnerContext",
         "kind": "type",
         "path": "server.ts",
-        "line": 9093,
+        "line": 9109,
         "exported": false
       },
       {
         "name": "requireCurrentTalentCapability",
         "kind": "function",
         "path": "server.ts",
-        "line": 9098,
+        "line": 9114,
         "exported": false
       },
       {
         "name": "requireCurrentEventOrganizerAuthority",
         "kind": "function",
         "path": "server.ts",
-        "line": 9128,
+        "line": 9144,
         "exported": false
       },
       {
         "name": "requireCurrentLiveMoneyAuthority",
         "kind": "function",
         "path": "server.ts",
-        "line": 9158,
+        "line": 9174,
         "exported": false
       },
       {
         "name": "requirePerformerEventOwner",
         "kind": "function",
         "path": "server.ts",
-        "line": 9193,
+        "line": 9209,
         "exported": false
       },
       {
         "name": "PerformerEventPublicationReviewInput",
         "kind": "type",
         "path": "server.ts",
-        "line": 9226,
+        "line": 9242,
         "exported": false
       },
       {
         "name": "requirePerformerEventPublicationReview",
         "kind": "function",
         "path": "server.ts",
-        "line": 9231,
+        "line": 9247,
         "exported": false
       },
       {
         "name": "requireAudioPublishingRuntime",
         "kind": "function",
         "path": "server.ts",
-        "line": 10538,
+        "line": 10554,
         "exported": false
       },
       {
         "name": "requireFilePairingRuntime",
         "kind": "function",
         "path": "server.ts",
-        "line": 11189,
+        "line": 11205,
         "exported": false
       },
       {
         "name": "requireFileCollaborationRuntime",
         "kind": "function",
         "path": "server.ts",
-        "line": 11201,
+        "line": 11217,
         "exported": false
       },
       {
         "name": "requireCollaboratorRevisionRuntime",
         "kind": "function",
         "path": "server.ts",
-        "line": 11213,
+        "line": 11229,
         "exported": false
       },
       {
         "name": "respondToCandidateRouteError",
         "kind": "function",
         "path": "server.ts",
-        "line": 11240,
+        "line": 11256,
         "exported": false
       },
       {
         "name": "resolveStripeConnectOnboardingUrls",
         "kind": "function",
         "path": "server.ts",
-        "line": 12034,
+        "line": 12056,
         "exported": false
       },
       {
         "name": "createStripeConnectOnboardingUrl",
         "kind": "function",
         "path": "server.ts",
-        "line": 12041,
+        "line": 12063,
         "exported": false
       },
       {
         "name": "recordDirectRoomDiscoveryOutcome",
         "kind": "function",
         "path": "server.ts",
-        "line": 12715,
+        "line": 12737,
         "exported": false
       },
       {
         "name": "recordDirectTipDiscoveryOutcome",
         "kind": "function",
         "path": "server.ts",
-        "line": 12788,
+        "line": 12810,
         "exported": false
       },
       {
         "name": "loadMatchingStartedRoom",
         "kind": "function",
         "path": "server.ts",
-        "line": 13228,
+        "line": 13250,
         "exported": false
       },
       {
         "name": "completeReservedFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 14082,
+        "line": 14104,
         "exported": false
       },
       {
         "name": "rejectAfterConfirmedAuthorization",
         "kind": "function",
         "path": "server.ts",
-        "line": 14135,
+        "line": 14157,
         "exported": false
       },
       {
         "name": "completeReservedFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 14769,
+        "line": 14791,
         "exported": false
       },
       {
         "name": "rejectAfterConfirmedAuthorization",
         "kind": "function",
         "path": "server.ts",
-        "line": 14822,
+        "line": 14844,
         "exported": false
       },
       {
         "name": "isDiscoveryEligibleHandle",
         "kind": "function",
         "path": "server.ts",
-        "line": 15943,
+        "line": 15965,
         "exported": false
       },
       {
         "name": "escapeXml",
         "kind": "function",
         "path": "server.ts",
-        "line": 15947,
+        "line": 15969,
         "exported": false
       },
       {
         "name": "SitemapEntry",
         "kind": "type",
         "path": "server.ts",
-        "line": 16013,
+        "line": 16035,
         "exported": false
       },
       {
         "name": "handleDataDeletionRequest",
         "kind": "function",
         "path": "server.ts",
-        "line": 16158,
+        "line": 16180,
         "exported": false
       },
       {
         "name": "startEventTicketWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16376,
+        "line": 16398,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16380,
+        "line": 16402,
         "exported": false
       },
       {
         "name": "startLiveRoomPaymentWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16401,
+        "line": 16423,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16405,
+        "line": 16427,
         "exported": false
       },
       {
         "name": "startAudioUploadCleanupWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16429,
+        "line": 16451,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16433,
+        "line": 16455,
         "exported": false
       },
       {
         "name": "startModerationRetentionWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16464,
+        "line": 16492,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16469,
+        "line": 16497,
         "exported": false
       },
       {
         "name": "startServer",
         "kind": "function",
         "path": "server.ts",
-        "line": 16513,
+        "line": 16541,
         "exported": false
       },
       {
         "name": "logStartupStage",
         "kind": "function",
         "path": "server.ts",
-        "line": 16516,
+        "line": 16544,
         "exported": false
       },
       {
         "name": "handlePublicPerformerRoute",
         "kind": "function",
         "path": "server.ts",
-        "line": 16551,
+        "line": 16579,
         "exported": false
       },
       {
         "name": "handlePublicPerformerRoute",
         "kind": "function",
         "path": "server.ts",
-        "line": 16588,
+        "line": 16616,
         "exported": false
       },
       {
@@ -13231,171 +13340,178 @@
         "exported": false
       },
       {
-        "name": "ReviewGrantScope",
+        "name": "AudioCollaborationTransaction",
         "kind": "type",
         "path": "src/server/audio-file-collaboration-service.ts",
         "line": 34,
         "exported": false
       },
       {
+        "name": "ReviewGrantScope",
+        "kind": "type",
+        "path": "src/server/audio-file-collaboration-service.ts",
+        "line": 35,
+        "exported": false
+      },
+      {
         "name": "isReviewEventType",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 41,
+        "line": 42,
         "exported": false
       },
       {
         "name": "activeGrantWhere",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 45,
+        "line": 46,
         "exported": false
       },
       {
         "name": "hasCurrentPrivateCollaborationCapability",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 56,
+        "line": 57,
         "exported": false
       },
       {
         "name": "hasCurrentIssuingProjectAuthority",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 72,
+        "line": 73,
         "exported": false
       },
       {
         "name": "hasCurrentProjectManager",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 88,
+        "line": 89,
         "exported": false
       },
       {
         "name": "isConnectionMember",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 103,
+        "line": 104,
         "exported": false
       },
       {
         "name": "reviewAuditBindingWhere",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 110,
+        "line": 111,
         "exported": false
       },
       {
         "name": "reviewEventGrantWhere",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 122,
+        "line": 123,
         "exported": false
       },
       {
         "name": "writeAudit",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 133,
+        "line": 134,
         "exported": false
       },
       {
         "name": "createAudioFileCollaborationService",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 155,
+        "line": 156,
         "exported": true
       },
       {
         "name": "assertCollaboratorRevisionUploadsEnabled",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 163,
+        "line": 169,
         "exported": false
       },
       {
         "name": "shareVersion",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 172,
+        "line": 178,
         "exported": false
       },
       {
         "name": "grantCandidateRevisionUpload",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 294,
+        "line": 300,
         "exported": false
       },
       {
         "name": "listSharedWithMe",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 550,
+        "line": 556,
         "exported": false
       },
       {
         "name": "listSharedByMe",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 610,
+        "line": 616,
         "exported": false
       },
       {
         "name": "requireActiveGrantForUser",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 689,
+        "line": 695,
         "exported": false
       },
       {
         "name": "requireActiveReviewGrantForUser",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 724,
+        "line": 730,
         "exported": false
       },
       {
         "name": "downloadGrantedOriginal",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 732,
+        "line": 738,
         "exported": false
       },
       {
         "name": "openCandidateRevision",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 759,
+        "line": 765,
         "exported": false
       },
       {
         "name": "listReviewEvents",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 843,
+        "line": 849,
         "exported": false
       },
       {
         "name": "addReviewEvent",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 861,
+        "line": 867,
         "exported": false
       },
       {
         "name": "revokeGrant",
         "kind": "function",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 944,
+        "line": 950,
         "exported": false
       },
       {
         "name": "AudioFileCollaborationService",
         "kind": "type",
         "path": "src/server/audio-file-collaboration-service.ts",
-        "line": 984,
+        "line": 1000,
         "exported": true
       },
       {
@@ -13406,235 +13522,347 @@
         "exported": false
       },
       {
+        "name": "AudioPairingTransaction",
+        "kind": "type",
+        "path": "src/server/audio-file-pairing-service.ts",
+        "line": 23,
+        "exported": false
+      },
+      {
         "name": "hashAudioFilePairingToken",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 23,
+        "line": 24,
         "exported": true
       },
       {
         "name": "PairingClaimDenial",
         "kind": "type",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 37,
+        "line": 38,
         "exported": false
       },
       {
         "name": "claimDenialReason",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 43,
+        "line": 44,
         "exported": false
       },
       {
         "name": "auditableClaimDenial",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 59,
+        "line": 60,
         "exported": false
       },
       {
         "name": "canonicalMemberPair",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 67,
+        "line": 68,
         "exported": false
       },
       {
         "name": "isPairingPurpose",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 73,
+        "line": 74,
         "exported": false
       },
       {
         "name": "writeAudit",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 77,
+        "line": 78,
         "exported": false
       },
       {
         "name": "createAudioFilePairingService",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 100,
+        "line": 101,
         "exported": true
       },
       {
         "name": "resolveCreatorIdentity",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 103,
+        "line": 111,
         "exported": false
       },
       {
         "name": "createPairingToken",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 123,
+        "line": 131,
         "exported": false
       },
       {
         "name": "previewPairingToken",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 194,
+        "line": 202,
         "exported": false
       },
       {
         "name": "claimPairingToken",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 235,
+        "line": 243,
         "exported": false
       },
       {
         "name": "listConnections",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 375,
+        "line": 383,
         "exported": false
       },
       {
         "name": "revokeConnection",
         "kind": "function",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 402,
+        "line": 410,
         "exported": false
       },
       {
         "name": "AudioFilePairingService",
         "kind": "type",
         "path": "src/server/audio-file-pairing-service.ts",
-        "line": 485,
+        "line": 500,
         "exported": true
       },
       {
         "name": "assertSafeAbsoluteDir",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 6,
+        "line": 16,
         "exported": false
       },
       {
         "name": "assertIdentity",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 19,
+        "line": 29,
         "exported": false
       },
       {
         "name": "resolveInsideStore",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 28,
+        "line": 38,
         "exported": false
       },
       {
         "name": "partPath",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 35,
+        "line": 45,
         "exported": false
       },
       {
         "name": "objectPath",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 39,
+        "line": 49,
+        "exported": false
+      },
+      {
+        "name": "uploadMarkerPath",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 53,
         "exported": false
       },
       {
         "name": "ensureParent",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 43,
+        "line": 57,
+        "exported": false
+      },
+      {
+        "name": "safeUploadSegment",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 61,
+        "exported": false
+      },
+      {
+        "name": "safeFilename",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 68,
+        "exported": false
+      },
+      {
+        "name": "samePlannedIdentity",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 72,
+        "exported": false
+      },
+      {
+        "name": "hashFile",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 78,
         "exported": false
       },
       {
         "name": "createLocalAudioObjectStore",
         "kind": "function",
         "path": "src/server/audio-object-storage-local.ts",
-        "line": 47,
+        "line": 91,
         "exported": true
       },
       {
-        "name": "R2Client",
-        "kind": "type",
-        "path": "src/server/audio-object-storage-r2.ts",
-        "line": 16,
+        "name": "planUploadIdentity",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-local.ts",
+        "line": 103,
         "exported": false
       },
       {
-        "name": "R2StoreDependencies",
+        "name": "R2Client",
         "kind": "type",
         "path": "src/server/audio-object-storage-r2.ts",
         "line": 18,
         "exported": false
       },
       {
+        "name": "R2StoreDependencies",
+        "kind": "type",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 20,
+        "exported": false
+      },
+      {
         "name": "requireValue",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 22,
+        "line": 24,
         "exported": false
       },
       {
         "name": "assertBucketName",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 28,
+        "line": 30,
         "exported": false
       },
       {
         "name": "assertIdentity",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 34,
+        "line": 36,
         "exported": false
       },
       {
         "name": "stagingKey",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 45,
+        "line": 47,
         "exported": false
       },
       {
-        "name": "copySource",
+        "name": "safeUploadSegment",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 49,
+        "line": 51,
         "exported": false
       },
       {
-        "name": "asNodeReadable",
-        "kind": "function",
-        "path": "src/server/audio-object-storage-r2.ts",
-        "line": 53,
-        "exported": false
-      },
-      {
-        "name": "hashBody",
+        "name": "safeFilename",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
         "line": 58,
         "exported": false
       },
       {
+        "name": "samePlannedIdentity",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 62,
+        "exported": false
+      },
+      {
+        "name": "copySource",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 68,
+        "exported": false
+      },
+      {
+        "name": "asNodeReadable",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 72,
+        "exported": false
+      },
+      {
+        "name": "hashBody",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 77,
+        "exported": false
+      },
+      {
         "name": "isNotFound",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 70,
+        "line": 89,
+        "exported": false
+      },
+      {
+        "name": "normalizeEtag",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 97,
         "exported": false
       },
       {
         "name": "createR2AudioObjectStore",
         "kind": "function",
         "path": "src/server/audio-object-storage-r2.ts",
-        "line": 78,
+        "line": 101,
         "exported": true
+      },
+      {
+        "name": "planUploadIdentity",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 119,
+        "exported": false
+      },
+      {
+        "name": "sendOptions",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 132,
+        "exported": false
+      },
+      {
+        "name": "listExactMultipartUploads",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 134,
+        "exported": false
+      },
+      {
+        "name": "listUploadParts",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 162,
+        "exported": false
+      },
+      {
+        "name": "loadObjectHash",
+        "kind": "function",
+        "path": "src/server/audio-object-storage-r2.ts",
+        "line": 200,
+        "exported": false
       },
       {
         "name": "AudioStorageProvider",
@@ -13658,24 +13886,276 @@
         "exported": true
       },
       {
-        "name": "AudioObjectStore",
+        "name": "AudioUploadPlanInput",
         "kind": "type",
         "path": "src/server/audio-object-storage.ts",
         "line": 18,
         "exported": true
       },
       {
+        "name": "AudioUploadReconciliation",
+        "kind": "type",
+        "path": "src/server/audio-object-storage.ts",
+        "line": 25,
+        "exported": true
+      },
+      {
+        "name": "AudioPartReconciliation",
+        "kind": "type",
+        "path": "src/server/audio-object-storage.ts",
+        "line": 30,
+        "exported": true
+      },
+      {
+        "name": "AudioAssemblyReconciliation",
+        "kind": "type",
+        "path": "src/server/audio-object-storage.ts",
+        "line": 35,
+        "exported": true
+      },
+      {
+        "name": "AudioCleanupReconciliation",
+        "kind": "type",
+        "path": "src/server/audio-object-storage.ts",
+        "line": 42,
+        "exported": true
+      },
+      {
+        "name": "AudioObjectStore",
+        "kind": "type",
+        "path": "src/server/audio-object-storage.ts",
+        "line": 49,
+        "exported": true
+      },
+      {
         "name": "parseAudioStorageProvider",
         "kind": "function",
         "path": "src/server/audio-object-storage.ts",
-        "line": 52,
+        "line": 105,
         "exported": true
       },
       {
         "name": "createConfiguredAudioObjectStore",
         "kind": "function",
         "path": "src/server/audio-object-storage.ts",
-        "line": 57,
+        "line": 110,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationType",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 6,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationStatus",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 13,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationRow",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 22,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationTransaction",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 24,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationLease",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 25,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationClaim",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 33,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationExecutor",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 37,
+        "exported": false
+      },
+      {
+        "name": "ReserveAudioProviderOperationInput",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 39,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationConflictError",
+        "kind": "class",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 58,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderOperationBusyError",
+        "kind": "class",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 68,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderCallTimeoutError",
+        "kind": "class",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 78,
+        "exported": true
+      },
+      {
+        "name": "AudioProviderLeaseHeartbeatError",
+        "kind": "class",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 89,
+        "exported": true
+      },
+      {
+        "name": "canonicalize",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 102,
+        "exported": false
+      },
+      {
+        "name": "canonicalAudioProviderValue",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 122,
+        "exported": true
+      },
+      {
+        "name": "fingerprintAudioProviderValue",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 126,
+        "exported": true
+      },
+      {
+        "name": "buildAudioProviderOperationKey",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 130,
+        "exported": true
+      },
+      {
+        "name": "assertReservedOperationMatches",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 143,
+        "exported": false
+      },
+      {
+        "name": "boundedError",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 200,
+        "exported": false
+      },
+      {
+        "name": "assertEvidence",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 205,
+        "exported": false
+      },
+      {
+        "name": "createAudioProviderOperationCoordinator",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 211,
+        "exported": true
+      },
+      {
+        "name": "reserveOperation",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 233,
+        "exported": false
+      },
+      {
+        "name": "loadOperation",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 279,
+        "exported": false
+      },
+      {
+        "name": "claimOperation",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 287,
+        "exported": false
+      },
+      {
+        "name": "requireActiveLease",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 365,
+        "exported": false
+      },
+      {
+        "name": "markProviderStarted",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 385,
+        "exported": false
+      },
+      {
+        "name": "markReconcileRequired",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 401,
+        "exported": false
+      },
+      {
+        "name": "renewLease",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 436,
+        "exported": false
+      },
+      {
+        "name": "stopFences",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 495,
+        "exported": false
+      },
+      {
+        "name": "detachUntilProviderSettles",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 499,
+        "exported": false
+      },
+      {
+        "name": "resetAfterSafeReconciliation",
+        "kind": "function",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 529,
+        "exported": false
+      },
+      {
+        "name": "AudioProviderOperationCoordinator",
+        "kind": "type",
+        "path": "src/server/audio-provider-operation-service.ts",
+        "line": 726,
         "exported": true
       },
       {
@@ -13749,423 +14229,605 @@
         "exported": true
       },
       {
+        "name": "AudioProviderOperationRow",
+        "kind": "type",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 37,
+        "exported": false
+      },
+      {
+        "name": "AudioProviderOperationTransaction",
+        "kind": "type",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 38,
+        "exported": false
+      },
+      {
         "name": "sha256Hex",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 70,
+        "line": 78,
         "exported": false
       },
       {
         "name": "readStreamWithLimit",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 74,
+        "line": 82,
         "exported": false
       },
       {
         "name": "readStreamPrefix",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 89,
+        "line": 97,
         "exported": false
       },
       {
         "name": "assertStrictImageContainer",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 106,
+        "line": 114,
         "exported": false
       },
       {
         "name": "assertStrictTextDocument",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 137,
+        "line": 145,
         "exported": false
       },
       {
         "name": "audioContainerMatchesMime",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 163,
+        "line": 171,
         "exported": false
       },
       {
         "name": "ReleaseStorageManifestAsset",
         "kind": "type",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 182,
+        "line": 190,
         "exported": false
       },
       {
         "name": "collectReleaseStorageManifestRoles",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 189,
+        "line": 197,
         "exported": false
       },
       {
         "name": "addRole",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 203,
+        "line": 211,
         "exported": false
       },
       {
         "name": "requiredReleaseText",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 234,
+        "line": 242,
         "exported": false
       },
       {
         "name": "optionalReleaseText",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 241,
+        "line": 249,
         "exported": false
       },
       {
         "name": "normalizeTerritories",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 247,
+        "line": 255,
         "exported": false
       },
       {
         "name": "normalizeCredits",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 255,
+        "line": 263,
         "exported": false
       },
       {
         "name": "credits",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 257,
+        "line": 265,
         "exported": false
       },
       {
         "name": "normalizeRecordingDraft",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 271,
+        "line": 279,
         "exported": false
       },
       {
         "name": "assertExpectedReleaseVersion",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 309,
+        "line": 317,
         "exported": false
       },
       {
         "name": "buildReleaseReadiness",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 317,
+        "line": 325,
         "exported": false
       },
       {
         "name": "writeAudit",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 393,
+        "line": 401,
         "exported": false
       },
       {
         "name": "createAudioPublishingService",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 416,
+        "line": 424,
         "exported": true
       },
       {
         "name": "requireActiveCollaboratorRevisionGrant",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 432,
+        "line": 447,
         "exported": false
       },
       {
         "name": "sessionObjectIdentity",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 458,
+        "line": 473,
+        "exported": false
+      },
+      {
+        "name": "operationObjectIdentity",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 491,
+        "exported": false
+      },
+      {
+        "name": "providerOperationStateError",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 500,
+        "exported": false
+      },
+      {
+        "name": "requireOperationPayloadString",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 516,
+        "exported": false
+      },
+      {
+        "name": "requireOperationPayloadNumber",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 524,
+        "exported": false
+      },
+      {
+        "name": "finalizeInitiationDomain",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 532,
+        "exported": false
+      },
+      {
+        "name": "cancelInvalidAssembly",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 850,
+        "exported": false
+      },
+      {
+        "name": "assertUnsealedUploadIdentity",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1041,
         "exported": false
       },
       {
         "name": "discardUnsealedUpload",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 476,
+        "line": 1066,
         "exported": false
       },
       {
         "name": "AudioCleanupReason",
         "kind": "type",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 503,
+        "line": 1240,
+        "exported": false
+      },
+      {
+        "name": "reserveSessionCleanupProviderOperation",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1248,
+        "exported": false
+      },
+      {
+        "name": "prepareSessionCleanupProviderOperation",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1278,
+        "exported": false
+      },
+      {
+        "name": "cancelSessionMutationOperationsAfterCleanup",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1314,
         "exported": false
       },
       {
         "name": "recordPendingAudioObjectCleanup",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 511,
+        "line": 1376,
+        "exported": false
+      },
+      {
+        "name": "reserveCollaboratorRevisionAuthorityCleanupIntent",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1442,
+        "exported": false
+      },
+      {
+        "name": "completePendingAudioObjectCleanupReceipt",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1558,
+        "exported": false
+      },
+      {
+        "name": "completePendingSessionlessCleanupReceipt",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1609,
         "exported": false
       },
       {
         "name": "retryPendingAudioObjectCleanupReceipts",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 577,
+        "line": 1660,
+        "exported": false
+      },
+      {
+        "name": "applyDomain",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1814,
+        "exported": false
+      },
+      {
+        "name": "loadCompleted",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 1837,
         "exported": false
       },
       {
         "name": "validatePlayableAudioOriginal",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 704,
+        "line": 1887,
         "exported": false
       },
       {
         "name": "openExactOriginal",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 740,
+        "line": 1923,
         "exported": false
       },
       {
         "name": "validateReleasePackageAsset",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 795,
+        "line": 1978,
         "exported": false
       },
       {
         "name": "openExactOriginal",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 826,
+        "line": 2009,
         "exported": false
       },
       {
         "name": "requireProjectAccess",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 886,
+        "line": 2069,
         "exported": false
       },
       {
         "name": "createProject",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 914,
+        "line": 2097,
         "exported": false
       },
       {
         "name": "listProjects",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 960,
+        "line": 2143,
         "exported": false
       },
       {
         "name": "listProjectAssets",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 984,
+        "line": 2167,
         "exported": false
       },
       {
         "name": "getStorageUsage",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1019,
+        "line": 2202,
         "exported": false
       },
       {
         "name": "initiateCollaboratorRevisionUpload",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1023,
+        "line": 2206,
         "exported": false
       },
       {
         "name": "initiateUpload",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1228,
+        "line": 2414,
         "exported": false
       },
       {
         "name": "authorizeCollaboratorRevisionUploadPart",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1369,
+        "line": 2600,
+        "exported": false
+      },
+      {
+        "name": "finalizeUploadPartDomain",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 2674,
         "exported": false
       },
       {
         "name": "writeUploadPart",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1443,
+        "line": 2778,
+        "exported": false
+      },
+      {
+        "name": "initiationAuthorityIsActive",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3087,
+        "exported": false
+      },
+      {
+        "name": "cancelSessionlessInitiationAfterAuthorityLoss",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3121,
+        "exported": false
+      },
+      {
+        "name": "reconcileStartedUploadPart",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3223,
+        "exported": false
+      },
+      {
+        "name": "reconcileDueAudioProviderOperations",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3290,
         "exported": false
       },
       {
         "name": "expireStaleUploadSessions",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1611,
+        "line": 3403,
+        "exported": false
+      },
+      {
+        "name": "applyDomain",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3446,
+        "exported": false
+      },
+      {
+        "name": "loadCompleted",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3502,
         "exported": false
       },
       {
         "name": "abortCollaboratorRevisionUploadSessions",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1715,
+        "line": 3539,
+        "exported": false
+      },
+      {
+        "name": "applyDomain",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3655,
+        "exported": false
+      },
+      {
+        "name": "loadCompleted",
+        "kind": "function",
+        "path": "src/server/audio-publishing-service.ts",
+        "line": 3704,
         "exported": false
       },
       {
         "name": "completeAndSealCollaboratorRevision",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 1849,
+        "line": 3804,
         "exported": false
       },
       {
         "name": "completeAndSealUpload",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2101,
+        "line": 4168,
         "exported": false
       },
       {
         "name": "createShareGrant",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2316,
+        "line": 4497,
         "exported": false
       },
       {
         "name": "downloadSharedOriginal",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2366,
+        "line": 4547,
         "exported": false
       },
       {
         "name": "openOwnedVersion",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2436,
+        "line": 4617,
         "exported": false
       },
       {
         "name": "listReleaseWorkspace",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2459,
+        "line": 4640,
         "exported": false
       },
       {
         "name": "createReleaseDraft",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2631,
+        "line": 4812,
         "exported": false
       },
       {
         "name": "updateReleaseDraft",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2795,
+        "line": 4976,
         "exported": false
       },
       {
         "name": "addReleaseRecording",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 2968,
+        "line": 5149,
         "exported": false
       },
       {
         "name": "updateReleaseRecording",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3126,
+        "line": 5307,
         "exported": false
       },
       {
         "name": "reorderReleaseRecordings",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3221,
+        "line": 5402,
         "exported": false
       },
       {
         "name": "removeReleaseRecording",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3292,
+        "line": 5473,
         "exported": false
       },
       {
         "name": "createRightsDeclaration",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3377,
+        "line": 5558,
         "exported": false
       },
       {
         "name": "reviewRightsDeclaration",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3477,
+        "line": 5658,
         "exported": false
       },
       {
         "name": "openRightsReviewDocument",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3675,
+        "line": 5856,
         "exported": false
       },
       {
         "name": "grantReleaseReviewer",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3749,
+        "line": 5930,
         "exported": false
       },
       {
         "name": "listRightsReviewQueue",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3819,
+        "line": 6000,
         "exported": false
       },
       {
         "name": "getPublicRelease",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3858,
+        "line": 6039,
         "exported": false
       },
       {
         "name": "openPublicReleaseArtwork",
         "kind": "function",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3928,
+        "line": 6109,
         "exported": false
       },
       {
         "name": "AudioPublishingService",
         "kind": "type",
         "path": "src/server/audio-publishing-service.ts",
-        "line": 3979,
+        "line": 6162,
         "exported": true
       },
       {
@@ -14249,70 +14911,70 @@
         "name": "assertAudioStorageReservationAvailable",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 264,
+        "line": 296,
         "exported": true
       },
       {
         "name": "assertAudioWorkingObjectAvailable",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 281,
+        "line": 313,
         "exported": true
       },
       {
         "name": "SupportedAudioAssetKind",
         "kind": "type",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 311,
+        "line": 343,
         "exported": true
       },
       {
         "name": "normalizeAudioAssetUploadType",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 313,
+        "line": 345,
         "exported": true
       },
       {
         "name": "beginsWith",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 323,
+        "line": 355,
         "exported": false
       },
       {
         "name": "beginsWithAscii",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 327,
+        "line": 359,
         "exported": false
       },
       {
         "name": "hasIsoBaseMediaSignature",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 332,
+        "line": 364,
         "exported": false
       },
       {
         "name": "hasUtf8TextSignature",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 336,
+        "line": 368,
         "exported": false
       },
       {
         "name": "signatureMatches",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 349,
+        "line": 381,
         "exported": false
       },
       {
         "name": "assertAudioUploadFirstPartSignature",
         "kind": "function",
         "path": "src/server/audio-storage-policy.ts",
-        "line": 392,
+        "line": 424,
         "exported": true
       },
       {
@@ -22856,10 +23518,10 @@
   ],
   "summary": {
     "directories": 15,
-    "source_files": 368,
-    "symbols": 2598,
+    "source_files": 371,
+    "symbols": 2690,
     "components": 90,
-    "functions_and_hooks": 2041,
+    "functions_and_hooks": 2111,
     "raw_ui_elements": 432,
     "errors": 0,
     "warnings": 5
