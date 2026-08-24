@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerCapabilityGrantEvents, performerEvents, performerIdentityEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -26,12 +26,25 @@ import {
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput, type PendingActionOwner } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { lockModerationBlockIdentities } from "./src/server/moderation-block-lock";
+import {
+  canonicalizeClientIp,
+  configureExpressTrustedProxyBoundary,
+  createTrustedProxyBoundaryMiddleware,
+  resolveCanonicalRequestIp
+} from "./src/server/trusted-proxy";
+import {
+  LiveRoomMenuPolicyError,
+  normalizeLiveRoomType,
+  normalizeRoomRequestMenu,
+  resolveRoomRequestSelection
+} from "./src/server/live-room-menu-policy";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { resolveLiveRoomPaymentRuntimeConfig } from "./src/server/live-room-payment-config";
 import {
   createPaymentService,
+  type AuthorizeActionResult,
   type CloseoutTotals,
   type PaymentReversalResult,
   type SettleResult
@@ -58,7 +71,7 @@ import {
 import {
   createPerformerLoginChallengeStore,
   createPerformerLoginRateLimiter,
-  hashPerformerLoginRequesterIp,
+  hashPerformerLoginRequesterIp as hashRawPerformerLoginRequesterIp,
   normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
@@ -92,6 +105,7 @@ import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-con
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
+  evaluatePublicProfessionalDirectoryEligibility,
   mergePublicProfileMetadata,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
@@ -106,6 +120,20 @@ import {
   type PerformerVisibilityState
 } from "./src/server/public-profile";
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
+import {
+  createTalentProfessionalSetupService,
+  resolveCurrentProfessionalIdentities,
+  TalentProfessionalSetupError
+} from "./src/server/talent-professional-setup-service";
+import {
+  createTalentCapabilityAuthorization,
+  TalentCapabilityAuthorizationError
+} from "./src/server/talent-capability-authorization";
+import {
+  professionalIdentityLabel,
+  type PerformerCapability,
+  type ProfessionalIdentityKind
+} from "./src/talent-capability-catalog";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
 import {
@@ -133,10 +161,14 @@ import {
 } from "./src/server/audio-upload-transport";
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
-import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
+import {
+  AUDIO_PUBLISHING_RUNTIME_CAPABILITIES,
+  resolveCollaboratorRevisionUploadEnabled
+} from "./src/server/audio-publishing-contract";
 import {
   createPerformerEventService,
   EventServiceError,
+  isPerformerEventRoomLinkEligible,
   isPublicEventExternalTicketLabel,
   normalizePublicEventHttpsUrl,
   type PerformerEventDto,
@@ -146,7 +178,18 @@ import {
   createEventTicketService,
   EventTicketServiceError
 } from "./src/server/event-ticket-service";
-import { createDiscoveryObservatoryStore } from "./src/server/discovery-observatory-store";
+import {
+  AttributionReceiptConflictError,
+  createDiscoveryObservatoryStore
+} from "./src/server/discovery-observatory-store";
+import {
+  createAccountDiscoveryAttributionService,
+  createDiscoveryAttributionReceipt,
+  DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE,
+  DISCOVERY_ATTRIBUTION_RECEIPT_TTL_MS,
+  readDiscoveryAttributionReceiptCookie,
+  resolveReceiptBackedAttributionEvidence
+} from "./src/server/account-discovery-attribution";
 import {
   buildDiscoveryObservatorySnapshot,
   buildSwayDiscoveryQueryCollection,
@@ -169,6 +212,8 @@ dotenv.config({ path: ".env.local", override: false });
 dotenv.config({ override: false });
 
 const app = express();
+configureExpressTrustedProxyBoundary(app);
+app.use(createTrustedProxyBoundaryMiddleware());
 const PORT = Number(process.env.PORT ?? 3000);
 const isProduction = process.env.NODE_ENV === "production";
 const skipStartupBusinessStateHydration = process.env.SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION === 'true';
@@ -195,6 +240,7 @@ const hasPerformerLoginEmailConfig = Boolean(
   && hasSwayEmailFrom
   && hasSwayEmailBaseUrl
 );
+const discoveryAttributionReceiptSecret = process.env.SWAY_DISCOVERY_ATTRIBUTION_SECRET?.trim() || null;
 const IDEMPOTENCY_TTL_HOURS = 48;
 const MAX_REQUESTS_PER_DEVICE_PER_SESSION = 8;
 const MAX_CUSTOM_NOTES_PER_DEVICE_PER_SESSION = 4;
@@ -210,6 +256,17 @@ const businessDb = process.env.DATABASE_URL ? createSwayDb(process.env.DATABASE_
 const discoveryObservatoryStore = businessDb
   ? createDiscoveryObservatoryStore(businessDb)
   : null;
+const accountDiscoveryAttributionService = businessDb
+  ? createAccountDiscoveryAttributionService(businessDb, {
+      receiptSecret: discoveryAttributionReceiptSecret
+    })
+  : null;
+const talentProfessionalSetupService = businessDb
+  ? createTalentProfessionalSetupService(businessDb)
+  : null;
+const talentCapabilityAuthorization = businessDb
+  ? createTalentCapabilityAuthorization(businessDb)
+  : null;
 const audioObjectStore = (() => {
   try {
     return createConfiguredAudioObjectStore(process.env);
@@ -224,20 +281,42 @@ const audioObjectStore = (() => {
   }
 })();
 const audioStoragePolicy = createAudioStoragePolicy({ env: process.env });
+const collaboratorRevisionUploadsEnabled = resolveCollaboratorRevisionUploadEnabled(process.env);
 let audioObjectStoreVerified = false;
 const audioPublishingService = businessDb && audioObjectStore
   ? createAudioPublishingService({
       db: businessDb,
       store: audioObjectStore,
       workspaceLimitBytes: audioStoragePolicy.workspaceLimitBytes,
-      workingObjectLimit: audioStoragePolicy.workingObjectLimit
+      workingObjectLimit: audioStoragePolicy.workingObjectLimit,
+      collaboratorRevisionUploadsEnabled
     })
   : null;
 const audioFilePairingService = businessDb
-  ? createAudioFilePairingService({ db: businessDb })
+  ? createAudioFilePairingService({
+      db: businessDb,
+      beforeConnectionRevocation: audioPublishingService
+        ? (tx, input) => audioPublishingService.reserveCollaboratorRevisionAuthorityCleanupIntent(tx, {
+            actorUserId: input.actorUserId,
+            connectionId: input.connectionId,
+            cleanupReason: 'candidate_connection_revoked'
+          }).then(() => undefined)
+        : undefined
+    })
   : null;
 const audioFileCollaborationService = businessDb && audioObjectStore
-  ? createAudioFileCollaborationService({ db: businessDb, store: audioObjectStore })
+  ? createAudioFileCollaborationService({
+      db: businessDb,
+      store: audioObjectStore,
+      collaboratorRevisionUploadsEnabled,
+      beforeGrantRevocation: audioPublishingService
+        ? (tx, input) => audioPublishingService.reserveCollaboratorRevisionAuthorityCleanupIntent(tx, {
+            actorUserId: input.actorUserId,
+            grantId: input.grantId,
+            cleanupReason: 'candidate_grant_revoked'
+          }).then(() => undefined)
+        : undefined
+    })
   : null;
 const performerEventService = businessDb
   ? createPerformerEventService(businessDb)
@@ -275,6 +354,28 @@ const performerClaimPeekRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_MAX, 20),
   windowMs: parsePositiveInteger(process.env.SWAY_PERFORMER_CLAIM_PEEK_RATE_LIMIT_WINDOW_MS, 5 * 60 * 1000)
 });
+const roomMenuReportSubjectLimit = Math.min(8, parsePositiveInteger(process.env.SWAY_ROOM_MENU_REPORT_SUBJECT_LIMIT, 8));
+const roomMenuReportIpLimit = Math.min(32, parsePositiveInteger(process.env.SWAY_ROOM_MENU_REPORT_IP_LIMIT, 32));
+const roomMenuReportRetentionDays = Math.min(180, parsePositiveInteger(
+  process.env.SWAY_ROOM_MENU_REPORT_RETENTION_DAYS,
+  180
+));
+const moderationRetentionBatchSize = Math.min(500, parsePositiveInteger(
+  process.env.SWAY_MODERATION_RETENTION_BATCH_SIZE,
+  500
+));
+const moderationRetentionMaxBatches = Math.min(100, parsePositiveInteger(
+  process.env.SWAY_MODERATION_RETENTION_MAX_BATCHES_PER_RUN,
+  20
+));
+const moderationRetentionMaxRuntimeMs = Math.min(30_000, parsePositiveInteger(
+  process.env.SWAY_MODERATION_RETENTION_MAX_RUNTIME_MS,
+  5_000
+));
+const moderationRetentionContinuationDelayMs = Math.min(1_000, parsePositiveInteger(
+  process.env.SWAY_MODERATION_RETENTION_CONTINUATION_DELAY_MS,
+  25
+));
 const hasAdminBootstrapSecret = Boolean(process.env.SWAY_ADMIN_BOOTSTRAP_SECRET?.trim());
 const adminBootstrapRateLimiter = createPerformerLoginRateLimiter({
   maxRequests: parsePositiveInteger(process.env.SWAY_ADMIN_BOOTSTRAP_RATE_LIMIT_MAX, 3),
@@ -358,6 +459,10 @@ const testModePlatformBalanceEnabled = testModePlatformBalancePerformerIds.size 
 const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
   provider: paymentProvider,
+  moneyExecutionEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled,
+  moneyEnvironment: liveRoomPaymentRuntimeConfig.mode === 'test' || liveRoomPaymentRuntimeConfig.mode === 'live'
+    ? liveRoomPaymentRuntimeConfig.mode
+    : null,
   testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
@@ -380,11 +485,28 @@ function resolveGitValue(args: string[]): string | null {
   }
 }
 
+function hashPerformerLoginRequesterIp(ipAddress: string | null | undefined) {
+  // Express preserves the textual X-Forwarded-For representation. Normalize
+  // equivalent IPv4/IPv6 spellings before deriving any durable or in-memory
+  // rate-limit identity, while retaining non-IP labels used by local scripts.
+  return hashRawPerformerLoginRequesterIp(canonicalizeClientIp(ipAddress) ?? ipAddress);
+}
+
 function applyNoStoreHeaders(res: express.Response) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
+}
+
+function applyPublicDiscoveryIndexHold(
+  req: express.Request,
+  res: express.Response,
+  metadata: ShareMetadata
+) {
+  if (isPublicDiscoverPath(req.path) && metadata.robots === 'noindex, follow') {
+    res.setHeader('X-Robots-Tag', 'noindex, follow');
+  }
 }
 
 function parsePositiveInteger(rawValue: string | undefined, fallbackValue: number) {
@@ -474,6 +596,70 @@ const CANONICAL_APP_HOST = 'app.sway.tips';
 const CANONICAL_APP_ORIGIN = `https://${CANONICAL_APP_HOST}`;
 const SHARE_REDIRECT_HOSTS = new Set(['sway.tips', 'www.sway.tips']);
 
+function resolveTrustedDiscoveryAttributionOrigins() {
+  const origins = new Set([CANONICAL_APP_ORIGIN]);
+  if (!isProduction) {
+    for (const configured of [process.env.SWAY_APP_BASE_URL, process.env.APP_BASE_URL]) {
+      if (!configured?.trim()) continue;
+      try {
+        origins.add(new URL(configured.trim()).origin);
+      } catch {
+        // Invalid non-production app URLs do not become trusted origins.
+      }
+    }
+  }
+  return [...origins];
+}
+
+const TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS = resolveTrustedDiscoveryAttributionOrigins();
+
+function resolveTrustedDiscoveryRequestOrigin(req: express.Request) {
+  const host = req.get('host')?.trim();
+  if (!host) return null;
+  const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol = isProduction ? 'https' : (forwardedProto || req.protocol || 'http');
+  try {
+    const origin = new URL(`${protocol}://${host}`).origin;
+    return TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS.includes(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPublicDiscoveryLandingPath(pathname: string) {
+  return pathname === '/discover'
+    || /^\/(?:p|e|r)\/[^/]+$/i.test(pathname);
+}
+
+function issueDiscoveryAttributionReceipt(req: express.Request, res: express.Response) {
+  if (req.method !== 'GET'
+    || !isPublicDiscoveryLandingPath(req.path)
+    || !discoveryAttributionReceiptSecret
+    || readDiscoveryAttributionReceiptCookie(req.get('cookie'))) {
+    return;
+  }
+  const trustedOrigin = resolveTrustedDiscoveryRequestOrigin(req);
+  if (!trustedOrigin) return;
+  const receipt = createDiscoveryAttributionReceipt({
+    landingUrl: new URL(req.originalUrl, trustedOrigin).toString(),
+    allowedOrigins: TRUSTED_DISCOVERY_ATTRIBUTION_ORIGINS,
+    entryPath: req.path,
+    secret: discoveryAttributionReceiptSecret,
+    referrer: req.get('referer'),
+    fetchSite: req.get('sec-fetch-site'),
+    fetchMode: req.get('sec-fetch-mode'),
+    fetchDest: req.get('sec-fetch-dest')
+  });
+  if (!receipt) return;
+  res.cookie(DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE, receipt, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: DISCOVERY_ATTRIBUTION_RECEIPT_TTL_MS
+  });
+}
+
 function shouldRedirectToAppHost(rawHost: string | undefined) {
   return SHARE_REDIRECT_HOSTS.has(normalizeHost(rawHost));
 }
@@ -481,6 +667,10 @@ function shouldRedirectToAppHost(rawHost: string | undefined) {
 function buildAppHostRedirectUrl(originalUrl: string) {
   const pathAndQuery = originalUrl.startsWith('/') ? originalUrl : `/${originalUrl}`;
   return `${CANONICAL_APP_ORIGIN}${pathAndQuery}`;
+}
+
+function isPublicDiscoverPath(urlPath: string) {
+  return urlPath.toLowerCase().replace(/\/+$/, '') === '/discover';
 }
 
 function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
@@ -491,7 +681,7 @@ function resolveShellForRoute(urlPath: string, _rawHost?: string): SwayShell {
   if (urlPath.startsWith('/admin')) return 'admin';
   if (urlPath === '/dev/sandbox' || urlPath.startsWith('/dev-sandbox')) return 'dev-sandbox';
   if (urlPath.startsWith('/g/') || urlPath.startsWith('/p/')) return 'patron';
-  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover') return 'patron';
+  if (urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || isPublicDiscoverPath(urlPath)) return 'patron';
   return 'patron';
 }
 
@@ -504,7 +694,7 @@ function isShellAllowed(shell: SwayShell): boolean {
 }
 
 type DiscoveryFacts = {
-  entityType: 'performer' | 'event' | 'release' | 'live_room';
+  entityType: 'performer' | 'event' | 'release' | 'live_room' | 'directory';
   entityName: string;
   heading: string;
   summary: string;
@@ -513,6 +703,12 @@ type DiscoveryFacts = {
   primaryActionLabel: string;
   primaryActionHref: string;
   relatedLinks: Array<{ label: string; href: string }>;
+  directoryItems?: Array<{
+    name: string;
+    roleLabel: string;
+    profileHref: string;
+    city?: string | null;
+  }>;
   lastUpdated?: string | null;
 };
 
@@ -522,9 +718,10 @@ type ShareMetadata = {
   url: string;
   image: string;
   imageAlt: string;
-  robots?: 'noindex, nofollow';
+  robots?: 'noindex, nofollow' | 'noindex, follow';
   structuredData?: Record<string, unknown>;
   discoveryFacts?: DiscoveryFacts;
+  responseStatus?: 503;
 };
 
 type PublicShareProfile = {
@@ -535,6 +732,8 @@ type PublicShareProfile = {
   city: string | null;
   avatarUrl: string | null;
   specialties: string[] | null;
+  primaryRole: ProfessionalIdentityKind | null;
+  primaryRoleLabel: string | null;
   updatedAt: Date | null;
   visibility: 'public' | 'unlisted';
 };
@@ -554,6 +753,8 @@ type PublicPerformerDiscoveryProfile = {
   city: string | null;
   avatarUrl: string | null;
   metadata: unknown;
+  primaryRole: ProfessionalIdentityKind | null;
+  primaryRoleLabel: string | null;
   bookingEmail: string | null;
   bookingPhone: string | null;
   facebookUrl: string | null;
@@ -570,8 +771,31 @@ type PublicPerformerDiscoveryResolution =
   | { kind: 'public' | 'unlisted'; profile: PublicPerformerDiscoveryProfile }
   | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
+type PublicProfessionalDirectoryItem = {
+  performerId: string;
+  displayName: string;
+  handle: string;
+  profilePath: string;
+  bio: string;
+  headline: string | null;
+  specialties: string[];
+  city: string | null;
+  avatarUrl: string | null;
+  primaryRole: string;
+  primaryRoleLabel: string;
+  updatedAt: string | null;
+};
+
+type PublicProfessionalDirectorySnapshot = {
+  professionals: PublicProfessionalDirectoryItem[];
+  qualifiedProfileCount: number;
+  discoverIndexEligible: boolean;
+};
+
+const PUBLIC_DISCOVERY_QUALIFIED_PROFILE_THRESHOLD = 3;
+
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
-const DEFAULT_SHARE_DESCRIPTION = 'Sway gives performers one place for public profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.';
+const DEFAULT_SHARE_DESCRIPTION = 'Sway gives independent talent, creators, and gig professionals one place for public profiles, releases, events, external ticket links, live rooms, Requests, Tips, Boosts, and direct audience support.';
 const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=4';
 const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
 const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
@@ -621,7 +845,8 @@ function defaultShareMetadata(req: express.Request, overrides: Partial<Omit<Shar
     imageAlt: overrides.imageAlt || 'Sway approved neon brand artwork',
     robots: overrides.robots,
     structuredData: overrides.structuredData,
-    discoveryFacts: overrides.discoveryFacts
+    discoveryFacts: overrides.discoveryFacts,
+    responseStatus: overrides.responseStatus
   };
 }
 
@@ -648,6 +873,20 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
   const categoryHtml = categories.length
     ? `<p data-discovery="categories">${categories.map((value) => escapeDiscoveryHtmlText(value)).join(' · ')}</p>`
     : '';
+  const directoryHtml = facts.directoryItems?.length
+    ? [
+        '<section id="sway-professional-directory" data-discovery="professional-directory">',
+        '  <h2>Qualified public profiles</h2>',
+        '  <ul>',
+        ...facts.directoryItems.map((item) => (
+          `    <li><a href="${escapeDiscoveryHtmlText(item.profileHref)}">${escapeDiscoveryHtmlText(item.name)}</a>`
+          + ` <span data-discovery="professional-role">${escapeDiscoveryHtmlText(item.roleLabel)}</span>`
+          + `${item.city?.trim() ? ` <span data-discovery="professional-city">${escapeDiscoveryHtmlText(item.city.trim())}</span>` : ''}</li>`
+        )),
+        '  </ul>',
+        '</section>'
+      ].join('\n')
+    : '';
 
   return [
     '<main id="sway-discovery-first-response" data-sway-discovery="server-rendered">',
@@ -656,6 +895,7 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
     `  <p data-discovery="entity"><span data-discovery="entity-name">${escapeDiscoveryHtmlText(facts.entityName)}</span> · <span data-discovery="entity-type">${escapeDiscoveryHtmlText(facts.entityType)}</span></p>`,
     location,
     categoryHtml,
+    directoryHtml,
     `  <p data-discovery="primary-action"><a href="${escapeDiscoveryHtmlText(facts.primaryActionHref)}">${escapeDiscoveryHtmlText(facts.primaryActionLabel)}</a></p>`,
     related ? `  <ul data-discovery="related-links">${related}</ul>` : '',
     lastUpdated,
@@ -720,6 +960,159 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
   );
 }
 
+async function loadQualifiedPublicProfessionalDirectory(): Promise<PublicProfessionalDirectorySnapshot> {
+  if (!businessDb) throw new Error('Public professional directory requires a durable database connection.');
+  const rows = await businessDb
+    .select({
+      performerId: performers.id,
+      ownerUserId: performers.ownerUserId,
+      ownerPerformerCount: sql<number>`(
+        select count(*)::int
+        from performers as owner_profiles
+        where owner_profiles.owner_user_id = ${performers.ownerUserId}
+      )`,
+      ownerEmail: users.email,
+      ownerEmailVerifiedAt: users.emailVerifiedAt,
+      ownerRole: users.role,
+      ownerProModeStatus: users.proModeStatus,
+      displayName: performers.displayName,
+      handle: performers.handle,
+      bio: performers.bio,
+      visibilityState: performers.visibilityState,
+      isActive: performers.isActive,
+      onboardingStatus: performers.onboardingStatus,
+      publicProfilePerformerId: performerPublicProfiles.performerId,
+      headline: performerPublicProfiles.headline,
+      specialties: performerPublicProfiles.specialties,
+      city: performerPublicProfiles.city,
+      avatarUrl: performerPublicProfiles.avatarUrl,
+      updatedAt: performerPublicProfiles.updatedAt
+    })
+    .from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(eq(performers.visibilityState, 'public'));
+
+  const performerIds = [...new Set(rows.map((row) => row.performerId))];
+  const identityRows = performerIds.length
+    ? await businessDb
+        .select({
+          performerId: performerIdentityEvents.performerId,
+          identityRole: performerIdentityEvents.identityRole,
+          identityKind: performerIdentityEvents.identityKind,
+          customLabel: performerIdentityEvents.customLabel,
+          eventType: performerIdentityEvents.eventType
+        })
+        .from(performerIdentityEvents)
+        .where(inArray(performerIdentityEvents.performerId, performerIds))
+        .orderBy(asc(performerIdentityEvents.performerId), asc(performerIdentityEvents.eventSequence))
+    : [];
+  const profilePublicationGrantRows = performerIds.length
+    ? await businessDb
+        .select({
+          performerId: performerCapabilityGrantEvents.performerId,
+          decision: performerCapabilityGrantEvents.decision,
+          expiresAt: performerCapabilityGrantEvents.expiresAt
+        })
+        .from(performerCapabilityGrantEvents)
+        .where(and(
+          inArray(performerCapabilityGrantEvents.performerId, performerIds),
+          eq(performerCapabilityGrantEvents.capability, 'profile_publication')
+        ))
+        .orderBy(
+          asc(performerCapabilityGrantEvents.performerId),
+          asc(performerCapabilityGrantEvents.eventSequence)
+        )
+    : [];
+  const identityRowsByPerformer = new Map<string, typeof identityRows>();
+  for (const row of identityRows) {
+    const existing = identityRowsByPerformer.get(row.performerId) ?? [];
+    existing.push(row);
+    identityRowsByPerformer.set(row.performerId, existing);
+  }
+  const latestProfilePublicationGrantByPerformer = new Map<
+    string,
+    (typeof profilePublicationGrantRows)[number]
+  >();
+  for (const row of profilePublicationGrantRows) {
+    latestProfilePublicationGrantByPerformer.set(row.performerId, row);
+  }
+  const grantEvaluationTime = Date.now();
+
+  const rowsByHandle = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (!isDiscoveryEligibleHandle(row.handle)) continue;
+    const handle = normalizePerformerHandle(row.handle)?.toLowerCase();
+    if (!handle) continue;
+    const existing = rowsByHandle.get(handle) ?? [];
+    existing.push(row);
+    rowsByHandle.set(handle, existing);
+  }
+
+  const professionals: PublicProfessionalDirectoryItem[] = [];
+  for (const [handle, matchingRows] of rowsByHandle) {
+    if (matchingRows.length !== 1) continue;
+    const row = matchingRows[0];
+    const primaryIdentity = resolveCurrentProfessionalIdentities(
+      (identityRowsByPerformer.get(row.performerId) ?? []).map((identityRow) => ({
+        ...identityRow,
+        identityKind: identityRow.identityKind as ProfessionalIdentityKind
+      }))
+    ).primaryIdentity;
+    const profilePublicationGrant = latestProfilePublicationGrantByPerformer.get(row.performerId);
+    const profilePublicationGrantCurrent = profilePublicationGrant?.decision === 'granted'
+      && (
+        profilePublicationGrant.expiresAt === null
+        || profilePublicationGrant.expiresAt.getTime() > grantEvaluationTime
+      );
+    const eligibility = evaluatePublicProfessionalDirectoryEligibility({
+      claimed: true,
+      hasOwner: Boolean(row.ownerUserId),
+      isActive: row.isActive,
+      onboardingStatus: row.onboardingStatus,
+      visibilityState: row.visibilityState,
+      handle,
+      displayName: row.displayName,
+      bio: row.bio,
+      hasPublicProfile: Boolean(row.publicProfilePerformerId),
+      ownerEmail: row.ownerEmail,
+      ownerEmailVerifiedAt: row.ownerEmailVerifiedAt,
+      ownerRole: row.ownerRole,
+      ownerProModeStatus: row.ownerProModeStatus,
+      profilePublicationGrantCurrent,
+      primaryRole: primaryIdentity?.kind ?? null,
+      conflicted: Number(row.ownerPerformerCount) !== 1
+    });
+    if (!eligibility.eligible) continue;
+
+    professionals.push({
+      performerId: row.performerId,
+      displayName: row.displayName.trim(),
+      handle,
+      profilePath: `/p/${encodeURIComponent(handle)}`,
+      bio: row.bio!.trim(),
+      headline: normalizePublicProfileText(row.headline, 160),
+      specialties: normalizePublicProfileSpecialties(row.specialties) ?? [],
+      city: normalizePublicProfileText(row.city, 120),
+      avatarUrl: normalizePublicProfileUrl(row.avatarUrl),
+      primaryRole: eligibility.primaryRole,
+      primaryRoleLabel: professionalIdentityLabel(eligibility.primaryRole, primaryIdentity?.customLabel),
+      updatedAt: row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
+        ? row.updatedAt.toISOString()
+        : null
+    });
+  }
+
+  professionals.sort((left, right) => (
+    left.displayName.localeCompare(right.displayName) || left.handle.localeCompare(right.handle)
+  ));
+  return {
+    professionals,
+    qualifiedProfileCount: professionals.length,
+    discoverIndexEligible: professionals.length >= PUBLIC_DISCOVERY_QUALIFIED_PROFILE_THRESHOLD
+  };
+}
+
 async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<PublicPerformerDiscoveryResolution> {
   const normalizedHandle = normalizePerformerHandle(rawHandle);
   if (!normalizedHandle) return { kind: 'not_resolvable', profile: null };
@@ -781,11 +1174,32 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
       return { kind: 'not_resolvable', profile: null };
     }
 
+    const identityRows = await businessDb
+      .select({
+        identityRole: performerIdentityEvents.identityRole,
+        identityKind: performerIdentityEvents.identityKind,
+        customLabel: performerIdentityEvents.customLabel,
+        eventType: performerIdentityEvents.eventType
+      })
+      .from(performerIdentityEvents)
+      .where(eq(performerIdentityEvents.performerId, candidate.performerId))
+      .orderBy(asc(performerIdentityEvents.eventSequence));
+    const primaryIdentity = resolveCurrentProfessionalIdentities(
+      identityRows.map((identityRow) => ({
+        ...identityRow,
+        identityKind: identityRow.identityKind as ProfessionalIdentityKind
+      }))
+    ).primaryIdentity;
+
     return {
       kind: policy.kind,
       profile: {
         ...candidate,
-        handle: storedHandle?.toLowerCase() ?? null
+        handle: storedHandle?.toLowerCase() ?? null,
+        primaryRole: primaryIdentity?.kind ?? null,
+        primaryRoleLabel: primaryIdentity
+          ? professionalIdentityLabel(primaryIdentity.kind, primaryIdentity.customLabel)
+          : null
       }
     };
   } catch (error) {
@@ -806,6 +1220,8 @@ function toPublicShareProfile(
     city: profile.city,
     avatarUrl: profile.avatarUrl,
     specialties: profile.specialties,
+    primaryRole: profile.primaryRole,
+    primaryRoleLabel: profile.primaryRoleLabel,
     updatedAt: profile.updatedAt,
     visibility
   };
@@ -841,6 +1257,7 @@ function buildPublicPerformerShareMetadata(
           description: profile.bio?.trim() || undefined,
           url: canonicalProfileUrl,
           image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
+          jobTitle: profile.primaryRoleLabel || undefined,
           homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
           mainEntityOfPage: canonicalProfileUrl,
           knowsAbout: categories.length ? categories : undefined
@@ -851,7 +1268,7 @@ function buildPublicPerformerShareMetadata(
       entityName: profile.displayName || `@${profile.handle}`,
       heading: profile.displayName || `@${profile.handle}`,
       summary: description,
-      categories: categories.length ? categories : ['Performer'],
+      categories: [profile.primaryRoleLabel, ...categories].filter((value): value is string => Boolean(value)).slice(0, 8),
       location: profile.city,
       primaryActionLabel: 'View performer page',
       primaryActionHref: canonicalProfileUrl,
@@ -1019,6 +1436,94 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
 async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata> {
   const pathParts = req.path.split('/').filter(Boolean);
   const defaultMetadata = defaultShareMetadata(req);
+
+  if (isPublicDiscoverPath(req.path)) {
+    const unavailableMetadata = () => defaultShareMetadata(req, {
+      title: 'Discover independent professionals on Sway',
+      description: 'Discover public professional pages, active live rooms, and upcoming events on Sway.',
+      url: '/discover',
+      robots: 'noindex, follow',
+      responseStatus: 503,
+      discoveryFacts: {
+        entityType: 'directory',
+        entityName: 'Sway professional directory',
+        heading: 'Discover independent professionals on Sway',
+        summary: 'Qualified public profiles are temporarily unavailable. No sample or preview profiles are substituted.',
+        categories: ['Comedians', 'Singers', 'Songwriters', 'DJs', 'Bartenders', 'Hosts', 'Creators', 'Gig and service professionals'],
+        primaryActionLabel: 'Create a professional Sway page',
+        primaryActionHref: canonicalPublicUrl('/account/signup?intent=performer'),
+        relatedLinks: [{ label: 'About Sway', href: canonicalPublicUrl('/about') }],
+        directoryItems: [],
+        lastUpdated: null
+      }
+    });
+    if (!businessDb) return unavailableMetadata();
+
+    try {
+      const directory = await loadQualifiedPublicProfessionalDirectory();
+      const visibleProfessionals = directory.professionals.slice(0, 24);
+      const description = directory.qualifiedProfileCount
+        ? `Discover ${directory.qualifiedProfileCount} qualified public professional ${directory.qualifiedProfileCount === 1 ? 'profile' : 'profiles'}, plus current live rooms and upcoming events on Sway.`
+        : 'No qualified public professional profiles are listed right now. Sway does not substitute sample or preview profiles.';
+      const latestUpdatedAt = directory.professionals
+        .map((professional) => professional.updatedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null;
+      return defaultShareMetadata(req, {
+        title: 'Discover independent professionals on Sway',
+        description,
+        url: '/discover',
+        robots: directory.discoverIndexEligible ? undefined : 'noindex, follow',
+        structuredData: {
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: 'Discover independent professionals on Sway',
+          description,
+          url: canonicalPublicUrl('/discover'),
+          mainEntity: {
+            '@type': 'ItemList',
+            numberOfItems: directory.qualifiedProfileCount,
+            itemListElement: visibleProfessionals.map((professional, index) => ({
+              '@type': 'ListItem',
+              position: index + 1,
+              item: {
+                '@type': 'ProfilePage',
+                name: professional.displayName,
+                url: canonicalPublicUrl(professional.profilePath),
+                about: {
+                  '@type': 'Thing',
+                  name: professional.primaryRoleLabel
+                }
+              }
+            }))
+          }
+        },
+        discoveryFacts: {
+          entityType: 'directory',
+          entityName: 'Sway professional directory',
+          heading: 'Discover independent professionals on Sway',
+          summary: description,
+          categories: ['Comedians', 'Singers', 'Songwriters', 'DJs', 'Bartenders', 'Hosts', 'Creators', 'Gig and service professionals'],
+          primaryActionLabel: visibleProfessionals.length ? 'Open a public professional profile' : 'Create a professional Sway page',
+          primaryActionHref: visibleProfessionals.length
+            ? canonicalPublicUrl(visibleProfessionals[0].profilePath)
+            : canonicalPublicUrl('/account/signup?intent=performer'),
+          relatedLinks: [{ label: 'About Sway', href: canonicalPublicUrl('/about') }],
+          directoryItems: visibleProfessionals.map((professional) => ({
+            name: professional.displayName,
+            roleLabel: professional.primaryRoleLabel,
+            profileHref: canonicalPublicUrl(professional.profilePath),
+            city: professional.city
+          })),
+          lastUpdated: latestUpdatedAt?.slice(0, 10) ?? null
+        }
+      });
+    } catch (error) {
+      console.error('[sway.discovery] discover document lookup failed:', error);
+      return unavailableMetadata();
+    }
+  }
 
   if (!businessDb) return defaultMetadata;
 
@@ -1694,6 +2199,11 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  issueDiscoveryAttributionReceipt(req, res);
+  next();
+});
+
 app.use('/admin/discovery-observatory', async (req, res, next) => {
   const adminAccess = await accessControl.requireAdminAccess(req);
   if (adminAccess.allowed === false) {
@@ -1728,6 +2238,10 @@ function createInactiveSession(): GigSession {
     lastMutationActorUserId: null,
     talentName: "",
     talentRole: 'DJ',
+    roomType: 'music',
+    requestMenu: [],
+    linkedEventId: null,
+    linkedEvent: null,
     feeType: 'patron',
     minimumTip: 5,
     endGigTimerStartedAt: null,
@@ -1973,6 +2487,8 @@ function buildActiveRoomSummary(roomState: BackendState, gigId: string, startedA
     gigId,
     performerName: roomState.session.talentName || 'Unassigned performer',
     talentRole: roomState.session.talentRole,
+    roomType: roomState.session.roomType,
+    linkedEventId: roomState.session.linkedEventId,
     routePath: `/g/${gigId}`,
     startedAt,
     requestCount: roomState.requests.filter((request) => !request.hidden && !request.removed).length
@@ -2022,6 +2538,35 @@ function resolvePatronDeviceIdHash(req: express.Request, bodyValue: unknown): st
   const actor = accessControl.resolveServerActor(req);
   return normalizePatronDeviceIdHash(actor.patronDeviceIdHash)
     ?? normalizePatronDeviceIdHash(bodyValue);
+}
+
+function createRoomMenuReportReporterFingerprint(input: {
+  actorId?: string | null;
+  sessionId?: string | null;
+  patronDeviceIdHash?: string | null;
+  requesterIpHash: string;
+}) {
+  const durableSubject = input.actorId && input.sessionId
+    ? `actor:${input.actorId}`
+    : input.patronDeviceIdHash
+      ? `device:${input.patronDeviceIdHash}`
+      : `ip:${input.requesterIpHash}`;
+  return createHash('sha256').update(`sway-room-menu-report:v1:${durableSubject}`).digest('hex');
+}
+
+function resolveTrustedLegacyReconciliationGigId(req: express.Request): string | null {
+  const referer = req.get('referer')?.trim();
+  const requestHost = req.get('host')?.trim().toLowerCase();
+  if (!referer || !requestHost) return null;
+
+  try {
+    const parsed = new URL(referer);
+    if (parsed.origin.toLowerCase() !== `${req.protocol}://${requestHost}`.toLowerCase()) return null;
+    const match = /^\/g\/([0-9a-f-]{36})\/?$/i.exec(parsed.pathname);
+    return match ? parseDurableGigId(match[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
 function canonicalJson(input: Record<string, string | number>): string {
@@ -2450,6 +2995,7 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
     },
     coverImageUrl: event.coverImageUrl,
     ticketingMode: event.ticketingMode,
+    attendanceMode: event.attendanceMode,
     externalTicket: externalTicketIsOpen && event.externalTicketUrl
       ? {
           url: event.externalTicketUrl,
@@ -2476,12 +3022,38 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
 }
 
 async function toPublicEventResponseWithTicket(event: PublicPerformerEventDto) {
-  const nativeTicket = event.ticketingMode === 'native_ga' && eventTicketService
-    ? await eventTicketService.getPublicOfferProjection({ eventId: event.id })
-    : null;
+  const [nativeTicket, activeRoomRows] = await Promise.all([
+    event.ticketingMode === 'native_ga' && eventTicketService
+      ? eventTicketService.getPublicOfferProjection({ eventId: event.id })
+      : Promise.resolve(null),
+    businessDb && isPerformerEventRoomLinkEligible(event)
+      ? businessDb
+          .select({
+            gigId: activeRoomRegistry.gigId,
+            routePath: activeRoomRegistry.routePath,
+            roomType: gigSessions.roomType
+          })
+          .from(gigSessions)
+          .innerJoin(activeRoomRegistry, eq(activeRoomRegistry.gigId, gigSessions.id))
+          .where(and(
+            eq(gigSessions.linkedEventId, event.id),
+            eq(gigSessions.performerId, event.performerId),
+            inArray(activeRoomRegistry.registryStatus, ['active', 'ending'])
+          ))
+          .limit(1)
+      : Promise.resolve([])
+  ]);
+  const activeRoom = activeRoomRows[0] ?? null;
   return {
     ...toPublicEventResponse(event),
-    nativeTicket
+    nativeTicket,
+    activeRoom: activeRoom
+      ? {
+          gigId: activeRoom.gigId,
+          routePath: activeRoom.routePath,
+          roomType: activeRoom.roomType
+        }
+      : null
   };
 }
 
@@ -2768,13 +3340,43 @@ function performerVerifyEmailSuccessRedirect() {
   return '/talent/login?status=verified';
 }
 
-function isUniqueConstraintViolation(error: unknown, constraintName: string) {
-  if (!error || typeof error !== 'object') {
-    return false;
+function isDatabaseConstraintViolation(error: unknown, code: string, constraintName: string) {
+  const seen = new Set<unknown>();
+  let candidate: unknown = error;
+  while (candidate && typeof candidate === 'object' && !seen.has(candidate)) {
+    seen.add(candidate);
+    const databaseError = candidate as { code?: string; constraint?: string; cause?: unknown };
+    if (databaseError.code === code && databaseError.constraint === constraintName) return true;
+    candidate = databaseError.cause;
   }
+  return false;
+}
 
-  const candidate = error as { code?: string; constraint?: string };
-  return candidate.code === '23505' && candidate.constraint === constraintName;
+function isUniqueConstraintViolation(error: unknown, constraintName: string) {
+  return isDatabaseConstraintViolation(error, '23505', constraintName);
+}
+
+const ROOM_EVENT_LIFECYCLE_RETRY_CONSTRAINT = 'gig_sessions_event_lifecycle_retry';
+
+function isRoomEventLifecycleRetryConflict(error: unknown) {
+  return isDatabaseConstraintViolation(
+    error,
+    '40001',
+    ROOM_EVENT_LIFECYCLE_RETRY_CONSTRAINT
+  );
+}
+
+function sendRoomEventLifecycleRetryResponse(
+  res: express.Response,
+  retryAfterMs = 250
+) {
+  res.setHeader('Retry-After', '1');
+  return res.status(409).json({
+    success: false,
+    error: 'This room changed while its linked event was updating. Retry the room action.',
+    code: 'room_event_lifecycle_retry_required',
+    retry_after_ms: retryAfterMs
+  });
 }
 
 async function persistStateWithAudit(input: {
@@ -3053,6 +3655,45 @@ async function sendCanonicalPatronActionFailure(input: {
     }
     throw error;
   }
+}
+
+async function sendCanonicalTerminalPaymentOutcome(input: {
+  res: express.Response;
+  clientRequestId: string;
+  idempotencyKey: string;
+  gigId: string;
+  actionType: 'request' | 'tip' | 'boost';
+  owner: PendingActionOwner;
+}) {
+  const terminalOutcome = await paymentService.loadInvisibleActionTerminalOutcome({
+    clientRequestId: input.clientRequestId,
+    idempotencyKey: input.idempotencyKey
+  });
+  if (!terminalOutcome) return null;
+  if (terminalOutcome.gigId !== input.gigId || terminalOutcome.actionType !== input.actionType) {
+    return input.res.status(409).json({
+      error: 'This terminal payment belongs to a different canonical action identity.',
+      code: 'idempotency_identity_mismatch'
+    });
+  }
+
+  const responseStatus = terminalOutcome.outcome === 'failed' ? 402 : 409;
+  return sendCanonicalPatronActionFailure({
+    res: input.res,
+    clientRequestId: input.clientRequestId,
+    idempotencyKey: input.idempotencyKey,
+    gigId: input.gigId,
+    actionType: input.actionType,
+    status: responseStatus,
+    body: {
+      error: terminalOutcome.outcome === 'failed'
+        ? 'Payment authorization failed. Your card was not charged and the action was not created.'
+        : 'The action was not created. Its payment hold was released or its charge was refunded.',
+      payment_status: terminalOutcome.paymentStatus,
+      payment_id: terminalOutcome.paymentId
+    },
+    owner: input.owner
+  });
 }
 
 function applyPaymentReversalTruth(
@@ -3600,6 +4241,7 @@ setInterval(async () => {
     return;
   }
 
+  await performerEventService?.detachIneligibleRoomLinks({ limit: 50 });
   const trackedGigIds = await businessStore.listTrackedGigIds();
 
   for (const trackedGigId of trackedGigIds) {
@@ -3620,8 +4262,14 @@ setInterval(async () => {
         changed = true;
         if (closeout.status === 'complete') {
           closeoutReason = 'post_gig_timer';
-        } else {
+        } else if (closeout.status === 'reversal_pending') {
           closeoutPendingPaymentIds = closeout.pendingPaymentIds;
+        } else {
+          changed = false;
+          console.warn('[sway.closeout] event lifecycle busy; the next maintenance cycle will retry.', {
+            gigId: trackedGigId,
+            retryAfterMs: closeout.retryAfterMs
+          });
         }
       }
     }
@@ -3632,8 +4280,14 @@ setInterval(async () => {
       changed = true;
       if (closeout.status === 'complete') {
         closeoutReason = 'maximum_room_duration';
-      } else {
+      } else if (closeout.status === 'reversal_pending') {
         closeoutPendingPaymentIds = closeout.pendingPaymentIds;
+      } else {
+        changed = false;
+        console.warn('[sway.closeout] event lifecycle busy; the next maintenance cycle will retry.', {
+          gigId: trackedGigId,
+          retryAfterMs: closeout.retryAfterMs
+        });
       }
     }
 
@@ -3705,7 +4359,8 @@ setInterval(async () => {
 
 type RoomCloseoutResult =
   | { status: 'complete'; totals: CloseoutTotals | null; pendingPaymentIds: [] }
-  | { status: 'reversal_pending'; totals: null; pendingPaymentIds: string[] };
+  | { status: 'reversal_pending'; totals: null; pendingPaymentIds: string[] }
+  | { status: 'barrier_retryable'; totals: null; pendingPaymentIds: []; retryAfterMs: number };
 
 async function settleRoomCloseout(inputState: BackendState, gigId: string): Promise<RoomCloseoutResult> {
   if (paymentService.hasDurableStore && UUID_PATTERN.test(gigId)) {
@@ -3713,6 +4368,14 @@ async function settleRoomCloseout(inputState: BackendState, gigId: string): Prom
   }
   if (businessStore.hasDurableStore && UUID_PATTERN.test(gigId)) {
     const barrier = await businessStore.beginRoomCloseout(gigId);
+    if (barrier.status === 'retryable_conflict') {
+      return {
+        status: 'barrier_retryable',
+        totals: null,
+        pendingPaymentIds: [],
+        retryAfterMs: barrier.retryAfterMs
+      };
+    }
     if (!['started', 'already_pending', 'closed'].includes(barrier.status) || !('stateRevision' in barrier)) {
       return {
         status: 'reversal_pending',
@@ -5399,6 +6062,19 @@ app.post('/api/account/claim/attach', async (req, res) => {
   }
 });
 
+async function linkSignupDiscoveryAttribution(accountId: string, journeyId: string | null) {
+  if (!journeyId || !accountDiscoveryAttributionService) return;
+  try {
+    await accountDiscoveryAttributionService.linkFromJourney({ userId: accountId, journeyId });
+  } catch (error) {
+    // Attribution is evidence about a signup, not authority to create one. A
+    // missing or conflicting journey must never deny an otherwise valid account.
+    console.warn('Account signup attribution link was not recorded.', {
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 app.post('/api/account/signup', async (req, res) => {
   applyNoStoreHeaders(res);
   if (!businessDb || !performerLoginChallengeStore.hasDurableStore) {
@@ -5411,6 +6087,13 @@ app.post('/api/account/signup', async (req, res) => {
   const confirmPassword = normalizePerformerPassword(req.body?.confirmPassword);
   const claimCode = typeof req.body?.claimCode === 'string' ? req.body.claimCode.trim() : '';
   const accountNextPath = normalizeSafeAccountNextPath(req.body?.next);
+  const rawDiscoveryJourneyId = typeof req.body?.discoveryJourneyId === 'string'
+    ? req.body.discoveryJourneyId.trim().toLowerCase()
+    : '';
+  if (req.body?.discoveryJourneyId !== undefined && !UUID_PATTERN.test(rawDiscoveryJourneyId)) {
+    return res.status(422).json({ error: 'Discovery journey context is invalid.' });
+  }
+  const discoveryJourneyId = rawDiscoveryJourneyId || null;
   if (!email || !displayName || !password) {
     return res.status(422).json({ error: 'Name, email, and password are required.' });
   }
@@ -5529,6 +6212,7 @@ app.post('/api/account/signup', async (req, res) => {
         });
 
         return {
+          accountId: claim.actorUserId,
           issuedSession,
           performerId,
           displayName: claimable.displayName
@@ -5542,6 +6226,7 @@ app.post('/api/account/signup', async (req, res) => {
         path: '/',
         expires: outcome.issuedSession.expiresAt
       });
+      await linkSignupDiscoveryAttribution(outcome.accountId, discoveryJourneyId);
       return res.status(200).json({
         success: true,
         message: 'Account created. Performer profile claimed and Pro Mode activated.',
@@ -5615,6 +6300,8 @@ app.post('/api/account/signup', async (req, res) => {
     });
     return res.status(503).json({ error: 'Verification email could not be delivered. Please try again.' });
   }
+
+  await linkSignupDiscoveryAttribution(outcome.accountId, discoveryJourneyId);
 
   return res.status(202).json({
     success: true,
@@ -7844,6 +8531,15 @@ app.post("/api/analytics/shell", async (req, res) => {
   try {
     const stage = discoveryStageForTelemetryEvent(payload.event);
     if (stage && payload.journey_id && discoveryObservatoryStore) {
+      const attributionEvidence = stage === 'entry'
+        ? resolveReceiptBackedAttributionEvidence({
+            receipt: readDiscoveryAttributionReceiptCookie(req.get('cookie')),
+            secret: discoveryAttributionReceiptSecret,
+            entryPath: payload.entry_path,
+            clientChannel: payload.attribution_channel,
+            now: new Date()
+          })
+        : null;
       const visibilityEligibility = await resolveDiscoveryEntityVisibilityEligibility({
         entityKind: payload.entity_kind,
         entityKey: payload.entity_key
@@ -7852,7 +8548,7 @@ app.post("/api/analytics/shell", async (req, res) => {
         journeyId: payload.journey_id,
         stage,
         eventType: payload.event,
-        source: payload.attribution_channel ?? 'unknown',
+        source: attributionEvidence?.source ?? payload.attribution_channel ?? 'unknown',
         surface: payload.surface,
         entryPath: payload.entry_path ?? null,
         entityKind: payload.entity_kind as DiscoveryJourneyEventInput['entityKind'],
@@ -7870,9 +8566,17 @@ app.post("/api/analytics/shell", async (req, res) => {
         // Client eligibility is never trusted for funnel inclusion. Resolve
         // it from current public server state or keep it explicitly unknown.
         visibilityEligibility,
-        linkStrength: 'client_correlated_unverified',
+        linkStrength: attributionEvidence?.linkStrength ?? 'client_correlated_unverified',
         searchPhrase: payload.search_phrase ?? null
-      });
+      }, undefined, attributionEvidence ? { attributionEvidence } : undefined);
+      if (attributionEvidence?.attributionReceiptId) {
+        res.clearCookie(DISCOVERY_ATTRIBUTION_RECEIPT_COOKIE, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax',
+          path: '/'
+        });
+      }
       return res.status(202).json({ accepted: true });
     }
     await businessDb.transaction(async (tx) => {
@@ -7886,7 +8590,10 @@ app.post("/api/analytics/shell", async (req, res) => {
       });
     });
     return res.status(202).json({ accepted: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof AttributionReceiptConflictError) {
+      return res.status(409).json({ error: 'Discovery attribution receipt has already been used.' });
+    }
     return res.status(500).json({ error: 'Unable to capture shell telemetry event.' });
   }
 });
@@ -8405,6 +9112,101 @@ type PerformerEventOwnerContext = {
   performerId: string;
 };
 
+async function requireCurrentTalentCapability(
+  res: express.Response,
+  performerId: string,
+  capability: PerformerCapability
+) {
+  if (!talentCapabilityAuthorization) {
+    res.status(503).json({
+      error: 'Talent authorization requires a durable database connection.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+
+  try {
+    await talentCapabilityAuthorization.requireCapability({ performerId, capability });
+    return true;
+  } catch (error) {
+    if (error instanceof TalentCapabilityAuthorizationError) {
+      res.status(error.status).json({ error: error.message, code: error.code, capability });
+      return false;
+    }
+    console.error('[sway.talent-authorization] capability lookup failed:', error);
+    res.status(503).json({
+      error: 'Talent authorization is temporarily unavailable.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+}
+
+async function requireCurrentEventOrganizerAuthority(
+  res: express.Response,
+  performerId: string,
+  eventId: string
+) {
+  if (!talentCapabilityAuthorization) {
+    res.status(503).json({
+      error: 'Event authority requires a durable database connection.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+
+  try {
+    await talentCapabilityAuthorization.requireEventOrganizerAuthority({ performerId, eventId });
+    return true;
+  } catch (error) {
+    if (error instanceof TalentCapabilityAuthorizationError) {
+      res.status(error.status).json({ error: error.message, code: error.code, eventId });
+      return false;
+    }
+    console.error('[sway.talent-authorization] event authority lookup failed:', error);
+    res.status(503).json({
+      error: 'Event authority is temporarily unavailable.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+}
+
+async function requireCurrentLiveMoneyAuthority(
+  res: express.Response,
+  performerId: string,
+  destinationAccountId: string,
+  environment: 'test' | 'live'
+) {
+  if (!talentCapabilityAuthorization) {
+    res.status(503).json({
+      error: 'Live-money authorization requires a durable database connection.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+
+  try {
+    await talentCapabilityAuthorization.requireLiveMoneyAuthority({
+      performerId,
+      destinationAccountId,
+      environment
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof TalentCapabilityAuthorizationError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return false;
+    }
+    console.error('Live-money authority lookup failed:', error);
+    res.status(503).json({
+      error: 'Live-money authorization is temporarily unavailable.',
+      code: 'talent_authorization_unavailable'
+    });
+    return false;
+  }
+}
+
 async function requirePerformerEventOwner(
   req: express.Request,
   res: express.Response
@@ -8436,6 +9238,68 @@ async function requirePerformerEventOwner(
     res.status(503).json({ error: 'Performer event access is temporarily unavailable.' });
     return null;
   }
+}
+
+type PerformerEventPublicationReviewInput = Pick<
+  PerformerEventDto,
+  'id' | 'performerId' | 'title' | 'description' | 'locationName' | 'locationAddress' | 'city'
+>;
+
+async function requirePerformerEventPublicationReview(
+  res: express.Response,
+  owner: PerformerEventOwnerContext,
+  event: PerformerEventPublicationReviewInput
+) {
+  const moderationOutcome = await moderationService.evaluateSubmission({
+    senderName: event.title,
+    text: [
+      event.title,
+      event.description,
+      event.locationName,
+      event.locationAddress,
+      event.city
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' ')
+  });
+  const moderationStatus = moderationOutcome.decision === 'block_submission'
+    ? 'blocked' as const
+    : moderationOutcome.decision === 'hold_for_review'
+      ? 'held_for_review' as const
+      : 'allowed' as const;
+  const moderationWrite = await moderationService.recordPerformerEventPublicationReview({
+    eventId: event.id,
+    performerId: event.performerId,
+    actorUserId: owner.actorUserId,
+    status: moderationStatus,
+    reason: moderationOutcome.reason,
+    title: event.title,
+    description: event.description,
+    locationName: event.locationName,
+    locationAddress: event.locationAddress,
+    city: event.city
+  });
+
+  if (moderationWrite.status !== 'written') {
+    res.status(503).json({
+      error: 'Event publication safety review is temporarily unavailable. No public event change was made.',
+      code: 'event_publication_moderation_unavailable'
+    });
+    return false;
+  }
+  if (moderationOutcome.decision === 'block_submission') {
+    res.status(422).json({
+      error: 'This event cannot be published because its public details violate the safety policy.',
+      code: 'event_publication_blocked'
+    });
+    return false;
+  }
+  if (moderationOutcome.decision === 'hold_for_review') {
+    res.status(422).json({
+      error: 'This event requires safety review before its public details can be published.',
+      code: 'event_publication_review_required'
+    });
+    return false;
+  }
+  return true;
 }
 
 app.get('/api/talent/events', async (req, res) => {
@@ -8476,6 +9340,13 @@ app.post('/api/talent/events', async (req, res) => {
   const owner = await requirePerformerEventOwner(req, res);
   if (!owner || !performerEventService) return;
 
+  if (!await requireCurrentTalentCapability(res, owner.performerId, 'event_publication')) return;
+  if (
+    typeof req.body?.externalTicketUrl === 'string'
+    && req.body.externalTicketUrl.trim()
+    && !await requireCurrentTalentCapability(res, owner.performerId, 'external_ticket_links')
+  ) return;
+
   try {
     if (req.body?.ticketingMode === 'native_ga') {
       const capability = eventTicketService
@@ -8503,6 +9374,7 @@ app.post('/api/talent/events', async (req, res) => {
       locationIsTba: req.body?.locationIsTba,
       coverImageUrl: req.body?.coverImageUrl,
       ticketingMode: req.body?.ticketingMode,
+      attendanceMode: req.body?.attendanceMode,
       externalTicketUrl: req.body?.externalTicketUrl,
       externalTicketLabel: req.body?.externalTicketLabel,
       visibility: req.body?.visibility
@@ -8520,6 +9392,9 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
   const owner = await requirePerformerEventOwner(req, res);
   if (!owner || !performerEventService) return;
 
+  if (!await requireCurrentTalentCapability(res, owner.performerId, 'event_publication')) return;
+  if (!await requireCurrentEventOrganizerAuthority(res, owner.performerId, req.params.eventId)) return;
+
   const optionalFields = [
     'title',
     'description',
@@ -8532,6 +9407,7 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
     'city',
     'locationIsTba',
     'coverImageUrl',
+    'attendanceMode',
     'externalTicketUrl',
     'externalTicketLabel',
     'visibility'
@@ -8541,6 +9417,37 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
     .map((field) => [field, req.body[field]]));
 
   try {
+    const current = await performerEventService.getOwnedEvent({
+      ...owner,
+      eventId: req.params.eventId
+    });
+    const resultingExternalTicketUrl = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'externalTicketUrl')
+      ? req.body?.externalTicketUrl
+      : current.externalTicketUrl;
+    if (
+      typeof resultingExternalTicketUrl === 'string'
+      && resultingExternalTicketUrl.trim()
+      && !await requireCurrentTalentCapability(res, owner.performerId, 'external_ticket_links')
+    ) return;
+    if (current.status === 'published') {
+      const reviewedText = (
+        field: 'title' | 'description' | 'locationName' | 'locationAddress' | 'city',
+        currentValue: string | null
+      ) => {
+        if (!Object.prototype.hasOwnProperty.call(req.body ?? {}, field)) return currentValue;
+        const candidate = req.body?.[field];
+        return typeof candidate === 'string' || candidate === null ? candidate : currentValue;
+      };
+      if (!await requirePerformerEventPublicationReview(res, owner, {
+        id: current.id,
+        performerId: current.performerId,
+        title: reviewedText('title', current.title) ?? current.title,
+        description: reviewedText('description', current.description),
+        locationName: reviewedText('locationName', current.locationName),
+        locationAddress: reviewedText('locationAddress', current.locationAddress),
+        city: reviewedText('city', current.city)
+      })) return;
+    }
     const event = await performerEventService.updateEvent({
       ...owner,
       eventId: req.params.eventId,
@@ -8648,6 +9555,13 @@ app.post('/api/talent/events/:eventId/publish', async (req, res) => {
       ...owner,
       eventId: req.params.eventId
     });
+    if (!await requireCurrentTalentCapability(res, owner.performerId, 'event_publication')) return;
+    if (!await requireCurrentEventOrganizerAuthority(res, owner.performerId, current.id)) return;
+    if (
+      current.externalTicketUrl
+      && !await requireCurrentTalentCapability(res, owner.performerId, 'external_ticket_links')
+    ) return;
+    if (!await requirePerformerEventPublicationReview(res, owner, current)) return;
     if (current.ticketingMode === 'native_ga') {
       if (!eventTicketService) {
         return res.status(503).json({ error: 'Native ticket publishing is temporarily unavailable.' });
@@ -8686,6 +9600,7 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
       ...owner,
       eventId: req.params.eventId
     });
+    if (!await requireCurrentEventOrganizerAuthority(res, owner.performerId, current.id)) return;
     if (current.ticketingMode === 'native_ga') {
       if (!eventTicketService) {
         return res.status(503).json({ error: 'Native ticket cancellation is temporarily unavailable.' });
@@ -8720,6 +9635,47 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
   }
 });
 
+app.get('/api/talent/professional-setup', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional setup requires durable authenticated persistence.' });
+  }
+  try {
+    return res.json({ setup: await talentProfessionalSetupService.getState(talentAccess.actor.actorId) });
+  } catch (error) {
+    if (error instanceof TalentProfessionalSetupError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('Professional setup read failed', error);
+    return res.status(500).json({ error: 'Unable to load professional setup.' });
+  }
+});
+
+app.post('/api/talent/professional-setup', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional setup requires durable authenticated persistence.' });
+  }
+  try {
+    const result = await talentProfessionalSetupService.save(talentAccess.actor.actorId, req.body);
+    return res.status(result.replayed || !result.changed ? 200 : 202).json(result);
+  } catch (error) {
+    if (error instanceof TalentProfessionalSetupError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('Professional setup update failed', error);
+    return res.status(500).json({ error: 'Unable to save professional setup.' });
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -8734,7 +9690,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
-  const [[profileRow], linkRows, partnerState] = await Promise.all([
+  const [[profileRow], linkRows, partnerState, professionalSetup] = await Promise.all([
     businessDb
       .select({
         performerId: performerPublicProfiles.performerId,
@@ -8769,7 +9725,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       .from(performerProfileLinks)
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
-    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
+    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId),
+    talentProfessionalSetupService!.getState(talentAccess.actor.actorId)
   ]);
 
   const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
@@ -8785,7 +9742,8 @@ app.get('/api/talent/profile/public', async (req, res) => {
       visibilityState: performerOwner.visibilityState,
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
-      primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
+      primaryRole: professionalSetup.primaryIdentity?.kind ?? resolvePublicPrimaryRole(profileRow?.metadata),
+      professionalIdentity: professionalSetup.primaryIdentity,
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -8988,12 +9946,25 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
+  if (!talentProfessionalSetupService) {
+    return res.status(503).json({ error: 'Professional identity persistence is unavailable.' });
+  }
+  const professionalSetup = await talentProfessionalSetupService.getState(talentAccess.actor.actorId);
+  const primaryRole = normalizePublicProfilePrimaryRole(professionalSetup.primaryIdentity?.kind);
+  if (!primaryRole || !professionalSetup.primaryIdentity) {
+    return res.status(409).json({ error: 'Choose and save your primary professional identity before editing the public page.' });
+  }
+  if (req.body?.primaryRole !== undefined) {
+    const requestedLegacyRole = normalizePublicProfilePrimaryRole(req.body.primaryRole);
+    if (requestedLegacyRole !== primaryRole) {
+      return res.status(409).json({ error: 'Professional identity changed. Reload and use Professional setup before saving the public page.' });
+    }
+  }
 
   const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
   const stageNameProvided = req.body?.stageName !== undefined;
   const stageName = normalizePublicProfileText(req.body?.stageName, 80);
-  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -9011,10 +9982,6 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
   }
-  if (!primaryRole) {
-    return res.status(422).json({ error: 'Choose your primary role.' });
-  }
-
   const invalidUrlField = [
     ['Avatar URL', req.body?.avatarUrl, avatarUrl],
     ['Facebook URL', req.body?.socialLinks?.facebook, facebookUrl],
@@ -9165,7 +10132,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
           : null,
         80
       ),
-      primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
+      primaryRole,
+      professionalIdentity: professionalSetup.primaryIdentity,
       specialties: specialties ?? [],
       city,
       avatarUrl,
@@ -10259,6 +11227,65 @@ function requireFileCollaborationRuntime(res: express.Response): boolean {
   return true;
 }
 
+function requireCollaboratorRevisionRuntime(res: express.Response): boolean {
+  if (!collaboratorRevisionUploadsEnabled) {
+    res.status(503).json({
+      error: 'Private candidate uploads are disabled.',
+      code: 'candidate_uploads_disabled'
+    });
+    return false;
+  }
+  if (!requireFileCollaborationRuntime(res)) return false;
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return false;
+  return true;
+}
+
+const PUBLIC_CANDIDATE_ERROR_CODES = new Set([
+  'active_candidate_grant_idempotency_conflict',
+  'active_candidate_grant_intent_conflict',
+  'candidate_byte_ceiling_exceeded',
+  'candidate_grant_intent_conflict',
+  'candidate_grant_issuing_authority_ended',
+  'candidate_grant_no_longer_active',
+  'candidate_upload_authority_ended',
+  'candidate_upload_intent_conflict',
+  'candidate_uploads_disabled',
+  'private_collaboration_capability_required',
+  'upload_part_replay_conflict'
+]);
+
+function respondToCandidateRouteError(
+  res: express.Response,
+  error: unknown,
+  fallback: string,
+  fallbackStatus = 422
+) {
+  const rawStatus = typeof (error as { status?: number })?.status === 'number'
+    ? (error as { status: number }).status
+    : fallbackStatus;
+  const status = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus <= 599
+    ? rawStatus
+    : fallbackStatus;
+  const rawCode = typeof (error as { code?: unknown })?.code === 'string'
+    ? (error as { code: string }).code
+    : null;
+  const code = rawCode && PUBLIC_CANDIDATE_ERROR_CODES.has(rawCode) ? rawCode : null;
+  if (code) {
+    return res.status(status).json({
+      error: error instanceof Error ? error.message : fallback,
+      code
+    });
+  }
+
+  const correlationId = randomBytes(12).toString('hex');
+  console.error('[sway.audio] private candidate route failed.', {
+    correlationId,
+    status,
+    errorType: error instanceof Error ? error.constructor.name : typeof error
+  });
+  return res.status(status).json({ error: fallback, correlationId });
+}
+
 app.post('/api/talent/audio/pairing/tokens', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
@@ -10339,7 +11366,10 @@ app.get('/api/talent/audio/pairing/connections', async (req, res) => {
   if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
 
   const connections = await audioFilePairingService.listConnections({ userId: accountAccess.actor.actorId });
-  return res.json({ connections });
+  return res.json({
+    connections,
+    capabilities: { candidateUploads: collaboratorRevisionUploadsEnabled }
+  });
 });
 
 app.post('/api/talent/audio/pairing/connections/:connectionId/shares', async (req, res) => {
@@ -10378,6 +11408,235 @@ app.post('/api/talent/audio/pairing/connections/:connectionId/shares', async (re
   }
 });
 
+app.post('/api/talent/audio/pairing/connections/:connectionId/candidate-revision-grants', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  if (!talentAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireCollaboratorRevisionRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const result = await audioFileCollaborationService.grantCandidateRevisionUpload({
+      connectionId: String(req.params.connectionId || ''),
+      versionId: typeof req.body?.versionId === 'string' ? req.body.versionId : '',
+      grantedByUserId: talentAccess.actor.actorId,
+      idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : '',
+      expiresInHours: req.body?.expiresInHours == null ? undefined : Number(req.body.expiresInHours),
+      maxCandidateBytes: Number(req.body?.maxCandidateBytes)
+    });
+    return res.status(result.reused ? 200 : 201).json({
+      grant: {
+        id: result.grant.id,
+        connectionId: result.grant.connectionId,
+        sourceAssetVersionId: result.grant.assetVersionId,
+        granteeUserId: result.grant.granteeUserId,
+        canUploadCandidateRevision: result.grant.canUploadNewVersion,
+        maxCandidateBytes: result.grant.maxCandidateBytes,
+        expiresAt: result.grant.expiresAt
+      },
+      reused: result.reused
+    });
+  } catch (error) {
+    return respondToCandidateRouteError(res, error, 'Unable to grant private candidate upload.');
+  }
+});
+
+app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireCollaboratorRevisionRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const session = await audioPublishingService.initiateCollaboratorRevisionUpload({
+      grantId: String(req.params.grantId || ''),
+      actorUserId: accountAccess.actor.actorId,
+      originalFilename: typeof req.body?.originalFilename === 'string' ? req.body.originalFilename : '',
+      mimeType: typeof req.body?.mimeType === 'string' ? req.body.mimeType : '',
+      expectedByteSize: Number(req.body?.expectedByteSize),
+      expectedSha256: typeof req.body?.expectedSha256 === 'string' ? req.body.expectedSha256 : '',
+      idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : '',
+      partSizeBytes: req.body?.partSizeBytes == null ? undefined : Number(req.body.partSizeBytes)
+    });
+    return res.status(201).json({
+      uploadSession: {
+        id: session.id,
+        expectedByteSize: session.expectedByteSize,
+        partSizeBytes: session.partSizeBytes,
+        expectedPartCount: Math.ceil(session.expectedByteSize / session.partSizeBytes),
+        uploadStatus: session.uploadStatus,
+        expiresAt: session.expiresAt
+      }
+    });
+  } catch (error) {
+    if (error instanceof AudioStorageQuotaError) {
+      return res.status(413).json({
+        error: 'This private candidate does not fit in the creator working-storage pool.',
+        code: error.code
+      });
+    }
+    if (error instanceof AudioStorageObjectLimitError) {
+      return res.status(429).json({
+        error: 'The creator working-file count safeguard has been reached. Ready releases remain unlimited.',
+        code: error.code
+      });
+    }
+    if ((error as { code?: string })?.code === 'candidate_byte_ceiling_exceeded') {
+      return res.status(413).json({
+        error: error instanceof Error ? error.message : 'Private candidate exceeds its byte ceiling.',
+        code: 'candidate_byte_ceiling_exceeded',
+        maxCandidateBytes: (error as { maxCandidateBytes?: number }).maxCandidateBytes ?? 0,
+        requestedBytes: (error as { requestedBytes?: number }).requestedBytes ?? 0
+      });
+    }
+    return respondToCandidateRouteError(res, error, 'Could not start private candidate upload.');
+  }
+});
+
+const requireCandidateUploadPartAuthority: express.RequestHandler = async (req, res, next) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireCollaboratorRevisionRuntime(res) || !audioPublishingService) return;
+  const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+  if (contentType !== 'application/octet-stream') {
+    return res.status(415).json({ error: 'Upload parts require Content-Type: application/octet-stream.' });
+  }
+
+  try {
+    const authorized = await audioPublishingService.authorizeCollaboratorRevisionUploadPart({
+      grantId: String(req.params.grantId || ''),
+      uploadSessionId: String(req.params.uploadSessionId || ''),
+      actorUserId: accountAccess.actor.actorId,
+      partNumber: Number(req.params.partNumber)
+    });
+    const declaredLength = req.headers['content-length'] == null
+      ? null
+      : Number(req.headers['content-length']);
+    if (declaredLength != null
+      && (!Number.isSafeInteger(declaredLength)
+        || declaredLength <= 0
+        || declaredLength > AUDIO_UPLOAD_PART_MAX_BYTES
+        || declaredLength !== authorized.expectedPartBytes)) {
+      return res.status(declaredLength > AUDIO_UPLOAD_PART_MAX_BYTES ? 413 : 422).json({
+        error: `Upload part must contain exactly ${authorized.expectedPartBytes} bytes.`
+      });
+    }
+    res.locals.candidateUploadActorId = accountAccess.actor.actorId;
+    res.locals.candidateUploadExpectedPartBytes = authorized.expectedPartBytes;
+    return next();
+  } catch (error) {
+    return respondToCandidateRouteError(res, error, 'Private candidate upload authority denied.', 403);
+  }
+};
+
+const handleCandidateUploadPartParseError: express.ErrorRequestHandler = (error, _req, res, next) => {
+  if ((error as { type?: string; status?: number })?.type === 'entity.too.large'
+    || (error as { status?: number })?.status === 413) {
+    applyNoStoreHeaders(res);
+    return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
+  }
+  return next(error);
+};
+
+app.put(
+  '/api/talent/audio/file-grants/:grantId/candidate-uploads/:uploadSessionId/parts/:partNumber',
+  requireCandidateUploadPartAuthority,
+  createAudioUploadPartBodyParser(),
+  handleCandidateUploadPartParseError,
+  async (req, res) => {
+  if (!Buffer.isBuffer(req.body)) {
+    return res.status(415).json({ error: 'Upload parts require Content-Type: application/octet-stream.' });
+  }
+  if (!req.body.byteLength || req.body.byteLength > AUDIO_UPLOAD_PART_MAX_BYTES) {
+    return res.status(413).json({ error: 'Each upload part must be between 1 byte and 6 MiB.' });
+  }
+  if (req.body.byteLength !== Number(res.locals.candidateUploadExpectedPartBytes)) {
+    return res.status(422).json({
+      error: `Upload part must contain exactly ${Number(res.locals.candidateUploadExpectedPartBytes)} bytes.`
+    });
+  }
+
+  try {
+    const part = await audioPublishingService.writeUploadPart({
+      grantId: String(req.params.grantId || ''),
+      uploadSessionId: String(req.params.uploadSessionId || ''),
+      actorUserId: String(res.locals.candidateUploadActorId || ''),
+      partNumber: Number(req.params.partNumber),
+      body: req.body
+    });
+    return res.json({
+      part: {
+        partNumber: Number(req.params.partNumber),
+        byteSize: part.byteSize
+      }
+    });
+  } catch (error) {
+    return respondToCandidateRouteError(res, error, 'Could not write private candidate upload part.');
+  }
+  }
+);
+
+app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads/:uploadSessionId/complete', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireCollaboratorRevisionRuntime(res) || !audioPublishingService) return;
+
+  try {
+    const candidate = await audioPublishingService.completeAndSealCollaboratorRevision({
+      grantId: String(req.params.grantId || ''),
+      uploadSessionId: String(req.params.uploadSessionId || ''),
+      actorUserId: accountAccess.actor.actorId
+    });
+    return res.json({
+      candidate: {
+        id: candidate.id,
+        sourceAssetVersionId: candidate.sourceAssetVersionId,
+        originalFilename: candidate.originalFilename,
+        mimeType: candidate.mimeType,
+        byteSize: candidate.byteSize,
+        sha256: candidate.sha256,
+        durationMs: candidate.durationMs,
+        codec: candidate.codec,
+        sampleRateHz: candidate.sampleRateHz,
+        bitDepth: candidate.bitDepth,
+        channelCount: candidate.channelCount,
+        intakeStatus: candidate.intakeStatus,
+        sealedAt: candidate.sealedAt
+      }
+    });
+  } catch (error) {
+    return respondToCandidateRouteError(res, error, 'Could not finalize private candidate upload.');
+  }
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/candidates/:candidateId/content', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireCollaboratorRevisionRuntime(res) || !audioFileCollaborationService) return;
+
+  try {
+    const opened = await audioFileCollaborationService.openCandidateRevision({
+      grantId: String(req.params.grantId || ''),
+      candidateId: String(req.params.candidateId || ''),
+      userId: accountAccess.actor.actorId
+    });
+    res.setHeader('Content-Type', opened.candidate.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(opened.byteSize));
+    res.setHeader('Content-Disposition', `inline; filename="${opened.candidate.originalFilename.replace(/"/g, '')}"`);
+    res.setHeader('X-Sway-Candidate-Sha256', opened.candidate.sha256);
+    opened.stream.pipe(res);
+  } catch (error) {
+    return respondToCandidateRouteError(res, error, 'Private candidate access denied.', 503);
+  }
+});
+
 app.get('/api/talent/audio/files/shared-with-me', async (req, res) => {
   applyNoStoreHeaders(res);
   const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
@@ -10387,7 +11646,10 @@ app.get('/api/talent/audio/files/shared-with-me', async (req, res) => {
 
   try {
     const files = await audioFileCollaborationService.listSharedWithMe({ userId: accountAccess.actor.actorId });
-    return res.json({ files });
+    return res.json({
+      files,
+      capabilities: { candidateUploads: collaboratorRevisionUploadsEnabled }
+    });
   } catch (error) {
     console.error('[sway.audio] failed to list files shared with account.', error);
     return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
@@ -10403,7 +11665,10 @@ app.get('/api/talent/audio/files/shared-by-me', async (req, res) => {
 
   try {
     const files = await audioFileCollaborationService.listSharedByMe({ userId: accountAccess.actor.actorId });
-    return res.json({ files });
+    return res.json({
+      files,
+      capabilities: { candidateUploads: collaboratorRevisionUploadsEnabled }
+    });
   } catch (error) {
     console.error('[sway.audio] failed to list files shared by account.', error);
     return res.status(503).json({ error: 'Shared files are temporarily unavailable.' });
@@ -10486,7 +11751,7 @@ app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
   const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
   if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
   if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
-  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService || !audioPublishingService) return;
 
   try {
     const revoked = await audioFileCollaborationService.revokeGrant({
@@ -10494,7 +11759,43 @@ app.post('/api/talent/audio/file-grants/:grantId/revoke', async (req, res) => {
       userId: accountAccess.actor.actorId,
       reason: typeof req.body?.reason === 'string' ? req.body.reason : null
     });
-    return res.json(revoked);
+    try {
+      const cleanup = await audioPublishingService.abortCollaboratorRevisionUploadSessions({
+        actorUserId: accountAccess.actor.actorId,
+        grantId: revoked.grantId,
+        cleanupReason: 'candidate_grant_revoked'
+      });
+      if (cleanup.failedCount > 0) {
+        console.error('[sway.audio] grant revocation candidate cleanup needs operator attention.', cleanup.failures);
+      }
+      const status = cleanup.pendingReceiptCount > 0 || cleanup.inProgressCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
+      return res.status(status).json({
+        ...revoked,
+        candidateUploadCleanup: {
+          state: cleanup.failedCount > 0
+            ? 'attention_required'
+            : cleanup.pendingReceiptCount > 0
+              ? 'retry_pending'
+              : cleanup.inProgressCount > 0
+                ? 'in_progress'
+                : 'complete',
+          examinedCount: cleanup.examinedCount,
+          abortedCount: cleanup.abortedCount,
+          pendingReceiptCount: cleanup.pendingReceiptCount,
+          inProgressCount: cleanup.inProgressCount,
+          failedCount: cleanup.failedCount
+        }
+      });
+    } catch (cleanupError) {
+      console.error('[sway.audio] grant revoked but candidate upload cleanup could not be confirmed.', cleanupError);
+      return res.status(202).json({
+        ...revoked,
+        candidateUploadCleanup: {
+          state: 'unconfirmed',
+          error: 'Candidate cleanup could not be confirmed; no sealed candidate was deleted.'
+        }
+      });
+    }
   } catch (error) {
     const status = typeof (error as { status?: number })?.status === 'number'
       ? (error as { status: number }).status
@@ -10508,7 +11809,7 @@ app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (re
   const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
   if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
   if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
-  if (!requireFilePairingRuntime(res) || !audioFilePairingService) return;
+  if (!requireFilePairingRuntime(res) || !audioFilePairingService || !audioPublishingService) return;
 
   try {
     const revoked = await audioFilePairingService.revokeConnection({
@@ -10516,7 +11817,43 @@ app.post('/api/talent/audio/pairing/connections/:connectionId/revoke', async (re
       connectionId: String(req.params.connectionId || ''),
       reason: typeof req.body?.reason === 'string' ? req.body.reason : null
     });
-    return res.json(revoked);
+    try {
+      const cleanup = await audioPublishingService.abortCollaboratorRevisionUploadSessions({
+        actorUserId: accountAccess.actor.actorId,
+        connectionId: revoked.connectionId,
+        cleanupReason: 'candidate_connection_revoked'
+      });
+      if (cleanup.failedCount > 0) {
+        console.error('[sway.audio] connection revocation candidate cleanup needs operator attention.', cleanup.failures);
+      }
+      const status = cleanup.pendingReceiptCount > 0 || cleanup.inProgressCount > 0 || cleanup.failedCount > 0 ? 202 : 200;
+      return res.status(status).json({
+        ...revoked,
+        candidateUploadCleanup: {
+          state: cleanup.failedCount > 0
+            ? 'attention_required'
+            : cleanup.pendingReceiptCount > 0
+              ? 'retry_pending'
+              : cleanup.inProgressCount > 0
+                ? 'in_progress'
+                : 'complete',
+          examinedCount: cleanup.examinedCount,
+          abortedCount: cleanup.abortedCount,
+          pendingReceiptCount: cleanup.pendingReceiptCount,
+          inProgressCount: cleanup.inProgressCount,
+          failedCount: cleanup.failedCount
+        }
+      });
+    } catch (cleanupError) {
+      console.error('[sway.audio] connection revoked but candidate upload cleanup could not be confirmed.', cleanupError);
+      return res.status(202).json({
+        ...revoked,
+        candidateUploadCleanup: {
+          state: 'unconfirmed',
+          error: 'Candidate cleanup could not be confirmed; no sealed candidate was deleted.'
+        }
+      });
+    }
   } catch (error) {
     const status = typeof (error as { status?: number })?.status === 'number'
       ? (error as { status: number }).status
@@ -11092,64 +12429,63 @@ app.get('/api/public/feed', async (_req, res) => {
   applyNoStoreHeaders(res);
 
   try {
-    const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
+    const professionalLimit = Math.max(1, Math.min(60, Number(_req.query?.professionalLimit) || 24));
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
-    const gigIds = activeRooms.map((room) => room.gigId);
-    const [details, publicEvents] = await Promise.all([
-      gigIds.length
-        ? businessDb
-            .select({
-              gigId: gigSessions.id,
-              performerName: performers.displayName,
-              performerHandle: performers.handle,
-              headline: performerPublicProfiles.headline,
-              city: performerPublicProfiles.city,
-              avatarUrl: performerPublicProfiles.avatarUrl,
-              facebookUrl: performerPublicProfiles.facebookUrl,
-              instagramUrl: performerPublicProfiles.instagramUrl,
-              tiktokUrl: performerPublicProfiles.tiktokUrl,
-              youtubeUrl: performerPublicProfiles.youtubeUrl,
-              soundcloudUrl: performerPublicProfiles.soundcloudUrl,
-              websiteUrl: performerPublicProfiles.websiteUrl
-            })
-            .from(gigSessions)
-            .innerJoin(performers, eq(performers.id, gigSessions.performerId))
-            .innerJoin(users, eq(users.id, performers.ownerUserId))
-            .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-            .where(and(
-              inArray(gigSessions.id, gigIds),
-              eq(performers.isActive, true),
-              notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
-              eq(performers.visibilityState, 'public'),
-              sql`nullif(trim(${performers.handle}), '') is not null`,
-              sql`nullif(trim(${performers.bio}), '') is not null`,
-              sql`nullif(trim(${performers.displayName}), '') is not null`
-            ))
-        : Promise.resolve([]),
+    const [activeRooms, directory, publicEvents] = await Promise.all([
+      listReadableActiveRooms(),
+      loadQualifiedPublicProfessionalDirectory(),
       performerEventService.listPublicEvents({ limit: eventLimit })
     ]);
+    const roomCandidates = activeRooms.slice(0, Math.max(30, Math.min(120, roomLimit * 4)));
+    const gigIds = roomCandidates.map((room) => room.gigId);
+    const details = gigIds.length
+      ? await businessDb
+          .select({
+            gigId: gigSessions.id,
+            performerId: performers.id,
+            performerName: performers.displayName,
+            headline: performerPublicProfiles.headline,
+            city: performerPublicProfiles.city,
+            avatarUrl: performerPublicProfiles.avatarUrl,
+            facebookUrl: performerPublicProfiles.facebookUrl,
+            instagramUrl: performerPublicProfiles.instagramUrl,
+            tiktokUrl: performerPublicProfiles.tiktokUrl,
+            youtubeUrl: performerPublicProfiles.youtubeUrl,
+            soundcloudUrl: performerPublicProfiles.soundcloudUrl,
+            websiteUrl: performerPublicProfiles.websiteUrl
+          })
+          .from(gigSessions)
+          .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+          .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+          .where(inArray(gigSessions.id, gigIds))
+      : [];
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
-    const selectedRooms = activeRooms
-      .filter((room) => detailsByGigId.has(room.gigId))
+    const professionalsById = new Map(directory.professionals.map((professional) => [professional.performerId, professional]));
+    const selectedRooms = roomCandidates
+      .filter((room) => {
+        const detail = detailsByGigId.get(room.gigId);
+        return Boolean(detail && professionalsById.has(detail.performerId));
+      })
       .slice(0, roomLimit);
 
     return res.json({
       rooms: selectedRooms
         .map((room) => {
         const detail = detailsByGigId.get(room.gigId)!;
+        const professional = professionalsById.get(detail.performerId)!;
         return {
           gigId: room.gigId,
           routePath: room.routePath,
-          performerName: detail.performerName || room.performerName,
-          performerHandle: detail.performerHandle || null,
-          performerPath: detail.performerHandle ? `/p/${detail.performerHandle}` : null,
+          performerName: professional.displayName || detail.performerName || room.performerName,
+          performerHandle: professional.handle,
+          performerPath: professional.profilePath,
           talentRole: room.talentRole,
           requestCount: room.requestCount,
           startedAt: room.startedAt,
@@ -11168,7 +12504,8 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
-      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket)),
+      professionals: directory.professionals.slice(0, professionalLimit)
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -11330,7 +12667,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       performer: {
         displayName: profile.displayName,
         stageName,
-        primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
+        primaryRole: profile.primaryRole,
+        primaryRoleLabel: profile.primaryRoleLabel,
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,
@@ -11779,10 +13117,29 @@ app.get("/api/admin/active-rooms", async (req, res) => {
 });
 
 app.post("/api/pending-action/reconcile", async (req, res) => {
-  const { client_request_id, idempotency_key } = req.body;
+  const { client_request_id, idempotency_key, expected_gig_id } = req.body;
+  const expectedGigIdSupplied = expected_gig_id !== undefined
+    && expected_gig_id !== null
+    && expected_gig_id !== '';
+  const expectedGigId = expectedGigIdSupplied ? parseDurableGigId(expected_gig_id) : null;
   if (!client_request_id || !idempotency_key) {
-    return res.status(400).json({ error: "client_request_id and idempotency_key are required." });
+    return res.status(400).json({
+      error: 'client_request_id and idempotency_key are required.'
+    });
   }
+  if (expectedGigIdSupplied && !expectedGigId) {
+    return res.status(400).json({ error: 'expected_gig_id must be a valid live-room UUID.' });
+  }
+  const trustedLegacyGigId = expectedGigIdSupplied
+    ? null
+    : resolveTrustedLegacyReconciliationGigId(req);
+  if (!expectedGigIdSupplied && !trustedLegacyGigId) {
+    return res.status(400).json({
+      error: 'Legacy pending-action recovery requires a same-origin live-room route.',
+      code: 'legacy_room_scope_required'
+    });
+  }
+  const boundExpectedGigId = expectedGigId ?? trustedLegacyGigId;
 
   const result = await idempotencyStore.reconcilePendingAction({
     clientRequestId: client_request_id,
@@ -11795,151 +13152,24 @@ app.post("/api/pending-action/reconcile", async (req, res) => {
   if (result.status === 'expired') {
     return res.status(410).json({ error: "Pending action expired before backend confirmation." });
   }
-
-  if (result.status === 'reconciled') {
-    const sanitizedBody = sanitizePatronMutationResponseBody(result.responseBody);
-    if (result.responseStatus >= 400) {
-      return res.status(result.responseStatus).json(sanitizedBody);
-    }
-    return res.json({
-      ...result,
-      responseBody: sanitizedBody
+  if (boundExpectedGigId && 'gigId' in result && result.gigId && result.gigId !== boundExpectedGigId) {
+    return res.status(409).json({
+      error: 'This pending action belongs to a different live room.',
+      code: 'pending_action_room_mismatch'
     });
   }
 
-  let recoveryOwner: PendingActionOwner | null = null;
-
-  if (
-    (result.status === 'pending' || result.status === 'retrying')
-    && result.gigId
-    && ['request', 'tip', 'boost'].includes(result.actionType)
-  ) {
-    const reconciledActionType = result.actionType as 'request' | 'tip' | 'boost';
-    const ownership = await idempotencyStore.claimPendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key
-    });
-    if (ownership.status === 'busy') {
-      return res.status(202).json({
-        ...result,
-        pending: true,
-        retry_after_ms: ownership.retryAfterMs
-      });
-    }
-    if (ownership.status !== 'acquired') {
-      return res.status(202).json({ ...result, pending: true });
-    }
-    recoveryOwner = ownership.owner;
-    // A worker may have completed the processor/database work after the
-    // original HTTP request disappeared. Converge visibility first, then mint
-    // a fresh private receipt and persist the exact terminal replay before
-    // telling the browser that the action succeeded.
-    await paymentService.reconcileActionVisibility({
-      limit: 50,
-      ownedAction: {
-        clientRequestId: client_request_id,
-        idempotencyKey: idempotency_key,
-        owner: recoveryOwner
-      }
-    });
-    const snapshot = await loadRoomState(result.gigId);
-    const receipt = issuePatronStatusReceipt();
-    let responseBody: ReturnType<typeof buildPatronRequestMutationResponse> | ReturnType<typeof buildPatronBoostMutationResponse> | null = null;
-
-    if (reconciledActionType === 'boost') {
-      const request = snapshot.state.requests.find((item) =>
-        item.boosts.some((boost) => boost.clientRequestId === client_request_id && boost.idempotencyKey === idempotency_key)
-      );
-      const boost = request?.boosts.find((item) =>
-        item.clientRequestId === client_request_id && item.idempotencyKey === idempotency_key
-      );
-      if (request && boost) {
-        recalculateTotals(snapshot.state);
-        responseBody = buildPatronBoostMutationResponse({
-          request,
-          boost,
-          roomState: snapshot.state,
-          gigId: result.gigId,
-          receipt: receipt.receipt,
-          reconciled: true
-        });
-      }
-    } else {
-      const request = snapshot.state.requests.find((item) =>
-        item.clientRequestId === client_request_id && item.idempotencyKey === idempotency_key
-      );
-      if (request) {
-        recalculateTotals(snapshot.state);
-        responseBody = buildPatronRequestMutationResponse({
-          request,
-          roomState: snapshot.state,
-          gigId: result.gigId,
-          receipt: receipt.receipt,
-          reconciled: true
-        });
-      }
-    }
-
-    if (responseBody) {
-      const completion = await idempotencyStore.completePendingAction({
-        clientRequestId: client_request_id,
-        idempotencyKey: idempotency_key,
-        gigId: result.gigId,
-        actionType: reconciledActionType,
-        receiptHash: receipt.receiptHash,
-        status: 200,
-        body: responseBody,
-        owner: recoveryOwner
-      });
-      return res.json({
-        status: 'reconciled',
-        responseStatus: completion.status,
-        responseBody: sanitizePatronMutationResponseBody(completion.body)
-      });
-    }
-
-    const terminalOutcome = await paymentService.loadInvisibleActionTerminalOutcome({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key
-    });
-    if (terminalOutcome) {
-      const responseStatus = terminalOutcome.outcome === 'failed' ? 402 : 409;
-      const failureBody = {
-        success: false,
-        pending: false,
-        terminal: true,
-        error: terminalOutcome.outcome === 'failed'
-          ? 'Payment authorization failed. Your card was not charged and the action was not created.'
-          : 'The action was not created. Its payment hold was released or its charge was refunded.',
-        payment_status: terminalOutcome.paymentStatus,
-        payment_id: terminalOutcome.paymentId
-      };
-      try {
-        const completion = await idempotencyStore.completePendingActionFailure({
-          clientRequestId: client_request_id,
-          idempotencyKey: idempotency_key,
-          gigId: terminalOutcome.gigId,
-          actionType: terminalOutcome.actionType,
-          status: responseStatus,
-          body: failureBody,
-          owner: recoveryOwner
-        });
-        return res.status(completion.status).json(sanitizePatronMutationResponseBody(completion.body));
-      } catch (error) {
-        if (error instanceof Error && ['pending_action_already_visible', 'pending_action_owner_fenced'].includes(error.message)) {
-          return res.json({ ...result, status: 'retrying' });
-        }
-        throw error;
-      }
-    }
-    await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: recoveryOwner
-    });
-  }
-
-  return res.json(result);
+  // This legacy endpoint is deliberately status-only. Complete payloads,
+  // private receipts, ownership, and finalization require resubmitting the
+  // original action to its canonical request/boost route, where every identity
+  // field and the full intent fingerprint are compared before any replay.
+  const statusCode = result.status === 'pending' || result.status === 'retrying' ? 202 : 200;
+  return res.status(statusCode).json({
+    status: result.status,
+    pending: statusCode === 202,
+    recovery: 'resubmit_original_action',
+    room_scope_source: expectedGigIdSupplied ? 'client_asserted' : 'trusted_route_legacy'
+  });
 });
 
 app.post("/api/session/start", async (req, res) => {
@@ -11953,7 +13183,18 @@ app.post("/api/session/start", async (req, res) => {
     }
   }
 
-  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
+  const {
+    talentName,
+    talentRole,
+    roomType,
+    requestMenu,
+    linkedEventId,
+    feeType,
+    minimumTip,
+    paymentsEnabled,
+    searchScope,
+    gig_id
+  } = req.body;
   const requestedGigId = parseDurableGigId(gig_id);
   if (!requestedGigId) {
     return res.status(422).json({
@@ -11961,14 +13202,51 @@ app.post("/api/session/start", async (req, res) => {
       code: 'room_start_id_required'
     });
   }
-  const requestedRoomConfig = {
-    talentName: talentName || "DJ Pro",
-    talentRole: talentRole || 'DJ',
-    feeType: feeType || 'patron',
-    minimumTip: Math.max(5, Number(minimumTip) || 5),
-    paymentsEnabled: paymentsEnabled === true,
-    searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'
+  let requestedRoomConfig: {
+    talentName: string;
+    talentRole: 'DJ' | 'Performer';
+    roomType: 'music' | 'comedy' | 'service' | 'general';
+    requestMenu: ReturnType<typeof normalizeRoomRequestMenu>;
+    linkedEventId: string | null;
+    feeType: 'talent' | 'patron';
+    minimumTip: number;
+    paymentsEnabled: boolean;
+    searchScope: 'catalog' | 'library';
   };
+  try {
+    const normalizedRoomType = normalizeLiveRoomType(roomType);
+    if (normalizedRoomType !== 'music' && paymentsEnabled === true) {
+      return res.status(422).json({
+        error: 'Comedy, service, and general rooms are free-only in this release.',
+        code: 'non_music_room_money_not_available'
+      });
+    }
+    const normalizedLinkedEventId = linkedEventId === undefined || linkedEventId === null || linkedEventId === ''
+      ? null
+      : parseDurableGigId(linkedEventId);
+    if (linkedEventId && !normalizedLinkedEventId) {
+      return res.status(422).json({
+        error: 'linkedEventId must be a valid event UUID.',
+        code: 'invalid_linked_event_id'
+      });
+    }
+    requestedRoomConfig = {
+      talentName: normalizeLibraryText(talentName, 120) || 'Sway professional',
+      talentRole: normalizedRoomType === 'music' && talentRole === 'DJ' ? 'DJ' : 'Performer',
+      roomType: normalizedRoomType,
+      requestMenu: normalizeRoomRequestMenu(requestMenu, normalizedRoomType),
+      linkedEventId: normalizedLinkedEventId,
+      feeType: feeType === 'talent' ? 'talent' : 'patron',
+      minimumTip: Math.max(5, Number(minimumTip) || 5),
+      paymentsEnabled: normalizedRoomType === 'music' && paymentsEnabled === true,
+      searchScope: searchScope === 'catalog' ? 'catalog' : 'library'
+    };
+  } catch (error) {
+    if (error instanceof LiveRoomMenuPolicyError) {
+      return res.status(422).json({ error: error.message, code: error.code });
+    }
+    throw error;
+  }
 
   const loadMatchingStartedRoom = async () => {
     if (!businessStore.hasDurableStore) return { kind: 'missing' as const };
@@ -11978,6 +13256,9 @@ app.post("/api/session/start", async (req, res) => {
     const ownedByCaller = session.ownerActorUserId === actor.actorId;
     const sameConfig = session.talentName === requestedRoomConfig.talentName
       && session.talentRole === requestedRoomConfig.talentRole
+      && session.roomType === requestedRoomConfig.roomType
+      && JSON.stringify(session.requestMenu) === JSON.stringify(requestedRoomConfig.requestMenu)
+      && session.linkedEventId === requestedRoomConfig.linkedEventId
       && session.feeType === requestedRoomConfig.feeType
       && session.minimumTip === requestedRoomConfig.minimumTip
       && session.paymentsEnabled === requestedRoomConfig.paymentsEnabled
@@ -12002,13 +13283,6 @@ app.post("/api/session/start", async (req, res) => {
     return res.status(409).json({ error: 'This room start identity was already used for a different or completed room.' });
   }
 
-  if (requestedRoomConfig.paymentsEnabled && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
-    return res.status(503).json({
-      error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
-      code: 'test_payment_runtime_unavailable'
-    });
-  }
-
   const [seller] = businessDb && actor.actorId
       ? await businessDb.select({
         id: performers.id,
@@ -12022,6 +13296,116 @@ app.post("/api/session/start", async (req, res) => {
         payoutHoldReason: performers.payoutHoldReason
       }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
+  if (!seller) {
+    return res.status(403).json({
+      error: 'Only the persisted performer owner can start this live room.',
+      code: 'performer_owner_required'
+    });
+  }
+  if (!await requireCurrentTalentCapability(res, seller.id, 'live_rooms')) return;
+
+  if (requestedRoomConfig.paymentsEnabled && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
+    return res.status(503).json({
+      error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+      code: 'test_payment_runtime_unavailable'
+    });
+  }
+
+  for (const menuItem of requestedRoomConfig.requestMenu) {
+    const moderationOutcome = await moderationService.evaluateSubmission({
+      senderName: requestedRoomConfig.talentName,
+      text: `${menuItem.title} ${menuItem.description}`
+    });
+    const moderationStatus = moderationOutcome.decision === 'block_submission'
+      ? 'blocked' as const
+      : moderationOutcome.decision === 'hold_for_review'
+        ? 'held_for_review' as const
+        : 'allowed' as const;
+    const moderationWrite = await moderationService.recordRoomMenuReview({
+      gigId: requestedGigId,
+      menuItemId: menuItem.id,
+      performerId: seller.id,
+      actorUserId: actor.actorId,
+      status: moderationStatus,
+      reason: moderationOutcome.reason,
+      title: menuItem.title,
+      description: menuItem.description
+    });
+    if (moderationWrite.status !== 'written') {
+      return res.status(503).json({
+        error: 'Room menu safety review is temporarily unavailable. No room was started.',
+        code: 'room_menu_moderation_unavailable'
+      });
+    }
+    if (moderationOutcome.decision === 'block_submission') {
+      return res.status(422).json({
+        error: 'A room menu item could not be published because it violates the safety policy.',
+        code: 'room_menu_blocked',
+        menuItemId: menuItem.id
+      });
+    }
+    if (moderationOutcome.decision === 'hold_for_review') {
+      return res.status(422).json({
+        error: 'A room menu item requires safety review before this room can start.',
+        code: 'room_menu_review_required',
+        menuItemId: menuItem.id
+      });
+    }
+  }
+
+  let linkedEvent: GigSession['linkedEvent'] = null;
+  if (requestedRoomConfig.linkedEventId) {
+    if (!businessDb || !performerEventService || !seller) {
+      return res.status(503).json({
+        error: 'Event linkage is temporarily unavailable. Start an unlinked room or retry shortly.',
+        code: 'linked_event_store_unavailable'
+      });
+    }
+    try {
+      const ownedEvent = await performerEventService.getOwnedEvent({
+        eventId: requestedRoomConfig.linkedEventId,
+        performerId: seller.id,
+        actorUserId: actor.actorId
+      });
+      if (!await requireCurrentEventOrganizerAuthority(res, seller.id, ownedEvent.id)) return;
+      if (!isPerformerEventRoomLinkEligible(ownedEvent)) {
+        return res.status(422).json({
+          error: 'A room can link only to your published, still-current walk-in, RSVP, or external-ticket event.',
+          code: 'linked_event_not_eligible'
+        });
+      }
+      const [existingLinkedRoom] = await businessDb
+        .select({ id: gigSessions.id })
+        .from(gigSessions)
+        .where(and(
+          eq(gigSessions.linkedEventId, ownedEvent.id),
+          inArray(gigSessions.status, ['active', 'closeout_pending']),
+          ne(gigSessions.id, requestedGigId)
+        ))
+        .limit(1);
+      if (existingLinkedRoom) {
+        return res.status(409).json({
+          error: 'This event already has an active Sway room.',
+          code: 'linked_event_room_already_active'
+        });
+      }
+      linkedEvent = {
+        id: ownedEvent.id,
+        title: ownedEvent.title,
+        startsAt: ownedEvent.startsAt,
+        eventPath: `/e/${ownedEvent.id}`,
+        attendanceMode: ownedEvent.attendanceMode
+      };
+    } catch (error) {
+      if (error instanceof EventServiceError) {
+        return res.status(422).json({
+          error: 'The selected event is unavailable for this room.',
+          code: 'linked_event_not_eligible'
+        });
+      }
+      throw error;
+    }
+  }
   const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
     seller,
     allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
@@ -12036,6 +13420,21 @@ app.post("/api/session/start", async (req, res) => {
       code: 'seller_payout_not_ready'
     });
   }
+  if (requestedPaymentsEnabled && sellerMoneyReadiness.ready) {
+    const moneyEnvironment = liveRoomPaymentRuntimeConfig.mode;
+    if (moneyEnvironment !== 'test' && moneyEnvironment !== 'live') {
+      return res.status(503).json({
+        error: 'Paid-room execution does not have an exact payment environment.',
+        code: 'test_payment_runtime_unavailable'
+      });
+    }
+    if (!await requireCurrentLiveMoneyAuthority(
+      res,
+      seller.id,
+      sellerMoneyReadiness.destinationAccountId,
+      moneyEnvironment
+    )) return;
+  }
 
   const roomGigId = requestedGigId;
   const roomState = createEmptyBackendState();
@@ -12049,6 +13448,10 @@ app.post("/api/session/start", async (req, res) => {
     lastMutationActorUserId: actor.actorId,
     talentName: requestedRoomConfig.talentName,
     talentRole: requestedRoomConfig.talentRole,
+    roomType: requestedRoomConfig.roomType,
+    requestMenu: requestedRoomConfig.requestMenu,
+    linkedEventId: requestedRoomConfig.linkedEventId,
+    linkedEvent,
     feeType: requestedRoomConfig.feeType,
     minimumTip: requestedRoomConfig.minimumTip,
     endGigTimerStartedAt: null,
@@ -12064,12 +13467,21 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: requestedRoomConfig.searchScope,
-    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
-    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
-    settlementMode: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentsEnabled: requestedRoomConfig.roomType === 'music'
+      && liveRoomPaymentRuntimeConfig.moneyEnabled
+      && requestedPaymentsEnabled
+      && sellerMoneyReadiness.ready,
+    tipsEnabled: requestedRoomConfig.roomType === 'music'
+      && liveRoomPaymentRuntimeConfig.moneyEnabled
+      && sellerMoneyReadiness.ready,
+    settlementMode: requestedRoomConfig.roomType === 'music'
+      && liveRoomPaymentRuntimeConfig.moneyEnabled
+      && sellerMoneyReadiness.ready
       ? sellerMoneyReadiness.settlementMode
       : 'unavailable',
-    paymentEnvironment: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentEnvironment: requestedRoomConfig.roomType === 'music'
+      && liveRoomPaymentRuntimeConfig.moneyEnabled
+      && sellerMoneyReadiness.ready
       ? liveRoomPaymentRuntimeConfig.mode
       : 'unavailable',
     totals: {
@@ -12093,6 +13505,9 @@ app.post("/api/session/start", async (req, res) => {
       metadata: {
         talentName: roomState.session.talentName,
         talentRole: roomState.session.talentRole,
+        roomType: roomState.session.roomType,
+        requestMenuItemIds: roomState.session.requestMenu.map((item) => item.id),
+        linkedEventId: roomState.session.linkedEventId,
         feeType: roomState.session.feeType,
         minimumTip: roomState.session.minimumTip,
         paymentsEnabled: roomState.session.paymentsEnabled,
@@ -12114,6 +13529,18 @@ app.post("/api/session/start", async (req, res) => {
         return res.json({ success: true, replayed: true, state });
       }
       return res.status(409).json({ error: 'This room start identity was already used for a different room setup.' });
+    }
+    if (isDatabaseConstraintViolation(error, '23514', 'gig_sessions_linked_event_eligible')) {
+      return res.status(422).json({
+        error: 'The selected event is no longer eligible for a live room.',
+        code: 'linked_event_not_eligible'
+      });
+    }
+    if (isUniqueConstraintViolation(error, 'gig_sessions_active_linked_event_idx')) {
+      return res.status(409).json({
+        error: 'This event already has an active Sway room.',
+        code: 'linked_event_room_already_active'
+      });
     }
     console.error('[sway.session.start] durable room start failed:', error);
     return res.status(503).json({ error: 'The room could not be started safely. Retry with the same room start.' });
@@ -12170,15 +13597,35 @@ app.post("/api/session/end", async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
   if (!actor) return;
   const roomState = roomContext.state;
+  if (roomState.session.status === 'ending') {
+    return res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId) });
+  }
   if (roomState.session.status !== 'active') {
     return res.status(400).json({ error: "No active session to end." });
   }
   if (businessStore.hasDurableStore && UUID_PATTERN.test(roomContext.gigId)) {
-    const barrier = await businessStore.beginRoomCloseout(roomContext.gigId);
+    const requestedAt = new Date().toISOString();
+    const barrier = await businessStore.beginRoomCloseout(roomContext.gigId, {
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      eventType: 'session.end',
+      metadata: { endGigTimerStartedAt: requestedAt }
+    });
+    if (barrier.status === 'retryable_conflict') {
+      return sendRoomEventLifecycleRetryResponse(res, barrier.retryAfterMs);
+    }
     if (!['started', 'already_pending'].includes(barrier.status) || !('stateRevision' in barrier)) {
       return res.status(503).json({ error: 'Room closeout could not be reserved safely. No payment state was changed.' });
     }
-    roomState.session.stateRevision = barrier.stateRevision;
+    const refreshed = await loadRoomState(roomContext.gigId);
+    if (activeGigId === roomContext.gigId) {
+      state = refreshed.state;
+      activeGigId = refreshed.activeGigId;
+    }
+    return res.json({
+      success: true,
+      state: prepareRoomState(refreshed.state, roomContext.gigId)
+    });
   }
   const previousStatus = roomState.session.status;
   roomState.session.status = 'ending';
@@ -12207,21 +13654,48 @@ app.post("/api/session/closeout", async (req, res) => {
   if (!actor) return;
   const roomState = roomContext.state;
   const previousStatus = roomState.session.status;
-  const closeout = await settleRoomCloseout(roomState, roomContext.gigId);
+  let closeout: RoomCloseoutResult;
+  try {
+    closeout = await settleRoomCloseout(roomState, roomContext.gigId);
+  } catch (error) {
+    if (isRoomEventLifecycleRetryConflict(error)) {
+      return sendRoomEventLifecycleRetryResponse(res);
+    }
+    console.error('[sway.closeout] closeout preparation failed:', error);
+    return res.status(503).json({
+      success: false,
+      error: 'Room closeout is temporarily unavailable. No success was recorded.'
+    });
+  }
   roomState.session.lastMutationActorUserId = actor.actorId;
 
+  if (closeout.status === 'barrier_retryable') {
+    return sendRoomEventLifecycleRetryResponse(res, closeout.retryAfterMs);
+  }
+
   if (closeout.status === 'reversal_pending') {
-    await persistStateWithAudit({
-      roomState,
-      gigId: roomContext.gigId,
-      actor,
-      entityType: 'gig_session',
-      entityId: roomContext.gigId,
-      eventType: 'session.closeout_reversal_pending',
-      previousStatus,
-      nextStatus: roomState.session.status,
-      metadata: { pendingPaymentIds: closeout.pendingPaymentIds }
-    });
+    try {
+      await persistStateWithAudit({
+        roomState,
+        gigId: roomContext.gigId,
+        actor,
+        entityType: 'gig_session',
+        entityId: roomContext.gigId,
+        eventType: 'session.closeout_reversal_pending',
+        previousStatus,
+        nextStatus: roomState.session.status,
+        metadata: { pendingPaymentIds: closeout.pendingPaymentIds }
+      });
+    } catch (error) {
+      if (isRoomEventLifecycleRetryConflict(error)) {
+        return sendRoomEventLifecycleRetryResponse(res);
+      }
+      console.error('[sway.closeout] pending closeout persistence failed:', error);
+      return res.status(503).json({
+        success: false,
+        error: 'Room closeout is temporarily unavailable. No success was recorded.'
+      });
+    }
     return res.status(409).json({
       success: false,
       error: 'Closeout is waiting for the payment processor to confirm every release or refund.',
@@ -12232,21 +13706,32 @@ app.post("/api/session/closeout", async (req, res) => {
 
   const closeoutTotals = closeout.totals;
 
-  await persistStateWithAudit({
-    roomState,
-    gigId: roomContext.gigId,
-    actor,
-    entityType: 'gig_session',
-    entityId: roomContext.gigId,
-    eventType: 'session.closeout',
-    previousStatus,
-    nextStatus: roomState.session.status,
-    metadata: {
-      autoNukeApplied: true,
-      closeoutTotalsSource: closeoutTotals ? closeoutTotals.source : 'provider_disabled',
-      capturedTotalCents: closeoutTotals ? closeoutTotals.capturedTotalCents : 0
+  try {
+    await persistStateWithAudit({
+      roomState,
+      gigId: roomContext.gigId,
+      actor,
+      entityType: 'gig_session',
+      entityId: roomContext.gigId,
+      eventType: 'session.closeout',
+      previousStatus,
+      nextStatus: roomState.session.status,
+      metadata: {
+        autoNukeApplied: true,
+        closeoutTotalsSource: closeoutTotals ? closeoutTotals.source : 'provider_disabled',
+        capturedTotalCents: closeoutTotals ? closeoutTotals.capturedTotalCents : 0
+      }
+    });
+  } catch (error) {
+    if (isRoomEventLifecycleRetryConflict(error)) {
+      return sendRoomEventLifecycleRetryResponse(res);
     }
-  });
+    console.error('[sway.closeout] final closeout persistence failed:', error);
+    return res.status(503).json({
+      success: false,
+      error: 'Room closeout is temporarily unavailable. No success was recorded.'
+    });
+  }
   res.json({ success: true, state: prepareRoomState(roomState, roomContext.gigId), closeoutTotals });
 });
 
@@ -12335,7 +13820,8 @@ app.post("/api/session/search-scope", async (req, res) => {
 
 // Operator toggles whether this room accepts payment at all. Off means a free
 // event: tips are rejected, boosts become free upvotes, requests carry no
-// payment step. Defaults to true (paid) for every room.
+// payment step. Relational money mode defaults off and only music rooms may
+// enable it after every current authorization/readiness gate succeeds.
 app.post("/api/session/payments-enabled", async (req, res) => {
   const roomContext = await resolveLegacyWritableRoom(req, res);
   if (!roomContext) return;
@@ -12348,7 +13834,14 @@ app.post("/api/session/payments-enabled", async (req, res) => {
     return res.status(400).json({ error: "enabled must be a boolean." });
   }
 
+  let enablingMoneyReadiness: ReturnType<typeof resolveLiveRoomSellerMoneyReadiness> | null = null;
   if (enabled) {
+    if (roomState.session.roomType !== 'music') {
+      return res.status(409).json({
+        error: 'Comedy, service, and general rooms are free-only in this release.',
+        code: 'non_music_room_money_not_available'
+      });
+    }
     if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
       return res.status(503).json({
         error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
@@ -12381,10 +13874,32 @@ app.post("/api/session/payments-enabled", async (req, res) => {
         code: 'seller_payout_not_ready'
       });
     }
+    const moneyEnvironment = liveRoomPaymentRuntimeConfig.mode;
+    if (moneyEnvironment !== 'test' && moneyEnvironment !== 'live') {
+      return res.status(503).json({
+        error: 'Paid-room execution does not have an exact payment environment.',
+        code: 'test_payment_runtime_unavailable'
+      });
+    }
+    if (!seller?.id || !await requireCurrentLiveMoneyAuthority(
+      res,
+      seller.id,
+      sellerMoneyReadiness.destinationAccountId,
+      moneyEnvironment
+    )) return;
+    enablingMoneyReadiness = sellerMoneyReadiness;
   }
 
   const previousEnabled = roomState.session.paymentsEnabled;
   roomState.session.paymentsEnabled = enabled;
+  roomState.session.tipsEnabled = enabled;
+  if (enabled && enablingMoneyReadiness?.ready) {
+    roomState.session.settlementMode = enablingMoneyReadiness.settlementMode;
+    roomState.session.paymentEnvironment = liveRoomPaymentRuntimeConfig.mode === 'live' ? 'live' : 'test';
+  } else {
+    roomState.session.settlementMode = 'unavailable';
+    roomState.session.paymentEnvironment = 'unavailable';
+  }
   roomState.session.lastMutationActorUserId = actor.actorId;
 
   await persistStateWithAudit({
@@ -12515,6 +14030,7 @@ app.post("/api/request/create", async (req, res) => {
   const {
     type,
     targetType,
+    menu_item_id,
     title,
     subtitle,
     senderName,
@@ -12557,98 +14073,33 @@ app.post("/api/request/create", async (req, res) => {
 
   const isStraightTip = targetType === 'straight_tip' || type === 'tip';
   const durableActionType = isStraightTip ? 'tip' : 'request';
-  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
-  if (preliminaryReplay.kind === 'replay') {
-    return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
+  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key, {
+    clientRequestId: client_request_id,
+    gigId: durableGigId,
+    actionType: durableActionType,
+    patronDeviceIdHash: resolvedPatronDeviceIdHash
+  });
+  if (preliminaryReplay.kind === 'misuse') {
+    return res.status(409).json({
+      error: 'This idempotency key belongs to a different request identity.',
+      code: 'idempotency_identity_mismatch'
+    });
+  }
+  const roomSnapshot = await loadRoomState(durableGigId);
+  const roomState = roomSnapshot.state;
+  const explicitMoneyIntent = isStraightTip
+    || Number(amount) > 0
+    || (typeof payment_method === 'string' && payment_method.trim().length > 0)
+    || Boolean(confirmedPaymentIntentId);
+  if (roomState.session.roomType !== 'music' && explicitMoneyIntent) {
+    return res.status(422).json({
+      error: 'Money actions are unavailable in comedy, service, and general rooms in this release.',
+      code: 'non_music_room_money_not_available'
+    });
   }
   let actionOwner: PendingActionOwner | null = null;
-  if (confirmedPaymentIntentId) {
-    const ownership = await idempotencyStore.claimPendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      expected: {
-        gigId: durableGigId,
-        actionType: durableActionType,
-        patronDeviceIdHash: resolvedPatronDeviceIdHash
-      }
-    });
-    if (ownership.status === 'busy') {
-      return res.status(202).json({
-        success: false,
-        pending: true,
-        payment_status: 'processing',
-        retry_after_ms: ownership.retryAfterMs
-      });
-    }
-    if (ownership.status === 'misuse') {
-      return res.status(409).json({ error: 'The payment confirmation does not belong to this request.' });
-    }
-    if (ownership.status === 'expired') {
-      return res.status(410).json({ error: 'Pending action expired before backend confirmation.' });
-    }
-    if (ownership.status !== 'acquired') {
-      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
-    }
-    actionOwner = ownership.owner;
-  }
-  // Reconcile an SCA-confirmed PaymentIntent against its immutable durable
-  // action identity before reading any room setting that may have changed
-  // while the customer was in Stripe.js.
-  const confirmedAuthorization = confirmedPaymentIntentId
-    ? await paymentService.confirmAuthorizedAction({
-        gigId: durableGigId,
-        actionType: isStraightTip ? 'tip' : 'request',
-        clientRequestId: client_request_id,
-        idempotencyKey: idempotency_key,
-        patronDeviceIdHash: resolvedPatronDeviceIdHash,
-        processorPaymentIntentId: confirmedPaymentIntentId
-      })
-    : null;
-  if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
-      success: false,
-      error: confirmedAuthorization.status === 'disabled'
-        ? 'Payments are temporarily unavailable. Confirmation is still pending.'
-        : 'Payment confirmation could not be matched to this request.',
-      payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
-    });
-  }
-  if (confirmedAuthorization?.status === 'processing') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(202).json({
-      success: false,
-      pending: true,
-      payment_status: 'processing',
-      payment_id: confirmedAuthorization.paymentId
-    });
-  }
-  if (confirmedAuthorization?.status === 'requires_confirmation') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(402).json({
-      success: false,
-      error: 'Payment confirmation is still required before your request is submitted.',
-      payment_status: 'requires_confirmation',
-      payment_id: confirmedAuthorization.paymentId,
-      payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
-      client_secret: confirmedAuthorization.clientSecret
-    });
-  }
-
-  let durableReservationEstablished = preliminaryReplay.kind === 'pending'
-    && Boolean(confirmedAuthorization && 'paymentId' in confirmedAuthorization);
+  let confirmedAuthorization: AuthorizeActionResult | null = null;
+  let durableReservationEstablished = false;
 
   const completeReservedFailure = async (status: number, body: Record<string, unknown>) => {
     if (!durableReservationEstablished) return res.status(status).json(body);
@@ -12717,8 +14168,43 @@ app.post("/api/request/create", async (req, res) => {
     return rejectAfterConfirmedAuthorization(422, { error: "Sway Request and Tip payments currently support USD only." });
   }
 
-  const roomSnapshot = await loadRoomState(durableGigId);
-  const roomState = roomSnapshot.state;
+  let menuItem: ReturnType<typeof resolveRoomRequestSelection>['menuItem'] = null;
+  let requestTargetType: 'music' | 'custom' = 'custom';
+  if (!isStraightTip) {
+    try {
+      const selection = resolveRoomRequestSelection({
+        roomType: roomState.session.roomType,
+        requestMenu: roomState.session.requestMenu,
+        menuItemId: menu_item_id,
+        requestedTargetType: targetType
+      });
+      menuItem = selection.menuItem;
+      requestTargetType = selection.targetType;
+    } catch (error) {
+      if (error instanceof LiveRoomMenuPolicyError) {
+        return rejectAfterConfirmedAuthorization(422, { error: error.message, code: error.code });
+      }
+      throw error;
+    }
+  }
+  const canonicalTargetType = isStraightTip
+    ? 'straight_tip'
+    : requestTargetType;
+  const canonicalTitle = isStraightTip
+    ? LIVE_ROOM_LANGUAGE.directTip
+    : menuItem?.title ?? normalizeLibraryText(title, 160);
+  const canonicalSubtitle = isStraightTip
+    ? 'Supported the talent directly!'
+    : menuItem?.description ?? normalizeLibraryText(subtitle, 500);
+  const canonicalAlbumArt = canonicalTargetType === 'music'
+    ? normalizePublicProfileUrl(albumArt)
+    : null;
+  if (!isStraightTip && !canonicalTitle) {
+    return rejectAfterConfirmedAuthorization(422, {
+      error: 'Choose a room menu item or enter a request title.',
+      code: 'room_request_title_required'
+    });
+  }
   const paymentsEnabledForAction = isStraightTip
     ? roomState.session.tipsEnabled === true
     : roomState.session.paymentsEnabled !== false;
@@ -12733,16 +14219,34 @@ app.post("/api/request/create", async (req, res) => {
   const amount_cents = paymentsEnabledForAction
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
     : 0;
-  const normalizedSourceProvider = normalizeLibraryText(sourceProvider, 80) || null;
-  const normalizedSpotifyUri = normalizeLibraryText(spotifyUri, 256) || null;
-  const normalizedSpotifyUrl = normalizeLibraryText(spotifyUrl, 512) || null;
-  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
+  const normalizedSourceProvider = canonicalTargetType === 'music'
+    ? normalizeLibraryText(sourceProvider, 80) || null
+    : null;
+  const normalizedSpotifyUri = canonicalTargetType === 'music'
+    ? normalizeLibraryText(spotifyUri, 256) || null
+    : null;
+  const normalizedSpotifyUrl = canonicalTargetType === 'music'
+    ? normalizeLibraryText(spotifyUrl, 512) || null
+    : null;
+  const payload_hash = hashPayload({
+    type: isStraightTip ? 'tip' : 'request',
+    targetType: canonicalTargetType,
+    menuItemId: menuItem?.id ?? null,
+    title: canonicalTitle,
+    subtitle: canonicalSubtitle,
+    senderName,
+    message,
+    albumArt: canonicalAlbumArt,
+    normalizedSourceProvider,
+    normalizedSpotifyUri,
+    normalizedSpotifyUrl
+  });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash: resolvedPatronDeviceIdHash,
     gig_id: durableGigId,
-    action_type: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
-    target_entity_id: title || 'request',
+    action_type: isStraightTip ? 'tip' : 'request',
+    target_entity_id: (menuItem?.id ?? canonicalTitle) || 'request',
     amount_cents,
     currency: normalizedCurrency,
     payload_hash
@@ -12753,11 +14257,11 @@ app.post("/api/request/create", async (req, res) => {
     idempotencyKey: idempotency_key,
     patronDeviceIdHash: resolvedPatronDeviceIdHash,
     gigId: durableGigId,
-    actionType: targetType === 'straight_tip' || type === 'tip' ? 'tip' : 'request',
+    actionType: isStraightTip ? 'tip' : 'request',
     amountCents: amount_cents,
     currency: normalizedCurrency,
-    targetEntityType: targetType || 'music',
-    targetEntityId: title || 'request',
+    targetEntityType: canonicalTargetType,
+    targetEntityId: (menuItem?.id ?? canonicalTitle) || 'request',
     payloadHash: payload_hash,
     intentFingerprint: idempotencyFingerprint,
     expiresAt: expires_at
@@ -12782,7 +14286,8 @@ app.post("/api/request/create", async (req, res) => {
       expected: {
         gigId: durableGigId,
         actionType: durableActionType,
-        patronDeviceIdHash: resolvedPatronDeviceIdHash
+        patronDeviceIdHash: resolvedPatronDeviceIdHash,
+        intentFingerprint: idempotencyFingerprint
       }
     });
     if (ownership.status === 'busy') {
@@ -12801,6 +14306,74 @@ app.post("/api/request/create", async (req, res) => {
       });
     }
     actionOwner = ownership.owner;
+  }
+
+  if (durableReplay.kind === 'pending') {
+    const terminalResponse = await sendCanonicalTerminalPaymentOutcome({
+      res,
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: durableActionType,
+      owner: actionOwner
+    });
+    if (terminalResponse) return terminalResponse;
+  }
+
+  // Provider reconciliation happens only after the complete canonical action
+  // was reserved and ownership was fenced to that exact fingerprint.
+  if (confirmedPaymentIntentId) {
+    confirmedAuthorization = await paymentService.confirmAuthorizedAction({
+      gigId: durableGigId,
+      actionType: durableActionType,
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      intentFingerprint: idempotencyFingerprint,
+      patronDeviceIdHash: resolvedPatronDeviceIdHash,
+      processorPaymentIntentId: confirmedPaymentIntentId
+    });
+    if (confirmedAuthorization.status === 'failed' || confirmedAuthorization.status === 'disabled') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
+        success: false,
+        error: confirmedAuthorization.status === 'disabled'
+          ? 'Payments are temporarily unavailable. Confirmation is still pending.'
+          : 'Payment confirmation could not be matched to this request.',
+        payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
+      });
+    }
+    if (confirmedAuthorization.status === 'processing') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        payment_id: confirmedAuthorization.paymentId
+      });
+    }
+    if (confirmedAuthorization.status === 'requires_confirmation') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(402).json({
+        success: false,
+        error: 'Payment confirmation is still required before your request is submitted.',
+        payment_status: 'requires_confirmation',
+        payment_id: confirmedAuthorization.paymentId,
+        payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
+        client_secret: confirmedAuthorization.clientSecret
+      });
+    }
   }
 
   const existingRequest = roomState.requests.find(r => r.idempotencyKey === idempotency_key);
@@ -12862,7 +14435,7 @@ app.post("/api/request/create", async (req, res) => {
 
   const moderationOutcome = await moderationService.evaluateSubmission({
     senderName: senderName || "Patron",
-    text: message || "",
+    text: `${canonicalTitle} ${canonicalSubtitle} ${message || ''}`,
     patronUserId: resolvedActor.actorId,
     patronDeviceIdHash: resolvedPatronDeviceIdHash
   });
@@ -12896,10 +14469,11 @@ app.post("/api/request/create", async (req, res) => {
   const newItem: RequestItem = {
     id: `req-${String(client_request_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)}`,
     type: isStraightTip ? 'tip' : 'request',
-    targetType: targetType || 'music',
-    title: isStraightTip ? LIVE_ROOM_LANGUAGE.directTip : (title || LIVE_ROOM_LANGUAGE.request),
-    subtitle: isStraightTip ? 'Supported the talent directly!' : (subtitle || ''),
-    albumArt: albumArt || (targetType === 'music' ? "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop" : undefined),
+    targetType: canonicalTargetType,
+    menuItemId: menuItem?.id ?? null,
+    title: canonicalTitle,
+    subtitle: canonicalSubtitle,
+    albumArt: canonicalAlbumArt ?? undefined,
     sourceProvider: isStraightTip ? null : normalizedSourceProvider,
     spotifyUri: isStraightTip ? null : normalizedSpotifyUri,
     spotifyUrl: isStraightTip ? null : normalizedSpotifyUrl,
@@ -12950,6 +14524,14 @@ app.post("/api/request/create", async (req, res) => {
     }
     if (reason === 'room_not_accepting_money') {
       return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting requests or tips.' });
+    }
+    if (reason === 'room_money_not_enabled') {
+      return rejectAfterConfirmedAuthorization(409, {
+        error: 'Money is not enabled for this live room.',
+        code: roomState.session.roomType === 'music'
+          ? 'room_money_not_enabled'
+          : 'non_music_room_money_not_available'
+      });
     }
     if (reason === 'room_not_accepting_requests') {
       return rejectAfterConfirmedAuthorization(400, { error: "Request submissions are currently closed by the host." });
@@ -13179,95 +14761,32 @@ app.post("/api/request/boost", async (req, res) => {
     return res.status(422).json({ error: "A valid route gig_id is required for durable boost submission." });
   }
 
-  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key);
-  if (preliminaryReplay.kind === 'replay') {
-    return res.status(preliminaryReplay.status).json(sanitizePatronMutationResponseBody(preliminaryReplay.body));
+  const preliminaryReplay = await idempotencyStore.loadDurableActionRecord(idempotency_key, {
+    clientRequestId: client_request_id,
+    gigId: durableGigId,
+    actionType: 'boost',
+    patronDeviceIdHash: resolvedPatronDeviceIdHash
+  });
+  if (preliminaryReplay.kind === 'misuse') {
+    return res.status(409).json({
+      error: 'This idempotency key belongs to a different boost identity.',
+      code: 'idempotency_identity_mismatch'
+    });
+  }
+  const roomSnapshot = await loadRoomState(durableGigId);
+  const roomState = roomSnapshot.state;
+  const explicitMoneyIntent = Number(boostAmount) > 1
+    || (typeof payment_method === 'string' && payment_method.trim().length > 0)
+    || Boolean(confirmedPaymentIntentId);
+  if (roomState.session.roomType !== 'music' && explicitMoneyIntent) {
+    return res.status(422).json({
+      error: 'Paid boosts are unavailable in comedy, service, and general rooms in this release.',
+      code: 'non_music_room_money_not_available'
+    });
   }
   let actionOwner: PendingActionOwner | null = null;
-  if (confirmedPaymentIntentId) {
-    const ownership = await idempotencyStore.claimPendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      expected: {
-        gigId: durableGigId,
-        actionType: 'boost',
-        patronDeviceIdHash: resolvedPatronDeviceIdHash
-      }
-    });
-    if (ownership.status === 'busy') {
-      return res.status(202).json({
-        success: false,
-        pending: true,
-        payment_status: 'processing',
-        retry_after_ms: ownership.retryAfterMs
-      });
-    }
-    if (ownership.status === 'misuse') {
-      return res.status(409).json({ error: 'The payment confirmation does not belong to this boost.' });
-    }
-    if (ownership.status === 'expired') {
-      return res.status(410).json({ error: 'Pending action expired before backend confirmation.' });
-    }
-    if (ownership.status !== 'acquired') {
-      return res.status(202).json({ success: false, pending: true, payment_status: 'processing' });
-    }
-    actionOwner = ownership.owner;
-  }
-  const confirmedAuthorization = confirmedPaymentIntentId
-    ? await paymentService.confirmAuthorizedAction({
-        gigId: durableGigId,
-        actionType: 'boost',
-        clientRequestId: client_request_id,
-        idempotencyKey: idempotency_key,
-        patronDeviceIdHash: resolvedPatronDeviceIdHash,
-        processorPaymentIntentId: confirmedPaymentIntentId
-      })
-    : null;
-  if (confirmedAuthorization?.status === 'failed' || confirmedAuthorization?.status === 'disabled') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
-      success: false,
-      error: confirmedAuthorization.status === 'disabled'
-        ? 'Payments are temporarily unavailable. Confirmation is still pending.'
-        : 'Payment confirmation could not be matched to this boost.',
-      payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
-    });
-  }
-  if (confirmedAuthorization?.status === 'processing') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(202).json({
-      success: false,
-      pending: true,
-      payment_status: 'processing',
-      payment_id: confirmedAuthorization.paymentId
-    });
-  }
-  if (confirmedAuthorization?.status === 'requires_confirmation') {
-    if (actionOwner) await idempotencyStore.releasePendingActionOwner({
-      clientRequestId: client_request_id,
-      idempotencyKey: idempotency_key,
-      owner: actionOwner
-    });
-    return res.status(402).json({
-      success: false,
-      error: 'Payment confirmation is still required before your boost is applied.',
-      payment_status: 'requires_confirmation',
-      payment_id: confirmedAuthorization.paymentId,
-      payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
-      client_secret: confirmedAuthorization.clientSecret
-    });
-  }
-
-  let durableReservationEstablished = preliminaryReplay.kind === 'pending'
-    && Boolean(confirmedAuthorization && 'paymentId' in confirmedAuthorization);
+  let confirmedAuthorization: AuthorizeActionResult | null = null;
+  let durableReservationEstablished = false;
 
   const completeReservedFailure = async (status: number, body: Record<string, unknown>) => {
     if (!durableReservationEstablished) return res.status(status).json(body);
@@ -13335,11 +14854,9 @@ app.post("/api/request/boost", async (req, res) => {
     return rejectAfterConfirmedAuthorization(422, { error: "Sway Boost payments currently support USD only." });
   }
 
-  const roomSnapshot = await loadRoomState(durableGigId);
   if (roomSnapshot.roomStatus !== 'active') {
     return rejectAfterConfirmedAuthorization(404, { error: ROOM_LOOKUP_UNAVAILABLE_COPY });
   }
-  const roomState = roomSnapshot.state;
   if (roomState.session.status !== 'active') {
     return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting boosts.' });
   }
@@ -13361,7 +14878,10 @@ app.post("/api/request/boost", async (req, res) => {
     return rejectAfterConfirmedAuthorization(404, { error: "Request not found" });
   }
 
-  const amount_cents = Math.round(amt * 100);
+  // `amt` remains the visible one-unit upvote weight in free rooms, while the
+  // durable monetary amount stays zero so rolling database guards do not
+  // reinterpret a free boost as a charge.
+  const amount_cents = paymentsEnabledForRoom ? Math.round(amt * 100) : 0;
   const payload_hash = hashPayload({ requestId, patronName, boostAmount });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
@@ -13408,7 +14928,8 @@ app.post("/api/request/boost", async (req, res) => {
       expected: {
         gigId: durableGigId,
         actionType: 'boost',
-        patronDeviceIdHash: resolvedPatronDeviceIdHash
+        patronDeviceIdHash: resolvedPatronDeviceIdHash,
+        intentFingerprint: idempotencyFingerprint
       }
     });
     if (ownership.status === 'busy') {
@@ -13427,6 +14948,72 @@ app.post("/api/request/boost", async (req, res) => {
       });
     }
     actionOwner = ownership.owner;
+  }
+
+  if (durableReplay.kind === 'pending') {
+    const terminalResponse = await sendCanonicalTerminalPaymentOutcome({
+      res,
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      gigId: durableGigId,
+      actionType: 'boost',
+      owner: actionOwner
+    });
+    if (terminalResponse) return terminalResponse;
+  }
+
+  if (confirmedPaymentIntentId) {
+    confirmedAuthorization = await paymentService.confirmAuthorizedAction({
+      gigId: durableGigId,
+      actionType: 'boost',
+      clientRequestId: client_request_id,
+      idempotencyKey: idempotency_key,
+      intentFingerprint: idempotencyFingerprint,
+      patronDeviceIdHash: resolvedPatronDeviceIdHash,
+      processorPaymentIntentId: confirmedPaymentIntentId
+    });
+    if (confirmedAuthorization.status === 'failed' || confirmedAuthorization.status === 'disabled') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(confirmedAuthorization.status === 'disabled' ? 503 : 402).json({
+        success: false,
+        error: confirmedAuthorization.status === 'disabled'
+          ? 'Payments are temporarily unavailable. Confirmation is still pending.'
+          : 'Payment confirmation could not be matched to this boost.',
+        payment_status: confirmedAuthorization.status === 'disabled' ? 'provider_unavailable' : 'failed'
+      });
+    }
+    if (confirmedAuthorization.status === 'processing') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        payment_status: 'processing',
+        payment_id: confirmedAuthorization.paymentId
+      });
+    }
+    if (confirmedAuthorization.status === 'requires_confirmation') {
+      await idempotencyStore.releasePendingActionOwner({
+        clientRequestId: client_request_id,
+        idempotencyKey: idempotency_key,
+        owner: actionOwner
+      });
+      return res.status(402).json({
+        success: false,
+        error: 'Payment confirmation is still required before your boost is applied.',
+        payment_status: 'requires_confirmation',
+        payment_id: confirmedAuthorization.paymentId,
+        payment_intent_id: confirmedAuthorization.processorPaymentIntentId,
+        client_secret: confirmedAuthorization.clientSecret
+      });
+    }
   }
 
   const existingBoost = request.boosts.find(b => b.idempotencyKey === idempotency_key);
@@ -13542,6 +15129,14 @@ app.post("/api/request/boost", async (req, res) => {
     }
     if (reason === 'room_not_accepting_money') {
       return rejectAfterConfirmedAuthorization(409, { error: 'This room is closing and is no longer accepting boosts.' });
+    }
+    if (reason === 'room_money_not_enabled') {
+      return rejectAfterConfirmedAuthorization(409, {
+        error: 'Money is not enabled for this live room.',
+        code: roomState.session.roomType === 'music'
+          ? 'room_money_not_enabled'
+          : 'non_music_room_money_not_available'
+      });
     }
     if (reason === 'boost_target_not_eligible') {
       return rejectAfterConfirmedAuthorization(409, { error: 'This request can no longer be boosted.' });
@@ -13797,18 +15392,96 @@ app.post("/api/moderation/report", async (req, res) => {
   if (!requirePersistentBusinessStore(res)) return;
   const resolvedActor = accessControl.resolveServerActor(req);
 
-  const { requestId, reason, details, patron_device_id_hash } = req.body;
-  if (!requestId || !reason) {
-    return res.status(400).json({ error: "requestId and reason are required." });
+  const { requestId, reason, details, patron_device_id_hash } = req.body ?? {};
+  const reportReason = typeof reason === 'string' ? reason.trim() : '';
+  const reportDetails = typeof details === 'string' ? details.trim().slice(0, 2_000) : undefined;
+  if (!reportReason || reportReason.length > 500) {
+    return res.status(400).json({ error: 'A report reason of 500 characters or fewer is required.' });
   }
 
-  await moderationService.recordPatronReport({
+  const requestedGigId = parseDurableGigId(req.body?.gig_id ?? req.body?.gigId);
+  const requestedMenuItemId = typeof (req.body?.menu_item_id ?? req.body?.menuItemId) === 'string'
+    ? String(req.body?.menu_item_id ?? req.body?.menuItemId).trim()
+    : '';
+  if (requestedGigId || requestedMenuItemId) {
+    if (!requestedGigId || !requestedMenuItemId) {
+      return res.status(400).json({ error: 'gig_id and menu_item_id are both required for a room menu report.' });
+    }
+    const roomSnapshot = await loadRoomState(requestedGigId);
+    if (roomSnapshot.roomStatus === 'missing') {
+      return res.status(404).json({ error: 'This live room is unavailable.' });
+    }
+    const menuItem = roomSnapshot.state.session.requestMenu.find((item) => item.id === requestedMenuItemId);
+    if (!menuItem) {
+      return res.status(404).json({ error: 'This room menu item is unavailable.' });
+    }
+
+    // Menu reports accept only a server-resolved device binding. A body value
+    // is untrusted and cannot mint a fresh durable reporter identity.
+    const patronDeviceIdHash = resolvedActor.patronDeviceIdHash ?? null;
+    const canonicalRequesterIp = resolveCanonicalRequestIp(req);
+    if (!canonicalRequesterIp) {
+      return res.status(400).json({
+        error: 'A valid client network address is required.',
+        code: 'invalid_client_ip'
+      });
+    }
+    const requesterIpHash = hashPerformerLoginRequesterIp(canonicalRequesterIp);
+    const moderationWrite = await moderationService.recordRoomMenuReport({
+      gigId: requestedGigId,
+      menuItemId: menuItem.id,
+      reason: reportReason,
+      details: reportDetails,
+      actorUserId: resolvedActor.sessionId ? resolvedActor.actorId : null,
+      patronDeviceIdHash,
+      reporterFingerprint: createRoomMenuReportReporterFingerprint({
+        actorId: resolvedActor.actorId,
+        sessionId: resolvedActor.sessionId,
+        patronDeviceIdHash,
+        requesterIpHash
+      }),
+      requesterIpHash,
+      subjectLimit: roomMenuReportSubjectLimit,
+      ipLimit: roomMenuReportIpLimit,
+      retentionDays: roomMenuReportRetentionDays
+    });
+    if (moderationWrite.status === 'rate_limited') {
+      res.setHeader('Retry-After', String(moderationWrite.retryAfterSeconds));
+      return res.status(429).json({
+        error: 'Too many menu reports were submitted from this reporter. Please try again later.',
+        code: 'room_menu_report_rate_limited'
+      });
+    }
+    if (moderationWrite.status !== 'written') {
+      if (moderationWrite.status === 'duplicate') {
+        return res.status(202).json({
+          success: true,
+          moderation_action: 'room_menu_report_already_submitted'
+        });
+      }
+      return res.status(503).json({ error: 'This report could not be recorded safely. Please retry.' });
+    }
+
+    return res.status(202).json({
+      success: true,
+      moderation_action: 'room_menu_report_submitted'
+    });
+  }
+
+  if (!requestId) {
+    return res.status(400).json({ error: 'requestId is required for a request report.' });
+  }
+
+  const moderationWrite = await moderationService.recordPatronReport({
     requestId: String(requestId),
-    reason: String(reason),
-    details: typeof details === 'string' ? details : undefined,
+    reason: reportReason,
+    details: reportDetails,
     actorUserId: resolvedActor.actorId,
     patronDeviceIdHash: resolvedActor.patronDeviceIdHash ?? (typeof patron_device_id_hash === 'string' ? patron_device_id_hash : null)
   });
+  if (moderationWrite.status !== 'written') {
+    return res.status(503).json({ error: 'This report could not be recorded safely. Please retry.' });
+  }
 
   return res.json({ success: true, moderation_action: 'report_submitted' });
 });
@@ -14302,6 +15975,13 @@ function escapeXml(value: string) {
     .replace(/'/g, '&apos;');
 }
 
+app.get(/^\/discover\/*$/i, (req, res, next) => {
+  if (req.path === '/discover') return next();
+  const queryIndex = req.originalUrl.indexOf('?');
+  const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : '';
+  return res.redirect(308, `/discover${query}`);
+});
+
 app.get('/robots.txt', (_req, res) => {
   // Canonical host for sitemap locs and HTML <link rel="canonical"> is app.sway.tips.
   // Apex/www may serve the same crawler files; they must keep pointing at the app host.
@@ -14321,19 +16001,19 @@ app.get('/llms.txt', (_req, res) => {
   res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send([
     '# Sway',
     '',
-    '> Sway gives working performers one public home for profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.',
+    '> Sway gives independent talent, creators, and gig professionals one public home for profiles, releases, events, external ticket links, live rooms, Requests, Tips, Boosts, and direct audience support.',
     '',
     `Canonical public host: ${CANONICAL_APP_ORIGIN}`,
     'Apex and www may redirect or mirror; permanent addresses and sitemap locs use the app host.',
     '',
     '## Public surfaces',
     `- [About Sway](${CANONICAL_APP_ORIGIN}/about)`,
-    `- [Discover performers, shows, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
+    `- [Discover comedians, singers, songwriters, DJs, bartenders, hosts, creators, gig professionals, events, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
     `- [FAQ](${CANONICAL_APP_ORIGIN}/faq)`,
     `- [Terms](${CANONICAL_APP_ORIGIN}/terms)`,
     `- [Privacy](${CANONICAL_APP_ORIGIN}/privacy)`,
     '',
-    'Performer pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
+    'Professional public pages use /p/{handle}. Public event pages use /e/{event-id}. Public release pages use /r/{release-id}.',
     'Venue/location facts appear on event pages when published; Sway does not invent standalone venue catalog pages.',
     'Live Rooms (/g/{id}) are operating product pages when a room is active; Self-Production releases are a separate lane.',
     'Sway.DIO is not a live discovery surface.',
@@ -14350,7 +16030,7 @@ app.get('/sitemap.xml', async (_req, res) => {
       .send('Sitemap temporarily unavailable.');
   }
 
-  const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
+  const staticPaths = ['/', '/about', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
   type SitemapEntry = { loc: string; lastmod?: string | null };
   const entries = new Map<string, SitemapEntry>();
   for (const route of staticPaths) {
@@ -14359,28 +16039,8 @@ app.get('/sitemap.xml', async (_req, res) => {
 
   if (businessDb) {
     try {
-    const [profileRows, eventRows, releaseRows] = await Promise.all([
-      businessDb.select({
-        ownerUserId: performers.ownerUserId,
-        handle: performers.handle,
-        displayName: performers.displayName,
-        bio: performers.bio,
-        visibilityState: performers.visibilityState,
-        isActive: performers.isActive,
-        onboardingStatus: performers.onboardingStatus,
-        updatedAt: performerPublicProfiles.updatedAt
-      })
-        .from(performers)
-        .innerJoin(users, eq(users.id, performers.ownerUserId))
-        .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
-        .where(and(
-          eq(performers.visibilityState, 'public'),
-          eq(performers.isActive, true),
-          notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
-          sql`nullif(trim(${performers.handle}), '') is not null`,
-          sql`nullif(trim(${performers.bio}), '') is not null`,
-          sql`nullif(trim(${performers.displayName}), '') is not null`
-        )),
+    const [directory, eventRows, releaseRows] = await Promise.all([
+      loadQualifiedPublicProfessionalDirectory(),
       // Venue/location is event context only — no fake /v/ venue URLs.
       businessDb.select({
         id: performerEvents.id,
@@ -14408,34 +16068,13 @@ app.get('/sitemap.xml', async (_req, res) => {
         ))
     ]);
 
-    const rowsByHandle = new Map<string, typeof profileRows>();
-    for (const row of profileRows) {
-      if (!isDiscoveryEligibleHandle(row.handle)) continue;
-      const normalizedHandle = normalizePerformerHandle(row.handle)?.toLowerCase();
-      if (!normalizedHandle) continue;
-      const existing = rowsByHandle.get(normalizedHandle) ?? [];
-      existing.push(row);
-      rowsByHandle.set(normalizedHandle, existing);
+    if (directory.discoverIndexEligible) {
+      const discoverLoc = `${CANONICAL_APP_ORIGIN}/discover`;
+      entries.set(discoverLoc, { loc: discoverLoc });
     }
-    for (const [normalizedHandle, rows] of rowsByHandle) {
-      if (rows.length !== 1) continue;
-      const row = rows[0];
-      const policy = evaluatePublicPerformerVisibility({
-        claimed: true,
-        hasOwner: Boolean(row.ownerUserId),
-        isActive: row.isActive,
-        onboardingStatus: row.onboardingStatus,
-        visibilityState: row.visibilityState,
-        handle: normalizedHandle,
-        displayName: row.displayName,
-        conflicted: false
-      });
-      if (policy.kind !== 'public') continue;
-      const loc = `${CANONICAL_APP_ORIGIN}/p/${encodeURIComponent(normalizedHandle)}`;
-      const lastmod = row.updatedAt instanceof Date && !Number.isNaN(row.updatedAt.getTime())
-        ? row.updatedAt.toISOString()
-        : null;
-      entries.set(loc, { loc, lastmod });
+    for (const professional of directory.professionals) {
+      const loc = `${CANONICAL_APP_ORIGIN}${professional.profilePath}`;
+      entries.set(loc, { loc, lastmod: professional.updatedAt });
     }
     for (const row of eventRows) {
       const loc = `${CANONICAL_APP_ORIGIN}/e/${row.id}`;
@@ -14816,6 +16455,18 @@ function startAudioUploadCleanupWorker() {
     if (running) return;
     running = true;
     try {
+      const receiptResult = await audioPublishingService.retryPendingAudioObjectCleanupReceipts({ limit: 100 });
+      if (receiptResult.failedCount > 0) {
+        console.warn(
+          `[sway.audio] ${receiptResult.failedCount} durable object-cleanup receipt(s) remain pending and will retry.`
+        );
+      }
+      const providerResult = await audioPublishingService.reconcileDueAudioProviderOperations({ limit: 100 });
+      if (providerResult.failedCount > 0) {
+        console.warn(
+          `[sway.audio] ${providerResult.failedCount} durable provider operation(s) remain unresolved and will retry.`
+        );
+      }
       const result = await audioPublishingService.expireStaleUploadSessions({ limit: 100 });
       if (result.failedCount > 0) {
         console.warn(
@@ -14838,19 +16489,80 @@ function startAudioUploadCleanupWorker() {
   timer.unref();
 }
 
+function startModerationRetentionWorker() {
+  if (!moderationService.hasDurableStore) return;
+  let running = false;
+  let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    let continuationRequired = false;
+    try {
+      const outcome = await moderationService.pruneExpiredRoomMenuReports({
+        limit: moderationRetentionBatchSize,
+        maxBatches: moderationRetentionMaxBatches,
+        maxRuntimeMs: moderationRetentionMaxRuntimeMs
+      });
+      continuationRequired = outcome.continuationRequired;
+      if (continuationRequired) {
+        console.warn('[sway.moderation] expired room-menu report backlog remains.', {
+          deleted: outcome.deleted,
+          remainingExpired: outcome.remainingExpired,
+          oldestExpiredAt: outcome.oldestExpiredAt,
+          oldestExpiredAgeMs: outcome.oldestExpiredAgeMs,
+          stopReason: outcome.stopReason
+        });
+      }
+    } catch (error) {
+      console.error(
+        '[sway.moderation] expired room-menu report cleanup failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+      if (continuationRequired && !continuationTimer) {
+        continuationTimer = setTimeout(() => {
+          continuationTimer = null;
+          void tick();
+        }, moderationRetentionContinuationDelayMs);
+        continuationTimer.unref();
+      }
+    }
+  };
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, 15 * 60 * 1000);
+  timer.unref();
+}
+
 // Vite Middleware & Front-End Serving Config
 async function startServer() {
+  const startupDiagnostics = process.env.NODE_ENV === 'test'
+    && process.env.SWAY_STARTUP_DIAGNOSTICS === 'true';
+  const logStartupStage = (stage: string) => {
+    if (startupDiagnostics) console.log(`[sway.startup.test] ${stage}`);
+  };
+  logStartupStage('begin');
   if (audioObjectStore) {
     await audioObjectStore.verifyReady();
     audioObjectStoreVerified = true;
     console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
   }
+  logStartupStage('hydrate-business-state');
   await refreshBusinessState();
+  logStartupStage('business-state-ready');
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
   startAudioUploadCleanupWorker();
+  startModerationRetentionWorker();
+  logStartupStage('workers-started');
 
-  if (process.env.NODE_ENV !== "production") {
+  const apiOnlyTestMode = process.env.NODE_ENV === 'test'
+    && process.env.SWAY_API_ONLY_TEST_MODE === 'true';
+  logStartupStage(apiOnlyTestMode ? 'api-only-test-mode' : 'frontend-mode');
+
+  if (process.env.NODE_ENV !== "production" && !apiOnlyTestMode) {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -14881,14 +16593,17 @@ async function startServer() {
         const templatePath = path.join(process.cwd(), shellHtmlRelativePath(shell));
         const template = readFileSync(templatePath, 'utf8');
         const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
-        const html = injectShareMetadata(transformedHtml, await resolveShareMetadata(req));
+        const metadata = await resolveShareMetadata(req);
+        const html = injectShareMetadata(transformedHtml, metadata);
         applyNoStoreHeaders(res);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        applyPublicDiscoveryIndexHold(req, res, metadata);
+        if (metadata.responseStatus === 503) res.setHeader('Retry-After', '300');
+        res.status(metadata.responseStatus ?? 200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
       }
     });
-  } else {
+  } else if (!apiOnlyTestMode) {
     const distPath = path.join(process.cwd(), 'dist');
     app.get('/shells/dev-sandbox.html', (_req, res) => {
       res.status(404).send('Not found');
@@ -14917,9 +16632,12 @@ async function startServer() {
       try {
         const htmlPath = path.join(distPath, shellHtmlRelativePath(shell));
         const template = readFileSync(htmlPath, 'utf8');
-        const html = injectShareMetadata(template, await resolveShareMetadata(req));
+        const metadata = await resolveShareMetadata(req);
+        const html = injectShareMetadata(template, metadata);
         applyNoStoreHeaders(res);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        applyPublicDiscoveryIndexHold(req, res, metadata);
+        if (metadata.responseStatus === 503) res.setHeader('Retry-After', '300');
+        res.status(metadata.responseStatus ?? 200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (error) {
         next(error);
       }
@@ -14927,6 +16645,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
+    logStartupStage('listening');
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }

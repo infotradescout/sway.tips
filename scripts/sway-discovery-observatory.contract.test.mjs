@@ -50,7 +50,9 @@ for (const linkStrength of ['direct_server_observed', 'client_correlated_unverif
 }
 
 const telemetryRoute = server.slice(server.indexOf('app.post("/api/analytics/shell"'), server.indexOf('function executeRows'));
-requireIncludes(telemetryRoute, "linkStrength: 'client_correlated_unverified'", 'Anonymous telemetry must remain client-correlated.');
+requireIncludes(telemetryRoute, 'resolveReceiptBackedAttributionEvidence', 'Anonymous entry telemetry may be strengthened only by a signed server landing receipt.');
+requireIncludes(telemetryRoute, "linkStrength: attributionEvidence?.linkStrength ?? 'client_correlated_unverified'", 'Caller-only anonymous telemetry must remain client-correlated.');
+requireIncludes(telemetryRoute, 'readDiscoveryAttributionReceiptCookie', 'Anonymous entry strength must come from the HttpOnly receipt, not caller fields.');
 requireIncludes(telemetryRoute, 'resolveDiscoveryEntityVisibilityEligibility', 'Client-claimed visibility must be resolved against current server state.');
 requireIncludes(telemetryRoute, 'Client eligibility is never trusted', 'Funnel eligibility must fail closed at the telemetry boundary.');
 requireIncludes(telemetryRoute, 'Anonymous shell telemetry cannot submit outcome evidence.', 'Anonymous completion claims must be rejected at the event allowlist.');
@@ -97,6 +99,8 @@ for (const boundary of [
 requireIncludes(observatory, 'JOURNEY_EVENT_TYPES', 'Journey event types must be runtime allowlisted.');
 requireIncludes(observatory, 'eventType is not allowed for the', 'Stage/event mismatch must fail at runtime.');
 requireIncludes(store, 'onConflictDoNothing({ target: auditEvents.eventId })', 'Concurrent idempotency must be enforced by the audit-event primary key.');
+requireIncludes(store, '`attribution-receipt:${attributionReceiptId.toLowerCase()}`', 'Signed attribution receipts must have one global deterministic event identity.');
+requireIncludes(store, 'throw new AttributionReceiptConflictError()', 'A receipt replay across journeys must fail closed.');
 requireIncludes(store, 'experiment-assignment:', 'Experiment assignment must have a deterministic event ID.');
 requireIncludes(observatory, 'discoveryExperimentVariant', 'Experiment cohort must be derived server-side from experiment and journey.');
 requireIncludes(store, 'controlled_change_key: definition.controlledChangeKey', 'Assignment must persist immutable controlled-change identity.');

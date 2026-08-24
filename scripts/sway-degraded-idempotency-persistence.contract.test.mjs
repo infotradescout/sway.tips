@@ -96,16 +96,22 @@ for (const term of [
   'submitWithBoundedRetry',
   'waitForRetryBackoff',
   'checkoutPayload.expires_at',
-  'expires_at: checkoutPayload.expires_at',
-  'gig_id: checkoutPayload.gigId',
-  'onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey)',
+  'expires_at: payload.expires_at',
+  'gig_id: payload.gigId',
+  'reconcilePendingActionRef.current(',
+  'identity.gigId',
+  'PENDING_ACTION_STORAGE_VERSION = 2',
+  'pendingActionStorageKeyForRoom',
+  'isCompletePersistedPendingAction',
+  'resubmitPersistedPendingAction',
   "result?.status === 'reconciled'",
   "result?.status === 'pending'",
+  "result?.recovery !== 'resubmit_original_action'",
   'window.setTimeout(reconcile, 2000)',
   'if (response?.pending)',
   'setBackendConfirmed(matchingCheckoutIsOpen)',
-  'localStorage.setItem',
-  'localStorage.removeItem'
+  'writePendingAction(localStorage, pendingActionStorageKey',
+  'removePendingAction(localStorage, pendingActionStorageKey)'
 ]) {
   if (!patron.includes(term)) failures.push(`Patron client missing bounded retry/pending behavior: ${term}`);
 }
@@ -127,7 +133,7 @@ if (completePaymentBody.indexOf('completeCheckoutSuccess') < completePaymentBody
   failures.push('Patron client must not show success before backend confirmation.');
 }
 
-if (!/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,320}localStorage\.removeItem/.test(completeCheckoutSuccessBody)) {
+if (!/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,360}removePendingAction\(localStorage, pendingActionStorageKey\)/.test(completeCheckoutSuccessBody)) {
   failures.push('Patron client must clear pending action only after backend confirmation.');
 }
 
@@ -139,7 +145,7 @@ const pending202Body = pending202Start >= 0 && confirmationRequiredStart > pendi
 if (!pending202Body) {
   failures.push('Patron client must classify durable HTTP 202 as nonterminal pending state.');
 } else if (
-  pending202Body.includes("localStorage.removeItem('sway.pendingAction')")
+  pending202Body.includes('removePendingAction(localStorage, pendingActionStorageKey)')
   || pending202Body.includes('setPendingAction(null)')
   || pending202Body.includes('setCheckoutPayload(null)')
 ) {
@@ -150,7 +156,7 @@ if (!patron.includes('const isSubmitLocked = isPaying || isStripeAuthorizing || 
   failures.push('Patron client must lock duplicate submit while a durable action is reconciling.');
 }
 
-if (!/result\?\.status === 'reconciled'[\s\S]{0,260}completeCheckoutSuccess\(parsed\.type === 'boost' \? 'boost' : 'request', parsed\.clientRequestId\)/.test(patron)) {
+if (!/const response = await resubmitPersistedPendingAction\(persistedAction\)[\s\S]{0,320}response\?\.success \|\| response\?\.reconciled[\s\S]{0,220}completeCheckoutSuccess\(persistedAction\.type, persistedAction\.clientRequestId\)/.test(patron)) {
   failures.push('Patron reconciliation success must enter the request-bound confirmed checkout completion path.');
 }
 
@@ -163,10 +169,14 @@ for (const term of [
   'UUID_PATTERN.test(route.gigId)',
   'gig_id: gigId',
   '/api/pending-action/reconcile',
-  "data.status === 'reconciled'",
-  'applyPatronMutationResponse(data.responseBody)'
+  'expected_gig_id: expectedGigId',
+  'return data;'
 ]) {
   if (!patronApp.includes(term)) failures.push(`Patron shell missing route gig/reconciliation behavior: ${term}`);
+}
+
+if (/applyPatronMutationResponse\(data\.responseBody\)/.test(patronApp)) {
+  failures.push('Patron shell must not treat the legacy status endpoint as a mutation-response replay channel.');
 }
 
 if (!patron.includes('This room link is incomplete.')) {

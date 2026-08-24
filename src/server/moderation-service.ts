@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { activeBlocks, moderationEvents } from '../db/schema';
 import { lockModerationBlockIdentities } from './moderation-block-lock';
@@ -30,6 +30,7 @@ type BlockLookupResult = {
 const BLOCK_LOOKUP_UNAVAILABLE_REASON = 'Moderation block store is unavailable; submission held for review.';
 
 type ModerationServiceOverrides = {
+  database?: ReturnType<typeof createSwayDb> | null;
   hasDurableStore?: boolean;
   findMatchingBlock?: (input: {
     patronUserId?: string | null;
@@ -49,13 +50,26 @@ type ModerationServiceOverrides = {
     status: 'allowed' | 'held_for_review' | 'blocked';
     reason?: string;
     metadata?: Record<string, unknown>;
+    dedupeKey?: string | null;
   }) => Promise<{ status: 'written' | 'unavailable' }>;
 };
 
-const localReviewTerms = ['spam', 'abuse', 'vulgarword', 'asshole', 'bitch', 'bastard'];
+const localReviewTerms = ['spam', 'abuse', 'vulgarword', 'asshole', 'bitch', 'bastard', 'fuck'];
 const localBlockTerms = ['kill you', 'hurt you', 'attack everyone', 'hate crime'];
 const localReviewPatterns = [/\b(?:https?:\/\/|www\.)\S+/i, /\b(?:nude|sexual)\b/i];
 const localBlockPatterns = [/\b(?:kill|hurt|attack)\s+(?:you|him|her|them|everyone)\b/i];
+const REPORT_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
+const DEFAULT_ROOM_MENU_REPORT_SUBJECT_LIMIT = 8;
+const DEFAULT_ROOM_MENU_REPORT_IP_LIMIT = 32;
+const DEFAULT_ROOM_MENU_REPORT_ENTITY_LIMIT = 256;
+const DEFAULT_ROOM_MENU_REPORT_RETENTION_DAYS = 180;
+const DEFAULT_ROOM_MENU_REPORT_PRUNE_BATCH_SIZE = 500;
+const DEFAULT_ROOM_MENU_REPORT_PRUNE_MAX_BATCHES = 20;
+const DEFAULT_ROOM_MENU_REPORT_PRUNE_MAX_RUNTIME_MS = 5_000;
+
+function roomMenuReportUtcWindowStart() {
+  return sql`date_trunc('day', transaction_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
+}
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
@@ -82,7 +96,7 @@ function pickStricterSignal(a: LocalSignal, b: AiAssistiveSignal): LocalSignal {
 }
 
 export function createModerationService(databaseUrl?: string, overrides?: ModerationServiceOverrides) {
-  const db = databaseUrl ? createSwayDb(databaseUrl) : null;
+  const db = overrides?.database ?? (databaseUrl ? createSwayDb(databaseUrl) : null);
 
   function evaluateLocalSignal(input: { senderName: string; text: string }): { signal: LocalSignal; reason?: string } {
     const haystack = `${input.senderName} ${input.text}`.toLowerCase();
@@ -170,6 +184,7 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     status: 'allowed' | 'held_for_review' | 'blocked';
     reason?: string;
     metadata?: Record<string, unknown>;
+    dedupeKey?: string | null;
   }) {
     if (overrides?.writeModerationEvent) {
       return overrides.writeModerationEvent(input);
@@ -180,13 +195,14 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     }
 
     await db.insert(moderationEvents).values({
+      dedupeKey: input.dedupeKey ?? null,
       actorUserId: input.actorUserId ?? null,
       entityType: input.entityType,
       entityId: toModerationEntityUuid(input.entityId),
       status: input.status,
       reason: input.reason ?? null,
       metadata: input.metadata ?? {}
-    });
+    }).onConflictDoNothing();
 
     return { status: 'written' as const };
   }
@@ -375,6 +391,344 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     });
   }
 
+  async function recordRoomMenuReview(input: {
+    gigId: string;
+    menuItemId: string;
+    performerId: string;
+    actorUserId: string;
+    status: 'allowed' | 'held_for_review' | 'blocked';
+    reason?: string;
+    title: string;
+    description: string;
+  }) {
+    const dedupeKey = createHash('sha256')
+      .update(JSON.stringify({
+        v: 1,
+        gigId: input.gigId,
+        menuItemId: input.menuItemId,
+        performerId: input.performerId,
+        status: input.status,
+        reason: input.reason,
+        title: input.title,
+        description: input.description
+      }))
+      .digest('hex');
+    return writeModerationEvent({
+      dedupeKey,
+      actorUserId: input.actorUserId,
+      entityType: 'room_menu_item',
+      entityId: `${input.gigId}:${input.menuItemId}`,
+      status: input.status,
+      reason: input.reason,
+      metadata: {
+        gigId: input.gigId,
+        menuItemId: input.menuItemId,
+        performerId: input.performerId,
+        title: input.title,
+        description: input.description,
+        source: 'moderation.room_menu.start'
+      }
+    });
+  }
+
+  async function recordPerformerEventPublicationReview(input: {
+    eventId: string;
+    performerId: string;
+    actorUserId: string;
+    status: 'allowed' | 'held_for_review' | 'blocked';
+    reason?: string;
+    title: string;
+    description?: string | null;
+    locationName?: string | null;
+    locationAddress?: string | null;
+    city?: string | null;
+  }) {
+    const reviewedContent = {
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      locationName: input.locationName?.trim() || null,
+      locationAddress: input.locationAddress?.trim() || null,
+      city: input.city?.trim() || null
+    };
+    const contentFingerprint = createHash('sha256')
+      .update(JSON.stringify({ v: 1, ...reviewedContent }))
+      .digest('hex');
+    const dedupeKey = createHash('sha256')
+      .update(JSON.stringify({
+        v: 1,
+        eventId: input.eventId,
+        performerId: input.performerId,
+        status: input.status,
+        reason: input.reason ?? null,
+        contentFingerprint
+      }))
+      .digest('hex');
+    return writeModerationEvent({
+      dedupeKey,
+      actorUserId: input.actorUserId,
+      entityType: 'performer_event_publication',
+      entityId: input.eventId,
+      status: input.status,
+      reason: input.reason,
+      metadata: {
+        eventId: input.eventId,
+        performerId: input.performerId,
+        contentFingerprint,
+        reviewedContent,
+        source: 'moderation.performer_event.publication'
+      }
+    });
+  }
+
+  async function recordRoomMenuReport(input: {
+    gigId: string;
+    menuItemId: string;
+    reason: string;
+    details?: string;
+    actorUserId?: string | null;
+    patronDeviceIdHash?: string | null;
+    reporterFingerprint: string;
+    requesterIpHash: string;
+    subjectLimit?: number;
+    ipLimit?: number;
+    entityLimit?: number;
+    retentionDays?: number;
+  }) {
+    if (
+      !db
+      || !REPORT_FINGERPRINT_PATTERN.test(input.reporterFingerprint)
+      || !REPORT_FINGERPRINT_PATTERN.test(input.requesterIpHash)
+    ) {
+      return { status: 'unavailable' as const };
+    }
+
+    const subjectLimit = Math.min(
+      DEFAULT_ROOM_MENU_REPORT_SUBJECT_LIMIT,
+      Math.max(1, Math.trunc(input.subjectLimit ?? DEFAULT_ROOM_MENU_REPORT_SUBJECT_LIMIT))
+    );
+    const ipLimit = Math.min(
+      DEFAULT_ROOM_MENU_REPORT_IP_LIMIT,
+      Math.max(1, Math.trunc(input.ipLimit ?? DEFAULT_ROOM_MENU_REPORT_IP_LIMIT))
+    );
+    const entityLimit = Math.min(
+      DEFAULT_ROOM_MENU_REPORT_ENTITY_LIMIT,
+      Math.max(1, Math.trunc(input.entityLimit ?? DEFAULT_ROOM_MENU_REPORT_ENTITY_LIMIT))
+    );
+    const retentionDays = Math.min(
+      DEFAULT_ROOM_MENU_REPORT_RETENTION_DAYS,
+      Math.max(1, Math.trunc(input.retentionDays ?? DEFAULT_ROOM_MENU_REPORT_RETENTION_DAYS))
+    );
+    const entityId = toModerationEntityUuid(`${input.gigId}:${input.menuItemId}`);
+    const lockScopes = [
+      `room-menu-report:entity:${entityId}`,
+      `room-menu-report:ip:${input.requesterIpHash}`,
+      `room-menu-report:subject:${input.reporterFingerprint}`
+    ].sort();
+
+    try {
+      return await db.transaction(async (tx) => {
+        // Serialize both durable counters. Sorting prevents deadlocks when an
+        // authenticated subject and an IP scope are shared by concurrent calls.
+        for (const lockScope of lockScopes) {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockScope}))`);
+        }
+
+        await tx.execute(sql`
+          with expired as (
+            select ${moderationEvents.id}
+            from ${moderationEvents}
+            where ${moderationEvents.entityType} = 'room_menu_item_report'
+              and ${moderationEvents.retentionExpiresAt} <= transaction_timestamp()
+            order by ${moderationEvents.retentionExpiresAt}, ${moderationEvents.id}
+            limit 500
+            for update skip locked
+          )
+          delete from ${moderationEvents}
+          using expired
+          where ${moderationEvents.id} = expired.id
+        `);
+
+        const [duplicate] = await tx
+          .select({ id: moderationEvents.id })
+          .from(moderationEvents)
+          .where(and(
+            eq(moderationEvents.entityType, 'room_menu_item_report'),
+            eq(moderationEvents.entityId, entityId),
+            eq(moderationEvents.reporterFingerprint, input.reporterFingerprint),
+            sql`${moderationEvents.reportWindowStartedAt} = ${roomMenuReportUtcWindowStart()}`
+          ))
+          .limit(1);
+        if (duplicate) {
+          return { status: 'duplicate' as const };
+        }
+
+        const [counts] = await tx
+          .select({
+            subjectCount: sql<number>`count(*) filter (where ${moderationEvents.reporterFingerprint} = ${input.reporterFingerprint})`,
+            ipCount: sql<number>`count(*) filter (where ${moderationEvents.requesterIpHash} = ${input.requesterIpHash})`,
+            entityCount: sql<number>`count(*) filter (where ${moderationEvents.entityId} = ${entityId})`
+          })
+          .from(moderationEvents)
+          .where(and(
+            eq(moderationEvents.entityType, 'room_menu_item_report'),
+            sql`${moderationEvents.reportWindowStartedAt} = ${roomMenuReportUtcWindowStart()}`
+          ));
+        if (
+          Number(counts?.subjectCount ?? 0) >= subjectLimit
+          || Number(counts?.ipCount ?? 0) >= ipLimit
+          || Number(counts?.entityCount ?? 0) >= entityLimit
+        ) {
+          return {
+            status: 'rate_limited' as const,
+            retryAfterSeconds: 86_400
+          };
+        }
+
+        const inserted = await tx.insert(moderationEvents).values({
+          dedupeKey: null,
+          reporterFingerprint: input.reporterFingerprint,
+          requesterIpHash: input.requesterIpHash,
+          reportWindowStartedAt: roomMenuReportUtcWindowStart(),
+          retentionExpiresAt: sql`transaction_timestamp() + (${retentionDays} * interval '1 day')`,
+          actorUserId: input.actorUserId ?? null,
+          entityType: 'room_menu_item_report',
+          entityId,
+          status: 'held_for_review',
+          reason: input.reason.trim().slice(0, 500),
+          metadata: {
+            gigId: input.gigId,
+            menuItemId: input.menuItemId,
+            details: input.details?.trim().slice(0, 2_000) || null,
+            patronDeviceIdHash: input.patronDeviceIdHash ?? null,
+            source: 'moderation.room_menu.report'
+          }
+        }).onConflictDoNothing().returning({ id: moderationEvents.id });
+
+        if (!inserted.length) {
+          return { status: 'duplicate' as const };
+        }
+
+        return { status: 'written' as const };
+      });
+    } catch {
+      return { status: 'unavailable' as const };
+    }
+  }
+
+  async function pruneExpiredRoomMenuReports(input: {
+    limit?: number;
+    maxBatches?: number;
+    maxRuntimeMs?: number;
+  } = {}) {
+    if (!db) {
+      return {
+        deleted: 0,
+        batches: 0,
+        remainingExpired: 0,
+        oldestExpiredAt: null,
+        oldestExpiredAgeMs: null,
+        continuationRequired: false,
+        stopReason: 'unavailable' as const
+      };
+    }
+
+    const limit = Math.max(1, Math.min(
+      DEFAULT_ROOM_MENU_REPORT_PRUNE_BATCH_SIZE,
+      Math.trunc(input.limit ?? DEFAULT_ROOM_MENU_REPORT_PRUNE_BATCH_SIZE)
+    ));
+    const maxBatches = Math.max(1, Math.min(
+      100,
+      Math.trunc(input.maxBatches ?? DEFAULT_ROOM_MENU_REPORT_PRUNE_MAX_BATCHES)
+    ));
+    const maxRuntimeMs = Math.max(10, Math.min(
+      30_000,
+      Math.trunc(input.maxRuntimeMs ?? DEFAULT_ROOM_MENU_REPORT_PRUNE_MAX_RUNTIME_MS)
+    ));
+    const startedAt = Date.now();
+    let deleted = 0;
+    let batches = 0;
+    let stopReason: 'drained' | 'batch_limit' | 'runtime_limit' = 'drained';
+
+    while (batches < maxBatches) {
+      const result = await db.execute(sql`
+        with expired as (
+          select ${moderationEvents.id}
+          from ${moderationEvents}
+          where ${moderationEvents.entityType} = 'room_menu_item_report'
+            and ${moderationEvents.retentionExpiresAt} <= clock_timestamp()
+          order by ${moderationEvents.retentionExpiresAt}, ${moderationEvents.id}
+          limit ${limit}
+          for update skip locked
+        ), deleted as (
+          delete from ${moderationEvents}
+          using expired
+          where ${moderationEvents.id} = expired.id
+          returning ${moderationEvents.id}
+        )
+        select count(*)::integer as deleted from deleted
+      `);
+      const rows = 'rows' in result ? result.rows as Array<{ deleted?: number }> : [];
+      const batchDeleted = Number(rows[0]?.deleted ?? 0);
+      deleted += batchDeleted;
+      batches += 1;
+
+      if (batchDeleted < limit) {
+        stopReason = 'drained';
+        break;
+      }
+      if (batches >= maxBatches) {
+        stopReason = 'batch_limit';
+        break;
+      }
+      if (Date.now() - startedAt >= maxRuntimeMs) {
+        stopReason = 'runtime_limit';
+        break;
+      }
+    }
+
+    const backlogResult = await db.execute(sql`
+      select
+        count(*)::integer as remaining_expired,
+        min(${moderationEvents.retentionExpiresAt}) as oldest_expired_at,
+        floor(extract(epoch from (clock_timestamp() - min(${moderationEvents.retentionExpiresAt}))) * 1000)::bigint
+          as oldest_expired_age_ms
+      from ${moderationEvents}
+      where ${moderationEvents.entityType} = 'room_menu_item_report'
+        and ${moderationEvents.retentionExpiresAt} <= clock_timestamp()
+    `);
+    const backlogRows = 'rows' in backlogResult
+      ? backlogResult.rows as Array<{
+          remaining_expired?: number;
+          oldest_expired_at?: Date | string | null;
+          oldest_expired_age_ms?: number | string | null;
+        }>
+      : [];
+    const backlog = backlogRows[0];
+    const remainingExpired = Number(backlog?.remaining_expired ?? 0);
+    const oldestExpiredDate = backlog?.oldest_expired_at
+      ? new Date(backlog.oldest_expired_at)
+      : null;
+    const oldestExpiredAt = oldestExpiredDate && Number.isFinite(oldestExpiredDate.getTime())
+      ? oldestExpiredDate.toISOString()
+      : null;
+    const parsedOldestAge = backlog?.oldest_expired_age_ms == null
+      ? null
+      : Number(backlog.oldest_expired_age_ms);
+    const oldestExpiredAgeMs = parsedOldestAge != null && Number.isFinite(parsedOldestAge)
+      ? Math.max(0, parsedOldestAge)
+      : null;
+
+    return {
+      deleted,
+      batches,
+      remainingExpired,
+      oldestExpiredAt,
+      oldestExpiredAgeMs,
+      continuationRequired: remainingExpired > 0,
+      stopReason: remainingExpired === 0 ? 'drained' as const : stopReason
+    };
+  }
+
   async function recordBlockEnforcement(input: {
     entityId: string;
     actorUserId?: string | null;
@@ -461,6 +815,10 @@ export function createModerationService(databaseUrl?: string, overrides?: Modera
     evaluateSubmission,
     addBlockRule,
     recordPatronReport,
+    recordRoomMenuReview,
+    recordPerformerEventPublicationReview,
+    recordRoomMenuReport,
+    pruneExpiredRoomMenuReports,
     recordBlockEnforcement,
     recordPatronBlockRequest,
     hideRequest,

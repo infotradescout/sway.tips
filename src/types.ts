@@ -26,12 +26,21 @@ export type PatronPaymentStatus =
   | 'paid_out'
   | 'unavailable';
 
-export interface CustomMenuItem {
+export type LiveRoomType = 'music' | 'comedy' | 'service' | 'general';
+
+export interface RoomRequestMenuItem {
   id: string;
   title: string;
   description: string;
-  basePrice: number;
-  iconName: string;
+  targetType: 'music' | 'custom';
+}
+
+export interface LinkedRoomEvent {
+  id: string;
+  title: string;
+  startsAt: string;
+  eventPath: string;
+  attendanceMode: 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket';
 }
 
 export interface BoostContribution {
@@ -60,6 +69,7 @@ export interface RequestItem {
   stateRevision?: number;
   type: 'request' | 'tip';
   targetType: 'music' | 'custom' | 'straight_tip';
+  menuItemId?: string | null;
   title: string;          // Song title, menu item, or direct tip
   subtitle: string;       // Artist, description, or empty
   albumArt?: string;      // Optional URL
@@ -123,6 +133,10 @@ export interface GigSession {
   lastMutationActorUserId?: string | null;
   talentName: string;
   talentRole: 'DJ' | 'Bartender' | 'Performer';
+  roomType: LiveRoomType;
+  requestMenu: RoomRequestMenuItem[];
+  linkedEventId: string | null;
+  linkedEvent: LinkedRoomEvent | null;
   feeType: 'talent' | 'patron'; // Who pays the $1 platform fee
   minimumTip: number;           // Usually $5
   endGigTimerStartedAt: string | null; // Match timestamp for 5-minute Post-Gig closeout
@@ -141,11 +155,11 @@ export interface GigSession {
   // Song search scope for this room: performer's own synced library, the full
   // open catalog, or a performer-curated setlist for this occasion.
   searchScope: 'library' | 'catalog' | 'setlist';
-  // When false, this room is a free event: tips are rejected, boosts become
-  // free upvotes, and requests are created with no payment step at all.
+  // When false, requests carry no payment step and boosts become free upvotes.
+  // Direct-tip availability is represented independently by tipsEnabled.
   paymentsEnabled: boolean;
   // Direct tips and every other paid room action require a payout-ready seller.
-  // A genuinely free room keeps this false while requests/upvotes remain usable.
+  // Nonmusic and fully nonmonetary rooms keep this false.
   tipsEnabled: boolean;
   // Persisted with the room snapshot so test volume can never be presented as
   // live connected-account earnings after closeout or a later deployment.
@@ -175,6 +189,8 @@ export interface ActiveRoomSummary {
   gigId: string;
   performerName: string;
   talentRole: 'DJ' | 'Bartender' | 'Performer';
+  roomType: LiveRoomType;
+  linkedEventId: string | null;
   routePath: string;
   startedAt: string | null;
   requestCount: number;
@@ -213,6 +229,9 @@ export interface PublicGigSession {
   status: GigSession['status'];
   talentName: string;
   talentRole: GigSession['talentRole'];
+  roomType: GigSession['roomType'];
+  requestMenu: RoomRequestMenuItem[];
+  linkedEvent: LinkedRoomEvent | null;
   feeType: GigSession['feeType'];
   minimumTip: number;
   requestsOpen: boolean;

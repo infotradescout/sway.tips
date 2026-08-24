@@ -177,6 +177,10 @@ for (const [permissions, expected] of [
   [
     { canDownloadOriginal: true, canComment: true, canApprove: true },
     'Source download · Review notes and change requests · Approval'
+  ],
+  [
+    { canUploadCandidateRevision: true, canDownloadOriginal: false, canComment: false, canApprove: false },
+    'One private candidate upload'
   ]
 ] as const) {
   assert.equal(describeCollaboratorFilePermissions(permissions), expected);

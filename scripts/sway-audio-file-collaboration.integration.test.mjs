@@ -29,14 +29,18 @@ import { createAudioPublishingService } from '../src/server/audio-publishing-ser
 import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
-if (process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
-  throw new Error('Audio collaboration integration requires SWAY_DISPOSABLE_MIGRATION_PROOF=1.');
-}
+const embeddedRequested = process.argv.includes('--embedded-postgres');
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim();
-const embeddedProof = configuredDatabaseUrl
-  ? null
-  : await startEmbeddedPostgresProof('audio_file_collaboration');
-const databaseUrl = configuredDatabaseUrl || embeddedProof?.databaseUrl;
+if (embeddedRequested && configuredDatabaseUrl) {
+  throw new Error('Embedded audio collaboration proof refuses generic DATABASE_URL.');
+}
+if (!embeddedRequested && process.env.SWAY_DISPOSABLE_MIGRATION_PROOF !== '1') {
+  throw new Error('Configured audio collaboration integration requires SWAY_DISPOSABLE_MIGRATION_PROOF=1.');
+}
+const embeddedProof = embeddedRequested
+  ? await startEmbeddedPostgresProof('audio_file_collaboration')
+  : null;
+const databaseUrl = embeddedProof?.databaseUrl || configuredDatabaseUrl;
 if (!databaseUrl) throw new Error('A disposable collaboration database is required.');
 assertDisposableDatabaseTarget({ databaseUrl, approval: 'true', label: 'Audio collaboration integration proof' });
 
@@ -79,14 +83,29 @@ const objectRoot = mkdtempSync(join(tmpdir(), 'sway-file-collaboration-'));
 try {
   if (!embeddedProof) await migrate(db, { migrationsFolder: 'drizzle' });
 
-  const actorIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()].sort();
-  const [ownerId, reviewerId, outsiderId, noAccessUserId, expiredReviewerId] = actorIds;
+  const actorIds = [
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+    randomUUID()
+  ].sort();
+  const [
+    ownerId,
+    reviewerId,
+    outsiderId,
+    noAccessUserId,
+    expiredReviewerId,
+    nonGrantorManagerId
+  ] = actorIds;
   await db.insert(users).values([
     { id: ownerId, email: `owner-${ownerId}@example.test`, emailVerifiedAt: new Date() },
     { id: reviewerId, email: `reviewer-${reviewerId}@example.test`, emailVerifiedAt: new Date() },
     { id: outsiderId, email: `outsider-${outsiderId}@example.test`, emailVerifiedAt: new Date() },
     { id: noAccessUserId, email: `no-access-${noAccessUserId}@example.test`, emailVerifiedAt: new Date() },
-    { id: expiredReviewerId, email: `expired-reviewer-${expiredReviewerId}@example.test`, emailVerifiedAt: new Date() }
+    { id: expiredReviewerId, email: `expired-reviewer-${expiredReviewerId}@example.test`, emailVerifiedAt: new Date() },
+    { id: nonGrantorManagerId, email: `non-grantor-manager-${nonGrantorManagerId}@example.test`, emailVerifiedAt: new Date() }
   ]);
   const [performer] = await db.insert(performers).values({
     ownerUserId: ownerId,
@@ -129,6 +148,14 @@ try {
     createdByUserId: ownerId,
     createdFromPurpose: 'send_files'
   }).returning();
+  await db.insert(audioProjectAccessGrants).values({
+    projectId: project.id,
+    granteeUserId: nonGrantorManagerId,
+    role: 'collaborator',
+    canComment: true,
+    canManageAccess: true,
+    grantedByUserId: ownerId
+  });
   const reviewerGrant = await publishing.grantReleaseReviewer({
     projectId: project.id,
     connectionId: connection.id,
@@ -981,6 +1008,11 @@ try {
   assert.equal(reviewerFiles.length, 1);
   assert.equal(reviewerFiles[0].sha256, sha256);
   assert.equal((await collaboration.listSharedByMe({ userId: ownerId })).length, 1);
+  assert.equal(
+    (await collaboration.listSharedByMe({ userId: nonGrantorManagerId })).length,
+    0,
+    'A non-grantor project manager must not receive metadata or controls for an ordinary review share.'
+  );
   assert.equal((await collaboration.listSharedWithMe({ userId: outsiderId })).length, 0);
 
   await assert.rejects(

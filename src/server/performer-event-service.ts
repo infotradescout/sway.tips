@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt, inArray, notInArray, sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import {
   auditEvents,
+  gigSessions,
   performerEvents,
   performerPublicProfiles,
   performers
@@ -11,6 +12,11 @@ import {
 export type PerformerEventStatus = 'draft' | 'published' | 'cancelled';
 export type PerformerEventVisibility = 'public' | 'unlisted';
 export type PerformerEventTicketingMode = 'external' | 'native_ga';
+export type PerformerEventAttendanceMode =
+  | 'walk_in'
+  | 'external_rsvp'
+  | 'external_ticket'
+  | 'native_ticket';
 export const PUBLIC_EVENT_EXTERNAL_TICKET_LABELS = [
   'Get tickets',
   'RSVP',
@@ -34,6 +40,7 @@ export type PerformerEventDto = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: PerformerEventTicketingMode;
+  attendanceMode: PerformerEventAttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -55,6 +62,7 @@ export type PublicEventPerformerDto = {
 
 export type PublicPerformerEventDto = {
   id: string;
+  performerId: string;
   title: string;
   description: string | null;
   startsAt: string;
@@ -67,6 +75,7 @@ export type PublicPerformerEventDto = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: PerformerEventTicketingMode;
+  attendanceMode: PerformerEventAttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -95,6 +104,7 @@ export type CreatePerformerEventInput = {
   locationIsTba?: boolean;
   coverImageUrl?: string | null;
   ticketingMode?: PerformerEventTicketingMode;
+  attendanceMode?: PerformerEventAttendanceMode;
   externalTicketUrl?: string | null;
   externalTicketLabel?: string | null;
   visibility?: PerformerEventVisibility;
@@ -116,6 +126,7 @@ export type UpdatePerformerEventInput = {
   city?: string | null;
   locationIsTba?: boolean;
   coverImageUrl?: string | null;
+  attendanceMode?: PerformerEventAttendanceMode;
   externalTicketUrl?: string | null;
   externalTicketLabel?: string | null;
   visibility?: PerformerEventVisibility;
@@ -165,6 +176,107 @@ const MAX_LOCATION_ADDRESS_LENGTH = 500;
 const MAX_CITY_LENGTH = 120;
 const MAX_EXTERNAL_URL_LENGTH = 2_048;
 const MAX_CANCELLATION_REASON_LENGTH = 500;
+
+export const PERFORMER_EVENT_ROOM_LINK_OPEN_BEFORE_MS = 24 * 60 * 60 * 1_000;
+export const PERFORMER_EVENT_ROOM_LINK_DEFAULT_DURATION_MS = 4 * 60 * 60 * 1_000;
+
+type PerformerEventRoomLinkTiming = {
+  startsAt: string | number | Date;
+  endsAt?: string | number | Date | null;
+};
+
+function finiteEpoch(value: string | number | Date): number | null {
+  const epoch = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+/**
+ * Canonical server policy for linking a published external event to a live room.
+ * The window is [24h before start, explicit end or start + 4h).
+ */
+export function resolvePerformerEventRoomLinkWindow(
+  event: PerformerEventRoomLinkTiming
+): { opensAt: number; closesAt: number } | null {
+  const startsAt = finiteEpoch(event.startsAt);
+  if (startsAt === null) return null;
+  const closesAt = event.endsAt === null || event.endsAt === undefined
+    ? startsAt + PERFORMER_EVENT_ROOM_LINK_DEFAULT_DURATION_MS
+    : finiteEpoch(event.endsAt);
+  if (closesAt === null || closesAt <= startsAt) return null;
+  return {
+    opensAt: startsAt - PERFORMER_EVENT_ROOM_LINK_OPEN_BEFORE_MS,
+    closesAt
+  };
+}
+
+export function isPerformerEventWithinRoomLinkWindow(
+  event: PerformerEventRoomLinkTiming,
+  now: string | number | Date = Date.now()
+): boolean {
+  const window = resolvePerformerEventRoomLinkWindow(event);
+  const nowEpoch = finiteEpoch(now);
+  return Boolean(
+    window
+    && nowEpoch !== null
+    && nowEpoch >= window.opensAt
+    && nowEpoch < window.closesAt
+  );
+}
+
+export function hasActionableWalkInLocation(event: {
+  locationName: string | null | undefined;
+  locationAddress: string | null | undefined;
+  city: string | null | undefined;
+  locationIsTba: boolean;
+}): boolean {
+  const hasText = (value: string | null | undefined) => Boolean(value?.trim());
+  return !event.locationIsTba
+    && hasText(event.locationName)
+    && (hasText(event.locationAddress) || hasText(event.city));
+}
+
+export function isPerformerEventRoomLinkEligible(event: {
+  status?: string | null;
+  ticketingMode?: string | null;
+  attendanceMode?: string | null;
+  startsAt: string | number | Date | null | undefined;
+  endsAt?: string | number | Date | null;
+  locationName?: string | null;
+  locationAddress?: string | null;
+  city?: string | null;
+  locationIsTba?: boolean | null;
+}, now: string | number | Date = Date.now()): boolean {
+  if (
+    event.status !== 'published'
+    || event.ticketingMode !== 'external'
+    || !['walk_in', 'external_rsvp', 'external_ticket'].includes(event.attendanceMode ?? '')
+    || event.startsAt === null
+    || event.startsAt === undefined
+    || !isPerformerEventWithinRoomLinkWindow({ startsAt: event.startsAt, endsAt: event.endsAt }, now)
+  ) return false;
+  return event.attendanceMode !== 'walk_in' || hasActionableWalkInLocation({
+    locationName: event.locationName,
+    locationAddress: event.locationAddress,
+    city: event.city,
+    locationIsTba: event.locationIsTba !== false
+  });
+}
+
+function assertWalkInLocationReady(event: {
+  attendanceMode: PerformerEventAttendanceMode;
+  locationName: string | null | undefined;
+  locationAddress: string | null | undefined;
+  city: string | null | undefined;
+  locationIsTba: boolean;
+}) {
+  if (event.attendanceMode === 'walk_in' && !hasActionableWalkInLocation(event)) {
+    serviceError(
+      422,
+      'walk_in_location_required',
+      'Add a location name and either a street address or city, and turn off Location TBA, before publishing a walk-in event.'
+    );
+  }
+}
 
 function serviceError(status: number, code: string, message: string): never {
   throw new EventServiceError(status, code, message);
@@ -356,6 +468,44 @@ function normalizeTicketingMode(value: unknown): PerformerEventTicketingMode {
   );
 }
 
+function normalizeAttendanceMode(
+  value: unknown,
+  ticketingMode: PerformerEventTicketingMode,
+  externalTicketLabel: unknown
+): PerformerEventAttendanceMode {
+  if (value === undefined || value === null || value === '') {
+    if (ticketingMode === 'native_ga') return 'native_ticket';
+    return externalTicketLabel === 'RSVP' ? 'external_rsvp' : 'external_ticket';
+  }
+  if (
+    value !== 'walk_in'
+    && value !== 'external_rsvp'
+    && value !== 'external_ticket'
+    && value !== 'native_ticket'
+  ) {
+    return serviceError(
+      422,
+      'invalid_attendance_mode',
+      'Attendance mode must be walk_in, external_rsvp, external_ticket, or native_ticket.'
+    );
+  }
+  if (ticketingMode === 'native_ga' && value !== 'native_ticket') {
+    return serviceError(
+      422,
+      'native_ticket_attendance_required',
+      'Native Sway tickets require native_ticket attendance mode.'
+    );
+  }
+  if (ticketingMode === 'external' && value === 'native_ticket') {
+    return serviceError(
+      422,
+      'external_attendance_required',
+      'External events cannot use native_ticket attendance mode.'
+    );
+  }
+  return value;
+}
+
 function normalizeLocationIsTba(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   if (typeof value !== 'boolean') {
@@ -388,6 +538,7 @@ function normalizeEventValues(input: {
   locationIsTba: unknown;
   coverImageUrl: unknown;
   ticketingMode: unknown;
+  attendanceMode: unknown;
   externalTicketUrl: unknown;
   externalTicketLabel: unknown;
   visibility: unknown;
@@ -439,11 +590,31 @@ function normalizeEventValues(input: {
     'External ticket label',
     80
   );
+  const attendanceMode = normalizeAttendanceMode(
+    input.attendanceMode,
+    ticketingMode,
+    requestedExternalTicketLabel
+  );
+  if (attendanceMode === 'walk_in' && (externalTicketUrl || requestedExternalTicketLabel)) {
+    serviceError(
+      422,
+      'walk_in_external_link_conflict',
+      'Walk-in events cannot use an external ticket or RSVP link.'
+    );
+  }
+  if (attendanceMode === 'external_rsvp' && requestedExternalTicketLabel && requestedExternalTicketLabel !== 'RSVP') {
+    serviceError(422, 'rsvp_label_required', 'External RSVP events must use the RSVP button label.');
+  }
+  if (attendanceMode === 'external_ticket' && requestedExternalTicketLabel === 'RSVP') {
+    serviceError(422, 'ticket_label_required', 'External ticket events cannot use the RSVP button label.');
+  }
   if (requestedExternalTicketLabel && !externalTicketUrl) {
     serviceError(422, 'ticket_label_without_url', 'An external ticket label requires an external ticket URL.');
   }
   const externalTicketLabel = externalTicketUrl
-    ? requestedExternalTicketLabel || PUBLIC_EVENT_EXTERNAL_TICKET_LABELS[0]
+    ? attendanceMode === 'external_rsvp'
+      ? 'RSVP'
+      : requestedExternalTicketLabel || PUBLIC_EVENT_EXTERNAL_TICKET_LABELS[0]
     : null;
   if (externalTicketLabel && !isPublicEventExternalTicketLabel(externalTicketLabel)) {
     serviceError(
@@ -466,6 +637,7 @@ function normalizeEventValues(input: {
     locationIsTba: normalizeLocationIsTba(input.locationIsTba),
     coverImageUrl: normalizeSafeHttpsUrl(input.coverImageUrl, 'Cover image URL'),
     ticketingMode,
+    attendanceMode,
     externalTicketUrl,
     externalTicketLabel: externalTicketUrl ? externalTicketLabel : null,
     visibility: normalizeVisibility(input.visibility)
@@ -532,6 +704,7 @@ function sameIdempotentCreate(event: EventRow, normalized: ReturnType<typeof nor
     && event.locationIsTba === normalized.locationIsTba
     && event.coverImageUrl === normalized.coverImageUrl
     && (event.ticketingMode ?? 'external') === normalized.ticketingMode
+    && (event.attendanceMode ?? 'external_ticket') === normalized.attendanceMode
     && event.externalTicketUrl === normalized.externalTicketUrl
     && event.externalTicketLabel === normalized.externalTicketLabel
     && event.visibility === normalized.visibility;
@@ -554,6 +727,7 @@ export function serializePerformerEvent(event: EventRow): PerformerEventDto {
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl,
     ticketingMode: event.ticketingMode ?? 'external',
+    attendanceMode: event.attendanceMode ?? (event.ticketingMode === 'native_ga' ? 'native_ticket' : 'external_ticket'),
     externalTicketUrl: event.externalTicketUrl,
     externalTicketLabel: event.externalTicketLabel,
     visibility: event.visibility,
@@ -570,6 +744,7 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
   const cancelled = row.event.status === 'cancelled';
   return {
     id: row.event.id,
+    performerId: row.event.performerId,
     title: row.event.title,
     description: row.event.description,
     startsAt: row.event.startsAt.toISOString(),
@@ -582,6 +757,7 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
     locationIsTba: row.event.locationIsTba,
     coverImageUrl: row.event.coverImageUrl,
     ticketingMode: row.event.ticketingMode ?? 'external',
+    attendanceMode: row.event.attendanceMode ?? (row.event.ticketingMode === 'native_ga' ? 'native_ticket' : 'external_ticket'),
     externalTicketUrl: cancelled ? null : row.event.externalTicketUrl,
     externalTicketLabel: cancelled ? null : row.event.externalTicketLabel,
     visibility: row.event.visibility,
@@ -613,6 +789,51 @@ function publicEventSelection() {
 }
 
 export function createPerformerEventService(db: SwayDb) {
+  async function lockEventRoomLifecycle(tx: DbExecutor, eventId: string) {
+    assertUuid(eventId, 'eventId');
+    await tx.execute(sql`select sway_event_room_link_lock(${eventId}::uuid)`);
+  }
+
+  async function detachActiveLinkedRooms(input: {
+    tx: DbExecutor;
+    eventId: string;
+    actorUserId: string | null;
+    reason: string;
+    source: string;
+  }) {
+    const detached = await input.tx
+      .update(gigSessions)
+      .set({
+        linkedEventId: null,
+        runtimeSessionState: sql`coalesce(${gigSessions.runtimeSessionState}, '{}'::jsonb)
+          || jsonb_build_object('linkedEventId', null, 'linkedEvent', null)`,
+        stateRevision: sql`${gigSessions.stateRevision} + 1`,
+        updatedAt: sql`transaction_timestamp()`
+      })
+      .where(and(
+        eq(gigSessions.linkedEventId, input.eventId),
+        inArray(gigSessions.status, ['active', 'closeout_pending'])
+      ))
+      .returning({ id: gigSessions.id, status: gigSessions.status });
+
+    if (detached.length) {
+      await input.tx.insert(auditEvents).values(detached.map((room: { id: string; status: string }) => ({
+        actorType: input.actorUserId ? 'performer' : 'system',
+        actorId: input.actorUserId,
+        entityType: 'gig_session',
+        entityId: room.id,
+        eventType: 'gig_session.linked_event_detached',
+        previousStatus: room.status,
+        nextStatus: room.status,
+        metadata: {
+          eventId: input.eventId,
+          reason: input.reason,
+          source: input.source
+        }
+      })));
+    }
+    return detached;
+  }
   async function listOwnedEvents(input: {
     performerId: string;
     actorUserId: string;
@@ -650,6 +871,7 @@ export function createPerformerEventService(db: SwayDb) {
       locationIsTba: input.locationIsTba,
       coverImageUrl: input.coverImageUrl,
       ticketingMode: input.ticketingMode,
+      attendanceMode: input.attendanceMode,
       externalTicketUrl: input.externalTicketUrl,
       externalTicketLabel: input.externalTicketLabel,
       visibility: input.visibility
@@ -747,6 +969,7 @@ export function createPerformerEventService(db: SwayDb) {
       'city',
       'locationIsTba',
       'coverImageUrl',
+      'attendanceMode',
       'externalTicketUrl',
       'externalTicketLabel',
       'visibility'
@@ -757,6 +980,7 @@ export function createPerformerEventService(db: SwayDb) {
     }
 
     return db.transaction(async (tx) => {
+      await lockEventRoomLifecycle(tx, input.eventId);
       await requireOwnedPerformer(tx, input.performerId, input.actorUserId);
       const current = await loadOwnedEvent(tx, input.eventId, input.performerId);
       if (current.status === 'cancelled') {
@@ -797,6 +1021,9 @@ export function createPerformerEventService(db: SwayDb) {
         locationIsTba: input.locationIsTba ?? current.locationIsTba,
         coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
         ticketingMode: current.ticketingMode ?? 'external',
+        attendanceMode: input.attendanceMode !== undefined
+          ? input.attendanceMode
+          : current.attendanceMode ?? (current.ticketingMode === 'native_ga' ? 'native_ticket' : 'external_ticket'),
         externalTicketUrl: input.externalTicketUrl !== undefined
           ? input.externalTicketUrl
           : current.externalTicketUrl,
@@ -807,7 +1034,7 @@ export function createPerformerEventService(db: SwayDb) {
       });
       if (
         current.status === 'published'
-        && (current.ticketingMode ?? 'external') === 'external'
+        && ['external_rsvp', 'external_ticket'].includes(normalized.attendanceMode)
         && !normalized.externalTicketUrl
       ) {
         serviceError(
@@ -815,6 +1042,9 @@ export function createPerformerEventService(db: SwayDb) {
           'external_ticket_url_required',
           'A published event must keep a public HTTPS ticket or RSVP link.'
         );
+      }
+      if (current.status === 'published') {
+        assertWalkInLocationReady(normalized);
       }
       if (
         current.status === 'published'
@@ -825,6 +1055,24 @@ export function createPerformerEventService(db: SwayDb) {
           'published_event_must_remain_active',
           'A published event update must keep its end time, or its start when no end is set, in the future.'
         );
+      }
+      const linkedLifecycleChanged = current.startsAt.getTime() !== normalized.startsAt.getTime()
+        || (current.endsAt?.getTime() ?? null) !== (normalized.endsAt?.getTime() ?? null)
+        || current.locationName !== normalized.locationName
+        || current.locationAddress !== normalized.locationAddress
+        || current.city !== normalized.city
+        || current.locationIsTba !== normalized.locationIsTba
+        || (current.attendanceMode ?? 'external_ticket') !== normalized.attendanceMode
+        || current.externalTicketUrl !== normalized.externalTicketUrl
+        || current.externalTicketLabel !== normalized.externalTicketLabel;
+      if (current.status === 'published' && linkedLifecycleChanged) {
+        await detachActiveLinkedRooms({
+          tx,
+          eventId: current.id,
+          actorUserId: input.actorUserId,
+          reason: 'linked_event_material_fields_changed',
+          source: 'performer_event.update'
+        });
       }
       const now = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
       const [updated] = await tx
@@ -866,6 +1114,7 @@ export function createPerformerEventService(db: SwayDb) {
   async function publishEvent(input: PublishPerformerEventInput): Promise<PerformerEventDto> {
     const expectedUpdatedAt = parseExpectedUpdatedAt(input.expectedUpdatedAt);
     return db.transaction(async (tx) => {
+      await lockEventRoomLifecycle(tx, input.eventId);
       const performer = await requireOwnedPerformer(tx, input.performerId, input.actorUserId);
       if (performer.onboardingStatus === 'suspended') {
         serviceError(403, 'performer_suspended', 'A suspended performer cannot publish events.');
@@ -891,9 +1140,21 @@ export function createPerformerEventService(db: SwayDb) {
       if (current.startsAt.getTime() <= now.getTime()) {
         serviceError(422, 'event_start_not_future', 'Only a future event can be published.');
       }
-      if (!current.externalTicketUrl) {
+      if (
+        ['external_rsvp', 'external_ticket'].includes(
+          current.attendanceMode ?? 'external_ticket'
+        )
+        && !current.externalTicketUrl
+      ) {
         serviceError(422, 'external_ticket_url_required', 'Add a public HTTPS ticket or RSVP link before publishing.');
       }
+      assertWalkInLocationReady({
+        attendanceMode: current.attendanceMode ?? 'external_ticket',
+        locationName: current.locationName,
+        locationAddress: current.locationAddress,
+        city: current.city,
+        locationIsTba: current.locationIsTba
+      });
       const [published] = await tx
         .update(performerEvents)
         .set({
@@ -939,6 +1200,7 @@ export function createPerformerEventService(db: SwayDb) {
       MAX_CANCELLATION_REASON_LENGTH
     );
     return db.transaction(async (tx) => {
+      await lockEventRoomLifecycle(tx, input.eventId);
       await requireOwnedPerformer(tx, input.performerId, input.actorUserId);
       const current = await loadOwnedEvent(tx, input.eventId, input.performerId);
       if (current.status === 'cancelled') {
@@ -966,6 +1228,14 @@ export function createPerformerEventService(db: SwayDb) {
         );
       }
       assertExpectedUpdatedAt(current.updatedAt, expectedUpdatedAt);
+
+      await detachActiveLinkedRooms({
+        tx,
+        eventId: current.id,
+        actorUserId: input.actorUserId,
+        reason: 'linked_event_cancelled',
+        source: 'performer_event.cancel'
+      });
 
       const now = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
       const [cancelled] = await tx
@@ -1067,6 +1337,126 @@ export function createPerformerEventService(db: SwayDb) {
     return serializePerformerEvent(await loadOwnedEvent(db, input.eventId, input.performerId));
   }
 
+  async function detachIneligibleRoomLinks(input: { limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(100, Math.trunc(input.limit ?? 50)));
+    return db.transaction(async (tx) => {
+      // Select only ineligible links before applying the batch limit. The
+      // materialized candidate CTE owns the room-row locks; the dependent clock
+      // CTE captures one wall-clock instant only after those locks exist. This
+      // maintenance path deliberately does not take the event advisory lock:
+      // lifecycle mutations take advisory -> room, so taking room -> advisory
+      // here would recreate the lock-order cycle this reconciler prevents.
+      const result = await tx.execute(sql<{
+        inspected: number;
+        candidate_room_id: string | null;
+        id: string | null;
+        status: string | null;
+        event_id: string | null;
+      }>`
+        with candidate_rooms as materialized (
+          select room.id as room_id,
+                 room.linked_event_id as event_id
+          from ${gigSessions} as room
+          inner join ${performerEvents} as event
+            on event.id = room.linked_event_id
+          where room.status in ('active', 'closeout_pending')
+            and room.linked_event_id is not null
+            and not sway_event_room_link_is_eligible(
+              event.status,
+              event.ticketing_mode,
+              event.attendance_mode,
+              event.starts_at,
+              event.ends_at,
+              event.location_is_tba,
+              event.location_name,
+              event.location_address,
+              event.city,
+              clock_timestamp()
+            )
+          order by event.id, room.id
+          limit ${limit}
+          for update of room skip locked
+        ), post_lock_clock as materialized (
+          select count(*)::integer as inspected,
+                 clock_timestamp() as evaluated_at
+          from candidate_rooms
+        ), detached_rooms as (
+          update ${gigSessions} as room
+          set linked_event_id = null,
+              runtime_session_state = coalesce(room.runtime_session_state, '{}'::jsonb)
+                || jsonb_build_object('linkedEventId', null, 'linkedEvent', null),
+              state_revision = room.state_revision + 1,
+              updated_at = post_lock_clock.evaluated_at
+          from candidate_rooms as candidate
+          inner join ${performerEvents} as event
+            on event.id = candidate.event_id
+          cross join post_lock_clock
+          where room.id = candidate.room_id
+            and room.linked_event_id = candidate.event_id
+            and room.status in ('active', 'closeout_pending')
+            and not sway_event_room_link_is_eligible(
+              event.status,
+              event.ticketing_mode,
+              event.attendance_mode,
+              event.starts_at,
+              event.ends_at,
+              event.location_is_tba,
+              event.location_name,
+              event.location_address,
+              event.city,
+              post_lock_clock.evaluated_at
+            )
+          returning room.id,
+                    room.status::text as status,
+                    candidate.event_id
+        )
+        select post_lock_clock.inspected,
+               candidate.room_id as candidate_room_id,
+               detached.id,
+               detached.status,
+               detached.event_id
+        from post_lock_clock
+        left join candidate_rooms as candidate on true
+        left join detached_rooms as detached on detached.id = candidate.room_id
+        order by candidate.event_id, candidate.room_id
+      `);
+      const rows = result.rows as Array<{
+        inspected: number;
+        candidate_room_id: string | null;
+        id: string | null;
+        status: string | null;
+        event_id: string | null;
+      }>;
+      const detached = rows.flatMap((row) => (
+        row.id && row.status && row.event_id
+          ? [{ id: row.id, status: row.status, eventId: row.event_id }]
+          : []
+      ));
+
+      if (detached.length) {
+        await tx.insert(auditEvents).values(detached.map((room) => ({
+          actorType: 'system',
+          actorId: null,
+          entityType: 'gig_session',
+          entityId: room.id,
+          eventType: 'gig_session.linked_event_detached',
+          previousStatus: room.status,
+          nextStatus: room.status,
+          metadata: {
+            eventId: room.eventId,
+            reason: 'linked_event_window_or_eligibility_expired',
+            source: 'event_room_maintenance'
+          }
+        })));
+      }
+
+      return {
+        inspected: Number(rows[0]?.inspected ?? 0),
+        detached: detached.length
+      };
+    });
+  }
+
   return {
     listOwnedEvents,
     getOwnedEvent,
@@ -1074,6 +1464,7 @@ export function createPerformerEventService(db: SwayDb) {
     updateEvent,
     publishEvent,
     cancelEvent,
+    detachIneligibleRoomLinks,
     getPublicEvent,
     listPublicEvents
   };

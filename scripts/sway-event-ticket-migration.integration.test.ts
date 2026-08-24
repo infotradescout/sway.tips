@@ -279,23 +279,77 @@ async function runMigrationProof(database: PGlite) {
   const legacy = await database.query<{
     ticketing_mode: string;
     external_ticket_url: string | null;
+    attendance_mode: string;
   }>(
-    `select ticketing_mode::text, external_ticket_url
+    `select ticketing_mode::text, external_ticket_url, attendance_mode::text
        from performer_events
       where id = $1`,
     [ids.legacyEvent]
   );
   assert.deepEqual(legacy.rows[0], {
     ticketing_mode: 'external',
-    external_ticket_url: 'https://tickets.example.test/legacy'
+    external_ticket_url: 'https://tickets.example.test/legacy',
+    attendance_mode: 'external_ticket'
   });
+
+  await database.exec(`
+    insert into performer_events (
+      id, performer_id, client_request_id, created_by_actor_user_id,
+      last_mutation_actor_user_id, title, starts_at, ends_at, time_zone,
+      ticketing_mode, external_ticket_url, external_ticket_label
+    ) values (
+      '00000000-0000-4000-8000-000000000306',
+      '${ids.performer}',
+      '00000000-0000-4000-8000-000000000316',
+      '${ids.ownerUser}',
+      '${ids.ownerUser}',
+      'Rolling writer RSVP event',
+      now() + interval '6 days',
+      now() + interval '6 days 3 hours',
+      'America/Chicago',
+      'external',
+      'https://tickets.example.test/rsvp',
+      'RSVP'
+    );
+
+    insert into performer_events (
+      id, performer_id, client_request_id, created_by_actor_user_id,
+      last_mutation_actor_user_id, title, starts_at, door_opens_at,
+      ends_at, time_zone, ticketing_mode
+    ) values (
+      '00000000-0000-4000-8000-000000000307',
+      '${ids.performer}',
+      '00000000-0000-4000-8000-000000000317',
+      '${ids.ownerUser}',
+      '${ids.ownerUser}',
+      'Rolling writer native event',
+      now() + interval '7 days',
+      now() + interval '7 days' - interval '1 hour',
+      now() + interval '7 days 3 hours',
+      'America/Chicago',
+      'native_ga'
+    );
+  `);
+  const rollingWriterModes = await database.query<{ id: string; attendance_mode: string }>(
+    `select id::text, attendance_mode::text
+       from performer_events
+      where id in (
+        '00000000-0000-4000-8000-000000000306',
+        '00000000-0000-4000-8000-000000000307'
+      )
+      order by id`,
+  );
+  assert.deepEqual(rollingWriterModes.rows, [
+    { id: '00000000-0000-4000-8000-000000000306', attendance_mode: 'external_rsvp' },
+    { id: '00000000-0000-4000-8000-000000000307', attendance_mode: 'native_ticket' }
+  ]);
 
   await expectDatabaseRejection(
     () => database.exec(`
       insert into performer_events (
         id, performer_id, client_request_id, created_by_actor_user_id,
         last_mutation_actor_user_id, title, starts_at, ends_at, time_zone,
-        ticketing_mode
+        ticketing_mode, attendance_mode
       ) values (
         '00000000-0000-4000-8000-000000000304',
         '${ids.performer}',
@@ -306,7 +360,8 @@ async function runMigrationProof(database: PGlite) {
         now() + interval '4 days',
         now() + interval '4 days 3 hours',
         'America/Chicago',
-        'native_ga'
+        'native_ga',
+        'native_ticket'
       )
     `),
     /performer_events_native_door_required/i,
@@ -317,7 +372,7 @@ async function runMigrationProof(database: PGlite) {
       insert into performer_events (
         id, performer_id, client_request_id, created_by_actor_user_id,
         last_mutation_actor_user_id, title, starts_at, door_opens_at,
-        ends_at, time_zone, ticketing_mode
+        ends_at, time_zone, ticketing_mode, attendance_mode
       ) values (
         '00000000-0000-4000-8000-000000000305',
         '${ids.performer}',
@@ -329,7 +384,8 @@ async function runMigrationProof(database: PGlite) {
         now() + interval '5 days 1 hour',
         now() + interval '5 days 3 hours',
         'America/Chicago',
-        'native_ga'
+        'native_ga',
+        'native_ticket'
       )
     `),
     /performer_events_door_not_after_start/i,
@@ -349,6 +405,7 @@ async function runMigrationProof(database: PGlite) {
       ends_at,
       time_zone,
       ticketing_mode,
+      attendance_mode,
       visibility,
       status,
       published_at
@@ -365,6 +422,7 @@ async function runMigrationProof(database: PGlite) {
         now() + interval '2 days 3 hours',
         'America/Chicago',
         'native_ga',
+        'native_ticket',
         'public',
         'published',
         now()
@@ -381,6 +439,7 @@ async function runMigrationProof(database: PGlite) {
         now() + interval '3 days 3 hours',
         'America/Chicago',
         'native_ga',
+        'native_ticket',
         'public',
         'published',
         now()
@@ -986,6 +1045,139 @@ async function runMigrationProof(database: PGlite) {
     () => database.query(`delete from performer_events where id = $1`, [ids.nativeEvent]),
     /foreign key|violates/i,
     'An event with native financial evidence must not be cascade-deleted.'
+  );
+
+  await database.exec(`
+    insert into performer_authority_events (
+      performer_id, authority_kind, subject_type, subject_id, decision,
+      actor_type, reason, evidence, idempotency_key_hash
+    ) values (
+      '${ids.performer}', 'event_organizer', 'event',
+      '00000000-0000-4000-8000-000000000306', 'revoked',
+      'system', 'Wave 4 exact-authority counterexample.',
+      '{"reference":"wave4-revoked-event-authority"}'::jsonb,
+      md5('wave4-revoke-event-authority') || md5('wave4-revoke-event-authority-proof')
+    );
+  `);
+  await expectDatabaseRejection(
+    () => database.exec(`
+      insert into gig_sessions (
+        id, performer_id, owner_actor_user_id, status, linked_event_id, auto_closeout_at
+      ) values (
+        '00000000-0000-4000-8000-000000000401',
+        '${ids.performer}', '${ids.ownerUser}', 'active',
+        '00000000-0000-4000-8000-000000000306', now() + interval '4 hours'
+      )
+    `),
+    /organizer authority for this exact event/i,
+    'A linked room must fail after exact event organizer authority is revoked.'
+  );
+
+  await database.exec(`
+    insert into gig_sessions (
+      id, performer_id, owner_actor_user_id, status, auto_closeout_at
+    ) values (
+      '00000000-0000-4000-8000-000000000405',
+      '${ids.performer}', '${ids.ownerUser}', 'active', now() + interval '4 hours'
+    );
+
+    insert into performer_capability_grant_events (
+      performer_id, capability, decision, actor_type, reason, evidence, idempotency_key_hash
+    ) values (
+      '${ids.performer}', 'external_ticket_links', 'revoked', 'system',
+      'Wave 4 external-link counterexample.',
+      '{"reference":"wave4-revoked-external-ticket-links"}'::jsonb,
+      md5('wave4-revoke-external-links') || md5('wave4-revoke-external-links-proof')
+    );
+  `);
+  await expectDatabaseRejection(
+    () => database.exec(`
+      insert into performer_events (
+        id, performer_id, client_request_id, created_by_actor_user_id,
+        last_mutation_actor_user_id, title, starts_at, ends_at, time_zone,
+        external_ticket_url, external_ticket_label
+      ) values (
+        '00000000-0000-4000-8000-000000000402',
+        '${ids.performer}', '00000000-0000-4000-8000-000000000412',
+        '${ids.ownerUser}', '${ids.ownerUser}', 'Revoked external link',
+        now() + interval '8 days', now() + interval '8 days 2 hours',
+        'America/Chicago', 'https://tickets.example.test/revoked', 'Get tickets'
+      )
+    `),
+    /external_ticket_links capability authorization/i,
+    'An external ticket URL must fail after its server capability is revoked.'
+  );
+
+  await database.exec(`
+    insert into performer_capability_grant_events (
+      performer_id, capability, decision, actor_type, reason, evidence, idempotency_key_hash
+    ) values (
+      '${ids.performer}', 'event_publication', 'revoked', 'system',
+      'Wave 4 event-publication counterexample.',
+      '{"reference":"wave4-revoked-event-publication"}'::jsonb,
+      md5('wave4-revoke-event-publication') || md5('wave4-revoke-event-publication-proof')
+    );
+  `);
+  await expectDatabaseRejection(
+    () => database.exec(`
+      insert into performer_events (
+        id, performer_id, client_request_id, created_by_actor_user_id,
+        last_mutation_actor_user_id, title, starts_at, ends_at, time_zone
+      ) values (
+        '00000000-0000-4000-8000-000000000403',
+        '${ids.performer}', '00000000-0000-4000-8000-000000000413',
+        '${ids.ownerUser}', '${ids.ownerUser}', 'Revoked event publication',
+        now() + interval '9 days', now() + interval '9 days 2 hours',
+        'America/Chicago'
+      )
+    `),
+    /event_publication capability authorization/i,
+    'Event creation must fail after its server capability is revoked.'
+  );
+
+  await database.exec(`
+    insert into performer_capability_grant_events (
+      performer_id, capability, decision, actor_type, reason, evidence, idempotency_key_hash
+    ) values (
+      '${ids.performer}', 'live_rooms', 'revoked', 'system',
+      'Wave 4 live-room counterexample.',
+      '{"reference":"wave4-revoked-live-rooms"}'::jsonb,
+      md5('wave4-revoke-live-rooms') || md5('wave4-revoke-live-rooms-proof')
+    );
+  `);
+  await expectDatabaseRejection(
+    () => database.exec(`
+      update gig_sessions
+         set title = 'Unauthorized active-room mutation'
+       where id = '00000000-0000-4000-8000-000000000405'
+    `),
+    /live_rooms capability authorization/i,
+    'An active room must reject further mutation after its server capability is revoked.'
+  );
+  await database.exec(`
+    update gig_sessions
+       set status = 'closeout_pending'
+     where id = '00000000-0000-4000-8000-000000000405'
+  `);
+  const closeoutAfterRevocation = await database.query<{ status: string }>(
+    `select status::text from gig_sessions where id = '00000000-0000-4000-8000-000000000405'`
+  );
+  assert.equal(
+    closeoutAfterRevocation.rows[0]?.status,
+    'closeout_pending',
+    'Capability revocation must not prevent risk-reducing room closeout.'
+  );
+  await expectDatabaseRejection(
+    () => database.exec(`
+      insert into gig_sessions (
+        id, performer_id, owner_actor_user_id, status, auto_closeout_at
+      ) values (
+        '00000000-0000-4000-8000-000000000404',
+        '${ids.performer}', '${ids.ownerUser}', 'active', now() + interval '4 hours'
+      )
+    `),
+    /live_rooms capability authorization/i,
+    'Starting a live room must fail after its server capability is revoked.'
   );
 
   const finalCounts = await database.query<{

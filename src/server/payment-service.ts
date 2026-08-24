@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { isDeepStrictEqual } from 'node:util';
 import { closeDisposableSwayDbProof, createSwayDb } from '../db/client';
 import {
   activeBlocks,
@@ -13,7 +14,10 @@ import {
 import { lockModerationBlockIdentities, moderationBlockIdentities } from './moderation-block-lock';
 import type { PaymentProviderAdapter } from './payment-provider';
 import { createPaymentLifecycleService } from './payment-lifecycle';
-import { createLiveRoomPaymentOperationStore } from './live-room-payment-operation-store';
+import {
+  createLiveRoomPaymentOperationStore,
+  CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION
+} from './live-room-payment-operation-store';
 import { resolveSwayPlatformFeePolicyForGig } from './partner-entitlement-store';
 import { createIdempotencyStore, type PendingActionOwner } from './idempotency-store';
 import {
@@ -50,6 +54,7 @@ export type ConfirmAuthorizedActionInput = {
   actionType: 'tip' | 'request' | 'boost';
   clientRequestId: string;
   idempotencyKey: string;
+  intentFingerprint: string;
   patronDeviceIdHash: string;
   processorPaymentIntentId: string;
 };
@@ -179,6 +184,8 @@ function actionLink(input: Pick<AuthorizeActionInput, 'actionType' | 'requestId'
 export function createPaymentService(config: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter | null;
+  moneyExecutionEnabled?: boolean;
+  moneyEnvironment?: 'test' | 'live' | null;
   testPlatformBalancePerformerIds?: ReadonlySet<string>;
 }) {
   const db = config.databaseUrl ? createSwayDb(config.databaseUrl) : null;
@@ -187,11 +194,345 @@ export function createPaymentService(config: {
   const operationStore = createLiveRoomPaymentOperationStore(config.databaseUrl);
   const idempotencyStore = createIdempotencyStore(config.databaseUrl);
   const enabled = Boolean(db && provider);
+  const moneyExecutionEnabled = config.moneyExecutionEnabled === true;
+  const moneyEnvironment = config.moneyEnvironment === 'test' || config.moneyEnvironment === 'live'
+    ? config.moneyEnvironment
+    : null;
   const testPlatformBalancePerformerIds = config.testPlatformBalancePerformerIds ?? new Set<string>();
   const workerId = `live-room-payment:${process.pid}`;
 
   function isEnabled() {
     return enabled;
+  }
+
+  async function withCurrentLiveMoneyAdmission<T>(input: {
+    phase: 'authorize' | 'confirm' | 'capture';
+    gigId: string;
+    destinationAccountId: string;
+    operation?: typeof liveRoomPaymentOperations.$inferSelect;
+    requireLeasedOperation?: boolean;
+    expectedClientRequestId?: string;
+    expectedIntentFingerprint?: string;
+    expectedPatronDeviceIdHash?: string;
+    expectedProcessorPaymentIntentId?: string;
+    execute: (admission: {
+      operation: typeof liveRoomPaymentOperations.$inferSelect;
+      payment: typeof payments.$inferSelect;
+      payload: Record<string, unknown>;
+      recoveryAttempt: boolean;
+      unresolvedPendingExpired: boolean;
+    }) => Promise<T>;
+  }): Promise<T> {
+    if (!db || !provider || !moneyExecutionEnabled || !moneyEnvironment) {
+      throw new Error('live_money_release_gate_closed');
+    }
+    let admissionPassed = false;
+    try {
+      return await db.transaction(async (tx) => {
+        if (!input.operation) throw new Error('payment_operation_lease_lost');
+
+        // One lock order is used at the provider boundary: room, seller,
+        // operation, payment, action, pending action, then the shared release
+        // lock inside the SQL authority function. Every mutable precondition is
+        // re-read only after its row lock is held.
+        const [lockedRoom] = await tx
+          .select({
+            id: gigSessions.id,
+            performerId: gigSessions.performerId,
+            status: gigSessions.status,
+            roomType: gigSessions.roomType,
+            moneyEnabled: gigSessions.moneyEnabled,
+            destinationAccountId: gigSessions.moneyDestinationAccountId,
+            moneyEnvironment: gigSessions.moneyEnvironment
+          })
+          .from(gigSessions)
+          .where(eq(gigSessions.id, input.gigId))
+          .for('update')
+          .limit(1);
+        if (
+          !lockedRoom
+          || lockedRoom.roomType !== 'music'
+          || lockedRoom.moneyEnabled !== true
+          || lockedRoom.destinationAccountId !== input.destinationAccountId
+          || lockedRoom.moneyEnvironment !== moneyEnvironment
+        ) throw new Error('live_money_admission_denied');
+
+        const [lockedSeller] = await tx
+          .select({ id: performers.id })
+          .from(performers)
+          .where(eq(performers.id, lockedRoom.performerId))
+          .for('update')
+          .limit(1);
+        if (!lockedSeller) throw new Error('live_money_admission_denied');
+
+        const [lockedOperation] = await tx
+          .select()
+          .from(liveRoomPaymentOperations)
+          .where(eq(liveRoomPaymentOperations.id, input.operation.id))
+          .for('update')
+          .limit(1);
+        if (
+          !lockedOperation
+          || lockedOperation.gigId !== input.gigId
+          || lockedOperation.performerId !== lockedRoom.performerId
+          || lockedOperation.destinationAccountId !== input.destinationAccountId
+          || lockedOperation.processor !== provider.processor
+          || (input.phase === 'capture'
+            ? lockedOperation.operationType !== 'capture'
+            : lockedOperation.operationType !== 'authorize')
+          || (input.phase === 'confirm'
+            && !['awaiting_customer', 'succeeded'].includes(lockedOperation.status))
+          || lockedOperation.minimumExecutorGeneration > CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION
+          || (input.requireLeasedOperation !== false && (
+            lockedOperation.status !== 'leased'
+            || lockedOperation.leaseOwner !== input.operation.leaseOwner
+            || lockedOperation.leaseExecutorGeneration === null
+            || lockedOperation.leaseExecutorGeneration < lockedOperation.minimumExecutorGeneration
+          ))
+        ) throw new Error('payment_operation_lease_lost');
+
+        const [lockedPayment] = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, lockedOperation.paymentId))
+          .for('update')
+          .limit(1);
+        if (
+          !lockedPayment
+          || lockedPayment.legacyUnlinked
+          || lockedPayment.gigId !== lockedOperation.gigId
+          || lockedPayment.performerId !== lockedOperation.performerId
+          || lockedPayment.requestId !== lockedOperation.requestId
+          || lockedPayment.requestBoostId !== lockedOperation.requestBoostId
+          || lockedPayment.destinationAccountId !== lockedOperation.destinationAccountId
+          || lockedPayment.processor !== lockedOperation.processor
+          || (input.expectedProcessorPaymentIntentId
+            && lockedPayment.processorPaymentIntentId !== input.expectedProcessorPaymentIntentId)
+        ) throw new Error('payment_operation_identity_mismatch');
+
+        const payload = asRecord(lockedOperation.requestPayload);
+        if (lockedOperation.operationType === 'authorize') {
+          if (
+            recordString(payload, 'actionType') !== lockedPayment.actionType
+            || recordNumber(payload, 'amountSubtotalCents') !== lockedPayment.amountSubtotal
+            || recordNumber(payload, 'amountTotalCents') !== lockedPayment.amountTotal
+            || (recordString(payload, 'currency') ?? '').toUpperCase() !== lockedPayment.currency.toUpperCase()
+            || (input.expectedClientRequestId
+              && recordString(payload, 'clientRequestId') !== input.expectedClientRequestId)
+            || (input.expectedIntentFingerprint
+              && recordString(payload, 'intentFingerprint') !== input.expectedIntentFingerprint)
+          ) throw new Error('payment_operation_identity_mismatch');
+        } else if (
+          recordString(payload, 'processorPaymentIntentId') !== lockedPayment.processorPaymentIntentId
+          || recordString(payload, 'paymentStatus') !== 'authorized'
+        ) {
+          throw new Error('payment_operation_identity_mismatch');
+        }
+
+        let actionStatus: string | null = null;
+        let actionActivatedAt: Date | null = null;
+        let actionRuntime: Record<string, unknown> = {};
+        let actionClientRequestId: string | null = null;
+        let actionIdempotencyKey: string | null = null;
+        let actionIntentFingerprint: string | null = null;
+        let actionPatronDeviceIdHash: string | null = null;
+        let committedStatus: string | null = null;
+        let committedActivatedAt: Date | null = null;
+        let committedRuntime: Record<string, unknown> = {};
+
+        if (lockedPayment.requestId) {
+          const [action] = await tx
+            .select()
+            .from(requests)
+            .where(eq(requests.id, lockedPayment.requestId))
+            .for('update')
+            .limit(1);
+          if (!action || action.gigId !== lockedPayment.gigId) {
+            throw new Error('payment_operation_identity_mismatch');
+          }
+          actionStatus = action.status;
+          actionActivatedAt = action.activatedAt;
+          actionRuntime = asRecord(action.runtimeRequestState);
+          actionClientRequestId = action.clientRequestId;
+          actionIdempotencyKey = action.idempotencyKey;
+          actionIntentFingerprint = action.intentFingerprint;
+          actionPatronDeviceIdHash = action.patronDeviceIdHash;
+          committedStatus = action.status;
+          committedActivatedAt = action.activatedAt;
+          committedRuntime = actionRuntime;
+          if (
+            action.moneyRequired !== true
+            || action.amountCents !== lockedPayment.amountSubtotal
+            || action.currency.toUpperCase() !== lockedPayment.currency.toUpperCase()
+          ) throw new Error('payment_operation_identity_mismatch');
+        } else if (lockedPayment.requestBoostId) {
+          const [boostIdentity] = await tx
+            .select({ requestId: requestBoosts.requestId })
+            .from(requestBoosts)
+            .where(eq(requestBoosts.id, lockedPayment.requestBoostId))
+            .limit(1);
+          if (!boostIdentity) throw new Error('payment_operation_identity_mismatch');
+          const [parent] = await tx
+            .select({
+              status: requests.status,
+              activatedAt: requests.activatedAt,
+              runtimeState: requests.runtimeRequestState
+            })
+            .from(requests)
+            .where(eq(requests.id, boostIdentity.requestId))
+            .for('update')
+            .limit(1);
+          if (!parent) throw new Error('payment_operation_identity_mismatch');
+          const [action] = await tx
+            .select()
+            .from(requestBoosts)
+            .where(eq(requestBoosts.id, lockedPayment.requestBoostId))
+            .for('update')
+            .limit(1);
+          if (
+            !action
+            || action.gigId !== lockedPayment.gigId
+            || action.requestId !== boostIdentity.requestId
+          ) {
+            throw new Error('payment_operation_identity_mismatch');
+          }
+          actionStatus = action.status;
+          actionActivatedAt = action.activatedAt;
+          actionRuntime = asRecord(action.runtimeBoostState);
+          actionClientRequestId = action.clientRequestId;
+          actionIdempotencyKey = action.idempotencyKey;
+          actionIntentFingerprint = action.intentFingerprint;
+          actionPatronDeviceIdHash = action.patronDeviceIdHash;
+          if (
+            action.moneyRequired !== true
+            || action.amountCents !== lockedPayment.amountSubtotal
+            || action.currency.toUpperCase() !== lockedPayment.currency.toUpperCase()
+          ) throw new Error('payment_operation_identity_mismatch');
+          committedStatus = parent.status;
+          committedActivatedAt = parent.activatedAt;
+          committedRuntime = asRecord(parent.runtimeState);
+        } else {
+          throw new Error('payment_operation_identity_mismatch');
+        }
+
+        if (
+          actionIdempotencyKey !== lockedPayment.idempotencyKey
+          || (lockedOperation.operationType === 'authorize' && (
+            actionClientRequestId !== recordString(payload, 'clientRequestId')
+            || actionIntentFingerprint !== recordString(payload, 'intentFingerprint')
+          ))
+          || (input.expectedClientRequestId && actionClientRequestId !== input.expectedClientRequestId)
+          || (input.expectedIntentFingerprint && actionIntentFingerprint !== input.expectedIntentFingerprint)
+          || (input.expectedPatronDeviceIdHash
+            && actionPatronDeviceIdHash !== input.expectedPatronDeviceIdHash)
+        ) throw new Error('payment_operation_identity_mismatch');
+
+        const [pending] = await tx
+          .select()
+          .from(clientPendingActions)
+          .where(eq(clientPendingActions.idempotencyKey, lockedPayment.idempotencyKey!))
+          .for('update')
+          .limit(1);
+        const effectiveDeadline = pending
+          ? Math.min(pending.expiresAt.getTime(), pending.createdAt.getTime() + 5 * 60 * 1000)
+          : null;
+        const recoveryAttempt = input.phase === 'authorize'
+          ? lockedOperation.attemptCount > 1
+            || Boolean(lockedPayment.processorPaymentIntentId || lockedOperation.processorObjectId)
+          : input.phase === 'capture'
+            ? lockedOperation.attemptCount > 1 || Boolean(lockedOperation.processorObjectId)
+            : false;
+
+        // Acquire the shared release lock and evaluate every authority grant
+        // only after all mutable identity rows are locked. The TTL check below
+        // intentionally happens after this call as the lock wait itself can
+        // cross the action deadline.
+        await tx.execute(sql`select sway_require_current_live_room_money_authority(
+          ${input.gigId}::uuid,
+          ${input.destinationAccountId}::text,
+          ${moneyEnvironment}::text
+        )`);
+        const unresolvedPendingExpired = !actionActivatedAt && (
+          !pending
+          || !['pending', 'retrying'].includes(pending.status)
+          || pending.gigId !== lockedPayment.gigId
+          || pending.clientRequestId !== actionClientRequestId
+          || pending.actionType !== lockedPayment.actionType
+          || effectiveDeadline === null
+          || effectiveDeadline <= Date.now()
+        );
+
+        if (
+          recordBoolean(actionRuntime, 'hidden')
+          || recordBoolean(actionRuntime, 'removed')
+          || recordBoolean(actionRuntime, 'shadowBanned')
+        ) {
+          if (!recoveryAttempt) throw new Error(input.phase === 'capture'
+            ? 'capture_canceled_before_provider_call'
+            : 'authorization_canceled_before_provider_call');
+        }
+        if (input.phase === 'authorize' || input.phase === 'confirm') {
+          if (!recoveryAttempt && lockedRoom.status !== 'active') {
+            throw new Error('authorization_canceled_before_provider_call');
+          }
+          if (!recoveryAttempt && (unresolvedPendingExpired || actionStatus !== 'payment_pending')) {
+            throw new Error('pending_action_expired_before_provider_call');
+          }
+        } else {
+          const committedTargetEligible = Boolean(
+            committedActivatedAt
+            && ['approved', 'fulfilled'].includes(committedStatus ?? '')
+            && !recordBoolean(committedRuntime, 'hidden')
+            && !recordBoolean(committedRuntime, 'removed')
+            && !recordBoolean(committedRuntime, 'shadowBanned')
+          );
+          const committedCaptureRequired = Boolean(
+            actionActivatedAt
+            && committedTargetEligible
+            && (lockedPayment.requestId || actionStatus === 'approved')
+          );
+          const invisibleRequestNeedsCapture = Boolean(
+            lockedPayment.requestId
+            && (
+              recordString(actionRuntime, 'type') === 'tip'
+              || ['approved', 'fulfilled'].includes(recordString(actionRuntime, 'status') ?? '')
+            )
+          );
+          const invisibleBoostNeedsCapture = Boolean(
+            lockedPayment.requestBoostId
+            && committedTargetEligible
+          );
+          const invisibleCaptureRequired = Boolean(
+            !actionActivatedAt
+            && lockedRoom.status === 'active'
+            && actionStatus === 'payment_pending'
+            && !unresolvedPendingExpired
+            && (invisibleRequestNeedsCapture || invisibleBoostNeedsCapture)
+          );
+          if (!recoveryAttempt && !committedCaptureRequired && !invisibleCaptureRequired) {
+            throw new Error('capture_canceled_before_provider_call');
+          }
+        }
+
+        admissionPassed = true;
+        return input.execute({
+          operation: lockedOperation,
+          payment: lockedPayment,
+          payload,
+          recoveryAttempt,
+          unresolvedPendingExpired
+        });
+      });
+    } catch (error) {
+      if (admissionPassed || (error instanceof Error && [
+        'payment_operation_lease_lost',
+        'payment_operation_identity_mismatch',
+        'capture_canceled_before_provider_call',
+        'authorization_canceled_before_provider_call',
+        'pending_action_expired_before_provider_call'
+      ].includes(error.message))) throw error;
+      throw new Error('live_money_admission_denied');
+    }
   }
 
   async function loadPayment(paymentId: string) {
@@ -341,6 +682,7 @@ export function createPaymentService(config: {
 
   async function reserveAuthorization(input: AuthorizeActionInput, feePolicy: FeePolicySnapshot) {
     if (!db || !provider) throw new Error('payment_service_disabled');
+    if (!moneyExecutionEnabled || !moneyEnvironment) throw new Error('live_money_release_gate_closed');
     const link = actionLink(input);
     if (!link || !input.intentFingerprint || !input.clientRequestId) {
       throw new Error('durable_action_link_required');
@@ -351,6 +693,24 @@ export function createPaymentService(config: {
       platformFeeCents: feePolicy.platformFeeCents,
       platformFeePayer: input.platformFeePayer
     });
+    const requestPayload = {
+      amountTotalCents: amounts.amountTotalCents,
+      amountSubtotalCents: input.amountSubtotalCents,
+      currency: input.currency,
+      paymentMethod: input.paymentMethod ?? null,
+      confirm: input.confirm === true,
+      actionType: input.actionType,
+      runtimeRequestId: input.runtimeRequestId ?? null,
+      clientRequestId: input.clientRequestId,
+      intentFingerprint: input.intentFingerprint,
+      platformFeePayer: amounts.platformFeePayer,
+      platformFeeChargedToPatronCents: amounts.platformFeeChargedToPatronCents,
+      platformFeeCents: feePolicy.platformFeeCents,
+      platformFeeCapCents: feePolicy.platformFeeCapCents,
+      partnerTermsVersion: feePolicy.partnerTermsVersion,
+      partnerTermsHash: feePolicy.partnerTermsHash,
+      metadata: input.metadata ?? {}
+    };
 
     return db.transaction(async (tx) => {
       const actionConditions = [eq(payments.idempotencyKey, input.idempotencyKey)];
@@ -387,14 +747,20 @@ export function createPaymentService(config: {
             eq(liveRoomPaymentOperations.operationType, 'authorize')
           ))
           .limit(1);
-        if (!operation) throw new Error('durable_authorization_operation_missing');
+        if (
+          !operation
+          || operation.processor !== provider.processor
+          || !isDeepStrictEqual(operation.requestPayload, requestPayload)
+        ) throw new Error(operation ? 'durable_payment_identity_conflict' : 'durable_authorization_operation_missing');
         return { payment: existing, operation };
       }
 
-      const [destination] = await tx
+      const [candidateDestination] = await tx
         .select({
           performerId: performers.id,
           roomStatus: gigSessions.status,
+          roomType: gigSessions.roomType,
+          moneyEnabled: gigSessions.moneyEnabled,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
           paymentAccountStatus: performers.paymentAccountStatus,
@@ -407,9 +773,55 @@ export function createPaymentService(config: {
         .from(gigSessions)
         .innerJoin(performers, eq(performers.id, gigSessions.performerId))
         .where(eq(gigSessions.id, input.gigId))
-        .for('update')
         .limit(1);
+      if (candidateDestination?.roomType !== 'music' || candidateDestination.moneyEnabled !== true) {
+        throw new Error('room_money_not_enabled');
+      }
       const sellerReadiness = resolveLiveRoomSellerMoneyReadiness({
+        roomStatus: candidateDestination?.roomStatus,
+        seller: candidateDestination,
+        allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
+          candidateDestination?.performerId,
+          testPlatformBalancePerformerIds
+        )
+      });
+      const destinationAccountId = sellerReadiness.destinationAccountId;
+      if (!sellerReadiness.ready || !destinationAccountId || !candidateDestination?.performerId) {
+        throw new Error(candidateDestination?.roomStatus === 'active' ? 'seller_payout_not_ready' : 'room_not_accepting_money');
+      }
+      try {
+        await tx.execute(sql`select sway_require_current_live_room_money_authority(
+          ${input.gigId}::uuid,
+          ${destinationAccountId}::text,
+          ${moneyEnvironment}::text
+        )`);
+      } catch {
+        throw new Error('live_money_admission_denied');
+      }
+
+      // The SQL admission function now owns the deterministic room -> seller
+      // lock order for the rest of this transaction. Reload the authoritative
+      // values after those locks are held so no pre-lock snapshot is persisted.
+      const [destination] = await tx
+        .select({
+          performerId: performers.id,
+          roomStatus: gigSessions.status,
+          roomType: gigSessions.roomType,
+          moneyEnabled: gigSessions.moneyEnabled,
+          isActive: performers.isActive,
+          onboardingStatus: performers.onboardingStatus,
+          paymentAccountStatus: performers.paymentAccountStatus,
+          kycStatus: performers.kycStatus,
+          chargesEnabled: performers.chargesEnabled,
+          payoutsEnabled: performers.payoutsEnabled,
+          stripeConnectedAccountId: performers.stripeConnectedAccountId,
+          payoutHoldReason: performers.payoutHoldReason
+        })
+        .from(gigSessions)
+        .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+        .where(eq(gigSessions.id, input.gigId))
+        .limit(1);
+      const currentSellerReadiness = resolveLiveRoomSellerMoneyReadiness({
         roomStatus: destination?.roomStatus,
         seller: destination,
         allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
@@ -417,9 +829,14 @@ export function createPaymentService(config: {
           testPlatformBalancePerformerIds
         )
       });
-      const destinationAccountId = sellerReadiness.destinationAccountId;
-      if (!sellerReadiness.ready || !destinationAccountId || !destination?.performerId) {
-        throw new Error(destination?.roomStatus === 'active' ? 'seller_payout_not_ready' : 'room_not_accepting_money');
+      if (
+        destination?.roomType !== 'music'
+        || destination.moneyEnabled !== true
+        || !destination.performerId
+        || !currentSellerReadiness.ready
+        || currentSellerReadiness.destinationAccountId !== destinationAccountId
+      ) {
+        throw new Error('live_money_admission_denied');
       }
 
       if (link.requestId) {
@@ -488,24 +905,6 @@ export function createPaymentService(config: {
         })
         .returning();
 
-      const requestPayload = {
-        amountTotalCents: amounts.amountTotalCents,
-        amountSubtotalCents: input.amountSubtotalCents,
-        currency: input.currency,
-        paymentMethod: input.paymentMethod ?? null,
-        confirm: input.confirm === true,
-        actionType: input.actionType,
-        runtimeRequestId: input.runtimeRequestId ?? null,
-        clientRequestId: input.clientRequestId,
-        intentFingerprint: input.intentFingerprint,
-        platformFeePayer: amounts.platformFeePayer,
-        platformFeeChargedToPatronCents: amounts.platformFeeChargedToPatronCents,
-        platformFeeCents: feePolicy.platformFeeCents,
-        platformFeeCapCents: feePolicy.platformFeeCapCents,
-        partnerTermsVersion: feePolicy.partnerTermsVersion,
-        partnerTermsHash: feePolicy.partnerTermsHash,
-        metadata: input.metadata ?? {}
-      };
       const [operation] = await tx
         .insert(liveRoomPaymentOperations)
         .values({
@@ -568,7 +967,7 @@ export function createPaymentService(config: {
       });
       return;
     }
-    const expiredBeforeProviderCall = await hasExpiredUnresolvedPendingAction(payment);
+    let expiredBeforeProviderCall = await hasExpiredUnresolvedPendingAction(payment);
     if (
       expiredBeforeProviderCall
       && operation.attemptCount <= 1
@@ -591,28 +990,37 @@ export function createPaymentService(config: {
     const payload = asRecord(operation.requestPayload);
     const metadata = asRecord(payload.metadata);
     const usesTestPlatformBalance = isSwayTestPlatformBalanceDestination(operation.destinationAccountId);
-    const authorization = await provider.authorizePayment({
-      amountTotalCents: recordNumber(payload, 'amountTotalCents') ?? payment.amountTotal,
-      currency: recordString(payload, 'currency') ?? payment.currency,
-      idempotencyKey: operation.idempotencyKey,
-      paymentMethod: recordString(payload, 'paymentMethod') ?? undefined,
-      confirm: recordBoolean(payload, 'confirm'),
-      destinationAccountId: usesTestPlatformBalance ? undefined : operation.destinationAccountId,
-      applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee,
-      metadata: {
-        sway_payment_id: payment.id,
-        sway_gig_id: payment.gigId,
-        sway_action_type: payment.actionType ?? 'request',
-        sway_platform_fee_cents: String(payment.platformFee),
-        sway_platform_fee_payer: recordString(payload, 'platformFeePayer') ?? 'patron',
-        sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents') ?? 0),
-        sway_settlement_mode: usesTestPlatformBalance ? 'platform_test_balance' : 'connected_account',
-        ...(recordNumber(payload, 'platformFeeCapCents') === null ? {} : { sway_platform_fee_cap_cents: String(recordNumber(payload, 'platformFeeCapCents')) }),
-        ...(recordString(payload, 'partnerTermsVersion') ? { sway_partner_terms_version: recordString(payload, 'partnerTermsVersion')! } : {}),
-        ...(recordString(payload, 'partnerTermsHash') ? { sway_partner_terms_hash: recordString(payload, 'partnerTermsHash')! } : {}),
-        ...(recordString(payload, 'runtimeRequestId') ? { sway_runtime_request_id: recordString(payload, 'runtimeRequestId')! } : {}),
-        ...(recordString(payload, 'clientRequestId') ? { sway_client_request_id: recordString(payload, 'clientRequestId')! } : {}),
-        ...Object.fromEntries(Object.entries(metadata).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
+    const authorization = await withCurrentLiveMoneyAdmission({
+      phase: 'authorize',
+      gigId: payment.gigId,
+      destinationAccountId: operation.destinationAccountId,
+      operation,
+      execute: ({ payment: admittedPayment, operation: admittedOperation, payload: admittedPayload, unresolvedPendingExpired }) => {
+        expiredBeforeProviderCall = unresolvedPendingExpired;
+        return provider.authorizePayment({
+        amountTotalCents: recordNumber(admittedPayload, 'amountTotalCents') ?? admittedPayment.amountTotal,
+        currency: recordString(admittedPayload, 'currency') ?? admittedPayment.currency,
+        idempotencyKey: admittedOperation.idempotencyKey,
+        paymentMethod: recordString(admittedPayload, 'paymentMethod') ?? undefined,
+        confirm: recordBoolean(admittedPayload, 'confirm'),
+        destinationAccountId: usesTestPlatformBalance ? undefined : admittedOperation.destinationAccountId,
+        applicationFeeAmountCents: usesTestPlatformBalance ? undefined : admittedPayment.platformFee,
+        metadata: {
+          sway_payment_id: admittedPayment.id,
+          sway_gig_id: admittedPayment.gigId,
+          sway_action_type: admittedPayment.actionType ?? 'request',
+          sway_platform_fee_cents: String(admittedPayment.platformFee),
+          sway_platform_fee_payer: recordString(admittedPayload, 'platformFeePayer') ?? 'patron',
+          sway_fee_charged_to_patron_cents: String(recordNumber(admittedPayload, 'platformFeeChargedToPatronCents') ?? 0),
+          sway_settlement_mode: usesTestPlatformBalance ? 'platform_test_balance' : 'connected_account',
+          ...(recordNumber(admittedPayload, 'platformFeeCapCents') === null ? {} : { sway_platform_fee_cap_cents: String(recordNumber(admittedPayload, 'platformFeeCapCents')) }),
+          ...(recordString(admittedPayload, 'partnerTermsVersion') ? { sway_partner_terms_version: recordString(admittedPayload, 'partnerTermsVersion')! } : {}),
+          ...(recordString(admittedPayload, 'partnerTermsHash') ? { sway_partner_terms_hash: recordString(admittedPayload, 'partnerTermsHash')! } : {}),
+          ...(recordString(admittedPayload, 'runtimeRequestId') ? { sway_runtime_request_id: recordString(admittedPayload, 'runtimeRequestId')! } : {}),
+          ...(recordString(admittedPayload, 'clientRequestId') ? { sway_client_request_id: recordString(admittedPayload, 'clientRequestId')! } : {}),
+          ...Object.fromEntries(Object.entries(metadata).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
+        }
+      });
       }
     });
 
@@ -665,6 +1073,9 @@ export function createPaymentService(config: {
 
   async function authorizeAction(input: AuthorizeActionInput): Promise<AuthorizeActionResult> {
     if (!db || !provider) return { status: 'disabled' };
+    if (!moneyExecutionEnabled || !moneyEnvironment) {
+      return { status: 'failed', reason: 'live_money_release_gate_closed' };
+    }
     let feePolicy: FeePolicySnapshot;
     try {
       feePolicy = await resolveSwayPlatformFeePolicyForGig({
@@ -698,7 +1109,7 @@ export function createPaymentService(config: {
 
   async function confirmAuthorizedAction(input: ConfirmAuthorizedActionInput): Promise<AuthorizeActionResult> {
     if (!db || !provider) return { status: 'disabled' };
-    if (!input.clientRequestId || !input.idempotencyKey || !input.patronDeviceIdHash) {
+    if (!input.clientRequestId || !input.idempotencyKey || !input.intentFingerprint || !input.patronDeviceIdHash) {
       return { status: 'failed', reason: 'durable_action_link_required' };
     }
 
@@ -719,6 +1130,7 @@ export function createPaymentService(config: {
           .select({
             clientRequestId: requestBoosts.clientRequestId,
             idempotencyKey: requestBoosts.idempotencyKey,
+            intentFingerprint: requestBoosts.intentFingerprint,
             patronDeviceIdHash: requestBoosts.patronDeviceIdHash
           })
           .from(requestBoosts)
@@ -729,6 +1141,7 @@ export function createPaymentService(config: {
             .select({
               clientRequestId: requests.clientRequestId,
               idempotencyKey: requests.idempotencyKey,
+              intentFingerprint: requests.intentFingerprint,
               patronDeviceIdHash: requests.patronDeviceIdHash
             })
             .from(requests)
@@ -739,13 +1152,17 @@ export function createPaymentService(config: {
       !reservedAction
       || reservedAction.clientRequestId !== input.clientRequestId
       || reservedAction.idempotencyKey !== input.idempotencyKey
+      || reservedAction.intentFingerprint !== input.intentFingerprint
       || reservedAction.patronDeviceIdHash !== input.patronDeviceIdHash
     ) return { status: 'failed', reason: 'payment_intent_client_request_mismatch' };
 
     const operation = await loadAuthorizeOperation(payment.id);
     if (!operation) return { status: 'failed', reason: 'durable_authorization_operation_missing' };
     const payload = asRecord(operation.requestPayload);
-    if (recordString(payload, 'clientRequestId') !== input.clientRequestId) {
+    if (
+      recordString(payload, 'clientRequestId') !== input.clientRequestId
+      || recordString(payload, 'intentFingerprint') !== input.intentFingerprint
+    ) {
       return { status: 'failed', reason: 'payment_intent_client_request_mismatch' };
     }
 
@@ -757,7 +1174,18 @@ export function createPaymentService(config: {
     }
 
     try {
-      const authorization = await provider.retrievePaymentAuthorization(input.processorPaymentIntentId);
+      const authorization = await withCurrentLiveMoneyAdmission({
+        phase: 'confirm',
+        gigId: payment.gigId,
+        destinationAccountId: operation.destinationAccountId,
+        operation,
+        requireLeasedOperation: false,
+        expectedClientRequestId: input.clientRequestId,
+        expectedIntentFingerprint: input.intentFingerprint,
+        expectedPatronDeviceIdHash: input.patronDeviceIdHash,
+        expectedProcessorPaymentIntentId: input.processorPaymentIntentId,
+        execute: () => provider.retrievePaymentAuthorization(input.processorPaymentIntentId)
+      });
       if (
         authorization.metadata?.sway_payment_id
         && authorization.metadata.sway_payment_id !== payment.id
@@ -789,6 +1217,16 @@ export function createPaymentService(config: {
         ...feePolicyFromPayload(payload)
       };
     } catch (error) {
+      if (error instanceof Error && [
+        'live_money_release_gate_closed',
+        'live_money_admission_denied',
+        'payment_operation_lease_lost',
+        'payment_operation_identity_mismatch',
+        'authorization_canceled_before_provider_call',
+        'pending_action_expired_before_provider_call'
+      ].includes(error.message)) {
+        return { status: 'failed', reason: error.message };
+      }
       return { status: 'processing', paymentId: payment.id, reason: operationRetryReason(error, 'payment_confirmation_reconciliation_pending') };
     }
   }
@@ -950,11 +1388,26 @@ export function createPaymentService(config: {
 
     let result;
     try {
-      result = await provider.capturePayment({
-        processorPaymentIntentId: payment.processorPaymentIntentId,
-        idempotencyKey: operation.idempotencyKey
+      result = await withCurrentLiveMoneyAdmission({
+        phase: 'capture',
+        gigId: payment.gigId,
+        destinationAccountId: operation.destinationAccountId,
+        operation,
+        expectedProcessorPaymentIntentId: payment.processorPaymentIntentId,
+        execute: ({ payment: admittedPayment, operation: admittedOperation }) => provider.capturePayment({
+          processorPaymentIntentId: admittedPayment.processorPaymentIntentId!,
+          idempotencyKey: admittedOperation.idempotencyKey
+        })
       });
     } catch (error) {
+      if (error instanceof Error && [
+        'live_money_release_gate_closed',
+        'live_money_admission_denied',
+        'payment_operation_lease_lost',
+        'payment_operation_identity_mismatch',
+        'capture_canceled_before_provider_call',
+        'pending_action_expired_before_capture'
+      ].includes(error.message)) throw error;
       const providerTruth = await provider.retrievePaymentAuthorization(payment.processorPaymentIntentId);
       await alignPaymentWithProviderTruth(payment.id, providerTruth, `capture_recovery:${operation.id}`);
       if (providerTruth.status === 'canceled') {
@@ -1000,7 +1453,14 @@ export function createPaymentService(config: {
       return;
     }
     if (!payment.processorPaymentIntentId) throw new Error('processor_payment_intent_missing');
-    const reverseConnectedTransfer = !isSwayTestPlatformBalanceDestination(payment.destinationAccountId);
+    const reversalPayload = asRecord(operation.requestPayload);
+    const reverseConnectedTransfer = recordBoolean(reversalPayload, 'reverseTransfer');
+    if (
+      reverseConnectedTransfer !== !isSwayTestPlatformBalanceDestination(operation.destinationAccountId)
+      || recordBoolean(reversalPayload, 'refundApplicationFee') !== reverseConnectedTransfer
+      || recordString(reversalPayload, 'processorPaymentIntentId') !== payment.processorPaymentIntentId
+      || operation.destinationAccountId !== payment.destinationAccountId
+    ) throw new Error('payment_operation_identity_mismatch');
 
     const completeVoid = async (providerTruth: Awaited<ReturnType<PaymentProviderAdapter['retrievePaymentAuthorization']>>) => {
       await alignPaymentWithProviderTruth(payment!.id, providerTruth, `reverse_void:${operation.id}`);
@@ -1120,6 +1580,12 @@ export function createPaymentService(config: {
     error: unknown,
     forceTerminal = false
   ) {
+    const admissionBlocked = error instanceof Error && [
+      'live_money_release_gate_closed',
+      'live_money_admission_denied',
+      'payment_operation_lease_lost',
+      'payment_operation_identity_mismatch'
+    ].includes(error.message);
     const closeoutBlocked = error instanceof Error && [
       'capture_canceled_before_provider_call',
       'authorization_canceled_before_provider_call',
@@ -1127,7 +1593,7 @@ export function createPaymentService(config: {
       'pending_action_expired_before_capture'
     ].includes(error.message);
     const terminalProcessorRejection = operation.operationType === 'authorize' && isTerminalProcessorError(error);
-    const terminal = forceTerminal || closeoutBlocked || terminalProcessorRejection;
+    const terminal = forceTerminal || closeoutBlocked || admissionBlocked || terminalProcessorRejection;
     const providerAmbiguousAuthorization = operation.operationType === 'authorize' && !terminal;
     const terminated = await operationStore.markFailed(
       operation,
@@ -1161,6 +1627,13 @@ export function createPaymentService(config: {
         'authorization_canceled_before_provider_call'
       ].includes(error.message);
       await markOperationFailure(operation, error, forceTerminal);
+      if (
+        operation.operationType === 'capture'
+        && error instanceof Error
+        && ['live_money_release_gate_closed', 'live_money_admission_denied'].includes(error.message)
+      ) {
+        await voidOrRefund(operation.paymentId);
+      }
       return false;
     }
   }
@@ -1188,6 +1661,28 @@ export function createPaymentService(config: {
     await runSpecificOperation(operation.id);
     payment = await loadPayment(paymentId);
     if (payment?.paymentStatus === 'captured') return { status: 'captured', paymentId };
+    if (payment && ['voided', 'refunded'].includes(payment.paymentStatus)) {
+      return { status: 'failed', reason: 'capture_authority_revoked_payment_released' };
+    }
+    const [finishedOperation] = await db
+      .select({ status: liveRoomPaymentOperations.status, lastError: liveRoomPaymentOperations.lastError })
+      .from(liveRoomPaymentOperations)
+      .where(eq(liveRoomPaymentOperations.id, operation.id))
+      .limit(1);
+    if (
+      payment?.paymentStatus === 'authorized'
+      && finishedOperation?.status === 'terminal_failed'
+      && [
+        'live_money_release_gate_closed',
+        'live_money_admission_denied',
+        'payment_operation_lease_lost'
+      ].includes(finishedOperation.lastError ?? '')
+    ) {
+      const reversal = await voidOrRefund(paymentId);
+      return ['voided', 'refunded', 'noop'].includes(reversal.status)
+        ? { status: 'failed', reason: 'capture_authority_revoked_payment_released' }
+        : { status: 'pending', paymentId, reason: 'capture_authority_revoked_reversal_pending' };
+    }
     return { status: 'pending', paymentId, reason: 'capture_reconciliation_pending' };
   }
 
@@ -1298,6 +1793,13 @@ export function createPaymentService(config: {
           'pending_action_expired_before_capture'
         ].includes(error.message);
         await markOperationFailure(operation, error, forceTerminal);
+        if (
+          operation.operationType === 'capture'
+          && error instanceof Error
+          && ['live_money_release_gate_closed', 'live_money_admission_denied'].includes(error.message)
+        ) {
+          await voidOrRefund(operation.paymentId);
+        }
         result.failed += 1;
       }
     }

@@ -45,6 +45,7 @@ import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
+import PerformerProfessionalSetup from './PerformerProfessionalSetup';
 import PerformerEventsManager from './PerformerEventsManager';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
@@ -2133,8 +2134,15 @@ export default function TalentDashboard({
         <div className="order-2 space-y-4">
           <nav
             aria-label="Profile workspace sections"
-            className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2"
+            className="grid gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2 sm:grid-cols-3"
           >
+            <a
+              href="#sway-professional-setup"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 text-xs font-black text-violet-100 transition hover:border-violet-200/40"
+            >
+              <Badge className="h-4 w-4" aria-hidden="true" />
+              Professional setup
+            </a>
             <a
               href="#sway-public-profile-editor"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-black text-cyan-100 transition hover:border-cyan-200/40"
@@ -2150,6 +2158,7 @@ export default function TalentDashboard({
               Shows &amp; events
             </a>
           </nav>
+          <PerformerProfessionalSetup previewMode={previewMode} />
           <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
           <PerformerEventsManager previewMode={previewMode} />
         </div>
@@ -2428,7 +2437,7 @@ export default function TalentDashboard({
         <div id="sway-start-room" className="order-3">
           <PerformerRoomSetup
             performerName={welcomePerformerName}
-            talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}
+            talentRole={performerProfile?.primary_role === 'dj' ? 'DJ' : 'Performer'}
             performerEmailVerified={performerEmailVerified}
             payoutReady={moneyReady}
             paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}

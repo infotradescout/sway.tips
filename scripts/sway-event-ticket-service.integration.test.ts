@@ -368,11 +368,11 @@ async function seedDatabase(database: PGlite) {
       `insert into performer_events (
          id, performer_id, client_request_id, created_by_actor_user_id,
          last_mutation_actor_user_id, title, starts_at, door_opens_at, ends_at, time_zone,
-         location_name, location_address, city, visibility, ticketing_mode,
+         location_name, location_address, city, visibility, ticketing_mode, attendance_mode,
          status, published_at
        ) values (
          $1, $2, $3, $4, $4, $5, $6, $9, $7, 'America/Chicago',
-         'Test Door', '100 Test Way', 'Chicago, IL 60601', 'public', 'native_ga',
+         'Test Door', '100 Test Way', 'Chicago, IL 60601', 'public', 'native_ga', 'native_ticket',
          'published', $8
        )`,
       [

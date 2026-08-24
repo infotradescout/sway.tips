@@ -24,10 +24,11 @@ import {
   Activity,
   Award,
   Sliders,
+  Flag,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfile, PatronPaymentStatus, PatronRequestStatus } from '../types';
+import { TrackReference, RequestItem, GigSession, PerformerProfile, PatronPaymentStatus, PatronRequestStatus, type LiveRoomType } from '../types';
 import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
@@ -39,6 +40,294 @@ const CAPTIVE_PORTAL_BLOCK_COPY = 'Network sign-in required. Finish Wi-Fi sign-i
 const PAYMENT_AUTHORIZATION_REQUIRED_COPY = 'Confirm payment to send this request.';
 const PAYMENT_CONFIRMATION_WAITING_COPY = 'Keep this page open while Sway confirms the request status.';
 const PAYMENT_AUTHORIZATION_DISCLOSURE_COPY = 'Sway will show Pending until the performer and payment outcome are confirmed.';
+const LEGACY_PENDING_ACTION_INCOMPLETE_COPY = 'Sway found an older pending action, but this browser does not have the original submission details needed to resubmit it safely. Nothing has been shown as complete.';
+const LEGACY_PENDING_ACTION_TERMINAL_COPY = 'The server has a record for an older action, but this browser cannot verify its result without the original submission details and receipt. Check the room before trying again; Sway has not shown it as successful.';
+const PENDING_ACTION_STORAGE_VERSION = 2 as const;
+export const LEGACY_PENDING_ACTION_STORAGE_KEY = 'sway.pendingAction';
+
+type PendingActionStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+type CanonicalRequestSubmission = {
+  type: 'request' | 'tip';
+  targetType: 'music' | 'custom' | 'straight_tip';
+  menu_item_id: string | null;
+  title: string;
+  subtitle: string;
+  senderName: string;
+  message: string;
+  amount: number;
+  albumArt: string | null;
+  sourceProvider: string | null;
+  spotifyUri: string | null;
+  spotifyUrl: string | null;
+  client_request_id: string;
+  idempotency_key: string;
+  expires_at: string;
+  gig_id: string;
+  payment_intent_id: string | null;
+};
+
+type CanonicalBoostSubmission = {
+  requestId: string;
+  patronName: string;
+  boostAmount: number;
+  client_request_id: string;
+  idempotency_key: string;
+  expires_at: string;
+  gig_id: string;
+  payment_intent_id: string | null;
+};
+
+type PersistedPendingAction = {
+  schemaVersion: typeof PENDING_ACTION_STORAGE_VERSION;
+  type: 'request';
+  endpoint: '/api/request/create';
+  gigId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  expires_at: string;
+  submission: CanonicalRequestSubmission;
+} | {
+  schemaVersion: typeof PENDING_ACTION_STORAGE_VERSION;
+  type: 'boost';
+  endpoint: '/api/request/boost';
+  gigId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  expires_at: string;
+  submission: CanonicalBoostSubmission;
+};
+
+type PendingActionIdentity = {
+  type: 'request' | 'boost';
+  gigId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  expires_at: string | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+function pendingActionIdentity(value: unknown): PendingActionIdentity | null {
+  if (!isRecord(value)) return null;
+  if (
+    (value.type !== 'request' && value.type !== 'boost')
+    || typeof value.gigId !== 'string'
+    || typeof value.clientRequestId !== 'string'
+    || typeof value.idempotencyKey !== 'string'
+  ) return null;
+
+  return {
+    type: value.type,
+    gigId: value.gigId,
+    clientRequestId: value.clientRequestId,
+    idempotencyKey: value.idempotencyKey,
+    expires_at: typeof value.expires_at === 'string' ? value.expires_at : null
+  };
+}
+
+function isCompletePersistedPendingAction(value: unknown): value is PersistedPendingAction {
+  const identity = pendingActionIdentity(value);
+  if (!identity || !isRecord(value) || value.schemaVersion !== PENDING_ACTION_STORAGE_VERSION) return false;
+  if (!isRecord(value.submission)) return false;
+
+  const submission = value.submission;
+  const commonMatches = submission.client_request_id === identity.clientRequestId
+    && submission.idempotency_key === identity.idempotencyKey
+    && submission.gig_id === identity.gigId
+    && submission.expires_at === identity.expires_at
+    && isNullableString(submission.payment_intent_id);
+  if (!commonMatches) return false;
+
+  if (identity.type === 'request') {
+    return value.endpoint === '/api/request/create'
+      && (submission.type === 'request' || submission.type === 'tip')
+      && (submission.targetType === 'music' || submission.targetType === 'custom' || submission.targetType === 'straight_tip')
+      && isNullableString(submission.menu_item_id)
+      && typeof submission.title === 'string'
+      && typeof submission.subtitle === 'string'
+      && typeof submission.senderName === 'string'
+      && typeof submission.message === 'string'
+      && typeof submission.amount === 'number'
+      && Number.isFinite(submission.amount)
+      && isNullableString(submission.albumArt)
+      && isNullableString(submission.sourceProvider)
+      && isNullableString(submission.spotifyUri)
+      && isNullableString(submission.spotifyUrl);
+  }
+
+  return value.endpoint === '/api/request/boost'
+    && typeof submission.requestId === 'string'
+    && typeof submission.patronName === 'string'
+    && typeof submission.boostAmount === 'number'
+    && Number.isFinite(submission.boostAmount);
+}
+
+function readPendingAction(storage: PendingActionStorage, key: string): string | null {
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePendingAction(storage: PendingActionStorage, key: string, value: string): boolean {
+  try {
+    storage.setItem(key, value);
+    return storage.getItem(key) === value;
+  } catch {
+    return false;
+  }
+}
+
+function removePendingAction(storage: PendingActionStorage, key: string) {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Storage can be disabled or unavailable; the in-memory lock still prevents
+    // this mounted client from claiming an unverified action as complete.
+  }
+}
+
+export function pendingActionStorageKeyForRoom(gigId?: string) {
+  return `sway.pendingAction:${gigId ?? 'missing-room'}`;
+}
+
+export function migrateLegacyPendingActionForRoom(
+  storage: PendingActionStorage,
+  gigId?: string
+): string | null {
+  try {
+    const roomKey = pendingActionStorageKeyForRoom(gigId);
+    const roomScopedAction = storage.getItem(roomKey);
+    if (roomScopedAction !== null) return roomScopedAction;
+    if (!gigId) return null;
+
+    const legacyAction = storage.getItem(LEGACY_PENDING_ACTION_STORAGE_KEY);
+    if (!legacyAction) return null;
+
+    const parsed = JSON.parse(legacyAction) as {
+      gigId?: unknown;
+      clientRequestId?: unknown;
+      idempotencyKey?: unknown;
+    };
+    if (
+      parsed?.gigId !== gigId
+      || typeof parsed.clientRequestId !== 'string'
+      || !parsed.clientRequestId
+      || typeof parsed.idempotencyKey !== 'string'
+      || !parsed.idempotencyKey
+    ) {
+      return null;
+    }
+
+    storage.setItem(roomKey, legacyAction);
+    if (storage.getItem(roomKey) !== legacyAction) return null;
+
+    // The legacy key is removed only when the exact action was copied into its
+    // matching room key. A legacy action for another room remains untouched.
+    if (storage.getItem(LEGACY_PENDING_ACTION_STORAGE_KEY) === legacyAction) {
+      storage.removeItem(LEGACY_PENDING_ACTION_STORAGE_KEY);
+    }
+    return legacyAction;
+  } catch {
+    return null;
+  }
+}
+
+export type PatronRoomLanguage = {
+  hostNoun: string;
+  hostTitle: string;
+  hostPluralTitle: string;
+  requestMenuLabel: string;
+  requestMenuBody: string;
+  directoryHeading: string;
+  directoryBody: string;
+  directoryPlaceholder: string;
+  directoryEmpty: string;
+  activeHostLabel: string;
+  roomLinkPrompt: string;
+  queueApprovalCopy: string;
+  directSupportDescription: string;
+  tipNotePlaceholder: string;
+};
+
+const PATRON_ROOM_LANGUAGE: Record<LiveRoomType, PatronRoomLanguage> = {
+  music: {
+    hostNoun: 'performer',
+    hostTitle: 'Performer',
+    hostPluralTitle: 'Performers',
+    requestMenuLabel: 'Host menu',
+    requestMenuBody: '',
+    directoryHeading: 'Browse Live Performers',
+    directoryBody: 'Browse active performers and DJs, then jump into the live room link they are currently using.',
+    directoryPlaceholder: 'Search by performer, role, or live room...',
+    directoryEmpty: 'No performers found',
+    activeHostLabel: 'ACTIVE PERFORMER',
+    roomLinkPrompt: 'Ask the performer for a live room link.',
+    queueApprovalCopy: 'Wait for performer approvals or submit your own request above.',
+    directSupportDescription: 'A tip supporting the performer directly.',
+    tipNotePlaceholder: 'e.g. Best dj set in years!! Keep it rocking.'
+  },
+  comedy: {
+    hostNoun: 'comedian',
+    hostTitle: 'Comedian',
+    hostPluralTitle: 'Comedians',
+    requestMenuLabel: 'Comedy request menu',
+    requestMenuBody: 'Choose a host-defined prompt or type a respectful request. The comedian decides what enters the live queue.',
+    directoryHeading: 'Browse Live Comedians',
+    directoryBody: 'Browse active comedians and comedy hosts, then join the live room they are using.',
+    directoryPlaceholder: 'Search by comedian, venue, or live room...',
+    directoryEmpty: 'No comedians found',
+    activeHostLabel: 'ACTIVE COMEDIAN',
+    roomLinkPrompt: 'Ask the comedian or room host for a fresh live room link.',
+    queueApprovalCopy: 'Wait for the comedian to approve requests or submit your own request above.',
+    directSupportDescription: 'A tip supporting the comedian directly.',
+    tipNotePlaceholder: 'e.g. That crowdwork made our night.'
+  },
+  service: {
+    hostNoun: 'service professional',
+    hostTitle: 'Service professional',
+    hostPluralTitle: 'Service professionals',
+    requestMenuLabel: 'Service request menu',
+    requestMenuBody: 'Choose a host-defined service option or type a respectful request. The service professional decides what enters the live queue.',
+    directoryHeading: 'Browse Live Service Professionals',
+    directoryBody: 'Browse active service professionals, then join the live room they are using.',
+    directoryPlaceholder: 'Search by service professional, venue, or live room...',
+    directoryEmpty: 'No service professionals found',
+    activeHostLabel: 'ACTIVE SERVICE PROFESSIONAL',
+    roomLinkPrompt: 'Ask the service professional or room host for a fresh live room link.',
+    queueApprovalCopy: 'Wait for the service professional to approve requests or submit your own request above.',
+    directSupportDescription: 'A tip supporting the service professional directly.',
+    tipNotePlaceholder: 'e.g. Thank you for taking great care of our group.'
+  },
+  general: {
+    hostNoun: 'professional',
+    hostTitle: 'Professional',
+    hostPluralTitle: 'Professionals',
+    requestMenuLabel: 'Professional request menu',
+    requestMenuBody: 'Choose a host-defined option or type a respectful request. The professional decides what enters the live queue.',
+    directoryHeading: 'Browse Live Professionals',
+    directoryBody: 'Browse active professionals and hosts, then join the live room they are using.',
+    directoryPlaceholder: 'Search by professional, role, or live room...',
+    directoryEmpty: 'No professionals found',
+    activeHostLabel: 'ACTIVE PROFESSIONAL',
+    roomLinkPrompt: 'Ask the professional or room host for a fresh live room link.',
+    queueApprovalCopy: 'Wait for the professional to approve requests or submit your own request above.',
+    directSupportDescription: 'A tip supporting the professional directly.',
+    tipNotePlaceholder: 'e.g. Thanks for making this event memorable.'
+  }
+};
+
+export function patronRoomLanguageFor(roomType: LiveRoomType): PatronRoomLanguage {
+  return PATRON_ROOM_LANGUAGE[roomType];
+}
 
 export function patronPaymentStatusLabel(status: PatronPaymentStatus) {
   switch (status) {
@@ -76,27 +365,11 @@ interface PatronViewProps {
   gigId?: string;
   patronRequestStatus?: PatronRequestStatus | null;
   patronActivity?: PatronRequestStatus[];
-  onCreateRequest: (data: {
-    type: 'request' | 'tip';
-    targetType: 'music' | 'custom' | 'straight_tip';
-    title: string;
-    subtitle: string;
-    senderName: string;
-    message?: string;
-    amount: number;
-    albumArt?: string;
-    sourceProvider?: string;
-    spotifyUri?: string;
-    spotifyUrl?: string;
-    client_request_id?: string;
-    idempotency_key?: string;
-    expires_at?: string;
-    gig_id?: string;
-    payment_intent_id?: string;
-  }) => Promise<any>;
+  onCreateRequest: (data: CanonicalRequestSubmission) => Promise<any>;
   onBoostRequest: (requestId: string, patronName: string, amount: number, clientRequestId?: string, idempotencyKey?: string, expiresAt?: string, gigId?: string, paymentIntentId?: string) => Promise<any>;
-  onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string) => Promise<any>;
+  onReconcilePendingAction: (clientRequestId: string, idempotencyKey: string, gigId: string) => Promise<any>;
   onReportContent: (requestId: string, reason: string, details?: string) => Promise<any>;
+  onReportMenuItem?: (gigId: string, menuItemId: string, reason: string, details?: string) => Promise<any>;
   onBlockFoundation: (scope: 'patron_user_id' | 'patron_device_id_hash' | 'sender_name', value: string, reason: string) => Promise<any>;
   onSupportContact: () => Promise<any>;
   onDataDeletionPlaceholder: () => Promise<any>;
@@ -116,9 +389,99 @@ type SearchTrack = {
   spotifyUri?: string;
   spotifyUrl?: string;
   targetType?: 'music' | 'custom';
+  menuItemId?: string;
 };
 
-const REQUEST_ART_PLACEHOLDER = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=240&q=80';
+type CheckoutPayload = {
+  open: boolean;
+  type: 'request' | 'boost';
+  title: string;
+  artist?: string;
+  amount: number;
+  fee: number;
+  total: number;
+  targetId?: string;
+  trackArt?: string;
+  targetType?: 'music' | 'custom' | 'straight_tip';
+  menuItemId?: string;
+  senderName: string;
+  message: string;
+  sourceProvider: string | null;
+  spotifyUri: string | null;
+  spotifyUrl: string | null;
+  boostPatronName: string | null;
+  clientRequestId: string;
+  idempotencyKey: string;
+  expires_at: string;
+  gigId: string;
+  isTip?: boolean;
+  clientSecret?: string;
+  paymentIntentId?: string;
+};
+
+type RequestMenuPreset = {
+  id: string;
+  label: string;
+  subtitle: string;
+  amount: number;
+  targetType: 'music' | 'custom';
+  menuItemId: string;
+};
+
+function HostMenuItemCard({
+  preset,
+  selected,
+  density,
+  isReporting,
+  onSelect,
+  onReport
+}: {
+  preset: RequestMenuPreset;
+  selected: boolean;
+  density: 'compact' | 'comfortable';
+  isReporting: boolean;
+  onSelect: () => void;
+  onReport?: () => void;
+}) {
+  const isCompact = density === 'compact';
+  return (
+    <div
+      className={`overflow-hidden rounded-xl border transition-colors ${
+        selected
+          ? 'border-fuchsia-400 bg-fuchsia-500/15'
+          : 'border-white/10 bg-slate-950 hover:border-fuchsia-500/40'
+      }`}
+    >
+      <button
+        type="button"
+        data-sway-select-menu-item={preset.id}
+        aria-pressed={selected}
+        onClick={onSelect}
+        className={`min-h-11 w-full scroll-my-2 text-left cursor-pointer ${isCompact ? 'px-3 py-2' : 'p-4'}`}
+      >
+        <span className={`block font-bold text-white ${isCompact ? 'text-xs' : 'text-sm'}`}>{preset.label}</span>
+        <span className={`mt-1 block text-slate-400 ${isCompact ? 'text-[10px]' : 'text-xs leading-5'}`}>{preset.subtitle}</span>
+      </button>
+      {onReport ? (
+        <div className="border-t border-white/5 px-3 py-2">
+          <button
+            type="button"
+            data-sway-report-menu-item={preset.id}
+            aria-label={`Report menu item: ${preset.label}`}
+            onClick={onReport}
+            disabled={isReporting}
+            className="inline-flex min-h-11 min-w-11 scroll-my-2 items-center gap-1.5 rounded-lg px-2 text-[10px] font-bold text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Flag className="h-3 w-3" aria-hidden="true" />
+            {isReporting ? 'Reporting…' : 'Report item'}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const REQUEST_ART_PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22240%22 height=%22240%22 viewBox=%220 0 240 240%22%3E%3Crect width=%22240%22 height=%22240%22 fill=%22%230f172a%22/%3E%3Cpath d=%22M45 135h18V105H45zm33 28h18V77H78zm33-10h18V87h-18zm33 25h18V62h-18zm33-43h18v-30h-18z%22 fill=%22%23d946ef%22/%3E%3C/svg%3E';
 const MANUAL_REQUEST_SOURCE = 'Manual request';
 const PRESET_REQUEST_SOURCE = 'Preset';
 
@@ -268,22 +631,36 @@ export default function PatronView({
   onBoostRequest,
   onReconcilePendingAction,
   onReportContent,
+  onReportMenuItem,
   onBlockFoundation,
   onSupportContact,
   onDataDeletionPlaceholder,
   previewMode = false
 }: PatronViewProps) {
-  const requestPresets: Array<{ id: string; label: string; subtitle: string; amount: number; targetType: 'music' | 'custom' }> = session.talentRole === 'DJ'
-    ? [
-        { id: 'preset-shoutout', label: session.paymentsEnabled === false ? 'Shoutout' : '$5 Shoutout', subtitle: 'Quick crowd shoutout', amount: session.paymentsEnabled === false ? 0 : 5, targetType: 'custom' },
-        { id: 'preset-bump', label: session.paymentsEnabled === false ? 'Move it up' : '$10 Bump the Queue', subtitle: 'Push your moment higher', amount: session.paymentsEnabled === false ? 0 : 10, targetType: 'custom' },
-        { id: 'preset-vip-song', label: session.paymentsEnabled === false ? 'Song request' : '$20 VIP Song Request', subtitle: 'Priority song request', amount: session.paymentsEnabled === false ? 0 : 20, targetType: 'music' }
-      ]
-    : [
-        { id: 'preset-shoutout', label: session.paymentsEnabled === false ? 'Shoutout' : '$5 Shoutout', subtitle: 'Quick audience shoutout', amount: session.paymentsEnabled === false ? 0 : 5, targetType: 'custom' },
-        { id: 'preset-bump', label: session.paymentsEnabled === false ? 'Move it up' : '$10 Bump the Queue', subtitle: 'Prioritize your request', amount: session.paymentsEnabled === false ? 0 : 10, targetType: 'custom' },
-        { id: 'preset-vip', label: session.paymentsEnabled === false ? 'Custom request' : '$20 VIP Request', subtitle: 'Premium priority action', amount: session.paymentsEnabled === false ? 0 : 20, targetType: 'custom' }
-      ];
+  const pendingActionStorageKey = pendingActionStorageKeyForRoom(gigId);
+  const roomLanguage = patronRoomLanguageFor(session.roomType);
+  const isMusicRoom = session.roomType === 'music';
+  const paymentAuthorizationDisclosureCopy = isMusicRoom
+    ? PAYMENT_AUTHORIZATION_DISCLOSURE_COPY
+    : 'Sway will show Pending until the request outcome is confirmed.';
+  const incompleteRoomCopy = `This room link is incomplete. ${roomLanguage.roomLinkPrompt}`;
+  const requestPresets = useMemo<RequestMenuPreset[]>(() => session.requestMenu.map((item) => ({
+    id: item.id,
+    label: item.title,
+    subtitle: item.description,
+    amount: session.paymentsEnabled === false ? 0 : session.minimumTip,
+    targetType: item.targetType,
+    menuItemId: item.id
+  })), [session.minimumTip, session.paymentsEnabled, session.requestMenu]);
+  const reconcilePendingActionRef = useRef(onReconcilePendingAction);
+  const createRequestRef = useRef(onCreateRequest);
+  const boostRequestRef = useRef(onBoostRequest);
+
+  useEffect(() => {
+    reconcilePendingActionRef.current = onReconcilePendingAction;
+    createRequestRef.current = onCreateRequest;
+    boostRequestRef.current = onBoostRequest;
+  }, [onBoostRequest, onCreateRequest, onReconcilePendingAction]);
 
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'home' | 'request' | 'tip' | 'queue' | 'discover'>('home');
@@ -313,26 +690,7 @@ export default function PatronView({
   const [boostAmount, setBoostAmount] = useState<number>(5);
 
   // Temporary confirmation overlay until the real payment processor flow is implemented.
-  const [checkoutPayload, setCheckoutPayload] = useState<{
-    open: boolean;
-    type: 'request' | 'boost';
-    title: string;
-    artist?: string;
-    amount: number;
-    fee: number;
-    total: number;
-    targetId?: string; // used for boost routing
-    trackArt?: string;
-    clientRequestId: string;
-    idempotencyKey: string;
-    expires_at: string;
-    gigId: string;
-    // A straight tip always goes through Stripe's test-only payment path,
-    // regardless of the room's free/paid toggle. No real money moves.
-    isTip?: boolean;
-    clientSecret?: string;
-    paymentIntentId?: string;
-  } | null>(null);
+  const [checkoutPayload, setCheckoutPayload] = useState<CheckoutPayload | null>(null);
 
   const [backendConfirmed, setBackendConfirmed] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
@@ -342,10 +700,11 @@ export default function PatronView({
   const [stripePaymentMode, setStripePaymentMode] = useState<'test' | 'live' | null>(null);
   const [stripeConfigError, setStripeConfigError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(() => !getInitialNetworkStatus().connected);
-  const [pendingAction, setPendingAction] = useState<string | null>(() => localStorage.getItem('sway.pendingAction'));
+  const [pendingAction, setPendingAction] = useState<string | null>(() => readPendingAction(localStorage, pendingActionStorageKey));
   const [pendingActionMessage, setPendingActionMessage] = useState('');
   const [networkPreflightStatus, setNetworkPreflightStatus] = useState<'unknown' | 'ready' | 'blocked'>('unknown');
   const [formToast, setFormToast] = useState<string | null>(null);
+  const [reportingMenuItemId, setReportingMenuItemId] = useState<string | null>(null);
   const formToastTimeoutRef = useRef<number | null>(null);
   const checkoutDialogRef = useRef<HTMLDivElement | null>(null);
   const checkoutCancelRef = useRef<HTMLButtonElement | null>(null);
@@ -474,6 +833,85 @@ export default function PatronView({
     (first ?? checkoutDialogRef.current)?.focus();
   };
 
+  const createPersistedPendingAction = (
+    payload: CheckoutPayload,
+    paymentIntentId = payload.paymentIntentId ?? null
+  ): PersistedPendingAction | null => {
+    if (payload.type === 'request') {
+      const submission: CanonicalRequestSubmission = {
+        type: payload.isTip ? 'tip' : 'request',
+        targetType: payload.isTip
+          ? 'straight_tip'
+          : (payload.targetType ?? (isMusicRoom ? 'music' : 'custom')),
+        menu_item_id: payload.isTip ? null : (payload.menuItemId ?? null),
+        title: payload.title,
+        subtitle: payload.artist ?? '',
+        senderName: payload.senderName,
+        message: payload.message,
+        amount: payload.amount,
+        albumArt: payload.trackArt ?? null,
+        sourceProvider: payload.sourceProvider,
+        spotifyUri: payload.spotifyUri,
+        spotifyUrl: payload.spotifyUrl,
+        client_request_id: payload.clientRequestId,
+        idempotency_key: payload.idempotencyKey,
+        expires_at: payload.expires_at,
+        gig_id: payload.gigId,
+        payment_intent_id: paymentIntentId
+      };
+      return {
+        schemaVersion: PENDING_ACTION_STORAGE_VERSION,
+        type: 'request',
+        endpoint: '/api/request/create',
+        gigId: payload.gigId,
+        clientRequestId: payload.clientRequestId,
+        idempotencyKey: payload.idempotencyKey,
+        expires_at: payload.expires_at,
+        submission
+      };
+    }
+
+    if (!payload.targetId || payload.boostPatronName === null) return null;
+    const submission: CanonicalBoostSubmission = {
+      requestId: payload.targetId,
+      patronName: payload.boostPatronName,
+      boostAmount: payload.amount,
+      client_request_id: payload.clientRequestId,
+      idempotency_key: payload.idempotencyKey,
+      expires_at: payload.expires_at,
+      gig_id: payload.gigId,
+      payment_intent_id: paymentIntentId
+    };
+    return {
+      schemaVersion: PENDING_ACTION_STORAGE_VERSION,
+      type: 'boost',
+      endpoint: '/api/request/boost',
+      gigId: payload.gigId,
+      clientRequestId: payload.clientRequestId,
+      idempotencyKey: payload.idempotencyKey,
+      expires_at: payload.expires_at,
+      submission
+    };
+  };
+
+  const resubmitPersistedPendingAction = async (action: PersistedPendingAction) => {
+    if (action.endpoint === '/api/request/create') {
+      return createRequestRef.current(action.submission);
+    }
+
+    const submission = action.submission;
+    return boostRequestRef.current(
+      submission.requestId,
+      submission.patronName,
+      submission.boostAmount,
+      submission.client_request_id,
+      submission.idempotency_key,
+      submission.expires_at,
+      submission.gig_id,
+      submission.payment_intent_id ?? undefined
+    );
+  };
+
   const completeCheckoutSuccess = (
     completedActionType: 'request' | 'boost',
     completedClientRequestId = checkoutPayload?.clientRequestId
@@ -486,7 +924,7 @@ export default function PatronView({
     setDegraded(false);
     setPendingAction(null);
     setPendingActionMessage('');
-    localStorage.removeItem('sway.pendingAction');
+    removePendingAction(localStorage, pendingActionStorageKey);
     if (!matchingCheckoutIsOpen) {
       setSelectedTrack(null);
       setCommentMessage('');
@@ -572,82 +1010,149 @@ export default function PatronView({
   }, []);
 
   useEffect(() => {
-    const storedPendingAction = pendingAction || localStorage.getItem('sway.pendingAction');
+    const roomScopedAction = migrateLegacyPendingActionForRoom(localStorage, gigId);
+    setPendingAction(roomScopedAction);
+    setPendingActionMessage('');
+  }, [gigId, pendingActionStorageKey]);
+
+  useEffect(() => {
+    const storedPendingAction = readPendingAction(localStorage, pendingActionStorageKey);
     if (!storedPendingAction) return;
     let cancelled = false;
     let retryTimer: number | null = null;
 
     try {
-      const parsed = JSON.parse(storedPendingAction);
-      if (parsed.expires_at && Date.now() > new Date(parsed.expires_at).getTime()) {
-        localStorage.removeItem('sway.pendingAction');
+      const parsed: unknown = JSON.parse(storedPendingAction);
+      const identity = pendingActionIdentity(parsed);
+      if (!identity || identity.gigId !== gigId) {
+        removePendingAction(localStorage, pendingActionStorageKey);
+        setPendingAction(null);
+        setDegraded(true);
+        setPendingActionMessage('Sway could not safely match the saved action to this room. Nothing was shown as complete.');
+        return;
+      }
+
+      const expiresAtMs = identity.expires_at ? new Date(identity.expires_at).getTime() : Number.NaN;
+      if (!Number.isFinite(expiresAtMs)) {
+        removePendingAction(localStorage, pendingActionStorageKey);
+        setPendingAction(null);
+        setDegraded(true);
+        setPendingActionMessage(LEGACY_PENDING_ACTION_INCOMPLETE_COPY);
+        return;
+      }
+      if (Date.now() > expiresAtMs) {
+        removePendingAction(localStorage, pendingActionStorageKey);
         setPendingAction(null);
         setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
         return;
       }
 
-      if (!parsed.clientRequestId || !parsed.idempotencyKey) {
-        localStorage.removeItem('sway.pendingAction');
-        setPendingAction(null);
-        return;
-      }
-
+      const persistedAction = isCompletePersistedPendingAction(parsed) ? parsed : null;
       setDegraded(true);
       setPendingAction(storedPendingAction);
-      setPendingActionMessage('Reconnecting to confirm your pending action.');
+      setPendingActionMessage(
+        persistedAction
+          ? 'Reconnecting to verify and safely resubmit your pending action.'
+          : LEGACY_PENDING_ACTION_INCOMPLETE_COPY
+      );
 
       const reconcile = async () => {
         if (cancelled) return;
-        if (parsed.expires_at && Date.now() > new Date(parsed.expires_at).getTime()) {
-          localStorage.removeItem('sway.pendingAction');
+        if (Date.now() > expiresAtMs) {
+          removePendingAction(localStorage, pendingActionStorageKey);
           setPendingAction(null);
           setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
           return;
         }
         try {
-          const result = await onReconcilePendingAction(parsed.clientRequestId, parsed.idempotencyKey);
+          const result = await reconcilePendingActionRef.current(
+            identity.clientRequestId,
+            identity.idempotencyKey,
+            identity.gigId
+          );
           if (cancelled) return;
-          if (result?.status === 'reconciled') {
-            window.dispatchEvent(new Event('re-fetch-state'));
-            completeCheckoutSuccess(parsed.type === 'boost' ? 'boost' : 'request', parsed.clientRequestId);
-            return;
-          }
-          if (result?.status === 'pending' || result?.status === 'retrying' || result?.status === 'missing') {
+
+          if (result?.recovery !== 'resubmit_original_action') {
             setDegraded(true);
-            setPendingActionMessage('Connection degraded. Your pending action is still awaiting backend confirmation.');
+            setPendingActionMessage('Sway could not verify a safe recovery route yet. Nothing was shown as complete.');
+          } else if (!persistedAction) {
+            if (result?.status === 'pending' || result?.status === 'retrying') {
+              setPendingActionMessage(`${LEGACY_PENDING_ACTION_INCOMPLETE_COPY} The server still reports it as pending.`);
+            } else {
+              removePendingAction(localStorage, pendingActionStorageKey);
+              setPendingAction(null);
+              setPendingActionMessage(
+                result?.status === 'reconciled'
+                  ? LEGACY_PENDING_ACTION_TERMINAL_COPY
+                  : LEGACY_PENDING_ACTION_INCOMPLETE_COPY
+              );
+              return;
+            }
+          } else {
+            setPendingActionMessage('Server status checked. Resubmitting the original action for full verification.');
+            const response = await resubmitPersistedPendingAction(persistedAction);
+            if (cancelled) return;
+            if (response?.success || response?.reconciled) {
+              window.dispatchEvent(new Event('re-fetch-state'));
+              completeCheckoutSuccess(persistedAction.type, persistedAction.clientRequestId);
+              return;
+            }
+            if (response?.pending) {
+              setPendingActionMessage('The original action was resubmitted and is still awaiting backend confirmation.');
+            } else {
+              setPendingActionMessage('The original action was resubmitted, but the server has not confirmed a final result.');
+            }
           }
         } catch (error: any) {
           if (cancelled) return;
           setDegraded(true);
+          const status = error?.status;
+          const backendMessage = error?.body?.error;
           if (error?.body?.terminal === true && error?.body?.pending === false) {
-            localStorage.removeItem('sway.pendingAction');
+            removePendingAction(localStorage, pendingActionStorageKey);
             setPendingAction(null);
             setPaymentConfirmationState(null);
             setCheckoutPayload(null);
-            setPendingActionMessage(error?.body?.error || 'The action did not complete, and its payment was safely released.');
+            setPendingActionMessage(backendMessage || 'The action did not complete, and its payment was safely released.');
             return;
           }
-          if (error?.status === 410) {
-            localStorage.removeItem('sway.pendingAction');
+          if (status === 410) {
+            removePendingAction(localStorage, pendingActionStorageKey);
             setPendingAction(null);
             setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
             return;
           }
-          setPendingActionMessage('Connection degraded. Sway will retry reconciliation when the network is available.');
+          if (status === 402 && error?.body?.payment_status === 'requires_confirmation') {
+            removePendingAction(localStorage, pendingActionStorageKey);
+            setPendingAction(null);
+            setPaymentConfirmationState(null);
+            setPendingActionMessage('Payment authorization is still required. This recovered action was not shown as complete; reopen it from the room to continue.');
+            return;
+          }
+          if ([400, 403, 409, 422, 429].includes(status)) {
+            removePendingAction(localStorage, pendingActionStorageKey);
+            setPendingAction(null);
+            setPaymentConfirmationState(null);
+            setPendingActionMessage(`${backendMessage || 'The recovered action could not be verified.'} Nothing was shown as complete.`);
+            return;
+          }
+          setPendingActionMessage('Connection degraded. Sway will retry status verification and the original action when the network is available.');
         }
         if (!cancelled) retryTimer = window.setTimeout(reconcile, 2000);
       };
       void reconcile();
     } catch {
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
       setPendingAction(null);
+      setDegraded(true);
+      setPendingActionMessage('Sway could not read the saved action safely. Nothing was shown as complete.');
     }
 
     return () => {
       cancelled = true;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [pendingAction]);
+  }, [gigId, pendingAction, pendingActionStorageKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -739,17 +1244,6 @@ export default function PatronView({
     throw lastError;
   };
 
-  // Pre-built customizable menus for bartenders / street performers
-  const customItems: CustomMenuItem[] = session.talentRole === 'Bartender' ? [
-    { id: "c1", title: "Skip the Line Cocktail", description: "Skip the crowd. Bartender mixes your drink immediately.", basePrice: 10, iconName: "🍹" },
-    { id: "c2", title: "Special Shot Round", description: "Bartender generates a custom premium fire shot selection.", basePrice: 15, iconName: "🔥" },
-    { id: "c3", title: "Buy the Bartender a Pint", description: "Show some absolute love to the crew behind the bar.", basePrice: 8, iconName: "🍺" }
-  ] : [
-    { id: "p1", title: "Card in Shoe Mind-Melter", description: "Street performer slips signed deck card into your shoe.", basePrice: 15, iconName: "🃏" },
-    { id: "p2", title: "Custom Balloon Crown", description: "Instant customized structural balloon crown manufactured.", basePrice: 10, iconName: "🎈" },
-    { id: "p3", title: "Dedicate Next Stunt", description: "Performer dedicates a highly risky physical fire act to you.", basePrice: 20, iconName: "🎪" }
-  ];
-
   // Load Initial Standard Suggestions
   useEffect(() => {
     handleSearch('');
@@ -764,11 +1258,13 @@ export default function PatronView({
     setSelectedPresetId(firstPreset.id);
       setSelectedTrack({
         id: firstPreset.id,
-        title: firstPreset.label.replace(/^\$\d+\s*/, ''),
+        title: firstPreset.label,
         artist: firstPreset.subtitle,
-        albumArt: REQUEST_ART_PLACEHOLDER,
+        description: firstPreset.subtitle,
+        albumArt: firstPreset.targetType === 'music' ? REQUEST_ART_PLACEHOLDER : undefined,
         basePrice: firstPreset.amount,
         targetType: firstPreset.targetType,
+        menuItemId: firstPreset.menuItemId,
         source: PRESET_REQUEST_SOURCE
       });
     setTipAmount(Math.max(session.minimumTip, firstPreset.amount));
@@ -810,7 +1306,7 @@ export default function PatronView({
       setSelectedPresetId(null);
     }
 
-    if (previewMode && session.talentRole === 'DJ') {
+    if (previewMode && session.roomType === 'music') {
       const query = val.trim().toLowerCase();
       const filtered = previewCatalog.filter((song) => {
         if (!query) return true;
@@ -836,7 +1332,7 @@ export default function PatronView({
     }
 
     const trimmed = val.trim();
-    const openSongOption: SearchTrack | null = (session.talentRole === 'DJ' && trimmed)
+    const openSongOption: SearchTrack | null = (session.roomType === 'music' && trimmed)
       ? {
         id: `open-song-${trimmed.toLowerCase().replace(/\s+/g, '-')}`,
         title: trimmed,
@@ -910,9 +1406,8 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This room link is incomplete. Ask the performer for a fresh room link or QR code.';
       setDegraded(true);
-      setPendingActionMessage(routeCopy);
+      setPendingActionMessage(incompleteRoomCopy);
       return;
     }
 
@@ -925,12 +1420,15 @@ export default function PatronView({
     let artist = '';
     let trackArt = '';
     let amt = 0;
+    let resolvedBoostPatronName: string | null = null;
 
     const paymentsEnabledForRoom = session.paymentsEnabled !== false;
 
     if (type === 'request') {
       if (!senderName) {
-        showFormToast("Please enter a Patron Name so the Performer knows who tipped!");
+        showFormToast(isMusicRoom
+          ? 'Please enter a Patron Name so the Performer knows who tipped!'
+          : `Please enter your name so the ${roomLanguage.hostNoun} knows who sent the request.`);
         return;
       }
       if (paymentsEnabledForRoom && tipAmount < session.minimumTip) {
@@ -938,7 +1436,7 @@ export default function PatronView({
         return;
       }
 
-      if (session.talentRole === 'DJ') {
+      if (session.roomType === 'music') {
         if (!selectedTrack) {
           showFormToast("Please search and select a song request first!");
           return;
@@ -953,7 +1451,7 @@ export default function PatronView({
           return;
         }
         title = selectedTrack.title;
-        artist = selectedTrack.description;
+        artist = selectedTrack.description ?? selectedTrack.artist;
         trackArt = '';
       }
       amt = paymentsEnabledForRoom ? tipAmount : 0;
@@ -970,6 +1468,7 @@ export default function PatronView({
       if (!boostPatronName && senderName) {
         setBoostPatronName(senderName);
       }
+      resolvedBoostPatronName = boostPatronName || senderName;
       if (paymentsEnabledForRoom && targetBoostAmount < session.minimumTip) {
         showFormToast(`Minimum boost is $${session.minimumTip}`);
         return;
@@ -999,49 +1498,26 @@ export default function PatronView({
       total,
       targetId: type === 'boost' ? (boostTarget ?? boostingItem)?.id : undefined,
       trackArt,
+      targetType: type === 'request'
+        ? (selectedTrack?.targetType ?? (isMusicRoom ? 'music' : 'custom'))
+        : undefined,
+      menuItemId: type === 'request' ? selectedTrack?.menuItemId : undefined,
+      senderName: type === 'request' ? senderName : '',
+      message: type === 'request' ? commentMessage : '',
+      sourceProvider: type === 'request' ? (selectedTrack?.sourceProvider ?? null) : null,
+      spotifyUri: type === 'request' ? (selectedTrack?.spotifyUri ?? null) : null,
+      spotifyUrl: type === 'request' ? (selectedTrack?.spotifyUrl ?? null) : null,
+      boostPatronName: type === 'boost' ? resolvedBoostPatronName : null,
       gigId,
       ...createClientActionIds()
     });
   };
 
-  const submitCheckoutPayload = async (paymentIntentId?: string) => {
-    if (!checkoutPayload) return;
-
-    if (checkoutPayload.type === 'request') {
-      const isCustom = session.talentRole !== 'DJ';
-      await submitWithBoundedRetry(() => onCreateRequest({
-        type: checkoutPayload.isTip ? 'tip' : 'request',
-        targetType: checkoutPayload.isTip ? 'straight_tip' : (selectedTrack?.targetType || (isCustom ? 'custom' : 'music')),
-        title: checkoutPayload.title,
-        subtitle: checkoutPayload.artist || '',
-        senderName: senderName,
-        message: commentMessage,
-        amount: checkoutPayload.amount,
-        albumArt: checkoutPayload.trackArt,
-        sourceProvider: selectedTrack?.sourceProvider,
-        spotifyUri: selectedTrack?.spotifyUri,
-        spotifyUrl: selectedTrack?.spotifyUrl,
-        client_request_id: checkoutPayload.clientRequestId,
-        idempotency_key: checkoutPayload.idempotencyKey,
-        expires_at: checkoutPayload.expires_at,
-        gig_id: checkoutPayload.gigId,
-        payment_intent_id: paymentIntentId
-      }), checkoutPayload.expires_at);
-      return;
-    }
-
-    if (checkoutPayload.targetId) {
-      await submitWithBoundedRetry(() => onBoostRequest(
-        checkoutPayload.targetId,
-        boostPatronName,
-        checkoutPayload.amount,
-        checkoutPayload.clientRequestId,
-        checkoutPayload.idempotencyKey,
-        checkoutPayload.expires_at,
-        checkoutPayload.gigId,
-        paymentIntentId
-      ), checkoutPayload.expires_at);
-    }
+  const submitCheckoutPayload = async (action: PersistedPendingAction) => {
+    await submitWithBoundedRetry(
+      () => resubmitPersistedPendingAction(action),
+      action.expires_at
+    );
   };
 
   const handleCheckoutError = async (e: unknown) => {
@@ -1075,7 +1551,7 @@ export default function PatronView({
       } : current);
       setPendingAction(null);
       setPendingActionMessage(PAYMENT_CONFIRMATION_WAITING_COPY);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
 
       try {
         await ensureStripePublishableKey();
@@ -1092,28 +1568,28 @@ export default function PatronView({
       setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
       setPendingAction(null);
       setCheckoutPayload(null);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
     } else if (status === 403) {
       setDegraded(true);
       setPaymentConfirmationState(null);
-      setPendingActionMessage(backendMessage || 'Request blocked for this session. Try a different preset or ask the performer for help.');
+      setPendingActionMessage(backendMessage || `Request blocked for this session. Try a different option or ask the ${roomLanguage.hostNoun} for help.`);
       setPendingAction(null);
       setCheckoutPayload(null);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
     } else if (status === 429) {
       setDegraded(true);
       setPaymentConfirmationState(null);
       setPendingActionMessage(backendMessage || "You've reached the request limit for this session. Try again later as the queue moves.");
       setPendingAction(null);
       setCheckoutPayload(null);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
     } else if (status === 409 || status === 400) {
       setDegraded(true);
       setPaymentConfirmationState(null);
       setPendingActionMessage(backendMessage || 'This action is not available right now.');
       setPendingAction(null);
       setCheckoutPayload(null);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
     } else if (typeof status === 'number') {
       // A real backend/payment failure (e.g. a 5xx), not a network drop -- don't
       // claim the action was "saved locally", tell the patron it actually failed.
@@ -1122,24 +1598,34 @@ export default function PatronView({
       setPendingActionMessage(backendMessage || 'Something went wrong processing that. Please try again.');
       setPendingAction(null);
       setCheckoutPayload(null);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
     } else {
       setDegraded(true);
     }
   };
 
-  const beginPendingSubmit = (payload = checkoutPayload) => {
-    if (!payload) return;
-    const serializedPendingAction = JSON.stringify(payload);
+  const beginPendingSubmit = (
+    payload = checkoutPayload,
+    paymentIntentId = payload?.paymentIntentId ?? null
+  ): PersistedPendingAction | null => {
+    if (!payload) return null;
+    const action = createPersistedPendingAction(payload, paymentIntentId);
+    if (!action) return null;
+    const serializedPendingAction = JSON.stringify(action);
+    if (!writePendingAction(localStorage, pendingActionStorageKey, serializedPendingAction)) {
+      setDegraded(true);
+      setPendingActionMessage('Sway could not save the crash-recovery record in this browser, so the action was not sent.');
+      return null;
+    }
     setPendingAction(serializedPendingAction);
-    localStorage.setItem('sway.pendingAction', serializedPendingAction);
+    return action;
   };
 
   // Create the pending PaymentIntent or complete a no-payment action.
   const completePayment = async () => {
     if (!checkoutPayload || isSubmitLocked) return;
 
-    if (checkoutPayload.type === 'boost' && !boostPatronName.trim()) {
+    if (checkoutPayload.type === 'boost' && !checkoutPayload.boostPatronName?.trim()) {
       showFormToast('Enter your name above to send this boost.');
       return;
     }
@@ -1148,15 +1634,19 @@ export default function PatronView({
       setCheckoutPayload(null);
       setPendingAction(null);
       setPendingActionMessage(PENDING_ACTION_EXPIRED_COPY);
-      localStorage.removeItem('sway.pendingAction');
+      removePendingAction(localStorage, pendingActionStorageKey);
       return;
     }
 
     setIsPaying(true);
-    beginPendingSubmit();
+    const pendingSubmission = beginPendingSubmit();
+    if (!pendingSubmission) {
+      setIsPaying(false);
+      return;
+    }
 
     try {
-      await submitCheckoutPayload();
+      await submitCheckoutPayload(pendingSubmission);
       completeCheckoutSuccess(checkoutPayload.type);
     } catch (e) {
       await handleCheckoutError(e);
@@ -1170,10 +1660,14 @@ export default function PatronView({
     const payloadWithIntent = { ...checkoutPayload, paymentIntentId };
     setCheckoutPayload(payloadWithIntent);
     setIsPaying(true);
-    beginPendingSubmit(payloadWithIntent);
+    const pendingSubmission = beginPendingSubmit(payloadWithIntent, paymentIntentId);
+    if (!pendingSubmission) {
+      setIsPaying(false);
+      return;
+    }
 
     try {
-      await submitCheckoutPayload(paymentIntentId);
+      await submitCheckoutPayload(pendingSubmission);
       completeCheckoutSuccess(checkoutPayload.type);
     } catch (e) {
       await handleCheckoutError(e);
@@ -1186,7 +1680,7 @@ export default function PatronView({
   const handleStraightTipSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!session.tipsEnabled) {
-      showFormToast('Tips are unavailable until this performer completes payout setup.');
+      showFormToast(`Tips are unavailable until this ${roomLanguage.hostNoun} completes payout setup.`);
       return;
     }
     if (isSubmitLocked) return;
@@ -1199,9 +1693,8 @@ export default function PatronView({
     }
 
     if (!gigId) {
-      const routeCopy = 'This room link is incomplete. Ask the performer for a fresh room link or QR code.';
       setDegraded(true);
-      setPendingActionMessage(routeCopy);
+      setPendingActionMessage(incompleteRoomCopy);
       return;
     }
 
@@ -1222,10 +1715,17 @@ export default function PatronView({
       type: 'request',
       isTip: true,
       title: LIVE_ROOM_LANGUAGE.directTip,
-      artist: 'A direct tip supporting the performer.',
+      artist: roomLanguage.directSupportDescription,
       amount: tipAmount,
       fee: platformFee,
       total: tipAmount + platformFee,
+      targetType: 'straight_tip',
+      senderName,
+      message: commentMessage,
+      sourceProvider: null,
+      spotifyUri: null,
+      spotifyUrl: null,
+      boostPatronName: null,
       gigId,
       ...createClientActionIds()
     });
@@ -1242,6 +1742,12 @@ export default function PatronView({
   const newestModeratableRequest = requests.find((item) => !item.removed);
   const isCrowdAutopilot = session.operatingMode === 'crowd_autopilot';
   const requestScopeCopy = (() => {
+    if (!isMusicRoom) {
+      return {
+        label: roomLanguage.requestMenuLabel,
+        body: roomLanguage.requestMenuBody
+      };
+    }
     if (session.searchScope === 'setlist') {
       return {
         label: 'Setlist song requests',
@@ -1288,6 +1794,9 @@ export default function PatronView({
             totalLabel: 'Request total:'
           }
     : null;
+  const checkoutSummaryLabel = checkoutPayload?.type === 'boost' && !isMusicRoom
+    ? 'UPVOTE SUMMARY'
+    : (checkoutCopy?.summaryLabel ?? 'REQUEST SUMMARY');
 
   const runSafetyAction = async (action: () => Promise<any>, successCopy: string) => {
     try {
@@ -1297,6 +1806,34 @@ export default function PatronView({
     } catch (error) {
       console.error(error);
       showFormToast('Safety action failed. Try again in a few moments.');
+    }
+  };
+
+  const reportHostMenuItem = async (preset: RequestMenuPreset) => {
+    if (!onReportMenuItem) {
+      showFormToast('Menu-item reporting is unavailable in this room.');
+      return;
+    }
+    if (!gigId) {
+      showFormToast(incompleteRoomCopy);
+      return;
+    }
+    if (reportingMenuItemId) return;
+
+    setReportingMenuItemId(preset.menuItemId);
+    try {
+      await onReportMenuItem(
+        gigId,
+        preset.menuItemId,
+        'Host menu item safety report',
+        'Patron requested safety review of a host-authored room menu item.'
+      );
+      showFormToast('Menu item report sent to the safety team.');
+    } catch (error) {
+      console.error(error);
+      showFormToast('Menu item report failed. Try again in a few moments.');
+    } finally {
+      setReportingMenuItemId(null);
     }
   };
 
@@ -1325,7 +1862,7 @@ export default function PatronView({
         )}
       </AnimatePresence>
 
-      {/* 1. Performer live show snapshot */}
+      {/* 1. Live room snapshot */}
       <div className="bg-gradient-to-br from-fuchsia-950/40 via-slate-904 via-slate-900 to-slate-950 border border-white/10 rounded-2xl p-6 relative overflow-hidden select-none glow-fuchsia">
         <div className="absolute top-0 right-0 p-3">
           <span className="flex h-2.5 w-2.5">
@@ -1337,7 +1874,9 @@ export default function PatronView({
           <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-fuchsia-600 to-blue-600 border border-white/10 flex items-center justify-center font-display text-white font-extrabold text-lg animate-pulse shadow-md">
             {session.talentName.charAt(0)}
           </div>
-          <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300">Live show snapshot</p>
+          <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300">
+            {isMusicRoom ? 'Live show snapshot' : 'Live room snapshot'}
+          </p>
           <h1 className="font-display text-lg font-black text-white tracking-wider uppercase">{session.talentName}</h1>
           {patronsWindowTimeLeft && (
             <div className="bg-cyan-950/40 border border-cyan-500/30 px-3 py-1 rounded-full flex items-center gap-1.5 text-[10px] font-mono text-cyan-400 select-none shadow shadow-cyan-500/15 animate-pulse-subtle">
@@ -1348,6 +1887,8 @@ export default function PatronView({
             <p className="text-xs text-slate-300 max-w-sm leading-relaxed font-sans">
               {previewMode
                 ? 'Demo data only. No payment or moderation action will be sent.'
+                : !isMusicRoom
+                  ? `Send a free request or upvote an approved queue item. The ${roomLanguage.hostNoun} decides what enters the live queue. Money actions are off for this room.`
                 : session.paymentsEnabled === false
                   ? session.tipsEnabled
                     ? `Send a free request, upvote an approved queue item, or tip ${session.talentName || 'this performer'}. Requests and boosts are free for this event.`
@@ -1361,7 +1902,7 @@ export default function PatronView({
                 type="button"
                 onClick={() => {
                   setActiveTab('tip');
-                  setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: 'A tip supporting the performer directly.', basePrice: session.minimumTip });
+                  setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: roomLanguage.directSupportDescription, basePrice: session.minimumTip });
                 }}
                 className="min-h-14 rounded-xl border border-emerald-500/30 bg-emerald-500 px-2 py-3 text-center text-xs font-black uppercase tracking-wide text-slate-950 shadow-lg transition-all active:scale-[0.99] min-[360px]:px-4 min-[360px]:text-sm"
               >
@@ -1412,7 +1953,7 @@ export default function PatronView({
           <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-bold tracking-widest uppercase text-slate-400">
-                {nowPlaying ? 'Now Playing' : 'Live Now'}
+                {nowPlaying ? (isMusicRoom ? 'Now Playing' : 'In Progress') : 'Live Now'}
               </span>
               <span
                 className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950 border border-white/10 text-cyan-300"
@@ -1433,7 +1974,9 @@ export default function PatronView({
                     />
                   ) : (
                     <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-fuchsia-600/30 to-blue-600/30 border border-white/10 flex items-center justify-center shrink-0">
-                      <Music className="w-5 h-5 text-cyan-300" />
+                      {isMusicRoom
+                        ? <Music className="w-5 h-5 text-cyan-300" />
+                        : <Layers className="w-5 h-5 text-cyan-300" />}
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
@@ -1474,7 +2017,9 @@ export default function PatronView({
           <div className="text-xs font-sans">
             <div className="font-bold">Live Room Locked</div>
             <p className="mt-0.5 text-slate-400 leading-relaxed font-sans">
-              New song checks and item submissions have been locked. Holds are being auto-released inside the final 5-minute safety sweep.
+              {isMusicRoom
+                ? 'New song checks and item submissions have been locked. Holds are being auto-released inside the final 5-minute safety sweep.'
+                : 'New requests are locked while the host finishes this room and resolves pending request outcomes.'}
             </p>
           </div>
         </div>
@@ -1546,12 +2091,12 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            {session.talentRole === 'DJ' ? <Music className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-            {session.talentRole === 'DJ' ? "Request" : "Request"}
+            {session.roomType === 'music' ? <Music className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
+            Request
           </button>
 
           {session.tipsEnabled ? <button
-            onClick={() => { setActiveTab('tip'); setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: 'A tip supporting the performer directly.', basePrice: session.minimumTip }); }}
+            onClick={() => { setActiveTab('tip'); setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: roomLanguage.directSupportDescription, basePrice: session.minimumTip }); }}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'tip'
                 ? 'bg-fuchsia-600 text-white shadow-lg glow-fuchsia'
@@ -1569,7 +2114,7 @@ export default function PatronView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Activity className="w-4 h-4" /> {LIVE_ROOM_LANGUAGE.boost}
+            <Activity className="w-4 h-4" /> {isMusicRoom ? LIVE_ROOM_LANGUAGE.boost : 'Upvote'}
           </button>
 
         </div>
@@ -1586,7 +2131,7 @@ export default function PatronView({
         <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 text-xs text-cyan-100">
           <p className="font-bold uppercase tracking-wide text-cyan-300">Payment authorization required</p>
           <p className="mt-2">{paymentConfirmationState?.message || PAYMENT_AUTHORIZATION_REQUIRED_COPY}</p>
-          <p className="mt-2">{PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}</p>
+          <p className="mt-2">{paymentAuthorizationDisclosureCopy}</p>
           <p className="mt-2">{PAYMENT_CONFIRMATION_WAITING_COPY}</p>
         </div>
       )}
@@ -1652,7 +2197,9 @@ export default function PatronView({
                     Queue Temporarily Closed
                   </h3>
                   <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed font-sans">
-                    {session.talentName} has temporarily paused new track requests to catch up with the approved queue.
+                    {isMusicRoom
+                      ? `${session.talentName} has temporarily paused new track requests to catch up with the approved queue.`
+                      : `${session.talentName} has temporarily paused new requests to catch up with the live queue.`}
                   </p>
                 </div>
                 
@@ -1660,7 +2207,7 @@ export default function PatronView({
                   <span className="text-fuchsia-400 font-bold block select-none">💡 WHAT YOU CAN STILL DO:</span>
                   <div className="text-slate-400 space-y-1 font-sans text-xs">
                     {session.tipsEnabled ? <p>• Send a <strong className="text-emerald-400">{LIVE_ROOM_LANGUAGE.directTip}</strong> to show love</p> : null}
-                    <p>• <strong className="text-cyan-400">Boost existing requests</strong> in the live queue to push them up</p>
+                    <p>• <strong className="text-cyan-400">{isMusicRoom ? 'Boost existing requests' : 'Upvote existing requests'}</strong> in the live queue to move them up</p>
                     <p>• Watch the live queue and try again when requests reopen</p>
                   </div>
                 </div>
@@ -1669,11 +2216,11 @@ export default function PatronView({
                   {session.tipsEnabled ? <button
                     onClick={() => {
                       setActiveTab('tip');
-                      setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: 'A tip supporting the performer directly.', basePrice: session.minimumTip });
+                      setSelectedTrack({ title: LIVE_ROOM_LANGUAGE.directTip, description: roomLanguage.directSupportDescription, basePrice: session.minimumTip });
                     }}
                     className="flex-1 py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-bold rounded-xl shadow-lg transition-colors cursor-pointer"
                   >
-                    💖 Support Performer Directly
+                    💖 Support {roomLanguage.hostTitle} Directly
                   </button> : null}
                   <button
                     onClick={() => setActiveTab('queue')}
@@ -1687,35 +2234,38 @@ export default function PatronView({
               <>
             
             {/* If DJ Role: Manual request entry */}
-            {session.talentRole === 'DJ' && (
+            {session.roomType === 'music' && (
               <div className="space-y-4">
                 <div className="space-y-2">
                   <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
-                    Quick presets
+                    Host menu
                   </div>
                   <div className="grid gap-2 sm:grid-cols-3">
                     {requestPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPresetId(preset.id);
-                          setSelectedTrack({
-                            id: preset.id,
-                            title: preset.label.replace(/^\$\d+\s*/, ''),
-                            artist: preset.subtitle,
-                            albumArt: REQUEST_ART_PLACEHOLDER,
-                            basePrice: preset.amount,
-                            targetType: preset.targetType,
-                            source: PRESET_REQUEST_SOURCE
-                          });
-                          setTipAmount(Math.max(session.minimumTip, preset.amount));
-                        }}
-                        className={`rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${selectedPresetId === preset.id ? 'border-fuchsia-400 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950 hover:border-fuchsia-500/40'}`}
-                      >
-                        <div className="text-xs font-bold text-white">{preset.label}</div>
-                        <div className="mt-1 text-[10px] text-slate-400">{preset.subtitle}</div>
-                      </button>
+                      <React.Fragment key={preset.id}>
+                        <HostMenuItemCard
+                          preset={preset}
+                          selected={selectedPresetId === preset.id}
+                          density="compact"
+                          isReporting={reportingMenuItemId === preset.menuItemId}
+                          onSelect={() => {
+                            setSelectedPresetId(preset.id);
+                            setSelectedTrack({
+                              id: preset.id,
+                              title: preset.label,
+                              artist: preset.subtitle,
+                              description: preset.subtitle,
+                              albumArt: preset.targetType === 'music' ? REQUEST_ART_PLACEHOLDER : undefined,
+                              basePrice: preset.amount,
+                              targetType: preset.targetType,
+                              menuItemId: preset.menuItemId,
+                              source: PRESET_REQUEST_SOURCE
+                            });
+                            setTipAmount(Math.max(session.minimumTip, preset.amount));
+                          }}
+                          onReport={onReportMenuItem ? () => { void reportHostMenuItem(preset); } : undefined}
+                        />
+                      </React.Fragment>
                     ))}
                   </div>
                 </div>
@@ -1804,69 +2354,71 @@ export default function PatronView({
               </div>
             )}
 
-            {session.talentRole !== 'DJ' && (
-              /* If Bartender / Magician custom menu selection: Path B */
+            {session.roomType !== 'music' && (
               <div className="space-y-4 font-sans">
-                <div className="space-y-2">
-                  <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
-                    Quick presets
+                {requestPresets.length ? (
+                  <div className="space-y-2">
+                    <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
+                      Host menu
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {requestPresets.map((preset) => (
+                        <React.Fragment key={preset.id}>
+                          <HostMenuItemCard
+                            preset={preset}
+                            selected={selectedPresetId === preset.id}
+                            density="comfortable"
+                            isReporting={reportingMenuItemId === preset.menuItemId}
+                            onSelect={() => {
+                              setSelectedPresetId(preset.id);
+                              setSearchQuery('');
+                              setSelectedTrack({
+                                id: preset.id,
+                                title: preset.label,
+                                artist: preset.subtitle,
+                                description: preset.subtitle,
+                                basePrice: 0,
+                                targetType: 'custom',
+                                menuItemId: preset.menuItemId,
+                                source: PRESET_REQUEST_SOURCE
+                              });
+                              setTipAmount(0);
+                            }}
+                            onReport={onReportMenuItem ? () => { void reportHostMenuItem(preset); } : undefined}
+                          />
+                        </React.Fragment>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {requestPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPresetId(preset.id);
-                          setSelectedTrack({
-                            id: preset.id,
-                            title: preset.label.replace(/^\$\d+\s*/, ''),
-                            artist: preset.subtitle,
-                            basePrice: preset.amount,
-                            targetType: preset.targetType,
-                            source: PRESET_REQUEST_SOURCE
-                          });
-                          setTipAmount(Math.max(session.minimumTip, preset.amount));
-                        }}
-                        className={`rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${selectedPresetId === preset.id ? 'border-fuchsia-400 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950 hover:border-fuchsia-500/40'}`}
-                      >
-                        <div className="text-xs font-bold text-white">{preset.label}</div>
-                        <div className="mt-1 text-[10px] text-slate-400">{preset.subtitle}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                ) : null}
 
-                <div className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest select-none">
-                  PATH B: Interactive Custom Action List
-                </div>
-
-                <div className="grid gap-3.5">
-                  {customItems.map((item) => {
-                    const isSelected = selectedTrack?.title === item.title;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleSelectTrack({ title: item.title, artist: item.description, basePrice: item.basePrice })}
-                        className={`w-full p-4 rounded-xl border text-left flex items-start gap-3.5 transition-all cursor-pointer ${
-                          isSelected 
-                            ? 'bg-fuchsia-500/5 border-fuchsia-500 text-fuchsia-400 glow-fuchsia' 
-                            : 'bg-slate-900/40 border-white/5 hover:border-white/10'
-                        }`}
-                      >
-                        <span className="text-2xl mt-0.5 shrink-0">{item.iconName}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex justify-between items-baseline gap-2">
-                            <h4 className="text-xs font-bold text-white truncate">{item.title}</h4>
-                            <span className="font-mono text-xs text-fuchsia-400 shrink-0">${item.basePrice}.00+</span>
-                          </div>
-                          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed font-sans">{item.description}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                <label className="block space-y-2">
+                  <span className="text-xs font-mono font-bold uppercase tracking-widest text-slate-500">Or type a request</span>
+                  <input
+                    type="text"
+                    maxLength={160}
+                    value={selectedPresetId ? '' : searchQuery}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const normalized = value.trim();
+                      setSearchQuery(value);
+                      setSelectedPresetId(null);
+                      setSelectedTrack(normalized ? {
+                        id: `manual-${normalized.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48)}`,
+                        title: normalized,
+                        artist: 'Manual audience request',
+                        description: 'Manual audience request',
+                        basePrice: 0,
+                        targetType: 'custom',
+                        source: MANUAL_REQUEST_SOURCE
+                      } : null);
+                      setTipAmount(0);
+                    }}
+                    placeholder="Enter a respectful request for the host"
+                    className="min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-fuchsia-400"
+                  />
+                </label>
+                <p className="text-[11px] leading-5 text-slate-500">Requests are suggestions, not guaranteed fulfillment. The host approves, denies, or closes requests.</p>
               </div>
             )}
 
@@ -1963,8 +2515,8 @@ export default function PatronView({
                   </button>
                   <p className="text-[9px] text-slate-500 text-center mt-2.5 leading-relaxed font-sans">
                     {session.paymentsEnabled !== false
-                      ? `Confirm payment to send this request. ${PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}`
-                      : `No payment needed for this request. ${PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}`}
+                      ? `Confirm payment to send this request. ${paymentAuthorizationDisclosureCopy}`
+                      : `No payment needed for this request. ${paymentAuthorizationDisclosureCopy}`}
                   </p>
                 </div>
 
@@ -2026,7 +2578,7 @@ export default function PatronView({
               <input
                 type="text"
                 value={commentMessage}
-                placeholder="e.g. Best dj set in years!! Keep it rocking."
+                placeholder={roomLanguage.tipNotePlaceholder}
                 onChange={(e) => setCommentMessage(e.target.value)}
                 className="w-full bg-slate-950 border border-white/10 px-4 py-3 text-xs rounded-xl text-white focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500 outline-none"
               />
@@ -2059,7 +2611,7 @@ export default function PatronView({
                 <div className="text-center p-8 bg-slate-900/10 border border-dashed border-white/10 rounded-2xl select-none">
                   <Smartphone className="w-6 h-6 text-slate-600 mx-auto animate-bounce" />
                   <div className="text-xs font-semibold text-slate-400 mt-1">No approved requests yet</div>
-                  <p className="text-[10px] text-slate-500">Wait for performer approvals or submit your own request above.</p>
+                  <p className="text-[10px] text-slate-500">{roomLanguage.queueApprovalCopy}</p>
                 </div>
               ) : (
                 approvedQueue.map((req, idx) => {
@@ -2140,7 +2692,7 @@ export default function PatronView({
                                     : 'bg-slate-800 border border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                                 } disabled:cursor-not-allowed disabled:opacity-60`}
                               >
-                                Boost
+                                {isMusicRoom ? 'Boost' : 'Upvote'}
                               </button>
                             )
                           )}
@@ -2159,10 +2711,10 @@ export default function PatronView({
           <div className="space-y-5">
             <div className="flex flex-col space-y-2 select-none animate-fade-in font-sans">
               <h3 className="font-display text-sm font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> Browse Live Performers
+                <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" /> {roomLanguage.directoryHeading}
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Browse active performers and DJs, then jump into the live room link they are currently using.
+                {roomLanguage.directoryBody}
               </p>
             </div>
 
@@ -2173,7 +2725,7 @@ export default function PatronView({
                 type="text"
                 value={directorySearch}
                 onChange={(e) => setDirectorySearch(e.target.value)}
-                placeholder="Search by performer, role, or live room..."
+                placeholder={roomLanguage.directoryPlaceholder}
                 className="w-full bg-slate-900 border border-white/10 px-4 py-3 pl-10 rounded-xl text-xs text-white focus:border-fuchsia-500 outline-none font-sans"
               />
             </div>
@@ -2192,7 +2744,7 @@ export default function PatronView({
                   return (
                     <div className="text-center py-10 bg-slate-900/10 border border-dashed border-white/5 rounded-2xl select-none">
                       <Search className="w-6 h-6 text-slate-500 mx-auto mb-1 animate-bounce" />
-                      <div className="text-xs text-slate-400 font-bold">No performers found</div>
+                      <div className="text-xs text-slate-400 font-bold">{roomLanguage.directoryEmpty}</div>
                       <p className="text-[10px] text-slate-500 font-sans mt-0.5">Refine search criteria to match active live rooms</p>
                     </div>
                   );
@@ -2211,7 +2763,7 @@ export default function PatronView({
                       {/* Distinct Featured holographic stamp overlay */}
                       {p.isFeatured && (
                         <div className="absolute top-0 right-0 bg-amber-500 text-slate-950 text-[7px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-bl-lg select-none animate-pulse font-mono z-10 flex items-center gap-1">
-                          <span>ACTIVE PERFORMER</span>
+                          <span>{roomLanguage.activeHostLabel}</span>
                         </div>
                       )}
 
@@ -2261,7 +2813,7 @@ export default function PatronView({
                                 ? 'border-amber-400/40 bg-amber-500/10 text-amber-300'
                                 : 'border-white/10 bg-slate-950 text-slate-400'
                             }`}
-                            title="Ask the performer for a live room link."
+                            title={roomLanguage.roomLinkPrompt}
                           >
                             Room link
                           </div>
@@ -2356,9 +2908,8 @@ export default function PatronView({
                                 return;
                               }
                               if (!gigId) {
-                                const routeCopy = 'This room link is incomplete. Ask the performer for a fresh room link or QR code.';
                                 setDegraded(true);
-                                setPendingActionMessage(routeCopy);
+                                setPendingActionMessage(incompleteRoomCopy);
                                 return;
                               }
                               // Open confirmation
@@ -2373,6 +2924,13 @@ export default function PatronView({
                                 amount: tipAmount,
                                 fee: platformFee,
                                 total: tipAmount + platformFee,
+                                targetType: isMusicRoom ? 'music' : 'custom',
+                                senderName,
+                                message: commentMessage,
+                                sourceProvider: null,
+                                spotifyUri: null,
+                                spotifyUrl: null,
+                                boostPatronName: null,
                                 gigId,
                                 ...createClientActionIds()
                               });
@@ -2436,13 +2994,13 @@ export default function PatronView({
                   </div>
                   <h3 id="sway-payment-dialog-title" className="font-sans text-lg font-bold text-white">
                     {checkoutPayload.type === 'boost'
-                      ? `${LIVE_ROOM_LANGUAGE.boost} Submitted`
+                      ? `${isMusicRoom ? LIVE_ROOM_LANGUAGE.boost : 'Upvote'} Submitted`
                       : checkoutPayload.isTip
                         ? `${LIVE_ROOM_LANGUAGE.tip} Submitted`
                         : `${LIVE_ROOM_LANGUAGE.request} Submitted`}
                   </h3>
                   <p id="sway-payment-dialog-description" className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto font-sans">
-                    Sent. Status: {LIVE_ROOM_LANGUAGE.pending}. {PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                    Sent. Status: {LIVE_ROOM_LANGUAGE.pending}. {paymentAuthorizationDisclosureCopy}
                   </p>
                 </div>
               ) : (
@@ -2451,7 +3009,7 @@ export default function PatronView({
                   
                   {/* Title and meta */}
                   <div className="space-y-1">
-                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">{checkoutCopy?.summaryLabel ?? 'REQUEST SUMMARY'}</span>
+                    <span className="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">{checkoutSummaryLabel}</span>
                     <h3 id="sway-payment-dialog-title" className="font-sans text-base font-bold text-white">
                       {previewMode
                         ? 'Demo Only'
@@ -2461,7 +3019,7 @@ export default function PatronView({
                             ? 'Payment authorization required'
                             : checkoutPayload.type === 'request'
                               ? 'Confirm Request'
-                              : 'Confirm Boost'}
+                              : (isMusicRoom ? 'Confirm Boost' : 'Confirm Upvote')}
                     </h3>
                     {previewMode && (
                       <p id="sway-payment-dialog-description" className="text-[10px] text-amber-200 font-bold uppercase tracking-widest">
@@ -2474,7 +3032,7 @@ export default function PatronView({
                           ? (pendingActionMessage || PAYMENT_CONFIRMATION_WAITING_COPY)
                           : isPaymentConfirmationPending
                             ? PAYMENT_CONFIRMATION_WAITING_COPY
-                            : PAYMENT_AUTHORIZATION_DISCLOSURE_COPY}
+                            : paymentAuthorizationDisclosureCopy}
                       </p>
                     )}
                   </div>
@@ -2495,7 +3053,7 @@ export default function PatronView({
                       <div className="flex justify-between text-xs font-sans">
                         <span className="text-slate-500">Estimated Sway fee:</span>
                         <span className="text-fuchsia-400 font-bold">
-                          {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
+                          {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : `Absorbed by ${roomLanguage.hostTitle}`}
                         </span>
                       </div>
 
@@ -2521,11 +3079,20 @@ export default function PatronView({
                   {checkoutPayload.type === 'boost' && (
                     <div className="space-y-3 pt-1 text-left">
                       <div className="space-y-1">
-                        <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">BOOSTER / SPONSOR NAME</label>
+                        <label className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-bold">
+                          {isMusicRoom ? 'BOOSTER / SPONSOR NAME' : 'YOUR NAME / GROUP'}
+                        </label>
                         <input
                           type="text"
                           value={boostPatronName}
-                          onChange={(e) => setBoostPatronName(e.target.value)}
+                          onChange={(e) => {
+                            const nextName = e.target.value;
+                            setBoostPatronName(nextName);
+                            setCheckoutPayload((current) => current?.type === 'boost'
+                              ? { ...current, boostPatronName: nextName }
+                              : current);
+                          }}
+                          disabled={isPaymentConfirmationPending}
                           maxLength={30}
                           placeholder="e.g. Table 5 Crew"
                           className="w-full bg-slate-950 border border-white/10 px-4 py-2 text-xs rounded-xl text-white focus:border-fuchsia-500 outline-none"
@@ -2540,6 +3107,7 @@ export default function PatronView({
                             min={session.minimumTip}
                             max={50}
                             value={boostAmount}
+                            disabled={isPaymentConfirmationPending}
                             onChange={(e) => {
                               const nextAmount = Number(e.target.value);
                               setBoostAmount(nextAmount);

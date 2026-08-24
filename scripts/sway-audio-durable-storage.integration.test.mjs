@@ -38,6 +38,11 @@ for (const term of [
   "export type AudioStorageProvider = 'local_private_fs' | 'r2'",
   "Production audio storage requires SWAY_AUDIO_STORAGE_PROVIDER=r2.",
   'beginUpload:',
+  'planUploadIdentity:',
+  'reconcileUpload:',
+  'reconcilePart:',
+  'reconcileAssembly:',
+  'reconcileCleanup:',
   'abortUpload:',
   'discardUpload?:',
   'verifyReady:'
@@ -52,6 +57,9 @@ for (const term of [
   'CopyObjectCommand',
   'HeadBucketCommand',
   'HeadObjectCommand',
+  'ListMultipartUploadsCommand',
+  'ListPartsCommand',
+  'ContentMD5:',
   "storageKey = `masters/",
   "return `staging/",
   "'sway-sha256': expectedSha256",
@@ -61,11 +69,12 @@ for (const term of [
 }
 
 for (const term of [
-  'storageProvider: objectIdentity.storageProvider',
-  'providerUploadId: objectIdentity.providerUploadId!',
+  'operationObjectIdentity',
+  'storageProvider: session.storageProvider',
+  'providerUploadId: operation.providerUploadId',
   'parseAudioStorageProvider(session.storageProvider)',
   'await store.openOriginal',
-  'await store.abortUpload(objectIdentity)'
+  'await discardUpload.call(store, identity, options)'
 ]) {
   if (!service.includes(term)) failures.push(`Publishing service still lacks provider-neutral behavior: ${term}`);
 }
@@ -73,13 +82,17 @@ if (service.includes("storageProvider: 'local_private_fs'")) {
   failures.push('Publishing service must never relabel provider-backed identities as local filesystem objects.');
 }
 const sealTransaction = service.slice(
-  service.indexOf('const outcome = await db.transaction(async (tx) => {', service.indexOf('async function completeAndSealUpload')),
+  service.indexOf('async function completeAndSealUpload'),
   service.indexOf('async function createShareGrant')
 );
 const completedSessionWrite = sealTransaction.indexOf("uploadStatus: 'completed'");
 const immutableVersionWrite = sealTransaction.indexOf('tx.insert(audioProjectAssetVersions)');
 if (completedSessionWrite < 0 || immutableVersionWrite < 0 || completedSessionWrite > immutableVersionWrite) {
   failures.push('The upload session must become completed before the verified-seal trigger accepts the immutable version row.');
+}
+if (!sealTransaction.includes('runAssemblyProviderOperation')
+  || !service.includes('providerOperations.finalizeSuccess({')) {
+  failures.push('Verified seal persistence must finalize atomically with durable provider-operation success.');
 }
 for (const term of [
   "if (session.uploadStatus === 'initiated' || session.uploadStatus === 'uploading')",
@@ -138,7 +151,7 @@ if (!filesSurface.includes('body: JSON.stringify({ maxUses: 1 })')
   failures.push('The Catalog one-time-link control must create an actual single-use share grant.');
 }
 if (!filesSurface.includes('const projectId = await refreshProjects();')
-  || !filesSurface.includes('if (projectId) await refreshAssets(projectId);')) {
+  || !filesSurface.includes('if (projectId && selectedProjectIdRef.current === projectId) await refreshAssets(projectId);')) {
   failures.push('Opening Files & projects must load sealed versions for the automatically selected project.');
 }
 for (const term of [
@@ -216,6 +229,16 @@ class InMemoryR2Client {
   uploads = new Map();
   commands = [];
   uploadSequence = 0;
+  failAfterApply = null;
+  multipartPageSize = Number.POSITIVE_INFINITY;
+
+  applied(name, result) {
+    if (this.failAfterApply === name) {
+      this.failAfterApply = null;
+      throw new Error(`simulated lost ${name} response`);
+    }
+    return result;
+  }
 
   async send(command) {
     const name = command.constructor.name.replace(/\d+$/, '');
@@ -225,21 +248,67 @@ class InMemoryR2Client {
     if (name === 'CreateMultipartUploadCommand') {
       const uploadId = `r2-upload-${++this.uploadSequence}`;
       this.uploads.set(uploadId, { key: input.Key, parts: new Map() });
-      return { UploadId: uploadId };
+      return this.applied(name, { UploadId: uploadId });
+    }
+    if (name === 'ListMultipartUploadsCommand') {
+      const matches = [...this.uploads.entries()]
+        .map(([uploadId, upload]) => ({ uploadId, key: upload.key }))
+        .filter((upload) => upload.key.startsWith(input.Prefix ?? ''))
+        .sort((left, right) => left.key.localeCompare(right.key) || left.uploadId.localeCompare(right.uploadId));
+      const start = input.KeyMarker == null
+        ? 0
+        : matches.findIndex((upload) => upload.key === input.KeyMarker && upload.uploadId === input.UploadIdMarker) + 1;
+      const page = matches.slice(Math.max(0, start), Math.max(0, start) + this.multipartPageSize);
+      const truncated = Math.max(0, start) + page.length < matches.length;
+      const last = page.at(-1);
+      return {
+        Uploads: page.map((upload) => ({ Key: upload.key, UploadId: upload.uploadId })),
+        IsTruncated: truncated,
+        NextKeyMarker: truncated ? last?.key : undefined,
+        NextUploadIdMarker: truncated ? last?.uploadId : undefined
+      };
     }
     if (name === 'UploadPartCommand') {
       const upload = this.uploads.get(input.UploadId);
       if (!upload || upload.key !== input.Key) throw new Error('Unknown multipart upload.');
-      upload.parts.set(input.PartNumber, Buffer.from(input.Body));
-      return { ETag: `"etag-${input.PartNumber}"` };
+      const body = Buffer.from(input.Body);
+      const md5 = createHash('md5').update(body).digest();
+      assert.equal(input.ContentMD5, md5.toString('base64'), 'R2 part upload must carry provider-validated Content-MD5.');
+      const etag = md5.toString('hex');
+      upload.parts.set(input.PartNumber, { body, etag });
+      return this.applied(name, { ETag: `"${etag}"` });
+    }
+    if (name === 'ListPartsCommand') {
+      const upload = this.uploads.get(input.UploadId);
+      if (!upload || upload.key !== input.Key) {
+        throw Object.assign(new Error('Multipart upload not found.'), {
+          name: 'NoSuchUpload',
+          $metadata: { httpStatusCode: 404 }
+        });
+      }
+      const marker = Number(input.PartNumberMarker ?? 0);
+      const all = [...upload.parts.entries()]
+        .filter(([partNumber]) => partNumber > marker)
+        .sort(([left], [right]) => left - right);
+      const page = all.slice(0, input.MaxParts ?? 1000);
+      const truncated = page.length < all.length;
+      return {
+        Parts: page.map(([partNumber, part]) => ({
+          PartNumber: partNumber,
+          ETag: `"${part.etag}"`,
+          Size: part.body.byteLength
+        })),
+        IsTruncated: truncated,
+        NextPartNumberMarker: truncated ? page.at(-1)?.[0] : undefined
+      };
     }
     if (name === 'CompleteMultipartUploadCommand') {
       const upload = this.uploads.get(input.UploadId);
       if (!upload) throw new Error('Unknown multipart upload.');
-      const bytes = Buffer.concat(input.MultipartUpload.Parts.map((part) => upload.parts.get(part.PartNumber)));
+      const bytes = Buffer.concat(input.MultipartUpload.Parts.map((part) => upload.parts.get(part.PartNumber).body));
       this.objects.set(input.Key, bytes);
       this.uploads.delete(input.UploadId);
-      return { ETag: '"completed"' };
+      return this.applied(name, { ETag: '"completed"' });
     }
     if (name === 'AbortMultipartUploadCommand') {
       this.uploads.delete(input.UploadId);
@@ -265,7 +334,7 @@ class InMemoryR2Client {
     }
     if (name === 'DeleteObjectCommand') {
       this.objects.delete(input.Key);
-      return {};
+      return this.applied(name, {});
     }
     throw new Error(`Unexpected command: ${name}`);
   }
@@ -366,6 +435,39 @@ async function runBehaviorProof() {
       SWAY_AUDIO_LOCAL_BUCKET: 'sway-audio-local'
     });
     await localStore.verifyReady();
+    const localPlan = localStore.planUploadIdentity({
+      projectId: 'local-project',
+      uploadSessionId: 'local-upload',
+      filename: 'master.wav',
+      mimeType: 'audio/wav'
+    });
+    assert.deepEqual(
+      localPlan,
+      localStore.planUploadIdentity({
+        projectId: 'local-project',
+        uploadSessionId: 'local-upload',
+        filename: 'master.wav',
+        mimeType: 'audio/wav'
+      }),
+      'Local planned identity must be deterministic.'
+    );
+    assert.deepEqual(
+      await localStore.reconcileUpload({ identity: localPlan, uploadSessionId: 'local-upload' }),
+      { status: 'absent' }
+    );
+    const localIdentity = await localStore.beginUpload({
+      projectId: 'local-project',
+      uploadSessionId: 'local-upload',
+      filename: 'master.wav',
+      mimeType: 'audio/wav',
+      identity: localPlan
+    });
+    assert.deepEqual(
+      await localStore.reconcileUpload({ identity: localPlan, uploadSessionId: 'local-upload' }),
+      { status: 'found', identity: localIdentity }
+    );
+    await localStore.abortUpload(localIdentity);
+    assert.equal((await localStore.reconcileCleanup(localIdentity)).status, 'absent');
     assert.throws(() => createConfiguredAudioObjectStore({
       NODE_ENV: 'production',
       SWAY_AUDIO_STORAGE_PROVIDER: 'local_private_fs',
@@ -389,14 +491,31 @@ async function runBehaviorProof() {
     const client = new InMemoryR2Client();
     const store = createR2AudioObjectStore(r2Env, { client });
     await store.verifyReady();
-    const identity = await store.beginUpload({
+    const uploadInput = {
       projectId: 'project-1',
       uploadSessionId: 'upload-1',
       filename: 'master.wav',
       mimeType: 'audio/wav'
+    };
+    const plannedIdentity = store.planUploadIdentity(uploadInput);
+    assert.deepEqual(plannedIdentity, store.planUploadIdentity(uploadInput));
+    assert.deepEqual(
+      await store.reconcileUpload({ identity: plannedIdentity, uploadSessionId: 'upload-1' }),
+      { status: 'absent' }
+    );
+    client.failAfterApply = 'CreateMultipartUploadCommand';
+    await assert.rejects(
+      store.beginUpload({ ...uploadInput, identity: plannedIdentity }),
+      /simulated lost CreateMultipartUploadCommand response/
+    );
+    const recoveredInitiation = await store.reconcileUpload({
+      identity: plannedIdentity,
+      uploadSessionId: 'upload-1'
     });
+    assert.equal(recoveredInitiation.status, 'found', 'Lost create response must reconcile by exact deterministic key.');
+    const identity = recoveredInitiation.identity;
     assert.equal(identity.storageProvider, 'r2');
-    assert.match(identity.storageKey, /^masters\/projects\/project-1\/uploads\/upload-1\//);
+    assert.equal(identity.storageKey, 'masters/projects/project-1/uploads/upload-1/master.wav');
 
     const original = Buffer.concat([
       Buffer.alloc(5 * 1024 * 1024, 0x53),
@@ -408,8 +527,59 @@ async function runBehaviorProof() {
     for (let index = 0; index < chunks.length; index += 1) {
       const written = await store.writePart({ identity, partNumber: index + 1, body: chunks[index] });
       parts.push({ partNumber: index + 1, etag: written.etag });
+      const partMd5 = createHash('md5').update(chunks[index]).digest('hex');
+      assert.deepEqual(
+        await store.reconcilePart({
+          identity,
+          partNumber: index + 1,
+          expectedByteSize: chunks[index].byteLength,
+          expectedMd5: partMd5
+        }),
+        { status: 'confirmed', etag: partMd5, byteSize: chunks[index].byteLength },
+        'Lost part response must reconcile by exact part number, size, and provider-validated MD5.'
+      );
     }
+    assert.equal((await store.reconcilePart({
+      identity,
+      partNumber: 1,
+      expectedByteSize: chunks[0].byteLength,
+      expectedMd5: '0'.repeat(32)
+    })).status, 'mismatch');
+    assert.deepEqual(await store.reconcilePart({
+      identity,
+      partNumber: 3,
+      expectedByteSize: 1,
+      expectedMd5: '0'.repeat(32)
+    }), { status: 'absent' });
     const sha256 = createHash('sha256').update(original).digest('hex');
+    assert.deepEqual(
+      await store.reconcileAssembly({
+        identity,
+        expectedByteSize: original.byteLength,
+        expectedSha256: sha256
+      }),
+      { status: 'multipart_open' }
+    );
+    client.failAfterApply = 'CompleteMultipartUploadCommand';
+    await assert.rejects(
+      store.assembleParts({
+        identity,
+        parts,
+        expectedByteSize: original.byteLength,
+        expectedSha256: sha256,
+        mimeType: 'audio/wav'
+      }),
+      /simulated lost CompleteMultipartUploadCommand response/
+    );
+    assert.deepEqual(
+      await store.reconcileAssembly({
+        identity,
+        expectedByteSize: original.byteLength,
+        expectedSha256: sha256
+      }),
+      { status: 'staging', byteSize: original.byteLength, sha256 },
+      'Lost completion response must reconcile the exact staging bytes before retry.'
+    );
     assert.deepEqual(await store.assembleParts({
       identity,
       parts,
@@ -417,6 +587,14 @@ async function runBehaviorProof() {
       expectedSha256: sha256,
       mimeType: 'audio/wav'
     }), { byteSize: original.byteLength, sha256 });
+    assert.deepEqual(
+      await store.reconcileAssembly({
+        identity,
+        expectedByteSize: original.byteLength,
+        expectedSha256: sha256
+      }),
+      { status: 'sealed', byteSize: original.byteLength, sha256 }
+    );
     assert.equal(client.objects.has(identity.storageKey), true, 'Sealed master must exist in the masters namespace.');
     assert.equal([...client.objects.keys()].some((key) => key.startsWith('staging/')), false, 'Verified staging objects must be removed.');
     assert.deepEqual(await store.assembleParts({
@@ -428,6 +606,7 @@ async function runBehaviorProof() {
     }), { byteSize: original.byteLength, sha256 }, 'Sealing must be idempotent after provider completion and staging cleanup.');
 
     const restartedStore = createR2AudioObjectStore(r2Env, { client });
+    assert.deepEqual(restartedStore.planUploadIdentity(uploadInput), plannedIdentity);
     const reopened = await restartedStore.openOriginal({
       storageProvider: identity.storageProvider,
       storageBucket: identity.storageBucket,
@@ -449,6 +628,26 @@ async function runBehaviorProof() {
       /storage key is invalid/
     );
 
+    const ambiguousInput = {
+      projectId: 'project-1',
+      uploadSessionId: 'ambiguous-1',
+      filename: 'ambiguous.wav',
+      mimeType: 'audio/wav'
+    };
+    const ambiguousPlan = store.planUploadIdentity(ambiguousInput);
+    const ambiguousOne = await store.beginUpload({ ...ambiguousInput, identity: ambiguousPlan });
+    const ambiguousTwo = await store.beginUpload({ ...ambiguousInput, identity: ambiguousPlan });
+    client.multipartPageSize = 1;
+    const ambiguous = await store.reconcileUpload({
+      identity: ambiguousPlan,
+      uploadSessionId: 'ambiguous-1'
+    });
+    assert.equal(ambiguous.status, 'ambiguous');
+    assert.equal(ambiguous.identities.length, 2, 'Multiple exact uploads must be reported, never guessed.');
+    client.multipartPageSize = Number.POSITIVE_INFINITY;
+    await store.abortUpload(ambiguousOne);
+    await store.abortUpload(ambiguousTwo);
+
     const orphan = await store.beginUpload({
       projectId: 'project-1',
       uploadSessionId: 'orphan-1',
@@ -456,8 +655,33 @@ async function runBehaviorProof() {
       mimeType: 'audio/wav'
     });
     assert.equal(client.uploads.has(orphan.providerUploadId), true);
+    assert.equal((await store.reconcileCleanup(orphan)).status, 'present');
     await store.abortUpload(orphan);
     assert.equal(client.uploads.has(orphan.providerUploadId), false, 'Aborted database work must not leave an R2 multipart upload.');
+    assert.deepEqual(await store.reconcileCleanup(orphan), {
+      status: 'absent',
+      multipartPresent: false,
+      stagingPresent: false,
+      sealedPresent: false
+    });
+
+    const lostCleanup = await store.beginUpload({
+      projectId: 'project-1',
+      uploadSessionId: 'lost-cleanup-1',
+      filename: 'lost-cleanup.wav',
+      mimeType: 'audio/wav'
+    });
+    client.failAfterApply = 'DeleteObjectCommand';
+    await assert.rejects(
+      store.discardUpload(lostCleanup),
+      /could not fully discard a failed audio upload/
+    );
+    assert.deepEqual(await store.reconcileCleanup(lostCleanup), {
+      status: 'absent',
+      multipartPresent: false,
+      stagingPresent: false,
+      sealedPresent: false
+    }, 'Lost cleanup response must reconcile exact absence before durable finalization.');
 
     const failedIntegrity = await store.beginUpload({
       projectId: 'project-1',
@@ -490,6 +714,7 @@ async function runBehaviorProof() {
       false,
       'Failed-upload discard must remove completed staging bytes.'
     );
+    assert.equal((await store.reconcileCleanup(failedIntegrity)).status, 'absent');
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

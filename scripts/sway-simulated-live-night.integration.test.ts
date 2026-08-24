@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
 
@@ -24,23 +25,71 @@ async function reservePort() {
 }
 
 class HttpClient {
-  private cookie = '';
+  private readonly cookies = new Map<string, string>();
 
   constructor(
     private readonly baseUrl: string,
     private readonly defaultHeaders: Record<string, string> = {}
   ) {}
 
+  cookieHeader() {
+    return [...this.cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+  }
+
+  private captureCookies(cookies: string[]) {
+    for (const cookie of cookies) {
+      const pair = cookie.split(';', 1)[0] ?? '';
+      const separator = pair.indexOf('=');
+      if (separator < 1) continue;
+      const name = pair.slice(0, separator).trim();
+      const value = pair.slice(separator + 1).trim();
+      if (/max-age=0/i.test(cookie) || !value) this.cookies.delete(name);
+      else this.cookies.set(name, value);
+    }
+  }
+
+  async navigate(path: string, headers: Record<string, string>) {
+    const url = new URL(path, this.baseUrl);
+    return new Promise<{ status: number; body: JsonObject; headers: Headers }>((resolve, reject) => {
+      const request = httpRequest(url, { method: 'GET', headers }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('error', reject);
+        response.on('end', () => {
+          this.captureCookies(response.headers['set-cookie'] ?? []);
+          const responseHeaders = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (Array.isArray(value)) value.forEach((item) => responseHeaders.append(name, item));
+            else if (value !== undefined) responseHeaders.set(name, String(value));
+          }
+          const text = Buffer.concat(chunks).toString('utf8');
+          let body: JsonObject = {};
+          if (text) {
+            try {
+              body = JSON.parse(text) as JsonObject;
+            } catch {
+              body = { text };
+            }
+          }
+          resolve({ status: response.statusCode ?? 0, body, headers: responseHeaders });
+        });
+      });
+      request.on('error', reject);
+      request.end();
+    });
+  }
+
   async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(this.defaultHeaders);
     for (const [name, value] of new Headers(init.headers).entries()) headers.set(name, value);
-    if (this.cookie) headers.set('cookie', this.cookie);
+    if (this.cookies.size) {
+      headers.set('cookie', [...this.cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; '));
+    }
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers, redirect: init.redirect ?? 'manual' });
     const cookies = typeof response.headers.getSetCookie === 'function'
       ? response.headers.getSetCookie()
       : [response.headers.get('set-cookie')].filter((value): value is string => Boolean(value));
-    const sessionCookie = cookies.find((value) => value.startsWith('sway_performer_session='));
-    if (sessionCookie) this.cookie = sessionCookie.split(';', 1)[0];
+    this.captureCookies(cookies);
     const text = await response.text();
     let body: JsonObject = {};
     if (text) {
@@ -90,6 +139,7 @@ async function startSwayServer(
       SWAY_APP_BASE_URL: baseUrl,
       APP_URL: baseUrl,
       APP_BASE_URL: baseUrl,
+      SWAY_DISCOVERY_ATTRIBUTION_SECRET: 'simulated-live-night-attribution-secret-2026',
       VITE_SWAY_DEMO_MODE: 'false',
       SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED: 'false',
       STRIPE_SECRET_KEY: '',
@@ -119,7 +169,7 @@ async function startSwayServer(
     )));
   });
   const readiness = (async () => {
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       try {
         const response = await fetch(`${baseUrl}/api/health/network-probe`);
@@ -131,21 +181,28 @@ async function startSwayServer(
     }
     throw new Error(`Timed out waiting for the Sway proof server.\n${output.join('')}`);
   })();
-  await Promise.race([readiness, earlyExit]);
+
+  const stopChild = async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill('SIGTERM');
+    const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const forced = new Promise<void>((resolve) => setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      resolve();
+    }, 5_000));
+    await Promise.race([stopped, forced]);
+  };
+  try {
+    await Promise.race([readiness, earlyExit]);
+  } catch (error) {
+    await stopChild();
+    throw error;
+  }
 
   return {
     baseUrl,
     logs: () => output.join(''),
-    async stop() {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      const stopped = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-      const forced = new Promise<void>((resolve) => setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-        resolve();
-      }, 5_000));
-      await Promise.race([stopped, forced]);
-    }
+    stop: stopChild
   };
 }
 
@@ -173,22 +230,56 @@ async function waitForDatabaseState(
   throw new Error(`Timed out waiting for ${label}.`);
 }
 
+function discoveryLandingBody(
+  journeyId: string,
+  linkStrength: 'direct_server_observed' | 'client_correlated_unverified' = 'client_correlated_unverified'
+) {
+  return {
+    event: 'discovery_landing',
+    shell: 'patron',
+    surface: 'public-discover',
+    route_family: 'public-discover',
+    has_route_context: true,
+    has_session_context: false,
+    build_commit: 'client-runtime',
+    attribution_channel: 'google',
+    journey_id: journeyId,
+    entry_path: '/discover',
+    visibility_eligibility: 'unknown',
+    link_strength: linkStrength
+  };
+}
+
 async function createPerformerAccount(input: {
   server: RunningServer;
   suffix: string;
   displayName: string;
   handle: string;
+  email?: string;
+  discoveryJourneyId?: string;
 }) {
   const client = new HttpClient(input.server.baseUrl);
-  const email = `simulated-${input.suffix}@example.test`;
+  const email = input.email ?? `simulated-${input.suffix}@example.test`;
   const password = `Sway!${input.suffix}-Pilot-2026-Long`;
+  if (input.discoveryJourneyId) {
+    const landing = await client.navigate('/discover?utm_source=google&utm_medium=organic&utm_campaign=simulated-live-night', {
+      referer: 'https://www.google.com/search?q=sway+tips',
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-dest': 'document'
+    });
+    assertStatus(landing, 200, `${input.suffix} signed discovery landing`, input.server);
+    const discoveryEntry = await client.post('/api/analytics/shell', discoveryLandingBody(input.discoveryJourneyId));
+    assertStatus(discoveryEntry, 202, `${input.suffix} durable discovery entry`, input.server);
+  }
   const signup = await client.post('/api/account/signup', {
     displayName: input.displayName,
     email,
     password,
     confirmPassword: password,
     termsAccepted: true,
-    next: '/account?intent=performer'
+    next: '/account?intent=performer',
+    discoveryJourneyId: input.discoveryJourneyId
   });
   assertStatus(signup, 202, `${input.suffix} account signup`, input.server);
   assert.match(String(signup.body.verificationLink ?? ''), /\/api\/account\/verify-email\/consume\?token=/);
@@ -278,12 +369,127 @@ async function main() {
     assert.equal(legacySignup.body.code, 'universal_account_required');
     assert.equal(legacySignup.body.redirectPath, '/account/signup?intent=performer');
 
+    const forgedJourneyId = randomUUID();
+    const forgedEntry = await new HttpClient(server.baseUrl).post(
+      '/api/analytics/shell',
+      discoveryLandingBody(forgedJourneyId, 'direct_server_observed'),
+      {
+        headers: {
+          host: 'attacker.example',
+          referer: 'https://attacker.example/discover?utm_source=google&utm_medium=organic&utm_campaign=forged'
+        }
+      }
+    );
+    assertStatus(forgedEntry, 202, 'forged Host and Referer discovery entry', server);
+    const forgedEvidence = await proof.query<{ source_class: string; link_strength: string; utm_source: string | null }>(
+      `select metadata->>'source_class' as source_class,
+              metadata->>'link_strength' as link_strength,
+              metadata->>'utm_source' as utm_source
+       from audit_events
+       where entity_type = 'shell_friction' and metadata->>'journey_id' = $1
+       order by created_at asc limit 1`,
+      [forgedJourneyId]
+    );
+    assert.deepEqual(forgedEvidence.rows[0], {
+      source_class: 'unknown',
+      link_strength: 'client_correlated_unverified',
+      utm_source: null
+    }, 'Caller-forged Host, Referer, UTM, and link strength must never become organic evidence.');
+
+    const directTypedJourneyId = randomUUID();
+    const directTypedClient = new HttpClient(server.baseUrl);
+    const directTypedLanding = await directTypedClient.get(
+      '/discover?utm_source=google&utm_medium=organic&utm_campaign=typed-directly'
+    );
+    assertStatus(directTypedLanding, 200, 'directly typed organic UTM landing', server);
+    assert.doesNotMatch(directTypedClient.cookieHeader(), /sway_discovery_attribution=/,
+      'UTM parameters without independently observed provider navigation must not receive a signed receipt.');
+    const directTypedEntry = await directTypedClient.post(
+      '/api/analytics/shell',
+      discoveryLandingBody(directTypedJourneyId, 'direct_server_observed')
+    );
+    assertStatus(directTypedEntry, 202, 'directly typed UTM discovery entry', server);
+    const directTypedEvidence = await proof.query<{ source_class: string; link_strength: string }>(
+      `select metadata->>'source_class' as source_class, metadata->>'link_strength' as link_strength
+       from audit_events
+       where entity_type = 'shell_friction' and metadata->>'journey_id' = $1
+       order by created_at asc limit 1`,
+      [directTypedJourneyId]
+    );
+    assert.deepEqual(directTypedEvidence.rows[0], {
+      source_class: 'unknown',
+      link_strength: 'client_correlated_unverified'
+    });
+
+    const receiptReuseClient = new HttpClient(server.baseUrl);
+    const receiptLanding = await receiptReuseClient.navigate(
+      '/discover?utm_source=google&utm_medium=organic&utm_campaign=receipt-reuse',
+      {
+        referer: 'https://www.google.com/search?q=sway+tips',
+        'sec-fetch-site': 'cross-site',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-dest': 'document'
+      }
+    );
+    assertStatus(receiptLanding, 200, 'receipt replay trusted landing', server);
+    const reusableCookie = receiptReuseClient.cookieHeader();
+    assert.match(reusableCookie, /sway_discovery_attribution=/);
+    const receiptJourneyA = randomUUID();
+    const receiptJourneyB = randomUUID();
+    const receiptFirstUse = await receiptReuseClient.post('/api/analytics/shell', discoveryLandingBody(receiptJourneyA));
+    assertStatus(receiptFirstUse, 202, 'receipt first journey use', server);
+    const receiptReplay = await new HttpClient(server.baseUrl, { cookie: reusableCookie }).post(
+      '/api/analytics/shell',
+      discoveryLandingBody(receiptJourneyB)
+    );
+    assertStatus(receiptReplay, 409, 'receipt cross-journey replay', server);
+    const receiptRows = await proof.query<{ journey_id: string; source_class: string; link_strength: string }>(
+      `select metadata->>'journey_id' as journey_id,
+              metadata->>'source_class' as source_class,
+              metadata->>'link_strength' as link_strength
+       from audit_events
+       where metadata->>'attribution_receipt_id' is not null
+         and metadata->>'journey_id' in ($1, $2)`,
+      [receiptJourneyA, receiptJourneyB]
+    );
+    assert.deepEqual(receiptRows.rows, [{
+      journey_id: receiptJourneyA,
+      source_class: 'unknown',
+      link_strength: 'client_correlated_unverified'
+    }], 'Forged navigation headers may preserve one-time context but cannot become organic proof or cross journeys.');
+
+    const primaryDiscoveryJourneyId = randomUUID();
     const primary = await createPerformerAccount({
       server,
       suffix: 'primary',
       displayName: 'DJ Simulated',
-      handle: 'dj-simulated'
+      handle: 'dj-simulated',
+      email: 'simulated-primary@example.com',
+      discoveryJourneyId: primaryDiscoveryJourneyId
     });
+    const primaryAttribution = await proof.query<{
+      source_channel: string;
+      source_class: string;
+      evidence_strength: string;
+      utm_campaign: string | null;
+      claimed_source_class: string | null;
+    }>(
+      `select attribution.source_channel, attribution.source_class,
+              attribution.evidence_strength, attribution.utm_campaign,
+              source_event.metadata->>'claimed_source_class' as claimed_source_class
+       from account_discovery_attributions attribution
+       inner join users on users.id = attribution.user_id
+       inner join audit_events source_event on source_event.event_id = attribution.source_event_id
+       where users.email = $1`,
+      [primary.email]
+    );
+    assert.deepEqual(primaryAttribution.rows[0], {
+      source_channel: 'google',
+      source_class: 'unknown',
+      evidence_strength: 'client_correlated_unverified',
+      utm_campaign: 'simulated-live-night',
+      claimed_source_class: 'organic_unpaid'
+    }, 'Public discovery must preserve signed source context without falsely awarding organic proof.');
 
     // Production once contained pre-deadline JSON snapshots whose relational
     // auto_closeout_at had already expired. The worker must restore that
@@ -421,6 +627,14 @@ async function main() {
       false,
       'A draft performer room must never enter public discovery.'
     );
+    const professionalSetup = await primary.client.post('/api/talent/professional-setup', {
+      clientMutationId: randomUUID(),
+      primaryIdentity: { kind: 'dj', customLabel: null },
+      secondaryIdentities: [],
+      earningModes: ['live_tips', 'audience_requests'],
+      desiredCapabilities: ['profile_publication', 'live_rooms']
+    });
+    assertStatus(professionalSetup, 202, 'save disposable professional identity', server);
     const publishPrimary = await primary.client.post('/api/talent/profile/visibility', { visibilityState: 'public' });
     assertStatus(publishPrimary, 200, 'publish performer for public-room feed proof', server);
     const thinPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
@@ -433,10 +647,24 @@ async function main() {
     const completePublicProfile = await primary.client.post('/api/talent/profile/public', {
       bio: 'Disposable integration performer used only to prove complete public eligibility.',
       headline: 'Disposable public eligibility proof',
-      primaryRole: 'DJ',
       specialties: ['Integration testing']
     });
     assertStatus(completePublicProfile, 202, 'complete disposable public profile facts', server);
+    const ungrantedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
+    assertStatus(ungrantedPublicFeed, 200, 'server grant requirement for public discovery', server);
+    assert.equal(
+      ungrantedPublicFeed.body.rooms.some((room: JsonObject) => room.gigId === gigId),
+      false,
+      'A complete public profile must not self-award its server publication grant.'
+    );
+    await proof.query(
+      `insert into performer_capability_grant_events (
+         performer_id, capability, decision, actor_type, reason, evidence, idempotency_key_hash
+       ) values ($1, 'profile_publication', 'granted', 'system',
+         'Disposable server-controlled public discovery proof',
+         '{"reference":"simulated-live-night-profile-publication"}'::jsonb, $2)`,
+      [primary.performerId, hash('simulated-live-night-profile-publication-grant')]
+    );
     const publishedPublicFeed = await new HttpClient(server.baseUrl).get('/api/public/feed');
     assertStatus(publishedPublicFeed, 200, 'public performer room discovery', server);
     assert.equal(
@@ -579,12 +807,12 @@ async function main() {
       payments: string;
     }>(`
       select
-        (select count(*) from users where email = 'simulated-primary@example.test')::text as users,
+        (select count(*) from users where email = 'simulated-primary@example.com')::text as users,
         (select count(*) from performers where owner_user_id = (
-          select id from users where email = 'simulated-primary@example.test'
+          select id from users where email = 'simulated-primary@example.com'
         ))::text as performers,
         (select count(*) from pro_mode_status_events where user_id = (
-          select id from users where email = 'simulated-primary@example.test'
+          select id from users where email = 'simulated-primary@example.com'
         ))::text as "proModeEvents",
         (select count(*) from gig_sessions where id = $1)::text as gigs,
         (select count(*) from requests where gig_id = $1 and activated_at is not null)::text as requests,

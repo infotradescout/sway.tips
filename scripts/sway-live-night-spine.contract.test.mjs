@@ -67,22 +67,26 @@ requireIncludes('TalentDashboard', talentDashboard, [
 
 requireIncludes('PerformerRoomSetup', performerRoomSetup, [
   'data-sway-performer-room-setup="true"',
-  "const steps = ['Pricing', 'Requests', 'Review', 'Start']",
-  'Step {step + 1} of 4',
+  "const steps = ['Room', 'Requests', 'Event', 'Start']",
+  'Step {step + 1} of {steps.length}',
   'Create room',
   'Test paid requests',
   'Free requests',
-  'My synced library',
-  'Open requests',
-  'Ready to go live',
+  'My synced library first',
+  'Open song requests',
+  'Ready to create',
   'disabled={!performerEmailVerified || isStarting}',
-  'Stripe test mode — no real money moves',
+  'Stripe test mode · $${minimumTip} minimum',
   'globalThis.crypto.randomUUID()',
   'gig_id: string',
   "useState(false)",
   "role=\"alert\"",
-  'Customers may still type a manual request',
-  'No real money moves.'
+  'Customers can still type a manual request.',
+  'This room is free-only. Requests and upvotes work; tips, paid requests, and paid boosts stay off.',
+  "{ id: 'comedy', label: 'Comedy'",
+  "{ id: 'service', label: 'Service'",
+  "{ id: 'general', label: 'General'",
+  'Link an event — optional'
 ]);
 
 requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSetup, [
@@ -92,8 +96,12 @@ requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSe
 ]);
 
 requireIncludes('Session start request scope', server, [
-  'const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
-  "searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'",
+  'const {',
+  'roomType,',
+  'requestMenu,',
+  'linkedEventId,',
+  'gig_id',
+  "searchScope: searchScope === 'catalog' ? 'catalog' : 'library'",
   'loadMatchingStartedRoom',
   "error.message === 'gig_session_state_revision_conflict'",
   'searchScope: roomState.session.searchScope'
@@ -142,14 +150,25 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready',
-  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready',
+  "paymentsEnabled: requestedRoomConfig.roomType === 'music'",
+  '&& requestedPaymentsEnabled',
+  "tipsEnabled: requestedRoomConfig.roomType === 'music'",
+  '&& sellerMoneyReadiness.ready',
   "code: 'test_payment_runtime_unavailable'",
   "code: 'room_start_id_required'",
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',
   'let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip)',
   'amt = 1'
 ]);
+
+const tipsEnabledDefinitionStart = server.indexOf("tipsEnabled: requestedRoomConfig.roomType === 'music'");
+const tipsEnabledDefinitionEnd = server.indexOf('settlementMode:', tipsEnabledDefinitionStart);
+const tipsEnabledDefinition = tipsEnabledDefinitionStart >= 0 && tipsEnabledDefinitionEnd > tipsEnabledDefinitionStart
+  ? server.slice(tipsEnabledDefinitionStart, tipsEnabledDefinitionEnd)
+  : '';
+if (tipsEnabledDefinition.includes('requestedPaymentsEnabled')) {
+  failures.push('Runtime money mode must keep direct-tip eligibility independent from paid-request pricing.');
+}
 
 requireExcludes('PatronView primary path', patronView, [
   'Browse Performers',

@@ -22,8 +22,9 @@ for (const term of [
   'PENDING_ACTION_TTL_MS = 5 * 60 * 1000',
   'expires_at',
   'PENDING_ACTION_EXPIRED_COPY',
-  'sway.pendingAction',
-  'localStorage.removeItem'
+  "`sway.pendingAction:${gigId ?? 'missing-room'}`",
+  'function removePendingAction',
+  'storage.removeItem(key)'
 ]) {
   if (!patron.includes(term)) failures.push(`Patron client missing pending action TTL guard: ${term}`);
 }
@@ -32,7 +33,7 @@ if (!/const\s+PENDING_ACTION_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000\s*;/.test(patr
   failures.push('Pending action TTL must be exactly five minutes for Slice 0A guardrail.');
 }
 
-if (/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,320}localStorage\.removeItem/.test(patron)) {
+if (/setBackendConfirmed\(matchingCheckoutIsOpen\)[\s\S]{0,420}removePendingAction\(localStorage, pendingActionStorageKey\)/.test(patron)) {
   // This is acceptable only if the pending action is removed after backend confirmation.
 } else {
   failures.push('Pending action must be cleared only on backend-confirmed completion.');

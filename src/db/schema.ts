@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigint,
+  bigserial,
   boolean,
   check,
   date,
@@ -62,6 +63,13 @@ export const gigSessionStatusEnum = pgEnum('gig_session_status', [
   'closed',
   'expired',
   'canceled'
+]);
+
+export const liveRoomTypeEnum = pgEnum('live_room_type', [
+  'music',
+  'comedy',
+  'service',
+  'general'
 ]);
 
 export const requestStatusEnum = pgEnum('request_status', [
@@ -129,6 +137,12 @@ export const performerEventVisibilityEnum = pgEnum('performer_event_visibility',
 export const performerEventTicketingModeEnum = pgEnum('performer_event_ticketing_mode', [
   'external',
   'native_ga'
+]);
+export const performerEventAttendanceModeEnum = pgEnum('performer_event_attendance_mode', [
+  'walk_in',
+  'external_rsvp',
+  'external_ticket',
+  'native_ticket'
 ]);
 export const eventTicketOfferStatusEnum = pgEnum('event_ticket_offer_status', [
   'draft',
@@ -212,6 +226,112 @@ export const ticketPaymentOperationStatusEnum = pgEnum('ticket_payment_operation
 // signup; performer signup moves straight to 'onboarding'. 'suspended' and
 // 'revoked' are administrative-only transitions (see proModeStatusEvents).
 export const proModeStatusEnum = pgEnum('pro_mode_status', ['disabled', 'onboarding', 'active', 'suspended', 'revoked']);
+
+export const professionalIdentityKindEnum = pgEnum('professional_identity_kind', [
+  'comedian',
+  'singer',
+  'songwriter',
+  'dj',
+  'musician',
+  'band',
+  'producer',
+  'host',
+  'emcee',
+  'bartender',
+  'dancer',
+  'actor',
+  'speaker',
+  'podcaster',
+  'magician',
+  'event_professional',
+  'vendor',
+  'service_professional',
+  'creator',
+  'other'
+]);
+
+export const performerIntentTypeEnum = pgEnum('performer_intent_type', [
+  'earning_mode',
+  'desired_capability'
+]);
+
+export const performerEarningModeEnum = pgEnum('performer_earning_mode', [
+  'live_tips',
+  'audience_requests',
+  'bookings',
+  'partnerships',
+  'services',
+  'releases',
+  'events',
+  'ticket_sales',
+  'audio_sales',
+  'sponsorships',
+  'merchandise'
+]);
+
+export const performerCapabilityEnum = pgEnum('performer_capability', [
+  'profile_publication',
+  'public_discovery',
+  'non_money_inquiries',
+  'live_rooms',
+  'live_money',
+  'event_publication',
+  'external_ticket_links',
+  'native_ticket_sales',
+  'private_collaboration',
+  'release_preparation',
+  'audio_publication',
+  'audio_sales',
+  'dsp_delivery',
+  'royalty_processing',
+  'partnership_inquiries',
+  'service_inquiries'
+]);
+
+export const performerCapabilityDecisionEnum = pgEnum('performer_capability_decision', [
+  'granted',
+  'revoked',
+  'expired',
+  'denied'
+]);
+
+export const performerAuthorityKindEnum = pgEnum('performer_authority_kind', [
+  'seller',
+  'event_organizer',
+  'venue_representative',
+  'ticket_inventory',
+  'catalog_controller',
+  'payout_controller',
+  'brand_representative'
+]);
+
+export const acquisitionSourceClassEnum = pgEnum('acquisition_source_class', [
+  'organic_unpaid',
+  'paid',
+  'direct',
+  'referral',
+  'unknown'
+]);
+
+export const attributionEvidenceStrengthEnum = pgEnum('attribution_evidence_strength', [
+  'direct_server_observed',
+  'client_correlated_unverified',
+  'offline_self_reported',
+  'unknown_unavailable'
+]);
+
+export const growthMilestoneKindEnum = pgEnum('growth_milestone_kind', [
+  'qualified_signup',
+  'first_value'
+]);
+
+export const growthValueKindEnum = pgEnum('growth_value_kind', [
+  'profile_published',
+  'event_published',
+  'inquiry_received',
+  'live_room_completed',
+  'release_ready'
+]);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -495,6 +615,7 @@ export const performerEvents = pgTable('performer_events', {
   locationIsTba: boolean('location_is_tba').notNull().default(false),
   coverImageUrl: text('cover_image_url'),
   ticketingMode: performerEventTicketingModeEnum('ticketing_mode').notNull().default('external'),
+  attendanceMode: performerEventAttendanceModeEnum('attendance_mode').notNull().default('external_ticket'),
   externalTicketUrl: text('external_ticket_url'),
   externalTicketLabel: text('external_ticket_label'),
   visibility: performerEventVisibilityEnum('visibility').notNull().default('unlisted'),
@@ -535,9 +656,21 @@ export const performerEvents = pgTable('performer_events', {
     'performer_events_published_has_timestamp',
     sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`
   ),
-  publishedHasExternalTicket: check(
-    'performer_events_published_has_external_ticket',
-    sql`${table.status} <> 'published' OR ${table.ticketingMode} = 'native_ga' OR ${table.externalTicketUrl} IS NOT NULL`
+  publishedAttendanceReady: check(
+    'performer_events_published_attendance_ready',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} IN ('walk_in', 'native_ticket') OR ${table.externalTicketUrl} IS NOT NULL`
+  ),
+  publishedWalkInHasLocation: check(
+    'performer_events_published_walk_in_has_location',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} <> 'walk_in' OR (
+      ${table.locationIsTba} = false
+      AND ${table.locationName} IS NOT NULL
+      AND length(trim(${table.locationName})) > 0
+      AND (
+        (${table.locationAddress} IS NOT NULL AND length(trim(${table.locationAddress})) > 0)
+        OR (${table.city} IS NOT NULL AND length(trim(${table.city})) > 0)
+      )
+    )`
   ),
   cancelledHasTimestamp: check(
     'performer_events_cancelled_has_timestamp',
@@ -566,6 +699,34 @@ export const performerEvents = pgTable('performer_events', {
   ticketingModeExclusive: check(
     'performer_events_ticketing_mode_exclusive',
     sql`${table.ticketingMode} = 'external' OR (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)`
+  ),
+  attendanceModeShape: check(
+    'performer_events_attendance_mode_shape',
+    sql`(
+      ${table.attendanceMode} = 'walk_in'
+      AND ${table.ticketingMode} = 'external'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    ) OR (
+      ${table.attendanceMode} = 'external_rsvp'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} = 'RSVP')
+      )
+    ) OR (
+      ${table.attendanceMode} = 'external_ticket'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} IN ('Get tickets', 'View details'))
+      )
+    ) OR (
+      ${table.attendanceMode} = 'native_ticket'
+      AND ${table.ticketingMode} = 'native_ga'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    )`
   ),
   externalTicketLabelAllowed: check(
     'performer_events_external_ticket_label_allowed',
@@ -1009,6 +1170,17 @@ export const gigSessions = pgTable('gig_sessions', {
   ownerActorUserId: uuid('owner_actor_user_id').references(() => users.id),
   lastMutationActorUserId: uuid('last_mutation_actor_user_id').references(() => users.id),
   status: gigSessionStatusEnum('status').notNull().default('draft'),
+  roomType: liveRoomTypeEnum('room_type').notNull().default('music'),
+  moneyEnabled: boolean('money_enabled').notNull().default(false),
+  moneyDestinationAccountId: text('money_destination_account_id'),
+  moneyEnvironment: text('money_environment'),
+  linkedEventId: uuid('linked_event_id'),
+  requestMenu: jsonb('request_menu').$type<Array<{
+    id: string;
+    title: string;
+    description: string;
+    targetType: 'music' | 'custom';
+  }>>().notNull().default([]),
   title: text('title'),
   venueName: text('venue_name'),
   runtimeSessionState: jsonb('runtime_session_state'),
@@ -1024,7 +1196,59 @@ export const gigSessions = pgTable('gig_sessions', {
   ...timestamps
 }, (table) => ({
   performerStatusIdx: index('gig_sessions_performer_status_idx').on(table.performerId, table.status),
-  autoCloseoutIdx: index('gig_sessions_auto_closeout_at_idx').on(table.autoCloseoutAt)
+  autoCloseoutIdx: index('gig_sessions_auto_closeout_at_idx').on(table.autoCloseoutAt),
+  activeLinkedEventIdx: uniqueIndex('gig_sessions_active_linked_event_idx')
+    .on(table.linkedEventId)
+    .where(sql`${table.linkedEventId} is not null and ${table.status} in ('active', 'closeout_pending')`),
+  linkedEventOwnerFk: foreignKey({
+    columns: [table.linkedEventId, table.performerId],
+    foreignColumns: [performerEvents.id, performerEvents.performerId],
+    name: 'gig_sessions_linked_event_owner_fk'
+  }),
+  requestMenuShape: check(
+    'gig_sessions_request_menu_shape',
+    sql`sway_request_menu_is_valid(${table.requestMenu}, ${table.roomType})`
+  ),
+  moneyRequiresMusic: check(
+    'gig_sessions_money_requires_music',
+    sql`(
+      ${table.moneyEnabled} = false
+      and ${table.moneyDestinationAccountId} is null
+      and ${table.moneyEnvironment} is null
+    ) or (
+      ${table.moneyEnabled} = true
+      and ${table.roomType} = 'music'
+      and ${table.moneyDestinationAccountId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$'
+      and ${table.moneyEnvironment} in ('test', 'live')
+    )`
+  )
+}));
+
+export const liveRoomMoneyReleaseEvents = pgTable('live_room_money_release_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  environment: text('environment').notNull(),
+  decision: text('decision').notNull(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('live_room_money_release_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('live_room_money_release_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('live_room_money_release_events_current_idx').on(table.environment, table.eventSequence),
+  environmentAllowed: check('live_room_money_release_events_environment_allowed', sql`${table.environment} in ('test', 'live')`),
+  decisionAllowed: check('live_room_money_release_events_decision_allowed', sql`${table.decision} in ('enabled', 'disabled')`),
+  reasonValid: check('live_room_money_release_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('live_room_money_release_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('live_room_money_release_events_expiry_valid', sql`(
+    (${table.decision} = 'enabled' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} = 'disabled' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('live_room_money_release_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
 }));
 
 export const gigAccessGrants = pgTable('gig_access_grants', {
@@ -1201,6 +1425,7 @@ export const requests = pgTable('requests', {
   patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
   requestType: text('request_type').notNull(),
+  moneyRequired: boolean('money_required').notNull().default(false),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   message: text('message'),
@@ -1232,6 +1457,7 @@ export const requestBoosts = pgTable('request_boosts', {
   intentFingerprint: text('intent_fingerprint'),
   patronDeviceIdHash: text('patron_device_id_hash'),
   status: requestStatusEnum('status').notNull().default('submitted'),
+  moneyRequired: boolean('money_required').notNull().default(false),
   amountCents: integer('amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
   runtimeBoostState: jsonb('runtime_boost_state'),
@@ -1321,6 +1547,11 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   idempotencyKey: text('idempotency_key').notNull(),
   destinationAccountId: text('destination_account_id').notNull(),
   requestPayload: jsonb('request_payload').notNull(),
+  // Positive money work is executable only by a binary generation that knows
+  // the current database-enforced admission contract. Older rolling binaries
+  // omit leaseExecutorGeneration and are rejected before provider entry.
+  minimumExecutorGeneration: integer('minimum_executor_generation').notNull().default(1),
+  leaseExecutorGeneration: integer('lease_executor_generation'),
   processorObjectId: text('processor_object_id'),
   resultPayload: jsonb('result_payload'),
   attemptCount: integer('attempt_count').notNull().default(0),
@@ -1340,6 +1571,13 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   requestIdx: index('live_room_payment_operations_request_idx').on(table.requestId, table.operationType),
   requestBoostIdx: index('live_room_payment_operations_boost_idx').on(table.requestBoostId, table.operationType),
   requestPayloadValid: check('live_room_payment_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object'`),
+  minimumExecutorGenerationValid: check('live_room_payment_operations_min_executor_generation_valid', sql`${table.minimumExecutorGeneration} >= 1`),
+  leaseExecutorGenerationValid: check('live_room_payment_operations_lease_executor_generation_valid', sql`
+    ${table.leaseExecutorGeneration} is null or ${table.leaseExecutorGeneration} >= 1
+  `),
+  releasedLeaseExecutorGeneration: check('live_room_payment_operations_released_executor_generation', sql`
+    ${table.status} = 'leased' or ${table.leaseExecutorGeneration} is null
+  `),
   actionLink: check('live_room_payment_operations_action_link', sql`
     ((${table.requestId} is not null)::int + (${table.requestBoostId} is not null)::int) = 1
     or (
@@ -1423,6 +1661,11 @@ export const payouts = pgTable('payouts', {
 
 export const moderationEvents = pgTable('moderation_events', {
   id: uuid('id').primaryKey().defaultRandom(),
+  dedupeKey: text('dedupe_key'),
+  reporterFingerprint: text('reporter_fingerprint'),
+  requesterIpHash: text('requester_ip_hash'),
+  reportWindowStartedAt: timestamp('report_window_started_at', { withTimezone: true }),
+  retentionExpiresAt: timestamp('retention_expires_at', { withTimezone: true }),
   actorUserId: uuid('actor_user_id').references(() => users.id),
   entityType: text('entity_type').notNull(),
   entityId: uuid('entity_id').notNull(),
@@ -1431,7 +1674,44 @@ export const moderationEvents = pgTable('moderation_events', {
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
-  entityIdx: index('moderation_events_entity_idx').on(table.entityType, table.entityId)
+  entityIdx: index('moderation_events_entity_idx').on(table.entityType, table.entityId),
+  reportWindowIdx: index('moderation_events_report_window_idx').on(table.entityType, table.createdAt),
+  dedupeKeyIdx: uniqueIndex('moderation_events_dedupe_key_idx').on(table.dedupeKey),
+  roomMenuReportIdentityIdx: uniqueIndex('moderation_events_room_menu_report_identity_idx')
+    .on(table.entityId, table.reporterFingerprint, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportReporterWindowIdx: index('moderation_events_room_menu_report_reporter_window_idx')
+    .on(table.reporterFingerprint, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportIpWindowIdx: index('moderation_events_room_menu_report_ip_window_idx')
+    .on(table.requesterIpHash, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportEntityWindowIdx: index('moderation_events_room_menu_report_entity_window_idx')
+    .on(table.entityId, table.reportWindowStartedAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportExpiryIdx: index('moderation_events_room_menu_report_expiry_idx')
+    .on(table.retentionExpiresAt)
+    .where(sql`${table.entityType} = 'room_menu_item_report'`),
+  roomMenuReportShape: check('moderation_events_room_menu_report_shape', sql`(
+    ${table.entityType} <> 'room_menu_item_report'
+    and ${table.reporterFingerprint} is null
+    and ${table.requesterIpHash} is null
+    and ${table.reportWindowStartedAt} is null
+    and ${table.retentionExpiresAt} is null
+  ) or (
+    ${table.entityType} = 'room_menu_item_report'
+    and ${table.reporterFingerprint} ~ '^[0-9a-f]{64}$'
+    and ${table.requesterIpHash} ~ '^[0-9a-f]{64}$'
+    and ${table.status} = 'held_for_review'
+    and ${table.reason} is not null
+    and length(trim(${table.reason})) between 1 and 500
+    and jsonb_typeof(${table.metadata}) = 'object'
+    and octet_length(${table.metadata}::text) <= 4096
+    and length(coalesce(${table.metadata}->>'details', '')) <= 2000
+    and ${table.reportWindowStartedAt} is not null
+    and ${table.retentionExpiresAt} > ${table.createdAt}
+    and ${table.retentionExpiresAt} <= ${table.createdAt} + interval '180 days'
+  )`)
 }));
 
 export const activeBlocks = pgTable('active_blocks', {
@@ -1478,6 +1758,206 @@ export const auditEvents = pgTable('audit_events', {
 }, (table) => ({
   entityIdx: index('audit_events_entity_idx').on(table.entityType, table.entityId),
   createdAtIdx: index('audit_events_created_at_idx').on(table.createdAt)
+}));
+
+// Wave 1 keeps professional self-description, earning intent, server grants,
+// and subject authority in separate append-only ledgers. Identity and intent
+// rows are never authorization records.
+export const performerIdentityEvents = pgTable('performer_identity_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  identityRole: text('identity_role').notNull(),
+  identityKind: professionalIdentityKindEnum('identity_kind').notNull(),
+  customLabel: text('custom_label'),
+  eventType: text('event_type').notNull(),
+  actorUserId: uuid('actor_user_id').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_identity_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_identity_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_identity_events_current_idx').on(table.performerId, table.identityRole, table.eventSequence),
+  identityRoleAllowed: check('performer_identity_events_role_allowed', sql`${table.identityRole} in ('primary', 'secondary')`),
+  eventTypeAllowed: check('performer_identity_events_type_allowed', sql`${table.eventType} in ('selected', 'withdrawn')`),
+  customLabelValid: check('performer_identity_events_custom_label_valid', sql`(
+    (${table.identityKind} = 'other' and nullif(trim(${table.customLabel}), '') is not null and length(trim(${table.customLabel})) <= 80)
+    or
+    (${table.identityKind} <> 'other' and (${table.customLabel} is null or (length(trim(${table.customLabel})) between 1 and 80)))
+  )`),
+  idempotencyHashValid: check('performer_identity_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerIntentEvents = pgTable('performer_intent_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  intentType: performerIntentTypeEnum('intent_type').notNull(),
+  earningMode: performerEarningModeEnum('earning_mode'),
+  desiredCapability: performerCapabilityEnum('desired_capability'),
+  eventType: text('event_type').notNull(),
+  actorUserId: uuid('actor_user_id').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_intent_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_intent_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_intent_events_current_idx').on(table.performerId, table.intentType, table.eventSequence),
+  eventTypeAllowed: check('performer_intent_events_type_allowed', sql`${table.eventType} in ('selected', 'withdrawn')`),
+  payloadMatchesType: check('performer_intent_events_payload_matches_type', sql`(
+    (${table.intentType} = 'earning_mode' and ${table.earningMode} is not null and ${table.desiredCapability} is null)
+    or
+    (${table.intentType} = 'desired_capability' and ${table.desiredCapability} is not null and ${table.earningMode} is null)
+  )`),
+  idempotencyHashValid: check('performer_intent_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerCapabilityGrantEvents = pgTable('performer_capability_grant_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  capability: performerCapabilityEnum('capability').notNull(),
+  decision: performerCapabilityDecisionEnum('decision').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorUserId: uuid('actor_user_id'),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_capability_grant_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_capability_grant_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_capability_grant_events_current_idx').on(table.performerId, table.capability, table.eventSequence),
+  actorShapeValid: check('performer_capability_grant_events_actor_shape_valid', sql`(
+    (${table.actorType} = 'admin' and ${table.actorUserId} is not null)
+    or
+    (${table.actorType} = 'system' and ${table.actorUserId} is null)
+  )`),
+  reasonValid: check('performer_capability_grant_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('performer_capability_grant_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('performer_capability_grant_events_expiry_valid', sql`(
+    (${table.decision} = 'granted' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} <> 'granted' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('performer_capability_grant_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const performerAuthorityEvents = pgTable('performer_authority_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  authorityKind: performerAuthorityKindEnum('authority_kind').notNull(),
+  subjectType: text('subject_type').notNull(),
+  subjectId: text('subject_id').notNull(),
+  decision: performerCapabilityDecisionEnum('decision').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorUserId: uuid('actor_user_id'),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('performer_authority_events_sequence_idx').on(table.eventSequence),
+  idempotencyIdx: uniqueIndex('performer_authority_events_idempotency_idx').on(table.idempotencyKeyHash),
+  currentIdx: index('performer_authority_events_current_idx').on(
+    table.performerId,
+    table.authorityKind,
+    table.subjectType,
+    table.subjectId,
+    table.eventSequence
+  ),
+  subjectTypeAllowed: check('performer_authority_events_subject_type_allowed', sql`${table.subjectType} in ('platform', 'seller', 'event', 'venue', 'ticket_offer', 'catalog', 'payout_account', 'brand')`),
+  subjectIdValid: check('performer_authority_events_subject_id_valid', sql`${table.subjectId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$'`),
+  actorShapeValid: check('performer_authority_events_actor_shape_valid', sql`(
+    (${table.actorType} = 'admin' and ${table.actorUserId} is not null)
+    or
+    (${table.actorType} = 'system' and ${table.actorUserId} is null)
+  )`),
+  reasonValid: check('performer_authority_events_reason_valid', sql`length(trim(${table.reason})) between 1 and 500`),
+  evidenceRequired: check('performer_authority_events_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  expiryValid: check('performer_authority_events_expiry_valid', sql`(
+    (${table.decision} = 'granted' and (${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}))
+    or
+    (${table.decision} <> 'granted' and ${table.expiresAt} is null)
+  )`),
+  idempotencyHashValid: check('performer_authority_events_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+// One immutable first-touch link per account. It snapshots already-recorded
+// discovery evidence; it does not trust a settings edit or overwrite the
+// source with an optional offline answer.
+export const accountDiscoveryAttributions = pgTable('account_discovery_attributions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull(),
+  sourceEventId: uuid('source_event_id').notNull(),
+  journeyEntityId: uuid('journey_entity_id').notNull(),
+  sourceChannel: text('source_channel').notNull(),
+  sourceClass: acquisitionSourceClassEnum('source_class').notNull(),
+  utmSource: text('utm_source'),
+  utmMedium: text('utm_medium'),
+  utmCampaign: text('utm_campaign'),
+  landingPath: text('landing_path').notNull(),
+  entityKind: text('entity_kind'),
+  entityKey: text('entity_key'),
+  offlineSource: text('offline_source'),
+  firstTouchAt: timestamp('first_touch_at', { withTimezone: true }).notNull(),
+  linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+  evidenceStrength: attributionEvidenceStrengthEnum('evidence_strength').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('account_discovery_attributions_user_idx').on(table.userId),
+  journeyIdx: uniqueIndex('account_discovery_attributions_journey_idx').on(table.journeyEntityId),
+  sourceEventIdx: uniqueIndex('account_discovery_attributions_source_event_idx').on(table.sourceEventId),
+  idempotencyIdx: uniqueIndex('account_discovery_attributions_idempotency_idx').on(table.idempotencyKeyHash),
+  sourceChannelValid: check('account_discovery_attributions_source_channel_valid', sql`${table.sourceChannel} ~ '^[a-z0-9][a-z0-9_.:-]{0,79}$'`),
+  landingPathValid: check('account_discovery_attributions_landing_path_valid', sql`length(${table.landingPath}) between 1 and 300 and ${table.landingPath} like '/%' and ${table.landingPath} !~ '[?#]'`),
+  entityPairValid: check('account_discovery_attributions_entity_pair_valid', sql`(
+    (${table.entityKind} is null and ${table.entityKey} is null)
+    or
+    (${table.entityKind} in ('performer', 'event', 'release', 'live_room') and ${table.entityKey} ~ '^[a-z0-9][a-z0-9_.:-]{0,127}$')
+  )`),
+  utmValuesValid: check('account_discovery_attributions_utm_values_valid', sql`(
+    (${table.utmSource} is null or (length(${table.utmSource}) between 1 and 100 and ${table.utmSource} !~ '[?&#=]'))
+    and (${table.utmMedium} is null or (length(${table.utmMedium}) between 1 and 100 and ${table.utmMedium} !~ '[?&#=]'))
+    and (${table.utmCampaign} is null or (length(${table.utmCampaign}) between 1 and 160 and ${table.utmCampaign} !~ '[?&#=]'))
+  )`),
+  offlineSourceValid: check('account_discovery_attributions_offline_source_valid', sql`${table.offlineSource} is null or length(trim(${table.offlineSource})) between 1 and 80`),
+  chronologyValid: check('account_discovery_attributions_chronology_valid', sql`${table.firstTouchAt} <= ${table.linkedAt}`),
+  idempotencyHashValid: check('account_discovery_attributions_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
+}));
+
+export const growthMilestones = pgTable('growth_milestones', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventSequence: bigserial('event_sequence', { mode: 'number' }),
+  userId: uuid('user_id').notNull(),
+  performerId: uuid('performer_id').notNull(),
+  attributionId: uuid('attribution_id').notNull().references(() => accountDiscoveryAttributions.id),
+  milestoneKind: growthMilestoneKindEnum('milestone_kind').notNull(),
+  valueKind: growthValueKindEnum('value_kind'),
+  evidenceEventId: uuid('evidence_event_id').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  environment: text('environment').notNull(),
+  qualificationSnapshot: jsonb('qualification_snapshot').notNull(),
+  idempotencyKeyHash: text('idempotency_key_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  sequenceIdx: uniqueIndex('growth_milestones_sequence_idx').on(table.eventSequence),
+  milestoneIdx: uniqueIndex('growth_milestones_user_kind_environment_idx').on(table.userId, table.milestoneKind, table.environment),
+  idempotencyIdx: uniqueIndex('growth_milestones_idempotency_idx').on(table.idempotencyKeyHash),
+  performerIdx: index('growth_milestones_performer_occurred_idx').on(table.performerId, table.occurredAt),
+  milestoneShapeValid: check('growth_milestones_shape_valid', sql`(
+    (${table.milestoneKind} = 'qualified_signup' and ${table.valueKind} is null)
+    or
+    (${table.milestoneKind} = 'first_value' and ${table.valueKind} is not null)
+  )`),
+  environmentAllowed: check('growth_milestones_environment_allowed', sql`${table.environment} in ('production', 'test', 'development')`),
+  snapshotRequired: check('growth_milestones_snapshot_required', sql`jsonb_typeof(${table.qualificationSnapshot}) = 'object' and ${table.qualificationSnapshot} <> '{}'::jsonb`),
+  chronologyValid: check('growth_milestones_chronology_valid', sql`${table.occurredAt} <= ${table.createdAt}`),
+  idempotencyHashValid: check('growth_milestones_idempotency_hash_valid', sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'`)
 }));
 
 export const idempotencyKeys = pgTable('idempotency_keys', {
@@ -1686,6 +2166,12 @@ export const audioUploadSessions = pgTable('audio_upload_sessions', {
   projectId: uuid('project_id').notNull().references(() => audioProjects.id),
   assetId: uuid('asset_id').references(() => audioAssets.id),
   initiatedByUserId: uuid('initiated_by_user_id').notNull().references(() => users.id),
+  uploadPurpose: text('upload_purpose').notNull().default('owner_asset'),
+  collaboratorFileGrantId: uuid('collaborator_file_grant_id')
+    .references((): AnyPgColumn => audioFileAccessGrants.id),
+  sourceAssetVersionId: uuid('source_asset_version_id')
+    .references((): AnyPgColumn => audioProjectAssetVersions.id),
+  requestFingerprint: text('request_fingerprint'),
   idempotencyKey: text('idempotency_key').notNull(),
   storageProvider: text('storage_provider').notNull(),
   storageBucket: text('storage_bucket').notNull(),
@@ -1703,19 +2189,169 @@ export const audioUploadSessions = pgTable('audio_upload_sessions', {
 }, (table) => ({
   providerUploadIdx: uniqueIndex('audio_upload_sessions_provider_upload_idx').on(table.storageProvider, table.providerUploadId),
   projectIdempotencyIdx: uniqueIndex('audio_upload_sessions_project_idempotency_idx').on(table.projectId, table.idempotencyKey),
+  collaboratorGrantIdx: uniqueIndex('audio_upload_sessions_collaborator_grant_idx')
+    .on(table.collaboratorFileGrantId)
+    .where(sql`${table.collaboratorFileGrantId} is not null`),
   idProjectIdx: uniqueIndex('audio_upload_sessions_id_project_idx').on(table.id, table.projectId),
   idExpectedIdentityIdx: uniqueIndex('audio_upload_sessions_id_expected_identity_idx').on(table.id, table.expectedSha256, table.expectedByteSize),
+  idStorageObjectIdx: uniqueIndex('audio_upload_sessions_id_storage_object_idx')
+    .on(table.id, table.storageProvider, table.storageBucket, table.storageKey, table.providerUploadId),
   projectStatusIdx: index('audio_upload_sessions_project_status_idx').on(table.projectId, table.uploadStatus),
   cleanupIdx: index('audio_upload_sessions_cleanup_idx').on(table.uploadStatus, table.expiresAt),
   expectedByteSizeValid: check('audio_upload_sessions_expected_byte_size_valid', sql`${table.expectedByteSize} > 0`),
   expectedShaValid: check('audio_upload_sessions_expected_sha_valid', sql`${table.expectedSha256} ~ '^[0-9a-f]{64}$'`),
+  purposeAllowed: check('audio_upload_sessions_purpose_allowed', sql`${table.uploadPurpose} in ('owner_asset', 'collaborator_revision')`),
+  collaboratorPurposeCoherent: check('audio_upload_sessions_collaborator_purpose_coherent', sql`(${table.uploadPurpose} = 'owner_asset' and ${table.collaboratorFileGrantId} is null and ${table.sourceAssetVersionId} is null and (${table.requestFingerprint} is null or ${table.requestFingerprint} ~ '^[0-9a-f]{64}$')) or (${table.uploadPurpose} = 'collaborator_revision' and ${table.collaboratorFileGrantId} is not null and ${table.sourceAssetVersionId} is not null and ${table.requestFingerprint} ~ '^[0-9a-f]{64}$')`),
   statusAllowed: check('audio_upload_sessions_status_allowed', sql`${table.uploadStatus} in ('initiated', 'uploading', 'uploaded', 'verifying', 'completed', 'quarantined', 'rejected', 'aborted', 'expired')`),
   completionCoherent: check('audio_upload_sessions_completion_coherent', sql`(${table.uploadStatus} = 'completed' and ${table.completedAt} is not null) or (${table.uploadStatus} <> 'completed' and ${table.completedAt} is null)`),
   assetProjectFk: foreignKey({
     columns: [table.assetId, table.projectId],
     foreignColumns: [audioAssets.id, audioAssets.projectId],
     name: 'audio_upload_sessions_asset_project_fk'
+  }),
+  collaboratorGrantScopeFk: foreignKey({
+    columns: [table.collaboratorFileGrantId, table.projectId, table.initiatedByUserId],
+    foreignColumns: [audioFileAccessGrants.id, audioFileAccessGrants.projectId, audioFileAccessGrants.granteeUserId],
+    name: 'audio_upload_sessions_collaborator_grant_scope_fk'
+  }),
+  sourceVersionProjectFk: foreignKey({
+    columns: [table.sourceAssetVersionId, table.projectId],
+    foreignColumns: [audioProjectAssetVersions.id, audioProjectAssetVersions.projectId],
+    name: 'audio_upload_sessions_source_version_project_fk'
   })
+}));
+
+// Durable provider-operation outbox for every private audio byte mutation.
+// Initiation is reserved before the provider call and may intentionally have
+// no upload-session row yet; its reservation remains chargeable until either
+// an exact session is linked or provider cleanup is durably confirmed.
+export const audioProviderOperations = pgTable('audio_provider_operations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => audioProjects.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  requestedByUserId: uuid('requested_by_user_id').references(() => users.id),
+  uploadSessionId: uuid('upload_session_id').references(() => audioUploadSessions.id),
+  plannedUploadSessionId: uuid('planned_upload_session_id').notNull(),
+  operationType: text('operation_type').notNull(),
+  operationKey: text('operation_key').notNull(),
+  intentFingerprint: text('intent_fingerprint').notNull(),
+  requestOrigin: text('request_origin').notNull().default('user'),
+  status: text('status').notNull().default('pending'),
+  storageProvider: text('storage_provider').notNull(),
+  storageBucket: text('storage_bucket').notNull(),
+  storageKey: text('storage_key').notNull(),
+  providerUploadId: text('provider_upload_id'),
+  partNumber: integer('part_number'),
+  bodySha256: text('body_sha256'),
+  bodyMd5: text('body_md5'),
+  bodyByteSize: bigint('body_byte_size', { mode: 'number' }),
+  reservedByteSize: bigint('reserved_byte_size', { mode: 'number' }).notNull().default(0),
+  reservedObjectCount: integer('reserved_object_count').notNull().default(0),
+  requestPayload: jsonb('request_payload').$type<Record<string, unknown>>().notNull(),
+  resultPayload: jsonb('result_payload').$type<Record<string, unknown>>(),
+  resultFingerprint: text('result_fingerprint'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(20),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseToken: uuid('lease_token'),
+  leaseOwner: text('lease_owner'),
+  leaseMode: text('lease_mode'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  lastErrorCode: text('last_error_code'),
+  providerStartedAt: timestamp('provider_started_at', { withTimezone: true }),
+  providerConfirmedAt: timestamp('provider_confirmed_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  operationKeyIdx: uniqueIndex('audio_provider_operations_operation_key_idx').on(table.operationKey),
+  subjectOperationIdx: uniqueIndex('audio_provider_operations_subject_operation_idx')
+    .on(table.plannedUploadSessionId, table.operationType, sql`coalesce(${table.partNumber}, 0)`),
+  claimIdx: index('audio_provider_operations_claim_idx').on(table.status, table.availableAt, table.leaseExpiresAt),
+  projectStatusIdx: index('audio_provider_operations_project_status_idx').on(table.projectId, table.status),
+  performerReservationIdx: index('audio_provider_operations_performer_reservation_idx')
+    .on(table.performerId, table.status),
+  uploadSessionIdx: index('audio_provider_operations_upload_session_idx').on(table.uploadSessionId),
+  projectPerformerFk: foreignKey({
+    columns: [table.projectId, table.performerId],
+    foreignColumns: [audioProjects.id, audioProjects.performerId],
+    name: 'audio_provider_operations_project_performer_fk'
+  }),
+  operationTypeAllowed: check('audio_provider_operations_type_allowed', sql`${table.operationType} in ('initiate_multipart', 'upload_part', 'complete_multipart', 'discard_upload', 'abort_upload')`),
+  statusAllowed: check('audio_provider_operations_status_allowed', sql`${table.status} in ('pending', 'leased', 'reconcile_required', 'awaiting_client_retry', 'succeeded', 'canceled', 'dead_letter')`),
+  operationKeyRequired: check('audio_provider_operations_key_required', sql`${table.operationKey} = 'audio-provider:v1:' || ${table.projectId}::text || ':' || ${table.plannedUploadSessionId}::text || ':' || ${table.operationType} || ':' || coalesce(${table.partNumber}::text, '0')`),
+  requestOriginCoherent: check('audio_provider_operations_request_origin_coherent', sql`(${table.requestOrigin} = 'user' and ${table.requestedByUserId} is not null) or (${table.requestOrigin} in ('system_cleanup', 'system_recovery') and ${table.requestedByUserId} is null)`),
+  storageIdentityRequired: check('audio_provider_operations_storage_identity_required', sql`length(btrim(${table.storageProvider})) between 1 and 80 and length(btrim(${table.storageBucket})) between 1 and 240 and length(btrim(${table.storageKey})) between 1 and 1024 and (${table.providerUploadId} is null or length(btrim(${table.providerUploadId})) between 1 and 1024)`),
+  intentFingerprintValid: check('audio_provider_operations_intent_fingerprint_valid', sql`${table.intentFingerprint} ~ '^[0-9a-f]{64}$'`),
+  requestPayloadValid: check('audio_provider_operations_request_payload_valid', sql`jsonb_typeof(${table.requestPayload}) = 'object' and ${table.requestPayload} <> '{}'::jsonb`),
+  resultEvidenceValid: check('audio_provider_operations_result_evidence_valid', sql`(${table.resultPayload} is null and ${table.resultFingerprint} is null) or (${table.resultPayload} is not null and jsonb_typeof(${table.resultPayload}) = 'object' and ${table.resultPayload} <> '{}'::jsonb and ${table.resultFingerprint} is not null and ${table.resultFingerprint} ~ '^[0-9a-f]{64}$')`),
+  attemptsValid: check('audio_provider_operations_attempts_valid', sql`${table.attemptCount} >= 0 and ${table.maxAttempts} between 1 and 100 and ${table.attemptCount} <= ${table.maxAttempts}`),
+  reservationValid: check('audio_provider_operations_reservation_valid', sql`(${table.operationType} = 'initiate_multipart' and ${table.reservedByteSize} > 0 and ${table.reservedObjectCount} = 1 and ${table.requestPayload} ? 'expectedByteSize' and jsonb_typeof(${table.requestPayload}->'expectedByteSize') = 'number' and coalesce(${table.requestPayload}->>'expectedByteSize' ~ '^[1-9][0-9]*$', false) and (${table.requestPayload}->>'expectedByteSize')::numeric = ${table.reservedByteSize}) or (${table.operationType} <> 'initiate_multipart' and ${table.reservedByteSize} = 0 and ${table.reservedObjectCount} = 0)`),
+  uploadSessionCoherent: check('audio_provider_operations_upload_session_coherent', sql`${table.uploadSessionId} is null or ${table.uploadSessionId} = ${table.plannedUploadSessionId}`),
+  operationSessionRequired: check('audio_provider_operations_session_required', sql`${table.operationType} = 'initiate_multipart' or ${table.uploadSessionId} is not null`),
+  partShape: check('audio_provider_operations_part_shape', sql`(${table.operationType} = 'upload_part' and ${table.partNumber} is not null and ${table.partNumber} between 1 and 10000 and ${table.bodySha256} is not null and ${table.bodySha256} ~ '^[0-9a-f]{64}$' and ${table.bodyMd5} is not null and ${table.bodyMd5} ~ '^[0-9a-f]{32}$' and ${table.bodyByteSize} is not null and ${table.bodyByteSize} > 0) or (${table.operationType} <> 'upload_part' and ${table.partNumber} is null and ${table.bodySha256} is null and ${table.bodyMd5} is null and ${table.bodyByteSize} is null)`),
+  providerIdentityShape: check('audio_provider_operations_provider_identity_shape', sql`(${table.operationType} = 'initiate_multipart' and (${table.providerUploadId} is null or ${table.providerStartedAt} is not null)) or (${table.operationType} <> 'initiate_multipart' and ${table.providerUploadId} is not null)`),
+  leaseCoherent: check('audio_provider_operations_lease_coherent', sql`(${table.status} = 'leased' and ${table.leaseToken} is not null and ${table.leaseOwner} is not null and length(btrim(${table.leaseOwner})) > 0 and ${table.leaseMode} in ('execute', 'reconcile') and ${table.leaseExpiresAt} is not null) or (${table.status} <> 'leased' and ${table.leaseToken} is null and ${table.leaseOwner} is null and ${table.leaseMode} is null and ${table.leaseExpiresAt} is null)`),
+  errorCodeValid: check('audio_provider_operations_error_code_valid', sql`${table.lastErrorCode} is null or ${table.lastErrorCode} ~ '^[a-z0-9][a-z0-9._-]{0,79}$'`),
+  completionCoherent: check('audio_provider_operations_completion_coherent', sql`(${table.status} in ('succeeded', 'canceled') and ${table.completedAt} is not null) or (${table.status} not in ('succeeded', 'canceled') and ${table.completedAt} is null)`),
+  providerConfirmationCoherent: check('audio_provider_operations_provider_confirmation_coherent', sql`${table.providerConfirmedAt} is null or (${table.providerStartedAt} is not null and ${table.resultPayload} is not null)`)
+}));
+
+// One row per lease generation. Active rows may be finalized once; prior
+// attempts are never overwritten or deleted, so process-kill and reconciliation
+// history remains independently inspectable.
+export const audioProviderOperationAttempts = pgTable('audio_provider_operation_attempts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  operationId: uuid('operation_id').notNull().references(() => audioProviderOperations.id),
+  attemptNumber: integer('attempt_number').notNull(),
+  fencingToken: uuid('fencing_token').notNull(),
+  mode: text('mode').notNull(),
+  leaseOwner: text('lease_owner').notNull(),
+  leaseStartedAt: timestamp('lease_started_at', { withTimezone: true }).notNull(),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  providerStartedAt: timestamp('provider_started_at', { withTimezone: true }),
+  providerResultFingerprint: text('provider_result_fingerprint'),
+  errorCode: text('error_code'),
+  outcome: text('outcome').notNull().default('active'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  operationAttemptIdx: uniqueIndex('audio_provider_operation_attempts_operation_attempt_idx')
+    .on(table.operationId, table.attemptNumber),
+  fencingTokenIdx: uniqueIndex('audio_provider_operation_attempts_fencing_token_idx')
+    .on(table.fencingToken),
+  outcomeIdx: index('audio_provider_operation_attempts_outcome_idx').on(table.outcome, table.leaseExpiresAt),
+  modeAllowed: check('audio_provider_operation_attempts_mode_allowed', sql`${table.mode} in ('execute', 'reconcile')`),
+  leaseOwnerRequired: check('audio_provider_operation_attempts_lease_owner_required', sql`length(btrim(${table.leaseOwner})) between 1 and 160`),
+  leaseWindowValid: check('audio_provider_operation_attempts_lease_window_valid', sql`${table.leaseExpiresAt} > ${table.leaseStartedAt}`),
+  requestFingerprintValid: check('audio_provider_operation_attempts_request_fingerprint_valid', sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`),
+  providerResultFingerprintValid: check('audio_provider_operation_attempts_result_fingerprint_valid', sql`${table.providerResultFingerprint} is null or ${table.providerResultFingerprint} ~ '^[0-9a-f]{64}$'`),
+  errorCodeValid: check('audio_provider_operation_attempts_error_code_valid', sql`${table.errorCode} is null or ${table.errorCode} ~ '^[a-z0-9][a-z0-9._-]{0,79}$'`),
+  outcomeAllowed: check('audio_provider_operation_attempts_outcome_allowed', sql`${table.outcome} in ('active', 'released', 'reconcile_required', 'awaiting_client_retry', 'succeeded', 'canceled', 'dead_letter', 'stale')`),
+  completionCoherent: check('audio_provider_operation_attempts_completion_coherent', sql`(${table.outcome} = 'active' and ${table.completedAt} is null) or (${table.outcome} <> 'active' and ${table.completedAt} is not null)`)
+}));
+
+// Dead letters stay immutable. Resolution is a separate append-only fact that
+// may release their reservation only after exact session recovery or confirmed
+// absence of multipart, staging, and sealed provider state.
+export const audioProviderOperationResolutions = pgTable('audio_provider_operation_resolutions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  operationId: uuid('operation_id').notNull().references(() => audioProviderOperations.id),
+  resolutionType: text('resolution_type').notNull(),
+  uploadSessionId: uuid('upload_session_id').references(() => audioUploadSessions.id),
+  resolvedByUserId: uuid('resolved_by_user_id').references(() => users.id),
+  providerObservedAt: timestamp('provider_observed_at', { withTimezone: true }).notNull(),
+  evidenceFingerprint: text('evidence_fingerprint').notNull(),
+  evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  operationIdx: uniqueIndex('audio_provider_operation_resolutions_operation_idx').on(table.operationId),
+  resolutionTypeAllowed: check('audio_provider_operation_resolutions_type_allowed', sql`${table.resolutionType} in ('cleanup_confirmed', 'session_recovered')`),
+  evidenceFingerprintValid: check('audio_provider_operation_resolutions_evidence_fingerprint_valid', sql`${table.evidenceFingerprint} ~ '^[0-9a-f]{64}$'`),
+  evidenceRequired: check('audio_provider_operation_resolutions_evidence_required', sql`jsonb_typeof(${table.evidence}) = 'object' and ${table.evidence} <> '{}'::jsonb`),
+  sessionCoherent: check('audio_provider_operation_resolutions_session_coherent', sql`(${table.resolutionType} = 'cleanup_confirmed' and ${table.uploadSessionId} is null) or (${table.resolutionType} = 'session_recovered' and ${table.uploadSessionId} is not null)`)
 }));
 
 export const audioUploadParts = pgTable('audio_upload_parts', {
@@ -1893,6 +2529,10 @@ export const audioFileAccessGrants = pgTable('audio_file_access_grants', {
   grantorCanManageAccess: boolean('grantor_can_manage_access').notNull().default(true),
   grantedByUserId: uuid('granted_by_user_id').notNull().references(() => users.id),
   granteeUserId: uuid('grantee_user_id').notNull().references(() => users.id),
+  grantPurpose: text('grant_purpose').notNull().default('review_share'),
+  idempotencyKeyHash: text('idempotency_key_hash'),
+  intentFingerprint: text('intent_fingerprint'),
+  maxCandidateBytes: bigint('max_candidate_bytes', { mode: 'number' }),
   canStreamPreview: boolean('can_stream_preview').notNull().default(true),
   canDownloadOriginal: boolean('can_download_original').notNull().default(false),
   canUploadNewVersion: boolean('can_upload_new_version').notNull().default(false),
@@ -1905,10 +2545,19 @@ export const audioFileAccessGrants = pgTable('audio_file_access_grants', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   activeConnectionAssetGranteeIdx: uniqueIndex('audio_file_access_grants_active_connection_asset_grantee_idx')
-    .on(table.connectionId, table.assetVersionId, table.granteeUserId)
+    .on(table.connectionId, table.assetVersionId, table.granteeUserId, table.grantPurpose)
     .where(sql`${table.revokedAt} is null`),
+  idProjectGranteeIdx: uniqueIndex('audio_file_access_grants_id_project_grantee_idx')
+    .on(table.id, table.projectId, table.granteeUserId),
+  grantorIdempotencyIdx: uniqueIndex('audio_file_access_grants_grantor_idempotency_idx')
+    .on(table.grantedByUserId, table.idempotencyKeyHash)
+    .where(sql`${table.idempotencyKeyHash} is not null`),
   granteeExpiryIdx: index('audio_file_access_grants_grantee_expiry_idx').on(table.granteeUserId, table.expiresAt),
   differentUsers: check('audio_file_access_grants_different_users', sql`${table.grantedByUserId} <> ${table.granteeUserId}`),
+  purposeAllowed: check('audio_file_access_grants_purpose_allowed', sql`${table.grantPurpose} in ('review_share', 'collaborator_revision_upload')`),
+  purposePermissionsCoherent: check('audio_file_access_grants_purpose_permissions_coherent', sql`(${table.grantPurpose} = 'review_share' and ${table.canUploadNewVersion} = false) or (${table.grantPurpose} = 'collaborator_revision_upload' and ${table.canUploadNewVersion} = true and ${table.canStreamPreview} = false and ${table.canDownloadOriginal} = false and ${table.canComment} = false and ${table.canApprove} = false)`),
+  purposeIntentCoherent: check('audio_file_access_grants_purpose_intent_coherent', sql`(${table.grantPurpose} = 'review_share' and ${table.idempotencyKeyHash} is null and ${table.intentFingerprint} is null and ${table.maxCandidateBytes} is null) or (${table.grantPurpose} = 'collaborator_revision_upload' and ${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$' and ${table.intentFingerprint} ~ '^[0-9a-f]{64}$' and ${table.maxCandidateBytes} between 1 and 536870912)`),
+  collaboratorExpiryBounded: check('audio_file_access_grants_collaborator_expiry_bounded', sql`${table.grantPurpose} <> 'collaborator_revision_upload' or (${table.expiresAt} is not null and ${table.expiresAt} <= ${table.createdAt} + interval '7 days')`),
   permissionRequired: check('audio_file_access_grants_permission_required', sql`${table.canStreamPreview} = true or ${table.canDownloadOriginal} = true or ${table.canUploadNewVersion} = true or ${table.canComment} = true or ${table.canApprove} = true`),
   expiryValid: check('audio_file_access_grants_expiry_valid', sql`${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}`),
   connectionMembersMatchGrant: check('audio_file_access_grants_connection_members_match_grant', sql`(${table.grantedByUserId} = ${table.connectionMemberOneUserId} and ${table.granteeUserId} = ${table.connectionMemberTwoUserId}) or (${table.grantedByUserId} = ${table.connectionMemberTwoUserId} and ${table.granteeUserId} = ${table.connectionMemberOneUserId})`),
@@ -1929,6 +2578,137 @@ export const audioFileAccessGrants = pgTable('audio_file_access_grants', {
     columns: [table.grantorProjectAccessGrantId, table.projectId, table.grantedByUserId, table.grantorCanManageAccess],
     foreignColumns: [audioProjectAccessGrants.id, audioProjectAccessGrants.projectId, audioProjectAccessGrants.granteeUserId, audioProjectAccessGrants.canManageAccess],
     name: 'audio_file_access_grants_grantor_project_access_fk'
+  })
+}));
+
+// Collaborator submissions are isolated from ordinary project versions. They
+// cannot become requestable, enter a release, or reach a delivery provider
+// without a future explicit promotion workflow that does not exist in Wave 5A.
+export const audioCandidateRevisions = pgTable('audio_candidate_revisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => audioProjects.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  assetId: uuid('asset_id').notNull().references(() => audioAssets.id),
+  sourceAssetVersionId: uuid('source_asset_version_id').notNull().references(() => audioProjectAssetVersions.id),
+  fileAccessGrantId: uuid('file_access_grant_id').notNull().references(() => audioFileAccessGrants.id),
+  uploadedByUserId: uuid('uploaded_by_user_id').notNull().references(() => users.id),
+  uploadSessionId: uuid('upload_session_id').notNull().references(() => audioUploadSessions.id),
+  originalFilename: text('original_filename').notNull(),
+  storageProvider: text('storage_provider').notNull(),
+  storageBucket: text('storage_bucket').notNull(),
+  storageKey: text('storage_key').notNull(),
+  providerVersionId: text('provider_version_id'),
+  mimeType: text('mime_type').notNull(),
+  byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+  sha256: text('sha256').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  codec: text('codec'),
+  sampleRateHz: integer('sample_rate_hz'),
+  bitDepth: integer('bit_depth'),
+  channelCount: integer('channel_count'),
+  integrityStatus: audioAssetIntegrityStatusEnum('integrity_status').notNull(),
+  integrityVerifierKey: text('integrity_verifier_key').notNull(),
+  integrityVerifiedAt: timestamp('integrity_verified_at', { withTimezone: true }).notNull(),
+  integrityEvidence: jsonb('integrity_evidence').notNull(),
+  intakeStatus: text('intake_status').notNull().default('private_review'),
+  originalPreserved: boolean('original_preserved').notNull().default(true),
+  sealedAt: timestamp('sealed_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  grantIdx: uniqueIndex('audio_candidate_revisions_grant_idx').on(table.fileAccessGrantId),
+  uploadSessionIdx: uniqueIndex('audio_candidate_revisions_upload_session_idx').on(table.uploadSessionId),
+  storageObjectIdx: uniqueIndex('audio_candidate_revisions_storage_object_idx').on(table.storageProvider, table.storageBucket, table.storageKey),
+  projectCreatedIdx: index('audio_candidate_revisions_project_created_idx').on(table.projectId, table.createdAt),
+  byteSizeValid: check('audio_candidate_revisions_byte_size_valid', sql`${table.byteSize} > 0`),
+  shaValid: check('audio_candidate_revisions_sha_valid', sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+  audioRequired: check('audio_candidate_revisions_audio_required', sql`${table.mimeType} like 'audio/%'`),
+  durationValid: check('audio_candidate_revisions_duration_valid', sql`${table.durationMs} > 0`),
+  audioMetadataValid: check('audio_candidate_revisions_audio_metadata_valid', sql`(${table.sampleRateHz} is null or ${table.sampleRateHz} > 0) and (${table.bitDepth} is null or ${table.bitDepth} > 0) and (${table.channelCount} is null or ${table.channelCount} > 0)`),
+  integrityVerified: check('audio_candidate_revisions_integrity_verified', sql`${table.integrityStatus} = 'verified'`),
+  integrityEvidenceRequired: check('audio_candidate_revisions_integrity_evidence_required', sql`jsonb_typeof(${table.integrityEvidence}) = 'object' and ${table.integrityEvidence} <> '{}'::jsonb`),
+  privateReviewOnly: check('audio_candidate_revisions_private_review_only', sql`${table.intakeStatus} = 'private_review'`),
+  originalRequired: check('audio_candidate_revisions_original_required', sql`${table.originalPreserved} = true`),
+  projectPerformerFk: foreignKey({
+    columns: [table.projectId, table.performerId],
+    foreignColumns: [audioProjects.id, audioProjects.performerId],
+    name: 'audio_candidate_revisions_project_performer_fk'
+  }),
+  assetProjectFk: foreignKey({
+    columns: [table.assetId, table.projectId],
+    foreignColumns: [audioAssets.id, audioAssets.projectId],
+    name: 'audio_candidate_revisions_asset_project_fk'
+  }),
+  sourceVersionProjectFk: foreignKey({
+    columns: [table.sourceAssetVersionId, table.projectId],
+    foreignColumns: [audioProjectAssetVersions.id, audioProjectAssetVersions.projectId],
+    name: 'audio_candidate_revisions_source_version_project_fk'
+  }),
+  fileGrantScopeFk: foreignKey({
+    columns: [table.fileAccessGrantId, table.projectId, table.uploadedByUserId],
+    foreignColumns: [audioFileAccessGrants.id, audioFileAccessGrants.projectId, audioFileAccessGrants.granteeUserId],
+    name: 'audio_candidate_revisions_file_grant_scope_fk'
+  }),
+  uploadProjectFk: foreignKey({
+    columns: [table.uploadSessionId, table.projectId],
+    foreignColumns: [audioUploadSessions.id, audioUploadSessions.projectId],
+    name: 'audio_candidate_revisions_upload_project_fk'
+  }),
+  uploadIdentityFk: foreignKey({
+    columns: [table.uploadSessionId, table.sha256, table.byteSize],
+    foreignColumns: [audioUploadSessions.id, audioUploadSessions.expectedSha256, audioUploadSessions.expectedByteSize],
+    name: 'audio_candidate_revisions_upload_identity_fk'
+  })
+}));
+
+// Provider cleanup can fail after the application transaction has already
+// rolled back. These receipts retain the exact private object identity so the
+// local cleanup worker can retry without inventing or rediscovering a key.
+export const audioObjectCleanupReceipts = pgTable('audio_object_cleanup_receipts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => audioProjects.id),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  uploadSessionId: uuid('upload_session_id').references(() => audioUploadSessions.id),
+  storageProvider: text('storage_provider').notNull(),
+  storageBucket: text('storage_bucket').notNull(),
+  storageKey: text('storage_key').notNull(),
+  providerUploadId: text('provider_upload_id'),
+  cleanupReason: text('cleanup_reason').notNull(),
+  cleanupStatus: text('cleanup_status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(1),
+  lastError: text('last_error').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true })
+}, (table) => ({
+  storageObjectIdx: uniqueIndex('audio_object_cleanup_receipts_storage_object_idx')
+    .on(table.storageProvider, table.storageBucket, table.storageKey),
+  pendingRequestedIdx: index('audio_object_cleanup_receipts_pending_requested_idx')
+    .on(table.cleanupStatus, table.requestedAt),
+  projectRequestedIdx: index('audio_object_cleanup_receipts_project_requested_idx')
+    .on(table.projectId, table.requestedAt),
+  reasonAllowed: check('audio_object_cleanup_receipts_reason_allowed', sql`${table.cleanupReason} in ('orphaned_owner_initiation', 'orphaned_candidate_initiation', 'owner_integrity_validation_failed', 'candidate_technical_validation_failed', 'candidate_grant_revoked', 'candidate_connection_revoked')`),
+  reasonSessionCoherent: check('audio_object_cleanup_receipts_reason_session_coherent', sql`(${table.cleanupReason} in ('orphaned_owner_initiation', 'orphaned_candidate_initiation') and ${table.uploadSessionId} is null) or (${table.cleanupReason} in ('owner_integrity_validation_failed', 'candidate_technical_validation_failed', 'candidate_grant_revoked', 'candidate_connection_revoked') and ${table.uploadSessionId} is not null)`),
+  sessionIdentityComplete: check('audio_object_cleanup_receipts_session_identity_complete', sql`${table.uploadSessionId} is null or ${table.providerUploadId} is not null`),
+  statusAllowed: check('audio_object_cleanup_receipts_status_allowed', sql`${table.cleanupStatus} in ('pending', 'completed')`),
+  attemptsValid: check('audio_object_cleanup_receipts_attempts_valid', sql`${table.attemptCount} > 0`),
+  errorRequired: check('audio_object_cleanup_receipts_error_required', sql`length(btrim(${table.lastError})) > 0`),
+  completionCoherent: check('audio_object_cleanup_receipts_completion_coherent', sql`(${table.cleanupStatus} = 'pending' and ${table.completedAt} is null) or (${table.cleanupStatus} = 'completed' and ${table.completedAt} is not null)`),
+  uploadSessionObjectFk: foreignKey({
+    columns: [
+      table.uploadSessionId,
+      table.storageProvider,
+      table.storageBucket,
+      table.storageKey,
+      table.providerUploadId
+    ],
+    foreignColumns: [
+      audioUploadSessions.id,
+      audioUploadSessions.storageProvider,
+      audioUploadSessions.storageBucket,
+      audioUploadSessions.storageKey,
+      audioUploadSessions.providerUploadId
+    ],
+    name: 'audio_object_cleanup_receipts_upload_session_object_fk'
   })
 }));
 

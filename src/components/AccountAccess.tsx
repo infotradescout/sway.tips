@@ -6,6 +6,7 @@ import {
   normalizeSafeAccountNextPath,
   preserveFileConnectFragment
 } from '../file-collaboration-routing';
+import { getOrCreateDiscoveryJourneyId } from '../shells/discoveryAttribution';
 
 type AccountSession = {
   account: {
@@ -309,7 +310,8 @@ export function AccountSignup() {
         confirmPassword,
         termsAccepted,
         claimCode: trimmedClaim || undefined,
-        next: performerNext || undefined
+        next: performerNext || undefined,
+        discoveryJourneyId: getOrCreateDiscoveryJourneyId()
       });
       if (typeof data.redirectPath === 'string' && data.redirectPath) {
         window.location.assign(data.redirectPath);

@@ -9,7 +9,11 @@ import {
   Trash2
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
+import {
+  PROFESSIONAL_IDENTITY_OPTIONS,
+  professionalIdentityLabel,
+  type ProfessionalIdentityKind
+} from '../talent-capability-catalog';
 import { PerformerVisibilityControl } from './PerformerVisibilityControl';
 
 type LinkDraft = {
@@ -22,7 +26,6 @@ type LinkDraft = {
 };
 
 type ProfileForm = {
-  primaryRole: string;
   stageName: string;
   headline: string;
   specialties: string;
@@ -41,7 +44,6 @@ type ProfileForm = {
 };
 
 const EMPTY_FORM: ProfileForm = {
-  primaryRole: '',
   stageName: '',
   headline: '',
   specialties: '',
@@ -96,6 +98,7 @@ export default function PerformerPublicProfileEditor({
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'success' | 'error'>(previewMode ? 'idle' : 'loading');
   const [message, setMessage] = useState<string | null>(null);
+  const [professionalIdentity, setProfessionalIdentity] = useState('Not set');
   const [partner, setPartner] = useState<{
     granted: boolean;
     active: boolean;
@@ -136,8 +139,14 @@ export default function PerformerPublicProfileEditor({
         }
 
         const profile = data.profile;
+        const identityKind = typeof profile.professionalIdentity?.kind === 'string'
+          && PROFESSIONAL_IDENTITY_OPTIONS.some((option) => option.id === profile.professionalIdentity.kind)
+          ? profile.professionalIdentity.kind as ProfessionalIdentityKind
+          : null;
+        setProfessionalIdentity(identityKind
+          ? professionalIdentityLabel(identityKind, text(profile.professionalIdentity?.customLabel) || null)
+          : 'Complete Professional setup above');
         setForm({
-          primaryRole: text(profile.primaryRole),
           stageName: text(profile.stageName),
           headline: text(profile.headline),
           specialties: Array.isArray(profile.specialties) ? profile.specialties.join(', ') : '',
@@ -242,7 +251,6 @@ export default function PerformerPublicProfileEditor({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          primaryRole: form.primaryRole || null,
           stageName: form.stageName,
           headline: form.headline,
           specialties,
@@ -402,21 +410,11 @@ export default function PerformerPublicProfileEditor({
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
         <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className={fieldLabel()}>What kind of performer are you?</span>
-              <select
-                className={fieldClass()}
-                required
-                value={form.primaryRole}
-                onChange={(event) => setForm((current) => ({ ...current, primaryRole: event.target.value }))}
-              >
-                <option value="">Choose one</option>
-                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => (
-                  <option key={role.id} value={role.id}>{role.label}</option>
-                ))}
-              </select>
-              <span className="block text-[11px] leading-5 text-slate-500">This appears at the top of your public page instead of a generic “performer” label.</span>
-            </label>
+            <div className="rounded-xl border border-violet-300/15 bg-violet-300/[0.04] p-4 sm:col-span-2">
+              <span className={fieldLabel()}>Professional identity</span>
+              <p className="mt-2 text-sm font-black text-white">{professionalIdentity}</p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">Identity is saved in the append-only Professional setup above. Profile details cannot grant or silently change it.</p>
+            </div>
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Stage name — optional</span>
               <input className={fieldClass()} maxLength={80} value={form.stageName} onChange={(event) => setForm((current) => ({ ...current, stageName: event.target.value }))} placeholder="Only if different from your @handle" />

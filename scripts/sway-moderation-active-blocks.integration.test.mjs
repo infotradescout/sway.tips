@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { build } from 'esbuild';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import { Client } from 'pg';
 import { closeDisposableSwayDbProof } from '../src/db/client.ts';
+import * as schema from '../src/db/schema.ts';
 import { createModerationService } from '../src/server/moderation-service.ts';
 import { createPerformerSessionStore } from '../src/server/performer-session-store.ts';
 import { assertDisposableDatabaseTarget } from './lib/disposable-database-guard.mjs';
@@ -93,9 +97,190 @@ async function proveUpgradeFromLegacyDuplicateRows(databaseUrl) {
   }
 }
 
-function spawnServer(databaseUrl) {
+async function createTimeZoneBoundModerationService(databaseUrl, timeZone) {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  await client.query(`select set_config('TimeZone', $1, false)`, [timeZone]);
+  const configuredTimeZone = await client.query('show timezone');
+  assert.equal(configuredTimeZone.rows[0].TimeZone, timeZone);
+  return {
+    client,
+    service: createModerationService(undefined, {
+      database: drizzle(client, { schema })
+    })
+  };
+}
+
+async function seedExpiredRoomMenuReports(client, count, seed) {
+  await client.query(
+    `INSERT INTO moderation_events (
+       reporter_fingerprint,
+       requester_ip_hash,
+       report_window_started_at,
+       retention_expires_at,
+       entity_type,
+       entity_id,
+       status,
+       reason,
+       metadata,
+       created_at
+     )
+     SELECT
+       md5($2 || ':reporter:' || value::text) || md5($2 || ':reporter-tail:' || value::text),
+       md5($2 || ':ip:' || value::text) || md5($2 || ':ip-tail:' || value::text),
+       date_trunc('day', (clock_timestamp() - interval '2 days') AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+       clock_timestamp() - interval '1 day',
+       'room_menu_item_report',
+       md5($2 || ':entity:' || value::text)::uuid,
+       'held_for_review',
+       'Expired retention sidecar proof',
+       jsonb_build_object('source', 'moderation.sidecar.proof', 'details', null),
+       clock_timestamp() - interval '2 days'
+     FROM generate_series(1, $1::integer) AS value`,
+    [count, seed]
+  );
+}
+
+async function proveRoomMenuReportUtcAndRetention(databaseUrl) {
+  const utc = await createTimeZoneBoundModerationService(databaseUrl, 'UTC');
+  let adversarial = null;
+  let chicagoClient = null;
+
+  try {
+    const utcWindow = await utc.client.query(
+      `select date_trunc('day', transaction_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' as report_window`
+    );
+    chicagoClient = new Client({ connectionString: databaseUrl });
+    await chicagoClient.connect();
+    await chicagoClient.query(`select set_config('TimeZone', 'America/Chicago', false)`);
+    const chicagoWindow = await chicagoClient.query(
+      `select date_trunc('day', transaction_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' as report_window`
+    );
+    assert.equal(
+      new Date(chicagoWindow.rows[0].report_window).toISOString(),
+      new Date(utcWindow.rows[0].report_window).toISOString(),
+      'The UTC report window expression must be invariant across UTC and America/Chicago sessions.'
+    );
+
+    const firstReport = await utc.service.recordRoomMenuReport({
+      gigId: '10000000-0000-4000-a000-000000000001',
+      menuItemId: 'utc-window-one',
+      reason: 'UTC report ceiling proof',
+      reporterFingerprint: 'a'.repeat(64),
+      requesterIpHash: 'b'.repeat(64),
+      subjectLimit: 1
+    });
+    assert.equal(firstReport.status, 'written');
+
+    const utcHour = Number((await utc.client.query(
+      `select extract(hour from clock_timestamp() AT TIME ZONE 'UTC')::integer as hour`
+    )).rows[0].hour);
+    const adversarialTimeZone = utcHour < 12 ? 'Etc/GMT+12' : 'Pacific/Kiritimati';
+    adversarial = await createTimeZoneBoundModerationService(databaseUrl, adversarialTimeZone);
+    const alternateLocalDay = await adversarial.client.query(
+      `select
+         (clock_timestamp() AT TIME ZONE current_setting('TimeZone'))::date as local_day,
+         (clock_timestamp() AT TIME ZONE 'UTC')::date as utc_day`
+    );
+    assert.notEqual(
+      String(alternateLocalDay.rows[0].local_day),
+      String(alternateLocalDay.rows[0].utc_day),
+      'The adversarial proof session must observe a different local calendar day from UTC.'
+    );
+
+    const secondReport = await adversarial.service.recordRoomMenuReport({
+      gigId: '10000000-0000-4000-a000-000000000001',
+      menuItemId: 'alternate-window-two',
+      reason: 'Cross-time-zone report ceiling proof',
+      reporterFingerprint: 'a'.repeat(64),
+      requesterIpHash: 'c'.repeat(64),
+      subjectLimit: 1
+    });
+    assert.equal(
+      secondReport.status,
+      'rate_limited',
+      'A second subject report on the same UTC day must be rate-limited even when the DB session local day differs.'
+    );
+
+    const durableUtcRows = await utc.client.query(
+      `SELECT count(*)::integer AS count,
+              count(DISTINCT report_window_started_at)::integer AS windows,
+              min(report_window_started_at) AS report_window
+       FROM moderation_events
+       WHERE entity_type = 'room_menu_item_report'`
+    );
+    assert.equal(durableUtcRows.rows[0].count, 1);
+    assert.equal(durableUtcRows.rows[0].windows, 1);
+    assert.equal(
+      new Date(durableUtcRows.rows[0].report_window).toISOString(),
+      new Date(utcWindow.rows[0].report_window).toISOString()
+    );
+
+    await utc.client.query(`DELETE FROM moderation_events WHERE entity_type = 'room_menu_item_report'`);
+    await seedExpiredRoomMenuReports(utc.client, 501, 'drain-all');
+    const drained = await utc.service.pruneExpiredRoomMenuReports({
+      limit: 500,
+      maxBatches: 10,
+      maxRuntimeMs: 10_000
+    });
+    assert.equal(drained.deleted, 501);
+    assert.equal(drained.batches, 2);
+    assert.equal(drained.remainingExpired, 0);
+    assert.equal(drained.continuationRequired, false);
+    assert.equal(drained.oldestExpiredAt, null);
+    assert.equal(drained.oldestExpiredAgeMs, null);
+    assert.equal(drained.stopReason, 'drained');
+
+    await seedExpiredRoomMenuReports(utc.client, 3, 'bounded-backlog');
+    const bounded = await utc.service.pruneExpiredRoomMenuReports({
+      limit: 1,
+      maxBatches: 1,
+      maxRuntimeMs: 10_000
+    });
+    assert.equal(bounded.deleted, 1);
+    assert.equal(bounded.remainingExpired, 2);
+    assert.equal(bounded.continuationRequired, true);
+    assert.equal(bounded.stopReason, 'batch_limit');
+    assert.match(bounded.oldestExpiredAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+    assert.ok((bounded.oldestExpiredAgeMs ?? 0) >= 24 * 60 * 60 * 1000);
+
+    return bounded.remainingExpired;
+  } finally {
+    await adversarial?.client.end();
+    await chicagoClient?.end();
+    await utc.client.end();
+  }
+}
+
+async function buildProofServer() {
+  const tempRoot = join(process.cwd(), '.tmp');
+  await mkdir(tempRoot, { recursive: true });
+  const directory = await mkdtemp(join(tempRoot, 'moderation-active-blocks-'));
+  const entryPath = join(directory, 'server.cjs');
+
+  await build({
+    entryPoints: [join(process.cwd(), 'server.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    packages: 'external',
+    outfile: entryPath,
+    sourcemap: false,
+    logLevel: 'silent'
+  });
+
+  return { directory, entryPath };
+}
+
+async function removeProofServer(proofServer) {
+  if (!proofServer) return;
+  await rm(proofServer.entryPath, { force: true });
+  await rmdir(proofServer.directory);
+}
+
+function spawnServer(databaseUrl, serverEntryPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+    const child = spawn(process.execPath, [serverEntryPath], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -104,6 +289,12 @@ function spawnServer(databaseUrl) {
         APP_URL: BASE,
         SWAY_APP_BASE_URL: BASE,
         NODE_ENV: 'test',
+        SWAY_API_ONLY_TEST_MODE: 'true',
+        SWAY_STARTUP_DIAGNOSTICS: 'true',
+        SWAY_MODERATION_RETENTION_BATCH_SIZE: '1',
+        SWAY_MODERATION_RETENTION_MAX_BATCHES_PER_RUN: '1',
+        SWAY_MODERATION_RETENTION_MAX_RUNTIME_MS: '1000',
+        SWAY_MODERATION_RETENTION_CONTINUATION_DELAY_MS: '10',
         DISABLE_HMR: 'true'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -160,19 +351,24 @@ async function main() {
   if (!databaseUrl) throw new Error('A disposable moderation database is required.');
 
   let server = null;
+  let proofServer = null;
 
   try {
+    proofServer = await buildProofServer();
     await proveUpgradeFromLegacyDuplicateRows(databaseUrl);
-    if (!embeddedProof) {
-      const adminClient = new Client({ connectionString: databaseUrl });
-      await adminClient.connect();
-      try {
-        await resetDatabase(adminClient);
-        await applyMigrations(adminClient);
-      } finally {
-        await adminClient.end();
-      }
+    const adminClient = new Client({ connectionString: databaseUrl });
+    await adminClient.connect();
+    try {
+      // The legacy-upgrade proof intentionally leaves this database at 0035.
+      // Rebuild it at the current schema before exercising current service code.
+      await resetDatabase(adminClient);
+      await applyMigrations(adminClient);
+    } finally {
+      await adminClient.end();
     }
+
+    const retentionBacklogBeforeWorker = await proveRoomMenuReportUtcAndRetention(databaseUrl);
+    assert.equal(retentionBacklogBeforeWorker, 2);
 
     const firstService = createModerationService(databaseUrl);
     await firstService.addBlockRule({
@@ -293,7 +489,7 @@ async function main() {
       idempotency_key: 'moderation-block-http-proof-v1'
     };
 
-    server = await spawnServer(databaseUrl);
+    server = await spawnServer(databaseUrl, proofServer.entryPath);
 
     const queryProofDatabase = async (sql, values = []) => {
       if (embeddedProof) return embeddedProof.query(sql, values);
@@ -305,6 +501,37 @@ async function main() {
         await client.end();
       }
     };
+    const spoofedForwardingResponse = await fetch(`${BASE}/api/build-marker`, {
+      headers: { 'x-forwarded-for': '198.51.100.250' }
+    });
+    assert.equal(
+      spoofedForwardingResponse.status,
+      400,
+      'The assembled Sway server must reject forwarded client identity when no trusted proxy boundary is configured.'
+    );
+    assert.equal(
+      (await spoofedForwardingResponse.json()).code,
+      'untrusted_forwarding_headers'
+    );
+    const retentionDeadline = Date.now() + 5_000;
+    let retentionBacklogAfterWorker = retentionBacklogBeforeWorker;
+    while (retentionBacklogAfterWorker > 0 && Date.now() < retentionDeadline) {
+      const retentionState = await queryProofDatabase(
+        `SELECT count(*)::integer AS count
+         FROM moderation_events
+         WHERE entity_type = 'room_menu_item_report'
+           AND retention_expires_at <= clock_timestamp()`
+      );
+      retentionBacklogAfterWorker = Number(retentionState.rows[0].count);
+      if (retentionBacklogAfterWorker > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    assert.equal(
+      retentionBacklogAfterWorker,
+      0,
+      'A bounded retention run with backlog must immediately continue instead of waiting for the 15-minute interval.'
+    );
     const evidenceBeforeDeniedCalls = await queryProofDatabase(
       `SELECT
          (SELECT count(*)::int FROM active_blocks) AS blocks,
@@ -383,7 +610,7 @@ async function main() {
     assert.deepEqual(adminBlockBody, { success: true, moderation_action: 'block_added', changed: true });
 
     await stopServer(server);
-    server = await spawnServer(databaseUrl);
+    server = await spawnServer(databaseUrl, proofServer.entryPath);
 
     const adminBlockReplay = await fetch(`${BASE}/api/moderation/block`, {
       method: 'POST',
@@ -535,6 +762,7 @@ async function main() {
     console.log(`Moderation active_blocks block/revoke/reactivate PostgreSQL integration test passed (${embeddedProof?.kind ?? 'configured-disposable-postgres'}).`);
   } finally {
     await stopServer(server);
+    await removeProofServer(proofServer);
     if (embeddedProof) {
       await embeddedProof.close();
     } else {

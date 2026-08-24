@@ -7,6 +7,7 @@ type OperationRow = typeof liveRoomPaymentOperations.$inferSelect;
 type OperationType = OperationRow['operationType'];
 
 const LEASE_MS = 30_000;
+export const CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION = 1;
 
 function retryAt(attemptCount: number) {
   const seconds = Math.min(300, Math.max(2, 2 ** Math.min(attemptCount, 8)));
@@ -77,6 +78,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
           availableAt: new Date(),
           leaseOwner: null,
           leaseExpiresAt: null,
+          leaseExecutorGeneration: null,
           completedAt: null,
           lastError: 'reversal_reopened_for_provider_truth_reconciliation',
           updatedAt: new Date()
@@ -113,6 +115,11 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         .for('update', { skipLocked: true })
         .limit(operationId ? 1 : 25);
       for (const operation of candidates) {
+        const positiveOperation = operation.operationType === 'authorize' || operation.operationType === 'capture';
+        if (
+          positiveOperation
+          && operation.minimumExecutorGeneration > CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION
+        ) continue;
         // Serialize every operation for one payment through the payment row.
         // If this payment already has a live sibling lease, keep scanning so
         // one blocked payment cannot starve unrelated rooms or customers.
@@ -141,6 +148,9 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
             attemptCount: operation.attemptCount + 1,
             leaseOwner: leaseToken,
             leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+            leaseExecutorGeneration: positiveOperation
+              ? CURRENT_LIVE_ROOM_POSITIVE_EXECUTOR_GENERATION
+              : null,
             lastAttemptAt: now,
             lastError: null,
             updatedAt: now
@@ -166,6 +176,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         resultPayload: input.resultPayload,
         leaseOwner: null,
         leaseExpiresAt: null,
+        leaseExecutorGeneration: null,
         lastError: null,
         updatedAt: new Date()
       })
@@ -190,6 +201,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         resultPayload: input.resultPayload,
         leaseOwner: null,
         leaseExpiresAt: null,
+        leaseExecutorGeneration: null,
         lastError: null,
         completedAt: now,
         updatedAt: now
@@ -215,6 +227,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         resultPayload: input.resultPayload,
         leaseOwner: null,
         leaseExpiresAt: null,
+        leaseExecutorGeneration: null,
         lastError: null,
         completedAt: now,
         updatedAt: now
@@ -242,6 +255,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         availableAt: retryAt(operation.attemptCount),
         leaseOwner: null,
         leaseExpiresAt: null,
+        leaseExecutorGeneration: null,
         lastError: safeError(error),
         completedAt: shouldTerminate ? now : null,
         updatedAt: now
@@ -310,6 +324,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
             availableAt: now,
             leaseOwner: null,
             leaseExpiresAt: null,
+            leaseExecutorGeneration: null,
             completedAt: null,
             lastError: 'authorization_reopened_for_closeout_reconciliation',
             updatedAt: now
@@ -331,6 +346,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
           lastError: 'authorization_canceled_by_room_closeout',
           leaseOwner: null,
           leaseExpiresAt: null,
+          leaseExecutorGeneration: null,
           updatedAt: now
         })
         .where(eq(liveRoomPaymentOperations.id, operation.id));

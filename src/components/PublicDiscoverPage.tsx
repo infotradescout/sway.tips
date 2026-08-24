@@ -29,9 +29,25 @@ type PublicRoomDto = {
   } | null;
 };
 
+type PublicProfessionalDto = {
+  performerId: string;
+  displayName: string;
+  handle: string;
+  profilePath: string;
+  bio: string;
+  headline: string | null;
+  specialties: string[];
+  city: string | null;
+  avatarUrl: string | null;
+  primaryRole: string;
+  primaryRoleLabel: string;
+  updatedAt: string | null;
+};
+
 type PublicFeedResponse = {
   rooms?: PublicRoomDto[];
   events?: PublicEventDto[];
+  professionals?: PublicProfessionalDto[];
   error?: string;
 };
 
@@ -54,6 +70,7 @@ function roomStartedLabel(value: string | null) {
 export default function PublicDiscoverPage() {
   const [rooms, setRooms] = useState<PublicRoomDto[]>([]);
   const [events, setEvents] = useState<PublicEventDto[]>([]);
+  const [professionals, setProfessionals] = useState<PublicProfessionalDto[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState<string | null>(null);
   const [searchPhrase, setSearchPhrase] = useState('');
@@ -65,21 +82,22 @@ export default function PublicDiscoverPage() {
       const response = await fetch('/api/public/feed', { cache: 'no-store', signal });
       const data = await response.json().catch(() => null) as PublicFeedResponse | null;
       if (!response.ok || !data) {
-        throw new Error(data?.error || 'Unable to load live rooms and upcoming shows.');
+        throw new Error(data?.error || 'Unable to load professionals, live rooms, and upcoming events.');
       }
       setRooms(Array.isArray(data.rooms) ? data.rooms : []);
       setEvents(Array.isArray(data.events) ? data.events : []);
+      setProfessionals(Array.isArray(data.professionals) ? data.professionals : []);
       setStatus('ready');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Unable to load live rooms and upcoming shows.');
+      setMessage(error instanceof Error ? error.message : 'Unable to load professionals, live rooms, and upcoming events.');
     }
   };
 
   useEffect(() => {
     const controller = new AbortController();
-    document.title = 'Discover live rooms and shows on Sway';
+    document.title = 'Discover independent professionals, live rooms, and events on Sway';
     void loadFeed(controller.signal);
     sendDiscoveryEvent('discovery_landing', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
@@ -102,10 +120,21 @@ export default function PublicDiscoverPage() {
     ? orderedEvents.filter((event) => [event.title, event.location.city, event.location.name, event.performer?.displayName]
       .some((value) => value?.toLowerCase().includes(normalizedSearchPhrase)))
     : orderedEvents, [normalizedSearchPhrase, orderedEvents]);
+  const filteredProfessionals = useMemo(() => normalizedSearchPhrase
+    ? professionals.filter((professional) => [
+        professional.displayName,
+        professional.handle,
+        professional.primaryRoleLabel,
+        professional.headline,
+        professional.bio,
+        professional.city,
+        ...professional.specialties
+      ].some((value) => value?.toLowerCase().includes(normalizedSearchPhrase)))
+    : professionals, [normalizedSearchPhrase, professionals]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (!searchPhrase.trim() || filteredRooms.length || filteredEvents.length) return;
+    if (!searchPhrase.trim() || filteredProfessionals.length || filteredRooms.length || filteredEvents.length) return;
     sendDiscoveryEvent('internal_search_zero_result', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
       has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
@@ -113,7 +142,7 @@ export default function PublicDiscoverPage() {
     });
   };
 
-  const isEmpty = status === 'ready' && rooms.length === 0 && orderedEvents.length === 0;
+  const isEmpty = status === 'ready' && professionals.length === 0 && rooms.length === 0 && orderedEvents.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#05060a] px-4 py-5 text-slate-100 sm:py-8">
@@ -139,23 +168,23 @@ export default function PublicDiscoverPage() {
         <section className="mt-8 max-w-2xl">
           <p className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            What&apos;s happening
+            Find your people
           </p>
           <h1 className="mt-3 font-display text-3xl font-black tracking-tight text-white sm:text-5xl">
-            Live rooms and upcoming shows
+            Independent professionals, live rooms, and events
           </h1>
           <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">
-            Enter a performer&apos;s active Sway room or open a real upcoming event. This page only shows current
-            records returned by Sway—no sample performers or padded listings.
+            Find comedians, singers, songwriters, DJs, bartenders, hosts, creators, and other gig or service
+            professionals. Open a real public profile, active room, or upcoming event—never a padded sample listing.
           </p>
         </section>
 
         {status === 'ready' ? (
           <form onSubmit={submitSearch} className="mt-7 flex max-w-2xl gap-2" role="search">
-            <label className="sr-only" htmlFor="sway-discover-search">Search current rooms and events</label>
+            <label className="sr-only" htmlFor="sway-discover-search">Search professionals, rooms, and events</label>
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-500" aria-hidden="true" />
-              <input id="sway-discover-search" value={searchPhrase} onChange={(event) => setSearchPhrase(event.target.value)} maxLength={160} placeholder="Search current performers, places, and shows" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-10 pr-3 text-sm text-white outline-none focus:border-cyan-300/50" />
+              <input id="sway-discover-search" value={searchPhrase} onChange={(event) => setSearchPhrase(event.target.value)} maxLength={160} placeholder="Search names, skills, places, rooms, and events" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-10 pr-3 text-sm text-white outline-none focus:border-cyan-300/50" />
             </div>
             <button className="min-h-11 rounded-xl bg-cyan-400 px-4 text-sm font-black text-slate-950">Search</button>
           </form>
@@ -165,7 +194,7 @@ export default function PublicDiscoverPage() {
           <div className="mt-12 flex min-h-48 items-center justify-center rounded-3xl border border-white/10 bg-slate-950/60">
             <div className="text-center">
               <Loader2 className="mx-auto h-7 w-7 animate-spin text-fuchsia-200" aria-label="Loading discovery" />
-              <p className="mt-3 text-xs font-bold text-slate-500">Checking what is live and coming up</p>
+              <p className="mt-3 text-xs font-bold text-slate-500">Loading qualified public profiles and current activity</p>
             </div>
           </div>
         ) : null}
@@ -187,19 +216,89 @@ export default function PublicDiscoverPage() {
         {isEmpty ? (
           <div className="mt-10 rounded-3xl border border-dashed border-white/10 bg-slate-950/55 p-8 text-center">
             <CalendarDays className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
-            <h2 className="mt-4 text-lg font-black text-white">No live rooms or upcoming shows right now</h2>
+            <h2 className="mt-4 text-lg font-black text-white">No qualified public profiles, live rooms, or upcoming events right now</h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              Check back later or use a performer&apos;s direct room or event link.
+              Check back later or use a professional&apos;s direct profile, room, or event link.
             </p>
           </div>
         ) : null}
 
-        {status === 'ready' && Boolean(normalizedSearchPhrase) && filteredRooms.length === 0 && filteredEvents.length === 0 && !isEmpty ? (
+        {status === 'ready' && Boolean(normalizedSearchPhrase) && filteredProfessionals.length === 0 && filteredRooms.length === 0 && filteredEvents.length === 0 && !isEmpty ? (
           <div className="mt-10 rounded-3xl border border-dashed border-white/10 bg-slate-950/55 p-8 text-center">
             <Search className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
             <h2 className="mt-4 text-lg font-black text-white">No current matches</h2>
-            <p className="mt-2 text-sm text-slate-400">Try another performer, place, or show.</p>
+            <p className="mt-2 text-sm text-slate-400">Try another name, skill, place, room, or event.</p>
           </div>
+        ) : null}
+
+        {status === 'ready' && filteredProfessionals.length ? (
+          <section className="mt-12" aria-labelledby="professionals-heading">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Public professionals</p>
+                <h2 id="professionals-heading" className="mt-1 text-2xl font-black text-white">People and skills to discover</h2>
+              </div>
+              <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-xs font-black text-cyan-100">
+                {filteredProfessionals.length}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredProfessionals.map((professional) => (
+                <article key={professional.performerId} className="flex flex-col rounded-2xl border border-cyan-300/15 bg-slate-950/70 p-4 shadow-xl">
+                  <div className="flex items-start gap-3">
+                    <div className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-cyan-500/10 font-display text-sm font-black text-cyan-100">
+                      <span>{initials(professional.displayName)}</span>
+                      {professional.avatarUrl ? (
+                        <img
+                          src={professional.avatarUrl}
+                          alt={`${professional.displayName} profile`}
+                          loading="lazy"
+                          onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-base font-black text-white">{professional.displayName}</h3>
+                      <p className="mt-1 text-xs font-bold text-cyan-200">{professional.primaryRoleLabel}</p>
+                      <p className="mt-1 truncate text-xs text-slate-500">@{professional.handle}</p>
+                    </div>
+                  </div>
+                  {professional.headline ? <p className="mt-3 text-sm font-bold leading-5 text-slate-200">{professional.headline}</p> : null}
+                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-400">{professional.bio}</p>
+                  {professional.city ? (
+                    <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+                      <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+                      {professional.city}
+                    </p>
+                  ) : null}
+                  {professional.specialties.length ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {professional.specialties.slice(0, 4).map((specialty) => (
+                        <span key={specialty} className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-bold text-slate-300">
+                          {specialty}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <a
+                    href={professional.profilePath}
+                    onClick={() => sendDiscoveryEvent('discovery_primary_action', {
+                      shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
+                      has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
+                      entity_kind: 'performer', entity_key: professional.performerId, action_kind: 'other',
+                      visibility_eligibility: 'eligible'
+                    })}
+                    className="mt-auto inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
+                  >
+                    Open public profile
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </a>
+                </article>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         {status === 'ready' && filteredRooms.length ? (
@@ -242,7 +341,7 @@ export default function PublicDiscoverPage() {
                       ) : (
                         <h3 className="mt-1 truncate text-base font-black text-white">{room.performerName}</h3>
                       )}
-                      <p className="mt-1 text-xs text-slate-400">{room.talentRole || 'Performer'} · {room.requestCount} live {room.requestCount === 1 ? 'request' : 'requests'}</p>
+                      <p className="mt-1 text-xs text-slate-400">{room.talentRole || 'Professional'} · {room.requestCount} live {room.requestCount === 1 ? 'request' : 'requests'}</p>
                       {room.profile?.city ? (
                         <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
                           <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
@@ -295,9 +394,9 @@ export default function PublicDiscoverPage() {
 
         <footer className="mt-14 border-t border-white/10 py-8 text-center">
           <UserRound className="mx-auto h-5 w-5 text-slate-600" aria-hidden="true" />
-          <p className="mt-3 text-xs text-slate-500">Have a performer link? Open it directly to see their full page.</p>
+          <p className="mt-3 text-xs text-slate-500">Have a professional&apos;s link? Open it directly to see their full public page.</p>
           <a href="/account/signup?intent=performer" className="mt-3 inline-flex text-xs font-black text-fuchsia-200 transition hover:text-white">
-            Create your own Sway page
+            Create your professional Sway page
           </a>
         </footer>
       </div>

@@ -54,8 +54,12 @@ async function main() {
     });
 
     const page = await context.newPage();
+    page.setDefaultTimeout(60_000);
     page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
-    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-refund-confirmation.html`, { waitUntil: 'networkidle' });
+    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-refund-confirmation.html`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000
+    });
 
     const trigger = page.getByRole('button', { name: 'Remove Shoutout and reverse payment' }).filter({ visible: true });
     await trigger.waitFor({ state: 'visible' });

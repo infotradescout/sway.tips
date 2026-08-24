@@ -61,6 +61,14 @@ export type IdempotencyReplay =
   | { kind: 'misuse' }
   | { kind: 'expired' };
 
+type DurableActionExpectation = {
+  intentFingerprint?: string;
+  clientRequestId?: string;
+  gigId?: string;
+  actionType?: string;
+  patronDeviceIdHash?: string;
+};
+
 function hashResponseBody(body: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify(body ?? {}))
@@ -106,7 +114,10 @@ export function createIdempotencyStore(databaseUrl?: string) {
     return Boolean(row?.activatedAt);
   }
 
-  async function loadDurableActionRecord(idempotencyKey: string, intentFingerprint?: string): Promise<IdempotencyReplay> {
+  async function loadDurableActionRecord(
+    idempotencyKey: string,
+    expected?: DurableActionExpectation
+  ): Promise<IdempotencyReplay> {
     if (!db) return { kind: 'new' };
 
     const existing = await db
@@ -118,7 +129,9 @@ export function createIdempotencyStore(databaseUrl?: string) {
         pendingExpiresAt: clientPendingActions.expiresAt,
         pendingCreatedAt: clientPendingActions.createdAt,
         pendingClientRequestId: clientPendingActions.clientRequestId,
-        actionType: idempotencyKeys.actionType
+        gigId: idempotencyKeys.gigId,
+        actionType: idempotencyKeys.actionType,
+        patronDeviceIdHash: idempotencyKeys.patronDeviceIdHash
       })
       .from(idempotencyKeys)
       .leftJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, idempotencyKeys.idempotencyKey))
@@ -128,7 +141,15 @@ export function createIdempotencyStore(databaseUrl?: string) {
     if (!existing.length) return { kind: 'new' };
 
     const record = existing[0];
-    if (intentFingerprint && record.intentFingerprint !== intentFingerprint) return { kind: 'misuse' };
+    if (
+      (expected?.intentFingerprint && record.intentFingerprint !== expected.intentFingerprint)
+      || (expected?.clientRequestId && record.pendingClientRequestId !== expected.clientRequestId)
+      || (expected?.gigId && record.gigId !== expected.gigId)
+      || (expected?.actionType && record.actionType !== expected.actionType)
+      || (expected?.patronDeviceIdHash && record.patronDeviceIdHash !== expected.patronDeviceIdHash)
+    ) {
+      return { kind: 'misuse' };
+    }
     if (Date.now() > record.expiresAt.getTime()) return { kind: 'expired' };
     if (record.firstResponseStatus && record.firstResponseBody) {
       return { kind: 'replay', status: record.firstResponseStatus, body: record.firstResponseBody };
@@ -181,7 +202,13 @@ export function createIdempotencyStore(databaseUrl?: string) {
         }).onConflictDoNothing().returning({ id: idempotencyKeys.id });
 
         if (!inserted.length) {
-          const replay = await loadDurableActionRecord(input.idempotencyKey, input.intentFingerprint);
+          const replay = await loadDurableActionRecord(input.idempotencyKey, {
+            intentFingerprint: input.intentFingerprint,
+            clientRequestId: input.clientRequestId,
+            gigId: input.gigId,
+            actionType: input.actionType,
+            patronDeviceIdHash: input.patronDeviceIdHash
+          });
           return replay.kind === 'new' ? { kind: 'pending' } : replay;
         }
 
@@ -285,7 +312,9 @@ export function createIdempotencyStore(databaseUrl?: string) {
     }).onConflictDoNothing().returning({ id: idempotencyKeys.id });
 
     if (!inserted.length) {
-      const replay = await loadDurableActionRecord(input.idempotencyKey, input.intentFingerprint);
+      const replay = await loadDurableActionRecord(input.idempotencyKey, {
+        intentFingerprint: input.intentFingerprint
+      });
       if (replay.kind === 'new') return { kind: 'pending' };
       return replay;
     }
@@ -300,6 +329,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
       gigId: string;
       actionType: 'request' | 'tip' | 'boost';
       patronDeviceIdHash: string;
+      intentFingerprint?: string;
     };
   }): Promise<PendingActionOwnerResult> {
     if (!db) return { status: 'unavailable' };
@@ -313,7 +343,8 @@ export function createIdempotencyStore(databaseUrl?: string) {
           ownerLeaseExpiresAt: clientPendingActions.ownerLeaseExpiresAt,
           gigId: clientPendingActions.gigId,
           actionType: clientPendingActions.actionType,
-          patronDeviceIdHash: idempotencyKeys.patronDeviceIdHash
+          patronDeviceIdHash: idempotencyKeys.patronDeviceIdHash,
+          intentFingerprint: idempotencyKeys.intentFingerprint
         })
         .from(clientPendingActions)
         .innerJoin(idempotencyKeys, eq(clientPendingActions.idempotencyKey, idempotencyKeys.idempotencyKey))
@@ -330,6 +361,10 @@ export function createIdempotencyStore(databaseUrl?: string) {
           pending.gigId !== input.expected.gigId
           || pending.actionType !== input.expected.actionType
           || pending.patronDeviceIdHash !== input.expected.patronDeviceIdHash
+          || (
+            input.expected.intentFingerprint !== undefined
+            && pending.intentFingerprint !== input.expected.intentFingerprint
+          )
         )
       ) return { status: 'misuse' };
       if (pending.status === 'reconciled') return { status: 'reconciled' };
@@ -1077,9 +1112,7 @@ export function createIdempotencyStore(databaseUrl?: string) {
         actionType: clientPendingActions.actionType,
         expiresAt: clientPendingActions.expiresAt,
         createdAt: clientPendingActions.createdAt,
-        idempotencyExpiresAt: idempotencyKeys.expiresAt,
-        responseStatus: idempotencyKeys.firstResponseStatus,
-        responseBody: idempotencyKeys.firstResponseBody
+        idempotencyExpiresAt: idempotencyKeys.expiresAt
       })
       .from(clientPendingActions)
       .leftJoin(idempotencyKeys, eq(clientPendingActions.idempotencyKey, idempotencyKeys.idempotencyKey))
@@ -1092,8 +1125,8 @@ export function createIdempotencyStore(databaseUrl?: string) {
     if (!rows.length) return { status: 'missing' as const };
     const row = rows[0];
     if (row.idempotencyExpiresAt && Date.now() > row.idempotencyExpiresAt.getTime()) return { status: 'expired' as const };
-    if (row.responseStatus && row.responseBody) {
-      return { status: 'reconciled' as const, responseStatus: row.responseStatus, responseBody: row.responseBody };
+    if (row.pendingStatus === 'reconciled') {
+      return { status: 'reconciled' as const, gigId: row.gigId, actionType: row.actionType };
     }
     const effectiveDeadline = Math.min(
       row.expiresAt.getTime(),

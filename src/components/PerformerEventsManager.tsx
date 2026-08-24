@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 type TicketingMode = 'external' | 'native_ga';
+type AttendanceMode = 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket';
 
 type NativeTicketSummary = {
   capacity: number | null;
@@ -52,6 +53,7 @@ type ManagedEvent = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: TicketingMode;
+  attendanceMode: AttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   nativeTicket: NativeTicketSummary | null;
@@ -77,6 +79,7 @@ type EventFormState = {
   locationIsTba: boolean;
   coverImageUrl: string;
   ticketingMode: TicketingMode;
+  attendanceMode: AttendanceMode;
   externalTicketUrl: string;
   externalTicketLabel: string;
   nativeCapacity: string;
@@ -85,7 +88,7 @@ type EventFormState = {
   visibility: 'public' | 'unlisted';
 };
 
-const EXTERNAL_TICKET_LABELS = ['Get tickets', 'RSVP', 'View details'] as const;
+const EXTERNAL_TICKET_LABELS = ['Get tickets', 'View details'] as const;
 
 function clientRequestId() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
@@ -121,6 +124,7 @@ function emptyForm(): EventFormState {
     locationIsTba: false,
     coverImageUrl: '',
     ticketingMode: 'external',
+    attendanceMode: 'external_ticket',
     externalTicketUrl: '',
     externalTicketLabel: 'Get tickets',
     nativeCapacity: '',
@@ -158,6 +162,16 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
   const ticketingMode: TicketingMode = value.ticketingMode === 'native_ga' || nativeTicket
     ? 'native_ga'
     : 'external';
+  const attendanceMode: AttendanceMode = value.attendanceMode === 'walk_in'
+    || value.attendanceMode === 'external_rsvp'
+    || value.attendanceMode === 'external_ticket'
+    || value.attendanceMode === 'native_ticket'
+    ? value.attendanceMode
+    : ticketingMode === 'native_ga'
+      ? 'native_ticket'
+      : text(value.externalTicketLabel ?? nestedTicket.label) === 'RSVP'
+        ? 'external_rsvp'
+        : 'external_ticket';
   return {
     id: value.id,
     title: text(value.title),
@@ -172,6 +186,7 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
     locationIsTba: value.locationIsTba === true || nestedLocation.isTba === true,
     coverImageUrl: text(value.coverImageUrl) || null,
     ticketingMode,
+    attendanceMode,
     externalTicketUrl: text(value.externalTicketUrl ?? nestedTicket.url) || null,
     externalTicketLabel: text(value.externalTicketLabel ?? nestedTicket.label) || null,
     nativeTicket,
@@ -293,6 +308,7 @@ function editForm(event: ManagedEvent): EventFormState {
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl || '',
     ticketingMode: event.ticketingMode,
+    attendanceMode: event.attendanceMode,
     externalTicketUrl: event.externalTicketUrl || '',
     externalTicketLabel: event.externalTicketLabel || 'Get tickets',
     nativeCapacity: event.nativeTicket?.capacity === null || event.nativeTicket?.capacity === undefined
@@ -565,6 +581,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
           ? { expectedUpdatedAt: form.expectedUpdatedAt }
           : { clientRequestId: form.clientRequestId }),
         ...(!form.eventId ? { ticketingMode: form.ticketingMode } : {}),
+        attendanceMode: form.ticketingMode === 'native_ga' ? 'native_ticket' : form.attendanceMode,
         title: form.title,
         description: form.description,
         startsAt,
@@ -576,9 +593,13 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         city: form.city,
         locationIsTba: form.locationIsTba,
         coverImageUrl: form.coverImageUrl,
-        externalTicketUrl: form.ticketingMode === 'external' ? form.externalTicketUrl : '',
-        externalTicketLabel: form.ticketingMode === 'external' && form.externalTicketUrl.trim()
-          ? form.externalTicketLabel
+        externalTicketUrl: form.ticketingMode === 'external' && form.attendanceMode !== 'walk_in'
+          ? form.externalTicketUrl
+          : '',
+        externalTicketLabel: form.ticketingMode === 'external'
+          && form.attendanceMode !== 'walk_in'
+          && form.externalTicketUrl.trim()
+          ? form.attendanceMode === 'external_rsvp' ? 'RSVP' : form.externalTicketLabel
           : '',
         visibility: form.visibility
       };
@@ -686,7 +707,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setMessage('Add a clear cancellation reason before cancelling this event.');
       return;
     }
-    if (event.ticketingMode === 'external' && !cancelDraft.externalProviderConfirmed) {
+    if (event.ticketingMode === 'external' && event.externalTicketUrl && !cancelDraft.externalProviderConfirmed) {
       setMessage('Confirm that you will handle external-provider cancellation duties before continuing.');
       return;
     }
@@ -712,7 +733,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setMessage(
         event.ticketingMode === 'native_ga'
           ? 'Event cancelled. Eligible unused native tickets are queued for refund. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and processor confirmation may remain pending.'
-          : 'Sway listing cancelled. Its external ticket action is no longer public.'
+          : event.externalTicketUrl
+            ? 'Sway listing cancelled. Its external action is no longer public.'
+            : 'Walk-in event cancelled. Its Sway listing no longer shows an attendance action.'
       );
       await loadEvents();
     } catch (error) {
@@ -937,13 +960,14 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     onChange={() => setForm((current) => ({
                       ...current,
                       ticketingMode: 'external',
+                      attendanceMode: current.attendanceMode === 'native_ticket' ? 'external_ticket' : current.attendanceMode,
                       nativeTermsAccepted: false
                     }))}
                     className="mt-1 h-4 w-4 shrink-0"
                   />
                   <span>
-                    <strong className="block font-black">External ticket or RSVP</strong>
-                    Sway links customers to another provider.
+                    <strong className="block font-black">Walk-in or external attendance</strong>
+                    Choose walk-in, RSVP elsewhere, or tickets elsewhere.
                   </span>
                 </label>
                 <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
@@ -960,6 +984,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     onChange={() => setForm((current) => ({
                       ...current,
                       ticketingMode: 'native_ga',
+                      attendanceMode: 'native_ticket',
                       nativeTermsAccepted: false
                     }))}
                     className="mt-1 h-4 w-4 shrink-0"
@@ -985,37 +1010,65 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
 
             {form.ticketingMode === 'external' ? (
               <>
-                <label className="space-y-1.5 sm:col-span-2">
-                  <span className={fieldLabel()}>External ticket or RSVP URL — required to publish</span>
-                  <input
-                    type="url"
-                    inputMode="url"
-                    className={fieldClass()}
-                    value={form.externalTicketUrl}
-                    onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
-                    placeholder="https://secure-ticket-site.example/..."
-                  />
-                  <span className="block text-[11px] leading-5 text-slate-500">
-                    Sway provides an external handoff to this destination. Sway is not selling this ticket or verifying the provider.
-                  </span>
-                </label>
+                <fieldset className="space-y-2 sm:col-span-2">
+                  <legend className={fieldLabel()}>How people attend</legend>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {([
+                      ['walk_in', 'Walk-in', 'No Sway reservation or external link.'],
+                      ['external_rsvp', 'RSVP elsewhere', 'Sway opens your external RSVP page.'],
+                      ['external_ticket', 'Tickets elsewhere', 'Sway opens your external ticket page.']
+                    ] as const).map(([mode, label, description]) => (
+                      <label key={mode} className={`cursor-pointer rounded-xl border p-3 text-xs leading-5 ${form.attendanceMode === mode ? 'border-fuchsia-300/35 bg-fuchsia-500/10 text-white' : 'border-white/10 bg-slate-950 text-slate-400'}`}>
+                        <input type="radio" name="attendanceMode" value={mode} checked={form.attendanceMode === mode} onChange={() => setForm((current) => ({
+                          ...current,
+                          attendanceMode: mode,
+                          externalTicketUrl: mode === 'walk_in' ? '' : current.externalTicketUrl,
+                          externalTicketLabel: mode === 'external_rsvp' ? 'RSVP' : mode === 'external_ticket' && current.externalTicketLabel === 'RSVP' ? 'Get tickets' : current.externalTicketLabel
+                        }))} className="mr-2 h-4 w-4 align-middle" />
+                        <strong>{label}</strong>
+                        <span className="mt-1 block text-[11px] text-slate-400">{description}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
 
-                <label className="space-y-1.5">
-                  <span className={fieldLabel()}>Ticket button label</span>
-                  <select
-                    className={fieldClass()}
-                    value={form.externalTicketLabel}
-                    onChange={(event) => setForm((current) => ({
-                      ...current,
-                      externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
-                        ? event.target.value
-                        : 'Get tickets'
-                    }))}
-                    disabled={!form.externalTicketUrl.trim()}
-                  >
-                    {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
-                  </select>
-                </label>
+                {form.attendanceMode !== 'walk_in' ? (
+                  <label className="space-y-1.5 sm:col-span-2">
+                    <span className={fieldLabel()}>{form.attendanceMode === 'external_rsvp' ? 'External RSVP URL' : 'External ticket URL'} — required to publish</span>
+                    <input
+                      type="url"
+                      inputMode="url"
+                      className={fieldClass()}
+                      value={form.externalTicketUrl}
+                      onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
+                      placeholder="https://secure-provider.example/..."
+                    />
+                    <span className="block text-[11px] leading-5 text-slate-500">
+                      Sway only provides an external handoff. The external provider handles registration, checkout, charges, and its policies.
+                    </span>
+                  </label>
+                ) : (
+                  <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-100 sm:col-span-2">Walk-in is informational only. Sway does not create an RSVP, reservation, ticket, capacity count, or admission record.</p>
+                )}
+
+                {form.attendanceMode === 'external_ticket' ? (
+                  <label className="space-y-1.5">
+                    <span className={fieldLabel()}>Ticket button label</span>
+                    <select
+                      className={fieldClass()}
+                      value={form.externalTicketLabel === 'RSVP' ? 'Get tickets' : form.externalTicketLabel}
+                      onChange={(event) => setForm((current) => ({
+                        ...current,
+                        externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
+                          ? event.target.value
+                          : 'Get tickets'
+                      }))}
+                      disabled={!form.externalTicketUrl.trim()}
+                    >
+                      {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                    </select>
+                  </label>
+                ) : null}
               </>
             ) : (
               <>
@@ -1209,7 +1262,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               const cancellationClosed = cancellationClosedAt <= Date.now();
               const ticketingReady = event.ticketingMode === 'native_ga'
                 ? Boolean(event.nativeTicket)
-                : Boolean(event.externalTicketUrl);
+                : event.attendanceMode === 'walk_in' || Boolean(event.externalTicketUrl);
               const coverFailed = Boolean(
                 event.coverImageUrl && failedCoverImages.has(event.coverImageUrl)
               );
@@ -1242,7 +1295,13 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         </span>
                         <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{event.visibility}</span>
                         <span className="rounded-full border border-cyan-300/20 bg-cyan-500/[0.06] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-cyan-100">
-                          {event.ticketingMode === 'native_ga' ? 'Sway paid GA' : 'External tickets'}
+                          {event.ticketingMode === 'native_ga'
+                            ? 'Sway paid GA'
+                            : event.attendanceMode === 'walk_in'
+                              ? 'Walk-in'
+                              : event.attendanceMode === 'external_rsvp'
+                                ? 'External RSVP'
+                                : 'External tickets'}
                         </span>
                       </div>
                       <h5 className="mt-2 text-base font-black text-white">{event.title}</h5>
@@ -1326,7 +1385,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                               ? 'Publish event'
                               : event.ticketingMode === 'native_ga'
                                 ? 'Save native capacity, price, and seller terms before publishing'
-                                : 'Add an external ticket or RSVP URL before publishing'
+                                : event.attendanceMode === 'walk_in'
+                                  ? 'Publish walk-in event'
+                                  : 'Add the required external URL before publishing'
                         }
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 text-xs font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -1385,7 +1446,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     <p className="mt-2 text-[11px] leading-5 text-amber-200/80">
                       {event.ticketingMode === 'native_ga'
                         ? 'Save native capacity, face value, and seller terms before publishing.'
-                        : 'Add a public HTTPS ticket or RSVP link before publishing.'}
+                        : event.attendanceMode === 'walk_in'
+                          ? 'Walk-in events can publish without a reservation or ticket link.'
+                          : 'Add the required public HTTPS external link before publishing.'}
                     </p>
                   ) : null}
 
@@ -1408,9 +1471,11 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-3 text-xs leading-5 text-amber-100">
                         {event.ticketingMode === 'native_ga'
                           ? 'When you confirm, Sway stops native ticket sales and queues full refunds for eligible unused tickets. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and refunds may remain pending while the payment processor completes them.'
-                          : 'Cancelling here only changes the Sway listing. It does not cancel tickets, issue refunds, or notify buyers through the external provider.'}
+                          : event.externalTicketUrl
+                            ? 'Cancelling here only changes the Sway listing. It does not cancel external registrations or tickets, issue refunds, or notify customers through the external provider.'
+                            : 'Cancelling here removes the walk-in attendance action from the Sway listing. Sway has no reservation or ticket records for this event.'}
                       </div>
-                      {event.ticketingMode === 'external' ? (
+                      {event.ticketingMode === 'external' && event.externalTicketUrl ? (
                         <label className="mt-3 flex items-start gap-3 text-xs leading-5 text-slate-300">
                           <input
                             type="checkbox"
@@ -1443,6 +1508,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                             || !cancelDraft.reason.trim()
                             || (
                               event.ticketingMode === 'external'
+                              && Boolean(event.externalTicketUrl)
                               && !cancelDraft.externalProviderConfirmed
                             )
                           }

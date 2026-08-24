@@ -120,7 +120,11 @@ if (!surfaces.audience.includes('upNext: approvedQueue[0] ?? null')) {
 if (!surfaces.patron.includes('resolvePausedRequestToast(session.tipsEnabled)')) {
   failures.push('Paused-request guidance must respect whether tips are enabled.');
 }
-if (!server.includes('title: isStraightTip ? LIVE_ROOM_LANGUAGE.directTip : (title || LIVE_ROOM_LANGUAGE.request)')) {
+if (
+  !server.includes('const canonicalTitle = isStraightTip')
+  || !server.includes('? LIVE_ROOM_LANGUAGE.directTip')
+  || !server.includes('title: canonicalTitle')
+) {
   failures.push('Server request creation must persist the shared Direct Tip label.');
 }
 const fixtureTip = demoFixture?.surfaces?.requests?.find?.((request) => request?.targetType === 'straight_tip');

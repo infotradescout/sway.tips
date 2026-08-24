@@ -36,6 +36,7 @@ const requiredFiles = [
   'src/server/performer-login.ts',
   'src/components/PerformerPublicProfilePage.tsx',
   'src/components/PerformerPublicProfileEditor.tsx',
+  'src/components/PerformerProfessionalSetup.tsx',
   'src/components/PerformerAccountHome.tsx',
   'src/components/TalentDashboard.tsx',
   'src/components/TalentInviteAcceptCard.tsx',
@@ -63,6 +64,7 @@ const paymentService = read('src/server/payment-service.ts');
 const performerLogin = read('src/server/performer-login.ts');
 const publicPage = read('src/components/PerformerPublicProfilePage.tsx');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
+const professionalSetup = read('src/components/PerformerProfessionalSetup.tsx');
 const accountHome = read('src/components/PerformerAccountHome.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const inviteCard = read('src/components/TalentInviteAcceptCard.tsx');
@@ -375,10 +377,10 @@ for (const term of [
   "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
   "platformFeePayer === 'patron'",
   'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
-  'sway_platform_fee_cents: String(payment.platformFee)',
-  "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
-  "sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
+  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : admittedPayment.platformFee',
+  'sway_platform_fee_cents: String(admittedPayment.platformFee)',
+  "sway_platform_fee_payer: recordString(admittedPayload, 'platformFeePayer')",
+  "sway_fee_charged_to_patron_cents: String(recordNumber(admittedPayload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
 requireExcludes(
   paymentService,
@@ -475,17 +477,22 @@ requireIncludes(performerShareMetadata, 'share-card.png?v=1', 'Performer share m
 
 const publicFeedRoute = sliceBetween(server, "app.get('/api/public/feed'", "app.get('/api/public/performer/:handle'", 'public feed route');
 for (const term of [
-  'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['restricted', 'suspended'])",
-  "eq(performers.visibilityState, 'public')",
-  '.innerJoin(users, eq(users.id, performers.ownerUserId))',
-  "sql`nullif(trim(${performers.handle}), '') is not null`",
-  "sql`nullif(trim(${performers.bio}), '') is not null`",
-  "sql`nullif(trim(${performers.displayName}), '') is not null`",
-  'const selectedRooms = activeRooms',
-  '.filter((room) => detailsByGigId.has(room.gigId))',
-  'normalizePublicProfileUrl(detail.avatarUrl)'
+  'loadQualifiedPublicProfessionalDirectory()',
+  'const roomCandidates = activeRooms.slice',
+  'professionalsById.has(detail.performerId)',
+  'const selectedRooms = roomCandidates',
+  'normalizePublicProfileUrl(detail.avatarUrl)',
+  'professionals: directory.professionals'
 ]) requireIncludes(publicFeedRoute, term, 'Public feed route');
+for (const term of ['qualifiedProfileCount:', 'discoverIndexEligible:']) {
+  requireExcludes(publicFeedRoute, term, 'Public feed internal index-threshold containment');
+}
+for (const term of [
+  'evaluatePublicProfessionalDirectoryEligibility',
+  "ownerProModeStatus !== 'active'",
+  "reason: 'profile_incomplete'",
+  "reason: 'reserved_test_record'"
+]) requireIncludes(normalizers, term, 'Public feed shared qualification policy');
 
 const publicPerformerRoute = sliceBetween(server, "app.get('/api/public/performer/:handle'", 'app.get("/api/lyrics"', 'public performer route');
 for (const term of [
@@ -559,12 +566,12 @@ for (const term of [
   'Accept exact Brand Partner terms'
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
 for (const term of [
-  'What kind of performer are you?',
-  'PUBLIC_PERFORMER_PRIMARY_ROLES',
-  'primaryRole: form.primaryRole || null',
+  'Tell Sway what you do and what you want to use',
+  'PROFESSIONAL_IDENTITY_OPTIONS',
+  'primaryIdentity',
   'Stage name — optional',
   'Your @handle is the main public name'
-]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
+]) requireIncludes(term === 'Stage name — optional' || term === 'Your @handle is the main public name' ? editor : professionalSetup, term, 'Authenticated profile identity fields');
 
 for (const term of [
   'mergePublicProfileMetadata',
@@ -577,7 +584,8 @@ for (const term of [
   '.leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))',
   '.leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))',
   ': performerRow.preview_specialties ?? []',
-  "return res.status(422).json({ error: 'Choose your primary role.' })"
+  'professionalSetup.primaryIdentity',
+  'Choose and save your primary professional identity before editing the public page.'
 ]) requireIncludes(server, term, 'Profile identity API and console state');
 
 for (const term of [

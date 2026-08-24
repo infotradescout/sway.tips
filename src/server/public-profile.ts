@@ -1,22 +1,16 @@
+import {
+  PROFESSIONAL_IDENTITY_OPTIONS,
+  type ProfessionalIdentityKind
+} from '../talent-capability-catalog';
+
 export const PUBLIC_PROFILE_MAX_LINKS = 12;
 export const PUBLIC_PROFILE_MAX_FEATURED_MEDIA = 4;
 
 const SUPPRESSED_PUBLIC_PROFILE_DOMAINS = ['djthreeex.com'];
 
-export const PUBLIC_PERFORMER_PRIMARY_ROLES = [
-  { id: 'dj', label: 'DJ' },
-  { id: 'musician', label: 'Musician' },
-  { id: 'comedian', label: 'Comedian' },
-  { id: 'host', label: 'Host / MC' },
-  { id: 'creator', label: 'Creator' },
-  { id: 'dancer', label: 'Dancer' },
-  { id: 'magician', label: 'Magician' },
-  { id: 'speaker', label: 'Speaker' },
-  { id: 'producer', label: 'Producer' },
-  { id: 'other', label: 'Other' }
-] as const;
+export const PUBLIC_PERFORMER_PRIMARY_ROLES = PROFESSIONAL_IDENTITY_OPTIONS;
 
-export type PublicPerformerPrimaryRoleId = typeof PUBLIC_PERFORMER_PRIMARY_ROLES[number]['id'];
+export type PublicPerformerPrimaryRoleId = ProfessionalIdentityKind;
 
 const PUBLIC_PERFORMER_PRIMARY_ROLE_IDS = new Set(
   PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => role.id)
@@ -424,4 +418,75 @@ export function evaluatePublicPerformerVisibility(input: {
   if (input.visibilityState === 'public') return { kind: 'public', visibility: 'public' };
   if (input.visibilityState === 'unlisted') return { kind: 'unlisted', visibility: 'unlisted' };
   return { kind: 'not_resolvable' };
+}
+
+export type PublicProfessionalDirectoryEligibility =
+  | { eligible: true; primaryRole: PublicPerformerPrimaryRoleId }
+  | {
+      eligible: false;
+      reason:
+        | 'not_public'
+        | 'owner_unverified'
+        | 'owner_ineligible'
+        | 'pro_mode_inactive'
+        | 'profile_publication_not_granted'
+        | 'profile_incomplete'
+        | 'primary_identity_missing'
+        | 'reserved_test_record';
+    };
+
+export function isReservedTestAccountEmail(value: unknown) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  const at = normalized.lastIndexOf('@');
+  if (at < 1 || at === normalized.length - 1) return false;
+  const domain = normalized.slice(at + 1);
+  return domain === 'example.test' || domain.endsWith('.test');
+}
+
+export function evaluatePublicProfessionalDirectoryEligibility(input: {
+  claimed: boolean;
+  hasOwner: boolean;
+  isActive: boolean;
+  onboardingStatus: string | null | undefined;
+  visibilityState: unknown;
+  handle: string | null | undefined;
+  displayName: string | null | undefined;
+  bio: string | null | undefined;
+  hasPublicProfile: boolean;
+  ownerEmail: string | null | undefined;
+  ownerEmailVerifiedAt: Date | string | null | undefined;
+  ownerRole: string | null | undefined;
+  ownerProModeStatus: string | null | undefined;
+  profilePublicationGrantCurrent: boolean;
+  primaryRole: unknown;
+  conflicted?: boolean;
+  moderationBlocked?: boolean;
+}): PublicProfessionalDirectoryEligibility {
+  const visibility = evaluatePublicPerformerVisibility(input);
+  if (visibility.kind !== 'public') return { eligible: false, reason: 'not_public' };
+
+  const ownerVerified = input.ownerEmailVerifiedAt instanceof Date
+    ? !Number.isNaN(input.ownerEmailVerifiedAt.getTime())
+    : typeof input.ownerEmailVerifiedAt === 'string' && input.ownerEmailVerifiedAt.trim().length > 0;
+  if (!ownerVerified) return { eligible: false, reason: 'owner_unverified' };
+
+  const ownerRole = typeof input.ownerRole === 'string' ? input.ownerRole.trim().toLowerCase() : '';
+  if (ownerRole === 'admin' || ownerRole === 'support') {
+    return { eligible: false, reason: 'owner_ineligible' };
+  }
+  if (input.ownerProModeStatus !== 'active') return { eligible: false, reason: 'pro_mode_inactive' };
+  if (!input.profilePublicationGrantCurrent) {
+    return { eligible: false, reason: 'profile_publication_not_granted' };
+  }
+  if (!input.hasPublicProfile || !normalizePublicProfileText(input.bio, 4000)) {
+    return { eligible: false, reason: 'profile_incomplete' };
+  }
+
+  const primaryRole = normalizePublicProfilePrimaryRole(input.primaryRole);
+  if (!primaryRole) return { eligible: false, reason: 'primary_identity_missing' };
+  if (isReservedTestAccountEmail(input.ownerEmail)) {
+    return { eligible: false, reason: 'reserved_test_record' };
+  }
+  return { eligible: true, primaryRole };
 }

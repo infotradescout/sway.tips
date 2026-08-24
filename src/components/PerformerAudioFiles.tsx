@@ -1,20 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, Loader2, Upload } from 'lucide-react';
-import CollaboratorInbox, { type FileConnection } from './CollaboratorInbox';
-
-async function sha256Hex(file: File) {
-  const buffer = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function chunkFile(file: File, partSize: number) {
-  const parts: Blob[] = [];
-  for (let offset = 0; offset < file.size; offset += partSize) {
-    parts.push(file.slice(offset, Math.min(offset + partSize, file.size)));
-  }
-  return parts;
-}
+import {
+  AUDIO_UPLOAD_PART_SIZE_BYTES,
+  chunkFileForUpload,
+  sha256FileHex
+} from '../audio-upload-client';
+import CollaboratorInbox, {
+  type CollaborationCapabilities,
+  type FileConnection
+} from './CollaboratorInbox';
 
 function inferAssetKind(file: File) {
   if (file.type.startsWith('image/')) return 'artwork';
@@ -47,6 +41,28 @@ type StorageUsage = {
   releaseCountLimit: null;
 };
 
+type CandidateGrantResponse = {
+  grant?: {
+    id?: string;
+    maxCandidateBytes?: number;
+  };
+  reused?: boolean;
+  error?: string;
+};
+
+const MIN_CANDIDATE_REQUEST_BYTES = 16 * 1024 * 1024;
+const MAX_CANDIDATE_REQUEST_BYTES = 512 * 1024 * 1024;
+
+function candidateRequestByteLimit(sourceByteSize: number) {
+  if (!Number.isSafeInteger(sourceByteSize) || sourceByteSize <= 0) {
+    return MIN_CANDIDATE_REQUEST_BYTES;
+  }
+  if (sourceByteSize >= MAX_CANDIDATE_REQUEST_BYTES / 2) {
+    return MAX_CANDIDATE_REQUEST_BYTES;
+  }
+  return Math.max(MIN_CANDIDATE_REQUEST_BYTES, sourceByteSize * 2);
+}
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
@@ -68,25 +84,36 @@ export default function PerformerAudioFiles() {
   const [connections, setConnections] = useState<FileConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [collaborationRefreshKey, setCollaborationRefreshKey] = useState(0);
+  const [candidateUploadsEnabled, setCandidateUploadsEnabled] = useState(false);
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
+  const assetRefreshSequence = useRef(0);
+  const selectedProjectIdRef = useRef('');
 
   const refreshProjects = async () => {
     const response = await fetch('/api/talent/audio/projects', { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error || 'Could not load projects.');
     const nextProjects: Project[] = data.projects || [];
-    const nextSelectedProjectId = nextProjects.some((project) => project.id === selectedProjectId)
-      ? selectedProjectId
+    const currentProjectId = selectedProjectIdRef.current;
+    const nextSelectedProjectId = nextProjects.some((project) => project.id === currentProjectId)
+      ? currentProjectId
       : nextProjects[0]?.id || '';
     setProjects(nextProjects);
+    selectedProjectIdRef.current = nextSelectedProjectId;
     setSelectedProjectId(nextSelectedProjectId);
     return nextSelectedProjectId;
   };
 
   const refreshAssets = async (projectId: string) => {
+    const refreshId = ++assetRefreshSequence.current;
     const response = await fetch(`/api/talent/audio/projects/${projectId}/assets`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || 'Could not load assets.');
+    if (!response.ok) {
+      if (refreshId !== assetRefreshSequence.current) return;
+      throw new Error(data?.error || 'Could not load assets.');
+    }
+    if (refreshId !== assetRefreshSequence.current
+      || projectId !== selectedProjectIdRef.current) return;
     setAssets(data.assets || []);
     setVersions(data.versions || []);
   };
@@ -100,8 +127,12 @@ export default function PerformerAudioFiles() {
     return nextUsage;
   };
 
-  const handleConnectionsLoaded = useCallback((nextConnections: FileConnection[]) => {
+  const handleConnectionsLoaded = useCallback((
+    nextConnections: FileConnection[],
+    capabilities: CollaborationCapabilities
+  ) => {
     setConnections(nextConnections);
+    setCandidateUploadsEnabled(capabilities.candidateUploads);
     setSelectedConnectionId((current) => nextConnections.some((connection) => connection.connectionId === current)
       ? current
       : nextConnections[0]?.connectionId || '');
@@ -114,8 +145,12 @@ export default function PerformerAudioFiles() {
     try {
       const projectId = await refreshProjects();
       await refreshStorageUsage();
-      if (projectId) await refreshAssets(projectId);
-      else setVersions([]);
+      if (projectId && selectedProjectIdRef.current === projectId) await refreshAssets(projectId);
+      else {
+        assetRefreshSequence.current += 1;
+        setAssets([]);
+        setVersions([]);
+      }
       setStatus(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Audio files unavailable.');
@@ -140,7 +175,11 @@ export default function PerformerAudioFiles() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not create project.');
       await refreshProjects();
+      selectedProjectIdRef.current = data.project.id;
       setSelectedProjectId(data.project.id);
+      assetRefreshSequence.current += 1;
+      setAssets([]);
+      setVersions([]);
       setStatus('Project created.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not create project.');
@@ -163,7 +202,7 @@ export default function PerformerAudioFiles() {
     setStatus(`Hashing ${file.name}…`);
     setShareToken(null);
     try {
-      let projectId = selectedProjectId;
+      let projectId = selectedProjectIdRef.current;
       if (!projectId) {
         setStatus('Preparing your Catalog…');
         const projectResponse = await fetch('/api/talent/audio/projects', {
@@ -175,10 +214,11 @@ export default function PerformerAudioFiles() {
         if (!projectResponse.ok) throw new Error(projectData?.error || 'Could not prepare your Catalog.');
         projectId = projectData.project.id;
         await refreshProjects();
+        selectedProjectIdRef.current = projectId;
         setSelectedProjectId(projectId);
       }
-      const expectedSha256 = await sha256Hex(file);
-      const partSize = 5 * 1024 * 1024;
+      const expectedSha256 = await sha256FileHex(file);
+      const partSize = AUDIO_UPLOAD_PART_SIZE_BYTES;
       const start = await fetch(`/api/talent/audio/projects/${projectId}/uploads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -196,7 +236,7 @@ export default function PerformerAudioFiles() {
       const startData = await start.json().catch(() => ({}));
       if (!start.ok) throw new Error(startData?.error || 'Could not start upload.');
 
-      const parts = chunkFile(file, partSize);
+      const parts = chunkFileForUpload(file, partSize);
       for (let index = 0; index < parts.length; index += 1) {
         setStatus(`Uploading part ${index + 1}/${parts.length}…`);
         const partResponse = await fetch(
@@ -228,7 +268,8 @@ export default function PerformerAudioFiles() {
   };
 
   const setRequestable = async (assetId: string, requestable: boolean) => {
-    if (!selectedProjectId) return;
+    const projectId = selectedProjectIdRef.current;
+    if (!projectId) return;
     setBusy(true);
     setStatus(null);
     try {
@@ -239,7 +280,7 @@ export default function PerformerAudioFiles() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not update request availability.');
-      await refreshAssets(selectedProjectId);
+      await refreshAssets(projectId);
       setStatus(requestable ? 'This track is now available in Library.' : 'This track is private to Catalog.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not update request availability.');
@@ -291,6 +332,45 @@ export default function PerformerAudioFiles() {
       setStatus(data.reused ? 'This version is already shared with that connection.' : 'Selected version shared for download, review, and approval.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not share selected file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestCandidateRevision = async (version: Version) => {
+    if (!selectedConnectionId) {
+      setStatus('Pair with another account before requesting a private candidate.');
+      return;
+    }
+    if (!candidateUploadsEnabled) return;
+    const maxCandidateBytes = candidateRequestByteLimit(version.byteSize);
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch(
+        `/api/talent/audio/pairing/connections/${selectedConnectionId}/candidate-revision-grants`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            versionId: version.id,
+            maxCandidateBytes,
+            expiresInHours: 168,
+            idempotencyKey: `candidate-grant:${version.id}:${crypto.randomUUID()}`
+          })
+        }
+      );
+      const data = await response.json().catch(() => ({})) as CandidateGrantResponse;
+      if (!response.ok) throw new Error(data?.error || 'Could not request a private candidate.');
+      if (data.grant?.maxCandidateBytes !== maxCandidateBytes) {
+        throw new Error('The server did not confirm the creator-approved candidate request ceiling.');
+      }
+      setCollaborationRefreshKey((current) => current + 1);
+      setStatus(data.reused
+        ? `That connection already has this ${formatBytes(maxCandidateBytes)} private-candidate request for the source.`
+        : `Private-candidate upload requested for seven days with a ${formatBytes(maxCandidateBytes)} ceiling. It cannot replace the source or enter a release.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not request a private candidate.');
     } finally {
       setBusy(false);
     }
@@ -365,12 +445,38 @@ export default function PerformerAudioFiles() {
       <details className="mt-3 rounded-xl border border-white/10 bg-slate-900 p-3">
         <summary className="cursor-pointer list-none text-xs font-bold text-slate-400">Organize projects</summary>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <select value={selectedProjectId} onChange={async (event) => { setSelectedProjectId(event.target.value); if (event.target.value) await refreshAssets(event.target.value); }} className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white">
-            <option value="">My Catalog</option>
-            {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-          </select>
+          <div>
+            <label htmlFor="sway-audio-project" className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Catalog project
+            </label>
+            <select
+              id="sway-audio-project"
+              value={selectedProjectId}
+              onChange={async (event) => {
+                const projectId = event.target.value;
+                selectedProjectIdRef.current = projectId;
+                setSelectedProjectId(projectId);
+                assetRefreshSequence.current += 1;
+                setAssets([]);
+                setVersions([]);
+                if (projectId) {
+                  setStatus(null);
+                  try {
+                    await refreshAssets(projectId);
+                  } catch (error) {
+                    setStatus(error instanceof Error ? error.message : 'Could not load assets.');
+                  }
+                }
+              }}
+              className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white"
+            >
+              <option value="">My Catalog</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </select>
+          </div>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white" placeholder="Project title" />
+            <label htmlFor="sway-new-project-title" className="sr-only">New project title</label>
+            <input id="sway-new-project-title" value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white" placeholder="Project title" />
             <button type="button" onClick={createProject} disabled={busy} className="rounded-xl border border-fuchsia-500/30 px-3 text-xs font-black text-fuchsia-100 disabled:opacity-50">Create</button>
           </div>
         </div>
@@ -382,6 +488,7 @@ export default function PerformerAudioFiles() {
         ) : versions.map((version) => {
           const asset = assets.find((candidate) => candidate.id === version.assetId);
           const requestable = asset?.metadata?.requestable === true;
+          const maxCandidateBytes = candidateRequestByteLimit(version.byteSize);
           return <div key={version.id} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-3">
             <p className="truncate text-sm font-bold text-white">{version.originalFilename} · v{version.versionNumber}</p>
             {version.mimeType.startsWith('audio/') ? <audio controls preload="metadata" src={`/api/talent/audio/versions/${version.id}/content`} className="mt-3 w-full" aria-label={`Play ${version.originalFilename}`} /> : null}
@@ -389,7 +496,7 @@ export default function PerformerAudioFiles() {
               <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${requestable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 text-slate-400'}`}>{requestable ? 'In Library' : 'Private'}</span>
               {version.mimeType.startsWith('audio/') ? <button type="button" onClick={() => setRequestable(version.assetId, !requestable)} disabled={busy} className="rounded-lg border border-fuchsia-500/30 px-3 py-2 text-xs font-black text-fuchsia-100 disabled:opacity-50">{requestable ? 'Remove from requests' : 'Allow requests'}</button> : null}
             </div>
-            <details className="mt-2"><summary className="cursor-pointer text-[10px] text-slate-500">File details and sharing</summary><p className="mt-2 font-mono text-[10px] text-slate-500">{version.sha256}</p>
+            <details className="mt-2"><summary className="cursor-pointer text-[10px] text-slate-500">File details and sharing</summary><p className="mt-2 break-all font-mono text-[10px] text-slate-500">{version.sha256}</p>
             <button
               type="button"
               onClick={() => createShare(version.id)}
@@ -406,6 +513,21 @@ export default function PerformerAudioFiles() {
             >
               Share with connection
             </button>
+            {candidateUploadsEnabled && version.mimeType.startsWith('audio/') ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => requestCandidateRevision(version)}
+                  disabled={busy || !selectedConnectionId}
+                  className="ml-2 mt-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-[11px] font-black text-violet-100 disabled:opacity-50"
+                >
+                  Request private candidate
+                </button>
+                <p className="mt-2 text-[10px] leading-relaxed text-violet-200">
+                  Request ceiling: {formatBytes(maxCandidateBytes)} (twice the source size with a 16 MiB minimum and 512 MiB maximum). Allows one private candidate for your review; it does not replace this file, become requestable, or enter a release.
+                </p>
+              </>
+            ) : null}
             </details>
           </div>;
         })}
@@ -435,6 +557,7 @@ export default function PerformerAudioFiles() {
         embedded
         refreshKey={collaborationRefreshKey}
         onConnectionsLoaded={handleConnectionsLoaded}
+        onCollaborationStateChange={setCandidateUploadsEnabled}
       />
 
       {shareToken ? (
@@ -442,7 +565,9 @@ export default function PerformerAudioFiles() {
           {shareToken}
         </p>
       ) : null}
-      {status ? <p className="mt-3 text-xs text-slate-300">{status}</p> : null}
+      <p role="status" aria-live="polite" className="mt-3 min-h-4 text-xs text-slate-300">
+        {status || ''}
+      </p>
     </section>
   );
 }

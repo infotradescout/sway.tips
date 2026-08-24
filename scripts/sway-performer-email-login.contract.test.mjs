@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
@@ -7,21 +8,24 @@ import { createRequire } from 'node:module';
 const root = process.cwd();
 
 async function loadBundle(entryPoint, outfileName) {
-  const tempDir = join(root, '.tmp');
-  mkdirSync(tempDir, { recursive: true });
+  const tempDir = mkdtempSync(join(tmpdir(), 'sway-email-login-contract-'));
   const outfile = join(tempDir, outfileName);
 
-  await build({
-    entryPoints: [entryPoint],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    outfile,
-    sourcemap: false
-  });
+  try {
+    await build({
+      entryPoints: [entryPoint],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      outfile,
+      sourcemap: false
+    });
 
-  const require = createRequire(import.meta.url);
-  return require(outfile);
+    const require = createRequire(import.meta.url);
+    return require(outfile);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function createInsertSpyDb() {

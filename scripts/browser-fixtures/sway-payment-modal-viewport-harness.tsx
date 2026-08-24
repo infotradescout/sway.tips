@@ -14,6 +14,15 @@ const session: GigSession = {
   closedAt: null,
   talentName: 'Viewport Test Performer',
   talentRole: 'DJ',
+  roomType: 'music',
+  requestMenu: [{
+    id: 'fixture-song-request',
+    title: 'Fixture song request',
+    description: 'A safe host-defined request used only by the viewport test.',
+    targetType: 'music'
+  }],
+  linkedEventId: null,
+  linkedEvent: null,
   feeType: 'patron',
   minimumTip: 5,
   endGigTimerStartedAt: null,
@@ -38,20 +47,24 @@ const session: GigSession = {
 
 installViewportEnvironment();
 
+const fixtureParams = new URLSearchParams(window.location.search);
+const stripeIframeFixture = fixtureParams.has('stripe-frame');
+const stripeAuthorizationFixture = fixtureParams.has('stripe-authorization');
+const restoredReconciliationFixture = fixtureParams.has('restored-reconciliation');
+const pendingActionKey = `sway.pendingAction:${gigId}`;
+
+if (restoredReconciliationFixture && !localStorage.getItem(pendingActionKey)) {
+  localStorage.setItem(pendingActionKey, JSON.stringify({
+    type: 'request',
+    gigId,
+    clientRequestId: 'restored-client-request',
+    idempotencyKey: 'sway:restored-client-request',
+    expires_at: new Date(Date.now() + 60_000).toISOString()
+  }));
+}
+
 function PaymentModalViewportHarness() {
   const [submissionCount, setSubmissionCount] = useState(0);
-  const stripeIframeFixture = new URLSearchParams(window.location.search).has('stripe-frame');
-  const stripeAuthorizationFixture = new URLSearchParams(window.location.search).has('stripe-authorization');
-  const restoredReconciliationFixture = new URLSearchParams(window.location.search).has('restored-reconciliation');
-
-  if (restoredReconciliationFixture && !localStorage.getItem('sway.pendingAction')) {
-    localStorage.setItem('sway.pendingAction', JSON.stringify({
-      type: 'request',
-      clientRequestId: 'restored-client-request',
-      idempotencyKey: 'sway:restored-client-request',
-      expires_at: new Date(Date.now() + 60_000).toISOString()
-    }));
-  }
 
   return (
     <>
@@ -97,7 +110,9 @@ function PaymentModalViewportHarness() {
         }}
         onBoostRequest={async () => ({ success: true })}
         onReconcilePendingAction={async () => (
-          restoredReconciliationFixture ? { status: 'reconciled' } : { status: 'missing' }
+          restoredReconciliationFixture
+            ? { status: 'reconciled', recovery: 'resubmit_original_action' }
+            : { status: 'missing' }
         )}
         onReportContent={async () => ({ success: true })}
         onBlockFoundation={async () => ({ success: true })}

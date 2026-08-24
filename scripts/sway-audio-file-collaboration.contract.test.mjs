@@ -236,7 +236,7 @@ for (const term of [
 }
 for (const term of [
   'Shared with me',
-  'Shared by me',
+  'Shares I created or manage',
   'Download source file',
   'Request changes',
   'Approve',

@@ -133,6 +133,8 @@ This economic lock does **not** authorize Sway.DIO launch, streaming/royalty run
 
 ## Related docs
 
+- Talent and capability model: `docs/SWAY_TALENT_CAPABILITY_MODEL.md`
+- Public copy truth matrix: `docs/SWAY_PUBLIC_COPY_TRUTH_MATRIX.md`
 - Live Rooms pilot: `docs/SWAY_LIVE_PILOT_READINESS_CHECKLIST.md`
 - Test-mode milestone record: `docs/process/TEST_MODE_PILOT_MILESTONE_HOLD.md`
 - Gap ledger (capability detail): `docs/SWAY_COMPLETE_PRODUCT_GAP.md`
