@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "index_version": "0.1.0",
-  "generated_at": "2026-08-24T20:54:23Z",
+  "generated_at": "2026-08-24T22:06:26Z",
   "source": {
     "kind": "git",
-    "revision": "475a1d8436c4a5a651c5ef8080ac7904453d7f97",
+    "revision": "d8cf4605de9c7e3571b9489003294b5ae58a91bd",
     "dirty": true,
-    "inventory_sha256": "5349cf4e8bde341ead035ac1a22da2c1657b73d15b5e777cfca420d8d88886dc"
+    "inventory_sha256": "42e8679312c14ccdc392e59386236db182efe1c0ed5135f1e3e95f1c8f0c0c6c"
   },
   "inventory": {
     "directories": [
@@ -24,7 +24,7 @@
       },
       {
         "path": "scripts",
-        "source_file_count": 207
+        "source_file_count": 208
       },
       {
         "path": "scripts/browser-fixtures",
@@ -297,14 +297,20 @@
       {
         "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
         "language": "mjs",
-        "sha256": "c8fac44dfcd9409ad5b0bae7c9757513f3f359c273f9781d70b18c532ad2d30c",
-        "bytes": 16674
+        "sha256": "a08ab8b1911d06fd644f6505bc132bd1c25e278d07dccef2fded139e1b0d6a92",
+        "bytes": 18551
       },
       {
         "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
         "language": "mjs",
         "sha256": "100b7434e81d8792549d44d470bec40ea3c9c6f35c4d3564a2aaf53624a9caec",
         "bytes": 50768
+      },
+      {
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "language": "mjs",
+        "sha256": "b39fe22c389255e4a873e163b3ac171f8eff1a9af355c493a98916fa8f26f435",
+        "bytes": 27498
       },
       {
         "path": "scripts/sway-audio-publishing-foundation.contract.test.mjs",
@@ -4173,7 +4179,7 @@
         "name": "requireTerms",
         "kind": "function",
         "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
-        "line": 25,
+        "line": 26,
         "exported": false
       },
       {
@@ -4244,6 +4250,174 @@
         "kind": "function",
         "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
         "line": 222,
+        "exported": false
+      },
+      {
+        "name": "sha256",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 36,
+        "exported": false
+      },
+      {
+        "name": "wavFixture",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 40,
+        "exported": false
+      },
+      {
+        "name": "streamToBuffer",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 60,
+        "exported": false
+      },
+      {
+        "name": "operationIdentity",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 68,
+        "exported": false
+      },
+      {
+        "name": "parseWorkerInput",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 77,
+        "exported": false
+      },
+      {
+        "name": "sendWorkerMessage",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 87,
+        "exported": false
+      },
+      {
+        "name": "runWorker",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 94,
+        "exported": false
+      },
+      {
+        "name": "pauseAfterProviderSideEffect",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 103,
+        "exported": false
+      },
+      {
+        "name": "startWorker",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 181,
+        "exported": false
+      },
+      {
+        "name": "appendOutput",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 192,
+        "exported": false
+      },
+      {
+        "name": "waitForWorkerMessage",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 199,
+        "exported": false
+      },
+      {
+        "name": "onMessage",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 206,
+        "exported": false
+      },
+      {
+        "name": "onExit",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 218,
+        "exported": false
+      },
+      {
+        "name": "onError",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 224,
+        "exported": false
+      },
+      {
+        "name": "cleanup",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 228,
+        "exported": false
+      },
+      {
+        "name": "waitForWorkerExit",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 239,
+        "exported": false
+      },
+      {
+        "name": "forceStopWorker",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 251,
+        "exported": false
+      },
+      {
+        "name": "killAtProviderSideEffect",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 257,
+        "exported": false
+      },
+      {
+        "name": "runRecoveryWorker",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 271,
+        "exported": false
+      },
+      {
+        "name": "waitForExpiredLease",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 283,
+        "exported": false
+      },
+      {
+        "name": "assertKilledOperation",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 297,
+        "exported": false
+      },
+      {
+        "name": "assertRecoveredOperation",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 314,
+        "exported": false
+      },
+      {
+        "name": "removeExactTempRoot",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 339,
+        "exported": false
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "path": "scripts/sway-audio-provider-process-kill.integration.test.mjs",
+        "line": 348,
         "exported": false
       },
       {
@@ -23525,10 +23699,10 @@
   ],
   "summary": {
     "directories": 15,
-    "source_files": 371,
-    "symbols": 2691,
+    "source_files": 372,
+    "symbols": 2715,
     "components": 90,
-    "functions_and_hooks": 2112,
+    "functions_and_hooks": 2136,
     "raw_ui_elements": 432,
     "errors": 0,
     "warnings": 5

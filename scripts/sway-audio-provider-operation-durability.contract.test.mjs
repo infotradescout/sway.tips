@@ -17,6 +17,7 @@ const collaboration = read('src/server/audio-file-collaboration-service.ts');
 const pairing = read('src/server/audio-file-pairing-service.ts');
 const integration = read('scripts/sway-audio-provider-operation-durability.integration.test.mjs');
 const storageIntegration = read('scripts/sway-audio-storage-policy.integration.test.mjs');
+const processKillIntegration = read('scripts/sway-audio-provider-process-kill.integration.test.mjs');
 const candidateIntegration = read('scripts/sway-audio-candidate-revisions.integration.test.mjs');
 const httpIntegration = read('scripts/sway-collaborator-revision-http.integration.test.mjs');
 const server = read('server.ts');
@@ -232,6 +233,20 @@ requireTerms(storageIntegration, 'Expiry and owner replay barrier proof', [
   'Rejected owner replay must not dispatch provider I/O.',
   "attempt.outcome !== 'active'"
 ]);
+requireTerms(processKillIntegration, 'Operating-system process-kill proof', [
+  "child.kill('SIGKILL')",
+  "await killAtProviderSideEffect(initiationInput, 'initiate')",
+  "await killAtProviderSideEffect(partInput, 'part')",
+  "await killAtProviderSideEffect(completionInput, 'complete')",
+  "assert.equal(attempts[0].outcome, 'stale')",
+  "assert.equal(attempts[1].mode, 'reconcile')",
+  "assert.equal(attempts[1].outcome, 'succeeded')",
+  'Restart recovery must create exactly one upload session.',
+  'Restart recovery must persist exactly one part receipt.',
+  'Restart recovery must seal exactly one private candidate.',
+  'Restart recovery must not duplicate provider initiation.',
+  'Wave 5B process-kill proof refuses generic DATABASE_URL.'
+]);
 requireTerms(candidateIntegration, 'Authority-loss process barrier proof', [
   'CreateMultipart succeeds but grant authority ends before the session',
   'Grant revocation installs a durable cleanup operation and receipt while a',
@@ -298,6 +313,24 @@ assert.equal(
 assert.ok(
   packageJson.scripts?.['test:wave5b:real-postgres']?.includes('test:integration:audio-storage-policy:real-postgres'),
   'The strict Wave 5B aggregate must include the standalone-PostgreSQL race proof.'
+);
+assert.equal(
+  packageJson.scripts?.['test:integration:audio-provider-process-kill'],
+  'node --import tsx scripts/sway-audio-provider-process-kill.integration.test.mjs',
+  'Wave 5B operating-system process-kill proof must have one portable named command.'
+);
+assert.equal(
+  packageJson.scripts?.['test:integration:audio-provider-process-kill:real-postgres'],
+  'node --import tsx scripts/sway-audio-provider-process-kill.integration.test.mjs --strict-real-postgres',
+  'Wave 5B operating-system process-kill proof must have one strict standalone-PostgreSQL command.'
+);
+assert.ok(
+  packageJson.scripts?.['test:wave5b']?.includes('test:integration:audio-provider-process-kill'),
+  'The local Wave 5B aggregate must execute the operating-system process-kill proof.'
+);
+assert.ok(
+  packageJson.scripts?.['test:wave5b:real-postgres']?.includes('test:integration:audio-provider-process-kill:real-postgres'),
+  'The strict Wave 5B aggregate must execute the operating-system process-kill proof on standalone PostgreSQL.'
 );
 assert.ok(contractCommand.includes(expectedCommand), 'Provider-operation durability gate must be wired into test:contracts.');
 assert.ok(
