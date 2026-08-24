@@ -112,6 +112,8 @@ requireTerms(`${store}\n${server}`, 'Retryable linked-event room closeout', [
   "status: 'barrier_retryable'"
 ]);
 requireTerms(httpPostgresProofSource, 'Strict HTTP closeout lifecycle proof', [
+  'proveDisposableServerBundleFailureCleanup',
+  'proveCleanupContinuesAfterFailure',
   'proveHttpCloseoutEventLifecycleRetry',
   "if (proof.kind === 'real-postgres')",
   "select sway_event_room_link_lock($1::uuid)",

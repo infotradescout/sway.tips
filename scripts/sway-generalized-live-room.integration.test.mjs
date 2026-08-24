@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { Client } from 'pg';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 const root = process.cwd();
-const proofTempRoot = join(root, '.tmp');
-const proofTempPrefix = join(proofTempRoot, 'sway-generalized-live-room-');
+const proofTempPrefix = join(tmpdir(), 'sway-generalized-live-room-');
 const expectedProductGaps = new Set([
   'nonmusic paid request intent is rejected',
   'nonmusic straight tip intent is rejected',
@@ -138,21 +138,37 @@ function assertStatus(response, expected, label, server) {
   );
 }
 
-async function buildDisposableServerBundle() {
-  await mkdir(proofTempRoot, { recursive: true });
+async function buildDisposableServerBundle({
+  buildImplementation = build,
+  onDirectoryCreated = () => undefined
+} = {}) {
   const directory = await mkdtemp(proofTempPrefix);
   const entryPath = join(directory, 'server.cjs');
-  await build({
-    entryPoints: [join(root, 'server.ts')],
-    outfile: entryPath,
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    packages: 'external',
-    sourcemap: false,
-    logLevel: 'silent'
-  });
-  return { directory, entryPath };
+  try {
+    onDirectoryCreated(directory);
+    await buildImplementation({
+      entryPoints: [join(root, 'server.ts')],
+      outfile: entryPath,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      packages: 'external',
+      sourcemap: false,
+      logLevel: 'silent'
+    });
+    return { directory, entryPath };
+  } catch (error) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Disposable server bundle build and cleanup both failed.',
+        { cause: error }
+      );
+    }
+    throw error;
+  }
 }
 
 async function removeDisposableServerBundle(bundle) {
@@ -165,6 +181,51 @@ async function removeDisposableServerBundle(bundle) {
   await rm(bundle.directory, { recursive: true, force: true });
 }
 
+async function proveDisposableServerBundleFailureCleanup() {
+  let createdDirectory = null;
+  await assert.rejects(
+    buildDisposableServerBundle({
+      buildImplementation: async () => {
+        throw new Error('Injected disposable server build failure.');
+      },
+      onDirectoryCreated: (directory) => {
+        createdDirectory = directory;
+      }
+    }),
+    /Injected disposable server build failure/
+  );
+  assert.ok(createdDirectory, 'The build-failure proof must observe its disposable directory.');
+  await assert.rejects(access(createdDirectory), { code: 'ENOENT' });
+}
+
+async function collectCleanupFailures(steps) {
+  const failures = [];
+  for (const [label, cleanup] of steps) {
+    try {
+      await cleanup();
+    } catch (error) {
+      failures.push(new Error(`${label}: ${errorMessage(error)}`, { cause: error }));
+    }
+  }
+  return failures;
+}
+
+async function proveCleanupContinuesAfterFailure() {
+  const calls = [];
+  const failures = await collectCleanupFailures([
+    ['injected first cleanup', async () => {
+      calls.push('first');
+      throw new Error('Injected cleanup failure.');
+    }],
+    ['injected second cleanup', async () => {
+      calls.push('second');
+    }]
+  ]);
+  assert.deepEqual(calls, ['first', 'second']);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].message, /Injected cleanup failure/);
+}
+
 async function startSwayServer({ databaseUrl, entryPath, port }) {
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [entryPath], {
@@ -174,6 +235,7 @@ async function startSwayServer({ databaseUrl, entryPath, port }) {
       NODE_ENV: 'test',
       DISABLE_HMR: 'true',
       SWAY_API_ONLY_TEST_MODE: 'true',
+      NODE_PATH: [join(root, 'node_modules'), process.env.NODE_PATH].filter(Boolean).join(delimiter),
       SWAY_STARTUP_DIAGNOSTICS: 'true',
       PORT: String(port),
       DATABASE_URL: databaseUrl,
@@ -622,12 +684,14 @@ async function proveHttpCloseoutEventLifecycleRetry({ server, proof, account, me
 }
 
 async function run() {
+  await proveDisposableServerBundleFailureCleanup();
+  await proveCleanupContinuesAfterFailure();
   const checks = [];
   const unmet = [];
   const proof = await startEmbeddedPostgresProof('generalized_live_room_http');
-  const port = await reservePort();
   let bundle = null;
   let server = null;
+  let proofError = null;
 
   const verify = async (name, action) => {
     try {
@@ -648,6 +712,7 @@ async function run() {
   };
 
   try {
+    const port = await reservePort();
     bundle = await buildDisposableServerBundle();
     server = await startSwayServer({ databaseUrl: proof.databaseUrl, entryPath: bundle.entryPath, port });
     const initialServer = server;
@@ -2050,10 +2115,26 @@ async function run() {
         `Wave 4 HTTP/PostgreSQL proof found ${unmet.length} unmet product assertion(s).`
       );
     }
-  } finally {
-    await server?.stop();
-    await proof.close();
-    await removeDisposableServerBundle(bundle);
+  } catch (error) {
+    proofError = error;
+  }
+
+  const cleanupFailures = await collectCleanupFailures([
+    ['Sway proof server shutdown failed', async () => server?.stop()],
+    ['embedded PostgreSQL proof shutdown failed', async () => proof.close()],
+    ['disposable server bundle cleanup failed', async () => removeDisposableServerBundle(bundle)]
+  ]);
+
+  if (proofError && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [proofError, ...cleanupFailures],
+      'Generalized live-room proof failed and teardown also reported errors.',
+      { cause: proofError }
+    );
+  }
+  if (proofError) throw proofError;
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, 'Generalized live-room proof teardown failed.');
   }
 }
 

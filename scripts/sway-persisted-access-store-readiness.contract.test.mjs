@@ -1,26 +1,30 @@
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 async function loadAccessControlFactory() {
-  const tempDir = join(process.cwd(), '.tmp');
-  mkdirSync(tempDir, { recursive: true });
+  const tempDir = mkdtempSync(join(tmpdir(), 'sway-persisted-access-contract-'));
   const outfile = join(tempDir, 'access-control.persisted-readiness.bundle.cjs');
 
-  await build({
-    entryPoints: ['src/server/access-control.ts'],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    outfile,
-    sourcemap: false
-  });
+  try {
+    await build({
+      entryPoints: ['src/server/access-control.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      outfile,
+      sourcemap: false
+    });
 
-  const require = createRequire(import.meta.url);
-  return require(outfile).createAccessControl;
+    const require = createRequire(import.meta.url);
+    return require(outfile).createAccessControl;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function makeReq(actorId, extraHeaders = {}) {

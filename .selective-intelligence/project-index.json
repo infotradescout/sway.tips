@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "index_version": "0.1.0",
-  "generated_at": "2026-08-23T19:20:03Z",
+  "generated_at": "2026-08-24T02:07:42Z",
   "source": {
     "kind": "git",
-    "revision": "d5041c5ecfafe17510945541c16c54917f54388c",
-    "dirty": false,
-    "inventory_sha256": "dbb61e11da2b24443207d0948579fe616e91cfd7b242d3d223348a7963c2310e"
+    "revision": "36163317e878addca95fb5d30982af86416462dd",
+    "dirty": true,
+    "inventory_sha256": "7699f94bbf6063c0afb1c172996669175a51f6a0b44fbc88795ea1b6a9503b8d"
   },
   "inventory": {
     "directories": [
@@ -24,7 +24,7 @@
       },
       {
         "path": "scripts",
-        "source_file_count": 204
+        "source_file_count": 205
       },
       {
         "path": "scripts/browser-fixtures",
@@ -415,6 +415,12 @@
         "bytes": 5080
       },
       {
+        "path": "scripts/sway-contract-temp-artifact-hygiene.contract.test.mjs",
+        "language": "mjs",
+        "sha256": "4da5069340ab0ac028294b6d3339a2088014dc3e930dc6b54608de922439da6d",
+        "bytes": 1613
+      },
+      {
         "path": "scripts/sway-control-bridge-cloud-action.contract.test.mjs",
         "language": "mjs",
         "sha256": "ca30a646b763b4238e75cde19ab2c4b9c98bd71796410d8e4c4018139a99c854",
@@ -579,14 +585,14 @@
       {
         "path": "scripts/sway-generalized-live-room.contract.test.mjs",
         "language": "mjs",
-        "sha256": "7e36c491621306578ecadf01efd9c3e83951a01d6433339d4885b3f716b351e3",
-        "bytes": 12511
+        "sha256": "c2e0f3e4d7b5b85abdbc7052dd6625848b7158b5417340c386bafb0f1bbe506b",
+        "bytes": 12597
       },
       {
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
         "language": "mjs",
-        "sha256": "7c3961b752cfe05142e9b8b4a31f109075b47f99d73b4b0698535df0d0f3c30f",
-        "bytes": 82417
+        "sha256": "1cee894bb23b27679e5c30ad7791d62027013d3a3a8dc9eeea05f693b9574566",
+        "bytes": 85080
       },
       {
         "path": "scripts/sway-generate-audio-proof-fixture.mjs",
@@ -927,8 +933,8 @@
       {
         "path": "scripts/sway-performer-browser-session.contract.test.mjs",
         "language": "mjs",
-        "sha256": "3e4bfe7abca793b75995b909066875bae496aceac8df760aca011b7e8b9ecc52",
-        "bytes": 4053
+        "sha256": "3e7c26dd091b8f53bfc50fd7f566b0d8cda879b35c2e2386bb56e3bddf35c855",
+        "bytes": 4189
       },
       {
         "path": "scripts/sway-performer-claim-code.integration.test.mjs",
@@ -945,8 +951,8 @@
       {
         "path": "scripts/sway-performer-email-login.contract.test.mjs",
         "language": "mjs",
-        "sha256": "986ef0be82ea2aae3455af1ce46a0ba63b5a73ea2d5fd10292890f3a387c3666",
-        "bytes": 11689
+        "sha256": "70a6e3d16ad53f64470431e9d709b018d272677ab87154a071875d46f36af1b0",
+        "bytes": 11830
       },
       {
         "path": "scripts/sway-performer-event-lifecycle.integration.test.ts",
@@ -999,8 +1005,8 @@
       {
         "path": "scripts/sway-performer-self-serve-signup.contract.test.mjs",
         "language": "mjs",
-        "sha256": "ca3483aecb38121465050eaaf9a5e142e1bd95dcd3130346510e9b60298f1c8e",
-        "bytes": 10003
+        "sha256": "f0e40bcc177ac0906f5ea8e047c26063da753129ebd75f9938dbe2fefb7f2378",
+        "bytes": 10150
       },
       {
         "path": "scripts/sway-performer-share-kit.contract.test.mjs",
@@ -1023,8 +1029,8 @@
       {
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
         "language": "mjs",
-        "sha256": "8a0a9200f970df5724cdfdf9e270452ac735136da77a398bf27d21bbf1ad41e3",
-        "bytes": 15694
+        "sha256": "8762de100302c14106f886f471fa2f8cbadf842c918a39fe38129435830cede9",
+        "bytes": 15831
       },
       {
         "path": "scripts/sway-persisted-middleware-guards.contract.test.mjs",
@@ -4664,6 +4670,13 @@
         "exported": false
       },
       {
+        "name": "findSourceArtifacts",
+        "kind": "function",
+        "path": "scripts/sway-contract-temp-artifact-hygiene.contract.test.mjs",
+        "line": 8,
+        "exported": false
+      },
+      {
         "name": "parseArgs",
         "kind": "function",
         "path": "scripts/sway-control-bridge.mjs",
@@ -5346,168 +5359,189 @@
         "name": "removeDisposableServerBundle",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 157,
+        "line": 173,
+        "exported": false
+      },
+      {
+        "name": "proveDisposableServerBundleFailureCleanup",
+        "kind": "function",
+        "path": "scripts/sway-generalized-live-room.integration.test.mjs",
+        "line": 183,
+        "exported": false
+      },
+      {
+        "name": "collectCleanupFailures",
+        "kind": "function",
+        "path": "scripts/sway-generalized-live-room.integration.test.mjs",
+        "line": 200,
+        "exported": false
+      },
+      {
+        "name": "proveCleanupContinuesAfterFailure",
+        "kind": "function",
+        "path": "scripts/sway-generalized-live-room.integration.test.mjs",
+        "line": 212,
         "exported": false
       },
       {
         "name": "startSwayServer",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 167,
+        "line": 228,
         "exported": false
       },
       {
         "name": "recordOutput",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 205,
+        "line": 267,
         "exported": false
       },
       {
         "name": "readiness",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 217,
+        "line": 279,
         "exported": false
       },
       {
         "name": "stop",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 230,
+        "line": 292,
         "exported": false
       },
       {
         "name": "createPerformerAccount",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 255,
+        "line": 317,
         "exported": false
       },
       {
         "name": "recordCapabilityDecision",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 297,
+        "line": 359,
         "exported": false
       },
       {
         "name": "grantCapabilities",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 319,
+        "line": 381,
         "exported": false
       },
       {
         "name": "recordEventAuthorityDecision",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 343,
+        "line": 405,
         "exported": false
       },
       {
         "name": "grantEventAuthority",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 366,
+        "line": 428,
         "exported": false
       },
       {
         "name": "createEvent",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 391,
+        "line": 453,
         "exported": false
       },
       {
         "name": "roomStartBody",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 423,
+        "line": 485,
         "exported": false
       },
       {
         "name": "actionIdentity",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 438,
+        "line": 500,
         "exported": false
       },
       {
         "name": "assertNonMusicMoneyDenial",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 447,
+        "line": 509,
         "exported": false
       },
       {
         "name": "countByClientRequestId",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 469,
+        "line": 531,
         "exported": false
       },
       {
         "name": "countPaymentsByIdempotencyKey",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 478,
+        "line": 540,
         "exported": false
       },
       {
         "name": "countEventsByClientRequestId",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 486,
+        "line": 548,
         "exported": false
       },
       {
         "name": "proveHttpCloseoutEventLifecycleRetry",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 494,
+        "line": 556,
         "exported": false
       },
       {
         "name": "createLinkedRoom",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 496,
+        "line": 558,
         "exported": false
       },
       {
         "name": "loadCloseoutTruth",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 516,
+        "line": 578,
         "exported": false
       },
       {
         "name": "run",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 623,
+        "line": 685,
         "exported": false
       },
       {
         "name": "verify",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 631,
+        "line": 695,
         "exported": false
       },
       {
         "name": "protectedEventPayload",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 715,
+        "line": 780,
         "exported": false
       },
       {
         "name": "linkDenial",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 1549,
+        "line": 1614,
         "exported": false
       },
       {
@@ -6228,21 +6262,21 @@
         "name": "loadSessionStoreFactory",
         "kind": "function",
         "path": "scripts/sway-performer-browser-session.contract.test.mjs",
-        "line": 6,
+        "line": 7,
         "exported": false
       },
       {
         "name": "createInsertSpyDb",
         "kind": "function",
         "path": "scripts/sway-performer-browser-session.contract.test.mjs",
-        "line": 24,
+        "line": 28,
         "exported": false
       },
       {
         "name": "main",
         "kind": "function",
         "path": "scripts/sway-performer-browser-session.contract.test.mjs",
-        "line": 51,
+        "line": 55,
         "exported": false
       },
       {
@@ -6263,21 +6297,21 @@
         "name": "loadBundle",
         "kind": "function",
         "path": "scripts/sway-performer-email-login.contract.test.mjs",
-        "line": 8,
+        "line": 9,
         "exported": false
       },
       {
         "name": "createInsertSpyDb",
         "kind": "function",
         "path": "scripts/sway-performer-email-login.contract.test.mjs",
-        "line": 26,
+        "line": 30,
         "exported": false
       },
       {
         "name": "main",
         "kind": "function",
         "path": "scripts/sway-performer-email-login.contract.test.mjs",
-        "line": 54,
+        "line": 58,
         "exported": false
       },
       {
@@ -6431,14 +6465,14 @@
         "name": "loadBundle",
         "kind": "function",
         "path": "scripts/sway-performer-self-serve-signup.contract.test.mjs",
-        "line": 8,
+        "line": 9,
         "exported": false
       },
       {
         "name": "main",
         "kind": "function",
         "path": "scripts/sway-performer-self-serve-signup.contract.test.mjs",
-        "line": 26,
+        "line": 30,
         "exported": false
       },
       {
@@ -6543,42 +6577,42 @@
         "name": "loadAccessControlFactory",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 7,
+        "line": 8,
         "exported": false
       },
       {
         "name": "makeReq",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 25,
+        "line": 29,
         "exported": false
       },
       {
         "name": "createSignedFallbackHeaders",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 39,
+        "line": 43,
         "exported": false
       },
       {
         "name": "createQueuedDbStub",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 57,
+        "line": 61,
         "exported": false
       },
       {
         "name": "createSessionStoreStub",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 84,
+        "line": 88,
         "exported": false
       },
       {
         "name": "main",
         "kind": "function",
         "path": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
-        "line": 100,
+        "line": 104,
         "exported": false
       },
       {
@@ -22822,10 +22856,10 @@
   ],
   "summary": {
     "directories": 15,
-    "source_files": 367,
-    "symbols": 2594,
+    "source_files": 368,
+    "symbols": 2598,
     "components": 90,
-    "functions_and_hooks": 2037,
+    "functions_and_hooks": 2041,
     "raw_ui_elements": 432,
     "errors": 0,
     "warnings": 5

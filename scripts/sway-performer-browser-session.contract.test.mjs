@@ -1,25 +1,29 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 async function loadSessionStoreFactory() {
-  const tempDir = join(process.cwd(), '.tmp');
-  mkdirSync(tempDir, { recursive: true });
+  const tempDir = mkdtempSync(join(tmpdir(), 'sway-browser-session-contract-'));
   const outfile = join(tempDir, 'performer-session-store.contract.bundle.cjs');
 
-  await build({
-    entryPoints: ['src/server/performer-session-store.ts'],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    outfile,
-    sourcemap: false
-  });
+  try {
+    await build({
+      entryPoints: ['src/server/performer-session-store.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      outfile,
+      sourcemap: false
+    });
 
-  const require = createRequire(import.meta.url);
-  return require(outfile);
+    const require = createRequire(import.meta.url);
+    return require(outfile);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function createInsertSpyDb() {
