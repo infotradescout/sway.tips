@@ -161,6 +161,15 @@ requireIncludes('Runtime money mode', server, [
   'amt = 1'
 ]);
 
+const tipsEnabledDefinitionStart = server.indexOf("tipsEnabled: requestedRoomConfig.roomType === 'music'");
+const tipsEnabledDefinitionEnd = server.indexOf('settlementMode:', tipsEnabledDefinitionStart);
+const tipsEnabledDefinition = tipsEnabledDefinitionStart >= 0 && tipsEnabledDefinitionEnd > tipsEnabledDefinitionStart
+  ? server.slice(tipsEnabledDefinitionStart, tipsEnabledDefinitionEnd)
+  : '';
+if (tipsEnabledDefinition.includes('requestedPaymentsEnabled')) {
+  failures.push('Runtime money mode must keep direct-tip eligibility independent from paid-request pricing.');
+}
+
 requireExcludes('PatronView primary path', patronView, [
   'Browse Performers',
   "setActiveTab('discover')",

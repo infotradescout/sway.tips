@@ -13473,7 +13473,6 @@ app.post("/api/session/start", async (req, res) => {
       && sellerMoneyReadiness.ready,
     tipsEnabled: requestedRoomConfig.roomType === 'music'
       && liveRoomPaymentRuntimeConfig.moneyEnabled
-      && requestedPaymentsEnabled
       && sellerMoneyReadiness.ready,
     settlementMode: requestedRoomConfig.roomType === 'music'
       && liveRoomPaymentRuntimeConfig.moneyEnabled

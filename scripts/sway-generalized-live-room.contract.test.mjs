@@ -70,6 +70,18 @@ requireTerms(migration, 'Generalized live-room migration', [
   'performer_events_90_enforce_capabilities',
   'CONSTRAINT "performer_events_attendance_mode_shape"'
 ]);
+const moneyProjectionMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .find((name) => read(`drizzle/${name}`).includes('projected_payments_enabled boolean'));
+assert.ok(moneyProjectionMigrationName, 'Independent paid-request and direct-tip projection migration is missing.');
+const moneyProjectionMigration = read(`drizzle/${moneyProjectionMigrationName}`);
+requireTerms(moneyProjectionMigration, 'Independent live-room money projection', [
+  'CREATE OR REPLACE FUNCTION "sway_sync_live_room_money_projection"()',
+  'projected_payments_enabled boolean',
+  'projected_tips_enabled boolean',
+  "'paymentsEnabled', projected_payments_enabled",
+  "'tipsEnabled', projected_tips_enabled"
+]);
 assert.ok(
   migration.indexOf('UPDATE "performer_events"') < migration.indexOf('CONSTRAINT "performer_events_attendance_mode_shape"'),
   'Legacy events must be backfilled before the attendance-shape constraint is installed.'

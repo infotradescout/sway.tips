@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "index_version": "0.1.0",
-  "generated_at": "2026-08-24T05:43:12Z",
+  "generated_at": "2026-08-24T20:46:13Z",
   "source": {
     "kind": "git",
-    "revision": "40f10c2bc29ef8df896ea3197230e1cd7b677f6b",
+    "revision": "5fb6cd9ebddfa1c7127c350554f8fe3bdb976183",
     "dirty": true,
-    "inventory_sha256": "b9d18c5ba515faadc4e4d74f74d26db5eb4a89d83fb507dd59dfbc7b44d112b7"
+    "inventory_sha256": "bf60e4c0f7da07494651d9c2f5d2e8e41df7567c441242187baae86b57a93271"
   },
   "inventory": {
     "directories": [
@@ -597,14 +597,14 @@
       {
         "path": "scripts/sway-generalized-live-room.contract.test.mjs",
         "language": "mjs",
-        "sha256": "c2e0f3e4d7b5b85abdbc7052dd6625848b7158b5417340c386bafb0f1bbe506b",
-        "bytes": 12597
+        "sha256": "71335f0b893bacea5432f1426c879af72af805126eb38c5df9c3c55fec633a51",
+        "bytes": 13338
       },
       {
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
         "language": "mjs",
-        "sha256": "1cee894bb23b27679e5c30ad7791d62027013d3a3a8dc9eeea05f693b9574566",
-        "bytes": 85080
+        "sha256": "39f360ba56a94beec4ce0f21003fcb443f3e065e13a7ab7da6ff6581cc03c5e5",
+        "bytes": 90179
       },
       {
         "path": "scripts/sway-generate-audio-proof-fixture.mjs",
@@ -681,8 +681,8 @@
       {
         "path": "scripts/sway-live-night-spine.contract.test.mjs",
         "language": "mjs",
-        "sha256": "2f9a378bf52b53cd5babffe70a67ef6a405cf930a3425a3ac14feba8fdd22ced",
-        "bytes": 7223
+        "sha256": "1ba13fe0bdf4bd413494e2dbd679dee9c56713d82d9a2916d4b2248b12c909f4",
+        "bytes": 7805
       },
       {
         "path": "scripts/sway-live-pilot-evidence.contract.test.mjs",
@@ -1413,8 +1413,8 @@
       {
         "path": "server.ts",
         "language": "ts",
-        "sha256": "c4a196780e099449a5fae891171b3405f42f128b2856e194bb1b345a9092ad72",
-        "bytes": 654267
+        "sha256": "a670623c965f785c402b9143d778727a874e0d13e5e3006186d1b9af78efe776",
+        "bytes": 654233
       },
       {
         "path": "src/App.tsx",
@@ -2283,8 +2283,8 @@
       {
         "path": "src/types.ts",
         "language": "ts",
-        "sha256": "c9e90d4fff4582341377117fc309521086df49c74c1b1e3e9a22a2ec0fdf79af",
-        "bytes": 8220
+        "sha256": "308041238a39d5e16a9611e4a38212e739bd64cef8a2e0e5c104f0a871746aef",
+        "bytes": 8201
       },
       {
         "path": "src/vite-env.d.ts",
@@ -5503,154 +5503,161 @@
         "name": "recordOutput",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 267,
+        "line": 268,
         "exported": false
       },
       {
         "name": "readiness",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 279,
+        "line": 280,
         "exported": false
       },
       {
         "name": "stop",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 292,
+        "line": 293,
         "exported": false
       },
       {
         "name": "createPerformerAccount",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 317,
+        "line": 318,
         "exported": false
       },
       {
         "name": "recordCapabilityDecision",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 359,
+        "line": 360,
         "exported": false
       },
       {
         "name": "grantCapabilities",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 381,
+        "line": 382,
+        "exported": false
+      },
+      {
+        "name": "grantDisposableTestMoneyAuthority",
+        "kind": "function",
+        "path": "scripts/sway-generalized-live-room.integration.test.mjs",
+        "line": 406,
         "exported": false
       },
       {
         "name": "recordEventAuthorityDecision",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 405,
+        "line": 468,
         "exported": false
       },
       {
         "name": "grantEventAuthority",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 428,
+        "line": 491,
         "exported": false
       },
       {
         "name": "createEvent",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 453,
+        "line": 516,
         "exported": false
       },
       {
         "name": "roomStartBody",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 485,
+        "line": 548,
         "exported": false
       },
       {
         "name": "actionIdentity",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 500,
+        "line": 563,
         "exported": false
       },
       {
         "name": "assertNonMusicMoneyDenial",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 509,
+        "line": 572,
         "exported": false
       },
       {
         "name": "countByClientRequestId",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 531,
+        "line": 594,
         "exported": false
       },
       {
         "name": "countPaymentsByIdempotencyKey",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 540,
+        "line": 603,
         "exported": false
       },
       {
         "name": "countEventsByClientRequestId",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 548,
+        "line": 611,
         "exported": false
       },
       {
         "name": "proveHttpCloseoutEventLifecycleRetry",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 556,
+        "line": 619,
         "exported": false
       },
       {
         "name": "createLinkedRoom",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 558,
+        "line": 621,
         "exported": false
       },
       {
         "name": "loadCloseoutTruth",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 578,
+        "line": 641,
         "exported": false
       },
       {
         "name": "run",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 685,
+        "line": 748,
         "exported": false
       },
       {
         "name": "verify",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 695,
+        "line": 758,
         "exported": false
       },
       {
         "name": "protectedEventPayload",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 780,
+        "line": 843,
         "exported": false
       },
       {
         "name": "linkDenial",
         "kind": "function",
         "path": "scripts/sway-generalized-live-room.integration.test.mjs",
-        "line": 1614,
+        "line": 1677,
         "exported": false
       },
       {
@@ -9220,140 +9227,140 @@
         "name": "completeReservedFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 14104,
+        "line": 14103,
         "exported": false
       },
       {
         "name": "rejectAfterConfirmedAuthorization",
         "kind": "function",
         "path": "server.ts",
-        "line": 14157,
+        "line": 14156,
         "exported": false
       },
       {
         "name": "completeReservedFailure",
         "kind": "function",
         "path": "server.ts",
-        "line": 14791,
+        "line": 14790,
         "exported": false
       },
       {
         "name": "rejectAfterConfirmedAuthorization",
         "kind": "function",
         "path": "server.ts",
-        "line": 14844,
+        "line": 14843,
         "exported": false
       },
       {
         "name": "isDiscoveryEligibleHandle",
         "kind": "function",
         "path": "server.ts",
-        "line": 15965,
+        "line": 15964,
         "exported": false
       },
       {
         "name": "escapeXml",
         "kind": "function",
         "path": "server.ts",
-        "line": 15969,
+        "line": 15968,
         "exported": false
       },
       {
         "name": "SitemapEntry",
         "kind": "type",
         "path": "server.ts",
-        "line": 16035,
+        "line": 16034,
         "exported": false
       },
       {
         "name": "handleDataDeletionRequest",
         "kind": "function",
         "path": "server.ts",
-        "line": 16180,
+        "line": 16179,
         "exported": false
       },
       {
         "name": "startEventTicketWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16398,
+        "line": 16397,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16402,
+        "line": 16401,
         "exported": false
       },
       {
         "name": "startLiveRoomPaymentWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16423,
+        "line": 16422,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16427,
+        "line": 16426,
         "exported": false
       },
       {
         "name": "startAudioUploadCleanupWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16451,
+        "line": 16450,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16455,
+        "line": 16454,
         "exported": false
       },
       {
         "name": "startModerationRetentionWorker",
         "kind": "function",
         "path": "server.ts",
-        "line": 16492,
+        "line": 16491,
         "exported": false
       },
       {
         "name": "tick",
         "kind": "function",
         "path": "server.ts",
-        "line": 16497,
+        "line": 16496,
         "exported": false
       },
       {
         "name": "startServer",
         "kind": "function",
         "path": "server.ts",
-        "line": 16541,
+        "line": 16540,
         "exported": false
       },
       {
         "name": "logStartupStage",
         "kind": "function",
         "path": "server.ts",
-        "line": 16544,
+        "line": 16543,
         "exported": false
       },
       {
         "name": "handlePublicPerformerRoute",
         "kind": "function",
         "path": "server.ts",
-        "line": 16579,
+        "line": 16578,
         "exported": false
       },
       {
         "name": "handlePublicPerformerRoute",
         "kind": "function",
         "path": "server.ts",
-        "line": 16616,
+        "line": 16615,
         "exported": false
       },
       {
@@ -23519,9 +23526,9 @@
   "summary": {
     "directories": 15,
     "source_files": 371,
-    "symbols": 2690,
+    "symbols": 2691,
     "components": 90,
-    "functions_and_hooks": 2111,
+    "functions_and_hooks": 2112,
     "raw_ui_elements": 432,
     "errors": 0,
     "warnings": 5

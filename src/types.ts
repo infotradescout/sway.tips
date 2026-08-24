@@ -155,11 +155,11 @@ export interface GigSession {
   // Song search scope for this room: performer's own synced library, the full
   // open catalog, or a performer-curated setlist for this occasion.
   searchScope: 'library' | 'catalog' | 'setlist';
-  // When false, this room is a free event: tips are rejected, boosts become
-  // free upvotes, and requests are created with no payment step at all.
+  // When false, requests carry no payment step and boosts become free upvotes.
+  // Direct-tip availability is represented independently by tipsEnabled.
   paymentsEnabled: boolean;
   // Direct tips and every other paid room action require a payout-ready seller.
-  // A genuinely free room keeps this false while requests/upvotes remain usable.
+  // Nonmusic and fully nonmonetary rooms keep this false.
   tipsEnabled: boolean;
   // Persisted with the room snapshot so test volume can never be presented as
   // live connected-account earnings after closeout or a later deployment.

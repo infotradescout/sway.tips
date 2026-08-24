@@ -309,6 +309,13 @@
       "when": 1787539976504,
       "tag": "0043_greedy_reavers",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787603775823,
+      "tag": "0044_preserve_free_request_tips",
+      "breakpoints": true
     }
   ]
 }

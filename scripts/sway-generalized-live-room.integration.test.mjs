@@ -226,7 +226,7 @@ async function proveCleanupContinuesAfterFailure() {
   assert.match(failures[0].message, /Injected cleanup failure/);
 }
 
-async function startSwayServer({ databaseUrl, entryPath, port }) {
+async function startSwayServer({ databaseUrl, entryPath, port, envOverrides = {} }) {
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [entryPath], {
     cwd: root,
@@ -258,7 +258,8 @@ async function startSwayServer({ databaseUrl, entryPath, port }) {
       STRIPE_PUBLISHABLE_KEY: '',
       VITE_STRIPE_PUBLISHABLE_KEY: '',
       STRIPE_WEBHOOK_SECRET: '',
-      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'false'
+      SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'false',
+      ...envOverrides
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -401,6 +402,68 @@ async function grantCapabilities(proof, performerId, label) {
       label
     });
   }
+}
+
+async function grantDisposableTestMoneyAuthority(proof, performerId, label) {
+  const actorUserId = randomUUID();
+  const actorEmail = `wave4-money-authority-${randomUUID()}@example.test`;
+  await proof.query(
+    `insert into users (
+       id, email, display_name, email_verified_at, terms_accepted_at, pro_mode_status
+     ) values ($1, $2, 'Wave 4 Money Authority', now(), now(), 'disabled')`,
+    [actorUserId, actorEmail]
+  );
+  await proof.query('update users set role = \'admin\' where id = $1', [actorUserId]);
+
+  await recordCapabilityDecision(proof, {
+    performerId,
+    capability: 'live_money',
+    decision: 'granted',
+    label: `${label}-live-money`
+  });
+
+  for (const authority of [
+    {
+      kind: 'seller',
+      subjectType: 'seller',
+      subjectId: `seller:${performerId}`
+    },
+    {
+      kind: 'payout_controller',
+      subjectType: 'payout_account',
+      subjectId: 'sway_test_platform_balance'
+    }
+  ]) {
+    const authorityKey = `wave4:${label}:${performerId}:${authority.kind}:${randomUUID()}`;
+    await proof.query(
+      `insert into performer_authority_events (
+         performer_id, authority_kind, subject_type, subject_id, decision,
+         actor_type, reason, evidence, idempotency_key_hash
+       ) values ($1, $2, $3, $4, 'granted', 'system', $5, $6::jsonb, $7)`,
+      [
+        performerId,
+        authority.kind,
+        authority.subjectType,
+        authority.subjectId,
+        `Disposable Wave 4 ${authority.kind} grant for test-money proof`,
+        JSON.stringify({ reference: authorityKey, environment: 'test' }),
+        hash(authorityKey)
+      ]
+    );
+  }
+
+  const releaseKey = `wave4:${label}:test-money-release:${randomUUID()}`;
+  await proof.query(
+    `insert into live_room_money_release_events (
+       environment, decision, actor_user_id, reason, evidence, idempotency_key_hash
+     ) values ('test', 'enabled', $1, $2, $3::jsonb, $4)`,
+    [
+      actorUserId,
+      'Disposable Wave 4 test-money release authorization',
+      JSON.stringify({ reference: releaseKey, environment: 'test' }),
+      hash(releaseKey)
+    ]
+  );
 }
 
 async function recordEventAuthorityDecision(proof, {
@@ -2092,10 +2155,67 @@ async function run() {
       };
     });
 
+    await grantDisposableTestMoneyAuthority(proof, hostA.performerId, 'free-request-tip');
+    await server.stop();
+    server = await startSwayServer({
+      databaseUrl: proof.databaseUrl,
+      entryPath: bundle.entryPath,
+      port,
+      envOverrides: {
+        STRIPE_SECRET_KEY: 'sk_test_wave4_free_request_tip_proof',
+        STRIPE_PUBLISHABLE_KEY: 'pk_test_wave4_free_request_tip_proof',
+        VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_wave4_free_request_tip_proof',
+        STRIPE_WEBHOOK_SECRET: 'whsec_wave4_free_request_tip_proof',
+        SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED: 'true',
+        SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS: hostA.performerId
+      }
+    });
+    await verify('payout-ready free music room keeps direct tips enabled', async () => {
+      const paymentConfig = await new HttpClient(server.baseUrl).get('/api/payment/config');
+      assertStatus(paymentConfig, 200, 'free-request tip payment configuration', server);
+      assert.equal(paymentConfig.body.mode, 'test');
+      const gigId = randomUUID();
+      const response = await hostA.client.post('/api/session/start', roomStartBody({
+        gigId,
+        roomType: 'music',
+        talentName: 'Wave 4 Free Request Music Host',
+        menu: []
+      }));
+      assertStatus(response, 200, 'payout-ready free music room start', server);
+      assert.equal(response.body.state.session.paymentsEnabled, false);
+      assert.equal(response.body.state.session.tipsEnabled, true);
+      assert.equal(response.body.state.session.settlementMode, 'platform_test_balance');
+      assert.equal(response.body.state.session.paymentEnvironment, 'test');
+      const persisted = await proof.query(
+        `select money_enabled,
+                runtime_session_state ->> 'paymentsEnabled' as payments_enabled,
+                runtime_session_state ->> 'tipsEnabled' as tips_enabled
+           from gig_sessions
+          where id = $1`,
+        [gigId]
+      );
+      assert.equal(persisted.rows.length, 1);
+      assert.equal(persisted.rows[0].money_enabled, true);
+      assert.equal(persisted.rows[0].payments_enabled, 'false');
+      assert.equal(persisted.rows[0].tips_enabled, 'true');
+      const end = await hostA.client.post('/api/session/end', { gig_id: gigId });
+      assertStatus(end, 200, 'payout-ready free music room end', server);
+      const closeout = await hostA.client.post('/api/session/closeout', { gig_id: gigId });
+      assertStatus(closeout, 200, 'payout-ready free music room closeout', server);
+      return {
+        paymentsEnabled: response.body.state.session.paymentsEnabled,
+        tipsEnabled: response.body.state.session.tipsEnabled,
+        persistedPaymentsEnabled: persisted.rows[0].payments_enabled,
+        persistedTipsEnabled: persisted.rows[0].tips_enabled,
+        settlementMode: response.body.state.session.settlementMode,
+        paymentEnvironment: response.body.state.session.paymentEnvironment
+      };
+    });
+
     const summary = {
       proofKind: proof.kind,
       disposableServerBundleBuilds: 1,
-      processStarts: 2,
+      processStarts: 3,
       realSignupLoginAccounts: 2,
       paymentRuntimeFailClosed: paymentConfig.status === 503,
       checks,
