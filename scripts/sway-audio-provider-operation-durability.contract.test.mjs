@@ -217,6 +217,8 @@ requireTerms(server, 'Provider-operation worker and truthful cleanup response', 
   'inProgressCount: cleanup.inProgressCount'
 ]);
 requireTerms(storageIntegration, 'Expiry and owner replay barrier proof', [
+  "process.argv.includes('--strict-real-postgres')",
+  'Wave 5B standalone-PostgreSQL proof refuses generic DATABASE_URL',
   'Owner idempotency is actor-and-intent bound before provider dispatch.',
   'Expiry installs a durable cleanup fence while a part provider call is in',
   'Expiry must persist cleanup intent before the part lease settles.',
@@ -288,6 +290,15 @@ requireTerms(integration, 'Provider-operation database proof', [
 const contractCommand = packageJson.scripts?.['test:contracts'] ?? '';
 const expectedCommand = 'node scripts/sway-audio-provider-operation-durability.contract.test.mjs';
 const hygieneCommand = 'node scripts/sway-contract-temp-artifact-hygiene.contract.test.mjs';
+assert.equal(
+  packageJson.scripts?.['test:integration:audio-storage-policy:real-postgres'],
+  'node --import tsx scripts/sway-audio-storage-policy.integration.test.mjs --strict-real-postgres',
+  'Wave 5B standalone-PostgreSQL race proof must have one portable named command.'
+);
+assert.ok(
+  packageJson.scripts?.['test:wave5b:real-postgres']?.includes('test:integration:audio-storage-policy:real-postgres'),
+  'The strict Wave 5B aggregate must include the standalone-PostgreSQL race proof.'
+);
 assert.ok(contractCommand.includes(expectedCommand), 'Provider-operation durability gate must be wired into test:contracts.');
 assert.ok(
   contractCommand.indexOf(expectedCommand) < contractCommand.indexOf(hygieneCommand),

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "index_version": "0.1.0",
-  "generated_at": "2026-08-24T20:46:13Z",
+  "generated_at": "2026-08-24T20:54:23Z",
   "source": {
     "kind": "git",
-    "revision": "5fb6cd9ebddfa1c7127c350554f8fe3bdb976183",
+    "revision": "475a1d8436c4a5a651c5ef8080ac7904453d7f97",
     "dirty": true,
-    "inventory_sha256": "bf60e4c0f7da07494651d9c2f5d2e8e41df7567c441242187baae86b57a93271"
+    "inventory_sha256": "5349cf4e8bde341ead035ac1a22da2c1657b73d15b5e777cfca420d8d88886dc"
   },
   "inventory": {
     "directories": [
@@ -297,8 +297,8 @@
       {
         "path": "scripts/sway-audio-provider-operation-durability.contract.test.mjs",
         "language": "mjs",
-        "sha256": "27eb328d38c951ec62865e414e2823f22b49fb72aeca726d87db445c8043f7b5",
-        "bytes": 16053
+        "sha256": "c8fac44dfcd9409ad5b0bae7c9757513f3f359c273f9781d70b18c532ad2d30c",
+        "bytes": 16674
       },
       {
         "path": "scripts/sway-audio-provider-operation-durability.integration.test.mjs",
@@ -327,8 +327,8 @@
       {
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
         "language": "mjs",
-        "sha256": "8c9ffdb475846fcbdce7c50020c88123c379ac31adda4584c0c0db3d896a73e6",
-        "bytes": 77634
+        "sha256": "958659ad312988394b1846ddebc61f8fcfd1758a8c5c578a0d9521f4570484a7",
+        "bytes": 77992
       },
       {
         "path": "scripts/sway-auto-closeout.contract.test.mjs",
@@ -4306,84 +4306,84 @@
         "name": "sha256",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 40,
+        "line": 50,
         "exported": false
       },
       {
         "name": "wavBody",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 44,
+        "line": 54,
         "exported": false
       },
       {
         "name": "pngBody",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 64,
+        "line": 74,
         "exported": false
       },
       {
         "name": "CountingAudioObjectStore",
         "kind": "class",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 71,
+        "line": 81,
         "exported": false
       },
       {
         "name": "createPerformerWorkspace",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 253,
+        "line": 263,
         "exported": false
       },
       {
         "name": "sealFile",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 272,
+        "line": 282,
         "exported": false
       },
       {
         "name": "countProjectRows",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 297,
+        "line": 307,
         "exported": false
       },
       {
         "name": "createStaleSession",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 301,
+        "line": 311,
         "exported": false
       },
       {
         "name": "createDelivery",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 354,
+        "line": 364,
         "exported": false
       },
       {
         "name": "transitionDelivery",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 368,
+        "line": 378,
         "exported": false
       },
       {
         "name": "uploadInput",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 408,
+        "line": 418,
         "exported": false
       },
       {
         "name": "tinyUpload",
         "kind": "function",
         "path": "scripts/sway-audio-storage-policy.integration.test.mjs",
-        "line": 519,
+        "line": 529,
         "exported": false
       },
       {

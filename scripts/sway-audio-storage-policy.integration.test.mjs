@@ -37,6 +37,16 @@ import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 const MIB = 1024 * 1024;
 const DEFAULT_PART_SIZE = 5 * MIB;
+const strictRealPostgres = process.argv.includes('--strict-real-postgres');
+
+if (strictRealPostgres) {
+  if (process.env.DATABASE_URL?.trim()) {
+    throw new Error(
+      'Wave 5B standalone-PostgreSQL proof refuses generic DATABASE_URL; use only SWAY_REAL_POSTGRES_PROOF_DATABASE_URL.'
+    );
+  }
+  process.env.SWAY_REQUIRE_REAL_POSTGRES_PROOF = 'true';
+}
 
 function sha256(body) {
   return createHash('sha256').update(body).digest('hex');
