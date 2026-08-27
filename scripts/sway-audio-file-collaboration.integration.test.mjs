@@ -73,6 +73,14 @@ function pngFixture() {
   );
 }
 
+const HUMAN_CREATION = Object.freeze({
+  lyricsAuthorship: 'human',
+  compositionAuthorship: 'human',
+  vocalPerformance: 'human',
+  productionMethod: 'human',
+  lyricsExcerpt: null
+});
+
 const db = createSwayDb(databaseUrl);
 const objectRoot = mkdtempSync(join(tmpdir(), 'sway-file-collaboration-'));
 
@@ -418,6 +426,7 @@ try {
 
   const releaseId = randomUUID();
   const releaseDraft = await publishing.createReleaseDraft({
+    ...HUMAN_CREATION,
     clientReleaseId: releaseId,
     performerId: performer.id,
     actorUserId: ownerId,
@@ -426,6 +435,7 @@ try {
     title: 'Durable Release Proof',
     trackTitle: 'Durable Release Proof',
     primaryArtistName: 'Collaboration proof',
+    songwriterName: 'Proof Writer',
     releaseType: 'album',
     territories: ['US'],
     languageCode: 'en'
@@ -442,6 +452,7 @@ try {
   assert.ok(releaseWorkspace.releases[0].readiness.issues.includes('The © artwork/release copyright line is required.'));
 
   const incompleteEdit = await publishing.updateReleaseDraft({
+    ...HUMAN_CREATION,
     releaseId,
     performerId: performer.id,
     actorUserId: ownerId,
@@ -475,6 +486,7 @@ try {
   assert.equal((await db.select().from(musicRightsDeclarations)).length, 0);
 
   const editedRelease = await publishing.updateReleaseDraft({
+    ...HUMAN_CREATION,
     releaseId,
     performerId: performer.id,
     actorUserId: ownerId,
@@ -504,6 +516,7 @@ try {
 
   await assert.rejects(
     publishing.updateReleaseDraft({
+      ...HUMAN_CREATION,
       releaseId,
       performerId: performer.id,
       actorUserId: ownerId,
@@ -522,6 +535,7 @@ try {
   assert.equal((await db.select().from(musicReleases).where(eq(musicReleases.id, releaseId)))[0].title, 'Durable Release Proof');
 
   const releaseReplay = await publishing.createReleaseDraft({
+    ...HUMAN_CREATION,
     clientReleaseId: releaseId,
     performerId: performer.id,
     actorUserId: ownerId,
@@ -530,6 +544,7 @@ try {
     title: 'A retry must not duplicate this release',
     trackTitle: 'A retry must not duplicate this recording',
     primaryArtistName: 'Collaboration proof',
+    songwriterName: 'Proof Writer',
     releaseType: 'single'
   });
   assert.equal(releaseReplay.created, false, 'Release creation must be idempotent by client release UUID.');
@@ -538,6 +553,7 @@ try {
 
   await assert.rejects(
     publishing.createReleaseDraft({
+      ...HUMAN_CREATION,
       clientReleaseId: randomUUID(),
       performerId: performer.id,
       actorUserId: outsiderId,
@@ -546,6 +562,7 @@ try {
       title: 'Unauthorized release',
       trackTitle: 'Unauthorized release',
       primaryArtistName: 'Outsider',
+      songwriterName: 'Outsider Writer',
       releaseType: 'single'
     }),
     /Release management permission required/
@@ -560,13 +577,18 @@ try {
     expectedUpdatedAt: editedRelease.release.updatedAt.toISOString(),
     masterAssetVersionId: secondMasterVersion.id,
     title: 'Second Track',
-    primaryArtistName: 'Collaboration proof',
+    primaryArtistName: 'EdgeWyze',
     isrc: 'USAAA2600002',
     languageCode: 'en',
     originalReleaseDate: '2026-07-22',
+    lyricsAuthorship: 'human',
+    compositionAuthorship: 'generated',
+    vocalPerformance: 'virtual_original',
+    productionMethod: 'generated',
+    lyricsExcerpt: 'These human-written words belong to their songwriter.',
     credits: [
-      { displayName: 'Collaboration proof', role: 'primary_artist' },
-      { displayName: 'Second Track Writer', role: 'songwriter' }
+      { displayName: 'EdgeWyze', role: 'primary_artist' },
+      { displayName: 'Edge Writer', role: 'songwriter' }
     ]
   };
   const addedSecond = await publishing.addReleaseRecording(secondRecordingInput);
@@ -595,6 +617,7 @@ try {
 
   const thirdRecordingId = randomUUID();
   const thirdRecordingInput = {
+    ...HUMAN_CREATION,
     releaseId,
     clientRecordingId: thirdRecordingId,
     performerId: performer.id,
@@ -607,7 +630,7 @@ try {
     originalReleaseDate: '2026-07-22',
     credits: [
       { displayName: 'Collaboration proof', role: 'primary_artist' },
-      { displayName: 'Third Track Composer', role: 'composer' }
+      { displayName: 'Third Track Writer', role: 'songwriter' }
     ]
   };
   await assert.rejects(
@@ -633,6 +656,7 @@ try {
   assert.equal(addedThird.trackNumber, 3);
 
   const updatedThird = await publishing.updateReleaseRecording({
+    ...HUMAN_CREATION,
     releaseId,
     recordingId: thirdRecordingId,
     performerId: performer.id,
@@ -647,7 +671,7 @@ try {
     originalReleaseDate: '2026-07-22',
     credits: [
       { displayName: 'Collaboration proof', role: 'primary_artist' },
-      { displayName: 'Third Track Composer', role: 'composer' },
+      { displayName: 'Third Track Writer', role: 'songwriter' },
       { displayName: 'Third Track Producer', role: 'producer' }
     ]
   });
@@ -711,6 +735,7 @@ try {
     'Third Track Revised: verified composition control rights evidence is required.',
     'Second Track: verified master control rights evidence is required.',
     'Second Track: verified composition control rights evidence is required.',
+    'Second Track: verified commercial-use evidence for synthetic performance or generative production is required.',
     'Verified artwork control rights evidence is required for the release.',
     'Verified distribution authorization rights evidence is required for the release.'
   ]);
@@ -720,6 +745,7 @@ try {
     { declarationType: 'composition_control', recordingId: thirdRecordingId },
     { declarationType: 'master_control', recordingId: secondRecordingId },
     { declarationType: 'composition_control', recordingId: secondRecordingId },
+    { declarationType: 'ai_disclosure', recordingId: secondRecordingId },
     { declarationType: 'artwork_control', recordingId: null },
     { declarationType: 'distribution_authorization', recordingId: null }
   ];
@@ -800,8 +826,8 @@ try {
   assert.equal(mainRelease?.readiness.ready, true);
   assert.equal(mainRelease?.status, 'ready');
   assert.deepEqual(mainRelease?.recordings.map((recording) => recording.rightsStatus), ['cleared', 'cleared']);
-  assert.equal((await db.select().from(musicRightsDeclarations)).length, 6);
-  assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 6);
+  assert.equal((await db.select().from(musicRightsDeclarations)).length, 7);
+  assert.equal((await db.select().from(musicRightsDeclarationEvents)).filter((event) => event.eventType === 'verified').length, 7);
   const [storageManifest] = await db.select().from(musicReleaseStorageManifests)
     .where(eq(musicReleaseStorageManifests.releaseId, releaseId));
   assert.ok(storageManifest, 'Final readiness must atomically append an immutable exact storage manifest.');
@@ -850,6 +876,84 @@ try {
     'The public release must preserve the reviewed manifest order.'
   );
   assert.deepEqual(publicRelease?.recordings.map((recording) => recording.credits.length), [3, 2]);
+  assert.deepEqual(publicRelease?.creationTags, [
+    'Human-written lyrics',
+    'Original virtual artist',
+    'Rights checked'
+  ]);
+  assert.equal(publicRelease?.humanWrittenLyrics, true);
+  assert.equal(publicRelease?.originalVirtualArtist, true);
+  assert.equal(publicRelease?.fullyGenerated, false, 'Human-written lyrics must prevent a fully-generated classification.');
+  assert.equal(publicRelease?.recordings[1].lyricsExcerpt, 'These human-written words belong to their songwriter.');
+  assert.deepEqual(publicRelease?.recordings[1].creation.howMade, [
+    'Generated musical composition',
+    'Original virtual performance',
+    'Generative production'
+  ]);
+  await assert.rejects(
+    publishing.createReleaseReport({
+      releaseId,
+      reporterUserId: outsiderId,
+      reason: 'ai_use',
+      details: 'The recording uses a virtual performer, which is not itself a policy violation.'
+    }),
+    /AI use by itself is not reportable/
+  );
+  await assert.rejects(
+    publishing.createReleaseReport({
+      releaseId,
+      reporterUserId: ownerId,
+      reason: 'incorrect_creation_credit',
+      details: 'The release owner must not be able to create a moderation case against the same release.'
+    }),
+    /owners cannot report their own release/i
+  );
+  await assert.rejects(
+    publishing.createReleaseReport({
+      releaseId,
+      reporterUserId: outsiderId,
+      reason: 'copied_lyrics',
+      details: 'Too short.'
+    }),
+    /at least 40 characters/
+  );
+  const report = await publishing.createReleaseReport({
+    releaseId,
+    reporterUserId: outsiderId,
+    reason: 'copied_lyrics',
+    details: 'Specific lyric lines appear to match a prior registered work; compare the attached references during review.'
+  });
+  assert.equal(report.status, 'pending');
+  await assert.rejects(
+    publishing.createReleaseReport({
+      releaseId,
+      reporterUserId: outsiderId,
+      reason: 'copied_lyrics',
+      details: 'A second active report from the same account and reason must not create another moderation case.'
+    }),
+    /already have an active report/
+  );
+  assert.equal((await publishing.listReleaseReports({ status: 'pending' })).length, 1);
+  await assert.rejects(
+    publishing.reviewReleaseReport({ reportId: report.id, actorUserId: reviewerId, outcome: 'resolved', note: 'Too short.' }),
+    /at least 20 characters/
+  );
+  const escalatedReport = await publishing.reviewReleaseReport({
+    reportId: report.id,
+    actorUserId: reviewerId,
+    outcome: 'escalated',
+    note: 'The evidence identifies a concrete source and requires a deeper rights comparison.'
+  });
+  assert.equal(escalatedReport.report.status, 'escalated');
+  assert.equal((await publishing.listReleaseReports({ status: 'escalated' })).length, 1);
+  assert.equal((await publishing.getPublicRelease({ releaseId }))?.status, 'ready', 'A report must not automatically suppress a public release.');
+  const resolvedReport = await publishing.reviewReleaseReport({
+    reportId: report.id,
+    actorUserId: reviewerId,
+    outcome: 'resolved',
+    note: 'The deeper comparison is complete and the reasoned moderation outcome is now recorded.'
+  });
+  assert.equal(resolvedReport.report.status, 'resolved');
   const publicArtwork = await publishing.openPublicReleaseArtwork({ releaseId });
   assert.deepEqual(await streamToBuffer(publicArtwork.stream), artworkBody);
   assert.equal(openOriginalCount, evidenceOpenCount + 1, 'Public artwork must open exactly one stored original.');
@@ -858,6 +962,7 @@ try {
   assert.ok(sealedUpdatedAt, 'A ready multi-track release must retain its durable revision timestamp.');
   await assert.rejects(
     publishing.addReleaseRecording({
+      ...HUMAN_CREATION,
       releaseId,
       clientRecordingId: randomUUID(),
       performerId: performer.id,
@@ -876,6 +981,7 @@ try {
   );
   await assert.rejects(
     publishing.updateReleaseRecording({
+      ...HUMAN_CREATION,
       releaseId,
       recordingId: thirdRecordingId,
       performerId: performer.id,
@@ -913,6 +1019,7 @@ try {
   );
 
   const oneTrackRelease = await publishing.createReleaseDraft({
+    ...HUMAN_CREATION,
     clientReleaseId: randomUUID(),
     performerId: performer.id,
     actorUserId: ownerId,
@@ -921,6 +1028,7 @@ try {
     title: 'Final Track Guard',
     trackTitle: 'Only Track',
     primaryArtistName: 'Collaboration proof',
+    songwriterName: 'Proof Writer',
     releaseType: 'single',
     territories: ['US'],
     languageCode: 'en'
@@ -1354,7 +1462,7 @@ try {
     );
   }
 
-  console.log('Audio file collaboration integration passed: multi-track add/retry, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, parsed immutable storage manifest, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, grant-isolated review threads, audit rollback, and exact audit behavior are durable.');
+  console.log('Audio file collaboration integration passed: multi-track add/retry, songwriter-first virtual-artist creation facts, conditional synthetic rights, evidence-based community moderation, duplicate/stale/unauthorized denial, metadata and credits, reorder, non-destructive removal and renumbering, scoped rights, parsed immutable storage manifest, readiness/public order, post-rights mutation denial, final-track protection, selected-version sharing, grant-isolated review threads, audit rollback, and exact audit behavior are durable.');
 } finally {
   if (embeddedProof) await embeddedProof.close();
   else await db.$client.end();

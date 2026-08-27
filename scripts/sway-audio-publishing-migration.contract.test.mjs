@@ -1183,6 +1183,99 @@ await expectDatabaseFailure(
 );
 
 await database.exec(`
+  update music_recordings set
+    lyrics_authorship = 'human',
+    composition_authorship = 'generated',
+    vocal_performance = 'virtual_original',
+    production_method = 'generated',
+    lyrics_excerpt = 'A human-written lyric remains a human authorship credit.'
+  where id = '00000000-0000-0000-0000-000000000080';
+
+  insert into music_release_reports (
+    id, release_id, reporter_user_id, reason, details
+  ) values (
+    '00000000-0000-0000-0000-000000000092',
+    '00000000-0000-0000-0000-000000000081',
+    '00000000-0000-0000-0000-000000000003',
+    'copied_lyrics',
+    'Specific prior lyrics and source references are supplied for a human reviewer to investigate.'
+  );
+
+  insert into music_release_report_events (
+    id, report_id, actor_user_id, event_type, note
+  ) values (
+    '00000000-0000-0000-0000-000000000093',
+    '00000000-0000-0000-0000-000000000092',
+    '00000000-0000-0000-0000-000000000003',
+    'submitted',
+    'Specific prior lyrics and source references are supplied for a human reviewer to investigate.'
+  );
+`);
+
+const songwriterFirstRecording = await database.query(`
+  select lyrics_authorship, composition_authorship, vocal_performance, production_method, lyrics_excerpt
+  from music_recordings
+  where id = '00000000-0000-0000-0000-000000000080'
+`);
+if (songwriterFirstRecording.rows[0]?.lyrics_authorship !== 'human'
+  || songwriterFirstRecording.rows[0]?.vocal_performance !== 'virtual_original'
+  || songwriterFirstRecording.rows[0]?.production_method !== 'generated') {
+  throw new Error('Songwriter-first creation facts must persist independently on the recording.');
+}
+
+await expectDatabaseFailure(
+  'Recording creation facts must reject unknown values.',
+  `update music_recordings set lyrics_authorship = 'ai_song'
+   where id = '00000000-0000-0000-0000-000000000080'`,
+  'music_recordings_lyrics_authorship_allowed'
+);
+
+await expectDatabaseFailure(
+  'Duplicate active community reports must be rejected.',
+  `insert into music_release_reports (release_id, reporter_user_id, reason, details)
+   values (
+     '00000000-0000-0000-0000-000000000081',
+     '00000000-0000-0000-0000-000000000003',
+     'copied_lyrics',
+     'A duplicate active report with the same reporter and reason must not create another review record.'
+   )`,
+  'music_release_reports_active_identity_idx'
+);
+
+await expectDatabaseFailure(
+  'Community report evidence must remain immutable.',
+  `update music_release_reports set details = 'Rewritten evidence is forbidden after the report has been submitted.'
+   where id = '00000000-0000-0000-0000-000000000092'`,
+  'origin and evidence are immutable'
+);
+
+await database.exec(`
+  update music_release_reports set status = 'escalated', updated_at = clock_timestamp()
+  where id = '00000000-0000-0000-0000-000000000092';
+`);
+
+await expectDatabaseFailure(
+  'Community report status must not move backward.',
+  `update music_release_reports set status = 'pending', updated_at = clock_timestamp()
+   where id = '00000000-0000-0000-0000-000000000092'`,
+  'status transition is invalid'
+);
+
+await expectDatabaseFailure(
+  'Community report events must remain append-only.',
+  `update music_release_report_events set note = 'Rewritten review history'
+   where id = '00000000-0000-0000-0000-000000000093'`,
+  'immutable'
+);
+
+await expectDatabaseFailure(
+  'Community reports must remain retained audit records.',
+  `delete from music_release_reports
+   where id = '00000000-0000-0000-0000-000000000092'`,
+  'retained audit records'
+);
+
+await database.exec(`
   update audio_project_access_grants set
     revoked_at = now(), revoked_by_user_id = '00000000-0000-0000-0000-000000000001'
   where id = '00000000-0000-0000-0000-000000000026';

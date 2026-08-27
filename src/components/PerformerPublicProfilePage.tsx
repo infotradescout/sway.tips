@@ -89,7 +89,18 @@ type PublicProfileRelease = {
   publishedAt: string | null;
   releasePath: string;
   artworkUrl: string | null;
+  creationTags: string[];
+  humanWrittenLyrics: boolean;
+  originalVirtualArtist: boolean;
+  fullyGenerated: boolean;
 };
+
+function releaseTagClass(tag: string) {
+  if (tag === 'Human-written lyrics') return 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100';
+  if (tag === 'Original virtual artist') return 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100';
+  if (tag === 'Rights checked') return 'border-violet-300/30 bg-violet-400/10 text-violet-100';
+  return 'border-white/10 bg-white/[0.04] text-slate-300';
+}
 
 type ProfileResponse = {
   performer?: PublicPerformerProfile;
@@ -480,9 +491,12 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           {releases.length ? (
             <section className="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/[0.06] p-4 text-left" aria-label="Releases">
               <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200"><Disc3 className="h-4 w-4" /></span><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Music and releases</p><p className="mt-0.5 text-xs text-slate-500">Official release pages from this performer</p></div></div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">{releases.map((release) => <a key={release.id} href={release.releasePath} className="group flex min-h-24 items-center gap-3 rounded-xl border border-white/10 bg-slate-950/70 p-3 transition hover:border-violet-300/40">
-                {release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-200"><Disc3 className="h-6 w-6" /></span>}
-                <span className="min-w-0"><span className="block truncate text-sm font-black text-white group-hover:text-violet-100">{release.title}</span><span className="mt-1 block truncate text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-violet-300">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">{releases.map((release) => <a key={release.id} href={release.releasePath} className="group min-h-24 rounded-xl border border-white/10 bg-slate-950/70 p-3 transition hover:border-violet-300/40">
+                <span className="flex items-center gap-3">
+                  {release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-200"><Disc3 className="h-6 w-6" /></span>}
+                  <span className="min-w-0"><span className="block truncate text-sm font-black text-white group-hover:text-violet-100">{release.title}</span><span className="mt-1 block truncate text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-violet-300">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span>
+                </span>
+                <span className="mt-3 flex flex-wrap gap-1.5">{release.creationTags.map((tag) => <span key={tag} className={`rounded-full border px-2 py-1 text-[9px] font-black ${releaseTagClass(tag)}`}>{tag}</span>)}</span>
               </a>)}</div>
             </section>
           ) : null}
