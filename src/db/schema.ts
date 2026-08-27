@@ -2007,6 +2007,11 @@ export const musicRecordings = pgTable('music_recordings', {
   isExplicit: boolean('is_explicit').notNull().default(false),
   languageCode: text('language_code'),
   originalReleaseDate: date('original_release_date'),
+  lyricsAuthorship: text('lyrics_authorship').notNull().default('not_declared'),
+  compositionAuthorship: text('composition_authorship').notNull().default('not_declared'),
+  vocalPerformance: text('vocal_performance').notNull().default('not_declared'),
+  productionMethod: text('production_method').notNull().default('not_declared'),
+  lyricsExcerpt: text('lyrics_excerpt'),
   rightsStatus: text('rights_status').notNull().default('draft'),
   metadata: jsonb('metadata'),
   ...timestamps
@@ -2016,6 +2021,11 @@ export const musicRecordings = pgTable('music_recordings', {
   performerUpdatedIdx: index('music_recordings_performer_updated_idx').on(table.performerId, table.updatedAt),
   isrcValid: check('music_recordings_isrc_valid', sql`${table.isrc} is null or ${table.isrc} ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'`),
   durationValid: check('music_recordings_duration_valid', sql`${table.durationMs} is null or ${table.durationMs} > 0`),
+  lyricsAuthorshipAllowed: check('music_recordings_lyrics_authorship_allowed', sql`${table.lyricsAuthorship} in ('not_declared', 'human', 'human_ai_assisted', 'generated', 'instrumental')`),
+  compositionAuthorshipAllowed: check('music_recordings_composition_authorship_allowed', sql`${table.compositionAuthorship} in ('not_declared', 'human', 'human_ai_assisted', 'generated')`),
+  vocalPerformanceAllowed: check('music_recordings_vocal_performance_allowed', sql`${table.vocalPerformance} in ('not_declared', 'human', 'virtual_original', 'licensed_replica', 'mixed', 'instrumental')`),
+  productionMethodAllowed: check('music_recordings_production_method_allowed', sql`${table.productionMethod} in ('not_declared', 'human', 'ai_assisted', 'generated', 'mixed')`),
+  lyricsExcerptValid: check('music_recordings_lyrics_excerpt_valid', sql`${table.lyricsExcerpt} is null or (char_length(trim(${table.lyricsExcerpt})) between 1 and 500)`),
   rightsStatusAllowed: check('music_recordings_rights_status_allowed', sql`${table.rightsStatus} in ('draft', 'declared', 'under_review', 'cleared', 'blocked')`),
   projectPerformerFk: foreignKey({
     columns: [table.projectId, table.performerId],
@@ -2159,6 +2169,42 @@ export const musicRightsDeclarationEvents = pgTable('music_rights_declaration_ev
     foreignColumns: [musicRightsDeclarations.id, musicRightsDeclarations.declarationSha256],
     name: 'music_rights_declaration_events_declaration_sha_fk'
   })
+}));
+
+export const musicReleaseReports = pgTable('music_release_reports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  releaseId: uuid('release_id').notNull().references(() => musicReleases.id),
+  reporterUserId: uuid('reporter_user_id').notNull().references(() => users.id),
+  reason: text('reason').notNull(),
+  details: text('details').notNull(),
+  status: text('status').notNull().default('pending'),
+  ...timestamps
+}, (table) => ({
+  releaseCreatedIdx: index('music_release_reports_release_created_idx').on(table.releaseId, table.createdAt),
+  statusCreatedIdx: index('music_release_reports_status_created_idx').on(table.status, table.createdAt),
+  activeIdentityIdx: uniqueIndex('music_release_reports_active_identity_idx')
+    .on(table.releaseId, table.reporterUserId, table.reason)
+    .where(sql`${table.status} in ('pending', 'escalated')`),
+  reasonAllowed: check('music_release_reports_reason_allowed', sql`${table.reason} in ('copied_lyrics', 'unauthorized_voice', 'unlicensed_sample', 'missing_commercial_rights', 'incorrect_creation_credit', 'spam_or_duplicate', 'fake_engagement', 'impersonation')`),
+  statusAllowed: check('music_release_reports_status_allowed', sql`${table.status} in ('pending', 'dismissed', 'escalated', 'resolved')`),
+  detailsValid: check('music_release_reports_details_valid', sql`char_length(trim(${table.details})) between 40 and 2000`)
+}));
+
+export const musicReleaseReportEvents = pgTable('music_release_report_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reportId: uuid('report_id').notNull().references(() => musicReleaseReports.id),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  eventType: text('event_type').notNull(),
+  note: text('note').notNull(),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  reportCreatedIdx: index('music_release_report_events_report_created_idx').on(table.reportId, table.createdAt),
+  singleSubmittedIdx: uniqueIndex('music_release_report_events_single_submitted_idx')
+    .on(table.reportId)
+    .where(sql`${table.eventType} = 'submitted'`),
+  eventTypeAllowed: check('music_release_report_events_type_allowed', sql`${table.eventType} in ('submitted', 'dismissed', 'escalated', 'resolved')`),
+  noteValid: check('music_release_report_events_note_valid', sql`char_length(trim(${table.note})) between 1 and 2000`)
 }));
 
 export const musicReleaseStorageManifests = pgTable('music_release_storage_manifests', {

@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
   CalendarDays,
+  Disc3,
   Loader2,
   MapPin,
   Radio,
@@ -32,8 +33,40 @@ type PublicRoomDto = {
 type PublicFeedResponse = {
   rooms?: PublicRoomDto[];
   events?: PublicEventDto[];
+  releases?: PublicReleaseDto[];
   error?: string;
 };
+
+type PublicReleaseDto = {
+  id: string;
+  title: string;
+  primaryArtistName: string;
+  releaseType: string;
+  status: 'ready' | 'scheduled' | 'published';
+  scheduledReleaseAt: string | null;
+  publishedAt: string | null;
+  releasePath: string;
+  artworkUrl: string | null;
+  creationTags: string[];
+  humanWrittenLyrics: boolean;
+  originalVirtualArtist: boolean;
+  fullyGenerated: boolean;
+  recordings: Array<{
+    recordingId: string;
+    title: string;
+    lyricsExcerpt: string | null;
+    credits: Array<{ displayName: string; role: string }>;
+  }>;
+};
+
+type ReleaseFilter = 'all' | 'human_written' | 'virtual';
+
+function releaseTagClass(tag: string) {
+  if (tag === 'Human-written lyrics') return 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100';
+  if (tag === 'Original virtual artist') return 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100';
+  if (tag === 'Rights checked') return 'border-violet-300/30 bg-violet-400/10 text-violet-100';
+  return 'border-white/10 bg-white/[0.04] text-slate-300';
+}
 
 function initials(value: string) {
   return value
@@ -54,9 +87,11 @@ function roomStartedLabel(value: string | null) {
 export default function PublicDiscoverPage() {
   const [rooms, setRooms] = useState<PublicRoomDto[]>([]);
   const [events, setEvents] = useState<PublicEventDto[]>([]);
+  const [releases, setReleases] = useState<PublicReleaseDto[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState<string | null>(null);
   const [searchPhrase, setSearchPhrase] = useState('');
+  const [releaseFilter, setReleaseFilter] = useState<ReleaseFilter>('all');
 
   const loadFeed = async (signal?: AbortSignal) => {
     setStatus('loading');
@@ -69,6 +104,7 @@ export default function PublicDiscoverPage() {
       }
       setRooms(Array.isArray(data.rooms) ? data.rooms : []);
       setEvents(Array.isArray(data.events) ? data.events : []);
+      setReleases(Array.isArray(data.releases) ? data.releases : []);
       setStatus('ready');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -102,10 +138,26 @@ export default function PublicDiscoverPage() {
     ? orderedEvents.filter((event) => [event.title, event.location.city, event.location.name, event.performer?.displayName]
       .some((value) => value?.toLowerCase().includes(normalizedSearchPhrase)))
     : orderedEvents, [normalizedSearchPhrase, orderedEvents]);
+  const filteredReleases = useMemo(() => releases.filter((release) => {
+    if (releaseFilter === 'human_written' && !release.humanWrittenLyrics) return false;
+    if (releaseFilter === 'virtual' && !release.originalVirtualArtist) return false;
+    if (!normalizedSearchPhrase) return true;
+    return [
+      release.title,
+      release.primaryArtistName,
+      ...release.recordings.flatMap((recording) => [
+        recording.title,
+        recording.lyricsExcerpt,
+        ...recording.credits
+          .filter((credit) => credit.role === 'songwriter' || credit.role === 'composer')
+          .map((credit) => credit.displayName)
+      ])
+    ].some((value) => value?.toLowerCase().includes(normalizedSearchPhrase));
+  }), [normalizedSearchPhrase, releaseFilter, releases]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (!searchPhrase.trim() || filteredRooms.length || filteredEvents.length) return;
+    if (!searchPhrase.trim() || filteredRooms.length || filteredEvents.length || filteredReleases.length) return;
     sendDiscoveryEvent('internal_search_zero_result', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
       has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
@@ -113,7 +165,7 @@ export default function PublicDiscoverPage() {
     });
   };
 
-  const isEmpty = status === 'ready' && rooms.length === 0 && orderedEvents.length === 0;
+  const isEmpty = status === 'ready' && rooms.length === 0 && orderedEvents.length === 0 && releases.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#05060a] px-4 py-5 text-slate-100 sm:py-8">
@@ -142,20 +194,20 @@ export default function PublicDiscoverPage() {
             What&apos;s happening
           </p>
           <h1 className="mt-3 font-display text-3xl font-black tracking-tight text-white sm:text-5xl">
-            Live rooms and upcoming shows
+            Live rooms, shows, and original music
           </h1>
           <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">
-            Enter a performer&apos;s active Sway room or open a real upcoming event. This page only shows current
-            records returned by Sway—no sample performers or padded listings.
+            Enter a performer&apos;s active room, open a real upcoming event, or discover a rights-checked release.
+            Human-written songs stay credited to their writers, including when an original virtual artist performs them.
           </p>
         </section>
 
         {status === 'ready' ? (
           <form onSubmit={submitSearch} className="mt-7 flex max-w-2xl gap-2" role="search">
-            <label className="sr-only" htmlFor="sway-discover-search">Search current rooms and events</label>
+            <label className="sr-only" htmlFor="sway-discover-search">Search rooms, events, songs, lyrics, and songwriters</label>
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-500" aria-hidden="true" />
-              <input id="sway-discover-search" value={searchPhrase} onChange={(event) => setSearchPhrase(event.target.value)} maxLength={160} placeholder="Search current performers, places, and shows" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-10 pr-3 text-sm text-white outline-none focus:border-cyan-300/50" />
+              <input id="sway-discover-search" value={searchPhrase} onChange={(event) => setSearchPhrase(event.target.value)} maxLength={160} placeholder="Search performers, songs, writers, lyrics, places, and shows" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-10 pr-3 text-sm text-white outline-none focus:border-cyan-300/50" />
             </div>
             <button className="min-h-11 rounded-xl bg-cyan-400 px-4 text-sm font-black text-slate-950">Search</button>
           </form>
@@ -194,11 +246,11 @@ export default function PublicDiscoverPage() {
           </div>
         ) : null}
 
-        {status === 'ready' && Boolean(normalizedSearchPhrase) && filteredRooms.length === 0 && filteredEvents.length === 0 && !isEmpty ? (
+        {status === 'ready' && Boolean(normalizedSearchPhrase) && filteredRooms.length === 0 && filteredEvents.length === 0 && filteredReleases.length === 0 && !isEmpty ? (
           <div className="mt-10 rounded-3xl border border-dashed border-white/10 bg-slate-950/55 p-8 text-center">
             <Search className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
             <h2 className="mt-4 text-lg font-black text-white">No current matches</h2>
-            <p className="mt-2 text-sm text-slate-400">Try another performer, place, or show.</p>
+            <p className="mt-2 text-sm text-slate-400">Try another performer, songwriter, lyric, place, or show.</p>
           </div>
         ) : null}
 
@@ -290,6 +342,73 @@ export default function PublicDiscoverPage() {
                 </div>
               ))}
             </div>
+          </section>
+        ) : null}
+
+        {status === 'ready' && releases.length ? (
+          <section className="mt-12" aria-labelledby="original-music-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-300">Original music</p>
+                <h2 id="original-music-heading" className="mt-1 text-2xl font-black text-white">Songs and their writers</h2>
+                <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">Creation labels explain how each recording was made without hiding human authorship or downranking virtual artists.</p>
+              </div>
+              <div className="flex flex-wrap gap-2" aria-label="Filter releases">
+                {([
+                  ['all', 'All releases'],
+                  ['human_written', 'Human-written lyrics'],
+                  ['virtual', 'Original virtual artists']
+                ] as Array<[ReleaseFilter, string]>).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setReleaseFilter(value)}
+                    aria-pressed={releaseFilter === value}
+                    className={`min-h-9 rounded-full border px-3 text-[10px] font-black uppercase tracking-wider transition ${releaseFilter === value ? 'border-cyan-300/40 bg-cyan-400/15 text-cyan-100' : 'border-white/10 bg-white/[0.04] text-slate-400 hover:text-white'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredReleases.length ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                {filteredReleases.map((release) => {
+                  const writers = [...new Set(release.recordings.flatMap((recording) => recording.credits
+                    .filter((credit) => credit.role === 'songwriter' || credit.role === 'composer')
+                    .map((credit) => credit.displayName)))];
+                  const excerpt = release.recordings.find((recording) => recording.lyricsExcerpt)?.lyricsExcerpt;
+                  return (
+                    <a
+                      key={release.id}
+                      href={release.releasePath}
+                      onClick={() => sendDiscoveryEvent('discovery_primary_action', {
+                        shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
+                        has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
+                        entity_kind: 'release', entity_key: release.id, action_kind: 'other',
+                        visibility_eligibility: 'eligible'
+                      })}
+                      className="group rounded-2xl border border-violet-300/20 bg-slate-950/70 p-4 shadow-xl transition hover:border-violet-300/45"
+                    >
+                      <div className="flex gap-3">
+                        {release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-20 w-20 shrink-0 rounded-xl object-cover" /> : <span className="grid h-20 w-20 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-200"><Disc3 className="h-7 w-7" /></span>}
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">{release.releaseType.replaceAll('_', ' ')}</p>
+                          <h3 className="mt-1 truncate text-base font-black text-white group-hover:text-violet-100">{release.title}</h3>
+                          <p className="mt-1 truncate text-xs text-slate-400">{release.primaryArtistName}</p>
+                          {writers.length ? <p className="mt-2 truncate text-xs font-bold text-emerald-100">Written by {writers.join(', ')}</p> : null}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">{release.creationTags.map((tag) => <span key={tag} className={`rounded-full border px-2 py-1 text-[9px] font-black ${releaseTagClass(tag)}`}>{tag}</span>)}</div>
+                      {excerpt ? <p className="mt-3 line-clamp-2 text-xs italic leading-5 text-slate-400">“{excerpt}”</p> : null}
+                    </a>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-slate-950/55 p-6 text-center text-sm text-slate-400">No releases match this filter.</div>
+            )}
           </section>
         ) : null}
 

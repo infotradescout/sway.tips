@@ -35,6 +35,13 @@ import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 const MIB = 1024 * 1024;
 const DEFAULT_PART_SIZE = 5 * MIB;
+const HUMAN_CREATION = Object.freeze({
+  lyricsAuthorship: 'human',
+  compositionAuthorship: 'human',
+  vocalPerformance: 'human',
+  productionMethod: 'human',
+  lyricsExcerpt: null
+});
 
 function sha256(body) {
   return createHash('sha256').update(body).digest('hex');
@@ -503,6 +510,7 @@ try {
     .where(eq(audioAssets.id, restrictedDocument.assetId));
 
   const releaseDraft = await classificationService.createReleaseDraft({
+    ...HUMAN_CREATION,
     clientReleaseId: randomUUID(),
     performerId: classificationWorkspace.performer.id,
     actorUserId: classificationWorkspace.ownerUserId,
@@ -511,6 +519,7 @@ try {
     title: 'Bounded Storage Release',
     trackTitle: 'Bounded Storage Track',
     primaryArtistName: 'Classification performer',
+    songwriterName: 'Classification writer',
     releaseType: 'single',
     territories: ['US'],
     languageCode: 'en'
@@ -705,6 +714,7 @@ try {
     .where(eq(musicReleases.performerId, classificationWorkspace.performer.id))).length;
   for (let index = 0; index < 12; index += 1) {
     const result = await noCountCapService.createReleaseDraft({
+      ...HUMAN_CREATION,
       clientReleaseId: randomUUID(),
       performerId: classificationWorkspace.performer.id,
       actorUserId: classificationWorkspace.ownerUserId,
@@ -713,6 +723,7 @@ try {
       title: `Unlimited release ${index + 1}`,
       trackTitle: `Unlimited track ${index + 1}`,
       primaryArtistName: 'Classification performer',
+      songwriterName: 'Classification writer',
       releaseType: 'single',
       territories: ['US'],
       languageCode: 'en'
@@ -743,6 +754,7 @@ try {
     filename: 'delivery-art.png', assetKind: 'artwork', mimeType: 'image/png', body: pngBody('delivery artwork')
   });
   const deliveryRelease = await classificationService.createReleaseDraft({
+    ...HUMAN_CREATION,
     clientReleaseId: randomUUID(),
     performerId: deliveryWorkspace.performer.id,
     actorUserId: deliveryWorkspace.ownerUserId,
@@ -751,6 +763,7 @@ try {
     title: 'Delivery lifecycle release',
     trackTitle: 'Delivery lifecycle track',
     primaryArtistName: 'Delivery performer',
+    songwriterName: 'Delivery writer',
     releaseType: 'single',
     territories: ['US'],
     languageCode: 'en'

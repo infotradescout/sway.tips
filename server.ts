@@ -1122,7 +1122,8 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       : release.scheduledReleaseAt
         ? `Planned for ${new Date(release.scheduledReleaseAt).toLocaleDateString('en-US')}.`
         : 'Release ready; destination delivery is not yet confirmed.';
-    const releaseDescription = `${dateCopy} View the official credits and provider-confirmed availability on Sway.`;
+    const creationCopy = release.creationTags.length ? `${release.creationTags.join(' · ')}. ` : '';
+    const releaseDescription = `${dateCopy} ${creationCopy}View the official credits and provider-confirmed availability on Sway.`;
     const canonicalReleaseUrl = canonicalPublicUrl(release.releasePath);
     return defaultShareMetadata(req, {
       title: `${release.title} by ${release.primaryArtistName}`,
@@ -1148,7 +1149,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         entityName: release.title,
         heading: `${release.title} by ${release.primaryArtistName}`,
         summary: releaseDescription,
-        categories: ['Release', 'Self-Production'],
+        categories: ['Release', 'Self-Production', ...release.creationTags],
         primaryActionLabel: 'View release',
         primaryActionHref: canonicalReleaseUrl,
         relatedLinks: [
@@ -1695,6 +1696,16 @@ app.use((req, res, next) => {
 });
 
 app.use('/admin/discovery-observatory', async (req, res, next) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).send(adminAccess.reason);
+    return;
+  }
+  applyNoStoreHeaders(res);
+  next();
+});
+
+app.use('/admin/release-reports', async (req, res, next) => {
   const adminAccess = await accessControl.requireAdminAccess(req);
   if (adminAccess.allowed === false) {
     res.status(adminAccess.status).send(adminAccess.reason);
@@ -9704,6 +9715,7 @@ app.post('/api/talent/audio/releases', async (req, res) => {
       trackTitle: typeof req.body?.trackTitle === 'string' ? req.body.trackTitle : '',
       versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
       primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      songwriterName: typeof req.body?.songwriterName === 'string' ? req.body.songwriterName : '',
       releaseType: typeof req.body?.releaseType === 'string' ? req.body.releaseType : '',
       upc: typeof req.body?.upc === 'string' ? req.body.upc : null,
       isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
@@ -9715,7 +9727,12 @@ app.post('/api/talent/audio/releases', async (req, res) => {
         ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string')
         : null,
       isExplicit: req.body?.isExplicit === true,
-      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.status(result.created ? 201 : 200).json(result);
   } catch (error) {
@@ -9756,7 +9773,12 @@ app.patch('/api/talent/audio/releases/:releaseId', async (req, res) => {
       territories: Array.isArray(req.body?.territories) ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string') : null,
       isExplicit: req.body?.isExplicit === true,
       languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
-      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.json(result);
   } catch (error) {
@@ -9789,7 +9811,12 @@ app.post('/api/talent/audio/releases/:releaseId/recordings', async (req, res) =>
       isExplicit: req.body?.isExplicit === true,
       languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
       originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
-      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.status(result.created ? 201 : 200).json(result);
   } catch (error) {
@@ -11095,13 +11122,14 @@ app.get('/api/public/feed', async (_req, res) => {
     const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
+    const releaseLimit = Math.max(1, Math.min(30, Number(_req.query?.releaseLimit) || 12));
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
     const gigIds = activeRooms.map((room) => room.gigId);
-    const [details, publicEvents] = await Promise.all([
+    const [details, publicEvents, publicReleaseRows] = await Promise.all([
       gigIds.length
         ? businessDb
             .select({
@@ -11132,13 +11160,26 @@ app.get('/api/public/feed', async (_req, res) => {
               sql`nullif(trim(${performers.displayName}), '') is not null`
             ))
         : Promise.resolve([]),
-      performerEventService.listPublicEvents({ limit: eventLimit })
+      performerEventService.listPublicEvents({ limit: eventLimit }),
+      businessDb
+        .select({ id: musicReleases.id })
+        .from(musicReleases)
+        .where(and(
+          ne(musicReleases.distributionMode, 'private'),
+          inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
+        ))
+        .orderBy(desc(musicReleases.publishedAt), desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
+        .limit(releaseLimit)
     ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
     const selectedRooms = activeRooms
       .filter((room) => detailsByGigId.has(room.gigId))
       .slice(0, roomLimit);
+    const publicReleases = audioPublishingService
+      ? (await Promise.all(publicReleaseRows.map((release) => audioPublishingService!.getPublicRelease({ releaseId: release.id }))))
+        .filter((release) => release !== null)
+      : [];
 
     return res.json({
       rooms: selectedRooms
@@ -11168,7 +11209,28 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
-      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket)),
+      releases: publicReleases.map((release) => ({
+        id: release.id,
+        title: release.title,
+        primaryArtistName: release.primaryArtistName,
+        releaseType: release.releaseType,
+        status: release.status,
+        scheduledReleaseAt: release.scheduledReleaseAt,
+        publishedAt: release.publishedAt,
+        releasePath: release.releasePath,
+        artworkUrl: release.artworkUrl,
+        creationTags: release.creationTags,
+        humanWrittenLyrics: release.humanWrittenLyrics,
+        originalVirtualArtist: release.originalVirtualArtist,
+        fullyGenerated: release.fullyGenerated,
+        recordings: release.recordings.map((recording) => ({
+          recordingId: recording.recordingId,
+          title: recording.title,
+          lyricsExcerpt: recording.lyricsExcerpt,
+          credits: recording.credits
+        }))
+      }))
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -11205,6 +11267,69 @@ app.get('/api/public/releases/:releaseId', async (req, res) => {
     return res.json({ release });
   } catch (error) {
     return res.status(503).json({ error: error instanceof Error ? error.message : 'Public release is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/public/releases/:releaseId/reports', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const report = await audioPublishingService.createReleaseReport({
+      releaseId: req.params.releaseId,
+      reporterUserId: accountAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : '',
+      details: typeof req.body?.details === 'string' ? req.body.details : ''
+    });
+    return res.status(201).json({ report: { id: report.id, status: report.status } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not submit this release report.';
+    const status = /already have an active report/i.test(message)
+      ? 409
+      : /owners cannot report/i.test(message)
+        ? 403
+        : /not found/i.test(message)
+          ? 404
+          : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/admin/release-reports', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!adminAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const reports = await audioPublishingService.listReleaseReports({
+      status: typeof req.query?.status === 'string' ? req.query.status : null
+    });
+    return res.json({ reports });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not load release reports.' });
+  }
+});
+
+app.patch('/api/admin/release-reports/:reportId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!adminAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const result = await audioPublishingService.reviewReleaseReport({
+      reportId: req.params.reportId,
+      actorUserId: adminAccess.actor.actorId,
+      outcome: typeof req.body?.outcome === 'string' ? req.body.outcome : '',
+      note: typeof req.body?.note === 'string' ? req.body.note : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not review release report.';
+    return res.status(/not found/i.test(message) ? 404 : /already|changed|final outcome/i.test(message) ? 409 : 422).json({ error: message });
   }
 });
 
@@ -11374,7 +11499,11 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         scheduledReleaseAt: release.scheduledReleaseAt,
         publishedAt: release.publishedAt,
         releasePath: release.releasePath,
-        artworkUrl: release.artworkUrl
+        artworkUrl: release.artworkUrl,
+        creationTags: release.creationTags,
+        humanWrittenLyrics: release.humanWrittenLyrics,
+        originalVirtualArtist: release.originalVirtualArtist,
+        fullyGenerated: release.fullyGenerated
       })),
       events: await Promise.all(publicEventRows.map(toPublicEventResponseWithTicket))
     });
