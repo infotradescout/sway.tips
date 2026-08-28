@@ -99,6 +99,7 @@ for (const allowedNext of [
   FILE_COLLABORATION_PATHS.inbox,
   FILE_COLLABORATION_PATHS.connect,
   '/talent/gigs',
+  '/talent/connections',
   '/talent/shows',
   '/talent/music',
   '/talent/files',

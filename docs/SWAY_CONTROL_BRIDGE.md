@@ -22,7 +22,7 @@ Content-Type: application/json
 { "gig_id": "YOUR_GIG_ID" }
 ```
 
-The performer dashboard's Hardware Controls panel issues the bridge token and
+The performer dashboard's Connections workspace issues the bridge token and
 can download a ready-made preset (button URL, header, and body already filled
 in) for Companion or Stream Deck import.
 
@@ -55,8 +55,8 @@ For a local Sway dev server:
 npm run control:bridge -- --gig-id YOUR_GIG_ID --auth-token YOUR_DASHBOARD_BRIDGE_TOKEN --sway-url http://localhost:5173
 ```
 
-The performer dashboard can issue a short-lived bridge token from Hardware
-Controls. That token is preferred over copying a browser cookie. The local
+The performer dashboard can issue a short-lived bridge token from Connections.
+That token is preferred over copying a browser cookie. The local
 bridge forwards it to Sway as the same `Authorization: Bearer` header used by
 the direct path above — it's a thin translator for hardware that can't speak
 HTTP with custom headers on its own, not a requirement for HTTP tools.

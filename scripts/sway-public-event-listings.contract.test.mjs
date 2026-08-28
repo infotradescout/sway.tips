@@ -257,7 +257,8 @@ requireTerms(manager, 'Performer event manager', [
 ]);
 if (
   !dashboard.includes('<PerformerEventsManager previewMode={previewMode} />')
-  || !dashboard.includes('href="#sway-events-manager"')
+  || !dashboard.includes("{ id: 'shows', label: 'Shows'")
+  || !dashboard.includes("inactiveWorkspace === 'shows'")
 ) {
   failures.push('Talent dashboard must render the performer event manager.');
 }

@@ -1,6 +1,7 @@
 export type InactivePerformerWorkspace =
   | 'home'
   | 'room'
+  | 'connections'
   | 'shows'
   | 'library'
   | 'catalog'
@@ -10,6 +11,7 @@ export type InactivePerformerWorkspace =
 export const INACTIVE_PERFORMER_WORKSPACE_PATHS: Record<InactivePerformerWorkspace, string> = {
   home: '/talent',
   room: '/talent/gigs',
+  connections: '/talent/connections',
   shows: '/talent/shows',
   library: '/talent/music',
   catalog: '/talent/files',
@@ -30,6 +32,7 @@ export function resolveInactivePerformerWorkspace(pathname: string, hash = ''): 
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath === '/talent/shows') return 'shows';
   if (normalizedPath === '/talent/gigs') return 'room';
+  if (normalizedPath === '/talent/connections') return 'connections';
   if (normalizedPath === '/talent/music') return 'library';
   if (normalizedPath === '/talent/files') return 'catalog';
   if (normalizedPath === '/talent/profile') return 'profile';

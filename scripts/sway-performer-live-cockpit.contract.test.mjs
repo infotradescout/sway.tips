@@ -11,7 +11,7 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const failures = [];
 
 for (const term of [
-  "if (session.status !== 'inactive')",
+  'if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace))',
   'h-[var(--sway-viewport-height,100vh)] overflow-hidden',
   '<TalentDashboard',
   '<SplitViewShell'
@@ -19,7 +19,7 @@ for (const term of [
   if (!talentApp.includes(term)) failures.push(`TalentApp missing performer cockpit routing term: ${term}`);
 }
 
-const activeBranchStart = talentApp.indexOf("if (session.status !== 'inactive')");
+const activeBranchStart = talentApp.indexOf('if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace))');
 const activeBranchEnd = activeBranchStart === -1 ? -1 : talentApp.indexOf('return (', talentApp.indexOf('return (', activeBranchStart) + 1);
 const activeBranch = activeBranchStart === -1 || activeBranchEnd === -1
   ? ''
@@ -62,7 +62,7 @@ if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} siz
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
-if (talentDashboard.match(/session\.status !== 'inactive'/g)?.length !== 1) {
+if (talentDashboard.match(/shouldRenderPerformerLiveRoom\(session\.status, inactiveWorkspace\)/g)?.length !== 1) {
   failures.push('TalentDashboard must have one active-room branch and no second live-session renderer below it.');
 }
 

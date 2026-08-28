@@ -1,24 +1,26 @@
 # Sway Performer Integration Truth Map
 
-Date: 2026-07-01
+Date: 2026-08-28
 
 ## Decision
 
-The current repo supports a basic performer room and queue console, but it does not yet support the real performer toolchain a working DJ or live performer needs.
+The current repo supports a real browser-based room, sharing, streaming-output, and controller workflow. It still does not load or play tracks inside third-party DJ software.
 
 The performer surface is currently:
 
 - a standalone web console
 - a room-share and QR flow
 - a request/tip/boost queue manager
-- a basic overlay route
+- branded and transparent streaming overlay routes
+- persistent keyboard and WebMIDI room controls
+- Stream Deck / Bitfocus Companion HTTP control presets
 
 It is not yet:
 
 - a built-in third-party audio playback engine
-- an OBS-integrated streaming workflow
+- native OBS scene/source automation
 - a DJ software companion
-- a real-time broadcast/control hub
+- an audio/video broadcast engine
 
 ## Product Reality
 
@@ -100,9 +102,12 @@ Verdict:
 Implemented:
 
 - separate `/overlay/:gigId` surface
+- transparent `/overlay/:gigId?transparent=1` Browser Source mode
 - now playing card
 - up-next list
-- empty-state overlay
+- tips and boosts
+- branded patron QR
+- copy and direct-test actions in `/talent/connections`
 
 Repo evidence:
 
@@ -111,9 +116,31 @@ Repo evidence:
 
 Verdict:
 
-- real but minimal
+- real browser output; manual source setup
 
-## What Is Fake, Preview-Only, Or Not Production-Ready
+### 5. Booth controls
+
+Implemented:
+
+- persisted opt-in for keyboard and WebMIDI controls
+- learnable keyboard and MIDI mappings
+- controls stay armed across performer workspace navigation while the dashboard is open
+- short-lived cloud control tokens
+- downloadable Stream Deck / Bitfocus Companion HTTP button presets
+- local control bridge for MIDI routers, foot pedals, and header-less tools
+
+Repo evidence:
+
+- `src/components/TalentDashboard.tsx`
+- `server.ts`
+- `scripts/sway-control-bridge.mjs`
+- `docs/SWAY_CONTROL_BRIDGE.md`
+
+Verdict:
+
+- real Sway room control; not music-deck control
+
+## What Is Not A Native Integration
 
 ### 1. Music search / song library integration
 
@@ -162,7 +189,8 @@ Verdict:
 
 Current truth:
 
-- there is an overlay web route
+- branded and transparent overlay web routes are ready for OBS/Streamlabs Browser Source
+- the Connections workspace supplies exact URLs with copy and direct-test actions
 - there is no OBS plugin, no OBS websocket integration, no scene/source automation, and no authenticated broadcaster workflow
 
 Repo evidence:
@@ -172,22 +200,24 @@ Repo evidence:
 
 Verdict:
 
-- no real OBS integration
+- real manual Browser Source workflow; no native OBS automation
 
 ### 4. DJ software integration
 
 Current truth:
 
-- no Serato integration
-- no Rekordbox integration
-- no Traktor integration
-- no VirtualDJ integration
-- no djay integration
-- no MIDI/controller integration
+- no native Serato integration
+- no native rekordbox integration
+- no native Traktor integration
+- no native VirtualDJ integration
+- no native djay integration
+- keyboard and WebMIDI can control Sway room actions, not decks or playback
+- Stream Deck / Companion can control Sway room actions through HTTP, not decks or playback
+- the library bridge can sync metadata/availability from a custom local workflow, not load a deck
 
 Verdict:
 
-- missing entirely
+- Sway controller layer exists; native DJ software linkage is still missing
 
 ### 5. Real-time performer notifications beyond polling
 
@@ -213,7 +243,9 @@ Verdict:
 - room QR and share flow
 - performer login/account ownership
 - performer queue actions
-- clean overlay/browser display
+- branded and transparent overlay/browser display
+- persistent keyboard/WebMIDI room controls
+- Stream Deck/Companion room-control preset
 - real production music search or clearly manual request entry
 - truthful performer copy about what is and is not integrated
 
@@ -221,7 +253,8 @@ Verdict:
 
 - licensed or verifiable song search/catalog
 - performer-side request-to-library workflow
-- stream/display workflow stronger than a bare browser overlay
+- native OBS automation if demand justifies it
+- first-party library exporters for specific DJ applications where lawful and technically supportable
 - lawful audio playback strategy for owned/licensed/provider-approved tracks
 
 ### Can stay manual temporarily
@@ -234,7 +267,7 @@ Verdict:
 
 ### Not present and should not be implied
 
-- native OBS automation
+- native OBS scene/source automation
 - DJ deck software sync
 - playlist/crate import
 - automatic library match
@@ -251,13 +284,15 @@ The repo is currently strongest at:
 - room routing
 - QR entry
 - queue management
+- manual OBS/Streamlabs browser outputs
+- keyboard, MIDI, Stream Deck, and Companion control of Sway room actions
 - synced library metadata
 
 The repo is currently weakest at:
 
 - music ecosystem integration
 - lawful audio playback
-- performer workflow integration
+- native deck software integration
 - stream/broadcast integration
 - “this fits into a real DJ set” tooling
 

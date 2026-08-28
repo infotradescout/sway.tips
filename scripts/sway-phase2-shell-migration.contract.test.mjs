@@ -125,10 +125,11 @@ const performerHome = readFileSync(join(root, 'src/components/PerformerAccountHo
 for (const workspace of [
   "{ id: 'home', label: 'Home'",
   "{ id: 'room', label: 'Live Room'",
+  "{ id: 'connections', label: 'Connections'",
   "{ id: 'library', label: 'Music'",
   "{ id: 'catalog', label: 'Files'",
-  "{ id: 'profile', label: 'Profile'",
-  "{ id: 'account', label: 'Account'"
+  "{ id: 'profile', label: 'Public Page'",
+  "{ id: 'account', label: 'Money'"
 ]) {
   if (!performerDashboard.includes(workspace)) {
     failures.push(`Performer app is missing workspace: ${workspace}`);
@@ -151,7 +152,7 @@ if (!performerDashboard.includes('<PerformerAudioFiles />') || !performerDashboa
 if (performerHome.includes('<PerformerAudioFiles />') || performerHome.includes('<PerformerFilePairing />')) {
   failures.push('Home must stay an overview instead of absorbing library workflows.');
 }
-if (!performerDashboard.includes('Money & access')) {
+if (!performerDashboard.includes('Payments & payout setup')) {
   failures.push('Account workspace must own payout and access administration.');
 }
 

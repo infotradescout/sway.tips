@@ -39,6 +39,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'aria-label="Performer sections"',
   "inactiveWorkspace === 'home'",
   "inactiveWorkspace === 'room'",
+  "inactiveWorkspace === 'connections'",
   "inactiveWorkspace === 'shows'",
   "inactiveWorkspace === 'library'",
   "inactiveWorkspace === 'catalog'",
