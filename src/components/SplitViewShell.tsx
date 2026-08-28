@@ -11,6 +11,7 @@ type SplitViewShellProps = {
   isEmpty?: boolean;
   badge?: ReactNode;
   showHeader?: boolean;
+  primaryOnly?: boolean;
 };
 
 export default function SplitViewShell({
@@ -23,11 +24,12 @@ export default function SplitViewShell({
   emptyState,
   isEmpty = false,
   badge,
-  showHeader = true
+  showHeader = true,
+  primaryOnly = false
 }: SplitViewShellProps) {
   return (
     <section
-      className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] lg:items-start lg:py-5"
+      className={`mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 lg:items-start lg:py-5 ${primaryOnly ? '' : 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]'}`}
       aria-label={`${title}: ${primaryLabel}`}
     >
       <div className="min-w-0 space-y-3">
@@ -46,7 +48,7 @@ export default function SplitViewShell({
         <div className="min-w-0">{isEmpty && emptyState ? emptyState : primary}</div>
       </div>
 
-      <aside className="hidden min-w-0 lg:sticky lg:top-4 lg:block">
+      <aside className={`${primaryOnly ? 'hidden' : 'hidden min-w-0 lg:sticky lg:top-4 lg:block'}`}>
         <div className="rounded-xl border border-white/10 bg-slate-900/75 p-4 shadow-xl">
           <div className="sr-only mb-3 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 lg:not-sr-only">
             {secondaryLabel}

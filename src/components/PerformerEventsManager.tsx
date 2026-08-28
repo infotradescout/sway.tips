@@ -726,7 +726,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
     <section
       id="sway-events-manager"
       data-sway-events-manager="true"
-      className="mx-auto w-full max-w-3xl scroll-mt-24 overflow-hidden rounded-2xl border border-fuchsia-300/20 bg-slate-900/80 shadow-xl shadow-fuchsia-950/10"
+      className="mx-auto w-full max-w-6xl scroll-mt-24 overflow-hidden rounded-2xl border border-fuchsia-300/20 bg-slate-900/80 shadow-xl shadow-fuchsia-950/10"
     >
       <div className="border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-cyan-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">

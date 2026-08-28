@@ -36,3 +36,10 @@ export function resolveInactivePerformerWorkspace(pathname: string, hash = ''): 
   if (normalizedPath === '/talent/account') return 'account';
   return 'home';
 }
+
+export function shouldRenderPerformerLiveRoom(
+  sessionStatus: string,
+  workspace: InactivePerformerWorkspace
+) {
+  return sessionStatus !== 'inactive' && (workspace === 'home' || workspace === 'room');
+}

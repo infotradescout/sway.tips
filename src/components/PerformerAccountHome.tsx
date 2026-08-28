@@ -20,7 +20,7 @@ export default function PerformerAccountHome({
   onStartRoom: () => void;
   onOpenLibrary: () => void;
 }) {
-  const publicPath = performerHandle ? `/p/${performerHandle}` : null;
+  const publicPath = performerHandle ? '/talent/profile?preview=1' : null;
   const readiness = [
     { done: emailVerified, label: 'Verify your account email', href: '/account/resend-verification' },
     { done: Boolean(performerHandle), label: 'Set your performer name and public handle', href: '/talent/profile' },
@@ -94,7 +94,7 @@ export default function PerformerAccountHome({
           {publicPath ? (
             <a href={publicPath} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-black text-white transition hover:border-white/30 sm:col-span-2">
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              Preview public page
+              Preview your page privately
             </a>
           ) : null}
         </div>

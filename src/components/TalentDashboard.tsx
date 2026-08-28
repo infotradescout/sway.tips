@@ -58,6 +58,7 @@ import {
   INACTIVE_PERFORMER_WORKSPACE_PATHS,
   LEGACY_SHOWS_WORKSPACE_HASH,
   resolveInactivePerformerWorkspace,
+  shouldRenderPerformerLiveRoom,
   type InactivePerformerWorkspace
 } from '../performer-workspace-routing';
 
@@ -625,7 +626,7 @@ function RequestLibraryWorkspace({
   const totalTracks = catalogTracks.length + externalTracks.length;
 
   return (
-    <section data-sway-library-workspace="true" className="mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg">
+    <section data-sway-library-workspace="true" className="mx-auto w-full max-w-6xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Library</p>
@@ -1631,7 +1632,7 @@ export default function TalentDashboard({
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   };
 
-  if (session.status !== 'inactive') {
+  if (shouldRenderPerformerLiveRoom(session.status, inactiveWorkspace)) {
     const visiblePending = triageQueue.slice(0, 4);
     const visibleApproved = liveLadderQueue.slice(0, 5);
     const overflowPending = Math.max(0, triageQueue.length - visiblePending.length);
@@ -2341,7 +2342,7 @@ export default function TalentDashboard({
       {inactiveWorkspace === 'catalog' ? (
         <section
           data-sway-audio-catalog="true"
-          className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-fuchsia-500/20 bg-slate-900/70 p-5 shadow-lg"
+          className="order-2 mx-auto w-full max-w-6xl rounded-2xl border border-fuchsia-500/20 bg-slate-900/70 p-5 shadow-lg"
         >
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Audio catalog</p>
@@ -2367,7 +2368,7 @@ export default function TalentDashboard({
       {inactiveWorkspace === 'account' ? (
         <section
           data-sway-account-workspace="true"
-          className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg"
+          className="order-2 mx-auto w-full max-w-6xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg"
         >
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Money</p>
