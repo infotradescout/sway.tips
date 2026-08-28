@@ -16,7 +16,7 @@ import {
   Sparkles, 
   Award, 
   Users, 
-  Settings, 
+  WalletCards,
   Flame, 
   Radio, 
   Search,
@@ -54,6 +54,12 @@ import {
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import {
+  INACTIVE_PERFORMER_WORKSPACE_PATHS,
+  LEGACY_SHOWS_WORKSPACE_HASH,
+  resolveInactivePerformerWorkspace,
+  type InactivePerformerWorkspace
+} from '../performer-workspace-routing';
 
 interface TalentDashboardProps {
   session: GigSession;
@@ -87,15 +93,14 @@ interface TalentDashboardProps {
   performerEmailVerified?: boolean;
 }
 
-type InactivePerformerWorkspace = 'home' | 'room' | 'library' | 'catalog' | 'profile' | 'account';
-
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'room', label: 'Live Room', icon: Radio },
+  { id: 'shows', label: 'Shows', icon: CalendarDays },
   { id: 'library', label: 'Music', icon: Music2 },
   { id: 'catalog', label: 'Files', icon: AudioLines },
-  { id: 'profile', label: 'Profile', icon: UserRound },
-  { id: 'account', label: 'Account', icon: Settings }
+  { id: 'profile', label: 'Public Page', icon: UserRound },
+  { id: 'account', label: 'Money', icon: WalletCards }
 ] as const;
 
 type MusicSourceCapability = {
@@ -840,7 +845,9 @@ export default function TalentDashboard({
     specialties: performerProfile?.specialties
   });
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
-  const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>('home');
+  const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>(() => (
+    typeof window === 'undefined' ? 'home' : resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash)
+  ));
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
   const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
@@ -938,6 +945,38 @@ export default function TalentDashboard({
   const [bridgeSwayUrl, setBridgeSwayUrl] = useState<string | null>(null);
   const hardwareBindingsRef = useRef(hardwareBindings);
   const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
+
+  useEffect(() => {
+    const syncWorkspaceFromLocation = () => {
+      const workspace = resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash);
+      setInactiveWorkspace(workspace);
+      if (workspace === 'library') setShowAdvancedLibrary(false);
+      if (window.location.hash === LEGACY_SHOWS_WORKSPACE_HASH) {
+        const nextLocation = new URL(window.location.href);
+        nextLocation.pathname = INACTIVE_PERFORMER_WORKSPACE_PATHS.shows;
+        nextLocation.hash = '';
+        window.history.replaceState({}, '', `${nextLocation.pathname}${nextLocation.search}`);
+      }
+    };
+    syncWorkspaceFromLocation();
+    window.addEventListener('popstate', syncWorkspaceFromLocation);
+    window.addEventListener('hashchange', syncWorkspaceFromLocation);
+    return () => {
+      window.removeEventListener('popstate', syncWorkspaceFromLocation);
+      window.removeEventListener('hashchange', syncWorkspaceFromLocation);
+    };
+  }, []);
+
+  const openInactiveWorkspace = (workspace: InactivePerformerWorkspace) => {
+    setInactiveWorkspace(workspace);
+    if (workspace === 'library') setShowAdvancedLibrary(false);
+    const workspacePath = INACTIVE_PERFORMER_WORKSPACE_PATHS[workspace];
+    if (window.location.pathname === workspacePath) return;
+    const nextLocation = new URL(window.location.href);
+    nextLocation.pathname = workspacePath;
+    nextLocation.hash = '';
+    window.history.pushState({}, '', `${nextLocation.pathname}${nextLocation.search}`);
+  };
 
   const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
     if (actionInFlightRef.current) {
@@ -2071,7 +2110,7 @@ export default function TalentDashboard({
       <nav
         data-sway-performer-app-navigation="true"
         aria-label="Performer sections"
-        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur sm:grid-cols-6"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-4xl grid-cols-4 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur lg:grid-cols-7"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
           const selected = inactiveWorkspace === id;
@@ -2081,8 +2120,7 @@ export default function TalentDashboard({
               type="button"
               aria-current={selected ? 'page' : undefined}
               onClick={() => {
-                setInactiveWorkspace(id);
-                if (id === 'library') setShowAdvancedLibrary(false);
+                openInactiveWorkspace(id);
               }}
               className={`inline-flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-black uppercase tracking-wider transition sm:flex-row sm:text-xs ${
                 selected
@@ -2130,27 +2168,13 @@ export default function TalentDashboard({
       ) : null}
 
       {inactiveWorkspace === 'profile' ? (
-        <div className="order-2 space-y-4">
-          <nav
-            aria-label="Profile workspace sections"
-            className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2"
-          >
-            <a
-              href="#sway-public-profile-editor"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 text-xs font-black text-cyan-100 transition hover:border-cyan-200/40"
-            >
-              <UserRound className="h-4 w-4" aria-hidden="true" />
-              Profile details
-            </a>
-            <a
-              href="#sway-events-manager"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 text-xs font-black text-fuchsia-100 transition hover:border-fuchsia-200/40"
-            >
-              <CalendarDays className="h-4 w-4" aria-hidden="true" />
-              Shows &amp; events
-            </a>
-          </nav>
+        <div className="order-2">
           <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
+        </div>
+      ) : null}
+
+      {inactiveWorkspace === 'shows' ? (
+        <div className="order-2">
           <PerformerEventsManager previewMode={previewMode} />
         </div>
       ) : null}
@@ -2346,9 +2370,9 @@ export default function TalentDashboard({
           className="order-2 mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg"
         >
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Account</p>
-            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Money & access</h2>
-            <p className="mt-1 text-xs text-slate-500">Manage payout readiness without mixing it into your music library.</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Money</p>
+            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Payments & payout setup</h2>
+            <p className="mt-1 text-xs text-slate-500">Incoming card payments and payout readiness live here. Free rooms do not require payout setup.</p>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950 p-4 select-none">
@@ -2415,10 +2439,9 @@ export default function TalentDashboard({
             stripeReady={moneyReady}
             paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}
             emailVerified={performerEmailVerified}
-            onStartRoom={() => setInactiveWorkspace('room')}
+            onStartRoom={() => openInactiveWorkspace('room')}
             onOpenLibrary={() => {
-              setShowAdvancedLibrary(false);
-              setInactiveWorkspace('library');
+              openInactiveWorkspace('library');
             }}
           />
         </div>
