@@ -755,8 +755,11 @@ export function routeFamilyGuard(accessControl: AccessControl) {
 
     const result = await guard(req);
     if (result.allowed === false) {
-      if (shell === 'talent' && req.method === 'GET' && req.path === '/talent' && isBrowserHtmlRequest(req)) {
-        res.redirect('/talent/login');
+      if (shell === 'talent' && req.method === 'GET' && isBrowserHtmlRequest(req)) {
+        const requestedWorkspace = req.originalUrl.startsWith('/talent/')
+          ? `?redirect=${encodeURIComponent(req.originalUrl)}`
+          : '';
+        res.redirect(`/talent/login${requestedWorkspace}`);
         return;
       }
 
