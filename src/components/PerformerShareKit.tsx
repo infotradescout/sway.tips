@@ -30,14 +30,28 @@ function resolveOverlayLink(activeGigId: string | null) {
   return new URL(`/overlay/${activeGigId}`, window.location.origin).toString();
 }
 
+function resolveTransparentOverlayLink(activeGigId: string | null) {
+  if (!activeGigId) return null;
+
+  if (typeof window === 'undefined') {
+    return `/overlay/${activeGigId}?transparent=1`;
+  }
+
+  const overlayUrl = new URL(`/overlay/${activeGigId}`, window.location.origin);
+  overlayUrl.searchParams.set('transparent', '1');
+  return overlayUrl.toString();
+}
+
 export default function PerformerShareKit({ activeGigId }: { activeGigId: string | null }) {
   const roomLink = resolveRoomLink(activeGigId);
   const roomPath = activeGigId ? `/g/${activeGigId}` : null;
   const overlayLink = resolveOverlayLink(activeGigId);
   const overlayPath = activeGigId ? `/overlay/${activeGigId}` : null;
+  const transparentOverlayLink = resolveTransparentOverlayLink(activeGigId);
+  const transparentOverlayPath = activeGigId ? `/overlay/${activeGigId}?transparent=1` : null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
-  const [overlayCopied, setOverlayCopied] = useState(false);
+  const [overlayCopied, setOverlayCopied] = useState<'branded' | 'transparent' | null>(null);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,13 +62,13 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
 
   useEffect(() => {
     if (!overlayCopied) return;
-    const timeout = window.setTimeout(() => setOverlayCopied(false), 1800);
+    const timeout = window.setTimeout(() => setOverlayCopied(null), 1800);
     return () => window.clearTimeout(timeout);
   }, [overlayCopied]);
 
   useEffect(() => {
     setCopied(false);
-    setOverlayCopied(false);
+    setOverlayCopied(null);
     setShareFeedback(null);
   }, [activeGigId]);
 
@@ -96,15 +110,18 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
     }
   };
 
-  const handleCopyOverlay = async () => {
-    if (!overlayLink) return;
+  const handleCopyOverlay = async (
+    value: string | null,
+    kind: 'branded' | 'transparent'
+  ) => {
+    if (!value) return;
 
     try {
-      await copyToClipboard(overlayLink);
-      setOverlayCopied(true);
+      await copyToClipboard(value);
+      setOverlayCopied(kind);
       setShareFeedback(null);
     } catch {
-      setOverlayCopied(false);
+      setOverlayCopied(null);
       setShareFeedback('Copy failed. Select the overlay link and copy it manually.');
     }
   };
@@ -259,25 +276,64 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
           </div>
         )}
 
-        <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
-          <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Stream / OBS overlay</p>
-          <p className={`mt-2 break-all text-xs font-semibold ${overlayLink ? 'text-white' : 'text-slate-500'}`}>
-            {overlayLink ?? 'Create a room to generate the stream overlay route.'}
+        <div data-sway-streaming-outputs="true" className="rounded-xl border border-cyan-500/20 bg-slate-950 px-3 py-3">
+          <p className="text-[9px] font-mono uppercase tracking-widest text-cyan-300">Streaming outputs</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+            Use the branded screen as the whole picture, or add the transparent layer as a 1920×1080 OBS/Streamlabs Browser Source over your camera.
           </p>
-          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-            {overlayPath
-              ? 'Add this as an OBS/Streamlabs Browser Source, or open it directly on a phone or tablet (landscape) to use that device’s screen as your stream source.'
-              : 'Overlay route appears here after the room goes live.'}
-          </p>
-          <button
-            type="button"
-            onClick={handleCopyOverlay}
-            disabled={!overlayLink}
-            className="mt-3 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500"
-          >
-            {overlayCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {overlayCopied ? 'Copied' : 'Copy overlay link'}
-          </button>
+
+          <div className="mt-3 grid gap-3">
+            {[
+              {
+                kind: 'branded' as const,
+                label: 'Branded room screen',
+                link: overlayLink,
+                path: overlayPath,
+                detail: 'Full-frame stage view with the live queue and patron QR.'
+              },
+              {
+                kind: 'transparent' as const,
+                label: 'Transparent OBS layer',
+                link: transparentOverlayLink,
+                path: transparentOverlayPath,
+                detail: 'Camera-ready queue, now playing, tips, and boosts without the full-screen background.'
+              }
+            ].map((output) => (
+              <div key={output.kind} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-white">{output.label}</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{output.detail}</p>
+                <p className={`mt-2 break-all font-mono text-[10px] ${output.link ? 'text-cyan-100' : 'text-slate-500'}`}>
+                  {output.link ?? 'Create a room to generate this output.'}
+                </p>
+                {output.path ? <p className="mt-1 font-mono text-[9px] text-slate-600">{output.path}</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyOverlay(output.link, output.kind)}
+                    disabled={!output.link}
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500"
+                  >
+                    {overlayCopied === output.kind ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {overlayCopied === output.kind ? 'Copied' : 'Copy URL'}
+                  </button>
+                  <a
+                    href={output.link ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-disabled={!output.link}
+                    className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-bold transition-all ${
+                      output.link
+                        ? 'border-white/15 bg-white/5 text-white hover:border-cyan-400'
+                        : 'pointer-events-none cursor-not-allowed border-white/10 bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Test
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
@@ -306,21 +362,6 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
             Open patron room
           </a>
         </div>
-
-        <a
-          href={overlayLink ?? undefined}
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={!overlayLink}
-          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-xs font-bold transition-all ${
-            overlayLink
-              ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:border-cyan-400 hover:text-white'
-              : 'pointer-events-none cursor-not-allowed border-white/10 bg-slate-800 text-slate-500'
-          }`}
-        >
-          <ExternalLink className="h-4 w-4" />
-          Open browser overlay
-        </a>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <button

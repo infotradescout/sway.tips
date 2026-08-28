@@ -7,6 +7,7 @@ export const FILE_COLLABORATION_PATHS = {
 const PERFORMER_WORKSPACE_PATHS = new Set([
   '/talent',
   '/talent/gigs',
+  '/talent/connections',
   '/talent/shows',
   '/talent/music',
   '/talent/files',

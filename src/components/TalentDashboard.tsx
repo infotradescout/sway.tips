@@ -43,6 +43,7 @@ import PerformerRoomControls from './PerformerRoomControls';
 import PerformerAudienceScreen from './PerformerAudienceScreen';
 import PerformerAccountHome from './PerformerAccountHome';
 import PerformerRoomShare, { copyRoomLink, resolveLiveRoomLink } from './PerformerRoomShare';
+import PerformerShareKit from './PerformerShareKit';
 import PerformerRoomSetup, { PerformerRoomSetupData } from './PerformerRoomSetup';
 import PerformerPublicProfileEditor from './PerformerPublicProfileEditor';
 import PerformerEventsManager from './PerformerEventsManager';
@@ -97,6 +98,7 @@ interface TalentDashboardProps {
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'room', label: 'Live Room', icon: Radio },
+  { id: 'connections', label: 'Connections', icon: LinkIcon },
   { id: 'shows', label: 'Shows', icon: CalendarDays },
   { id: 'library', label: 'Music', icon: Music2 },
   { id: 'catalog', label: 'Files', icon: AudioLines },
@@ -209,6 +211,7 @@ type HardwareBinding = {
 type HardwareBindingMap = Record<HardwareActionId, HardwareBinding>;
 
 const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1';
+const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1';
 
 const HARDWARE_ACTIONS: Array<{ id: HardwareActionId; label: string }> = [
   { id: 'toggle_requests', label: 'Pause / Resume' },
@@ -269,6 +272,11 @@ function loadHardwareBindings(): HardwareBindingMap {
   } catch {
     return createDefaultHardwareBindings();
   }
+}
+
+function loadHardwareControlsEnabled() {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(HARDWARE_LISTENING_STORAGE_KEY) === 'true';
 }
 
 function hardwareInputLabel(value: string | null) {
@@ -700,6 +708,8 @@ function HardwareMappingPanel({
   bindings,
   learnTarget,
   midiStatus,
+  controlsEnabled,
+  bridgeReady,
   bridgeCommand,
   bridgeTokenStatus,
   bridgeTokenMessage,
@@ -711,6 +721,8 @@ function HardwareMappingPanel({
   bindings: HardwareBindingMap;
   learnTarget: HardwareActionId | null;
   midiStatus: 'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied';
+  controlsEnabled: boolean;
+  bridgeReady: boolean;
   bridgeCommand: string | null;
   bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
   bridgeTokenMessage: string | null;
@@ -719,13 +731,15 @@ function HardwareMappingPanel({
   onIssueBridgeToken: () => void;
   onDownloadBridgePreset: () => void;
 }) {
-  const midiLabel = midiStatus === 'midi-ready'
+  const midiLabel = !controlsEnabled
+    ? 'Not listening'
+    : midiStatus === 'midi-ready'
     ? 'MIDI ready'
     : midiStatus === 'midi-denied'
       ? 'MIDI blocked'
       : midiStatus === 'midi-unavailable'
         ? 'Keys only'
-        : 'Listening';
+        : 'Keyboard ready · checking MIDI';
 
   return (
     <section
@@ -744,16 +758,18 @@ function HardwareMappingPanel({
           <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Local bridge token</p>
             <p className="mt-1 truncate text-[10px] text-slate-400">
-              {bridgeTokenMessage ?? 'Create a short-lived token for Stream Deck, Companion, or scripts.'}
+              {bridgeTokenMessage ?? (bridgeReady
+                ? 'Create a short-lived token for Stream Deck, Companion, or scripts.'
+                : 'Start a room before creating a Stream Deck or Companion preset.')}
             </p>
           </div>
           <button
             type="button"
             onClick={onIssueBridgeToken}
-            disabled={bridgeTokenStatus === 'submitting'}
+            disabled={bridgeTokenStatus === 'submitting' || !bridgeReady}
             className="shrink-0 rounded-lg bg-cyan-500 px-3 py-2 text-[10px] font-black uppercase text-slate-950 disabled:opacity-50"
           >
-            {bridgeTokenStatus === 'submitting' ? 'Creating' : 'Create'}
+            {bridgeTokenStatus === 'submitting' ? 'Creating' : bridgeReady ? 'Create' : 'No room'}
           </button>
         </div>
         {bridgeCommand ? (
@@ -809,6 +825,160 @@ function HardwareMappingPanel({
             </div>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function PerformerConnectionsWorkspace({
+  activeGigId,
+  sessionStatus,
+  controlsEnabled,
+  midiStatus,
+  bindings,
+  learnTarget,
+  bridgeCommand,
+  bridgeTokenStatus,
+  bridgeTokenMessage,
+  previewMode,
+  onControlsEnabledChange,
+  onLearn,
+  onClear,
+  onIssueBridgeToken,
+  onDownloadBridgePreset,
+  onBackToRoom,
+  onOpenLibraryConnections
+}: {
+  activeGigId: string | null;
+  sessionStatus: GigSession['status'];
+  controlsEnabled: boolean;
+  midiStatus: 'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied';
+  bindings: HardwareBindingMap;
+  learnTarget: HardwareActionId | null;
+  bridgeCommand: string | null;
+  bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
+  bridgeTokenMessage: string | null;
+  previewMode: boolean;
+  onControlsEnabledChange: (enabled: boolean) => void;
+  onLearn: (actionId: HardwareActionId) => void;
+  onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
+  onIssueBridgeToken: () => void;
+  onDownloadBridgePreset: () => void;
+  onBackToRoom: () => void;
+  onOpenLibraryConnections: () => void;
+}) {
+  const roomActive = (sessionStatus === 'active' || sessionStatus === 'ending') && Boolean(activeGigId);
+  const listeningCopy = controlsEnabled
+    ? roomActive
+      ? 'Listening across Sway while this dashboard stays open.'
+      : 'Armed now. Room actions begin when your room goes live.'
+    : 'Off. Turn controls on once, then leave setup without losing them.';
+
+  return (
+    <section
+      data-sway-performer-connections-workspace="true"
+      className="order-2 mx-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900/70 shadow-xl"
+    >
+      <header className="flex flex-col gap-3 border-b border-white/10 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Connections</p>
+          <h2 className="mt-1 font-display text-xl font-black uppercase tracking-wide text-white">Room, stream & booth setup</h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">One place for the room QR, stream outputs, controllers, and the real integration status of your DJ software.</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-wide ${
+            roomActive
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+              : 'border-white/10 bg-slate-900 text-slate-400'
+          }`}>
+            {roomActive ? 'Room live' : 'No live room'}
+          </span>
+          {roomActive ? (
+            <button type="button" onClick={onBackToRoom} className="min-h-10 rounded-xl bg-fuchsia-600 px-4 text-xs font-black uppercase text-white">
+              Back to room
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
+        <PerformerShareKit activeGigId={activeGigId} />
+
+        <div className="min-w-0 space-y-4">
+          <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4" aria-label="Controller listening status">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Keyboard className="h-4 w-4 text-cyan-300" />
+                  <h3 className="text-xs font-black uppercase tracking-wider text-white">Keyboard & MIDI</h3>
+                  {controlsEnabled ? (
+                    <span data-sway-hardware-controls-enabled="true" className="rounded-full bg-emerald-500/15 px-2 py-1 text-[9px] font-black uppercase text-emerald-200">Armed</span>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-slate-400">{listeningCopy}</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">Keyboard shortcuts work while the Sway tab is focused. MIDI stays attached while this dashboard is open.</p>
+              </div>
+              <button
+                type="button"
+                data-sway-enable-hardware-controls="true"
+                onClick={() => onControlsEnabledChange(!controlsEnabled)}
+                disabled={previewMode}
+                aria-pressed={controlsEnabled}
+                className={`min-h-11 shrink-0 rounded-xl px-4 text-xs font-black uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
+                  controlsEnabled
+                    ? 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
+                    : 'bg-cyan-500 text-slate-950'
+                }`}
+              >
+                {controlsEnabled ? 'Turn off' : 'Turn on controls'}
+              </button>
+            </div>
+          </section>
+
+          <HardwareMappingPanel
+            bindings={bindings}
+            learnTarget={learnTarget}
+            midiStatus={midiStatus}
+            controlsEnabled={controlsEnabled}
+            bridgeReady={roomActive && !previewMode}
+            bridgeCommand={bridgeCommand}
+            bridgeTokenStatus={bridgeTokenStatus}
+            bridgeTokenMessage={bridgeTokenMessage}
+            onLearn={onLearn}
+            onClear={onClear}
+            onIssueBridgeToken={onIssueBridgeToken}
+            onDownloadBridgePreset={onDownloadBridgePreset}
+          />
+
+          <section data-sway-dj-software-truth="true" className="rounded-2xl border border-white/10 bg-slate-950 p-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-300">Software status</p>
+              <h3 className="mt-1 text-sm font-black text-white">What Sway connects to today</h3>
+            </div>
+            <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-900 px-3">
+              {[
+                ['OBS / Streamlabs', 'Ready', 'Use either Browser Source URL above; setup is manual and Sway does not change scenes.'],
+                ['Stream Deck / Companion', roomActive ? 'Ready to set up' : 'Needs live room', 'Create the 2-hour token and download the HTTP button preset above.'],
+                ['Serato · rekordbox · VirtualDJ · Traktor · djay', 'No native link', 'Sway does not load decks or control playback. A metadata-only library bridge is available for technical setups.']
+              ].map(([name, status, detail]) => (
+                <div key={name} className="grid gap-1 py-3 sm:grid-cols-[minmax(0,0.72fr)_auto_minmax(0,1.28fr)] sm:items-center sm:gap-3">
+                  <p className="text-xs font-black text-white">{name}</p>
+                  <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase ${
+                    status === 'Ready' || status === 'Ready to set up'
+                      ? 'bg-emerald-500/15 text-emerald-200'
+                      : status === 'Needs live room'
+                        ? 'bg-amber-500/15 text-amber-200'
+                        : 'bg-slate-800 text-slate-400'
+                  }`}>{status}</span>
+                  <p className="text-[10px] leading-relaxed text-slate-400">{detail}</p>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={onOpenLibraryConnections} className="mt-3 min-h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-slate-200 hover:border-cyan-500/40 hover:text-white">
+              Open advanced music-library connections
+            </button>
+          </section>
+        </div>
       </div>
     </section>
   );
@@ -936,7 +1106,7 @@ export default function TalentDashboard({
   const removeConfirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const queueActionStatusRef = useRef<HTMLDivElement | null>(null);
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
-  const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(false);
+  const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(() => loadHardwareControlsEnabled());
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
   const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -946,6 +1116,7 @@ export default function TalentDashboard({
   const [bridgeSwayUrl, setBridgeSwayUrl] = useState<string | null>(null);
   const hardwareBindingsRef = useRef(hardwareBindings);
   const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
+  const runHardwareActionRef = useRef<(actionId: HardwareActionId) => void>(() => {});
 
   useEffect(() => {
     const syncWorkspaceFromLocation = () => {
@@ -1140,6 +1311,13 @@ export default function TalentDashboard({
       window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY, JSON.stringify(hardwareBindings));
     }
   }, [hardwareBindings]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(HARDWARE_LISTENING_STORAGE_KEY, String(hardwareControlsEnabled));
+    }
+    if (!hardwareControlsEnabled) setHardwareLearnTarget(null);
+  }, [hardwareControlsEnabled]);
 
   useEffect(() => {
     hardwareLearnTargetRef.current = hardwareLearnTarget;
@@ -1487,6 +1665,10 @@ export default function TalentDashboard({
     }
   };
 
+  useEffect(() => {
+    runHardwareActionRef.current = runHardwareAction;
+  });
+
   const learnHardwareInput = (actionId: HardwareActionId, kind: keyof HardwareBinding, value: string) => {
     setHardwareBindings((current) => ({
       ...current,
@@ -1549,7 +1731,7 @@ export default function TalentDashboard({
   };
 
   useEffect(() => {
-    if (session.status === 'inactive' || !hardwareControlsEnabled) return;
+    if (!hardwareControlsEnabled && !hardwareLearnTarget) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1563,18 +1745,20 @@ export default function TalentDashboard({
         return;
       }
 
+      if (session.status === 'inactive' || !hardwareControlsEnabled) return;
+
       const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].keyboard === event.code);
       if (!match) return;
       event.preventDefault();
-      runHardwareAction(match.id);
+      runHardwareActionRef.current(match.id);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue, hardwareControlsEnabled]);
+  }, [session.status, hardwareControlsEnabled, hardwareLearnTarget]);
 
   useEffect(() => {
-    if (session.status === 'inactive' || !hardwareControlsEnabled) {
+    if (!hardwareControlsEnabled && !hardwareLearnTarget) {
       setHardwareInputStatus('idle');
       return;
     }
@@ -1592,8 +1776,10 @@ export default function TalentDashboard({
         return;
       }
 
+      if (session.status === 'inactive' || !hardwareControlsEnabled) return;
+
       const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].midi === binding);
-      if (match) runHardwareAction(match.id);
+      if (match) runHardwareActionRef.current(match.id);
     };
 
     const connectMidi = async () => {
@@ -1625,7 +1811,7 @@ export default function TalentDashboard({
         });
       }
     };
-  }, [session.status, session.requestsOpen, previewMode, liveLadderQueue, triageQueue, hardwareControlsEnabled]);
+  }, [session.status, hardwareControlsEnabled, hardwareLearnTarget]);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -1691,46 +1877,6 @@ export default function TalentDashboard({
                   {session.paymentsEnabled === false ? 'Remove' : 'Remove and reverse'}
                 </button>
               </div>
-            </div>
-          </div>
-        ) : null}
-        {hardwareControlsEnabled ? (
-          <div
-            data-sway-hardware-controls-enabled="true"
-            className="absolute inset-0 z-50 overflow-y-auto bg-slate-950/95 p-3 backdrop-blur"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Advanced key controls"
-          >
-            <div className="mx-auto max-w-2xl space-y-2">
-              <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900 px-4 py-3">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-widest text-white">Hardware controls are on</p>
-                  <p className="mt-1 text-[10px] text-slate-400">Keyboard and MIDI actions only listen while this panel is open.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHardwareLearnTarget(null);
-                    setHardwareControlsEnabled(false);
-                  }}
-                  className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs font-black uppercase text-slate-200"
-                >
-                  Done
-                </button>
-              </div>
-              <HardwareMappingPanel
-                bindings={hardwareBindings}
-                learnTarget={hardwareLearnTarget}
-                midiStatus={hardwareInputStatus}
-                bridgeCommand={bridgeCommand}
-                bridgeTokenStatus={bridgeTokenStatus}
-                bridgeTokenMessage={bridgeTokenMessage}
-                onLearn={setHardwareLearnTarget}
-                onClear={clearHardwareInput}
-                onIssueBridgeToken={issueBridgeToken}
-                onDownloadBridgePreset={downloadBridgePreset}
-              />
             </div>
           </div>
         ) : null}
@@ -2041,12 +2187,12 @@ export default function TalentDashboard({
             </div>
           </main>
 
-          <footer className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
+          <footer className="grid grid-cols-3 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
             <div
               ref={queueActionStatusRef}
               tabIndex={-1}
               aria-label="Queue action status"
-              className="min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="hidden min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:block"
             >
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
@@ -2061,11 +2207,12 @@ export default function TalentDashboard({
             </button>
             <button
               type="button"
-              data-sway-enable-hardware-controls="true"
-              onClick={() => setHardwareControlsEnabled(true)}
-              className="hidden min-h-12 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black uppercase tracking-wide text-cyan-200 sm:block"
+              data-sway-open-connections="true"
+              onClick={() => openInactiveWorkspace('connections')}
+              className="inline-flex min-h-12 items-center justify-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 text-[10px] font-black uppercase tracking-wide text-cyan-200 sm:px-3 sm:text-xs"
             >
-              Keys
+              <LinkIcon className="h-4 w-4" />
+              Connect
             </button>
             <button
               type="button"
@@ -2111,7 +2258,7 @@ export default function TalentDashboard({
       <nav
         data-sway-performer-app-navigation="true"
         aria-label="Performer sections"
-        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-4xl grid-cols-4 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur lg:grid-cols-7"
+        className="sticky top-0 z-20 order-1 mx-auto grid w-full max-w-5xl grid-cols-4 gap-1 rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur lg:grid-cols-8"
       >
         {INACTIVE_PERFORMER_NAVIGATION.map(({ id, label, icon: Icon }) => {
           const selected = inactiveWorkspace === id;
@@ -2172,6 +2319,31 @@ export default function TalentDashboard({
         <div className="order-2">
           <PerformerPublicProfileEditor performerHandle={performerProfile?.handle} previewMode={previewMode} />
         </div>
+      ) : null}
+
+      {inactiveWorkspace === 'connections' ? (
+        <PerformerConnectionsWorkspace
+          activeGigId={selectedRoomLink}
+          sessionStatus={session.status}
+          controlsEnabled={hardwareControlsEnabled}
+          midiStatus={hardwareInputStatus}
+          bindings={hardwareBindings}
+          learnTarget={hardwareLearnTarget}
+          bridgeCommand={bridgeCommand}
+          bridgeTokenStatus={bridgeTokenStatus}
+          bridgeTokenMessage={bridgeTokenMessage}
+          previewMode={previewMode}
+          onControlsEnabledChange={setHardwareControlsEnabled}
+          onLearn={setHardwareLearnTarget}
+          onClear={clearHardwareInput}
+          onIssueBridgeToken={issueBridgeToken}
+          onDownloadBridgePreset={downloadBridgePreset}
+          onBackToRoom={() => openInactiveWorkspace('room')}
+          onOpenLibraryConnections={() => {
+            openInactiveWorkspace('library');
+            setShowAdvancedLibrary(true);
+          }}
+        />
       ) : null}
 
       {inactiveWorkspace === 'shows' ? (

@@ -9,6 +9,7 @@ import {
 
 assert.equal(resolveInactivePerformerWorkspace('/talent'), 'home');
 assert.equal(resolveInactivePerformerWorkspace('/talent/gigs'), 'room');
+assert.equal(resolveInactivePerformerWorkspace('/talent/connections'), 'connections');
 assert.equal(resolveInactivePerformerWorkspace('/talent/shows'), 'shows');
 assert.equal(resolveInactivePerformerWorkspace('/talent/music'), 'library');
 assert.equal(resolveInactivePerformerWorkspace('/talent/files'), 'catalog');
@@ -21,7 +22,7 @@ assert.equal(resolvePerformerLoginWorkspaceRedirect('/talent/profile', ''), '/ta
 for (const status of ['active', 'ending', 'closed']) {
   assert.equal(shouldRenderPerformerLiveRoom(status, 'home'), true);
   assert.equal(shouldRenderPerformerLiveRoom(status, 'room'), true);
-  for (const workspace of ['shows', 'library', 'catalog', 'profile', 'account']) {
+  for (const workspace of ['connections', 'shows', 'library', 'catalog', 'profile', 'account']) {
     assert.equal(shouldRenderPerformerLiveRoom(status, workspace), false);
   }
 }

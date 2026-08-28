@@ -8,6 +8,7 @@ const failures = [];
 
 for (const term of [
   "const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1'",
+  "const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1'",
   "type HardwareActionId",
   "'toggle_requests'",
   "'fulfill_top'",
@@ -18,8 +19,10 @@ for (const term of [
   'data-sway-hardware-mapping-panel="true"',
   'data-sway-enable-hardware-controls="true"',
   'data-sway-hardware-controls-enabled="true"',
-  "if (session.status === 'inactive' || !hardwareControlsEnabled) return;",
-  'Keyboard and MIDI actions only listen while this panel is open.',
+  'data-sway-performer-connections-workspace="true"',
+  "if (!hardwareControlsEnabled && !hardwareLearnTarget) return;",
+  'Listening across Sway while this dashboard stays open.',
+  'MIDI stays attached while this dashboard is open.',
   'navigator as any).requestMIDIAccess',
   'resolveMidiBinding',
   "window.addEventListener('keydown'",
@@ -31,6 +34,7 @@ for (const term of [
   'onHide(topApproved.id)',
   "window.open(topApproved.spotifyUrl, '_blank', 'noopener,noreferrer')",
   'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY',
+  'window.localStorage.setItem(HARDWARE_LISTENING_STORAGE_KEY',
   'Local bridge token',
   'onIssueBridgeToken'
 ]) {
@@ -48,6 +52,15 @@ for (const forbidden of [
 ]) {
   if (talentDashboard.includes(forbidden)) {
     failures.push(`Hardware mapping must stay local/truthful in this slice: ${forbidden}`);
+  }
+}
+
+for (const removedFailureMode of [
+  'Keyboard and MIDI actions only listen while this panel is open.',
+  'aria-label="Advanced key controls"'
+]) {
+  if (talentDashboard.includes(removedFailureMode)) {
+    failures.push(`Hardware setup must not block or disable the live console: ${removedFailureMode}`);
   }
 }
 
