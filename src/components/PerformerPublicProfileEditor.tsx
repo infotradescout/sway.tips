@@ -276,6 +276,7 @@ export default function PerformerPublicProfileEditor({
       }
       setStatus('success');
       setMessage('Public page saved.');
+      window.dispatchEvent(new Event('sway:performer-profile-updated'));
     } catch (error) {
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Unable to save your public page.');
