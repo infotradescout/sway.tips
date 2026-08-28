@@ -22,9 +22,9 @@ export default function PerformerAccountHome({
 }) {
   const publicPath = performerHandle ? `/p/${performerHandle}` : null;
   const readiness = [
-    { done: emailVerified, label: 'Verify your account email' },
-    { done: Boolean(performerHandle), label: 'Set your performer name and public handle' },
-    { done: stripeReady, label: 'Finish Stripe test setup for paid-mode rehearsal', optional: true }
+    { done: emailVerified, label: 'Verify your account email', href: '/account/resend-verification' },
+    { done: Boolean(performerHandle), label: 'Set your performer name and public handle', href: '/talent/profile' },
+    { done: stripeReady, label: 'Finish money setup for paid-mode rehearsal', optional: true, href: '/talent/account' }
   ];
 
   return (
@@ -62,9 +62,13 @@ export default function PerformerAccountHome({
           {readiness.map((item) => (
             <li key={item.label} className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm">
               {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <Circle className="h-4 w-4 shrink-0 text-slate-500" />}
-              <span className={item.done ? 'text-slate-300' : 'font-bold text-white'}>
-                {item.label}{item.optional && !item.done ? ' (only for paid rooms)' : ''}
-              </span>
+              {item.done ? (
+                <span className="text-slate-300">{item.label}</span>
+              ) : (
+                <a href={item.href} className="font-bold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white">
+                  {item.label}{item.optional ? ' (only for paid rooms)' : ''}
+                </a>
+              )}
             </li>
           ))}
         </ol>
