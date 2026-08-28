@@ -22,7 +22,7 @@ for (const term of [
   "{ id: 'connections', label: 'Connections'",
   'data-sway-performer-connections-workspace="true"',
   'data-sway-open-connections="true"',
-  '<PerformerShareKit activeGigId={activeGigId} />',
+  '<PerformerShareKit activeGigId={roomActive ? activeGigId : null} />',
   'Room, stream & booth setup',
   'data-sway-dj-software-truth="true"',
   'OBS / Streamlabs',

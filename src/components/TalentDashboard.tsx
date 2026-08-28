@@ -902,7 +902,7 @@ function PerformerConnectionsWorkspace({
       </header>
 
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
-        <PerformerShareKit activeGigId={activeGigId} />
+        <PerformerShareKit activeGigId={roomActive ? activeGigId : null} />
 
         <div className="min-w-0 space-y-4">
           <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4" aria-label="Controller listening status">
