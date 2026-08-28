@@ -98,6 +98,12 @@ assert.equal(resolveLegacyFileConnectTarget(''), FILE_COLLABORATION_PATHS.connec
 for (const allowedNext of [
   FILE_COLLABORATION_PATHS.inbox,
   FILE_COLLABORATION_PATHS.connect,
+  '/talent/gigs',
+  '/talent/shows',
+  '/talent/music',
+  '/talent/files',
+  '/talent/profile',
+  '/talent/account',
   `/e/${eventId}`,
   `/e/${eventId}?buy=1`,
   `/talent/events/${eventId}/door`,
