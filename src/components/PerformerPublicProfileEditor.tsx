@@ -2,6 +2,8 @@ import {
   ArrowDown,
   ArrowUp,
   BadgeCheck,
+  Eye,
+  EyeOff,
   ExternalLink,
   Link2,
   Plus,
@@ -96,6 +98,9 @@ export default function PerformerPublicProfileEditor({
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'success' | 'error'>(previewMode ? 'idle' : 'loading');
   const [message, setMessage] = useState<string | null>(null);
+  const [showOwnerPreview, setShowOwnerPreview] = useState(() => (
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === '1'
+  ));
   const [partner, setPartner] = useState<{
     granted: boolean;
     active: boolean;
@@ -327,7 +332,7 @@ export default function PerformerPublicProfileEditor({
     <section
       id="sway-public-profile-editor"
       data-sway-public-profile-editor="true"
-      className="mx-auto w-full max-w-3xl scroll-mt-24 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10"
+      className="mx-auto w-full max-w-6xl scroll-mt-24 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10"
     >
       <div className="border-b border-white/10 bg-gradient-to-r from-cyan-500/10 via-fuchsia-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -351,17 +356,53 @@ export default function PerformerPublicProfileEditor({
             ) : null}
           </div>
           {performerHandle ? (
-            <a
-              href={`/p/${encodeURIComponent(performerHandle)}`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => setShowOwnerPreview((current) => !current)}
               className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 py-2 text-xs font-black text-white transition hover:border-cyan-300/40"
             >
-              View page <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+              {showOwnerPreview ? 'Hide private preview' : 'Preview your page'}
+              {showOwnerPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </button>
           ) : null}
         </div>
       </div>
+
+      {showOwnerPreview ? (
+        <section data-sway-owner-profile-preview="true" className="border-b border-cyan-300/20 bg-slate-950 p-5 sm:p-8">
+          <div className="mx-auto max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-fuchsia-950/40 shadow-2xl">
+            <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-center">
+              <div className="flex aspect-square items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-400/20 to-fuchsia-500/20 text-5xl font-black text-white">
+                {form.avatarUrl ? <img src={form.avatarUrl} alt="" className="h-full w-full object-cover" /> : (form.stageName || performerHandle || 'S').slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Private owner preview</p>
+                <h2 className="mt-3 break-words font-display text-3xl font-black text-white sm:text-5xl">{form.stageName || performerHandle || 'Your performer name'}</h2>
+                <p className="mt-2 text-sm font-bold text-fuchsia-200">@{performerHandle}</p>
+                {form.headline ? <p className="mt-4 max-w-3xl text-lg leading-7 text-slate-200">{form.headline}</p> : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {form.city ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200">{form.city}</span> : null}
+                  {specialties.map((specialty) => <span key={specialty} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{specialty}</span>)}
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-6 border-t border-white/10 p-6 sm:p-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white">About</h3>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-300">{form.bio || 'Add your story, sound, experience, and what makes your shows worth following.'}</p>
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white">Booking and links</h3>
+                {(form.bookingEmail || form.bookingPhone) ? <p className="text-sm leading-6 text-slate-300">{form.bookingEmail || form.bookingPhone}</p> : <p className="text-sm text-slate-500">Add verified booking contact details.</p>}
+                {form.links.filter((link) => link.isActive && link.label).slice(0, 4).map((link) => (
+                  <div key={link.key} className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white">{link.label}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <p className="mx-auto mt-4 max-w-5xl text-center text-xs leading-5 text-slate-400">Only you can see this preview while the page is private. Publishing remains a separate choice below.</p>
+        </section>
+      ) : null}
 
       {partner.acceptanceRequired && partner.termsVersion && partner.termsHash && partner.termsText ? (
         <div className="border-b border-amber-300/15 bg-amber-300/[0.04] p-4 sm:p-6">
