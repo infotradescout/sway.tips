@@ -1,7 +1,6 @@
 import {
   ArrowDown,
   ArrowUp,
-  BadgeCheck,
   ExternalLink,
   Link2,
   Plus,
@@ -22,6 +21,8 @@ type LinkDraft = {
 };
 
 type ProfileForm = {
+  displayName: string;
+  handle: string;
   primaryRole: string;
   stageName: string;
   headline: string;
@@ -41,6 +42,8 @@ type ProfileForm = {
 };
 
 const EMPTY_FORM: ProfileForm = {
+  displayName: '',
+  handle: '',
   primaryRole: '',
   stageName: '',
   headline: '',
@@ -94,30 +97,9 @@ export default function PerformerPublicProfileEditor({
   previewMode?: boolean;
 }) {
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
+  const [savedHandle, setSavedHandle] = useState(text(performerHandle));
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'success' | 'error'>(previewMode ? 'idle' : 'loading');
   const [message, setMessage] = useState<string | null>(null);
-  const [partner, setPartner] = useState<{
-    granted: boolean;
-    active: boolean;
-    accepted: boolean;
-    suspended: boolean;
-    acceptanceRequired: boolean;
-    termsVersion: string | null;
-    termsHash: string | null;
-    termsText: string | null;
-  }>({
-    granted: false,
-    active: false,
-    accepted: false,
-    suspended: false,
-    acceptanceRequired: false,
-    termsVersion: null,
-    termsHash: null,
-    termsText: null
-  });
-  const [partnerAcceptanceConfirmed, setPartnerAcceptanceConfirmed] = useState(false);
-  const [partnerAcceptanceStatus, setPartnerAcceptanceStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
-  const [partnerAcceptanceMessage, setPartnerAcceptanceMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (previewMode) return;
@@ -137,6 +119,8 @@ export default function PerformerPublicProfileEditor({
 
         const profile = data.profile;
         setForm({
+          displayName: text(profile.displayName),
+          handle: text(profile.handle),
           primaryRole: text(profile.primaryRole),
           stageName: text(profile.stageName),
           headline: text(profile.headline),
@@ -163,16 +147,7 @@ export default function PerformerPublicProfileEditor({
               }))
             : []
         });
-        setPartner({
-          granted: profile.partner?.granted === true,
-          active: profile.partner?.active === true,
-          accepted: profile.partner?.accepted === true,
-          suspended: profile.partner?.suspended === true,
-          acceptanceRequired: profile.partner?.acceptanceRequired === true,
-          termsVersion: text(profile.partner?.termsVersion) || null,
-          termsHash: text(profile.partner?.termsHash) || null,
-          termsText: text(profile.partner?.termsText) || null
-        });
+        setSavedHandle(text(profile.handle));
         setStatus('idle');
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
@@ -242,6 +217,8 @@ export default function PerformerPublicProfileEditor({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          displayName: form.displayName,
+          handle: form.handle,
           primaryRole: form.primaryRole || null,
           stageName: form.stageName,
           headline: form.headline,
@@ -274,51 +251,24 @@ export default function PerformerPublicProfileEditor({
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save your public page.');
       }
+      const savedProfile = data?.profile;
+      const nextDisplayName = text(savedProfile?.displayName) || form.displayName.trim();
+      const nextHandle = text(savedProfile?.handle) || form.handle.trim();
+      setForm((current) => ({
+        ...current,
+        displayName: nextDisplayName,
+        handle: nextHandle
+      }));
+      setSavedHandle(nextHandle);
       setStatus('success');
       setMessage('Public page saved.');
+      window.dispatchEvent(new CustomEvent('sway:performer-profile-updated', {
+        detail: { displayName: nextDisplayName, handle: nextHandle }
+      }));
+      window.dispatchEvent(new Event('re-fetch-state'));
     } catch (error) {
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Unable to save your public page.');
-    }
-  };
-
-  const handleAcceptPartnerTerms = async () => {
-    if (
-      previewMode
-      || partnerAcceptanceStatus === 'submitting'
-      || !partnerAcceptanceConfirmed
-      || !partner.termsVersion
-      || !partner.termsHash
-    ) return;
-
-    setPartnerAcceptanceStatus('submitting');
-    setPartnerAcceptanceMessage(null);
-    try {
-      const response = await fetch('/api/talent/partner/terms/accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accepted: true,
-          termsVersion: partner.termsVersion,
-          termsHash: partner.termsHash
-        })
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to record Brand Partner acceptance.');
-      }
-      setPartner((current) => ({
-        ...current,
-        accepted: true,
-        acceptanceRequired: false,
-        active: !current.suspended
-      }));
-      setPartnerAcceptanceConfirmed(false);
-      setPartnerAcceptanceStatus('idle');
-      setPartnerAcceptanceMessage('Brand Partner terms accepted. Your immutable receipt is recorded.');
-    } catch (error) {
-      setPartnerAcceptanceStatus('error');
-      setPartnerAcceptanceMessage(error instanceof Error ? error.message : 'Unable to record Brand Partner acceptance.');
     }
   };
 
@@ -331,27 +281,15 @@ export default function PerformerPublicProfileEditor({
       <div className="border-b border-white/10 bg-gradient-to-r from-cyan-500/10 via-fuchsia-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your public Sway page</p>
-              {partner.granted ? (
-                <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-amber-100">
-                  <BadgeCheck className="h-3.5 w-3.5" /> {partner.active ? 'Brand Partner' : partner.suspended ? 'Partner suspended' : 'Partner acceptance pending'}
-                </span>
-              ) : null}
-            </div>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your public Sway page</p>
             <h3 className="mt-2 font-display text-xl font-black text-white">A free website that works between events</h3>
             <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">
               Share your work, brands, booking details, and any links you want. A live room and payment setup are optional.
             </p>
-            {partner.active ? (
-              <p className="mt-2 text-[10px] leading-5 text-amber-100/80">
-                Your Sway-controlled pricing is grandfathered under Brand Partner terms {partner.termsVersion || ''}.
-              </p>
-            ) : null}
           </div>
-          {performerHandle ? (
+          {savedHandle ? (
             <a
-              href={`/p/${encodeURIComponent(performerHandle)}`}
+              href={`/p/${encodeURIComponent(savedHandle)}`}
               target="_blank"
               rel="noreferrer"
               className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 py-2 text-xs font-black text-white transition hover:border-cyan-300/40"
@@ -362,46 +300,43 @@ export default function PerformerPublicProfileEditor({
         </div>
       </div>
 
-      {partner.acceptanceRequired && partner.termsVersion && partner.termsHash && partner.termsText ? (
-        <div className="border-b border-amber-300/15 bg-amber-300/[0.04] p-4 sm:p-6">
-          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Owner acceptance required</p>
-          <h4 className="mt-2 text-base font-black text-white">Review the exact Brand Partner terms</h4>
-          <pre className="mt-3 whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-950 p-4 font-sans text-xs leading-6 text-slate-300">{partner.termsText}</pre>
-          <p className="mt-3 break-all font-mono text-[10px] leading-5 text-slate-500">
-            Version {partner.termsVersion} · SHA-256 {partner.termsHash}
-          </p>
-          <label className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-300/15 bg-slate-950/60 px-4 py-3 text-xs leading-5 text-slate-300">
-            <input
-              type="checkbox"
-              checked={partnerAcceptanceConfirmed}
-              onChange={(event) => setPartnerAcceptanceConfirmed(event.target.checked)}
-              className="mt-0.5 h-4 w-4"
-            />
-            <span>I am the authenticated owner of this performer account and accept this exact version and hash.</span>
-          </label>
-          {partnerAcceptanceMessage ? (
-            <p className={`mt-3 rounded-xl border px-4 py-3 text-xs ${partnerAcceptanceStatus === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-100' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-100'}`}>
-              {partnerAcceptanceMessage}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            onClick={handleAcceptPartnerTerms}
-            disabled={!partnerAcceptanceConfirmed || partnerAcceptanceStatus === 'submitting'}
-            className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-amber-300 px-4 py-3 text-sm font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {partnerAcceptanceStatus === 'submitting' ? 'Recording acceptance...' : 'Accept exact Brand Partner terms'}
-          </button>
-        </div>
-      ) : partnerAcceptanceMessage ? (
-        <div className="border-b border-emerald-500/20 bg-emerald-500/5 px-5 py-3 text-xs text-emerald-100">{partnerAcceptanceMessage}</div>
-      ) : null}
-
       <PerformerVisibilityControl previewMode={previewMode} />
 
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
         <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5">
+              <span className={fieldLabel()}>Performer display name</span>
+              <input
+                className={fieldClass()}
+                maxLength={80}
+                required
+                value={form.displayName}
+                onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+                placeholder="The name people know you by"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className={fieldLabel()}>Public handle</span>
+              <input
+                className={fieldClass()}
+                maxLength={64}
+                pattern="[A-Za-z0-9_-]+"
+                required
+                value={form.handle}
+                onChange={(event) => setForm((current) => ({ ...current, handle: event.target.value }))}
+                placeholder="your_handle"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <span className="block text-[11px] leading-5 text-slate-500">Letters, numbers, underscores, and hyphens only. This creates your /p/handle URL.</span>
+              {savedHandle && form.handle.trim().toLowerCase() !== savedHandle.toLowerCase() ? (
+                <span className="block rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-[11px] font-semibold leading-5 text-amber-100">
+                  Changing your handle changes your public URL. Existing profile links and QR codes will stop working; update them after saving.
+                </span>
+              ) : null}
+            </label>
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>What kind of performer are you?</span>
               <select

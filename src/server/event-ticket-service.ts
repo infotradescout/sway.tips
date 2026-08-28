@@ -49,6 +49,7 @@ import {
   verifyEventTicketQrToken
 } from './event-ticket-token';
 import { loadPartnerEntitlementStateForPerformer } from './partner-entitlement-store';
+import { evaluatePublicEventPerformerEligibility } from './public-profile';
 
 type DbExecutor = SwayDb | any;
 type OfferRow = typeof eventTicketOffers.$inferSelect;
@@ -488,10 +489,20 @@ type TicketSellerReadiness = {
   payoutHoldReason: string | null;
 };
 
+type TicketSellerPublicProfile = {
+  ownerUserId: string | null;
+  displayName: string;
+  handle: string | null;
+  bio: string | null;
+  visibilityState: string;
+  isActive: boolean;
+  onboardingStatus: string;
+};
+
 function sellerIsReady(performer: TicketSellerReadiness) {
   return (
     performer.isActive
-    && performer.onboardingStatus !== 'suspended'
+    && !['restricted', 'suspended'].includes(performer.onboardingStatus)
     && performer.paymentAccountStatus === 'payouts_enabled'
     && ['not_required', 'verified'].includes(performer.kycStatus)
     && performer.chargesEnabled === true
@@ -502,8 +513,11 @@ function sellerIsReady(performer: TicketSellerReadiness) {
 }
 
 function assertSellerReady(performer: TicketSellerReadiness) {
-  if (!performer.isActive || performer.onboardingStatus === 'suspended') {
+  if (!performer.isActive) {
     serviceError(403, 'ticket_seller_inactive', 'Activate the performer account before selling tickets.');
+  }
+  if (['restricted', 'suspended'].includes(performer.onboardingStatus)) {
+    serviceError(403, 'ticket_seller_restricted', 'This performer cannot sell tickets.');
   }
   if (!sellerIsReady(performer)) {
     serviceError(
@@ -512,6 +526,37 @@ function assertSellerReady(performer: TicketSellerReadiness) {
       'Complete Stripe identity, transfer, and payout onboarding before selling native tickets.'
     );
   }
+}
+
+function sellerPublicProfileVisibility(performer: TicketSellerPublicProfile) {
+  const eligibility = evaluatePublicEventPerformerEligibility({
+    audience: 'direct',
+    claimed: Boolean(performer.ownerUserId),
+    hasOwner: Boolean(performer.ownerUserId),
+    isActive: performer.isActive,
+    onboardingStatus: performer.onboardingStatus,
+    visibilityState: performer.visibilityState,
+    handle: performer.handle,
+    displayName: performer.displayName,
+    bio: performer.bio
+  });
+  return eligibility.eligible ? eligibility.visibility : null;
+}
+
+function sellerPublicProfileIsResolvable(performer: TicketSellerPublicProfile) {
+  return sellerPublicProfileVisibility(performer) !== null;
+}
+
+function assertTicketSellerPublicProfileReady(performer: TicketSellerPublicProfile) {
+  const visibility = sellerPublicProfileVisibility(performer);
+  if (!visibility) {
+    serviceError(
+      409,
+      'ticket_seller_public_page_not_ready',
+      'Finish the seller Public Page before publishing or selling tickets.'
+    );
+  }
+  return visibility === 'public' ? 'discover' as const : 'link_only' as const;
 }
 
 function manualCodeForTicket(ticketId: string, secret: string) {
@@ -823,6 +868,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     const reasonCodes = [...capability.reasonCodes];
     try {
       assertSellerReady(performer);
+      assertTicketSellerPublicProfileReady(performer);
     } catch (error) {
       if (error instanceof EventTicketServiceError) {
         reasonCodes.push(error.code);
@@ -862,7 +908,10 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         event: performerEvents,
         performerId: performers.id,
         ownerUserId: performers.ownerUserId,
-        performerDisplayName: performers.displayName,
+        displayName: performers.displayName,
+        handle: performers.handle,
+        bio: performers.bio,
+        visibilityState: performers.visibilityState,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
         paymentAccountStatus: performers.paymentAccountStatus,
@@ -1102,6 +1151,7 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
     return db.transaction(async (tx: DbExecutor) => {
       const owner = await requireOwnerContext(tx, { ...input, lock: true });
       assertSellerReady(owner);
+      const performerReach = assertTicketSellerPublicProfileReady(owner);
       const offer = await getOfferByEvent(tx, input.eventId, true);
       if (!offer) {
         serviceError(409, 'ticket_offer_required', 'Save the native ticket price, capacity, and terms before publishing.');
@@ -1114,7 +1164,11 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         owner.event.status === 'published'
         && offer.status === 'on_sale'
       ) {
-        return { event: owner.event, offer: serializeOwnerOffer(offer) };
+        return {
+          event: owner.event,
+          offer: serializeOwnerOffer(offer),
+          publicationReach: owner.event.visibility === 'unlisted' ? 'link_only' as const : performerReach
+        };
       }
       if (owner.event.status !== 'draft' || offer.status !== 'draft') {
         serviceError(409, 'native_ticket_publish_state_invalid', 'This event or ticket offer cannot be published.');
@@ -1200,7 +1254,11 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         nextStatus: 'on_sale',
         metadata: { eventId: input.eventId, performerId: input.performerId }
       });
-      return { event: published, offer: serializeOwnerOffer(activated) };
+      return {
+        event: published,
+        offer: serializeOwnerOffer(activated),
+        publicationReach: published.visibility === 'unlisted' ? 'link_only' as const : performerReach
+      };
     });
   }
 
@@ -1512,7 +1570,8 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       })
     );
     const capability = getNativeTicketSalesCapability();
-    const activeSeller = await offerMatchesCurrentSeller(row.offer, row.performer);
+    const activeSeller = sellerPublicProfileIsResolvable(row.performer)
+      && await offerMatchesCurrentSeller(row.offer, row.performer);
     const sellerSupportEmail = recordString(asRecord(row.offer.sellerTermsSnapshot), 'sellerSupportEmail') ?? '';
     return {
       mode: 'native_ga',
@@ -1604,7 +1663,6 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
           'A performer owner cannot buy their own native event ticket.'
         );
       }
-
       const [existing] = await tx
         .select()
         .from(ticketOrders)
@@ -1620,8 +1678,17 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
         if (['expired', 'payment_failed', 'voided', 'refunded'].includes(existing.status)) {
           serviceError(409, 'ticket_order_request_consumed', 'This checkout request is already closed. Start a new checkout.');
         }
+        // Idempotency must not turn an old checkout URL or a delayed provider
+        // operation into a bypass of current seller eligibility. Paid and
+        // ticket-bearing recovery states intentionally remain readable.
+        if (UNPAID_ORDER_STATUSES.includes(existing.status)) {
+          assertSellerReady(event.performer);
+          assertTicketSellerPublicProfileReady(event.performer);
+        }
         return { order: existing, operationId: null as string | null, created: false };
       }
+      assertSellerReady(event.performer);
+      assertTicketSellerPublicProfileReady(event.performer);
       const [activeBuyerOrder] = await tx
         .select({ id: ticketOrders.id })
         .from(ticketOrders)
@@ -1638,8 +1705,6 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
           'This verified Sway account already has an issued, paid, or pending ticket record for this event.'
         );
       }
-
-      assertSellerReady(event.performer);
       const now = clock();
       if (
         event.event.status !== 'published'
@@ -3898,6 +3963,11 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
       ) {
         throw new TerminalOperationError('Ticket checkout reservation already expired.');
       }
+      // The seller can become restricted, lose payout readiness, or hide the
+      // public profile after the durable order is reserved but before a
+      // retry reaches Stripe. Revalidate at the provider boundary.
+      assertSellerReady(context.performer);
+      assertTicketSellerPublicProfileReady(context.performer);
       const performanceLocation = resolveNativeTicketPerformanceLocation(context.event);
       if (!performanceLocation) {
         throw new TerminalOperationError(

@@ -36,6 +36,7 @@ const requiredFiles = [
   'src/server/performer-login.ts',
   'src/components/PerformerPublicProfilePage.tsx',
   'src/components/PerformerPublicProfileEditor.tsx',
+  'src/components/PerformerPartnerTermsPanel.tsx',
   'src/components/PerformerAccountHome.tsx',
   'src/components/TalentDashboard.tsx',
   'src/components/TalentInviteAcceptCard.tsx',
@@ -63,6 +64,7 @@ const paymentService = read('src/server/payment-service.ts');
 const performerLogin = read('src/server/performer-login.ts');
 const publicPage = read('src/components/PerformerPublicProfilePage.tsx');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
+const partnerPanel = read('src/components/PerformerPartnerTermsPanel.tsx');
 const accountHome = read('src/components/PerformerAccountHome.tsx');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const inviteCard = read('src/components/TalentInviteAcceptCard.tsx');
@@ -319,6 +321,38 @@ for (const term of [
   'acceptedByAdmin: false'
 ]) requireIncludes(partnerAcceptRoute, term, 'Brand Partner owner acceptance route');
 
+const partnerTermsReadRoute = sliceBetween(
+  server,
+  "app.get('/api/talent/partner/terms'",
+  "app.post('/api/talent/partner/terms/accept'",
+  'Brand Partner terms read route'
+);
+for (const term of [
+  'applyNoStoreHeaders(res)',
+  'requireTalentAccess(req)',
+  'loadOwnedPerformerByActorUserId(talentAccess.actor.actorId)',
+  'loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)',
+  'partner:',
+  'termsVersion:',
+  'termsHash:',
+  'termsText:',
+  'statusReason:'
+]) requireIncludes(partnerTermsReadRoute, term, 'Brand Partner terms read route');
+
+const publicProfileReadRoute = sliceBetween(
+  server,
+  "app.get('/api/talent/profile/public'",
+  "app.post('/api/talent/profile/visibility'",
+  'Public Page owner read route'
+);
+for (const forbidden of [
+  'loadPartnerEntitlementStateForPerformer',
+  'partner:',
+  'termsVersion',
+  'termsHash',
+  'termsText'
+]) requireExcludes(publicProfileReadRoute, forbidden, 'Public Page owner read route without Money state');
+
 const acceptanceInsertCount = (server.match(/\.insert\(performerPartnerTermsAcceptances\)/g) || []).length;
 if (acceptanceInsertCount !== 1) {
   failures.push(`Brand Partner acceptance must have exactly one owner-authenticated insert path; found ${acceptanceInsertCount}.`);
@@ -552,12 +586,26 @@ for (const forbidden of ['performerId', 'entitlementId', 'termsHash', 'grantedAt
 
 for (const term of [
   'Review the exact Brand Partner terms',
+  'Review accepted Brand Partner terms',
+  'The accepted Brand Partner record is incomplete.',
   'partner.termsText',
   'partner.termsHash',
+  "fetch('/api/talent/partner/terms'",
+  'setPartner(parsePartnerState(data.partner))',
   "fetch('/api/talent/partner/terms/accept'",
   'accepted: true',
+  'receiptVersion !== termsVersion',
+  'receiptHash !== termsHash',
   'Accept exact Brand Partner terms'
-]) requireIncludes(editor, term, 'Authenticated profile editor');
+]) requireIncludes(partnerPanel, term, 'Money workspace Brand Partner terms panel');
+const moneyWorkspace = sliceBetween(
+  talentDashboard,
+  "{inactiveWorkspace === 'account' ? (",
+  "{inactiveWorkspace === 'home' ? (",
+  'Money workspace'
+);
+requireIncludes(talentDashboard, "import PerformerPartnerTermsPanel from './PerformerPartnerTermsPanel';", 'TalentDashboard');
+requireIncludes(moneyWorkspace, '<PerformerPartnerTermsPanel previewMode={previewMode} />', 'Money workspace');
 for (const term of [
   'What kind of performer are you?',
   'PUBLIC_PERFORMER_PRIMARY_ROLES',
@@ -565,6 +613,13 @@ for (const term of [
   'Stage name — optional',
   'Your @handle is the main public name'
 ]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
+for (const forbidden of [
+  "fetch('/api/talent/partner/terms/accept'",
+  'Accept exact Brand Partner terms',
+  'partnerAcceptanceConfirmed',
+  'partner.termsText',
+  'Partner acceptance pending'
+]) requireExcludes(editor, forbidden, 'Public Page without money-affecting Brand Partner controls');
 
 for (const term of [
   'mergePublicProfileMetadata',
@@ -585,6 +640,8 @@ for (const term of [
   'resolvePublicProfilePageKindLabel',
   'performerProfile?.primary_role',
   'performerProfile?.specialties',
+  "window.addEventListener('sway:performer-profile-updated', refreshAfterProfileSave)",
+  "window.removeEventListener('sway:performer-profile-updated', refreshAfterProfileSave)",
   'Ready to start a live room · ${performerRoleLabel}'
 ]) requireIncludes(talentApp, term, 'Handle-first performer console');
 requireExcludes(talentApp, "performerProfile?.display_name?.trim()\n    || performerProfile?.handle?.trim()", 'Performer console identity');

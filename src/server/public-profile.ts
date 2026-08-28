@@ -386,6 +386,16 @@ export function normalizePublicProfileLinks(value: unknown): NormalizedPublicPro
 
 export type PerformerVisibilityState = 'draft' | 'unlisted' | 'public';
 
+export const INTERNAL_TEST_PROFILE_HANDLES = ['platynum-47'] as const;
+const INTERNAL_TEST_PROFILE_HANDLE_SET = new Set<string>(INTERNAL_TEST_PROFILE_HANDLES);
+
+export function isDiscoveryEligibleHandle(handle: string | null | undefined) {
+  if (typeof handle !== 'string' || handle !== handle.trim() || !/^[A-Za-z0-9_-]{1,64}$/.test(handle)) {
+    return false;
+  }
+  return !INTERNAL_TEST_PROFILE_HANDLE_SET.has(handle.toLowerCase());
+}
+
 export type PublicPerformerPolicyResult =
   | { kind: 'public'; visibility: 'public' }
   | { kind: 'unlisted'; visibility: 'unlisted' }
@@ -424,4 +434,40 @@ export function evaluatePublicPerformerVisibility(input: {
   if (input.visibilityState === 'public') return { kind: 'public', visibility: 'public' };
   if (input.visibilityState === 'unlisted') return { kind: 'unlisted', visibility: 'unlisted' };
   return { kind: 'not_resolvable' };
+}
+
+export type PublicEventPerformerAudience = 'discovery' | 'direct';
+
+/**
+ * One performer eligibility policy for every public event surface. Discovery
+ * requires an indexable performer; a direct event link may resolve an
+ * unlisted performer, but neither audience may expose a draft, inactive, or
+ * restricted account. A nonempty bio matches the canonical profile resolver,
+ * so event cards never point at a performer route that cannot resolve.
+ */
+export function evaluatePublicEventPerformerEligibility(input: {
+  audience: PublicEventPerformerAudience;
+  claimed: boolean;
+  hasOwner: boolean;
+  isActive: boolean;
+  onboardingStatus: string | null | undefined;
+  visibilityState: unknown;
+  handle: string | null | undefined;
+  displayName: string | null | undefined;
+  bio: string | null | undefined;
+}): { eligible: boolean; visibility: 'public' | 'unlisted' | null } {
+  if (!isDiscoveryEligibleHandle(input.handle)) {
+    return { eligible: false, visibility: null };
+  }
+  if (typeof input.bio !== 'string' || !input.bio.trim()) {
+    return { eligible: false, visibility: null };
+  }
+  const policy = evaluatePublicPerformerVisibility(input);
+  if (policy.kind === 'not_resolvable') {
+    return { eligible: false, visibility: null };
+  }
+  return {
+    eligible: input.audience === 'direct' || policy.visibility === 'public',
+    visibility: policy.visibility
+  };
 }

@@ -9,6 +9,7 @@ This repository contains separate audience, performer, overlay, and internal-adm
 - `/talent/login`
 - `/talent/gigs`
 - `/talent/gigs/:gigId`
+- `/talent/shows`
 - `/g/:gigId`
 - `/p/:performerHandle`
 - `/e/:eventId`

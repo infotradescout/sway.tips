@@ -20,6 +20,8 @@ import {
 import { sendAcquisitionEvent, sendDiscoveryEvent } from '../shells/frictionClient';
 import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
 
+type AttendanceMode = 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket';
+
 export type PublicEventDto = {
   id: string;
   title: string;
@@ -35,6 +37,7 @@ export type PublicEventDto = {
     isTba: boolean;
   };
   coverImageUrl: string | null;
+  attendanceMode?: AttendanceMode;
   externalTicket: {
     url: string;
     label: string | null;
@@ -148,8 +151,57 @@ export function externalTicketRedirectPath(eventId: string) {
   return `/api/public/events/${encodeURIComponent(eventId)}/ticket`;
 }
 
-function externalTicketCtaLabel(label: string | null | undefined) {
+type AttendanceResolvableEvent = Pick<PublicEventDto, 'attendanceMode' | 'nativeTicket' | 'externalTicket'>;
+
+function resolvedAttendanceMode(event: AttendanceResolvableEvent): AttendanceMode {
+  if (event.attendanceMode === 'walk_in'
+    || event.attendanceMode === 'external_rsvp'
+    || event.attendanceMode === 'external_ticket'
+    || event.attendanceMode === 'native_ticket') return event.attendanceMode;
+  if (event.nativeTicket) return 'native_ticket';
+  if (event.externalTicket?.label === 'RSVP') return 'external_rsvp';
+  return 'external_ticket';
+}
+
+function externalTicketCtaLabel(label: string | null | undefined, attendanceMode?: AttendanceMode) {
+  if (attendanceMode === 'external_rsvp') return 'RSVP';
   return label === 'RSVP' || label === 'View details' ? label : 'Get tickets';
+}
+
+function attendanceModeLabel(event: AttendanceResolvableEvent) {
+  const attendanceMode = resolvedAttendanceMode(event);
+  if (attendanceMode === 'walk_in') return 'Walk-in · admission handled at the venue';
+  if (attendanceMode === 'external_rsvp') return 'RSVP through an external provider';
+  if (attendanceMode === 'native_ticket') return 'General admission sold by the performer through Sway';
+  return 'Tickets through an external provider';
+}
+
+function externalAttendancePolicy(event: AttendanceResolvableEvent) {
+  return resolvedAttendanceMode(event) === 'external_rsvp'
+    ? 'Registration and attendance policies are handled by the external RSVP site.'
+    : 'Checkout, charges, and refund policies are handled by the external ticket site.';
+}
+
+function externalAttendanceSiteLabel(event: AttendanceResolvableEvent) {
+  return resolvedAttendanceMode(event) === 'external_rsvp'
+    ? 'external RSVP site'
+    : 'external ticket site';
+}
+
+function cancelledEventSupportCopy(
+  event: AttendanceResolvableEvent
+) {
+  const attendanceMode = resolvedAttendanceMode(event);
+  if (attendanceMode === 'native_ticket') {
+    return 'Sway queues full refunds for eligible unused native tickets. Admitted tickets keep their recorded settlement, and disputed payments remain under support review.';
+  }
+  if (attendanceMode === 'external_rsvp') {
+    return 'Contact the external RSVP provider, performer, or venue for next steps.';
+  }
+  if (attendanceMode === 'external_ticket') {
+    return 'Contact the external ticket provider, performer, or venue for refund and support policies.';
+  }
+  return 'No Sway ticket or RSVP link. Contact the performer or venue for next steps.';
 }
 
 function formatUsd(cents: number) {
@@ -171,6 +223,7 @@ export function PublicEventCard({
   const cancelled = isEventCancelled(event);
   const started = hasEventStarted(event);
   const ended = hasEventEnded(event);
+  const attendanceMode = resolvedAttendanceMode(event);
   const eventPath = event.eventPath || `/e/${encodeURIComponent(event.id)}`;
   const [coverFailed, setCoverFailed] = useState(false);
 
@@ -220,6 +273,14 @@ export function PublicEventCard({
             <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>{eventLocationLabel(event)}</span>
           </p>
+          <p className="mt-1 flex items-start gap-2 text-xs font-bold leading-5 text-cyan-100">
+            {attendanceMode === 'walk_in' ? (
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <Ticket className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span>{attendanceModeLabel(event)}</span>
+          </p>
         </div>
       </div>
 
@@ -235,10 +296,10 @@ export function PublicEventCard({
             href={externalTicketRedirectPath(event.id)}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`${externalTicketCtaLabel(event.externalTicket.label)} on external ticket site (opens in a new tab)`}
+            aria-label={`${externalTicketCtaLabel(event.externalTicket.label, attendanceMode)} on ${externalAttendanceSiteLabel(event)} (opens in a new tab)`}
             className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-xs font-black text-white transition hover:bg-fuchsia-500"
           >
-            {externalTicketCtaLabel(event.externalTicket.label)}
+            {externalTicketCtaLabel(event.externalTicket.label, attendanceMode)}
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
           </a>
         ) : event.nativeTicket && !cancelled && !started ? (
@@ -267,7 +328,7 @@ export function PublicEventCard({
 
       {showExternalPolicy && event.externalTicket && !cancelled && !started ? (
         <p className="border-t border-white/10 px-4 py-3 text-xs leading-5 text-slate-400">
-          Checkout, charges, and refund policies are handled by the external ticket site.
+          {externalAttendancePolicy(event)}
         </p>
       ) : null}
     </article>
@@ -388,6 +449,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
   const cancelled = isEventCancelled(event);
   const started = hasEventStarted(event);
   const ended = hasEventEnded(event);
+  const attendanceMode = resolvedAttendanceMode(event);
   const performerPath = event.performer.performerPath || (event.performer.handle
     ? `/p/${encodeURIComponent(event.performer.handle)}`
     : null);
@@ -431,7 +493,7 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
             />
           ) : (
             <div className="grid aspect-[16/7] w-full place-items-center border-b border-white/10 bg-gradient-to-br from-fuchsia-500/20 to-cyan-400/10 text-fuchsia-100">
-              <Ticket className="h-16 w-16" aria-hidden="true" />
+              <CalendarDays className="h-16 w-16" aria-hidden="true" />
             </div>
           )}
 
@@ -442,10 +504,8 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                 <div>
                   <p className="font-black">This event has been cancelled.</p>
                   <p className="mt-1 text-xs leading-5 text-rose-100/80">
-                    {event.cancellationReason || 'Ticket checkout is unavailable.'}{' '}
-                    {event.nativeTicket
-                      ? 'Sway queues full refunds for eligible unused native tickets. Admitted tickets keep their recorded settlement, and disputed payments remain under support review.'
-                      : 'Contact the external ticket provider for its refund and support policies.'}
+                    {event.cancellationReason || 'This event is no longer taking place.'}{' '}
+                    {cancelledEventSupportCopy(event)}
                   </p>
                 </div>
               </div>
@@ -480,6 +540,17 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                   ) : null}
                 </div>
               </div>
+              <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:col-span-2">
+                {attendanceMode === 'walk_in' ? (
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" aria-hidden="true" />
+                ) : (
+                  <Ticket className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" aria-hidden="true" />
+                )}
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500">Attendance</p>
+                  <p className="mt-1 text-sm font-bold text-white">{attendanceModeLabel(event)}</p>
+                </div>
+              </div>
             </div>
 
             {event.description ? (
@@ -496,17 +567,18 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                     shell: 'patron', surface: 'public-event', route_family: 'public-event',
                     has_route_context: true, has_session_context: false, build_commit: 'unknown',
                     attribution_channel: getEffectiveDiscoveryChannel(), entity_kind: 'event', entity_key: event.id,
-                    action_kind: 'ticket', visibility_eligibility: 'eligible'
+                    action_kind: attendanceMode === 'external_rsvp' ? 'other' : 'ticket', visibility_eligibility: 'eligible'
                   })}
-                  aria-label={`${externalTicketCtaLabel(event.externalTicket.label)} on external ticket site (opens in a new tab)`}
+                  aria-label={`${externalTicketCtaLabel(event.externalTicket.label, attendanceMode)} on ${externalAttendanceSiteLabel(event)} (opens in a new tab)`}
                   className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-5 text-sm font-black text-white transition hover:bg-fuchsia-500"
                 >
-                  {externalTicketCtaLabel(event.externalTicket.label)}
+                  {externalTicketCtaLabel(event.externalTicket.label, attendanceMode)}
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                 </a>
                 <p className="mt-3 text-xs leading-5 text-slate-400">
-                  You are leaving Sway. Checkout, charges, ticket delivery, admission, transfers, cancellations,
-                  refunds, and support are handled under the external ticket provider&apos;s policies.
+                  {attendanceMode === 'external_rsvp'
+                    ? 'You are leaving Sway. Registration, admission, cancellations, and support are handled under the external RSVP provider’s policies.'
+                    : 'You are leaving Sway. Checkout, charges, ticket delivery, admission, transfers, cancellations, refunds, and support are handled under the external ticket provider’s policies.'}
                 </p>
               </div>
             ) : event.nativeTicket && !cancelled && !started ? (
@@ -516,13 +588,24 @@ export default function PublicEventPage({ eventId }: { eventId: string }) {
                 eventTitle={event.title}
                 offer={event.nativeTicket}
               />
+            ) : attendanceMode === 'walk_in' && !cancelled && !started ? (
+              <div className="mt-7 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-slate-200">
+                <p className="text-sm font-black text-white">Walk-in · admission handled at the venue</p>
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  No Sway ticket or RSVP link. Contact the performer or venue for admission details.
+                </p>
+              </div>
             ) : !cancelled && !started ? (
               <div className="mt-7 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm text-amber-100">
-                No ticket checkout is available for this event right now.
+                The listed attendance action is unavailable. Contact the performer or venue for details.
               </div>
             ) : started && !cancelled ? (
               <div className="mt-7 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-300">
-                {ended ? 'This event has ended.' : 'This event has started.'} Ticket checkout is closed.
+                {ended
+                  ? 'This event has ended.'
+                  : attendanceMode === 'walk_in'
+                    ? 'This event has started. Contact the performer or venue for current admission details.'
+                    : 'This event has started. Ticket or RSVP actions are closed.'}
               </div>
             ) : null}
           </div>

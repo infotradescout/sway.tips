@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import { performers, proModeStatusEvents, users } from '../db/schema';
+import { lockPerformerHandleNamespace } from './performer-handle-lock';
 
 export type ProModeStatus = 'disabled' | 'onboarding' | 'active' | 'suspended' | 'revoked';
 export type ProModeAction = 'performer_signup' | 'self_activate';
@@ -116,6 +117,8 @@ export async function activateProModeWithPerformer(
   input: { userId: string; actorUserId: string; displayName: string; handle: string }
 ) {
   return db.transaction(async (tx) => {
+    await lockPerformerHandleNamespace(tx, input.handle);
+
     const [account] = await tx
       .select({ proModeStatus: users.proModeStatus, emailVerifiedAt: users.emailVerifiedAt })
       .from(users)

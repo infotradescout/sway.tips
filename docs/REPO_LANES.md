@@ -49,7 +49,7 @@ These lanes may run in parallel when they keep to their allowed files and do not
 | `overlay-surface` | Overlay display shell and overlay-only client behavior. |
 | `moderation` | Reporting, blocking, hiding, removing, moderation audit behavior. |
 | `payments` | Stripe/payment provider, idempotency, capture/void/refund/payout lifecycle. |
-| `public-event-listings` | Performer-owned event listings, public discovery, and safe handoff to external HTTPS ticket providers. No native ticket money. |
+| `public-event-listings` | Performer-owned walk-in, external RSVP, and external ticket listings with public discovery. No native ticket money. |
 | `event-tickets-native-ga` | Feature-gated one-ticket paid-GA checkout, separate ticket ledger, rotating admission pass, durable post-check-in performer transfer, and refund-only unused-ticket settlement. |
 | `app-store` | TestFlight/App Store package evidence, privacy/support/compliance docs. |
 
@@ -61,16 +61,18 @@ The `public-event-listings` slice was activated on 2026-07-26.
 Performer creates an event
 → performer publishes it
 → Sway shows it on the performer profile, public event page, and discovery feed
-→ customer follows the performer-supplied HTTPS ticket link
+→ walk-in visitors use the published location, or customers follow the performer-supplied HTTPS RSVP/ticket link
 ```
 
 This slice is listing and discovery only:
 
 - Performer is the only seller-side product actor.
 - Location details are event content, not a separate account, role, or permission boundary.
+- Walk-in means Sway owns no ticket, RSVP, reservation, capacity, or admission record. Admission is handled at the venue; the listing does not claim a price.
 - Sway does not sell the external ticket, control external capacity, confirm external inventory, issue admission proof, process a refund, or settle money.
-- Ownership guards, suspended-performer hiding, public-state filtering, idempotency, and transactional mutation audit evidence are required. Anonymous reads must not create unbounded audit rows.
-- External CTA copy is closed to truthful handoff labels. Cancelling the Sway listing does not cancel or refund an external order.
+- Discovery and indexing require an active, public, resolvable performer who is neither restricted nor suspended. Direct event links also allow unlisted performers/events, but never draft, inactive, restricted, or suspended performers.
+- Ownership guards, public-state filtering, idempotency, and transactional mutation audit evidence are required. Anonymous reads must not create unbounded audit rows.
+- External CTA copy is closed to truthful handoff labels. Cancelling an external listing does not cancel or refund an external order; walk-in cancellation has no external provider confirmation.
 - Native ticket money remains isolated from this external-listing lane. The authorized `event-tickets-native-ga` lane owns its separate records and feature gate.
 
 ## Future Product Lanes

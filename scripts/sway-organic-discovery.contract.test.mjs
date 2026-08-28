@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
+const publicProfile = readFileSync(join(root, 'src/server/public-profile.ts'), 'utf8');
 const client = readFileSync(join(root, 'src/shells/frictionClient.ts'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
@@ -17,7 +18,6 @@ for (const term of [
   "app.get('/llms.txt'",
   "app.get('/sitemap.xml'",
   "nullif(trim(${performers.bio}), '') is not null",
-  "'platynum-47'",
   'isDiscoveryEligibleHandle(row.handle)',
   'performer_profile_claim_started',
   'guest_to_performer_started',
@@ -36,6 +36,14 @@ for (const term of [
   'discovery_primary_action'
 ]) {
   if (!server.includes(term)) failures.push(`Organic discovery implementation missing: ${term}`);
+}
+
+for (const term of [
+  "INTERNAL_TEST_PROFILE_HANDLES = ['platynum-47']",
+  'export function isDiscoveryEligibleHandle',
+  'INTERNAL_TEST_PROFILE_HANDLE_SET.has'
+]) {
+  if (!publicProfile.includes(term)) failures.push(`Missing shared discovery handle policy term: ${term}`);
 }
 
 for (const event of [

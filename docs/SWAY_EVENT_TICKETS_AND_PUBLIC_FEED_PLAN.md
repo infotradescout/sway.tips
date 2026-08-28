@@ -1,6 +1,6 @@
-# Sway Plan: External Event Listings + Future Native Tickets
+# Sway Plan: Performer Event Listings + Native Tickets
 
-**Status:** External listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.
+**Status:** Walk-in and external listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.
 **Date:** 2026-07-23
 **External-listing slice activated:** 2026-07-26
 **Native paid-GA v1 slice activated:** 2026-07-26
@@ -8,7 +8,7 @@
 **Owner direction:**
 
 - Event ticket sales is a Sway lane.
-- External-mode events hand customers to an external HTTPS ticket provider; native-mode events use the isolated paid-GA v1 lane below.
+- Walk-in events publish an actionable location without a Sway ticket/RSVP link; external modes hand customers to a performer-supplied HTTPS destination; native mode uses the isolated paid-GA v1 lane below.
 - Performer is the only seller-side product actor. Location details do not create another account type or role.
 - The merged external-listing product does **not** sell tickets. The authorized native paid-GA slice must remain disabled in production until its configuration and proof gates pass.
 - Handle fraud and the real money/admission risks — without Ticketmaster-scale bloat.
@@ -18,7 +18,7 @@
 
 ---
 
-## 0. Activated Slice: External Event Listings
+## 0. Activated Slice: Performer Event Listings
 
 The activated slice is deliberately narrow:
 
@@ -26,7 +26,7 @@ The activated slice is deliberately narrow:
 Performer creates event
 → performer publishes event
 → event appears on the performer profile, /e/:eventId, and /discover
-→ customer follows the performer-supplied HTTPS ticket URL
+→ visitor uses the walk-in location, or follows the performer-supplied HTTPS RSVP/ticket URL
 ```
 
 Required truth:
@@ -34,11 +34,14 @@ Required truth:
 - Every event belongs to one performer.
 - Only that performer’s authorized account can mutate it.
 - Repeated creates with the same client request ID resolve idempotently.
-- Performer profiles and the discovery feed show only published, public, future events owned by active, non-suspended performers.
-- A direct `/e/:eventId` page may preserve a truthful previously published event record after it is unlisted, cancelled, or past; it must expose the real current status and disable stale handoffs.
+- The discovery feed shows only published, public, future events whose performer is active, public, resolvable, and neither restricted nor suspended.
+- A resolved public or unlisted performer profile may show that performer's published, public, future events.
+- A direct `/e/:eventId` page may preserve a truthful public/unlisted previously published event after it is unlisted, cancelled, or past, including an unlisted performer parent; it must never resolve a draft, inactive, restricted, suspended, or unresolvable performer and must disable stale handoffs.
+- Unlisted event documents are `noindex`, and sitemap/event ticket handoffs use the same performer eligibility policy.
+- Walk-in publication requires a non-TBA location name plus either a street address or city. It creates no Sway ticket, RSVP, reservation, capacity, or admission record, and it does not claim a price.
 - External ticket URLs must be safe HTTPS handoffs.
-- External CTAs use the closed labels `Get tickets`, `RSVP`, or `View details`; performer copy cannot imply Sway inventory, checkout, or guaranteed admission.
-- Cancelling changes the Sway listing only. The performer must separately handle external-provider cancellation, buyer communication, and refunds.
+- External ticket CTAs use `Get tickets` or `View details`; external RSVP uses `RSVP`. Performer copy cannot imply Sway inventory, checkout, or guaranteed admission.
+- Cancelling changes the Sway listing only. Linked external listings still require the performer to handle provider cancellation, buyer communication, and refunds; walk-in cancellation directs visitors to the performer or venue.
 - A completed published event cannot be edited or rewritten as cancelled. If no end time is supplied, the event start closes the mutation window.
 - An edit to an active published event cannot move its effective end (or start when no end is set) into the past.
 - Anonymous event reads do not append unbounded audit rows. State mutations remain transactionally audited; future view/click analytics must be bounded and abuse-resistant.
@@ -370,7 +373,7 @@ We are winning when:
 ## 11. Open Owner Decisions (Before Build)
 
 1. **Close / grace window** after event end before auto-applying the event’s default settle policy?
-2. Free / RSVP events on the same event object, or tickets-only in v1?
+2. **Resolved:** walk-in, external RSVP, external ticket, and native ticket are explicit attendance modes on the same event object; walk-in does not make a price claim.
 3. Unlisted vs public feed default?
 4. Should Phase B (feed UI) run ahead of ticket MVP while live-room money stays sacred?
 5. Platform fee model for tickets (flat cents, %, or hybrid) — at release vs purchase — and any small transfer fee — must match Partner Terms before UI copy.

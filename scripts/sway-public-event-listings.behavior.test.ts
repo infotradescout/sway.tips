@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import {
   createPerformerEventService,
   EventServiceError,
-  type CreatePerformerEventInput
+  type CreatePerformerEventInput,
+  type PerformerEventAttendanceMode
 } from '../src/server/performer-event-service';
+import { evaluatePublicEventPerformerEligibility } from '../src/server/public-profile';
 
 const performerId = '11111111-1111-4111-8111-111111111111';
 const actorUserId = '22222222-2222-4222-8222-222222222222';
@@ -11,6 +13,17 @@ const clientRequestId = '33333333-3333-4333-8333-333333333333';
 const eventId = '44444444-4444-4444-8444-444444444444';
 const createdAt = new Date('2026-07-26T12:00:00.000Z');
 const updatedAt = new Date('2026-07-26T12:00:01.000Z');
+
+const ownedPerformerRow = {
+  id: performerId,
+  ownerUserId: actorUserId,
+  displayName: 'Event Owner',
+  handle: 'event-owner',
+  bio: 'A resolvable performer profile.',
+  visibilityState: 'public',
+  isActive: true,
+  onboardingStatus: 'complete'
+};
 
 const normalizedRow = {
   id: eventId,
@@ -21,6 +34,7 @@ const normalizedRow = {
   title: 'Summer Night',
   description: 'Doors at seven.\nMusic at eight.',
   startsAt: new Date('2030-07-28T00:00:00.000Z'),
+  doorOpensAt: null,
   endsAt: null,
   timeZone: 'America/Chicago',
   locationName: 'The Listening Room',
@@ -28,6 +42,8 @@ const normalizedRow = {
   city: 'Chicago',
   locationIsTba: false,
   coverImageUrl: 'https://images.example.com/summer-night.png',
+  ticketingMode: 'external' as const,
+  attendanceMode: 'external_ticket' as PerformerEventAttendanceMode,
   externalTicketUrl: 'https://tickets.example.com/summer-night',
   externalTicketLabel: 'Get tickets',
   visibility: 'unlisted' as const,
@@ -58,9 +74,21 @@ const replayInput: CreatePerformerEventInput = {
   visibility: undefined
 };
 
+assert.deepEqual(evaluatePublicEventPerformerEligibility({
+  audience: 'discovery',
+  claimed: true,
+  hasOwner: true,
+  isActive: true,
+  onboardingStatus: 'gig_ready',
+  visibilityState: 'public',
+  handle: ' tickets ',
+  displayName: 'Whitespace Reserved Handle',
+  bio: 'Should never be discoverable.'
+}), { eligible: false, visibility: null });
+
 function fakeReplayDb(eventRow = normalizedRow) {
   return fakeSelectOnlyDb([
-    [{ id: performerId, isActive: true, onboardingStatus: 'active' }],
+    [ownedPerformerRow],
     [eventRow]
   ]);
 }
@@ -75,6 +103,9 @@ function fakeSelectOnlyDb(resultsInput: unknown[][]) {
           return chain;
         },
         where() {
+          return chain;
+        },
+        for() {
           return chain;
         },
         limit() {
@@ -171,6 +202,11 @@ await expectEventError({ timeZone: 'Not/A_Time_Zone' }, 'invalid_time_zone');
 await expectEventError({ visibility: 'friends-only' as never }, 'invalid_visibility');
 await expectEventError({ locationIsTba: 'yes' as never }, 'invalid_location_tba');
 await expectEventError({ externalTicketUrl: null, externalTicketLabel: 'Buy now' }, 'ticket_label_without_url');
+await expectEventError({ attendanceMode: 'unsupported' as never }, 'invalid_attendance_mode');
+await expectEventError({ attendanceMode: ['walk_in'] as never }, 'invalid_attendance_mode');
+await expectEventError({ attendanceMode: 'walk_in' }, 'walk_in_external_link_conflict');
+await expectEventError({ attendanceMode: 'external_rsvp', externalTicketLabel: 'Get tickets' }, 'rsvp_label_required');
+await expectEventError({ attendanceMode: 'external_ticket', externalTicketLabel: 'RSVP' }, 'ticket_label_required');
 await expectEventError(
   { externalTicketLabel: 'Buy on Sway' },
   'invalid_external_ticket_label'
@@ -212,11 +248,32 @@ for (const unsafeUrl of [
 }
 await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe_url');
 
+// Walk-in is explicit intent. It persists without a ticket/RSVP URL, while an
+// omitted mode keeps the legacy external-ticket interpretation.
+{
+  const walkInRow = {
+    ...normalizedRow,
+    attendanceMode: 'walk_in' as const,
+    externalTicketUrl: null,
+    externalTicketLabel: null
+  };
+  const service = createPerformerEventService(fakeReplayDb(walkInRow) as never);
+  const result = await service.createEvent({
+    ...replayInput,
+    attendanceMode: 'walk_in',
+    externalTicketUrl: null,
+    externalTicketLabel: null
+  });
+  assert.equal(result.created, false);
+  assert.equal(result.event.attendanceMode, 'walk_in');
+  assert.equal(result.event.externalTicketUrl, null);
+}
+
 // Publishing is fail-closed unless the owning performer is active. A valid
 // external HTTPS URL does not let an inactive account publish.
 {
   const service = createPerformerEventService(fakeSelectOnlyDb([
-    [{ id: performerId, isActive: false, onboardingStatus: 'complete' }]
+    [{ ...ownedPerformerRow, isActive: false }]
   ]) as never);
   await assert.rejects(
     service.publishEvent({
@@ -234,8 +291,8 @@ await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe
   );
 }
 
-// An active performer still cannot publish a listing without an external
-// HTTPS ticket or RSVP destination. Native Sway checkout is not a fallback.
+// An explicit external mode still cannot publish without its HTTPS ticket or
+// RSVP destination. An ambiguous missing link never becomes walk-in.
 {
   const eventWithoutExternalLink = {
     ...normalizedRow,
@@ -243,7 +300,7 @@ await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe
     externalTicketLabel: null
   };
   const service = createPerformerEventService(fakeSelectOnlyDb([
-    [{ id: performerId, isActive: true, onboardingStatus: 'complete' }],
+    [ownedPerformerRow],
     [eventWithoutExternalLink]
   ]) as never);
   await assert.rejects(
@@ -262,6 +319,39 @@ await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe
   );
 }
 
+// A walk-in draft may omit ticket/RSVP data, but publishing still requires a
+// venue visitors can act on.
+{
+  const incompleteWalkIn = {
+    ...normalizedRow,
+    attendanceMode: 'walk_in' as const,
+    externalTicketUrl: null,
+    externalTicketLabel: null,
+    locationName: null,
+    locationAddress: null,
+    city: null,
+    locationIsTba: true
+  };
+  const service = createPerformerEventService(fakeSelectOnlyDb([
+    [ownedPerformerRow],
+    [incompleteWalkIn]
+  ]) as never);
+  await assert.rejects(
+    service.publishEvent({
+      eventId,
+      performerId,
+      actorUserId,
+      expectedUpdatedAt: updatedAt.toISOString()
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof EventServiceError);
+      assert.equal(error.status, 422);
+      assert.equal(error.code, 'walk_in_location_required');
+      return true;
+    }
+  );
+}
+
 // A lost response can be retried safely: once the requested state is already
 // durable, publish and same-reason cancellation replay the current event
 // instead of creating duplicate audit/state transitions.
@@ -274,7 +364,7 @@ await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe
     updatedAt: publishedAt
   };
   const service = createPerformerEventService(fakeSelectOnlyDb([
-    [{ id: performerId, isActive: true, onboardingStatus: 'complete' }],
+    [ownedPerformerRow],
     [publishedEvent]
   ]) as never);
   const result = await service.publishEvent({
@@ -298,7 +388,7 @@ await expectEventError({ coverImageUrl: 'https://127.0.0.1/cover.png' }, 'unsafe
     updatedAt: cancelledAt
   };
   const service = createPerformerEventService(fakeSelectOnlyDb([
-    [{ id: performerId, isActive: true, onboardingStatus: 'complete' }],
+    [ownedPerformerRow],
     [cancelledEvent]
   ]) as never);
   const result = await service.cancelEvent({
@@ -331,7 +421,7 @@ for (const endedEvent of [
   }
 ]) {
   const service = createPerformerEventService(fakeSelectOnlyDb([
-    [{ id: performerId, isActive: true, onboardingStatus: 'complete' }],
+    [ownedPerformerRow],
     [endedEvent]
   ]) as never);
   await assert.rejects(

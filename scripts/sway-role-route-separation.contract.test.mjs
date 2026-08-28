@@ -11,6 +11,7 @@ const requiredRoutes = [
   '/talent/login',
   '/talent/signup',
   '/talent/gigs',
+  '/talent/shows',
   '/g/',
   '/p/',
   '/overlay/',

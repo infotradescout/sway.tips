@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { evaluatePublicEventPerformerEligibility } from './public-profile';
 
 export const SWAY_DISCOVERY_PLATFORM = 'sway' as const;
 
@@ -138,6 +139,7 @@ export type SwayDiscoverySupply = {
     isActive: boolean;
     onboardingStatus: string;
     claimed: boolean;
+    bio: string | null;
   }>;
   events: Array<{
     id: string;
@@ -463,18 +465,35 @@ export function resolvePerformerDiscoveryEligibility(input: {
   isActive: boolean;
   onboardingStatus: string;
   visibilityState?: string | null;
+  claimed?: boolean;
+  handle?: string | null;
+  displayName?: string | null;
+  bio?: string | null;
 }) {
   if (input.visibilityState !== undefined) {
     const valid = typeof input.visibilityState === 'string'
       && ['draft', 'unlisted', 'public', 'suspended', 'removed'].includes(input.visibilityState);
+    const policy = valid
+      ? evaluatePublicEventPerformerEligibility({
+          audience: 'discovery',
+          claimed: input.claimed === true,
+          hasOwner: input.claimed === true,
+          isActive: input.isActive,
+          onboardingStatus: input.onboardingStatus,
+          visibilityState: input.visibilityState,
+          handle: input.handle,
+          displayName: input.displayName,
+          bio: input.bio
+        })
+      : { eligible: false };
     return {
-      eligible: valid && input.visibilityState === 'public' && input.isActive && input.onboardingStatus !== 'suspended',
+      eligible: policy.eligible,
       visibilityState: valid ? input.visibilityState as PerformerDiscoveryVisibilityState : null,
       evidence: valid ? 'explicit_visibility' as const : 'invalid_visibility' as const
     };
   }
   return {
-    eligible: input.isActive && input.onboardingStatus !== 'suspended',
+    eligible: input.isActive && !['restricted', 'suspended'].includes(input.onboardingStatus),
     visibilityState: null,
     evidence: 'explicit_visibility_unavailable_legacy_fallback' as const
   };

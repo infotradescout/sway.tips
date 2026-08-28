@@ -43,12 +43,14 @@ const ids = {
   noShowEvent: '30000000-0000-4000-8000-000000000004',
   disputeEvent: '30000000-0000-4000-8000-000000000005',
   replacementEvent: '30000000-0000-4000-8000-000000000006',
+  retryEvent: '30000000-0000-4000-8000-000000000007',
   qrOffer: '40000000-0000-4000-8000-000000000001',
   manualOffer: '40000000-0000-4000-8000-000000000002',
   cancelOffer: '40000000-0000-4000-8000-000000000003',
   noShowOffer: '40000000-0000-4000-8000-000000000004',
   disputeOffer: '40000000-0000-4000-8000-000000000005',
   replacementOffer: '40000000-0000-4000-8000-000000000006',
+  retryOffer: '40000000-0000-4000-8000-000000000007',
   qrCheckoutRequest: '50000000-0000-4000-8000-000000000001',
   soldOutRequest: '50000000-0000-4000-8000-000000000002',
   manualCheckoutRequest: '50000000-0000-4000-8000-000000000003',
@@ -60,6 +62,7 @@ const ids = {
   selfPurchaseRequest: '50000000-0000-4000-8000-000000000009',
   replacementFirstRequest: '50000000-0000-4000-8000-000000000010',
   replacementSecondRequest: '50000000-0000-4000-8000-000000000011',
+  retryCheckoutRequest: '50000000-0000-4000-8000-000000000012',
   qrCheckInRequest: '60000000-0000-4000-8000-000000000001',
   manualCheckInRequest: '60000000-0000-4000-8000-000000000002'
 } as const;
@@ -117,12 +120,13 @@ function stripeId(prefix: string, orderId: string) {
   return `${prefix}_${orderId.replace(/-/g, '')}`;
 }
 
-function createFakeProvider() {
+function createFakeProvider(options: { checkoutFailures?: number } = {}) {
   const checkoutCalls: CreateEventTicketCheckoutInput[] = [];
   const transferCalls: TransferEventTicketProceedsInput[] = [];
   const refundCalls: RefundEventTicketPaymentInput[] = [];
   const sessions = new Map<string, EventTicketCheckoutResult>();
   const intents = new Map<string, EventTicketPaymentIntentResult>();
+  let checkoutFailuresRemaining = Math.max(0, options.checkoutFailures ?? 0);
 
   const provider: EventTicketStripeProvider = {
     processor: 'stripe',
@@ -130,6 +134,10 @@ function createFakeProvider() {
 
     async createCheckoutSession(input) {
       checkoutCalls.push(input);
+      if (checkoutFailuresRemaining > 0) {
+        checkoutFailuresRemaining -= 1;
+        throw new Error('Temporary fake Checkout Session failure.');
+      }
       const checkoutSessionId = stripeId('cs', input.orderId);
       const result: EventTicketCheckoutResult = {
         checkoutSessionId,
@@ -344,12 +352,12 @@ async function seedDatabase(database: PGlite) {
       ('${ids.buyerTwo}', 'ticket-buyer-two@example.test', now(), 'patron');
 
     insert into performers (
-      id, owner_user_id, display_name, handle, is_active, onboarding_status,
+      id, owner_user_id, display_name, handle, bio, visibility_state, is_active, onboarding_status,
       payment_account_status, kyc_status, charges_enabled, payouts_enabled,
       stripe_connected_account_id
     ) values (
       '${ids.performer}', '${ids.owner}', 'Native Ticket Seller',
-      'native-ticket-seller', true, 'gig_ready', 'payouts_enabled',
+      'native-ticket-seller', 'A resolvable native ticket seller.', 'public', true, 'gig_ready', 'payouts_enabled',
       'not_required', true, true, 'acct_native_ticket_seller'
     );
   `);
@@ -360,7 +368,8 @@ async function seedDatabase(database: PGlite) {
     [ids.cancelEvent, 'Cancelled Show'],
     [ids.noShowEvent, 'No-show Refund Show'],
     [ids.disputeEvent, 'Dispute Ordering Show'],
-    [ids.replacementEvent, 'Replacement Checkout Show']
+    [ids.replacementEvent, 'Replacement Checkout Show'],
+    [ids.retryEvent, 'Retry Eligibility Show']
   ] as const;
   for (const [eventId, title] of eventRows) {
     const clientRequestId = eventId.replace(/^3/, '7');
@@ -395,6 +404,7 @@ async function seedDatabase(database: PGlite) {
   await seedNativeOffer(database, ids.noShowEvent, ids.noShowOffer, 1);
   await seedNativeOffer(database, ids.disputeEvent, ids.disputeOffer, 1);
   await seedNativeOffer(database, ids.replacementEvent, ids.replacementOffer, 1);
+  await seedNativeOffer(database, ids.retryEvent, ids.retryOffer, 1);
 }
 
 async function confirmPayment(
@@ -522,6 +532,71 @@ async function runServiceProof(
     'update performers set payouts_enabled = true where id = $1',
     [ids.performer]
   );
+  await database.query(
+    "update performers set onboarding_status = 'restricted' where id = $1",
+    [ids.performer]
+  );
+  const restrictedProjection = await service.getPublicOfferProjection({ eventId: ids.qrEvent });
+  assert.equal(
+    restrictedProjection?.salesStatus,
+    'closed',
+    'A restricted performer cannot remain a publicly ready native ticket seller.'
+  );
+  await expectServiceError(
+    () => service.publishNativeEvent({
+      eventId: ids.qrEvent,
+      performerId: ids.performer,
+      actorUserId: ids.owner,
+      expectedUpdatedAt: currentNow.toISOString()
+    }),
+    'ticket_seller_restricted',
+    403
+  );
+  await expectServiceError(
+    () => checkout(service, {
+      eventId: ids.qrEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.qrCheckoutRequest
+    }),
+    'ticket_seller_restricted',
+    403
+  );
+  await database.query(
+    "update performers set onboarding_status = 'gig_ready' where id = $1",
+    [ids.performer]
+  );
+  await database.query(
+    "update performers set visibility_state = 'draft' where id = $1",
+    [ids.performer]
+  );
+  assert.equal(
+    (await service.getPublicOfferProjection({ eventId: ids.qrEvent }))?.salesStatus,
+    'closed',
+    'A hidden seller profile must close a native ticket offer.'
+  );
+  await expectServiceError(
+    () => service.publishNativeEvent({
+      eventId: ids.qrEvent,
+      performerId: ids.performer,
+      actorUserId: ids.owner,
+      expectedUpdatedAt: currentNow.toISOString()
+    }),
+    'ticket_seller_public_page_not_ready',
+    409
+  );
+  await expectServiceError(
+    () => checkout(service, {
+      eventId: ids.qrEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.qrCheckoutRequest
+    }),
+    'ticket_seller_public_page_not_ready',
+    409
+  );
+  await database.query(
+    "update performers set visibility_state = 'public' where id = $1",
+    [ids.performer]
+  );
 
   const stalePolicyService = createEventTicketService({
     db: drizzle(database, { schema }) as never,
@@ -541,6 +616,104 @@ async function runServiceProof(
     'closed',
     'A published offer must close publicly when the active fee policy changes.'
   );
+
+  const retryBaselineNow = new Date(currentNow);
+  const retryFake = createFakeProvider({ checkoutFailures: 1 });
+  const retryService = createEventTicketService({
+    db: drizzle(database, { schema }) as never,
+    provider: retryFake.provider,
+    runtimeConfig,
+    expectedStripeLivemode: false,
+    now: () => new Date(currentNow),
+    workerId: 'checkout-eligibility-retry-worker'
+  });
+  await expectServiceError(
+    () => checkout(retryService, {
+      eventId: ids.retryEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.retryCheckoutRequest
+    }),
+    'ticket_checkout_pending',
+    503
+  );
+  assert.equal(retryFake.checkoutCalls.length, 1);
+
+  await database.query(
+    "update performers set onboarding_status = 'restricted' where id = $1",
+    [ids.performer]
+  );
+  currentNow = new Date(currentNow.getTime() + 6_000);
+  assert.deepEqual(
+    await retryService.runDueOperations({ limit: 10, workerId: 'restricted-checkout-retry' }),
+    { claimed: 1, succeeded: 0, failed: 1 }
+  );
+  assert.equal(
+    retryFake.checkoutCalls.length,
+    1,
+    'A restricted seller must be rejected before a delayed create-checkout operation reaches Stripe.'
+  );
+  await expectServiceError(
+    () => checkout(retryService, {
+      eventId: ids.retryEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.retryCheckoutRequest
+    }),
+    'ticket_seller_restricted',
+    403
+  );
+
+  await database.query(
+    "update performers set onboarding_status = 'gig_ready', visibility_state = 'draft' where id = $1",
+    [ids.performer]
+  );
+  currentNow = new Date(currentNow.getTime() + 11_000);
+  assert.deepEqual(
+    await retryService.runDueOperations({ limit: 10, workerId: 'hidden-profile-checkout-retry' }),
+    { claimed: 1, succeeded: 0, failed: 1 }
+  );
+  assert.equal(
+    retryFake.checkoutCalls.length,
+    1,
+    'A seller whose Public Page became hidden must be rejected before a delayed checkout reaches Stripe.'
+  );
+  await expectServiceError(
+    () => checkout(retryService, {
+      eventId: ids.retryEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.retryCheckoutRequest
+    }),
+    'ticket_seller_public_page_not_ready',
+    409
+  );
+
+  await database.query(
+    "update performers set visibility_state = 'public' where id = $1",
+    [ids.performer]
+  );
+  currentNow = new Date(currentNow.getTime() + 21_000);
+  assert.deepEqual(
+    await retryService.runDueOperations({ limit: 10, workerId: 'restored-checkout-retry' }),
+    { claimed: 1, succeeded: 1, failed: 0 }
+  );
+  assert.equal(retryFake.checkoutCalls.length, 2);
+  const restoredRetryCheckout = await checkout(retryService, {
+    eventId: ids.retryEvent,
+    buyerUserId: ids.buyerOne,
+    clientRequestId: ids.retryCheckoutRequest
+  });
+  assert.match(restoredRetryCheckout.checkoutUrl ?? '', /^https:\/\/checkout\.stripe\.test\//);
+
+  currentNow = new Date(currentNow.getTime() + 32 * 60_000);
+  await retryService.runMaintenance({ limit: 10 });
+  await retryService.runDueOperations({ limit: 10, workerId: 'retry-proof-cleanup-worker' });
+  assert.equal(
+    (await retryService.getBuyerOrder({
+      orderId: restoredRetryCheckout.orderId,
+      buyerUserId: ids.buyerOne
+    })).status,
+    'checkout_expired'
+  );
+  currentNow = retryBaselineNow;
 
   const baselineNow = new Date(currentNow);
   const replacementFake = createFakeProvider();
@@ -660,6 +833,52 @@ async function runServiceProof(
   assert.equal(idempotentCheckout.checkoutUrl, qrCheckout.checkoutUrl);
   assert.equal(fake.checkoutCalls.length, 1);
 
+  await database.query(
+    "update performers set onboarding_status = 'restricted' where id = $1",
+    [ids.performer]
+  );
+  await expectServiceError(
+    () => checkout(service, {
+      eventId: ids.qrEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.qrCheckoutRequest
+    }),
+    'ticket_seller_restricted',
+    403
+  );
+  assert.equal(
+    fake.checkoutCalls.length,
+    1,
+    'A restricted seller must not expose an existing unpaid checkout URL.'
+  );
+  await database.query(
+    "update performers set onboarding_status = 'gig_ready', visibility_state = 'draft' where id = $1",
+    [ids.performer]
+  );
+  await expectServiceError(
+    () => checkout(service, {
+      eventId: ids.qrEvent,
+      buyerUserId: ids.buyerOne,
+      clientRequestId: ids.qrCheckoutRequest
+    }),
+    'ticket_seller_public_page_not_ready',
+    409
+  );
+  assert.equal(fake.checkoutCalls.length, 1, 'A hidden seller must not expose an existing unpaid checkout URL.');
+  await expectServiceError(
+    () => checkout(service, {
+      eventId: ids.qrEvent,
+      buyerUserId: ids.buyerTwo,
+      clientRequestId: ids.soldOutRequest
+    }),
+    'ticket_seller_public_page_not_ready',
+    409
+  );
+  await database.query(
+    "update performers set visibility_state = 'public' where id = $1",
+    [ids.performer]
+  );
+
   await expectServiceError(
     () => checkout(service, {
       eventId: ids.qrEvent,
@@ -731,6 +950,25 @@ async function runServiceProof(
       [qrCheckout.orderId]
     ),
     1
+  );
+  await database.query(
+    "update performers set onboarding_status = 'restricted', visibility_state = 'draft' where id = $1",
+    [ids.performer]
+  );
+  const paidRecoveryReplay = await checkout(service, {
+    eventId: ids.qrEvent,
+    buyerUserId: ids.buyerOne,
+    clientRequestId: ids.qrCheckoutRequest
+  });
+  assert.equal(paidRecoveryReplay.orderId, qrCheckout.orderId);
+  assert.equal(
+    paidRecoveryReplay.ticketId,
+    issuedQrOrder.ticketIds[0],
+    'Seller eligibility loss must not hide a ticket that was already paid and issued.'
+  );
+  await database.query(
+    "update performers set onboarding_status = 'gig_ready', visibility_state = 'public' where id = $1",
+    [ids.performer]
   );
   const captureLedger = await database.query<{
     account: string;

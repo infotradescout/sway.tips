@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 type TicketingMode = 'external' | 'native_ga';
+type AttendanceMode = 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket';
 
 type NativeTicketSummary = {
   capacity: number | null;
@@ -38,6 +39,13 @@ type NativeTicketCapability = {
   supportEmail: string | null;
 };
 
+type EventPublicationCapability = {
+  canPublish: boolean;
+  reach: 'discover' | 'link_only' | null;
+  reasonCode: string | null;
+  message: string | null;
+};
+
 type ManagedEvent = {
   id: string;
   title: string;
@@ -52,6 +60,7 @@ type ManagedEvent = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: TicketingMode;
+  attendanceMode: AttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   nativeTicket: NativeTicketSummary | null;
@@ -77,6 +86,7 @@ type EventFormState = {
   locationIsTba: boolean;
   coverImageUrl: string;
   ticketingMode: TicketingMode;
+  attendanceMode: AttendanceMode;
   externalTicketUrl: string;
   externalTicketLabel: string;
   nativeCapacity: string;
@@ -85,7 +95,12 @@ type EventFormState = {
   visibility: 'public' | 'unlisted';
 };
 
-const EXTERNAL_TICKET_LABELS = ['Get tickets', 'RSVP', 'View details'] as const;
+const EXTERNAL_TICKET_LABELS = ['Get tickets', 'View details'] as const;
+const EXTERNAL_ATTENDANCE_OPTIONS = [
+  ['walk_in', 'Walk-in', 'No Sway ticket or RSVP link.'],
+  ['external_rsvp', 'RSVP elsewhere', 'Sway opens your external RSVP page.'],
+  ['external_ticket', 'Tickets elsewhere', 'Sway opens your external ticket page.']
+] as const satisfies ReadonlyArray<readonly [Exclude<AttendanceMode, 'native_ticket'>, string, string]>;
 
 function clientRequestId() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
@@ -121,6 +136,7 @@ function emptyForm(): EventFormState {
     locationIsTba: false,
     coverImageUrl: '',
     ticketingMode: 'external',
+    attendanceMode: 'walk_in',
     externalTicketUrl: '',
     externalTicketLabel: 'Get tickets',
     nativeCapacity: '',
@@ -158,6 +174,16 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
   const ticketingMode: TicketingMode = value.ticketingMode === 'native_ga' || nativeTicket
     ? 'native_ga'
     : 'external';
+  const attendanceMode: AttendanceMode = value.attendanceMode === 'walk_in'
+    || value.attendanceMode === 'external_rsvp'
+    || value.attendanceMode === 'external_ticket'
+    || value.attendanceMode === 'native_ticket'
+    ? value.attendanceMode
+    : ticketingMode === 'native_ga'
+      ? 'native_ticket'
+      : text(value.externalTicketLabel ?? nestedTicket.label) === 'RSVP'
+        ? 'external_rsvp'
+        : 'external_ticket';
   return {
     id: value.id,
     title: text(value.title),
@@ -172,6 +198,7 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
     locationIsTba: value.locationIsTba === true || nestedLocation.isTba === true,
     coverImageUrl: text(value.coverImageUrl) || null,
     ticketingMode,
+    attendanceMode,
     externalTicketUrl: text(value.externalTicketUrl ?? nestedTicket.url) || null,
     externalTicketLabel: text(value.externalTicketLabel ?? nestedTicket.label) || null,
     nativeTicket,
@@ -179,6 +206,19 @@ function normalizeManagedEvent(value: any): ManagedEvent | null {
     status: text(value.status) || 'draft',
     eventPath: text(value.eventPath) || null,
     updatedAt: text(value.updatedAt)
+  };
+}
+
+function normalizePublicationCapability(value: any): EventPublicationCapability | null {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.canPublish !== 'boolean') return null;
+  const reach = value.reach === 'discover' || value.reach === 'link_only' ? value.reach : null;
+  if (value.canPublish && !reach) return null;
+  return {
+    canPublish: value.canPublish,
+    reach,
+    reasonCode: text(value.reasonCode) || null,
+    message: text(value.message) || null
   };
 }
 
@@ -293,6 +333,7 @@ function editForm(event: ManagedEvent): EventFormState {
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl || '',
     ticketingMode: event.ticketingMode,
+    attendanceMode: event.attendanceMode,
     externalTicketUrl: event.externalTicketUrl || '',
     externalTicketLabel: event.externalTicketLabel || 'Get tickets',
     nativeCapacity: event.nativeTicket?.capacity === null || event.nativeTicket?.capacity === undefined
@@ -375,6 +416,29 @@ function eventDateLabel(event: ManagedEvent) {
   return dateTimeLabel(event.startsAt, event.timeZone);
 }
 
+function hasActionableLocation(
+  event: Pick<ManagedEvent, 'locationName' | 'locationAddress' | 'city' | 'locationIsTba'>
+) {
+  return !event.locationIsTba
+    && Boolean(event.locationName?.trim())
+    && Boolean(event.locationAddress?.trim() || event.city?.trim());
+}
+
+function attendanceModeLabel(event: Pick<ManagedEvent, 'attendanceMode' | 'ticketingMode'>) {
+  if (event.ticketingMode === 'native_ga' || event.attendanceMode === 'native_ticket') return 'Sway paid GA';
+  if (event.attendanceMode === 'walk_in') return 'Walk-in';
+  if (event.attendanceMode === 'external_rsvp') return 'External RSVP';
+  return 'External tickets';
+}
+
+function hasExternalAttendanceLink(
+  event: Pick<ManagedEvent, 'attendanceMode' | 'ticketingMode' | 'externalTicketUrl'>
+) {
+  return event.ticketingMode === 'external'
+    && (event.attendanceMode === 'external_rsvp' || event.attendanceMode === 'external_ticket')
+    && Boolean(event.externalTicketUrl);
+}
+
 function fieldClass() {
   return 'min-h-12 w-full rounded-xl border border-white/10 bg-slate-950 px-3.5 py-3 text-sm font-semibold text-white outline-none transition focus:border-fuchsia-400 focus:ring-1 focus:ring-fuchsia-400/30 disabled:cursor-not-allowed disabled:opacity-50';
 }
@@ -389,6 +453,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [nativeCapability, setNativeCapability] = useState<NativeTicketCapability | null>(null);
+  const [publicationCapability, setPublicationCapability] = useState<EventPublicationCapability | null>(
+    previewMode ? { canPublish: true, reach: 'discover', reasonCode: null, message: null } : null
+  );
   const [form, setForm] = useState<EventFormState>(() => emptyForm());
   const [formOpen, setFormOpen] = useState(false);
   const [cancelDraft, setCancelDraft] = useState<{
@@ -397,22 +464,21 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
     externalProviderConfirmed: boolean;
   } | null>(null);
   const [failedCoverImages, setFailedCoverImages] = useState<Set<string>>(() => new Set());
+  const editorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const cancelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const statusMessageRef = useRef<HTMLDivElement | null>(null);
 
-  const loadEvents = async (signal?: AbortSignal) => {
+  const loadNativeTicketCapability = async (signal?: AbortSignal) => {
     if (previewMode) return;
-    setStatus('loading');
     try {
-      const response = await fetch('/api/talent/events', { cache: 'no-store', signal });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || 'Unable to load your events.');
-      const capabilityResponse = await fetch('/api/talent/events/native-ticket-capability', {
+      const response = await fetch('/api/talent/events/native-ticket-capability', {
         cache: 'no-store',
         signal
       });
-      const capabilityData = await capabilityResponse.json().catch(() => null);
-      const capability = capabilityData?.capability;
+      const data = await response.json().catch(() => null);
+      const capability = data?.capability;
       setNativeCapability(
-        capabilityResponse.ok && capability && typeof capability === 'object'
+        response.ok && capability && typeof capability === 'object'
           ? {
               salesAvailable: capability.salesAvailable === true,
               reasonCodes: Array.isArray(capability.reasonCodes)
@@ -429,25 +495,27 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               termsHash: text(capability.termsHash),
               supportEmail: text(capability.supportEmail) || null
             }
-          : {
-              salesAvailable: false,
-              reasonCodes: ['native_ticket_readiness_unavailable'],
-              feeBps: null,
-              feeFixedCents: null,
-              taxMode: null,
-              reservationMinutes: null,
-              refundGraceMinutes: null,
-              termsVersion: '',
-              termsHash: '',
-              supportEmail: null
-            }
+          : null
       );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setNativeCapability(null);
+    }
+  };
+
+  const loadEvents = async (signal?: AbortSignal) => {
+    if (previewMode) return;
+    setStatus('loading');
+    try {
+      const response = await fetch('/api/talent/events', { cache: 'no-store', signal });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Unable to load your events.');
       const normalized = Array.isArray(data?.events)
         ? data.events.map(normalizeManagedEvent).filter((event): event is ManagedEvent => Boolean(event))
         : [];
       setEvents(normalized);
+      setPublicationCapability(normalizePublicationCapability(data?.publicationCapability));
       setStatus('ready');
-      if (normalized.length === 0) setFormOpen(true);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setStatus('error');
@@ -458,6 +526,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   useEffect(() => {
     const controller = new AbortController();
     void loadEvents(controller.signal);
+    void loadNativeTicketCapability(controller.signal);
     return () => controller.abort();
   }, [previewMode]);
 
@@ -472,9 +541,11 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       return leftUpcoming ? leftStart - rightStart : rightStart - leftStart;
     });
   }, [events]);
-  const editingNativeTicket = form.eventId
-    ? events.find((event) => event.id === form.eventId)?.nativeTicket ?? null
+  const editingEvent = form.eventId
+    ? events.find((event) => event.id === form.eventId) ?? null
     : null;
+  const editingNativeTicket = editingEvent?.nativeTicket ?? null;
+  const attendanceModeLocked = editingEvent?.status === 'published';
   const nativePriceQuote = useMemo(() => {
     if (
       form.ticketingMode !== 'native_ga'
@@ -507,18 +578,62 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
     if (clearMessage) setMessage(null);
   };
 
-  const openNewEvent = () => {
+  const focusEventEditor = () => {
+    window.setTimeout(() => {
+      document.getElementById('sway-event-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('sway-event-title')?.focus({ preventScroll: true });
+    }, 0);
+  };
+
+  const restoreEditorTriggerFocus = () => {
+    const trigger = editorTriggerRef.current;
+    window.setTimeout(() => {
+      if (trigger?.isConnected) trigger.focus();
+      else statusMessageRef.current?.focus();
+    }, 0);
+  };
+
+  const focusStatusMessage = () => {
+    window.setTimeout(() => statusMessageRef.current?.focus(), 0);
+  };
+
+  const effectivePublicationReach = (event: ManagedEvent): 'discover' | 'link_only' | null => {
+    if (publicationCapability?.canPublish !== true || !publicationCapability.reach) return null;
+    return event.visibility === 'unlisted' || publicationCapability.reach === 'link_only'
+      ? 'link_only'
+      : 'discover';
+  };
+
+  const closeCancellation = () => {
+    const trigger = cancelTriggerRef.current;
+    setCancelDraft(null);
+    window.setTimeout(() => {
+      if (trigger?.isConnected) trigger.focus();
+      else statusMessageRef.current?.focus();
+    }, 0);
+  };
+
+  const openNewEvent = (trigger: HTMLButtonElement) => {
+    editorTriggerRef.current = trigger;
     resetForm();
     setCancelDraft(null);
     setFormOpen(true);
+    focusEventEditor();
   };
 
-  const openEditEvent = (event: ManagedEvent) => {
+  const openEditEvent = (event: ManagedEvent, trigger: HTMLButtonElement) => {
+    editorTriggerRef.current = trigger;
     setForm(editForm(event));
     setCancelDraft(null);
     setFormOpen(true);
     setMessage(null);
-    window.setTimeout(() => document.getElementById('sway-event-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    focusEventEditor();
+  };
+
+  const closeEventEditor = () => {
+    setFormOpen(false);
+    resetForm();
+    restoreEditorTriggerFocus();
   };
 
   const handleSave = async (submitEvent: FormEvent<HTMLFormElement>) => {
@@ -541,13 +656,16 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         && !form.eventId
         && nativeCapability?.salesAvailable !== true
       ) {
-        throw new Error('Native ticket sales are not ready for this performer. Choose an external ticket link.');
+        throw new Error('Native ticket sales are not ready for this performer. Choose walk-in or an external link.');
       }
       if (endsAt && new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
         throw new Error('Event end time must be after the start time.');
       }
       if (doorOpensAt && new Date(doorOpensAt).getTime() > new Date(startsAt).getTime()) {
         throw new Error('Door-open time must be at or before the show start time.');
+      }
+      if (attendanceModeLocked && form.attendanceMode === 'walk_in' && !hasActionableLocation(form)) {
+        throw new Error('Walk-in events need a location name plus a public address or city.');
       }
 
       const nativeConfig = form.ticketingMode === 'native_ga'
@@ -565,6 +683,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
           ? { expectedUpdatedAt: form.expectedUpdatedAt }
           : { clientRequestId: form.clientRequestId }),
         ...(!form.eventId ? { ticketingMode: form.ticketingMode } : {}),
+        attendanceMode: form.ticketingMode === 'native_ga' ? 'native_ticket' : form.attendanceMode,
         title: form.title,
         description: form.description,
         startsAt,
@@ -576,9 +695,13 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         city: form.city,
         locationIsTba: form.locationIsTba,
         coverImageUrl: form.coverImageUrl,
-        externalTicketUrl: form.ticketingMode === 'external' ? form.externalTicketUrl : '',
-        externalTicketLabel: form.ticketingMode === 'external' && form.externalTicketUrl.trim()
-          ? form.externalTicketLabel
+        externalTicketUrl: form.ticketingMode === 'external' && form.attendanceMode !== 'walk_in'
+          ? form.externalTicketUrl
+          : '',
+        externalTicketLabel: form.ticketingMode === 'external'
+          && form.attendanceMode !== 'walk_in'
+          && form.externalTicketUrl.trim()
+          ? form.attendanceMode === 'external_rsvp' ? 'RSVP' : form.externalTicketLabel
           : '',
         visibility: form.visibility
       };
@@ -644,6 +767,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setFormOpen(false);
       resetForm(false);
       await loadEvents();
+      focusStatusMessage();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save this event.');
     } finally {
@@ -653,6 +777,14 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
 
   const publishEvent = async (event: ManagedEvent) => {
     if (previewMode || actionPending) return;
+    if (publicationCapability?.canPublish !== true || !publicationCapability.reach) {
+      setMessage(
+        publicationCapability?.message
+          || 'Publication readiness is unavailable. Reload Shows before publishing.'
+      );
+      focusStatusMessage();
+      return;
+    }
     if (!event.updatedAt) {
       setMessage('This event is missing its update version. Reload before publishing it.');
       return;
@@ -666,13 +798,30 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         body: JSON.stringify({ expectedUpdatedAt: event.updatedAt })
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || 'Unable to publish this event.');
+      if (!response.ok) {
+        if (['performer_public_page_not_ready', 'ticket_seller_public_page_not_ready'].includes(text(data?.code))) {
+          setPublicationCapability({
+            canPublish: false,
+            reach: null,
+            reasonCode: text(data?.code) || 'performer_public_page_not_ready',
+            message: text(data?.error) || 'Finish your Public Page before publishing shows.'
+          });
+        }
+        throw new Error(data?.error || 'Unable to publish this event.');
+      }
+      const reach = data?.publicationReach === 'link_only' || data?.publicationReach === 'discover'
+        ? data.publicationReach
+        : null;
+      if (!reach) {
+        throw new Error('The event was saved, but its publication reach could not be verified. Reload Shows before sharing it.');
+      }
       setMessage(
-        event.visibility === 'unlisted'
+        reach === 'link_only'
           ? 'Event published as link-only. Share its event-page URL directly.'
           : 'Event published to your public profile and Discover.'
       );
       await loadEvents();
+      focusStatusMessage();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to publish this event.');
     } finally {
@@ -686,7 +835,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setMessage('Add a clear cancellation reason before cancelling this event.');
       return;
     }
-    if (event.ticketingMode === 'external' && !cancelDraft.externalProviderConfirmed) {
+    if (hasExternalAttendanceLink(event) && !cancelDraft.externalProviderConfirmed) {
       setMessage('Confirm that you will handle external-provider cancellation duties before continuing.');
       return;
     }
@@ -712,9 +861,12 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       setMessage(
         event.ticketingMode === 'native_ga'
           ? 'Event cancelled. Eligible unused native tickets are queued for refund. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and processor confirmation may remain pending.'
-          : 'Sway listing cancelled. Its external ticket action is no longer public.'
+          : hasExternalAttendanceLink(event)
+            ? 'Sway listing cancelled. Its external attendance action is no longer public.'
+            : 'Walk-in event cancelled. Attendees should contact you or the venue for next steps.'
       );
       await loadEvents();
+      focusStatusMessage();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to cancel this event.');
     } finally {
@@ -726,21 +878,20 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
     <section
       id="sway-events-manager"
       data-sway-events-manager="true"
-      className="mx-auto w-full max-w-3xl scroll-mt-24 overflow-hidden rounded-2xl border border-fuchsia-300/20 bg-slate-900/80 shadow-xl shadow-fuchsia-950/10"
+      className="mx-auto w-full max-w-3xl scroll-mt-32 overflow-hidden rounded-2xl border border-fuchsia-300/20 bg-slate-900/80 shadow-xl shadow-fuchsia-950/10"
     >
       <div className="border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-cyan-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Shows and events</p>
-            <h3 className="mt-2 font-display text-xl font-black text-white">Put upcoming shows on your public page</h3>
+            <h3 className="mt-2 font-display text-xl font-black text-white">Add upcoming shows to your public page</h3>
             <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400">
-              Add a real date and location, then choose an external ticket destination or native Sway
-              general admission. Each event stays a performer-to-customer offer.
+              Set a real date and location, then choose walk-in, an external RSVP or ticket link, or Sway paid GA.
             </p>
           </div>
           <button
             type="button"
-            onClick={openNewEvent}
+            onClick={(event) => openNewEvent(event.currentTarget)}
             disabled={previewMode || actionPending}
             className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-xs font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -756,14 +907,32 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         </div>
       ) : null}
 
-      {message ? (
-        <div role="status" className="border-b border-white/10 bg-slate-950/60 px-5 py-3 text-xs leading-5 text-slate-200">
+      {!previewMode && status === 'ready' && publicationCapability?.canPublish !== true ? (
+        <div className="border-b border-amber-300/20 bg-amber-300/[0.06] px-5 py-3 text-xs leading-5 text-amber-100">
+          {publicationCapability?.message || 'Publication readiness is unavailable. Reload Shows before publishing.'}{' '}
+          {publicationCapability ? (
+            <a href="/talent/profile" className="font-black underline underline-offset-2">Open Public Page</a>
+          ) : (
+            <button type="button" onClick={() => void loadEvents()} className="font-black underline underline-offset-2">
+              Reload Shows
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {message && !formOpen ? (
+        <div
+          ref={statusMessageRef}
+          role="status"
+          tabIndex={-1}
+          className="border-b border-white/10 bg-slate-950/60 px-5 py-3 text-xs leading-5 text-slate-200 outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-300/50"
+        >
           {message}
         </div>
       ) : null}
 
       {formOpen ? (
-        <form id="sway-event-editor" className="space-y-5 border-b border-white/10 p-4 sm:p-6" onSubmit={handleSave}>
+        <form id="sway-event-editor" className="scroll-mt-32 space-y-5 border-b border-white/10 p-4 sm:p-6" onSubmit={handleSave}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">
@@ -773,10 +942,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             </div>
             <button
               type="button"
-              onClick={() => {
-                setFormOpen(false);
-                resetForm();
-              }}
+              onClick={closeEventEditor}
               className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 px-3 text-xs font-black text-slate-300 hover:text-white"
             >
               Close
@@ -787,6 +953,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Event title</span>
               <input
+                id="sway-event-title"
                 required
                 maxLength={140}
                 className={fieldClass()}
@@ -864,16 +1031,26 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             <label className="flex min-h-12 items-center gap-3 rounded-xl border border-white/10 bg-slate-950 px-4 text-xs font-bold text-slate-300 sm:col-span-2">
               <input
                 type="checkbox"
+                disabled={attendanceModeLocked && form.attendanceMode === 'walk_in'}
                 checked={form.locationIsTba}
                 onChange={(event) => setForm((current) => ({ ...current, locationIsTba: event.target.checked }))}
                 className="h-4 w-4"
               />
               Show “Location TBA” instead of public location details
+              {form.attendanceMode === 'walk_in' ? ' (Location TBA prevents walk-in publishing)' : ''}
             </label>
+            {attendanceModeLocked && form.attendanceMode === 'walk_in' ? (
+              <p className="text-[11px] leading-5 text-slate-500 sm:col-span-2">
+                Published walk-in events must keep an actionable venue. Location TBA and removing both the city and address are locked.
+              </p>
+            ) : null}
 
             <label className="space-y-1.5">
-              <span className={fieldLabel()}>Location name</span>
+              <span className={fieldLabel()}>
+                Location name {form.attendanceMode === 'walk_in' ? '— required to publish' : ''}
+              </span>
               <input
+                required={attendanceModeLocked && form.attendanceMode === 'walk_in'}
                 maxLength={160}
                 disabled={form.locationIsTba}
                 className={fieldClass()}
@@ -881,10 +1058,16 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                 onChange={(event) => setForm((current) => ({ ...current, locationName: event.target.value }))}
                 placeholder="The room, hall, park, or online show"
               />
+              {form.attendanceMode === 'walk_in' ? (
+                <span className="block text-[11px] leading-5 text-slate-500">
+                  Walk-in publishing needs a location name plus a public address or city.
+                </span>
+              ) : null}
             </label>
             <label className="space-y-1.5">
               <span className={fieldLabel()}>City</span>
               <input
+                required={attendanceModeLocked && form.attendanceMode === 'walk_in' && !form.locationAddress.trim()}
                 maxLength={120}
                 disabled={form.locationIsTba}
                 className={fieldClass()}
@@ -898,6 +1081,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                 {form.ticketingMode === 'native_ga' ? 'Event street address' : 'Public address — optional'}
               </span>
               <input
+                required={attendanceModeLocked && form.attendanceMode === 'walk_in' && !form.city.trim()}
                 maxLength={240}
                 disabled={form.locationIsTba}
                 className={fieldClass()}
@@ -920,9 +1104,13 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               />
             </label>
 
-            <div className="space-y-2 sm:col-span-2">
-              <span className={fieldLabel()}>Ticketing</span>
-              <div className="grid gap-2 sm:grid-cols-2">
+            <fieldset className="space-y-2 sm:col-span-2">
+              <legend className={fieldLabel()}>Attendance</legend>
+              <div className={`grid gap-2 ${
+                nativeCapability?.salesAvailable === true || form.ticketingMode === 'native_ga'
+                  ? 'sm:grid-cols-2'
+                  : ''
+              }`}>
                 <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
                   form.ticketingMode === 'external'
                     ? 'border-fuchsia-300/35 bg-fuchsia-500/10 text-white'
@@ -937,85 +1125,138 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     onChange={() => setForm((current) => ({
                       ...current,
                       ticketingMode: 'external',
+                      attendanceMode: current.attendanceMode === 'native_ticket'
+                        ? 'walk_in'
+                        : current.attendanceMode,
                       nativeTermsAccepted: false
                     }))}
                     className="mt-1 h-4 w-4 shrink-0"
                   />
                   <span>
-                    <strong className="block font-black">External ticket or RSVP</strong>
-                    Sway links customers to another provider.
+                    <strong className="block font-black">Walk-in or external attendance</strong>
+                    Choose walk-in, RSVP elsewhere, or tickets elsewhere.
                   </span>
                 </label>
-                <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
-                  form.ticketingMode === 'native_ga'
-                    ? 'border-cyan-300/35 bg-cyan-500/10 text-white'
-                    : 'border-white/10 bg-slate-950 text-slate-400'
-                }`}>
-                  <input
-                    type="radio"
-                    name="ticketingMode"
-                    value="native_ga"
-                    disabled={Boolean(form.eventId) || nativeCapability?.salesAvailable !== true}
-                    checked={form.ticketingMode === 'native_ga'}
-                    onChange={() => setForm((current) => ({
-                      ...current,
-                      ticketingMode: 'native_ga',
-                      nativeTermsAccepted: false
-                    }))}
-                    className="mt-1 h-4 w-4 shrink-0"
-                  />
-                  <span>
-                    <strong className="block font-black">Native Sway paid GA</strong>
-                    One general-admission ticket per customer checkout.
-                  </span>
-                </label>
+                {nativeCapability?.salesAvailable === true || form.ticketingMode === 'native_ga' ? (
+                  <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs leading-5 transition ${
+                    form.ticketingMode === 'native_ga'
+                      ? 'border-cyan-300/35 bg-cyan-500/10 text-white'
+                      : 'border-white/10 bg-slate-950 text-slate-400'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="ticketingMode"
+                      value="native_ga"
+                      disabled={Boolean(form.eventId) || nativeCapability?.salesAvailable !== true}
+                      checked={form.ticketingMode === 'native_ga'}
+                      onChange={() => setForm((current) => ({
+                        ...current,
+                        ticketingMode: 'native_ga',
+                        attendanceMode: 'native_ticket',
+                        nativeTermsAccepted: false
+                      }))}
+                      className="mt-1 h-4 w-4 shrink-0"
+                    />
+                    <span>
+                      <strong className="block font-black">Sell paid GA with Sway</strong>
+                      One general-admission ticket per customer checkout.
+                    </span>
+                  </label>
+                ) : null}
               </div>
-              {!form.eventId && nativeCapability?.salesAvailable !== true ? (
-                <span className="block text-[11px] leading-5 text-amber-200">
-                  Native sales stay unavailable until Sway’s payment, tax, admission, and performer payout
-                  readiness checks all pass. You can create an external-ticket event now.
-                </span>
-              ) : null}
               {form.eventId ? (
                 <span className="block text-[11px] leading-5 text-slate-500">
                   Ticketing mode is locked after the event draft is created.
                 </span>
               ) : null}
-            </div>
+            </fieldset>
 
             {form.ticketingMode === 'external' ? (
               <>
-                <label className="space-y-1.5 sm:col-span-2">
-                  <span className={fieldLabel()}>External ticket or RSVP URL — required to publish</span>
-                  <input
-                    type="url"
-                    inputMode="url"
-                    className={fieldClass()}
-                    value={form.externalTicketUrl}
-                    onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
-                    placeholder="https://secure-ticket-site.example/..."
-                  />
-                  <span className="block text-[11px] leading-5 text-slate-500">
-                    Sway provides an external handoff to this destination. Sway is not selling this ticket or verifying the provider.
-                  </span>
-                </label>
+                <fieldset className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
+                  <legend className="sr-only">External attendance type</legend>
+                  {EXTERNAL_ATTENDANCE_OPTIONS.map(([mode, label, description]) => (
+                    <label
+                      key={mode}
+                      className={`rounded-xl border p-3 text-xs leading-5 ${
+                        attendanceModeLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                      } ${
+                        form.attendanceMode === mode
+                          ? 'border-fuchsia-300/35 bg-fuchsia-500/10 text-white'
+                          : 'border-white/10 bg-slate-950 text-slate-400'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="attendanceMode"
+                        value={mode}
+                        disabled={attendanceModeLocked}
+                        checked={form.attendanceMode === mode}
+                        onChange={() => setForm((current) => ({
+                          ...current,
+                          attendanceMode: mode,
+                          externalTicketUrl: mode === 'walk_in' ? '' : current.externalTicketUrl,
+                          externalTicketLabel: mode === 'external_rsvp'
+                            ? 'RSVP'
+                            : mode === 'external_ticket' && current.externalTicketLabel === 'RSVP'
+                              ? 'Get tickets'
+                              : current.externalTicketLabel
+                        }))}
+                        className="mr-2 h-4 w-4 align-middle"
+                      />
+                      <strong className="font-black">{label}</strong>
+                      <span className="mt-1 block">{description}</span>
+                    </label>
+                  ))}
+                </fieldset>
+                {attendanceModeLocked ? (
+                  <p className="text-[11px] leading-5 text-slate-500 sm:col-span-2">
+                    Attendance mode is locked after publishing. You can still update the linked destination.
+                  </p>
+                ) : null}
 
-                <label className="space-y-1.5">
-                  <span className={fieldLabel()}>Ticket button label</span>
-                  <select
-                    className={fieldClass()}
-                    value={form.externalTicketLabel}
-                    onChange={(event) => setForm((current) => ({
-                      ...current,
-                      externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
-                        ? event.target.value
-                        : 'Get tickets'
-                    }))}
-                    disabled={!form.externalTicketUrl.trim()}
-                  >
-                    {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
-                  </select>
-                </label>
+                {form.attendanceMode !== 'walk_in' ? (
+                  <label className="space-y-1.5 sm:col-span-2">
+                    <span className={fieldLabel()}>
+                      {form.attendanceMode === 'external_rsvp' ? 'External RSVP URL' : 'External ticket URL'} — required to publish
+                    </span>
+                    <input
+                      type="url"
+                      inputMode="url"
+                      className={fieldClass()}
+                      value={form.externalTicketUrl}
+                      onChange={(event) => setForm((current) => ({ ...current, externalTicketUrl: event.target.value }))}
+                      placeholder="https://secure-provider.example/..."
+                    />
+                    <span className="block text-[11px] leading-5 text-slate-500">
+                      Sway only provides an external handoff. The external provider handles registration, checkout, charges, and its policies.
+                    </span>
+                  </label>
+                ) : (
+                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-100 sm:col-span-2">
+                    <strong className="block">Walk-in · admission handled at the venue</strong>
+                    No Sway ticket or RSVP link.
+                  </div>
+                )}
+
+                {form.attendanceMode === 'external_ticket' ? (
+                  <label className="space-y-1.5">
+                    <span className={fieldLabel()}>Ticket button label</span>
+                    <select
+                      className={fieldClass()}
+                      value={form.externalTicketLabel === 'RSVP' ? 'Get tickets' : form.externalTicketLabel}
+                      onChange={(event) => setForm((current) => ({
+                        ...current,
+                        externalTicketLabel: EXTERNAL_TICKET_LABELS.includes(event.target.value as typeof EXTERNAL_TICKET_LABELS[number])
+                          ? event.target.value
+                          : 'Get tickets'
+                      }))}
+                      disabled={!form.externalTicketUrl.trim()}
+                    >
+                      {EXTERNAL_TICKET_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                    </select>
+                  </label>
+                ) : null}
               </>
             ) : (
               <>
@@ -1144,7 +1385,13 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                   visibility: event.target.value === 'unlisted' ? 'unlisted' : 'public'
                 }))}
               >
-                <option value="public">Public profile + discover</option>
+                <option value="public">
+                  {publicationCapability?.reach === 'link_only'
+                    ? 'Public Page + direct link (not Discover)'
+                    : publicationCapability?.reach === 'discover'
+                      ? 'Public Page + Discover'
+                      : 'Public Page (reach unavailable)'}
+                </option>
                 <option value="unlisted">Link only</option>
               </select>
             </label>
@@ -1190,7 +1437,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
         {status === 'ready' && sortedEvents.length === 0 ? (
           <button
             type="button"
-            onClick={openNewEvent}
+            onClick={(event) => openNewEvent(event.currentTarget)}
             disabled={previewMode}
             className="mt-4 min-h-24 w-full rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-5 text-sm font-bold text-slate-400 transition hover:border-fuchsia-300/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -1209,7 +1456,9 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
               const cancellationClosed = cancellationClosedAt <= Date.now();
               const ticketingReady = event.ticketingMode === 'native_ga'
                 ? Boolean(event.nativeTicket)
-                : Boolean(event.externalTicketUrl);
+                : event.attendanceMode === 'walk_in'
+                  ? hasActionableLocation(event)
+                  : Boolean(event.externalTicketUrl);
               const coverFailed = Boolean(
                 event.coverImageUrl && failedCoverImages.has(event.coverImageUrl)
               );
@@ -1242,7 +1491,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         </span>
                         <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{event.visibility}</span>
                         <span className="rounded-full border border-cyan-300/20 bg-cyan-500/[0.06] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-cyan-100">
-                          {event.ticketingMode === 'native_ga' ? 'Sway paid GA' : 'External tickets'}
+                          {attendanceModeLabel(event)}
                         </span>
                       </div>
                       <h5 className="mt-2 text-base font-black text-white">{event.title}</h5>
@@ -1288,7 +1537,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     <button
                       type="button"
-                      onClick={() => openEditEvent(event)}
+                      onClick={(clickEvent) => openEditEvent(event, clickEvent.currentTarget)}
                       disabled={
                         previewMode
                         || actionPending
@@ -1306,14 +1555,45 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
                       Edit
                     </button>
-                    {!published && !cancelled ? (
+                    {!published && !cancelled && !ticketingReady && !started ? (
+                      <button
+                        type="button"
+                        onClick={(clickEvent) => openEditEvent(event, clickEvent.currentTarget)}
+                        disabled={previewMode || actionPending}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-fuchsia-300/25 bg-fuchsia-500/10 px-3 text-xs font-black text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Ticket className="h-3.5 w-3.5" aria-hidden="true" />
+                        {event.ticketingMode === 'native_ga'
+                          ? 'Finish ticket setup'
+                          : event.attendanceMode === 'walk_in'
+                            ? 'Add location'
+                            : event.attendanceMode === 'external_rsvp'
+                              ? 'Add RSVP link'
+                              : 'Add ticket link'}
+                      </button>
+                    ) : !published && !cancelled && publicationCapability?.canPublish === false ? (
+                      <a
+                        href="/talent/profile"
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 text-xs font-black text-amber-100"
+                      >
+                        Finish Public Page
+                      </a>
+                    ) : !published && !cancelled && publicationCapability?.canPublish !== true ? (
+                      <button
+                        type="button"
+                        disabled
+                        title="Reload Shows to verify publication readiness"
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/5 px-3 text-xs font-black text-amber-100 opacity-60"
+                      >
+                        Publish unavailable
+                      </button>
+                    ) : !published && !cancelled ? (
                       <button
                         type="button"
                         onClick={() => void publishEvent(event)}
                         disabled={
                           previewMode
                           || actionPending
-                          || !ticketingReady
                           || started
                           || (event.ticketingMode === 'native_ga' && admissionStarted)
                         }
@@ -1322,16 +1602,14 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                             ? 'Native ticket events must publish before the disclosed door-open time'
                             : started
                             ? 'Only a future event can be published'
-                            : ticketingReady
-                              ? 'Publish event'
-                              : event.ticketingMode === 'native_ga'
-                                ? 'Save native capacity, price, and seller terms before publishing'
-                                : 'Add an external ticket or RSVP URL before publishing'
+                            : effectivePublicationReach(event) === 'link_only'
+                              ? 'Publish link-only'
+                              : 'Publish to Discover'
                         }
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 text-xs font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        Publish
+                        {effectivePublicationReach(event) === 'link_only' ? 'Publish link-only' : 'Publish to Discover'}
                       </button>
                     ) : event.eventPath ? (
                       <a
@@ -1367,11 +1645,14 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                     {published && !cancelled && !cancellationClosed ? (
                       <button
                         type="button"
-                        onClick={() => setCancelDraft({
-                          eventId: event.id,
-                          reason: '',
-                          externalProviderConfirmed: false
-                        })}
+                        onClick={(clickEvent) => {
+                          cancelTriggerRef.current = clickEvent.currentTarget;
+                          setCancelDraft({
+                            eventId: event.id,
+                            reason: '',
+                            externalProviderConfirmed: false
+                          });
+                        }}
                         disabled={previewMode || actionPending}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-xs font-black text-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -1382,10 +1663,12 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                   </div>
 
                   {!published && !cancelled && !ticketingReady ? (
-                    <p className="mt-2 text-[11px] leading-5 text-amber-200/80">
+                    <p className="mt-2 text-[11px] leading-5 text-slate-400">
                       {event.ticketingMode === 'native_ga'
-                        ? 'Save native capacity, face value, and seller terms before publishing.'
-                        : 'Add a public HTTPS ticket or RSVP link before publishing.'}
+                        ? 'Finish capacity, price, and seller terms before publishing.'
+                        : event.attendanceMode === 'walk_in'
+                          ? 'Add a location name plus a public address or city before publishing this walk-in event.'
+                          : 'Add the required public HTTPS external link before publishing.'}
                     </p>
                   ) : null}
 
@@ -1408,9 +1691,11 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-3 text-xs leading-5 text-amber-100">
                         {event.ticketingMode === 'native_ga'
                           ? 'When you confirm, Sway stops native ticket sales and queues full refunds for eligible unused tickets. Admitted tickets keep their recorded settlement, disputed payments remain under support review, and refunds may remain pending while the payment processor completes them.'
-                          : 'Cancelling here only changes the Sway listing. It does not cancel tickets, issue refunds, or notify buyers through the external provider.'}
+                          : hasExternalAttendanceLink(event)
+                            ? 'Cancelling here only changes the Sway listing. It does not cancel external registrations or tickets, issue refunds, or notify customers through the external provider.'
+                            : 'Cancelling here removes the walk-in attendance action from Sway. Ask attendees to contact you or the venue for next steps.'}
                       </div>
-                      {event.ticketingMode === 'external' ? (
+                      {hasExternalAttendanceLink(event) ? (
                         <label className="mt-3 flex items-start gap-3 text-xs leading-5 text-slate-300">
                           <input
                             type="checkbox"
@@ -1430,7 +1715,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         <button
                           type="button"
-                          onClick={() => setCancelDraft(null)}
+                          onClick={closeCancellation}
                           className="min-h-11 rounded-xl border border-white/10 text-xs font-black text-slate-300"
                         >
                           Keep event
@@ -1442,7 +1727,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                             actionPending
                             || !cancelDraft.reason.trim()
                             || (
-                              event.ticketingMode === 'external'
+                              hasExternalAttendanceLink(event)
                               && !cancelDraft.externalProviderConfirmed
                             )
                           }

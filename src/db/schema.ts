@@ -130,6 +130,12 @@ export const performerEventTicketingModeEnum = pgEnum('performer_event_ticketing
   'external',
   'native_ga'
 ]);
+export const performerEventAttendanceModeEnum = pgEnum('performer_event_attendance_mode', [
+  'walk_in',
+  'external_rsvp',
+  'external_ticket',
+  'native_ticket'
+]);
 export const eventTicketOfferStatusEnum = pgEnum('event_ticket_offer_status', [
   'draft',
   'on_sale',
@@ -290,7 +296,8 @@ export const performers = pgTable('performers', {
   stripeConnectedAccountUnique: uniqueIndex('performers_stripe_connected_account_id_unique')
     .on(table.stripeConnectedAccountId)
     .where(sql`${table.stripeConnectedAccountId} is not null`),
-  handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
+  handleCanonical: check('performers_handle_canonical', sql`${table.handle} is null or (${table.handle} = trim(${table.handle}) and ${table.handle} ~ '^[A-Za-z0-9_-]{1,64}$')`),
+  handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(trim(${table.handle})) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'tickets', 'www')`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
 }));
 
@@ -384,7 +391,8 @@ export const performerProfilePreviews = pgTable('performer_profile_previews', {
 }, (table) => ({
   handleLowerIdx: uniqueIndex('performer_profile_previews_handle_lower_idx').on(sql`lower(${table.handle})`),
   claimedPerformerIdx: uniqueIndex('performer_profile_previews_claimed_performer_idx').on(table.claimedPerformerId),
-  handleNotReserved: check('performer_profile_previews_handle_not_reserved', sql`lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
+  handleCanonical: check('performer_profile_previews_handle_canonical', sql`${table.handle} = trim(${table.handle}) and ${table.handle} ~ '^[A-Za-z0-9_-]{1,64}$'`),
+  handleNotReserved: check('performer_profile_previews_handle_not_reserved', sql`lower(trim(${table.handle})) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'tickets', 'www')`),
   activeIdx: index('performer_profile_previews_active_idx').on(table.isActive)
 }));
 
@@ -495,6 +503,7 @@ export const performerEvents = pgTable('performer_events', {
   locationIsTba: boolean('location_is_tba').notNull().default(false),
   coverImageUrl: text('cover_image_url'),
   ticketingMode: performerEventTicketingModeEnum('ticketing_mode').notNull().default('external'),
+  attendanceMode: performerEventAttendanceModeEnum('attendance_mode').notNull(),
   externalTicketUrl: text('external_ticket_url'),
   externalTicketLabel: text('external_ticket_label'),
   visibility: performerEventVisibilityEnum('visibility').notNull().default('unlisted'),
@@ -535,9 +544,21 @@ export const performerEvents = pgTable('performer_events', {
     'performer_events_published_has_timestamp',
     sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`
   ),
-  publishedHasExternalTicket: check(
-    'performer_events_published_has_external_ticket',
-    sql`${table.status} <> 'published' OR ${table.ticketingMode} = 'native_ga' OR ${table.externalTicketUrl} IS NOT NULL`
+  publishedAttendanceReady: check(
+    'performer_events_published_attendance_ready',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} IN ('walk_in', 'native_ticket') OR ${table.externalTicketUrl} IS NOT NULL`
+  ),
+  publishedWalkInHasLocation: check(
+    'performer_events_published_walk_in_has_location',
+    sql`${table.status} <> 'published' OR ${table.attendanceMode} <> 'walk_in' OR (
+      ${table.locationIsTba} = false
+      AND ${table.locationName} IS NOT NULL
+      AND length(trim(${table.locationName})) > 0
+      AND (
+        (${table.locationAddress} IS NOT NULL AND length(trim(${table.locationAddress})) > 0)
+        OR (${table.city} IS NOT NULL AND length(trim(${table.city})) > 0)
+      )
+    )`
   ),
   cancelledHasTimestamp: check(
     'performer_events_cancelled_has_timestamp',
@@ -566,6 +587,34 @@ export const performerEvents = pgTable('performer_events', {
   ticketingModeExclusive: check(
     'performer_events_ticketing_mode_exclusive',
     sql`${table.ticketingMode} = 'external' OR (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)`
+  ),
+  attendanceModeShape: check(
+    'performer_events_attendance_mode_shape',
+    sql`(
+      ${table.attendanceMode} = 'walk_in'
+      AND ${table.ticketingMode} = 'external'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    ) OR (
+      ${table.attendanceMode} = 'external_rsvp'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} = 'RSVP')
+      )
+    ) OR (
+      ${table.attendanceMode} = 'external_ticket'
+      AND ${table.ticketingMode} = 'external'
+      AND (
+        (${table.externalTicketUrl} IS NULL AND ${table.externalTicketLabel} IS NULL)
+        OR (${table.externalTicketUrl} IS NOT NULL AND ${table.externalTicketLabel} IN ('Get tickets', 'View details'))
+      )
+    ) OR (
+      ${table.attendanceMode} = 'native_ticket'
+      AND ${table.ticketingMode} = 'native_ga'
+      AND ${table.externalTicketUrl} IS NULL
+      AND ${table.externalTicketLabel} IS NULL
+    )`
   ),
   externalTicketLabelAllowed: check(
     'performer_events_external_ticket_label_allowed',

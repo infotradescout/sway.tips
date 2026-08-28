@@ -175,7 +175,8 @@ requireTerms(ticketService, 'Verified-exclusive fee cap and seller support', [
   'feeCapCents: isSwayExclusive',
   'supportEmail: owner.sellerSupportEmail',
   "'ticket_seller_support_email_required'",
-  "'ticket_seller_support_email_missing'"
+  "'ticket_seller_support_email_missing'",
+  "!['restricted', 'suspended'].includes(performer.onboardingStatus)"
 ]);
 requireTerms(readiness, 'Native ticket readiness HOLD', [
   '"id": "native_general_admission_tickets"',
@@ -194,6 +195,20 @@ requireTerms(ticketService, 'Native ticket runtime gate', [
   'const capability = getNativeTicketSalesCapability()',
   'salesStatus: salesStatus === \'on_sale\'',
   "? 'closed'"
+]);
+requireTerms(ticketService, 'Native seller public-page gate', [
+  'evaluatePublicEventPerformerEligibility',
+  'function assertTicketSellerPublicProfileReady',
+  "'ticket_seller_public_page_not_ready'",
+  'const performerReach = assertTicketSellerPublicProfileReady(owner)',
+  'sellerPublicProfileIsResolvable(row.performer)',
+  'assertTicketSellerPublicProfileReady(event.performer)'
+]);
+requirePatterns(ticketService, 'Unpaid checkout replay current seller gates', [
+  /if \(UNPAID_ORDER_STATUSES\.includes\(existing\.status\)\) \{\s*assertSellerReady\(event\.performer\);\s*assertTicketSellerPublicProfileReady\(event\.performer\);\s*\}\s*return \{ order: existing,/
+]);
+requirePatterns(ticketService, 'Delayed create-checkout current seller gates', [
+  /if \(operation\.operationType === 'create_checkout'\) \{[\s\S]*assertSellerReady\(context\.performer\);\s*assertTicketSellerPublicProfileReady\(context\.performer\);[\s\S]*provider\.createCheckoutSession\(/
 ]);
 requirePatterns(ticketService, 'Native ticket public-sale policy gate', [
   /salesStatus:\s*salesStatus === 'on_sale'[\s\S]*!capability\.salesAvailable[\s\S]*!activeOfferPolicy[\s\S]*!activeSeller[\s\S]*\?\s*'closed'/

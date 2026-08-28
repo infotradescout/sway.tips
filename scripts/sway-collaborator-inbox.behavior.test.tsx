@@ -10,6 +10,7 @@ import {
   readFilePairingTokenFromHash,
   resolveLegacyFileConnectTarget
 } from '../src/file-collaboration-routing';
+import { INACTIVE_PERFORMER_WORKSPACE_PATHS } from '../src/performer-workspace-routing';
 
 const validToken = `${'A'.repeat(40)}_-z`;
 const validHash = `#token=${validToken}`;
@@ -101,6 +102,7 @@ for (const allowedNext of [
   `/e/${eventId}`,
   `/e/${eventId}?buy=1`,
   `/talent/events/${eventId}/door`,
+  ...Object.values(INACTIVE_PERFORMER_WORKSPACE_PATHS),
   '/account?intent=performer'
 ]) {
   assert.equal(normalizeSafeAccountNextPath(allowedNext), allowedNext, `Expected safe account next path: ${allowedNext}`);
@@ -126,6 +128,13 @@ for (const unsafeNext of [
   '/e/11111111-1111-0111-8111-111111111111?buy=1',
   `/talent/events/${eventId}/door?token=${validToken}`,
   `/talent/events/${eventId}/door#token=${validToken}`,
+  ...Object.values(INACTIVE_PERFORMER_WORKSPACE_PATHS).flatMap((workspacePath) => [
+    `${workspacePath}?extra=1`,
+    `${workspacePath}#section`,
+    `${workspacePath}/extra`
+  ]),
+  '/talent/showcase',
+  '/talent/profiled',
   '/account/collaboration/other',
   '/admin',
   'https://evil.example/account/collaboration',

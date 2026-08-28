@@ -26,6 +26,7 @@ import {
 import { createIdempotencyStore, type DurableActionInput, type DurableActorActionInput, type PendingActionOwner } from "./src/server/idempotency-store";
 import { createModerationService, type BlockScope } from "./src/server/moderation-service";
 import { lockModerationBlockIdentities } from "./src/server/moderation-block-lock";
+import { lockPerformerHandleNamespace } from "./src/server/performer-handle-lock";
 import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
@@ -102,7 +103,10 @@ import {
   normalizePublicProfileText,
   normalizePublicProfileUrl,
   resolveVerifiedPublicBookingContact,
+  evaluatePublicEventPerformerEligibility,
   evaluatePublicPerformerVisibility,
+  INTERNAL_TEST_PROFILE_HANDLES,
+  isDiscoveryEligibleHandle,
   type PerformerVisibilityState
 } from "./src/server/public-profile";
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
@@ -908,6 +912,57 @@ async function renderPublicPerformerDocument(
   return res.status(200).type('html').send(html);
 }
 
+const PUBLIC_EVENT_NOT_FOUND_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway event not found</title></head><body><main><h1>Event not found</h1><p>This Sway event is not publicly available.</p></main></body></html>';
+const PUBLIC_EVENT_UNAVAILABLE_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway event unavailable</title></head><body><main><h1>Event unavailable</h1><p>Sway could not load this event right now.</p></main></body></html>';
+
+function sendPublicEventNotFound(res: express.Response) {
+  return res
+    .status(404)
+    .type('html')
+    .set('X-Robots-Tag', 'noindex, nofollow')
+    .send(PUBLIC_EVENT_NOT_FOUND_HTML);
+}
+
+function sendPublicEventUnavailable(res: express.Response) {
+  return res
+    .status(503)
+    .type('html')
+    .set('X-Robots-Tag', 'noindex, nofollow')
+    .send(PUBLIC_EVENT_UNAVAILABLE_HTML);
+}
+
+async function renderPublicEventDocument(
+  req: express.Request,
+  res: express.Response,
+  templateHtml: string
+) {
+  const pathParts = req.path.split('/').filter(Boolean);
+  if (pathParts.length !== 2 || pathParts[0] !== 'e') return sendPublicEventNotFound(res);
+  const rawEventId = req.params.eventId ?? pathParts[1];
+  if (!UUID_PATTERN.test(rawEventId ?? '')) return sendPublicEventNotFound(res);
+  if (!businessDb || !performerEventService) return sendPublicEventUnavailable(res);
+
+  try {
+    const event = await performerEventService.getPublicEvent(rawEventId!);
+    if (!event) return sendPublicEventNotFound(res);
+    const html = injectShareMetadata(templateHtml, buildPublicEventShareMetadata(req, event));
+    applyNoStoreHeaders(res);
+    const eventTime = new Date(event.startsAt).getTime();
+    if (
+      event.visibility === 'unlisted'
+      || event.performer.visibility === 'unlisted'
+      || event.status === 'cancelled'
+      || eventTime <= Date.now()
+    ) {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    }
+    return res.status(200).type('html').send(html);
+  } catch (error) {
+    console.error('[sway.discovery] public event document failed:', error);
+    return sendPublicEventUnavailable(res);
+  }
+}
+
 function escapeShareCardText(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -1016,6 +1071,88 @@ async function renderPerformerShareCard(profile: PublicShareProfile) {
     .toBuffer();
 }
 
+function buildPublicEventShareMetadata(
+  req: express.Request,
+  event: PublicPerformerEventDto
+): ShareMetadata {
+  const eventDate = new Date(event.startsAt);
+  const dateCopy = Number.isNaN(eventDate.getTime())
+    ? 'View event details.'
+    : `Happening ${eventDate.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: event.timeZone
+      })}.`;
+  const locationCopy = event.locationIsTba
+    ? ' Location to be announced.'
+    : event.locationName || event.city
+      ? ` ${[event.locationName, event.city].filter(Boolean).join(' · ')}.`
+      : '';
+  const cancellationCopy = event.status === 'cancelled' ? ' This event has been cancelled.' : '';
+  const canonicalEventUrl = canonicalPublicUrl(`/e/${event.id}`);
+  const eventDescription = `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim();
+  const venueLabel = event.locationIsTba
+    ? 'Location TBA'
+    : [event.locationName, event.city].filter(Boolean).join(' · ') || null;
+  const performerPath = event.performer.handle ? `/p/${event.performer.handle}` : null;
+
+  return defaultShareMetadata(req, {
+    title: `${event.title} on Sway`,
+    description: eventDescription,
+    url: `/e/${event.id}`,
+    image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
+    imageAlt: `${event.title} event artwork`,
+    structuredData: {
+      '@context': 'https://schema.org',
+      '@type': 'Event',
+      name: event.title,
+      description: event.description || undefined,
+      startDate: event.startsAt,
+      endDate: event.endsAt || undefined,
+      eventStatus: event.status === 'cancelled'
+        ? 'https://schema.org/EventCancelled'
+        : 'https://schema.org/EventScheduled',
+      eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+      image: event.coverImageUrl || event.performer.avatarUrl || undefined,
+      url: canonicalEventUrl,
+      location: event.locationIsTba ? undefined : {
+        '@type': 'Place',
+        name: event.locationName || event.city || undefined,
+        address: event.locationAddress || event.city || undefined
+      },
+      performer: {
+        '@type': 'Person',
+        name: event.performer.displayName,
+        url: performerPath ? canonicalPublicUrl(performerPath) : undefined
+      }
+    },
+    robots: event.visibility === 'unlisted'
+      || event.performer.visibility === 'unlisted'
+      || event.status === 'cancelled'
+      || eventDate.getTime() <= Date.now()
+      ? 'noindex, nofollow'
+      : undefined,
+    discoveryFacts: {
+      entityType: 'event',
+      entityName: event.title,
+      heading: event.title,
+      summary: eventDescription,
+      categories: ['Event', 'Live show'],
+      location: venueLabel,
+      primaryActionLabel: 'Attend this event',
+      primaryActionHref: canonicalEventUrl,
+      relatedLinks: [
+        ...(performerPath
+          ? [{ label: `View ${event.performer.displayName}`, href: canonicalPublicUrl(performerPath) }]
+          : []),
+        { label: 'Discover shows', href: canonicalPublicUrl('/discover') }
+      ],
+      lastUpdated: null
+    }
+  });
+}
+
 async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata> {
   const pathParts = req.path.split('/').filter(Boolean);
   const defaultMetadata = defaultShareMetadata(req);
@@ -1032,86 +1169,10 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
     return buildPublicPerformerShareMetadata(req, profile);
   }
 
-  if (pathParts[0] === 'e' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && performerEventService) {
+  if (pathParts.length === 2 && pathParts[0] === 'e' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && performerEventService) {
     const event = await performerEventService.getPublicEvent(pathParts[1]);
     if (!event) return defaultMetadata;
-
-    const eventDate = new Date(event.startsAt);
-    const dateCopy = Number.isNaN(eventDate.getTime())
-      ? 'View event details.'
-      : `Happening ${eventDate.toLocaleDateString('en-US', {
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric',
-          timeZone: event.timeZone
-        })}.`;
-    const locationCopy = event.locationIsTba
-      ? ' Location to be announced.'
-      : event.locationName || event.city
-        ? ` ${[event.locationName, event.city].filter(Boolean).join(' · ')}.`
-        : '';
-    const cancellationCopy = event.status === 'cancelled' ? ' This event has been cancelled.' : '';
-
-    const canonicalEventUrl = canonicalPublicUrl(`/e/${event.id}`);
-    const eventDescription = `${event.description || `${dateCopy}${locationCopy}`}${cancellationCopy}`.trim();
-    const venueLabel = event.locationIsTba
-      ? 'Location TBA'
-      : [event.locationName, event.city].filter(Boolean).join(' · ') || null;
-    const performerPath = event.performer.handle ? `/p/${event.performer.handle}` : null;
-
-    return defaultShareMetadata(req, {
-      title: `${event.title} on Sway`,
-      description: eventDescription,
-      url: `/e/${event.id}`,
-      image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH,
-      imageAlt: `${event.title} event artwork`,
-      structuredData: {
-        '@context': 'https://schema.org',
-        '@type': 'Event',
-        name: event.title,
-        description: event.description || undefined,
-        startDate: event.startsAt,
-        endDate: event.endsAt || undefined,
-        eventStatus: event.status === 'cancelled'
-          ? 'https://schema.org/EventCancelled'
-          : 'https://schema.org/EventScheduled',
-        eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
-        image: event.coverImageUrl || event.performer.avatarUrl || undefined,
-        url: canonicalEventUrl,
-        location: event.locationIsTba ? undefined : {
-          '@type': 'Place',
-          name: event.locationName || event.city || undefined,
-          address: event.locationAddress || event.city || undefined
-        },
-        performer: {
-          '@type': 'Person',
-          name: event.performer.displayName,
-          url: performerPath ? canonicalPublicUrl(performerPath) : undefined
-        }
-      },
-      robots: event.visibility === 'unlisted'
-        || event.status === 'cancelled'
-        || eventDate.getTime() <= Date.now()
-        ? 'noindex, nofollow'
-        : undefined,
-      discoveryFacts: {
-        entityType: 'event',
-        entityName: event.title,
-        heading: event.title,
-        summary: eventDescription,
-        categories: ['Event', 'Live show'],
-        location: venueLabel,
-        primaryActionLabel: 'Attend this event',
-        primaryActionHref: canonicalEventUrl,
-        relatedLinks: [
-          ...(performerPath
-            ? [{ label: `View ${event.performer.displayName}`, href: canonicalPublicUrl(performerPath) }]
-            : []),
-          { label: 'Discover shows', href: canonicalPublicUrl('/discover') }
-        ],
-        lastUpdated: null
-      }
-    });
+    return buildPublicEventShareMetadata(req, event);
   }
 
   if (pathParts[0] === 'r' && pathParts[1] && UUID_PATTERN.test(pathParts[1]) && audioPublishingService) {
@@ -1482,79 +1543,67 @@ function renderSupportPageHtml(reference: { type: 'order' | 'ticket'; id: string
 }
 
 const aboutPageHtml = renderStaticDocument(
-  'Sway: the whole performer business, connected',
-  'One read on how Sway connects a performer’s public identity, live audience, music catalog, releases, distribution, payments, and control.',
+  'Run the crowd without stopping the set',
+  'Sway gives DJs and live performers one room for Requests, Tips, and Boosts. Share a QR code or link, manage the queue, and keep control of what gets approved and played.',
   `
-    <p class="hero-note"><strong>Sway gives independent performers two connected systems.</strong> Live Rooms earn and engage audiences during real performances. Self-Production helps creators own, release, ticket, distribute, and eventually stream original work—including planned Sway.DIO (Digital Independent Original) streaming. External distribution is one Self-Production outlet, not Sway’s whole identity.</p>
+    <p class="hero-note"><strong>Start a room, share the QR code or link, and let people interact from their phones.</strong> No app download is required for the web experience.</p>
+    <p><strong>Sway works alongside your existing DJ setup.</strong> Keep using Serato, Rekordbox, VirtualDJ, Tidal, USB drives, or your normal deck workflow. Sway handles the audience interaction around it.</p>
+    ${liveRoomPaymentRuntimeConfig.mode === 'test'
+      ? '<div class="plain-language"><p><strong>Beta payment notice:</strong> Test activity is not a real charge or payout.</p></div>'
+      : liveRoomPaymentRuntimeConfig.mode === 'live'
+        ? '<div class="plain-language"><p><strong>Live payment notice:</strong> The performer must complete the required payment setup before using live paid actions.</p></div>'
+        : ''}
 
-    <h2>The product in four connected parts</h2>
+    <h2>What Sway handles</h2>
     <div class="card-grid">
-      <article class="card"><h3>Your public page</h3><p>A shareable Sway profile for your story, image, featured media, social links, booking contact, support links, releases, and live-room entry. It is designed to replace a patchwork artist website and link page with one place that stays connected to the rest of your business.</p></article>
-      <article class="card"><h3>Your live room</h3><p>Live Rooms is the current operating product: a performer-controlled room for real-world shows. People scan a QR code or open a room link, make requests, tip, boost approved queue items, and follow what happened from their own private status receipts. Stripe live money remains a separate release gate; test-mode payment proof comes first.</p></article>
-      <article class="card"><h3>Your Catalog and collaborators</h3><p>Self-Production files and collaboration: private, original-quality storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
-      <article class="card"><h3>Your publishing and distribution</h3><p>Self-Production release prep plus one external-distribution outlet (DistroKid-class workflow) inside the same account—not the definition of Sway. The current release workspace assembles singles, EPs, and albums from verified masters, with an ordered track list, per-track metadata and credits, artwork, identifiers, territories, and reviewed rights evidence. It prepares a release but does not send it to stores: provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live.</p></article>
+      <article class="card"><h3>Requests in one queue</h3><p>Instead of taking shouted requests, messages, screenshots, and paper notes, collect song and custom requests in one performer-controlled room.</p></article>
+      <article class="card"><h3>Tips in the same room</h3><p>When payment actions are available for the performer, patrons can send direct support without leaving the live room.</p></article>
+      <article class="card"><h3>Approved boosts</h3><p>Patrons can boost an already-approved request. A boost never forces approval and never takes control away from the DJ.</p></article>
+      <article class="card"><h3>Clear status</h3><p>Patrons can follow what happened to their action instead of repeatedly asking whether the DJ saw it. Room labels include Pending, Approved, Now Playing, Up Next, Paused, and Ended.</p></article>
     </div>
 
-    <h2>How Sway works for an audience member</h2>
+    <h2>How patrons use Sway</h2>
     <ol class="steps">
-      <li><strong>Join the correct room.</strong> Scan the performer’s Sway QR code or open their room link. A download is not required to use the web experience.</li>
-      <li><strong>Choose what you want to do.</strong> Send a music or custom request, leave a direct tip, or boost an already-approved request higher in the crowd signal.</li>
-      <li><strong>Review the amount and authorize payment.</strong> Sway does not treat a button tap as payment success. The screen waits for backend and payment-provider confirmation.</li>
-      <li><strong>Follow the outcome.</strong> A private receipt shows whether your request, tip, or boost is pending, approved, denied, fulfilled, captured, released, or refunded.</li>
+      <li><strong>Enter the right room.</strong> Scan the DJ’s Sway QR code or open the shared room link.</li>
+      <li><strong>Choose an action.</strong> Send a Request, Tip, or Boost that is available in that room.</li>
+      <li><strong>Review before submitting.</strong> Confirm the request details and any applicable amount before authorizing it.</li>
+      <li><strong>Follow the result.</strong> Use the private status view to see what happened without interrupting the DJ.</li>
     </ol>
-    <div class="plain-language"><p><strong>A request is not a promise that something will be played.</strong> The performer keeps artistic and operational control. If an unresolved request is denied or the room closes, Sway releases or refunds the associated payment according to its confirmed processor state.</p></div>
+    <div class="plain-language"><p><strong>A request is not a promise that a song will be played.</strong> The DJ keeps artistic and operational control of the room.</p></div>
 
-    <h2>How Sway works for a performer</h2>
+    <h2>How to run Sway tonight</h2>
     <ol class="steps">
-      <li><strong>Create one Sway account.</strong> Any account can join rooms. Activating Pro Mode adds the performer workspace and public identity to that same account.</li>
-      <li><strong>Build your public presence.</strong> Set your handle, name, roles, location, biography, featured media, booking details, social accounts, and prioritized links. When you go live, the same page can route fans into your active room.</li>
-      <li><strong>Start and share a room.</strong> Configure the room, minimum support amount, request source, and operating mode; then share the durable QR or link.</li>
-      <li><strong>Run the crowd, not a second job.</strong> Pause or resume requests, manually review them, use open-call behavior, or use crowd autopilot for moderated requests. Approve, deny, order, fulfill, report, or remove items while Sway keeps payment state tied to the action.</li>
-      <li><strong>Close with a real recap.</strong> Ending a room shuts requests, resolves outstanding holds, calculates captured totals from durable records, and keeps the completed session in room history.</li>
-    </ol>
-
-    <h2>From a master file to a release</h2>
-    <ol class="steps">
-      <li><strong>Add the work to Catalog.</strong> Sway preserves the original, its checksum, versions, project ownership, and access permissions. Catalog files stay private unless the owner explicitly shares or exposes them for requests.</li>
-      <li><strong>Work with the right people.</strong> Connect collaborators, grant only the permissions they need, exchange files, comment at timecodes, request changes, record approvals, and revoke access.</li>
-      <li><strong>Build and order the release tracks.</strong> Start with one verified master, add another verified master for each additional track, and edit or reorder the track list. Add artwork, release and recording titles, artist identity, UPC, per-track ISRCs, explicit flags, languages, label, copyright lines, dates, territories, and recording credits. A single must keep one track; EP and album readiness requires at least two. Track structure locks when rights review starts so sealed evidence cannot silently drift.</li>
-      <li><strong>Clear the rights that apply.</strong> Every release readiness check requires independently verified master control, composition control, artwork control, and distribution authorization. Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence: creators must document them when the facts of the recording require them, but they are not universal requirements for every release.</li>
-      <li><strong>Prepare for delivery.</strong> A rights-cleared release becomes ready for a contracted delivery provider. When that integration is active, each destination will keep its own queued, submitted, accepted, live, correction, failure, or takedown state so “published” means provider-confirmed—not merely submitted.</li>
+      <li><strong>Create or open your account.</strong> Sign up or log in, then activate Pro Mode if the account has not been set up as a performer.</li>
+      <li><strong>Start your live room.</strong> Choose Free requests${liveRoomPaymentRuntimeConfig.mode === 'test'
+        ? ' or Test paid requests'
+        : liveRoomPaymentRuntimeConfig.mode === 'live'
+          ? ' or Paid requests'
+          : ''}. If a paid option is available, set the Minimum request amount. Choose My synced library first or Open requests, Review the room rules, then select Create room.</li>
+      <li><strong>Share the room.</strong> Display the room QR code or send the room link where the crowd can reach it.</li>
+      <li><strong>Manage the queue.</strong> After the room starts, choose Manual, Open Call, or Auto. Use Pause Requests or Resume Requests as needed, and use Approve, Deny, and Mark played on the requests in front of you.</li>
+      <li><strong>Close the room.</strong> Select End Room, then review the Room Recap, room activity, and recorded captured payment volume. The recap is not a bank payout total.</li>
     </ol>
 
-    <h2>Replacing an existing distributor</h2>
-    <p>Sway’s catalog-transfer design is built around continuity, not a blind re-upload. It will snapshot the source catalog; map artist identities, UPCs, ISRCs, exact metadata, artwork, assets, rights, and destination IDs; stage replacement deliveries; verify overlap and store matching; and only permit an old-provider takedown after every expected release and recording has immutable continuity evidence. A mismatch, rights problem, Content ID conflict, or failed track link must stop the cutover. This cutover is not enabled until provider execution and production continuity proof exist.</p>
-
-    <h2>Where the publishing product stands</h2>
-    <p><strong>Available in the product:</strong> durable original masters, projects, private collaborator connections, immutable file sharing and review, editable ordered multi-recording release drafts built from one verified master per track, artwork, identifiers, territories, per-track credits, sealed rights declarations, independent rights review, readiness checks, public artist profiles, and eligible public release pages.</p>
-    <p><strong>Still required for Self-Production external distribution (DistroKid-class outlet):</strong> a contracted DSP delivery provider, provider callbacks and corrections, store takedowns, royalty-statement ingestion and reconciliation, collaborator split agreements, tax/KYC and payouts, true destination pre-saves, and production-proven catalog transfer. Until those systems exist, Sway keeps delivery and cutover fail-closed. Those gaps do not make Live Rooms unfinished.</p>
-
-    <h2>Money, ownership, and control</h2>
-    <div class="card-grid">
-      <article class="card"><h3>Payments follow evidence</h3><p>Requests, tips, and boosts use idempotent backend actions and processor-confirmed states. Sway distinguishes authorization, capture, release, refund, failure, and payout readiness.</p></article>
-      <article class="card"><h3>Creators keep their rights</h3><p>Uploading work or preparing a release draft in Sway does not transfer a creator’s master or composition ownership to Sway. Collaborator terms and splits must be explicit, attributable, and accepted by the actual parties.</p></article>
-      <article class="card"><h3>Performers control the room</h3><p>Money does not buy approval authority. Paid boosts only apply to already-approved visible items, and moderation can block abusive or unsafe submissions.</p></article>
-      <article class="card"><h3>No false success</h3><p>Sway is designed to fail closed: no payment success before confirmation, no delivery success before provider evidence, no payout promise before identity and payout onboarding, and no catalog cutover on incomplete proof.</p></article>
-    </div>
-
-    <h2>What Sway is not</h2>
+    <h2>You remain in control</h2>
     <ul>
-      <li>It is not a jukebox and does not take over the performer’s creative decisions.</li>
-      <li>It is not a guarantee that a paid request will be performed.</li>
-      <li>It is not a public dump of private Catalog files.</li>
-      <li>It is not a claim on creator copyrights.</li>
-      <li>It is not a “submitted means live” distributor or a “deployed means working” product.</li>
+      <li>Sway does not replace DJ software or control the decks.</li>
+      <li>A paid request does not guarantee that it will be played.</li>
+      <li>Boosts apply only to requests the performer has already approved.</li>
+      <li>Patrons cannot buy control of the performance.</li>
+      <li>Payment success does not appear before Sway confirms it.</li>
+      <li>A payment is only described as captured, released, refunded, or ready for payout when its recorded state confirms that result.</li>
     </ul>
 
-    <h2>Start where you are</h2>
-    <p>Fans can join a room immediately. Creators can use the same account as a fan, then activate Pro Mode when they are ready to build a profile, run rooms, manage Catalog, and publish.</p>
+    <h2>Opening beta focus</h2>
+    <p><strong>The opening DJ beta is focused on the live room: Request, Tip, Boost, queue control, patron status, and room recap.</strong> No DJ software connection or patron app download is required.</p>
+
     <div class="primary-actions">
-      <a href="/home">Scan or join a room</a>
-      <a href="/account/signup">Create a Sway account</a>
-      <a href="/account/login">Log in</a>
+      <a href="/account/signup">Create your DJ account</a>
+      <a href="/account/login">Log in and start</a>
+      <a href="/home">Join a live room</a>
     </div>
   `,
-  'Sway to play'
+  'Sway live rooms'
 );
 
 // Keep the long-standing FAQ URL working while the landing-page explainer
@@ -2461,6 +2510,7 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
     },
     coverImageUrl: event.coverImageUrl,
     ticketingMode: event.ticketingMode,
+    attendanceMode: event.attendanceMode,
     externalTicket: externalTicketIsOpen && event.externalTicketUrl
       ? {
           url: event.externalTicketUrl,
@@ -2481,7 +2531,8 @@ function toPublicEventResponse(event: PublicPerformerEventDto) {
       performerPath: event.performer.handle ? `/p/${event.performer.handle}` : null,
       avatarUrl: normalizePublicProfileUrl(event.performer.avatarUrl),
       headline: event.performer.headline,
-      city: event.performer.city
+      city: event.performer.city,
+      visibility: event.performer.visibility
     }
   };
 }
@@ -2780,12 +2831,24 @@ function performerVerifyEmailSuccessRedirect() {
 }
 
 function isUniqueConstraintViolation(error: unknown, constraintName: string) {
-  if (!error || typeof error !== 'object') {
-    return false;
+  let candidate: unknown = error;
+  for (let depth = 0; depth < 5 && candidate && typeof candidate === 'object'; depth += 1) {
+    const databaseError = candidate as { code?: string; constraint?: string; cause?: unknown };
+    if (databaseError.code === '23505' && databaseError.constraint === constraintName) {
+      return true;
+    }
+    candidate = databaseError.cause;
   }
+  return false;
+}
 
-  const candidate = error as { code?: string; constraint?: string };
-  return candidate.code === '23505' && candidate.constraint === constraintName;
+function isPerformerHandleUniqueViolation(error: unknown) {
+  return [
+    'idx_performers_handle',
+    'idx_performers_handle_lower',
+    'performer_profile_previews_handle_lower_idx',
+    'sway_global_performer_handle_unique'
+  ].some((constraintName) => isUniqueConstraintViolation(error, constraintName));
 }
 
 async function persistStateWithAudit(input: {
@@ -4485,6 +4548,8 @@ app.post('/api/talent/signup', async (req, res) => {
 
   try {
     const outcome = await businessDb.transaction(async (tx) => {
+      await lockPerformerHandleNamespace(tx, normalizedHandle);
+
       const passwordHash = await hashPerformerPassword(password);
       const [createdUser] = await tx
         .insert(users)
@@ -4610,10 +4675,7 @@ app.post('/api/talent/signup', async (req, res) => {
       deliveryResult.provider === 'mock' ? verificationLink : undefined
     ));
   } catch (error) {
-    if (
-      isUniqueConstraintViolation(error, 'idx_performers_handle') ||
-      isUniqueConstraintViolation(error, 'idx_performers_handle_lower')
-    ) {
+    if (isPerformerHandleUniqueViolation(error)) {
       res.status(409).json({ error: 'This handle is already taken.' });
       return;
     }
@@ -5968,7 +6030,7 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
       redirectPath: '/talent'
     });
   } catch (error) {
-    if (isUniqueConstraintViolation(error, 'idx_performers_handle') || isUniqueConstraintViolation(error, 'idx_performers_handle_lower')) {
+    if (isPerformerHandleUniqueViolation(error)) {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
     throw error;
@@ -6613,15 +6675,6 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     return;
   }
 
-  const [reservedPreview] = await businessDb
-    .select({ id: performerProfilePreviews.id })
-    .from(performerProfilePreviews)
-    .where(and(
-      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
-      eq(performerProfilePreviews.isActive, true)
-    ))
-    .limit(1);
-
   if (await performerHandleExists(businessDb, normalizedHandle, { includePreviews: false })) {
     res.status(409).json({ error: 'This handle is already taken.' });
     return;
@@ -6633,6 +6686,18 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
   }
 
   const outcome = await businessDb.transaction(async (tx) => {
+    await lockPerformerHandleNamespace(tx, normalizedHandle);
+
+    const [reservedPreview] = await tx
+      .select({ id: performerProfilePreviews.id })
+      .from(performerProfilePreviews)
+      .where(and(
+        sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+        eq(performerProfilePreviews.isActive, true),
+        isNull(performerProfilePreviews.claimedPerformerId)
+      ))
+      .limit(1);
+
     const [createdUser] = await tx
       .insert(users)
       .values({
@@ -6649,7 +6714,7 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
       .insert(performers)
       .values({
         ownerUserId: createdUser.id,
-        handle: normalizedHandle,
+        handle: reservedPreview ? null : normalizedHandle,
         displayName: normalizedDisplayName,
         isActive: false,
         onboardingStatus: 'created'
@@ -6661,6 +6726,11 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
         .update(performerProfilePreviews)
         .set({ claimedPerformerId: createdPerformer.id, updatedAt: new Date() })
         .where(eq(performerProfilePreviews.id, reservedPreview.id));
+
+      await tx
+        .update(performers)
+        .set({ handle: normalizedHandle, updatedAt: new Date() })
+        .where(eq(performers.id, createdPerformer.id));
     }
 
     let partnerEntitlementId: string | null = null;
@@ -6726,12 +6796,23 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     });
 
     return {
+      kind: 'created' as const,
       userId: createdUser.id,
       performerId: createdPerformer.id,
       challengeId: invitation.challengeId,
       invitationToken: invitation.token
     };
+  }).catch((error) => {
+    if (isPerformerHandleUniqueViolation(error)) {
+      return { kind: 'handle_conflict' as const };
+    }
+    throw error;
   });
+
+  if (outcome.kind === 'handle_conflict') {
+    res.status(409).json({ error: 'This handle is already taken.' });
+    return;
+  }
 
   const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
   const invitationLink = `${appBaseUrl}/talent/invite?token=${encodeURIComponent(outcome.invitationToken)}`;
@@ -6908,16 +6989,19 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
 
-    const [reservedPreview] = await businessDb
-      .select({ id: performerProfilePreviews.id })
-      .from(performerProfilePreviews)
-      .where(and(
-        sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
-        eq(performerProfilePreviews.isActive, true)
-      ))
-      .limit(1);
-
     const created = await businessDb.transaction(async (tx) => {
+      await lockPerformerHandleNamespace(tx, normalizedHandle);
+
+      const [reservedPreview] = await tx
+        .select({ id: performerProfilePreviews.id })
+        .from(performerProfilePreviews)
+        .where(and(
+          sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+          eq(performerProfilePreviews.isActive, true),
+          isNull(performerProfilePreviews.claimedPerformerId)
+        ))
+        .limit(1);
+
       const [createdUser] = await tx
         .insert(users)
         .values({ email: null, displayName: normalizedDisplayName, passwordHash: null, role: 'performer' })
@@ -6926,7 +7010,7 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
         .insert(performers)
         .values({
           ownerUserId: createdUser.id,
-          handle: normalizedHandle,
+          handle: reservedPreview ? null : normalizedHandle,
           displayName: normalizedDisplayName,
           isActive: false,
           onboardingStatus: 'created'
@@ -6938,10 +7022,25 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
           .update(performerProfilePreviews)
           .set({ claimedPerformerId: createdPerformer.id, updatedAt: new Date() })
           .where(eq(performerProfilePreviews.id, reservedPreview.id));
+
+        await tx
+          .update(performers)
+          .set({ handle: normalizedHandle, updatedAt: new Date() })
+          .where(eq(performers.id, createdPerformer.id));
       }
 
-      return { userId: createdUser.id, performerId: createdPerformer.id };
+      return { kind: 'created' as const, userId: createdUser.id, performerId: createdPerformer.id };
+    }).catch((error) => {
+      if (isPerformerHandleUniqueViolation(error)) {
+        return { kind: 'handle_conflict' as const };
+      }
+      throw error;
     });
+
+    if (created.kind === 'handle_conflict') {
+      return res.status(409).json({ error: 'This handle is already taken.' });
+    }
+
     userId = created.userId;
     performerId = created.performerId;
     wasNewPerformer = true;
@@ -7021,6 +7120,7 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
   const userUpdates: Record<string, unknown> = {};
   const performerUpdates: Record<string, unknown> = {};
   const changedFields: string[] = [];
+  let adminHandleToLock: string | null = null;
   const shouldGrantPartner = Boolean(
     existingAccount.performerId
     && req.body?.isPartner === true
@@ -7109,6 +7209,25 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
           res.status(409).json({ error: 'This handle is already taken.' });
           return;
         }
+
+        const [previewConflict] = await businessDb
+          .select({ id: performerProfilePreviews.id })
+          .from(performerProfilePreviews)
+          .where(and(
+            sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle.toLowerCase()}`,
+            eq(performerProfilePreviews.isActive, true),
+            or(
+              isNull(performerProfilePreviews.claimedPerformerId),
+              ne(performerProfilePreviews.claimedPerformerId, existingAccount.performerId)
+            )
+          ))
+          .limit(1);
+        if (previewConflict) {
+          res.status(409).json({ error: 'This handle is already taken.' });
+          return;
+        }
+
+        adminHandleToLock = normalizedHandle;
         performerUpdates.handle = normalizedHandle;
         changedFields.push('handle');
       }
@@ -7145,7 +7264,11 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     return;
   }
 
-  await businessDb.transaction(async (tx) => {
+  const updateResult = await businessDb.transaction(async (tx) => {
+    if (adminHandleToLock) {
+      await lockPerformerHandleNamespace(tx, adminHandleToLock);
+    }
+
     if (Object.keys(userUpdates).length > 0) {
       await tx.update(users).set(userUpdates).where(eq(users.id, req.params.userId));
     }
@@ -7244,7 +7367,19 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
         changedFields
       }
     });
+
+    return { kind: 'updated' as const };
+  }).catch((error) => {
+    if (isPerformerHandleUniqueViolation(error)) {
+      return { kind: 'handle_conflict' as const };
+    }
+    throw error;
   });
+
+  if (updateResult.kind === 'handle_conflict') {
+    res.status(409).json({ error: 'This handle is already taken.' });
+    return;
+  }
 
   const [updatedAccount] = await loadAdminAccountsBaseQuery(businessDb)
     .where(eq(users.id, req.params.userId))
@@ -7935,6 +8070,7 @@ async function loadDiscoveryPerformerSupply() {
       p.owner_user_id,
       p.display_name,
       p.handle,
+      p.bio,
       p.is_active,
       p.onboarding_status,
       ${visibilityProjection} as visibility_state,
@@ -7949,6 +8085,7 @@ async function loadDiscoveryPerformerSupply() {
     owner_user_id: string | null;
     display_name: string;
     handle: string | null;
+    bio: string | null;
     is_active: boolean;
     onboarding_status: string;
     visibility_state: string | null;
@@ -7959,6 +8096,7 @@ async function loadDiscoveryPerformerSupply() {
     id: row.id,
     displayName: row.display_name,
     handle: row.handle,
+    bio: row.bio,
     city: row.city,
     specialties: Array.isArray(row.specialties)
       ? row.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 20)
@@ -8057,12 +8195,22 @@ async function loadSwayDiscoverySupply(auditRows: Array<{ metadata: unknown }>) 
       timeZone: performerEvents.timeZone,
       city: performerEvents.city,
       locationName: performerEvents.locationName,
+      attendanceMode: performerEvents.attendanceMode,
       externalTicketUrl: performerEvents.externalTicketUrl
-    }).from(performerEvents).where(and(
-      eq(performerEvents.status, 'published'),
-      eq(performerEvents.visibility, 'public'),
-      gt(performerEvents.startsAt, new Date())
-    )).orderBy(asc(performerEvents.startsAt)).limit(100),
+    }).from(performerEvents)
+      .innerJoin(performers, eq(performers.id, performerEvents.performerId))
+      .where(and(
+        eq(performerEvents.status, 'published'),
+        eq(performerEvents.visibility, 'public'),
+        gt(performerEvents.startsAt, new Date()),
+        eq(performers.visibilityState, 'public'),
+        eq(performers.isActive, true),
+        notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+        sql`lower(trim(${performers.handle})) ~ '^[a-z0-9_-]{1,64}$'`,
+        notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES]),
+        sql`nullif(trim(${performers.displayName}), '') is not null`,
+        sql`nullif(trim(${performers.bio}), '') is not null`
+      )).orderBy(asc(performerEvents.startsAt)).limit(100),
     businessDb.select({
       gigId: activeRoomRegistry.gigId,
       performerId: activeRoomRegistry.performerId,
@@ -8121,7 +8269,7 @@ async function loadSwayDiscoverySupply(auditRows: Array<{ metadata: unknown }>) 
       timeZone: event.timeZone,
       city: event.city,
       locationName: event.locationName,
-      ticketAvailable: Boolean(event.externalTicketUrl)
+      ticketAvailable: event.attendanceMode === 'external_ticket' && Boolean(event.externalTicketUrl)
     })),
     rooms: roomRows.map((room) => ({
       gigId: room.gigId,
@@ -8454,14 +8602,17 @@ app.get('/api/talent/events', async (req, res) => {
   if (!owner || !performerEventService) return;
 
   try {
-    const events = await performerEventService.listOwnedEvents({
-      ...owner,
-      limit: Number(req.query.limit) || 50
-    });
+    const [events, publicationCapability] = await Promise.all([
+      performerEventService.listOwnedEvents({
+        ...owner,
+        limit: Number(req.query.limit) || 50
+      }),
+      performerEventService.getOwnerPublicationCapability(owner)
+    ]);
     const eventResponses = await Promise.all(
       events.map((event) => toOwnedEventResponseWithTicket(event, owner))
     );
-    return res.json({ events: eventResponses });
+    return res.json({ events: eventResponses, publicationCapability });
   } catch (error) {
     return respondToEventServiceError(res, error, 'Unable to load performer events.');
   }
@@ -8469,7 +8620,13 @@ app.get('/api/talent/events', async (req, res) => {
 
 app.get('/api/talent/events/native-ticket-capability', async (req, res) => {
   const owner = await requirePerformerEventOwner(req, res);
-  if (!owner || !eventTicketService) return;
+  if (!owner) return;
+  if (!eventTicketService) {
+    return res.status(503).json({
+      error: 'Native ticket readiness is temporarily unavailable.',
+      code: 'native_ticket_readiness_unavailable'
+    });
+  }
 
   try {
     const capability = await eventTicketService.getOwnerNativeTicketSalesCapability(owner);
@@ -8514,6 +8671,7 @@ app.post('/api/talent/events', async (req, res) => {
       locationIsTba: req.body?.locationIsTba,
       coverImageUrl: req.body?.coverImageUrl,
       ticketingMode: req.body?.ticketingMode,
+      attendanceMode: req.body?.attendanceMode,
       externalTicketUrl: req.body?.externalTicketUrl,
       externalTicketLabel: req.body?.externalTicketLabel,
       visibility: req.body?.visibility
@@ -8543,6 +8701,7 @@ app.patch('/api/talent/events/:eventId', async (req, res) => {
     'city',
     'locationIsTba',
     'coverImageUrl',
+    'attendanceMode',
     'externalTicketUrl',
     'externalTicketLabel',
     'visibility'
@@ -8663,7 +8822,7 @@ app.post('/api/talent/events/:eventId/publish', async (req, res) => {
       if (!eventTicketService) {
         return res.status(503).json({ error: 'Native ticket publishing is temporarily unavailable.' });
       }
-      await eventTicketService.publishNativeEvent({
+      const result = await eventTicketService.publishNativeEvent({
         ...owner,
         eventId: req.params.eventId,
         expectedUpdatedAt: req.body?.expectedUpdatedAt
@@ -8672,14 +8831,20 @@ app.post('/api/talent/events/:eventId/publish', async (req, res) => {
         ...owner,
         eventId: req.params.eventId
       });
-      return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+      return res.json({
+        event: await toOwnedEventResponseWithTicket(event, owner),
+        publicationReach: result.publicationReach
+      });
     }
     const event = await performerEventService.publishEvent({
       ...owner,
       eventId: req.params.eventId,
       expectedUpdatedAt: req.body?.expectedUpdatedAt
     });
-    return res.json({ event: await toOwnedEventResponseWithTicket(event, owner) });
+    return res.json({
+      event: await toOwnedEventResponseWithTicket(event, owner),
+      publicationReach: event.publicationReach
+    });
   } catch (error) {
     if (error instanceof EventTicketServiceError) {
       return respondToEventTicketServiceError(res, error, 'Unable to publish performer event.');
@@ -8745,7 +8910,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
-  const [[profileRow], linkRows, partnerState] = await Promise.all([
+  const [[profileRow], linkRows] = await Promise.all([
     businessDb
       .select({
         performerId: performerPublicProfiles.performerId,
@@ -8779,8 +8944,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       })
       .from(performerProfileLinks)
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
-      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt)),
-    loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId)
+      .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt))
   ]);
 
   const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
@@ -8813,22 +8977,6 @@ app.get('/api/talent/profile/public', async (req, res) => {
         websiteUrl: profileRow?.websiteUrl ?? null
       }),
       links: linkRows,
-      partner: {
-        granted: Boolean(partnerState),
-        active: partnerState?.isEffective ?? false,
-        accepted: partnerState?.isAccepted ?? false,
-        suspended: partnerState?.isSuspended ?? false,
-        acceptanceRequired: Boolean(partnerState && !partnerState.isAccepted),
-        kind: partnerState?.partnerKind ?? null,
-        termsVersion: partnerState?.termsVersion ?? null,
-        termsHash: partnerState?.termsHash ?? null,
-        termsText: partnerState?.termsText ?? null,
-        termsSnapshot: partnerState?.termsSnapshot ?? null,
-        grantedAt: partnerState?.grantedAt ?? null,
-        acceptedAt: partnerState?.acceptedAt ?? null,
-        status: partnerState?.currentStatus ?? null,
-        statusReason: partnerState?.statusReason ?? null
-      },
       updatedAt: profileRow?.updatedAt ?? null
     }
   });
@@ -8905,6 +9053,42 @@ app.post('/api/talent/profile/visibility', async (req, res) => {
     console.error('Performer visibility update failed', error);
     return res.status(500).json({ error: 'Unable to update performer visibility.' });
   }
+});
+
+app.get('/api/talent/partner/terms', async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Brand Partner terms require durable authenticated persistence.' });
+  }
+
+  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!performerOwner) {
+    return res.status(403).json({ error: 'Only the performer owner can review Brand Partner terms.' });
+  }
+
+  const partnerState = await loadPartnerEntitlementStateForPerformer(businessDb, performerOwner.performerId);
+  return res.json({
+    partner: {
+      granted: Boolean(partnerState),
+      active: partnerState?.isEffective ?? false,
+      accepted: partnerState?.isAccepted ?? false,
+      suspended: partnerState?.isSuspended ?? false,
+      acceptanceRequired: Boolean(partnerState && !partnerState.isAccepted),
+      kind: partnerState?.partnerKind ?? null,
+      termsVersion: partnerState?.termsVersion ?? null,
+      termsHash: partnerState?.termsHash ?? null,
+      termsText: partnerState?.termsText ?? null,
+      grantedAt: partnerState?.grantedAt ?? null,
+      acceptedAt: partnerState?.acceptedAt ?? null,
+      status: partnerState?.currentStatus ?? null,
+      statusReason: partnerState?.statusReason ?? null
+    }
+  });
 });
 
 app.post('/api/talent/partner/terms/accept', async (req, res) => {
@@ -9000,6 +9184,10 @@ app.post('/api/talent/profile/public', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
   }
 
+  const displayNameProvided = req.body?.displayName !== undefined;
+  const handleProvided = req.body?.handle !== undefined;
+  const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
+  const normalizedHandle = normalizePerformerHandle(req.body?.handle);
   const bio = normalizePublicProfileText(req.body?.bio, 1200);
   const headline = normalizePublicProfileText(req.body?.headline, 140);
   const stageNameProvided = req.body?.stageName !== undefined;
@@ -9019,6 +9207,12 @@ app.post('/api/talent/profile/public', async (req, res) => {
   const websiteUrl = normalizePublicProfileUrl(req.body?.socialLinks?.website);
   const normalizedLinks = normalizePublicProfileLinks(req.body?.links);
 
+  if (displayNameProvided && !normalizedDisplayName) {
+    return res.status(422).json({ error: 'Display name must be between 1 and 80 characters.' });
+  }
+  if (handleProvided && !normalizedHandle) {
+    return res.status(422).json({ error: 'Handle must use 1–64 letters, numbers, underscores, or hyphens and cannot be reserved.' });
+  }
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
   }
@@ -9051,8 +9245,67 @@ app.post('/api/talent/profile/public', async (req, res) => {
     return res.status(422).json({ error: normalizedLinks.error });
   }
 
-  const savedLinks = await businessDb.transaction(async (tx) => {
+  const profileSaveResult = await businessDb.transaction(async (tx) => {
     const now = new Date();
+    if (handleProvided) {
+      await lockPerformerHandleNamespace(tx, normalizedHandle);
+    }
+
+    const [ownedPerformer] = await tx
+      .select({
+        performerId: performers.id,
+        displayName: performers.displayName,
+        handle: performers.handle,
+        visibilityState: performers.visibilityState
+      })
+      .from(performers)
+      .where(and(
+        eq(performers.id, performerOwner.performerId),
+        eq(performers.ownerUserId, talentAccess.actor.actorId)
+      ))
+      .for('update')
+      .limit(1);
+
+    if (!ownedPerformer) {
+      return { kind: 'owner_missing' as const };
+    }
+
+    const nextDisplayName = displayNameProvided ? normalizedDisplayName! : ownedPerformer.displayName;
+    const nextHandle = handleProvided ? normalizedHandle! : ownedPerformer.handle;
+    const displayNameChanged = nextDisplayName !== ownedPerformer.displayName;
+    const handleChanged = nextHandle?.toLowerCase() !== ownedPerformer.handle?.toLowerCase()
+      || nextHandle !== ownedPerformer.handle;
+    let claimedPreviewReservationUsed = false;
+
+    if (handleProvided && nextHandle?.toLowerCase() !== ownedPerformer.handle?.toLowerCase()) {
+      const [performerConflict] = await tx
+        .select({ performerId: performers.id })
+        .from(performers)
+        .where(and(
+          sql`lower(${performers.handle}) = ${nextHandle.toLowerCase()}`,
+          ne(performers.id, ownedPerformer.performerId)
+        ))
+        .limit(1);
+
+      if (performerConflict) {
+        return { kind: 'handle_conflict' as const };
+      }
+
+      const [activePreview] = await tx
+        .select({ claimedPerformerId: performerProfilePreviews.claimedPerformerId })
+        .from(performerProfilePreviews)
+        .where(and(
+          sql`lower(${performerProfilePreviews.handle}) = ${nextHandle.toLowerCase()}`,
+          eq(performerProfilePreviews.isActive, true)
+        ))
+        .limit(1);
+
+      if (activePreview && activePreview.claimedPerformerId !== ownedPerformer.performerId) {
+        return { kind: 'handle_conflict' as const };
+      }
+      claimedPreviewReservationUsed = activePreview?.claimedPerformerId === ownedPerformer.performerId;
+    }
+
     const [existingProfile] = await tx
       .select({ metadata: performerPublicProfiles.metadata })
       .from(performerPublicProfiles)
@@ -9066,8 +9319,16 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
     await tx
       .update(performers)
-      .set({ bio, updatedAt: now })
-      .where(eq(performers.id, performerOwner.performerId));
+      .set({
+        bio,
+        displayName: nextDisplayName,
+        ...(handleProvided ? { handle: nextHandle } : {}),
+        updatedAt: now
+      })
+      .where(and(
+        eq(performers.id, ownedPerformer.performerId),
+        eq(performers.ownerUserId, talentAccess.actor.actorId)
+      ));
 
     await tx
       .insert(performerPublicProfiles)
@@ -9128,13 +9389,22 @@ app.post('/api/talent/profile/public', async (req, res) => {
       actorId: talentAccess.actor.actorId,
       actorType: 'performer',
       entityType: 'performer',
-      entityId: performerOwner.performerId,
+      entityId: ownedPerformer.performerId,
       eventType: 'performer_public_profile.update',
-      previousStatus: performerOwner.visibilityState,
-      nextStatus: performerOwner.visibilityState,
+      previousStatus: ownedPerformer.visibilityState,
+      nextStatus: ownedPerformer.visibilityState,
       metadata: {
         operation: 'profile_save',
-        visibilityState: performerOwner.visibilityState,
+        visibilityState: ownedPerformer.visibilityState,
+        changedIdentityFields: [
+          ...(displayNameChanged ? ['displayName'] : []),
+          ...(handleChanged ? ['handle'] : [])
+        ],
+        previousDisplayName: displayNameChanged ? ownedPerformer.displayName : null,
+        nextDisplayName,
+        previousHandle: handleChanged ? ownedPerformer.handle : null,
+        nextHandle,
+        claimedPreviewReservationUsed,
         hasBio: Boolean(bio),
         specialtyCount: specialties?.length ?? 0,
         hasBookingEmail: Boolean(bookingEmail),
@@ -9158,17 +9428,38 @@ app.post('/api/talent/profile/public', async (req, res) => {
       .where(eq(performerProfileLinks.performerId, performerOwner.performerId))
       .orderBy(asc(performerProfileLinks.sortOrder), asc(performerProfileLinks.createdAt));
 
-    return { links, metadata: nextMetadata };
+    return {
+      kind: 'saved' as const,
+      links,
+      metadata: nextMetadata,
+      displayName: nextDisplayName,
+      handle: nextHandle,
+      visibilityState: ownedPerformer.visibilityState
+    };
+  }).catch((error) => {
+    if (isPerformerHandleUniqueViolation(error)) {
+      return { kind: 'handle_conflict' as const };
+    }
+    throw error;
   });
+
+  if (profileSaveResult.kind === 'owner_missing') {
+    return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
+  }
+  if (profileSaveResult.kind === 'handle_conflict') {
+    return res.status(409).json({ error: 'This handle is already taken.' });
+  }
+
+  const savedLinks = profileSaveResult;
 
   return res.status(202).json({
     success: true,
     profile: {
       performerId: performerOwner.performerId,
-      handle: performerOwner.handle,
-      displayName: performerOwner.displayName,
+      handle: savedLinks.handle,
+      displayName: savedLinks.displayName,
       bio,
-      visibilityState: performerOwner.visibilityState,
+      visibilityState: savedLinks.visibilityState,
       headline,
       stageName: normalizePublicProfileText(
         savedLinks.metadata && typeof savedLinks.metadata === 'object'
@@ -10766,7 +11057,12 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
     return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
   }
   if (!stripeConnectService || !stripeConnectOnboardingStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).json({ error: 'Stripe test-mode Connect onboarding is unavailable until payment execution is fully configured.' });
+    const connectModeLabel = liveRoomPaymentRuntimeConfig.mode === 'live'
+      ? 'Stripe live-mode Connect'
+      : liveRoomPaymentRuntimeConfig.mode === 'test'
+        ? 'Stripe test-mode Connect'
+        : 'Stripe Connect';
+    return res.status(503).json({ error: `${connectModeLabel} onboarding is unavailable until payment execution is fully configured.` });
   }
 
   const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
@@ -10799,8 +11095,13 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
     console.error('Stripe Connect onboarding failed.', {
       message: error instanceof Error ? error.message : 'unknown_error'
     });
+    const configurationHint = liveRoomPaymentRuntimeConfig.mode === 'live'
+      ? 'Confirm Stripe Connect is enabled for the live Stripe account and Render is using matching live-mode Stripe keys.'
+      : liveRoomPaymentRuntimeConfig.mode === 'test'
+        ? 'Confirm Stripe Connect is enabled for the test Stripe account and Render is using matching test-mode Stripe keys.'
+        : 'Confirm Stripe Connect and payment execution are configured for the same environment.';
     return res.status(502).json({
-      error: 'Stripe Connect onboarding could not be started. Confirm Stripe Connect is enabled for the Stripe account and Render is using test-mode Stripe keys.'
+      error: `Stripe Connect onboarding could not be started. ${configurationHint}`
     });
   }
 });
@@ -11098,15 +11399,15 @@ app.get('/api/public/events/:eventId/ticket', async (req, res) => {
   try {
     const event = await performerEventService.getPublicEvent(req.params.eventId);
     if (!event || event.status !== 'published' || !event.externalTicketUrl) {
-      return res.status(404).json({ error: 'External ticket link not available.' });
+      return res.status(404).json({ error: 'External attendance link not available.' });
     }
     if (new Date(event.startsAt).getTime() <= Date.now()) {
       return res.status(410).json({ error: 'This event has already started.' });
     }
 
-    const safeDestination = normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External ticket URL');
+    const safeDestination = normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External attendance URL');
     if (!safeDestination) {
-      return res.status(422).json({ error: 'External ticket link is not safe to open.' });
+      return res.status(422).json({ error: 'External attendance link is not safe to open.' });
     }
 
     return res.redirect(302, safeDestination);
@@ -11413,7 +11714,11 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         .orderBy(desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
         .limit(12),
       performerEventService
-        ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
+        ? performerEventService.listPublicEvents({
+            performerId: publicProfilePerformerId,
+            limit: 12,
+            audience: 'direct'
+          })
         : Promise.resolve([])
     ]);
 
@@ -14414,14 +14719,6 @@ app.get('/api/moderation/placeholders', (_req, res) => {
   });
 });
 
-const INTERNAL_TEST_PROFILE_HANDLES = new Set([
-  'platynum-47'
-]);
-
-function isDiscoveryEligibleHandle(handle: string | null | undefined) {
-  return Boolean(handle && !INTERNAL_TEST_PROFILE_HANDLES.has(handle.trim().toLowerCase()));
-}
-
 function escapeXml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -14514,14 +14811,30 @@ app.get('/sitemap.xml', async (_req, res) => {
       businessDb.select({
         id: performerEvents.id,
         updatedAt: performerEvents.updatedAt,
-        startsAt: performerEvents.startsAt
+        startsAt: performerEvents.startsAt,
+        ownerUserId: performers.ownerUserId,
+        performerDisplayName: performers.displayName,
+        performerHandle: performers.handle,
+        performerBio: performers.bio,
+        performerVisibilityState: performers.visibilityState,
+        performerIsActive: performers.isActive,
+        performerOnboardingStatus: performers.onboardingStatus
       })
         .from(performerEvents)
+        .innerJoin(performers, eq(performers.id, performerEvents.performerId))
+        .innerJoin(users, eq(users.id, performers.ownerUserId))
         .where(and(
           eq(performerEvents.status, 'published'),
           eq(performerEvents.visibility, 'public'),
           gt(performerEvents.startsAt, new Date()),
-          sql`nullif(trim(${performerEvents.title}), '') is not null`
+          sql`nullif(trim(${performerEvents.title}), '') is not null`,
+          eq(performers.visibilityState, 'public'),
+          eq(performers.isActive, true),
+          notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+          sql`lower(trim(${performers.handle})) ~ '^[a-z0-9_-]{1,64}$'`,
+          notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES]),
+          sql`nullif(trim(${performers.bio}), '') is not null`,
+          sql`nullif(trim(${performers.displayName}), '') is not null`
         )),
       // Align with getPublicRelease: never list private distributionMode releases.
       businessDb.select({
@@ -14567,6 +14880,18 @@ app.get('/sitemap.xml', async (_req, res) => {
       entries.set(loc, { loc, lastmod });
     }
     for (const row of eventRows) {
+      const eligibility = evaluatePublicEventPerformerEligibility({
+        audience: 'discovery',
+        claimed: Boolean(row.ownerUserId),
+        hasOwner: Boolean(row.ownerUserId),
+        isActive: row.performerIsActive,
+        onboardingStatus: row.performerOnboardingStatus,
+        visibilityState: row.performerVisibilityState,
+        handle: row.performerHandle,
+        displayName: row.performerDisplayName,
+        bio: row.performerBio
+      });
+      if (!eligibility.eligible) continue;
       const loc = `${CANONICAL_APP_ORIGIN}/e/${row.id}`;
       const stamp = row.updatedAt || row.startsAt;
       const lastmod = stamp instanceof Date && !Number.isNaN(stamp.getTime()) ? stamp.toISOString() : null;
@@ -15004,6 +15329,18 @@ async function startServer() {
     };
     app.get('/p/:handle', handlePublicPerformerRoute);
     app.get(/^\/p\/.+$/, handlePublicPerformerRoute);
+    const handlePublicEventRoute = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      try {
+        const templatePath = path.join(process.cwd(), shellHtmlRelativePath('patron'));
+        const template = readFileSync(templatePath, 'utf8');
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, template);
+        await renderPublicEventDocument(req, res, transformedHtml);
+      } catch (error) {
+        next(error);
+      }
+    };
+    app.get('/e/:eventId', handlePublicEventRoute);
+    app.get(/^\/e\/.*$/, handlePublicEventRoute);
     app.get('*', async (req, res, next) => {
       try {
         const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
@@ -15037,6 +15374,17 @@ async function startServer() {
     };
     app.get('/p/:handle', handlePublicPerformerRoute);
     app.get(/^\/p\/.+$/, handlePublicPerformerRoute);
+    const handlePublicEventRoute = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      try {
+        const htmlPath = path.join(distPath, shellHtmlRelativePath('patron'));
+        const template = readFileSync(htmlPath, 'utf8');
+        await renderPublicEventDocument(req, res, template);
+      } catch (error) {
+        next(error);
+      }
+    };
+    app.get('/e/:eventId', handlePublicEventRoute);
+    app.get(/^\/e\/.*$/, handlePublicEventRoute);
     app.get('*', async (req, res, next) => {
       const shell = resolveShellForRoute(req.path, typeof req.headers.host === 'string' ? req.headers.host : undefined);
       if (!isShellAllowed(shell)) {

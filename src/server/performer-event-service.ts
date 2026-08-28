@@ -7,10 +7,26 @@ import {
   performerPublicProfiles,
   performers
 } from '../db/schema';
+import {
+  evaluatePublicEventPerformerEligibility,
+  INTERNAL_TEST_PROFILE_HANDLES
+} from './public-profile';
 
 export type PerformerEventStatus = 'draft' | 'published' | 'cancelled';
 export type PerformerEventVisibility = 'public' | 'unlisted';
 export type PerformerEventTicketingMode = 'external' | 'native_ga';
+export type PerformerEventAttendanceMode =
+  | 'walk_in'
+  | 'external_rsvp'
+  | 'external_ticket'
+  | 'native_ticket';
+export type PerformerEventPublicationReach = 'discover' | 'link_only';
+export type PerformerEventPublicationCapability = {
+  canPublish: boolean;
+  reach: PerformerEventPublicationReach | null;
+  reasonCode: string | null;
+  message: string | null;
+};
 export const PUBLIC_EVENT_EXTERNAL_TICKET_LABELS = [
   'Get tickets',
   'RSVP',
@@ -34,6 +50,7 @@ export type PerformerEventDto = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: PerformerEventTicketingMode;
+  attendanceMode: PerformerEventAttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -41,6 +58,7 @@ export type PerformerEventDto = {
   publishedAt: string | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  publicationReach?: PerformerEventPublicationReach;
   createdAt: string;
   updatedAt: string;
 };
@@ -51,10 +69,12 @@ export type PublicEventPerformerDto = {
   headline: string | null;
   city: string | null;
   avatarUrl: string | null;
+  visibility: 'public' | 'unlisted';
 };
 
 export type PublicPerformerEventDto = {
   id: string;
+  performerId: string;
   title: string;
   description: string | null;
   startsAt: string;
@@ -67,6 +87,7 @@ export type PublicPerformerEventDto = {
   locationIsTba: boolean;
   coverImageUrl: string | null;
   ticketingMode: PerformerEventTicketingMode;
+  attendanceMode: PerformerEventAttendanceMode;
   externalTicketUrl: string | null;
   externalTicketLabel: string | null;
   visibility: PerformerEventVisibility;
@@ -95,6 +116,7 @@ export type CreatePerformerEventInput = {
   locationIsTba?: boolean;
   coverImageUrl?: string | null;
   ticketingMode?: PerformerEventTicketingMode;
+  attendanceMode?: PerformerEventAttendanceMode;
   externalTicketUrl?: string | null;
   externalTicketLabel?: string | null;
   visibility?: PerformerEventVisibility;
@@ -116,6 +138,7 @@ export type UpdatePerformerEventInput = {
   city?: string | null;
   locationIsTba?: boolean;
   coverImageUrl?: string | null;
+  attendanceMode?: PerformerEventAttendanceMode;
   externalTicketUrl?: string | null;
   externalTicketLabel?: string | null;
   visibility?: PerformerEventVisibility;
@@ -147,10 +170,26 @@ export class EventServiceError extends Error {
 type EventRow = typeof performerEvents.$inferSelect;
 type DbExecutor = SwayDb | any;
 
+type OwnedPerformerRow = {
+  id: string;
+  ownerUserId: string | null;
+  displayName: string;
+  handle: string | null;
+  bio: string | null;
+  visibilityState: string;
+  isActive: boolean;
+  onboardingStatus: string;
+};
+
 type PublicEventRow = {
   event: EventRow;
+  performerOwnerUserId: string;
   performerDisplayName: string;
   performerHandle: string | null;
+  performerBio: string | null;
+  performerVisibilityState: string;
+  performerIsActive: boolean;
+  performerOnboardingStatus: string;
   performerHeadline: string | null;
   performerCity: string | null;
   performerAvatarUrl: string | null;
@@ -165,6 +204,34 @@ const MAX_LOCATION_ADDRESS_LENGTH = 500;
 const MAX_CITY_LENGTH = 120;
 const MAX_EXTERNAL_URL_LENGTH = 2_048;
 const MAX_CANCELLATION_REASON_LENGTH = 500;
+
+export function hasActionableWalkInLocation(event: {
+  locationName: string | null | undefined;
+  locationAddress: string | null | undefined;
+  city: string | null | undefined;
+  locationIsTba: boolean;
+}): boolean {
+  const hasText = (value: string | null | undefined) => Boolean(value?.trim());
+  return !event.locationIsTba
+    && hasText(event.locationName)
+    && (hasText(event.locationAddress) || hasText(event.city));
+}
+
+function assertWalkInLocationReady(event: {
+  attendanceMode: PerformerEventAttendanceMode;
+  locationName: string | null | undefined;
+  locationAddress: string | null | undefined;
+  city: string | null | undefined;
+  locationIsTba: boolean;
+}) {
+  if (event.attendanceMode === 'walk_in' && !hasActionableWalkInLocation(event)) {
+    serviceError(
+      422,
+      'walk_in_location_required',
+      'Add a location name and either a street address or city, and turn off Location TBA, before publishing a walk-in event.'
+    );
+  }
+}
 
 function serviceError(status: number, code: string, message: string): never {
   throw new EventServiceError(status, code, message);
@@ -356,6 +423,52 @@ function normalizeTicketingMode(value: unknown): PerformerEventTicketingMode {
   );
 }
 
+function normalizeAttendanceMode(
+  value: unknown,
+  ticketingMode: PerformerEventTicketingMode,
+  externalTicketLabel: unknown
+): PerformerEventAttendanceMode {
+  if (value === undefined || value === null || value === '') {
+    if (ticketingMode === 'native_ga') return 'native_ticket';
+    return externalTicketLabel === 'RSVP' ? 'external_rsvp' : 'external_ticket';
+  }
+  if (
+    typeof value !== 'string'
+    || !['walk_in', 'external_rsvp', 'external_ticket', 'native_ticket'].includes(value)
+  ) {
+    return serviceError(
+      422,
+      'invalid_attendance_mode',
+      'Attendance mode must be walk_in, external_rsvp, external_ticket, or native_ticket.'
+    );
+  }
+  if (ticketingMode === 'native_ga' && value !== 'native_ticket') {
+    return serviceError(
+      422,
+      'native_ticket_attendance_required',
+      'Native Sway tickets require native_ticket attendance mode.'
+    );
+  }
+  if (ticketingMode === 'external' && value === 'native_ticket') {
+    return serviceError(
+      422,
+      'external_attendance_required',
+      'External events cannot use native_ticket attendance mode.'
+    );
+  }
+  return value as PerformerEventAttendanceMode;
+}
+
+function attendanceModeForEvent(event: {
+  attendanceMode?: PerformerEventAttendanceMode | null;
+  ticketingMode?: PerformerEventTicketingMode | null;
+  externalTicketLabel?: string | null;
+}): PerformerEventAttendanceMode {
+  if (event.attendanceMode) return event.attendanceMode;
+  if (event.ticketingMode === 'native_ga') return 'native_ticket';
+  return event.externalTicketLabel === 'RSVP' ? 'external_rsvp' : 'external_ticket';
+}
+
 function normalizeLocationIsTba(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   if (typeof value !== 'boolean') {
@@ -388,6 +501,7 @@ function normalizeEventValues(input: {
   locationIsTba: unknown;
   coverImageUrl: unknown;
   ticketingMode: unknown;
+  attendanceMode: unknown;
   externalTicketUrl: unknown;
   externalTicketLabel: unknown;
   visibility: unknown;
@@ -439,11 +553,31 @@ function normalizeEventValues(input: {
     'External ticket label',
     80
   );
+  const attendanceMode = normalizeAttendanceMode(
+    input.attendanceMode,
+    ticketingMode,
+    requestedExternalTicketLabel
+  );
+  if (attendanceMode === 'walk_in' && (externalTicketUrl || requestedExternalTicketLabel)) {
+    serviceError(
+      422,
+      'walk_in_external_link_conflict',
+      'Walk-in events cannot use an external ticket or RSVP link.'
+    );
+  }
+  if (attendanceMode === 'external_rsvp' && requestedExternalTicketLabel && requestedExternalTicketLabel !== 'RSVP') {
+    serviceError(422, 'rsvp_label_required', 'External RSVP events must use the RSVP button label.');
+  }
+  if (attendanceMode === 'external_ticket' && requestedExternalTicketLabel === 'RSVP') {
+    serviceError(422, 'ticket_label_required', 'External ticket events cannot use the RSVP button label.');
+  }
   if (requestedExternalTicketLabel && !externalTicketUrl) {
     serviceError(422, 'ticket_label_without_url', 'An external ticket label requires an external ticket URL.');
   }
   const externalTicketLabel = externalTicketUrl
-    ? requestedExternalTicketLabel || PUBLIC_EVENT_EXTERNAL_TICKET_LABELS[0]
+    ? attendanceMode === 'external_rsvp'
+      ? 'RSVP'
+      : requestedExternalTicketLabel || PUBLIC_EVENT_EXTERNAL_TICKET_LABELS[0]
     : null;
   if (externalTicketLabel && !isPublicEventExternalTicketLabel(externalTicketLabel)) {
     serviceError(
@@ -466,6 +600,7 @@ function normalizeEventValues(input: {
     locationIsTba: normalizeLocationIsTba(input.locationIsTba),
     coverImageUrl: normalizeSafeHttpsUrl(input.coverImageUrl, 'Cover image URL'),
     ticketingMode,
+    attendanceMode,
     externalTicketUrl,
     externalTicketLabel: externalTicketUrl ? externalTicketLabel : null,
     visibility: normalizeVisibility(input.visibility)
@@ -482,12 +617,22 @@ function assertExpectedUpdatedAt(current: Date, expected: Date) {
   }
 }
 
-async function requireOwnedPerformer(executor: DbExecutor, performerId: string, actorUserId: string) {
+async function requireOwnedPerformer(
+  executor: DbExecutor,
+  performerId: string,
+  actorUserId: string,
+  lock = false
+) {
   assertUuid(performerId, 'performerId');
   assertUuid(actorUserId, 'actorUserId');
-  const [performer] = await executor
+  const query = executor
     .select({
       id: performers.id,
+      ownerUserId: performers.ownerUserId,
+      displayName: performers.displayName,
+      handle: performers.handle,
+      bio: performers.bio,
+      visibilityState: performers.visibilityState,
       isActive: performers.isActive,
       onboardingStatus: performers.onboardingStatus
     })
@@ -495,12 +640,74 @@ async function requireOwnedPerformer(executor: DbExecutor, performerId: string, 
     .where(and(
       eq(performers.id, performerId),
       eq(performers.ownerUserId, actorUserId)
-    ))
-    .limit(1);
+    ));
+  const [performer] = lock
+    ? await query.for('update').limit(1)
+    : await query.limit(1);
   if (!performer) {
     serviceError(403, 'performer_owner_required', 'Only the performer owner can manage these events.');
   }
   return performer;
+}
+
+function publicationCapabilityForPerformer(
+  performer: OwnedPerformerRow
+): PerformerEventPublicationCapability {
+  if (!performer.isActive) {
+    return {
+      canPublish: false,
+      reach: null,
+      reasonCode: 'performer_inactive',
+      message: 'Activate your performer account before publishing shows.'
+    };
+  }
+  if (['restricted', 'suspended'].includes(performer.onboardingStatus)) {
+    return {
+      canPublish: false,
+      reach: null,
+      reasonCode: 'performer_restricted',
+      message: 'This performer cannot publish shows.'
+    };
+  }
+  const eligibility = evaluatePublicEventPerformerEligibility({
+    audience: 'direct',
+    claimed: Boolean(performer.ownerUserId),
+    hasOwner: Boolean(performer.ownerUserId),
+    isActive: performer.isActive,
+    onboardingStatus: performer.onboardingStatus,
+    visibilityState: performer.visibilityState,
+    handle: performer.handle,
+    displayName: performer.displayName,
+    bio: performer.bio
+  });
+  if (!eligibility.eligible || !eligibility.visibility) {
+    return {
+      canPublish: false,
+      reach: null,
+      reasonCode: 'performer_public_page_not_ready',
+      message: 'Finish your Public Page before publishing: add a valid handle, display name, and bio, then choose Public or Unlisted visibility.'
+    };
+  }
+  return {
+    canPublish: true,
+    reach: eligibility.visibility === 'public' ? 'discover' : 'link_only',
+    reasonCode: null,
+    message: null
+  };
+}
+
+function assertPerformerPublicationReady(performer: OwnedPerformerRow) {
+  const capability = publicationCapabilityForPerformer(performer);
+  if (!capability.canPublish) {
+    serviceError(
+      capability.reasonCode === 'performer_inactive' || capability.reasonCode === 'performer_restricted'
+        ? 403
+        : 422,
+      capability.reasonCode ?? 'performer_public_page_not_ready',
+      capability.message ?? 'Finish your Public Page before publishing shows.'
+    );
+  }
+  return capability.reach as PerformerEventPublicationReach;
 }
 
 async function loadOwnedEvent(executor: DbExecutor, eventId: string, performerId: string): Promise<EventRow> {
@@ -532,12 +739,16 @@ function sameIdempotentCreate(event: EventRow, normalized: ReturnType<typeof nor
     && event.locationIsTba === normalized.locationIsTba
     && event.coverImageUrl === normalized.coverImageUrl
     && (event.ticketingMode ?? 'external') === normalized.ticketingMode
+    && attendanceModeForEvent(event) === normalized.attendanceMode
     && event.externalTicketUrl === normalized.externalTicketUrl
     && event.externalTicketLabel === normalized.externalTicketLabel
     && event.visibility === normalized.visibility;
 }
 
-export function serializePerformerEvent(event: EventRow): PerformerEventDto {
+export function serializePerformerEvent(
+  event: EventRow,
+  publicationReach?: PerformerEventPublicationReach
+): PerformerEventDto {
   return {
     id: event.id,
     performerId: event.performerId,
@@ -554,6 +765,7 @@ export function serializePerformerEvent(event: EventRow): PerformerEventDto {
     locationIsTba: event.locationIsTba,
     coverImageUrl: event.coverImageUrl,
     ticketingMode: event.ticketingMode ?? 'external',
+    attendanceMode: attendanceModeForEvent(event),
     externalTicketUrl: event.externalTicketUrl,
     externalTicketLabel: event.externalTicketLabel,
     visibility: event.visibility,
@@ -561,15 +773,22 @@ export function serializePerformerEvent(event: EventRow): PerformerEventDto {
     publishedAt: event.publishedAt?.toISOString() ?? null,
     cancelledAt: event.cancelledAt?.toISOString() ?? null,
     cancellationReason: event.cancellationReason,
+    ...(publicationReach ? {
+      publicationReach: event.visibility === 'unlisted' ? 'link_only' : publicationReach
+    } : {}),
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString()
   };
 }
 
-function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
+function serializePublicEvent(
+  row: PublicEventRow,
+  performerVisibility: 'public' | 'unlisted'
+): PublicPerformerEventDto {
   const cancelled = row.event.status === 'cancelled';
   return {
     id: row.event.id,
+    performerId: row.event.performerId,
     title: row.event.title,
     description: row.event.description,
     startsAt: row.event.startsAt.toISOString(),
@@ -582,6 +801,7 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
     locationIsTba: row.event.locationIsTba,
     coverImageUrl: row.event.coverImageUrl,
     ticketingMode: row.event.ticketingMode ?? 'external',
+    attendanceMode: attendanceModeForEvent(row.event),
     externalTicketUrl: cancelled ? null : row.event.externalTicketUrl,
     externalTicketLabel: cancelled ? null : row.event.externalTicketLabel,
     visibility: row.event.visibility,
@@ -594,7 +814,8 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
       handle: row.performerHandle,
       headline: row.performerHeadline,
       city: row.performerCity,
-      avatarUrl: row.performerAvatarUrl
+      avatarUrl: row.performerAvatarUrl,
+      visibility: performerVisibility
     },
     createdAt: row.event.createdAt.toISOString(),
     updatedAt: row.event.updatedAt.toISOString()
@@ -604,15 +825,45 @@ function serializePublicEvent(row: PublicEventRow): PublicPerformerEventDto {
 function publicEventSelection() {
   return {
     event: performerEvents,
+    performerOwnerUserId: performers.ownerUserId,
     performerDisplayName: performers.displayName,
     performerHandle: performers.handle,
+    performerBio: performers.bio,
+    performerVisibilityState: performers.visibilityState,
+    performerIsActive: performers.isActive,
+    performerOnboardingStatus: performers.onboardingStatus,
     performerHeadline: performerPublicProfiles.headline,
     performerCity: performerPublicProfiles.city,
     performerAvatarUrl: performerPublicProfiles.avatarUrl
   };
 }
 
+function resolvePublicEventPerformer(
+  row: PublicEventRow,
+  audience: 'discovery' | 'direct'
+) {
+  return evaluatePublicEventPerformerEligibility({
+    audience,
+    claimed: Boolean(row.performerOwnerUserId),
+    hasOwner: Boolean(row.performerOwnerUserId),
+    isActive: row.performerIsActive,
+    onboardingStatus: row.performerOnboardingStatus,
+    visibilityState: row.performerVisibilityState,
+    handle: row.performerHandle,
+    displayName: row.performerDisplayName,
+    bio: row.performerBio
+  });
+}
+
 export function createPerformerEventService(db: SwayDb) {
+  async function getOwnerPublicationCapability(input: {
+    performerId: string;
+    actorUserId: string;
+  }): Promise<PerformerEventPublicationCapability> {
+    const performer = await requireOwnedPerformer(db, input.performerId, input.actorUserId);
+    return publicationCapabilityForPerformer(performer as OwnedPerformerRow);
+  }
+
   async function listOwnedEvents(input: {
     performerId: string;
     actorUserId: string;
@@ -631,7 +882,7 @@ export function createPerformerEventService(db: SwayDb) {
         desc(performerEvents.createdAt)
       )
       .limit(limit);
-    return events.map(serializePerformerEvent);
+    return events.map((event) => serializePerformerEvent(event));
   }
 
   async function createEvent(input: CreatePerformerEventInput): Promise<{
@@ -650,6 +901,7 @@ export function createPerformerEventService(db: SwayDb) {
       locationIsTba: input.locationIsTba,
       coverImageUrl: input.coverImageUrl,
       ticketingMode: input.ticketingMode,
+      attendanceMode: input.attendanceMode,
       externalTicketUrl: input.externalTicketUrl,
       externalTicketLabel: input.externalTicketLabel,
       visibility: input.visibility
@@ -747,6 +999,7 @@ export function createPerformerEventService(db: SwayDb) {
       'city',
       'locationIsTba',
       'coverImageUrl',
+      'attendanceMode',
       'externalTicketUrl',
       'externalTicketLabel',
       'visibility'
@@ -774,6 +1027,17 @@ export function createPerformerEventService(db: SwayDb) {
       }
       if (
         current.status === 'published'
+        && input.attendanceMode !== undefined
+        && input.attendanceMode !== attendanceModeForEvent(current)
+      ) {
+        serviceError(
+          409,
+          'published_attendance_mode_locked',
+          'Attendance mode cannot be changed after an event is published.'
+        );
+      }
+      if (
+        current.status === 'published'
         && (current.endsAt ?? current.startsAt).getTime() <= Date.now()
       ) {
         serviceError(409, 'event_already_ended', 'A completed published event cannot be edited.');
@@ -797,6 +1061,9 @@ export function createPerformerEventService(db: SwayDb) {
         locationIsTba: input.locationIsTba ?? current.locationIsTba,
         coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
         ticketingMode: current.ticketingMode ?? 'external',
+        attendanceMode: input.attendanceMode !== undefined
+          ? input.attendanceMode
+          : attendanceModeForEvent(current),
         externalTicketUrl: input.externalTicketUrl !== undefined
           ? input.externalTicketUrl
           : current.externalTicketUrl,
@@ -807,7 +1074,7 @@ export function createPerformerEventService(db: SwayDb) {
       });
       if (
         current.status === 'published'
-        && (current.ticketingMode ?? 'external') === 'external'
+        && ['external_rsvp', 'external_ticket'].includes(normalized.attendanceMode)
         && !normalized.externalTicketUrl
       ) {
         serviceError(
@@ -815,6 +1082,9 @@ export function createPerformerEventService(db: SwayDb) {
           'external_ticket_url_required',
           'A published event must keep a public HTTPS ticket or RSVP link.'
         );
+      }
+      if (current.status === 'published') {
+        assertWalkInLocationReady(normalized);
       }
       if (
         current.status === 'published'
@@ -866,15 +1136,16 @@ export function createPerformerEventService(db: SwayDb) {
   async function publishEvent(input: PublishPerformerEventInput): Promise<PerformerEventDto> {
     const expectedUpdatedAt = parseExpectedUpdatedAt(input.expectedUpdatedAt);
     return db.transaction(async (tx) => {
-      const performer = await requireOwnedPerformer(tx, input.performerId, input.actorUserId);
-      if (performer.onboardingStatus === 'suspended') {
-        serviceError(403, 'performer_suspended', 'A suspended performer cannot publish events.');
+      const performer = await requireOwnedPerformer(tx, input.performerId, input.actorUserId, true);
+      if (['restricted', 'suspended'].includes(performer.onboardingStatus)) {
+        serviceError(403, 'performer_restricted', 'This performer cannot publish events.');
       }
       if (!performer.isActive) {
         serviceError(403, 'performer_inactive', 'Activate the performer profile before publishing events.');
       }
+      const performerReach = assertPerformerPublicationReady(performer as OwnedPerformerRow);
       const current = await loadOwnedEvent(tx, input.eventId, input.performerId);
-      if (current.status === 'published') return serializePerformerEvent(current);
+      if (current.status === 'published') return serializePerformerEvent(current, performerReach);
       if (current.status === 'cancelled') {
         serviceError(409, 'event_cancelled', 'A cancelled event cannot be published.');
       }
@@ -891,9 +1162,16 @@ export function createPerformerEventService(db: SwayDb) {
       if (current.startsAt.getTime() <= now.getTime()) {
         serviceError(422, 'event_start_not_future', 'Only a future event can be published.');
       }
-      if (!current.externalTicketUrl) {
+      if (
+        ['external_rsvp', 'external_ticket'].includes(attendanceModeForEvent(current))
+        && !current.externalTicketUrl
+      ) {
         serviceError(422, 'external_ticket_url_required', 'Add a public HTTPS ticket or RSVP link before publishing.');
       }
+      assertWalkInLocationReady({
+        ...current,
+        attendanceMode: attendanceModeForEvent(current)
+      });
       const [published] = await tx
         .update(performerEvents)
         .set({
@@ -927,7 +1205,7 @@ export function createPerformerEventService(db: SwayDb) {
           visibility: published.visibility
         }
       });
-      return serializePerformerEvent(published);
+      return serializePerformerEvent(published, performerReach);
     });
   }
 
@@ -1015,20 +1293,27 @@ export function createPerformerEventService(db: SwayDb) {
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .where(and(
         eq(performerEvents.id, eventId),
-        inArray(performerEvents.status, ['published', 'cancelled']),
-        eq(performers.isActive, true),
-        notInArray(performers.onboardingStatus, ['suspended'])
+        inArray(performerEvents.status, ['published', 'cancelled'])
       ))
       .limit(1);
-    return row ? serializePublicEvent(row as PublicEventRow) : null;
+    if (!row) return null;
+    const typedRow = row as PublicEventRow;
+    const eligibility = resolvePublicEventPerformer(typedRow, 'direct');
+    return eligibility.eligible && eligibility.visibility
+      ? serializePublicEvent(typedRow, eligibility.visibility)
+      : null;
   }
 
   async function listPublicEvents(input: {
     performerId?: string;
     limit?: number;
     now?: string | Date;
+    audience?: 'discovery' | 'direct';
   } = {}): Promise<PublicPerformerEventDto[]> {
     if (input.performerId !== undefined) assertUuid(input.performerId, 'performerId');
+    if (input.audience === 'direct' && input.performerId === undefined) {
+      serviceError(422, 'performer_id_required', 'Direct event listing requires a resolved performer.');
+    }
     const now = input.now instanceof Date
       ? input.now
       : input.now
@@ -1038,12 +1323,21 @@ export function createPerformerEventService(db: SwayDb) {
       serviceError(422, 'invalid_datetime', 'now is invalid.');
     }
     const limit = Math.max(1, Math.min(30, Math.trunc(Number(input.limit) || 12)));
+    const audience = input.audience ?? 'discovery';
     const publicConditions = and(
       eq(performerEvents.status, 'published'),
       eq(performerEvents.visibility, 'public'),
       gt(performerEvents.startsAt, now),
       eq(performers.isActive, true),
-      notInArray(performers.onboardingStatus, ['suspended'])
+      notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+      audience === 'discovery'
+        ? eq(performers.visibilityState, 'public')
+        : inArray(performers.visibilityState, ['public', 'unlisted']),
+      sql`${performers.handle} = trim(${performers.handle})`,
+      sql`lower(trim(${performers.handle})) ~ '^[a-z0-9_-]{1,64}$'`,
+      notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES]),
+      sql`nullif(trim(${performers.displayName}), '') is not null`,
+      sql`nullif(trim(${performers.bio}), '') is not null`
     );
     const rows = await db
       .select(publicEventSelection())
@@ -1055,7 +1349,13 @@ export function createPerformerEventService(db: SwayDb) {
         : publicConditions)
       .orderBy(asc(performerEvents.startsAt), asc(performerEvents.id))
       .limit(limit);
-    return rows.map((row) => serializePublicEvent(row as PublicEventRow));
+    return rows.flatMap((row) => {
+      const typedRow = row as PublicEventRow;
+      const eligibility = resolvePublicEventPerformer(typedRow, audience);
+      return eligibility.eligible && eligibility.visibility
+        ? [serializePublicEvent(typedRow, eligibility.visibility)]
+        : [];
+    });
   }
 
   async function getOwnedEvent(input: {
@@ -1068,6 +1368,7 @@ export function createPerformerEventService(db: SwayDb) {
   }
 
   return {
+    getOwnerPublicationCapability,
     listOwnedEvents,
     getOwnedEvent,
     createEvent,

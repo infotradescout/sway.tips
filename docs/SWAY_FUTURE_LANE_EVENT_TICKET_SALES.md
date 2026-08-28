@@ -1,6 +1,6 @@
 # Event Listings And Future Native Ticket Sales
 
-**Status:** External event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.
+**Status:** Walk-in and external event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.
 **Date locked:** 2026-07-23
 **External-listing slice activated:** 2026-07-26
 **Native paid-GA slice activated:** 2026-07-26
@@ -8,20 +8,21 @@
 
 ## Intent
 
-The activated slice lets a performer publish an event on their Sway profile and hand a customer off to a performer-supplied HTTPS ticket URL. Sway does not process that external purchase, claim inventory, issue admission proof, or report external sales.
+The activated slice lets a performer publish a walk-in event with an actionable location, an external RSVP, or an external ticket handoff. Walk-in creates no Sway ticket/RSVP record and makes no price claim. Sway does not process an external purchase, claim inventory, issue admission proof, or report external sales.
 
 Native Sway ticket sales are a separate money lane — not a side feature bolted onto live-room tips/requests/boosts, and not a silent add-on to audio publishing or merch. The performer remains the seller-side product actor; a venue is descriptive event context, not an account type, role, or permission boundary.
 
 ## Lane Boundary
 
-| Activated external-listing slice owns | Activated slice does not own |
+| Activated performer-listing slice owns | Activated slice does not own |
 | --- | --- |
 | Performer-owned event create, edit, publish, and cancel | Native checkout, payment capture, refunds, credits, or settlement |
 | Public profile, event page, and discovery-feed listing | Capacity, inventory, ticket issuance, QR admission, or transfer market |
 | Safe external HTTPS ticket handoff | Claims about external availability, price, purchase success, or sales |
+| Walk-in listing with actionable public location | Sway RSVP, reservation, capacity, or admission records for walk-in |
 | Ownership, suspension, public filtering, idempotency, and audit evidence | Live-room money, publishing/royalties, merch, or paid streams |
 
-External handoff labels are limited to `Get tickets`, `RSVP`, or `View details`. Cancelling in Sway only changes the listing; performers remain responsible for external-provider cancellation, buyer communication, and refunds. Completed events remain historical records rather than being rewritten as cancelled.
+External ticket labels are limited to `Get tickets` or `View details`; external RSVP uses `RSVP`. Cancelling in Sway only changes the listing. Performers remain responsible for external-provider cancellation, buyer communication, and refunds when a linked provider exists; walk-in cancellation points visitors to the performer or venue. Completed events remain historical records rather than being rewritten as cancelled.
 
 The native lane must use its own order, ticket, payment, settlement, and audit records. Live-room payment records must never be reused as proof of ticket sales. Ticket fees must never silently stack onto tips, requests, boosts, publishing downloads, or merch.
 

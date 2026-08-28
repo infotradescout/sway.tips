@@ -32,6 +32,33 @@ const connectWebhookSource = readFileSync(join(root, 'src/server/stripe-connect-
 
 const failures = [];
 
+if (serverSource.includes('Render is using test-mode Stripe keys.')) {
+  failures.push('Connect onboarding failures must not show test-mode key guidance while live mode is active.');
+}
+
+for (const term of [
+  "liveRoomPaymentRuntimeConfig.mode === 'live'",
+  'Render is using matching live-mode Stripe keys.',
+  'Render is using matching test-mode Stripe keys.',
+  'configurationHint'
+]) {
+  if (!serverSource.includes(term)) failures.push(`Connect onboarding failure copy missing mode-aware term: ${term}`);
+}
+
+if (talentDashboardSource.includes('Bank payout through Stripe Connect is the only working beta cash-out rail.')) {
+  failures.push('Money must not claim a working bank cash-out rail in test or unavailable mode.');
+}
+
+for (const term of [
+  'Payments & payout setup',
+  'Test money rehearsal',
+  'No cash-out or bank transfer occurs in test mode.',
+  'No cash-out rail is currently available.',
+  'Bank payout through Stripe Connect is the only live beta cash-out rail.'
+]) {
+  if (!talentDashboardSource.includes(term)) failures.push(`Money workspace copy missing mode-aware term: ${term}`);
+}
+
 const requiredServerTerms = [
   "app.post('/api/talent/connect/onboard'",
   'stripeConnectService.createOnboardingLink',
@@ -304,6 +331,18 @@ const connectRouteSource = connectRouteStart >= 0 && connectRouteEnd > connectRo
 
 if (!/try\s*\{[\s\S]*provisionStripeConnectRecipient[\s\S]*createStripeConnectOnboardingUrl[\s\S]*\}\s*catch\s*\(error\)/.test(connectRouteSource)) {
   failures.push('Connect onboarding durable provisioning and link creation must be wrapped in try/catch.');
+}
+
+for (const modeAwareCopy of [
+  "liveRoomPaymentRuntimeConfig.mode === 'live'",
+  "liveRoomPaymentRuntimeConfig.mode === 'test'",
+  "'Stripe live-mode Connect'",
+  "'Stripe test-mode Connect'",
+  "'Stripe Connect'"
+]) {
+  if (!connectRouteSource.includes(modeAwareCopy)) {
+    failures.push(`Connect onboarding unavailable copy is missing mode-aware token: ${modeAwareCopy}`);
+  }
 }
 
 if (!talentDashboardSource.includes('await response.json().catch(() => null)')) {

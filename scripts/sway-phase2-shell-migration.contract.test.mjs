@@ -125,10 +125,11 @@ const performerHome = readFileSync(join(root, 'src/components/PerformerAccountHo
 for (const workspace of [
   "{ id: 'home', label: 'Home'",
   "{ id: 'room', label: 'Live Room'",
+  "{ id: 'shows', label: 'Shows'",
   "{ id: 'library', label: 'Music'",
   "{ id: 'catalog', label: 'Files'",
-  "{ id: 'profile', label: 'Profile'",
-  "{ id: 'account', label: 'Account'"
+  "{ id: 'profile', label: 'Public Page'",
+  "{ id: 'account', label: 'Money'"
 ]) {
   if (!performerDashboard.includes(workspace)) {
     failures.push(`Performer app is missing workspace: ${workspace}`);
@@ -151,8 +152,42 @@ if (!performerDashboard.includes('<PerformerAudioFiles />') || !performerDashboa
 if (performerHome.includes('<PerformerAudioFiles />') || performerHome.includes('<PerformerFilePairing />')) {
   failures.push('Home must stay an overview instead of absorbing library workflows.');
 }
-if (!performerDashboard.includes('Money & access')) {
-  failures.push('Account workspace must own payout and access administration.');
+if (!performerDashboard.includes('Payments & payout setup')) {
+  failures.push('Money workspace must own payout readiness administration.');
+}
+for (const cashoutTruth of [
+  "liveRoomPaymentMode === 'live'",
+  "liveRoomPaymentMode === 'test'",
+  'Stripe processes incoming card payments.',
+  'Stripe test mode simulates incoming card payments.',
+  'Incoming card payments are unavailable until payment processing is configured.',
+  'Bank payout through Stripe Connect is the only live beta cash-out rail.',
+  'No cash-out or bank transfer occurs in test mode.',
+  'No cash-out rail is currently available.',
+  'Venmo and Cash App are not live options yet.',
+  'Set up bank payout'
+]) {
+  if (!performerDashboard.includes(cashoutTruth)) {
+    failures.push(`Money workspace is missing current cash-out truth: ${cashoutTruth}`);
+  }
+}
+if (performerDashboard.includes('Bank payout through Stripe Connect is the only working beta cash-out rail.')) {
+  failures.push('Money workspace must not claim a working bank cash-out rail outside live mode.');
+}
+for (const recoveryOrMoneyTruth of [
+  "href: '/account/resend-verification'",
+  "paymentMode === 'live'",
+  "'Live-money ready'",
+  "'Test-money ready'",
+  "'Live payout setup'",
+  "'Test-money rehearsal setup'"
+]) {
+  if (!performerHome.includes(recoveryOrMoneyTruth)) {
+    failures.push(`Performer Home is missing truthful readiness recovery: ${recoveryOrMoneyTruth}`);
+  }
+}
+if (performerHome.includes("label: 'Verify your account email', href: '/account'")) {
+  failures.push('Email verification readiness must link directly to the resend-verification screen.');
 }
 
 if (failures.length) {

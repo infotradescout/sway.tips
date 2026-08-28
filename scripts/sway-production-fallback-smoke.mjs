@@ -63,9 +63,11 @@ async function request(name, path, options = {}) {
   const headers = new Headers(options.headers || {});
   const response = await fetch(`${config.baseUrl}${path}`, {
     method: options.method || 'GET',
-    headers
+    headers,
+    redirect: options.redirect || 'follow'
   });
   const contentType = response.headers.get('content-type') || '';
+  const location = response.headers.get('location') || '';
   const body = await response.text();
 
   return {
@@ -74,6 +76,7 @@ async function request(name, path, options = {}) {
     status: response.status,
     ok: response.ok,
     contentType,
+    location,
     body
   };
 }
@@ -215,6 +218,32 @@ async function verifyAnonymousHtml(path, label) {
   );
 }
 
+async function verifyAnonymousTalentWorkspaceRedirect(path, label) {
+  const response = await request(label, path, {
+    headers: { Accept: 'text/html' },
+    redirect: 'manual'
+  });
+  const expectedLocation = `/talent/login?${new URLSearchParams({ redirect: path }).toString()}`;
+  let normalizedLocation = response.location;
+  try {
+    const locationUrl = new URL(response.location, config.baseUrl);
+    normalizedLocation = `${locationUrl.pathname}${locationUrl.search}`;
+  } catch {
+    // The missing or malformed Location header is reported by the assertion below.
+  }
+
+  assertCondition(
+    response.status === 302,
+    `${label} returned 302`,
+    `${label} expected 302 but returned ${response.status}: ${summarizeBody(response.body)}`
+  );
+  assertCondition(
+    normalizedLocation === expectedLocation,
+    `${label} preserved ${path} through performer login`,
+    `${label} expected Location ${expectedLocation} but received ${response.location || '<missing>'}`
+  );
+}
+
 async function verifyInvalidSignatureFailClosed() {
   const response = await request('invalid-signature-talent-api', '/api/talent/active-rooms', {
     headers: {
@@ -245,10 +274,12 @@ async function main() {
   await verifySignedApi('/api/talent/active-rooms', config.performerActorId, 'performer', 'signed-talent-api');
   await verifySignedApi('/api/admin/active-rooms', config.adminActorId, 'admin', 'signed-admin-api');
   await verifySignedHtml('/talent/gigs', config.performerActorId, 'performer', 'signed-talent-html');
+  await verifySignedHtml('/talent/shows', config.performerActorId, 'performer', 'signed-talent-shows-html');
   await verifySignedHtml('/admin', config.adminActorId, 'admin', 'signed-admin-html');
   await verifyAnonymousApi('/api/talent/active-rooms', 'anonymous-talent-api');
   await verifyAnonymousApi('/api/admin/active-rooms', 'anonymous-admin-api');
-  await verifyAnonymousHtml('/talent/gigs', 'anonymous-talent-html');
+  await verifyAnonymousTalentWorkspaceRedirect('/talent/gigs', 'anonymous-talent-html');
+  await verifyAnonymousTalentWorkspaceRedirect('/talent/shows', 'anonymous-talent-shows-html');
   await verifyAnonymousHtml('/admin', 'anonymous-admin-html');
   await verifyInvalidSignatureFailClosed();
 

@@ -26,6 +26,9 @@ const draftClientRequestId = '00000000-0000-4000-8000-000000000302';
 const unlistedClientRequestId = '00000000-0000-4000-8000-000000000303';
 const endedClientRequestId = '00000000-0000-4000-8000-000000000304';
 const unauthorizedClientRequestId = '00000000-0000-4000-8000-000000000305';
+const walkInClientRequestId = '00000000-0000-4000-8000-000000000306';
+const incompleteWalkInClientRequestId = '00000000-0000-4000-8000-000000000307';
+const rsvpDraftClientRequestId = '00000000-0000-4000-8000-000000000308';
 
 async function applyAllMigrations(database: PGlite) {
   for (const migrationFile of migrationFiles) {
@@ -183,6 +186,58 @@ async function runIntegrationProof(
     404
   );
 
+  await database.query(
+    `update performers set visibility_state = 'draft' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.deepEqual(
+    await service.getOwnerPublicationCapability({
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId
+    }),
+    {
+      canPublish: false,
+      reach: null,
+      reasonCode: 'performer_public_page_not_ready',
+      message: 'Finish your Public Page before publishing: add a valid handle, display name, and bio, then choose Public or Unlisted visibility.'
+    }
+  );
+  await expectEventError(
+    () => service.publishEvent({
+      eventId: created.event.id,
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId,
+      expectedUpdatedAt: updated.updatedAt
+    }),
+    'performer_public_page_not_ready',
+    422
+  );
+  await database.query(
+    `update performers set visibility_state = 'public', bio = null where id = $1`,
+    [ownerPerformerId]
+  );
+  await expectEventError(
+    () => service.publishEvent({
+      eventId: created.event.id,
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId,
+      expectedUpdatedAt: updated.updatedAt
+    }),
+    'performer_public_page_not_ready',
+    422
+  );
+  await database.query(
+    `update performers set bio = 'A resolvable public performer profile.' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(
+    (await service.getOwnerPublicationCapability({
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId
+    })).reach,
+    'discover'
+  );
+
   const published = await service.publishEvent({
     eventId: created.event.id,
     performerId: ownerPerformerId,
@@ -261,6 +316,17 @@ async function runIntegrationProof(
     externalTicketUrl: 'https://tickets.example.com/link-only',
     visibility: 'unlisted'
   });
+  await database.query(
+    `update performers set visibility_state = 'unlisted' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(
+    (await service.getOwnerPublicationCapability({
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId
+    })).reach,
+    'link_only'
+  );
   const unlistedPublished = await service.publishEvent({
     eventId: unlisted.event.id,
     performerId: ownerPerformerId,
@@ -268,7 +334,87 @@ async function runIntegrationProof(
     expectedUpdatedAt: unlisted.event.updatedAt
   });
   assert.equal(unlistedPublished.status, 'published');
+  assert.equal(unlistedPublished.publicationReach, 'link_only');
   assert.ok(await service.getPublicEvent(unlisted.event.id));
+  await database.query(
+    `update performers set visibility_state = 'public' where id = $1`,
+    [ownerPerformerId]
+  );
+
+  const walkIn = await service.createEvent({
+    performerId: ownerPerformerId,
+    actorUserId: ownerUserId,
+    clientRequestId: walkInClientRequestId,
+    title: 'Walk-in showcase',
+    startsAt: '2035-07-20T19:00:00-05:00',
+    timeZone: 'America/Chicago',
+    locationName: 'The Listening Room',
+    city: 'Chicago',
+    attendanceMode: 'walk_in',
+    visibility: 'public'
+  });
+  assert.equal(walkIn.event.attendanceMode, 'walk_in');
+  assert.equal(walkIn.event.externalTicketUrl, null);
+  const publishedWalkIn = await service.publishEvent({
+    eventId: walkIn.event.id,
+    performerId: ownerPerformerId,
+    actorUserId: ownerUserId,
+    expectedUpdatedAt: walkIn.event.updatedAt
+  });
+  assert.equal(publishedWalkIn.status, 'published');
+  const publicWalkIn = await service.getPublicEvent(walkIn.event.id);
+  assert.equal(publicWalkIn?.attendanceMode, 'walk_in');
+  assert.equal(publicWalkIn?.externalTicketUrl, null);
+
+  const rsvpDraft = await service.createEvent({
+    performerId: ownerPerformerId,
+    actorUserId: ownerUserId,
+    clientRequestId: rsvpDraftClientRequestId,
+    title: 'RSVP details pending',
+    startsAt: '2035-08-04T19:00:00-05:00',
+    timeZone: 'America/Chicago',
+    attendanceMode: 'external_rsvp',
+    externalTicketUrl: 'https://rsvp.example.com/temporary',
+    externalTicketLabel: 'RSVP',
+    visibility: 'unlisted'
+  });
+  const clearedRsvpDraft = await service.updateEvent({
+    eventId: rsvpDraft.event.id,
+    performerId: ownerPerformerId,
+    actorUserId: ownerUserId,
+    expectedUpdatedAt: rsvpDraft.event.updatedAt,
+    attendanceMode: 'external_rsvp',
+    externalTicketUrl: null,
+    externalTicketLabel: null
+  });
+  assert.equal(
+    clearedRsvpDraft.attendanceMode,
+    'external_rsvp',
+    'Clearing a draft RSVP URL must not silently rewrite its attendance mode.'
+  );
+  assert.equal(clearedRsvpDraft.externalTicketUrl, null);
+
+  const incompleteWalkIn = await service.createEvent({
+    performerId: ownerPerformerId,
+    actorUserId: ownerUserId,
+    clientRequestId: incompleteWalkInClientRequestId,
+    title: 'Location still needed',
+    startsAt: '2035-08-03T19:00:00-05:00',
+    timeZone: 'America/Chicago',
+    locationIsTba: true,
+    attendanceMode: 'walk_in',
+    visibility: 'public'
+  });
+  await expectEventError(
+    () => service.publishEvent({
+      eventId: incompleteWalkIn.event.id,
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId,
+      expectedUpdatedAt: incompleteWalkIn.event.updatedAt
+    }),
+    'walk_in_location_required',
+    422
+  );
 
   const publicFeedEvents = await service.listPublicEvents({
     performerId: ownerPerformerId,
@@ -276,8 +422,85 @@ async function runIntegrationProof(
   });
   assert.deepEqual(
     publicFeedEvents.map((event) => event.id),
-    [created.event.id],
+    [walkIn.event.id, created.event.id],
     'The feed source must include only future, published, public events.'
+  );
+
+  await expectEventError(
+    () => service.listPublicEvents({ audience: 'direct' }),
+    'performer_id_required',
+    422
+  );
+  await database.query(
+    `update performers set visibility_state = 'unlisted' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.deepEqual(
+    await service.listPublicEvents({ performerId: ownerPerformerId, now: '2035-01-01T00:00:00Z' }),
+    [],
+    'An unlisted performer must not be enumerable in discovery.'
+  );
+  assert.ok(
+    await service.getPublicEvent(created.event.id),
+    'An unlisted performer may still resolve through a direct event link.'
+  );
+  assert.ok((await service.listPublicEvents({
+    performerId: ownerPerformerId,
+    audience: 'direct',
+    now: '2035-01-01T00:00:00Z'
+  })).length > 0);
+
+  await database.query(
+    `update performers set visibility_state = 'draft' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(await service.getPublicEvent(created.event.id), null);
+  await database.query(
+    `update performers set visibility_state = 'public', onboarding_status = 'restricted' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(await service.getPublicEvent(created.event.id), null);
+  await expectEventError(
+    () => service.publishEvent({
+      eventId: incompleteWalkIn.event.id,
+      performerId: ownerPerformerId,
+      actorUserId: ownerUserId,
+      expectedUpdatedAt: incompleteWalkIn.event.updatedAt
+    }),
+    'performer_restricted',
+    403
+  );
+  await database.query(
+    `update performers set onboarding_status = 'gig_ready', is_active = false where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(await service.getPublicEvent(created.event.id), null);
+  await database.query(
+    `update performers set is_active = true, bio = null where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(await service.getPublicEvent(created.event.id), null);
+  await database.query(
+    `update performers set bio = 'A resolvable public performer profile.' where id = $1`,
+    [ownerPerformerId]
+  );
+  await database.query(
+    `update performers set handle = 'platynum-47' where id = $1`,
+    [ownerPerformerId]
+  );
+  assert.equal(
+    await service.getPublicEvent(created.event.id),
+    null,
+    'An internal-test performer handle must not resolve through a direct event link.'
+  );
+  assert.deepEqual(
+    await service.listPublicEvents({ performerId: ownerPerformerId, now: '2035-01-01T00:00:00Z' }),
+    [],
+    'An internal-test performer handle must not enter event discovery.'
+  );
+  await database.query(
+    `update performers set handle = 'event-owner' where id = $1`,
+    [ownerPerformerId]
   );
 
   await database.query(
@@ -336,11 +559,11 @@ async function runIntegrationProof(
   assert.equal(publicCancelled.externalTicketUrl, null);
   assert.equal(publicCancelled.externalTicketLabel, null);
   assert.deepEqual(
-    await service.listPublicEvents({
+    (await service.listPublicEvents({
       performerId: ownerPerformerId,
       now: '2035-01-01T00:00:00Z'
-    }),
-    [],
+    })).map((event) => event.id),
+    [walkIn.event.id],
     'Cancelled, draft, and unlisted events must all stay out of discovery.'
   );
 
@@ -434,7 +657,9 @@ try {
       owner_user_id,
       display_name,
       handle,
+      bio,
       is_active,
+      visibility_state,
       onboarding_status
     ) values
       (
@@ -442,7 +667,9 @@ try {
         '${ownerUserId}',
         'Event Owner',
         'event-owner',
+        'A resolvable public performer profile.',
         true,
+        'public',
         'gig_ready'
       ),
       (
@@ -450,7 +677,9 @@ try {
         '${outsiderUserId}',
         'Event Outsider',
         'event-outsider',
+        'Another resolvable public performer profile.',
         true,
+        'public',
         'gig_ready'
       );
   `);

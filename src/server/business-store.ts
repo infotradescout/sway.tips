@@ -17,6 +17,7 @@ import {
   requestStatusEnum
 } from '../db/schema';
 import { lockModerationBlockIdentities, moderationBlockIdentities } from './moderation-block-lock';
+import { lockPerformerHandleNamespace } from './performer-handle-lock';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 
@@ -303,6 +304,10 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
 
   async function ensurePerformerForActor(executor: SwayDb, actorUserId: string | null | undefined) {
     const ownerUserId = actorUserId ?? RUNTIME_USER_ID;
+    const idSuffix = ownerUserId.slice(0, 8).replace(/[^a-z0-9]/gi, '').toLowerCase() || 'runtime';
+    const runtimeHandle = `runtime-${idSuffix}`;
+
+    await lockPerformerHandleNamespace(executor, runtimeHandle);
     await ensureRuntimeUserRow(executor);
 
     const [existingPerformer] = await executor
@@ -315,10 +320,9 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
       return existingPerformer.id;
     }
 
-    const idSuffix = ownerUserId.slice(0, 8).replace(/[^a-z0-9]/gi, '').toLowerCase() || 'runtime';
     const [inserted] = await executor.insert(performers).values({
       ownerUserId,
-      handle: `runtime-${idSuffix}`,
+      handle: runtimeHandle,
       displayName: `Runtime ${idSuffix}`,
       bio: null
     }).returning({ id: performers.id });
@@ -1287,8 +1291,6 @@ export function createBusinessStore(databaseUrl: string | undefined, createInact
     }
     const executor = options?.executor ?? db;
     if (!executor || !input.activeGigId) return;
-
-    await ensureRuntimeUserRow(executor);
 
     const now = new Date();
     const session = input.state.session;

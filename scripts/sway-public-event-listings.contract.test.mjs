@@ -20,12 +20,15 @@ function forbidPatterns(source, label, patterns) {
 
 const schema = read('src/db/schema.ts');
 const service = read('src/server/performer-event-service.ts');
+const publicProfilePolicy = read('src/server/public-profile.ts');
 const server = read('server.ts');
 const manager = read('src/components/PerformerEventsManager.tsx');
 const eventPage = read('src/components/PublicEventPage.tsx');
 const discoverPage = read('src/components/PublicDiscoverPage.tsx');
 const profilePage = read('src/components/PerformerPublicProfilePage.tsx');
 const dashboard = read('src/components/TalentDashboard.tsx');
+const workspaceRouting = read('src/performer-workspace-routing.ts');
+const talentApp = read('src/shells/TalentApp.tsx');
 const patronShell = read('src/shells/PatronApp.tsx');
 const publicLanding = read('shells/public.html');
 const laneRegistry = read('docs/REPO_LANES.md');
@@ -39,6 +42,18 @@ if (!migrationName) {
   failures.push('Generated performer_events migration is missing.');
 }
 const migration = migrationName ? read(`drizzle/${migrationName}`) : '';
+const attendanceMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^0038_.+\.sql$/.test(name))
+  .find((name) => read(`drizzle/${name}`).includes('performer_event_attendance_mode'));
+if (!attendanceMigrationName) failures.push('Generated performer attendance migration is missing.');
+const attendanceMigration = attendanceMigrationName ? read(`drizzle/${attendanceMigrationName}`) : '';
+const attendanceCompatibilityMigrationName = readdirSync(join(root, 'drizzle'))
+  .filter((name) => /^0039_.+\.sql$/.test(name))
+  .find((name) => read(`drizzle/${name}`).includes('CREATE OR REPLACE FUNCTION "sway_sync_legacy_performer_event_attendance_mode"'));
+if (!attendanceCompatibilityMigrationName) failures.push('Performer attendance compatibility follow-up migration is missing.');
+const attendanceCompatibilityMigration = attendanceCompatibilityMigrationName
+  ? read(`drizzle/${attendanceCompatibilityMigrationName}`)
+  : '';
 
 const eventSchemaStart = schema.indexOf("export const performerEvents = pgTable('performer_events'");
 const eventSchemaEnd = schema.indexOf('// Native paid GA tickets', eventSchemaStart);
@@ -49,6 +64,7 @@ const eventSchema = eventSchemaStart >= 0 && eventSchemaEnd > eventSchemaStart
 requireTerms(schema, 'Event schema', [
   "pgEnum('performer_event_status', ['draft', 'published', 'cancelled'])",
   "pgEnum('performer_event_visibility', ['public', 'unlisted'])",
+  "pgEnum('performer_event_attendance_mode'",
   "export const performerEvents = pgTable('performer_events'",
   "performerId: uuid('performer_id').notNull().references(() => performers.id",
   "clientRequestId: uuid('client_request_id').notNull()",
@@ -57,7 +73,9 @@ requireTerms(schema, 'Event schema', [
   "uniqueIndex('performer_events_performer_client_request_idx')",
   "'performer_events_ends_after_starts'",
   "'performer_events_published_has_timestamp'",
-  "'performer_events_published_has_external_ticket'",
+  "'performer_events_published_attendance_ready'",
+  "'performer_events_published_walk_in_has_location'",
+  "'performer_events_attendance_mode_shape'",
   "'performer_events_cancelled_has_timestamp'",
   "'performer_events_cancelled_was_published'",
   "'performer_events_cancelled_has_reason'",
@@ -65,6 +83,28 @@ requireTerms(schema, 'Event schema', [
   "'performer_events_external_ticket_uses_https'",
   "'performer_events_external_ticket_shape'",
   "'performer_events_external_ticket_label_allowed'"
+]);
+
+requireTerms(attendanceMigration, 'Generated attendance migration', [
+  'CREATE TYPE "public"."performer_event_attendance_mode"',
+  'ADD COLUMN "attendance_mode" "performer_event_attendance_mode"',
+  'CREATE FUNCTION "sway_sync_legacy_performer_event_attendance_mode"',
+  'BEFORE INSERT OR UPDATE OF "ticketing_mode", "external_ticket_url", "external_ticket_label"',
+  'WHERE "attendance_mode" IS NULL',
+  'VALIDATE CONSTRAINT "performer_events_attendance_mode_not_null"',
+  'ALTER COLUMN "attendance_mode" SET NOT NULL',
+  'CONSTRAINT "performer_events_published_attendance_ready"',
+  'CONSTRAINT "performer_events_published_walk_in_has_location"',
+  'CONSTRAINT "performer_events_attendance_mode_shape"',
+  'DROP CONSTRAINT "performer_events_published_has_external_ticket"'
+]);
+
+requireTerms(attendanceCompatibilityMigration, 'Attendance compatibility follow-up migration', [
+  'CREATE OR REPLACE FUNCTION "sway_sync_legacy_performer_event_attendance_mode"',
+  "NEW.attendance_mode = 'external_rsvp'",
+  "NEW.attendance_mode = 'external_ticket'",
+  "NEW.attendance_mode = 'walk_in'",
+  'NULL;'
 ]);
 
 requireTerms(migration, 'Generated event migration', [
@@ -112,6 +152,12 @@ requireTerms(service, 'Event service', [
   'function mappedIpv4FromIpv6',
   'if (mappedIpv4) return isPrivateIpv4(mappedIpv4)',
   'PUBLIC_EVENT_EXTERNAL_TICKET_LABELS',
+  'PerformerEventAttendanceMode',
+  'function normalizeAttendanceMode',
+  "typeof value !== 'string'",
+  'function attendanceModeForEvent',
+  'function assertWalkInLocationReady',
+  "'walk_in_location_required'",
   "'invalid_external_ticket_label'",
   'eq(performers.ownerUserId, actorUserId)',
   "serviceError(403, 'performer_owner_required'",
@@ -126,11 +172,14 @@ requireTerms(service, 'Event service', [
   "eventType: 'performer_event.publish'",
   "eventType: 'performer_event.cancel'",
   'if (!performer.isActive)',
+  'function publicationCapabilityForPerformer',
+  'function assertPerformerPublicationReady',
+  "'performer_public_page_not_ready'",
+  "requireOwnedPerformer(tx, input.performerId, input.actorUserId, true)",
   "'performer_inactive'",
-  'if (!current.externalTicketUrl)',
   "'external_ticket_url_required'",
   'Add a public HTTPS ticket or RSVP link before publishing.',
-  "(current.ticketingMode ?? 'external') === 'external'",
+  "['external_rsvp', 'external_ticket'].includes",
   '!normalized.externalTicketUrl',
   "'published_event_must_remain_active'",
   'const cancellationDeadline = current.endsAt ?? current.startsAt',
@@ -140,7 +189,8 @@ requireTerms(service, 'Event service', [
   "eq(performerEvents.visibility, 'public')",
   'gt(performerEvents.startsAt, now)',
   'eq(performers.isActive, true)',
-  "notInArray(performers.onboardingStatus, ['suspended'])",
+  "notInArray(performers.onboardingStatus, ['restricted', 'suspended'])",
+  'evaluatePublicEventPerformerEligibility',
   'locationName: row.event.locationIsTba ? null : row.event.locationName',
   'city: row.event.locationIsTba ? null : row.event.city',
   "externalTicketUrl: cancelled ? null : row.event.externalTicketUrl"
@@ -171,8 +221,11 @@ requireTerms(server, 'Performer event API', [
   "app.post('/api/talent/events/:eventId/publish'",
   "app.post('/api/talent/events/:eventId/cancel'",
   'clientRequestId: req.body?.clientRequestId',
+  'attendanceMode: req.body?.attendanceMode',
   'expectedUpdatedAt: req.body?.expectedUpdatedAt',
-  'idempotentReplay: !result.created'
+  'idempotentReplay: !result.created',
+  'publicationCapability',
+  'publicationReach: event.publicationReach'
 ]);
 
 requireTerms(server, 'Public event API', [
@@ -185,7 +238,7 @@ requireTerms(server, 'Public event API', [
   "event.status !== 'published'",
   '!event.externalTicketUrl',
   'new Date(event.startsAt).getTime() <= Date.now()',
-  "normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External ticket URL')",
+  "normalizePublicEventHttpsUrl(event.externalTicketUrl, 'External attendance URL')",
   "res.setHeader('Referrer-Policy', 'no-referrer')",
   'return res.redirect(302, safeDestination)',
   'performerEventService.listPublicEvents({ limit: eventLimit })',
@@ -198,6 +251,7 @@ requireTerms(server, 'Public event API', [
 requireTerms(server, 'Public event response', [
   'eventPath: `/e/${event.id}`',
   "const externalTicketIsOpen = event.status === 'published'",
+  'attendanceMode: event.attendanceMode',
   'externalTicket: externalTicketIsOpen && event.externalTicketUrl',
   'isPublicEventExternalTicketLabel(event.externalTicketLabel)',
   'performerPath: event.performer.handle ? `/p/${event.performer.handle}` : null',
@@ -210,11 +264,49 @@ requireTerms(server, 'Public event shell and share metadata', [
   "urlPath.startsWith('/r/') || urlPath.startsWith('/e/') || urlPath === '/discover'",
   "pathParts[0] === 'e'",
   'performerEventService.getPublicEvent(pathParts[1])',
+  'async function renderPublicEventDocument',
+  'buildPublicEventShareMetadata(req, event)',
+  "event.performer.visibility === 'unlisted'",
   'title: `${event.title} on Sway`',
   'url: `/e/${event.id}`',
   'image: event.coverImageUrl || event.performer.avatarUrl || DEFAULT_SHARE_IMAGE_PATH',
   "robots: event.visibility === 'unlisted'",
   "'noindex, nofollow'"
+]);
+requireTerms(publicProfilePolicy, 'Public event performer eligibility policy', [
+  "export type PublicEventPerformerAudience = 'discovery' | 'direct'",
+  'export function evaluatePublicEventPerformerEligibility',
+  "INTERNAL_TEST_PROFILE_HANDLES = ['platynum-47']",
+  "handle !== handle.trim()",
+  'isDiscoveryEligibleHandle(input.handle)',
+  "input.audience === 'direct' || policy.visibility === 'public'",
+  "typeof input.bio !== 'string' || !input.bio.trim()"
+]);
+const observatoryEventQuery = server.slice(
+  server.indexOf('async function loadSwayDiscoverySupply'),
+  server.indexOf('const publicReleases =', server.indexOf('async function loadSwayDiscoverySupply'))
+);
+requireTerms(observatoryEventQuery, 'Pre-limit observatory event exclusion', [
+  'notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES])',
+  '.orderBy(asc(performerEvents.startsAt)).limit(100)',
+  'attendanceMode: performerEvents.attendanceMode'
+]);
+requireTerms(server, 'Truthful observatory ticket supply', [
+  "ticketAvailable: event.attendanceMode === 'external_ticket' && Boolean(event.externalTicketUrl)"
+]);
+requireTerms(server, 'Public event discovery eligibility handoffs', [
+  'evaluatePublicEventPerformerEligibility({',
+  "audience: 'discovery'",
+  "audience: 'direct'",
+  ".innerJoin(performers, eq(performers.id, performerEvents.performerId))",
+  'INTERNAL_TEST_PROFILE_HANDLES',
+  'notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES])',
+  "notInArray(performers.onboardingStatus, ['restricted', 'suspended'])"
+]);
+requireTerms(service, 'Pre-limit internal-test event exclusion', [
+  'INTERNAL_TEST_PROFILE_HANDLES',
+  'sql`${performers.handle} = trim(${performers.handle})`',
+  'notInArray(sql<string>`lower(trim(${performers.handle}))`, [...INTERNAL_TEST_PROFILE_HANDLES])'
 ]);
 
 const performerEventRouteSource = server.slice(
@@ -248,19 +340,105 @@ requireTerms(manager, 'Performer event manager', [
   "fetch('/api/talent/events'",
   '`/api/talent/events/${encodeURIComponent(event.id)}/publish`',
   '`/api/talent/events/${encodeURIComponent(event.id)}/cancel`',
-  'Sway is not selling this ticket or verifying the provider.',
-  'Sway links customers to another provider.',
-  "const EXTERNAL_TICKET_LABELS = ['Get tickets', 'RSVP', 'View details']",
-  'does not cancel tickets, issue refunds',
+  "type AttendanceMode = 'walk_in' | 'external_rsvp' | 'external_ticket' | 'native_ticket'",
+  "attendanceMode: 'walk_in'",
+  "const EXTERNAL_TICKET_LABELS = ['Get tickets', 'View details']",
+  'Walk-in · admission handled at the venue',
+  'No Sway ticket or RSVP link.',
+  'Location TBA prevents walk-in publishing',
+  'function hasExternalAttendanceLink',
+  'Cancelling here removes the walk-in attendance action from Sway.',
   'externalProviderConfirmed',
+  'normalizePublicationCapability',
+  'effectivePublicationReach',
+  'Finish Public Page',
+  'focusStatusMessage()',
+  'statusMessageRef',
   '`/api/public/events/${encodeURIComponent(event.id)}/ticket`'
 ]);
-if (
-  !dashboard.includes('<PerformerEventsManager previewMode={previewMode} />')
-  || !dashboard.includes('href="#sway-events-manager"')
-) {
-  failures.push('Talent dashboard must render the performer event manager.');
+const publicationCapabilityNormalizer = manager.slice(
+  manager.indexOf('function normalizePublicationCapability'),
+  manager.indexOf('function zonedParts', manager.indexOf('function normalizePublicationCapability'))
+);
+requireTerms(publicationCapabilityNormalizer, 'Fail-closed publication capability normalization', [
+  "if (!value || typeof value !== 'object') return null;",
+  "if (typeof value.canPublish !== 'boolean') return null;",
+  "value.reach === 'discover' || value.reach === 'link_only'",
+  'if (value.canPublish && !reach) return null;'
+]);
+requireTerms(manager, 'Fail-closed publication readiness UI', [
+  'setPublicationCapability(normalizePublicationCapability(data?.publicationCapability));',
+  'publicationCapability?.canPublish !== true || !publicationCapability.reach',
+  'Publication readiness is unavailable. Reload Shows before publishing.',
+  'Publish unavailable'
+]);
+requireTerms(manager, 'Link-only publication copy', [
+  "event.visibility === 'unlisted' || publicationCapability.reach === 'link_only'",
+  'Event published as link-only. Share its event-page URL directly.',
+  'Public Page + direct link (not Discover)',
+  '<option value="unlisted">Link only</option>',
+  'Publish link-only'
+]);
+requireTerms(manager, 'Performer event editor focus recovery', [
+  "document.getElementById('sway-event-title')?.focus({ preventScroll: true })",
+  'restoreEditorTriggerFocus()',
+  'onClick={closeEventEditor}',
+  'scroll-mt-32'
+]);
+const profileWorkspaceStart = dashboard.indexOf("inactiveWorkspace === 'profile'");
+const showsWorkspaceStart = dashboard.indexOf("inactiveWorkspace === 'shows'", profileWorkspaceStart);
+const libraryWorkspaceStart = dashboard.indexOf("inactiveWorkspace === 'library'", showsWorkspaceStart);
+const profileWorkspace = dashboard.slice(profileWorkspaceStart, showsWorkspaceStart);
+const showsWorkspace = dashboard.slice(showsWorkspaceStart, libraryWorkspaceStart);
+if (profileWorkspaceStart < 0 || showsWorkspaceStart < 0 || libraryWorkspaceStart < 0) {
+  failures.push('Talent dashboard must define separate Profile and Shows workspaces.');
+} else {
+  if (!profileWorkspace.includes('<PerformerPublicProfileEditor') || profileWorkspace.includes('<PerformerEventsManager')) {
+    failures.push('Profile workspace must contain profile editing only.');
+  }
+  if (!showsWorkspace.includes('<PerformerEventsManager previewMode={previewMode} />') || showsWorkspace.includes('<PerformerPublicProfileEditor')) {
+    failures.push('Shows workspace must own event management separately from Profile.');
+  }
 }
+requireTerms(dashboard, 'Performer Shows navigation', [
+  "{ id: 'shows', label: 'Shows'",
+  "{ id: 'profile', label: 'Public Page'",
+  "{ id: 'account', label: 'Money'",
+  "openInactiveWorkspace('shows')",
+  'window.history.pushState',
+  'window.history.replaceState',
+  "window.addEventListener('popstate'",
+  "window.addEventListener('hashchange'"
+]);
+requireTerms(workspaceRouting, 'Performer workspace paths', [
+  "shows: '/talent/shows'",
+  "profile: '/talent/profile'",
+  "LEGACY_SHOWS_WORKSPACE_HASH = '#sway-events-manager'",
+  "if (hash === LEGACY_SHOWS_WORKSPACE_HASH) return 'shows'"
+]);
+requireTerms(talentApp, 'Legacy Shows login continuation', [
+  'resolvePerformerLoginWorkspaceRedirect(legacyRedirect, outerHash)'
+]);
+const eventLoadSource = manager.slice(
+  manager.indexOf('const loadEvents = async'),
+  manager.indexOf('useEffect(() =>', manager.indexOf('const loadEvents = async'))
+);
+if (eventLoadSource.includes('/api/talent/events/native-ticket-capability')) {
+  failures.push('Ordinary event-list loading must not depend on native-ticket capability readiness.');
+}
+if (!manager.includes("nativeCapability?.salesAvailable === true || form.ticketingMode === 'native_ga'")) {
+  failures.push('Native ticket selection must stay hidden unless it is available or already configured.');
+}
+const capabilityRoute = server.slice(
+  server.indexOf("app.get('/api/talent/events/native-ticket-capability'"),
+  server.indexOf("app.post('/api/talent/events'", server.indexOf("app.get('/api/talent/events/native-ticket-capability'"))
+);
+requireTerms(capabilityRoute, 'Native-ticket capability failure response', [
+  'if (!owner) return;',
+  'if (!eventTicketService)',
+  "code: 'native_ticket_readiness_unavailable'",
+  'return res.status(503).json'
+]);
 if (!publicLanding.includes('href="/discover">Discover shows</a>')) {
   failures.push('Public landing must provide a direct discovery entry point.');
 }
@@ -270,11 +448,20 @@ requireTerms(eventPage, 'Public event page', [
   'return `/api/public/events/${encodeURIComponent(eventId)}/ticket`',
   'You are leaving Sway.',
   'handled under the external ticket provider',
-  'No ticket checkout is available for this event right now.',
+  'function resolvedAttendanceMode',
+  'function attendanceModeLabel',
+  'Walk-in · admission handled at the venue',
+  'No Sway ticket or RSVP link. Contact the performer or venue for admission details.',
+  'The listed attendance action is unavailable. Contact the performer or venue for details.',
   'function externalTicketCtaLabel',
+  'function externalAttendanceSiteLabel',
+  "attendanceMode === 'external_rsvp' ? 'other' : 'ticket'",
   'opens in a new tab',
   'isEventCancelled'
 ]);
+if (/\bfree\b/i.test(`${manager}\n${eventPage}`)) {
+  failures.push('Walk-in UI must not make a free-admission or price claim.');
+}
 requireTerms(discoverPage, 'Public discovery page', [
   "fetch('/api/public/feed'",
   'Array.isArray(data.events)',
@@ -314,15 +501,16 @@ requireTerms(laneRegistry, 'Repository lane registry', [
   '| `event-tickets-native-ga` |'
 ]);
 requireTerms(eventPlan, 'Event listing plan', [
-  '**Status:** External listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.',
+  '**Status:** Walk-in and external listings are active. Native paid-GA v1 implementation is active behind a fail-closed production sales gate.',
   'Performer is the only seller-side product actor.',
   'The merged external-listing product does **not** sell tickets.',
-  'A direct `/e/:eventId` page may preserve a truthful previously published event record',
+  'A direct `/e/:eventId` page may preserve a truthful public/unlisted previously published event',
+  'Walk-in publication requires a non-TBA location name plus either a street address or city.',
   'External ticket URLs must be safe HTTPS handoffs.',
   'No location or venue field creates a venue actor, account, dashboard, or authority boundary.'
 ]);
 requireTerms(laneMemo, 'Event lane memo', [
-  '**Status:** External event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.',
+  '**Status:** Walk-in and external event listings are active. The first native paid-GA implementation slice is authorized but production sales remain fail-closed.',
   'The performer remains the seller-side product actor',
   'An external link is a handoff only.',
   'No marketing or readiness record may call native sales production-ready'
@@ -335,8 +523,10 @@ if (failures.length) {
 }
 
 for (const [label, script] of [
+  ['workspace routing', 'scripts/sway-performer-workspace-routing.behavior.test.ts'],
   ['behavior', 'scripts/sway-public-event-listings.behavior.test.ts'],
-  ['integration', 'scripts/sway-public-event-listings.integration.test.ts']
+  ['integration', 'scripts/sway-public-event-listings.integration.test.ts'],
+  ['attendance migration integration', 'scripts/sway-performer-event-attendance-migration.integration.test.ts']
 ]) {
   const result = spawnSync(
     process.execPath,

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
+import { INACTIVE_PERFORMER_WORKSPACE_PATHS } from '../performer-workspace-routing';
 import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
 
 export type SwayActor = {
@@ -59,6 +60,23 @@ function isPublicTalentLoginEntryRoute(req: Request) {
     || req.path === '/talent/claim'
     || req.path === '/talent/connect/files'
   );
+}
+
+const TALENT_WORKSPACE_ENTRY_PATHS = new Set(Object.values(INACTIVE_PERFORMER_WORKSPACE_PATHS));
+
+function resolveTalentWorkspaceEntryPath(req: Request) {
+  if (req.method !== 'GET') return null;
+  const normalizedPath = req.path.replace(/\/+$/, '') || '/';
+  return TALENT_WORKSPACE_ENTRY_PATHS.has(normalizedPath) ? normalizedPath : null;
+}
+
+function isTalentWorkspaceEntryRoute(req: Request) {
+  return resolveTalentWorkspaceEntryPath(req) !== null;
+}
+
+function talentLoginRedirectFor(req: Request) {
+  const requestedPath = resolveTalentWorkspaceEntryPath(req) ?? INACTIVE_PERFORMER_WORKSPACE_PATHS.home;
+  return `/talent/login?${new URLSearchParams({ redirect: requestedPath }).toString()}`;
 }
 
 function isPublicAdminLoginEntryRoute(req: Request) {
@@ -755,8 +773,13 @@ export function routeFamilyGuard(accessControl: AccessControl) {
 
     const result = await guard(req);
     if (result.allowed === false) {
-      if (shell === 'talent' && req.method === 'GET' && req.path === '/talent' && isBrowserHtmlRequest(req)) {
-        res.redirect('/talent/login');
+      if (
+        shell === 'talent'
+        && result.status === 401
+        && isTalentWorkspaceEntryRoute(req)
+        && isBrowserHtmlRequest(req)
+      ) {
+        res.redirect(talentLoginRedirectFor(req));
         return;
       }
 

@@ -5,6 +5,7 @@ const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const publicHtml = readFileSync(join(root, 'shells/public.html'), 'utf8');
 const packageJson = readFileSync(join(root, 'package.json'), 'utf8');
+const packageConfig = JSON.parse(packageJson);
 const failures = [];
 
 for (const term of [
@@ -12,29 +13,7 @@ for (const term of [
   "const faqPageHtml = aboutPageHtml;",
   "app.get('/about'",
   "app.get('/faq'",
-  "faqPath: '/faq'",
-  'Sway: the whole performer business, connected',
-  'Your public page',
-  'Your live room',
-  'Your Catalog and collaborators',
-  'Your publishing and distribution',
-  'Replacing an existing distributor',
-  'Where the publishing product stands',
-  'Still required for Self-Production external distribution (DistroKid-class outlet)',
-  'current release workspace assembles singles, EPs, and albums from verified masters',
-  'Live Rooms is the current operating product',
-  'External distribution is one Self-Production outlet',
-  'Sway.DIO',
-  'Digital Independent Original',
-  'Those gaps do not make Live Rooms unfinished',
-  'Build and order the release tracks',
-  'A single must keep one track; EP and album readiness requires at least two',
-  'Track structure locks when rights review starts',
-  'editable ordered multi-recording release drafts built from one verified master per track',
-  'master control, composition control, artwork control, and distribution authorization',
-  'Samples, third-party beats, cover songs, performer consent, and AI disclosure are conditional evidence',
-  'contracted DSP delivery provider',
-  'Money, ownership, and control'
+  "faqPath: '/faq'"
 ]) {
   if (!server.includes(term)) failures.push(`FAQ surface missing server term: ${term}`);
 }
@@ -56,13 +35,86 @@ const faqTemplate = faqTemplateStart === -1 || faqTemplateEnd === -1
   ? server
   : server.slice(faqTemplateStart, faqTemplateEnd);
 
-for (const staleMultiTrackClaim of [
-  'each release draft connects one verified master to one recording',
-  'does not yet add or reorder recordings for an EP or album',
-  'Multi-recording EP and album assembly with track add and reorder controls'
+for (const term of [
+  'Run the crowd without stopping the set',
+  'Sway gives DJs and live performers one room for Requests, Tips, and Boosts',
+  'Start a room, share the QR code or link, and let people interact from their phones',
+  'No app download is required for the web experience',
+  'Sway works alongside your existing DJ setup',
+  'Requests in one queue',
+  'Tips in the same room',
+  'Approved boosts',
+  'Clear status',
+  'Pending, Approved, Now Playing, Up Next, Paused, and Ended',
+  'How patrons use Sway',
+  'How to run Sway tonight',
+  'Free requests',
+  'Paid requests',
+  'Minimum request amount',
+  'My synced library first',
+  'Open requests',
+  'Review the room rules',
+  'Create room',
+  'Manual, Open Call, or Auto',
+  'Pause Requests or Resume Requests',
+  'Approve, Deny, and Mark played',
+  'recorded captured payment volume',
+  'You remain in control',
+  'The opening DJ beta is focused on the live room',
+  'Keep using Serato, Rekordbox, VirtualDJ, Tidal, USB drives, or your normal deck workflow',
+  'A request is not a promise that a song will be played',
+  'The DJ keeps artistic and operational control of the room',
+  'If a paid option is available, set the Minimum request amount',
+  'My synced library first or Open requests',
+  "liveRoomPaymentRuntimeConfig.mode === 'test'",
+  'or Test paid requests',
+  'Test activity is not a real charge or payout',
+  "liveRoomPaymentRuntimeConfig.mode === 'live'",
+  'or Paid requests',
+  'The performer must complete the required payment setup before using live paid actions'
 ]) {
-  if (faqTemplate.includes(staleMultiTrackClaim)) {
-    failures.push(`About surface still presents implemented multi-track assembly as missing: ${staleMultiTrackClaim}`);
+  if (!faqTemplate.includes(term)) failures.push(`About template missing DJ-beta term: ${term}`);
+}
+
+for (const [href, label] of [
+  ['/account/signup', 'Create your DJ account'],
+  ['/account/login', 'Log in and start'],
+  ['/home', 'Join a live room']
+]) {
+  if (!faqTemplate.includes(`<a href="${href}">${label}</a>`)) {
+    failures.push(`About template missing CTA: ${label} -> ${href}`);
+  }
+}
+
+const signupCtaIndex = faqTemplate.indexOf('<a href="/account/signup">Create your DJ account</a>');
+const loginCtaIndex = faqTemplate.indexOf('<a href="/account/login">Log in and start</a>');
+const joinCtaIndex = faqTemplate.indexOf('<a href="/home">Join a live room</a>');
+if (!(signupCtaIndex !== -1 && signupCtaIndex < loginCtaIndex && loginCtaIndex < joinCtaIndex)) {
+  failures.push('Create your DJ account must remain the visually first About-page action.');
+}
+
+if (!/liveRoomPaymentRuntimeConfig\.mode === 'test'[\s\S]*liveRoomPaymentRuntimeConfig\.mode === 'live'[\s\S]*: ''\}/.test(faqTemplate)) {
+  failures.push('About payment notice must render for test/live modes and stay absent when payment mode is unavailable.');
+}
+
+for (const forbidden of [
+  'Sway.DIO',
+  'DistroKid',
+  'Self-Production',
+  'Replacing an existing distributor',
+  'contracted DSP delivery provider',
+  'royalty-statement',
+  'catalog transfer',
+  'multi-recording release',
+  'provider-backed delivery',
+  'durable Sway QR',
+  'durable QR',
+  'order approved items',
+  'update status',
+  'available earnings information'
+]) {
+  if (faqTemplate.includes(forbidden)) {
+    failures.push(`About template still contains forbidden or unimplemented term: ${forbidden}`);
   }
 }
 
@@ -80,8 +132,12 @@ for (const forbidden of [
   }
 }
 
-if (!packageJson.includes('sway-faq-surface.contract.test.mjs')) {
-  failures.push('test:contracts must include FAQ surface contract.');
+const faqContractCommand = 'node scripts/sway-faq-surface.contract.test.mjs';
+if (packageConfig.scripts?.['test:faq'] !== faqContractCommand) {
+  failures.push('Package scripts must keep the dedicated FAQ test wired directly to the FAQ surface contract.');
+}
+if (!packageConfig.scripts?.['test:contracts']?.split(' && ').includes(faqContractCommand)) {
+  failures.push('The full contract suite must keep the FAQ surface contract wired in.');
 }
 
 if (failures.length) {

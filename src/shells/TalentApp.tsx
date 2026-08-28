@@ -23,6 +23,7 @@ import {
   readFilePairingTokenFromHash,
   resolveLegacyFileConnectTarget
 } from '../file-collaboration-routing';
+import { resolvePerformerLoginWorkspaceRedirect } from '../performer-workspace-routing';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -148,6 +149,14 @@ export default function TalentApp() {
 
   useEffect(() => {
     void refreshPerformerProfile();
+  }, [demoMode, isAuthEntryRoute]);
+
+  useEffect(() => {
+    const refreshAfterProfileSave = () => {
+      void refreshPerformerProfile();
+    };
+    window.addEventListener('sway:performer-profile-updated', refreshAfterProfileSave);
+    return () => window.removeEventListener('sway:performer-profile-updated', refreshAfterProfileSave);
   }, [demoMode, isAuthEntryRoute]);
 
   useEffect(() => {
@@ -296,7 +305,7 @@ export default function TalentApp() {
     }
     const targetParams = new URLSearchParams({ intent: 'performer' });
     const safeNext = normalizeSafeAccountNextPath(
-      legacyRedirect,
+      resolvePerformerLoginWorkspaceRedirect(legacyRedirect, outerHash),
       typeof window === 'undefined' ? 'https://app.sway.tips' : window.location.origin
     );
     if (safeNext) targetParams.set('next', safeNext);

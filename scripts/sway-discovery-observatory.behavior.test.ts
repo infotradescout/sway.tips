@@ -84,7 +84,15 @@ assert.throws(() => normalizeDiscoveryJourneyEvent({
   ...journeyBase, stage: 'entry', eventType: 'discovery_landing', actionKind: 'other'
 }, now), /Entry evidence/);
 
-assert.equal(resolvePerformerDiscoveryEligibility({ isActive: true, onboardingStatus: 'gig_ready', visibilityState: 'public' }).eligible, true);
+assert.equal(resolvePerformerDiscoveryEligibility({
+  isActive: true,
+  onboardingStatus: 'gig_ready',
+  visibilityState: 'public',
+  claimed: true,
+  handle: 'eligible',
+  displayName: 'Eligible Artist',
+  bio: 'A resolvable performer profile.'
+}).eligible, true);
 for (const visibilityState of ['draft', 'unlisted', 'suspended', 'removed', null] as const) {
   assert.equal(resolvePerformerDiscoveryEligibility({ isActive: true, onboardingStatus: 'gig_ready', visibilityState }).eligible, false);
 }
@@ -92,8 +100,8 @@ assert.equal(resolvePerformerDiscoveryEligibility({ isActive: true, onboardingSt
 
 const supply: SwayDiscoverySupply = {
   performers: [
-    { id: entityKey, displayName: 'Eligible Artist', handle: 'eligible', city: 'Chicago', specialties: ['House'], visibilityState: 'public', isActive: true, onboardingStatus: 'gig_ready', claimed: false },
-    { id: '10000000-0000-4000-8000-000000000002', displayName: 'Draft Artist', handle: 'draft', city: 'Chicago', specialties: ['Jazz'], visibilityState: 'draft', isActive: true, onboardingStatus: 'gig_ready', claimed: false }
+    { id: entityKey, displayName: 'Eligible Artist', handle: 'eligible', bio: 'A resolvable performer profile.', city: 'Chicago', specialties: ['House'], visibilityState: 'public', isActive: true, onboardingStatus: 'gig_ready', claimed: true },
+    { id: '10000000-0000-4000-8000-000000000002', displayName: 'Draft Artist', handle: 'draft', bio: 'A draft performer profile.', city: 'Chicago', specialties: ['Jazz'], visibilityState: 'draft', isActive: true, onboardingStatus: 'gig_ready', claimed: true }
   ],
   events: [
     { id: '30000000-0000-4000-8000-000000000001', performerId: entityKey, title: 'Eligible Show', startsAt: '2026-08-08T23:00:00Z', timeZone: 'UTC', city: 'Chicago', locationName: 'The Room', ticketAvailable: true },

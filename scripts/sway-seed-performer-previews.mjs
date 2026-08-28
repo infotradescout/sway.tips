@@ -228,6 +228,19 @@ await client.connect();
 
 try {
   await client.query('BEGIN');
+  const canonicalPreviewHandles = [...new Set(
+    previews
+      .map((preview) => preview.handle.trim().toLowerCase())
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right));
+
+  for (const canonicalHandle of canonicalPreviewHandles) {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`sway:performer-handle:v1:${canonicalHandle}`]
+    );
+  }
+
   const seeded = [];
 
   for (const preview of previews) {

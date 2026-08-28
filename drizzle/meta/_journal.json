@@ -267,6 +267,20 @@
       "when": 1787857703362,
       "tag": "0037_brief_komodo",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787865509052,
+      "tag": "0038_performer-event-attendance-mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787872281069,
+      "tag": "0039_performer-handle-namespace",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,5 @@
+import { INACTIVE_PERFORMER_WORKSPACE_PATHS } from './performer-workspace-routing';
+
 export const FILE_COLLABORATION_PATHS = {
   inbox: '/account/collaboration',
   connect: '/account/collaboration/connect',
@@ -7,6 +9,7 @@ export const FILE_COLLABORATION_PATHS = {
 const FILE_PAIRING_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const CANONICAL_UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const PERFORMER_WORKSPACE_PATHS = new Set(Object.values(INACTIVE_PERFORMER_WORKSPACE_PATHS));
 
 export function normalizeSafeAccountNextPath(value: unknown, origin = 'https://app.sway.tips') {
   if (typeof value !== 'string') return '';
@@ -33,7 +36,7 @@ export function normalizeSafeAccountNextPath(value: unknown, origin = 'https://a
       || new RegExp(`^/talent/events/${UUID_PATTERN}/door$`, 'i').test(parsed.pathname)
       || parsed.pathname === FILE_COLLABORATION_PATHS.inbox
       || parsed.pathname === FILE_COLLABORATION_PATHS.connect
-      || parsed.pathname === '/talent';
+      || PERFORMER_WORKSPACE_PATHS.has(parsed.pathname);
     if (pathOnlyAllowed) return hasNoQuery ? parsed.pathname : '';
 
     const performerAccountIntent = parsed.pathname === '/account'

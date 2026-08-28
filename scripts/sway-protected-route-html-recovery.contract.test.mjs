@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const access = readFileSync(join(root, 'src/server/access-control.ts'), 'utf8');
+const workspaceRouting = readFileSync(join(root, 'src/performer-workspace-routing.ts'), 'utf8');
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
@@ -89,6 +91,47 @@ requireIncludes(
   'Admin recovery HTML must link to the admin sign-in page.'
 );
 
+for (const workspacePath of [
+  '/talent',
+  '/talent/gigs',
+  '/talent/shows',
+  '/talent/music',
+  '/talent/files',
+  '/talent/profile',
+  '/talent/account'
+]) {
+  requireIncludes(
+    workspaceRouting,
+    `'${workspacePath}'`,
+    `Performer workspace auth recovery is missing path: ${workspacePath}`
+  );
+}
+requireIncludes(
+  access,
+  "import { INACTIVE_PERFORMER_WORKSPACE_PATHS } from '../performer-workspace-routing';",
+  'Performer access recovery must share the canonical workspace path map with the client.'
+);
+requireIncludes(
+  access,
+  'new Set(Object.values(INACTIVE_PERFORMER_WORKSPACE_PATHS))',
+  'Performer access recovery must derive its exact allowlist from canonical workspace paths.'
+);
+requirePattern(
+  access,
+  /shell === 'talent'[\s\S]{0,180}result\.status === 401[\s\S]{0,180}isTalentWorkspaceEntryRoute\(req\)[\s\S]{0,180}isBrowserHtmlRequest\(req\)/,
+  'Performer workspace redirects must require a talent-shell browser GET authentication failure.'
+);
+requireIncludes(
+  access,
+  'new URLSearchParams({ redirect: requestedPath }).toString()',
+  'Performer workspace sign-in redirects must preserve the canonical workspace path.'
+);
+requireIncludes(
+  access,
+  'res.redirect(talentLoginRedirectFor(req));',
+  'Performer workspace authentication failures must redirect through the preserved login target.'
+);
+
 for (const forbidden of [
   /checkout/i,
   /invoice/i,
@@ -112,6 +155,18 @@ requireIncludes(
   'node scripts/sway-protected-route-html-recovery.contract.test.mjs',
   'test:contracts must include the protected route HTML recovery contract.'
 );
+
+const workspaceAccessBehavior = spawnSync(
+  process.execPath,
+  ['--import', 'tsx', 'scripts/sway-performer-workspace-access.behavior.test.ts'],
+  { cwd: root, encoding: 'utf8' }
+);
+if (workspaceAccessBehavior.status !== 0) {
+  failures.push(
+    'Performer workspace access recovery behavior failed: '
+      + (workspaceAccessBehavior.stderr || workspaceAccessBehavior.stdout || `status ${workspaceAccessBehavior.status}`).trim()
+  );
+}
 
 if (failures.length) {
   console.error('Protected route HTML recovery contract failed:');
