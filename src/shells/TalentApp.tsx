@@ -23,7 +23,11 @@ import {
   readFilePairingTokenFromHash,
   resolveLegacyFileConnectTarget
 } from '../file-collaboration-routing';
-import { resolvePerformerLoginWorkspaceRedirect } from '../performer-workspace-routing';
+import {
+  resolveInactivePerformerWorkspace,
+  resolvePerformerLoginWorkspaceRedirect,
+  shouldRenderPerformerLiveRoom
+} from '../performer-workspace-routing';
 
 function isTalentLogin(pathname: string) {
   return pathname === '/talent/login';
@@ -72,6 +76,7 @@ type TalentPerformerProfile = {
 
 export default function TalentApp() {
   const pathname = typeof window === 'undefined' ? '/talent' : window.location.pathname;
+  const requestedWorkspace = resolveInactivePerformerWorkspace(pathname, typeof window === 'undefined' ? '' : window.location.hash);
   const eventDoorId = talentEventDoorId(pathname);
   const isAuthEntryRoute = isTalentLogin(pathname)
     || isTalentSignup(pathname)
@@ -386,11 +391,11 @@ export default function TalentApp() {
 
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
 
-  if (session.status === 'closed') {
+  if (session.status === 'closed' && shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
     return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
   }
 
-  if (session.status !== 'inactive') {
+  if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
     return (
       <div className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
         {!demoMode ? <button type="button" onClick={() => { void handleLogout(); }} className="absolute right-3 top-3 z-50 inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 text-xs font-bold text-slate-200 shadow-xl"><LogOut className="h-4 w-4" /> Log out</button> : null}
@@ -440,6 +445,7 @@ export default function TalentApp() {
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
+            primaryOnly
             title={session.status === 'inactive' ? 'Performer home' : "Tonight's Live Room"}
             eyebrow={session.status === 'inactive' ? `Welcome, ${performerIdentityName}` : LIVE_ROOM_LANGUAGE.liveRoom}
             primaryLabel={session.status === 'inactive'
