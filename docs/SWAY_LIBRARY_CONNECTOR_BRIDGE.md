@@ -1,12 +1,52 @@
-# Sway Library Connector Bridge
+# Sway DJ Library Bridge
 
-## Purpose
+## Outcome
 
-This bridge is the first-party adapter for the "link any program" performer workflow.
+The bridge imports the tracks available on the booth computer so audience
+search and Sway's room controller can resolve the requested song. It sends
+metadata and local file paths; it never uploads audio.
 
-It runs locally on the performer's machine and accepts simple HTTP `POST` requests from any DJ app, library manager, automation script, or companion tool that can emit JSON. The bridge forwards the normalized library snapshot to Sway using the performer's source-specific sync key.
+Built-in inputs:
 
-## Start The Bridge
+- rekordbox XML
+- Traktor NML
+- VirtualDJ database XML
+- M3U / M3U8
+- CSV exports with common title/artist/path columns
+- folders containing MP3, WAV, AIFF, FLAC, M4A, AAC, ALAC, OGG, Opus, or WMA
+
+## One-shot import
+
+1. In **Music → Advanced library connections**, create a source and copy its
+   sync key.
+2. Export the DJ library or choose its music folder.
+3. Run:
+
+```bash
+npm run library:bridge -- \
+  --sync-key YOUR_SYNC_KEY \
+  --import "/path/to/rekordbox.xml"
+```
+
+Folder example:
+
+```bash
+npm run library:bridge -- \
+  --sync-key YOUR_SYNC_KEY \
+  --import "/Volumes/DJ MUSIC"
+```
+
+The server accepts at most 1,000 tracks per source snapshot in this release.
+The command reports when an import reaches that bound.
+
+`--append-only` adds/updates rows without removing older tracks. The default is
+an authoritative replace, so tracks removed from the source disappear from
+audience search.
+
+## Local adapter mode
+
+Programs or scripts that can already produce JSON can run the bridge as a
+protected localhost adapter:
 
 ```bash
 npm run library:bridge -- --sync-key YOUR_SYNC_KEY
@@ -14,56 +54,51 @@ npm run library:bridge -- --sync-key YOUR_SYNC_KEY
 
 Defaults:
 
-- local bridge host: `127.0.0.1`
-- local bridge port: `4314`
-- upstream sync URL: `https://app.sway.tips/api/library/sync`
-- snapshot mode: replace existing tracks for that linked source
+- host: `127.0.0.1`
+- port: `4314`
+- upstream: `https://app.sway.tips/api/library/sync`
 
-## Local Endpoints
-
-### `GET /health`
-
-Returns bridge status and configured upstream target.
-
-### `POST /ingest`
-
-Accepts a performer-availability snapshot:
+The bridge prints a random-token health URL. Use that token as a query value,
+`Authorization: Bearer`, or `x-sway-bridge-token` when posting to `/ingest`.
 
 ```json
 {
   "replaceExisting": true,
   "tracks": [
     {
-      "title": "Levels",
-      "artist": "Avicii",
-      "album": "Levels",
-      "externalTrackId": "serato:crate-a:levels",
-      "artworkUrl": "https://example.com/levels.jpg",
+      "title": "Track title",
+      "artist": "Artist",
+      "album": "Album",
+      "externalTrackId": "stable-source-id",
       "metadata": {
-        "sourceApp": "serato"
+        "path": "C:/Music/Track title.mp3",
+        "bpm": 126,
+        "key": "8A"
       }
     }
   ]
 }
 ```
 
-Rules:
+## Browser import versus booth import
 
-- `title` is required.
-- `artist` falls back to `Unknown artist`.
-- `replaceExisting: true` makes the sync authoritative for that source, removing tracks that were previously available but are not in the new snapshot.
-- `replaceExisting: false` behaves as append/update only.
+The performer Music page can directly read rekordbox XML, Traktor NML,
+VirtualDJ XML, M3U, and CSV. That route intentionally strips local path fields.
+It is useful for request/search metadata but cannot instruct the booth computer
+to open a file.
 
-## Why Replace-Existing Matters
+The booth bridge authenticates with a source-specific sync key and is the only
+import lane allowed to persist exact local paths. Those paths let the
+room-scoped VirtualDJ bridge load the requested file. Generic MIDI sources
+cannot accept track identity and therefore use title/artist search or manual
+selection instead.
 
-Performers need patron search to reflect what is actually available right now, not a stale pile of old imports. The default bridge behavior is an authoritative snapshot so removed songs disappear from search results for that linked source.
+## Security
 
-## Integration Pattern
-
-Any local program can integrate if it can do one of these:
-
-1. Send an HTTP `POST` to `http://127.0.0.1:4314/ingest`
-2. Run a small companion script that sends the same JSON payload
-3. Export track metadata into a tool you control, then forward it to the bridge
-
-This keeps Sway generic instead of pretending there is only one supported DJ stack.
+- Sync keys are stored only as hashes by Sway and can be rotated or revoked.
+- The local adapter is loopback-only unless explicitly overridden.
+- Every local endpoint requires a random local token.
+- Browser preflight is rejected and no permissive CORS header is emitted.
+- Audio bytes are never sent by this bridge.
+- Local paths remain performer-owned metadata and are not returned by public
+  room/library responses.

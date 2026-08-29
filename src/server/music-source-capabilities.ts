@@ -11,6 +11,8 @@ export type MusicSourceCapabilitySummary = {
     importLibrary: boolean;
     openExternal: boolean;
     playInSway: boolean;
+    controlExternalPlayback: boolean;
+    loadExternalTrack: boolean;
     requiresTrackAvailabilityCheck: boolean;
   };
   performerActionLabel: string;
@@ -35,11 +37,13 @@ export function getMusicSourceCapabilityCatalog({
         importLibrary: true,
         openExternal: true,
         playInSway: false,
+        controlExternalPlayback: true,
+        loadExternalTrack: true,
         requiresTrackAvailabilityCheck: false
       },
-      performerActionLabel: 'Matched in library',
+      performerActionLabel: 'Load or search from the room controller',
       audienceClaim: 'Request from the performer library',
-      riskNote: 'Metadata availability only. The performer still plays audio from their existing setup.'
+      riskNote: 'VirtualDJ supports exact-path load plus bidirectional transport through the booth bridge. Other DJ apps get one-way mapped MIDI transport. Audio stays in the DJ source.'
     },
     {
       providerKey: 'spotify',
@@ -52,6 +56,8 @@ export function getMusicSourceCapabilityCatalog({
         importLibrary: false,
         openExternal: true,
         playInSway: false,
+        controlExternalPlayback: false,
+        loadExternalTrack: false,
         requiresTrackAvailabilityCheck: true
       },
       performerActionLabel: 'Open in Spotify',
@@ -69,6 +75,8 @@ export function getMusicSourceCapabilityCatalog({
         importLibrary: false,
         openExternal: true,
         playInSway: false,
+        controlExternalPlayback: false,
+        loadExternalTrack: false,
         requiresTrackAvailabilityCheck: true
       },
       performerActionLabel: 'Connect SoundCloud',
@@ -86,6 +94,8 @@ export function getMusicSourceCapabilityCatalog({
         importLibrary: false,
         openExternal: false,
         playInSway: false,
+        controlExternalPlayback: false,
+        loadExternalTrack: false,
         requiresTrackAvailabilityCheck: true
       },
       performerActionLabel: 'Playable in Sway when licensed',

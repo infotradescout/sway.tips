@@ -50,6 +50,8 @@ for (const term of [
   "providerKey: 'local_library'",
   "providerKey: 'sway_upload'",
   'playInSway: false',
+  'controlExternalPlayback: true',
+  'loadExternalTrack: true',
   'requiresTrackAvailabilityCheck: true',
   'Sway must not claim venue playback from Spotify',
   'SoundCloud access depends on OAuth'
@@ -91,7 +93,9 @@ for (const term of [
   'Spotify playlist import',
   'Open in Spotify',
   'Connect SoundCloud',
-  'No Sway playback',
+  'Audio stays in source',
+  'External control',
+  'Exact load · VirtualDJ',
   'Metadata only',
   'Metadata',
   'Library sync',
@@ -126,7 +130,7 @@ for (const forbidden of [
   'playInSway: true',
   'Spotify plays from Sway',
   'SoundCloud plays from Sway',
-  'Spotify playback'
+  'Sway controls Spotify playback'
 ]) {
   if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden)) {
     failures.push(`Music source capability slice must not add raw token storage or playback enablement: ${forbidden}`);

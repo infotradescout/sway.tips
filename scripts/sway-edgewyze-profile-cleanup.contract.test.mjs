@@ -24,7 +24,12 @@ const linkCleanupIndex = migrationFiles.indexOf(linkCleanupMigration);
 assert.notEqual(identityIndex, -1, `${identityMigration} must exist.`);
 assert.notEqual(linkCleanupIndex, -1, `${linkCleanupMigration} must exist.`);
 assert.equal(identityIndex + 1, linkCleanupIndex, 'The link cleanup must immediately follow the identity cleanup.');
-assert.equal(linkCleanupIndex, migrationFiles.length - 1, 'The EdgeWyze link cleanup must be the latest migration.');
+for (const laterMigration of migrationFiles.slice(linkCleanupIndex + 1)) {
+  assert.ok(
+    Number.parseInt(laterMigration.slice(0, 4), 10) > 39,
+    'Later product migrations must preserve EdgeWyze cleanup ordering.'
+  );
+}
 
 const identitySql = readFileSync(join(migrationDirectory, identityMigration), 'utf8');
 assert.match(identitySql, /lower\(handle\) = 'platynum-47'/i);

@@ -10,9 +10,11 @@ const failures = [];
 
 for (const term of [
   "app.post('/api/talent/control-bridge/token'",
-  'resolveProtectedMutationActor(req, res, parseDurableGigId(req.body?.gig_id))',
+  'const actor = await resolveProtectedMutationActor(req, res, gigId)',
   'Control bridge token issuance requires durable session persistence.',
-  'ttlHours: 2',
+  'ttlHours: 6',
+  "sessionType: 'control_bridge'",
+  'gigId,',
   "eventType: 'performer_control_bridge.token.issue'",
   "tokenTransport: 'bridge_auth_token'",
   'bridgeToken: bridgeSession.token',
@@ -38,7 +40,7 @@ for (const term of [
   '/api/talent/control-bridge/token',
   'setBridgeCommand',
   'bridgeTokenStatus',
-  'Create a short-lived token for Stream Deck, Companion, or scripts.',
+  'Create a room-scoped 6-hour token for the booth bridge, Stream Deck, or Companion.',
   'buildDashboardBridgePreset',
   'downloadJsonFile',
   'data-sway-control-bridge-preset-download="true"',

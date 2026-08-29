@@ -73,14 +73,20 @@ Already present:
 - linked library sources
 - sync keys
 - `/api/library/sync`
-- local bridge script
+- local bridge parsing rekordbox XML, Traktor NML, VirtualDJ XML, M3U, CSV,
+  and audio folders
 - library/setlist/catalog search scope
+- exact local paths accepted only through the booth sync-key lane
+- VirtualDJ exact-path load and bidirectional transport/state through the
+  official Network Control extension
+- one-way generic Web MIDI transport for manually mapped DJ applications
 
 Not included:
 
-- audio playback
-- deck loading
-- waveform/mixer controls
+- audio relay or decoding in Sway
+- waveform, EQ, gain, crossfader, or mixer controls
+- direct track loading/state for Serato, rekordbox, Traktor, or djay
+- Spotify or TIDAL playback control
 
 ### Lane 2: Provider Account Links
 

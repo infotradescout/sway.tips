@@ -86,6 +86,8 @@ interface PatronViewProps {
     amount: number;
     albumArt?: string;
     sourceProvider?: string;
+    sourceTrackId?: string;
+    externalTrackId?: string;
     spotifyUri?: string;
     spotifyUrl?: string;
     client_request_id?: string;
@@ -112,6 +114,8 @@ type SearchTrack = {
   description?: string;
   source?: string;
   sourceProvider?: string;
+  sourceTrackId?: string;
+  externalTrackId?: string;
   category?: 'sway_catalog' | 'external_request_music';
   spotifyUri?: string;
   spotifyUrl?: string;
@@ -1019,6 +1023,8 @@ export default function PatronView({
         amount: checkoutPayload.amount,
         albumArt: checkoutPayload.trackArt,
         sourceProvider: selectedTrack?.sourceProvider,
+        sourceTrackId: selectedTrack?.sourceTrackId,
+        externalTrackId: selectedTrack?.externalTrackId,
         spotifyUri: selectedTrack?.spotifyUri,
         spotifyUrl: selectedTrack?.spotifyUrl,
         client_request_id: checkoutPayload.clientRequestId,

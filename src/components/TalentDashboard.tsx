@@ -50,6 +50,8 @@ import PerformerEventsManager from './PerformerEventsManager';
 import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
+import PerformerPlaybackController from './PerformerPlaybackController';
+import { parseDjLibraryFile } from '../dj-library-file-parser';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
@@ -117,6 +119,8 @@ type MusicSourceCapability = {
     importLibrary: boolean;
     openExternal: boolean;
     playInSway: boolean;
+    controlExternalPlayback: boolean;
+    loadExternalTrack: boolean;
     requiresTrackAvailabilityCheck: boolean;
   };
   performerActionLabel: string;
@@ -136,11 +140,13 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
       importLibrary: true,
       openExternal: true,
       playInSway: false,
+      controlExternalPlayback: true,
+      loadExternalTrack: true,
       requiresTrackAvailabilityCheck: false
     },
-    performerActionLabel: 'Matched in library',
+    performerActionLabel: 'Load or search from the room controller',
     audienceClaim: 'Request from the performer library',
-    riskNote: 'Metadata availability only. The performer still plays audio from their existing setup.'
+    riskNote: 'VirtualDJ supports exact-path load and bidirectional transport through the booth bridge. Other DJ apps get one-way mapped MIDI transport. Audio stays in the DJ source.'
   },
   {
     providerKey: 'spotify',
@@ -153,6 +159,8 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
       importLibrary: false,
       openExternal: true,
       playInSway: false,
+      controlExternalPlayback: false,
+      loadExternalTrack: false,
       requiresTrackAvailabilityCheck: true
     },
     performerActionLabel: 'Open in Spotify',
@@ -170,6 +178,8 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
       importLibrary: false,
       openExternal: true,
       playInSway: false,
+      controlExternalPlayback: false,
+      loadExternalTrack: false,
       requiresTrackAvailabilityCheck: true
     },
     performerActionLabel: 'Connect SoundCloud',
@@ -187,6 +197,8 @@ const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
       importLibrary: false,
       openExternal: false,
       playInSway: false,
+      controlExternalPlayback: false,
+      loadExternalTrack: false,
       requiresTrackAvailabilityCheck: true
     },
     performerActionLabel: 'Playable in Sway when licensed',
@@ -201,7 +213,14 @@ type HardwareActionId =
   | 'hide_top'
   | 'approve_pending'
   | 'veto_pending'
-  | 'open_top_source';
+  | 'open_top_source'
+  | 'playback_load_top'
+  | 'playback_play'
+  | 'playback_pause'
+  | 'playback_stop'
+  | 'playback_cue'
+  | 'playback_next'
+  | 'playback_previous';
 
 type HardwareBinding = {
   keyboard: string | null;
@@ -215,11 +234,18 @@ const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1';
 
 const HARDWARE_ACTIONS: Array<{ id: HardwareActionId; label: string }> = [
   { id: 'toggle_requests', label: 'Pause / Resume' },
-  { id: 'fulfill_top', label: 'Play / Clear Top' },
+  { id: 'fulfill_top', label: 'Mark Top Played' },
   { id: 'hide_top', label: 'Hide Top' },
   { id: 'approve_pending', label: 'Approve Pending' },
   { id: 'veto_pending', label: 'Deny Pending' },
-  { id: 'open_top_source', label: 'Open Source' }
+  { id: 'open_top_source', label: 'Open Source' },
+  { id: 'playback_load_top', label: 'Playback · Load Top' },
+  { id: 'playback_play', label: 'Playback · Play' },
+  { id: 'playback_pause', label: 'Playback · Pause' },
+  { id: 'playback_stop', label: 'Playback · Stop' },
+  { id: 'playback_cue', label: 'Playback · Cue' },
+  { id: 'playback_next', label: 'Playback · Next' },
+  { id: 'playback_previous', label: 'Playback · Previous' }
 ];
 
 const DEFAULT_HARDWARE_BINDINGS: HardwareBindingMap = {
@@ -228,7 +254,14 @@ const DEFAULT_HARDWARE_BINDINGS: HardwareBindingMap = {
   hide_top: { keyboard: 'Backspace', midi: null },
   approve_pending: { keyboard: 'KeyA', midi: null },
   veto_pending: { keyboard: 'KeyV', midi: null },
-  open_top_source: { keyboard: 'KeyO', midi: null }
+  open_top_source: { keyboard: 'KeyO', midi: null },
+  playback_load_top: { keyboard: null, midi: null },
+  playback_play: { keyboard: null, midi: null },
+  playback_pause: { keyboard: null, midi: null },
+  playback_stop: { keyboard: null, midi: null },
+  playback_cue: { keyboard: null, midi: null },
+  playback_next: { keyboard: null, midi: null },
+  playback_previous: { keyboard: null, midi: null }
 };
 
 const BRIDGE_PRESET_ACTIONS = [
@@ -335,7 +368,7 @@ function buildDashboardBridgePreset({
     auth: {
       header: 'Authorization',
       value: `Bearer ${bridgeToken}`,
-      note: 'This token is short-lived (2 hours). Reissue and re-download the preset once it expires.'
+      note: 'This token is room-scoped and expires after 6 hours. Reissue it for the next room.'
     },
     localBridgeFallback: {
       launchCommand: bridgeCommand,
@@ -534,12 +567,18 @@ function MusicSourcesPanel({
                 {provider.capabilities.openExternal && (
                   <span className="rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-1 text-[9px] font-bold text-fuchsia-200">Open source</span>
                 )}
+                {provider.capabilities.controlExternalPlayback && (
+                  <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[9px] font-bold text-cyan-200">External control</span>
+                )}
+                {provider.capabilities.loadExternalTrack && (
+                  <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-[9px] font-bold text-violet-200">Exact load · VirtualDJ</span>
+                )}
                 <span className={`rounded-full border px-2 py-1 text-[9px] font-bold ${
                   provider.capabilities.playInSway
                     ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
                     : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
                 }`}>
-                  {provider.capabilities.playInSway ? 'Playable in Sway' : 'No Sway playback'}
+                  {provider.capabilities.playInSway ? 'Audio in Sway' : 'Audio stays in source'}
                 </span>
               </div>
 
@@ -616,8 +655,11 @@ function RequestLibraryWorkspace({
   spotifyPlaylistUrl,
   spotifyImportStatus,
   spotifyImportMessage,
+  djLibraryImportStatus,
+  djLibraryImportMessage,
   onSpotifyPlaylistUrlChange,
   onSpotifyPlaylistImport,
+  onDjLibraryFileImport,
   onOpenAdvanced
 }: {
   catalogTracks: RequestLibraryTrack[];
@@ -627,8 +669,11 @@ function RequestLibraryWorkspace({
   spotifyPlaylistUrl: string;
   spotifyImportStatus: 'idle' | 'submitting' | 'success' | 'error';
   spotifyImportMessage: string | null;
+  djLibraryImportStatus: 'idle' | 'submitting' | 'success' | 'error';
+  djLibraryImportMessage: string | null;
   onSpotifyPlaylistUrlChange: (value: string) => void;
   onSpotifyPlaylistImport: (event: React.FormEvent) => void;
+  onDjLibraryFileImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenAdvanced: () => void;
 }) {
   const totalTracks = catalogTracks.length + externalTracks.length;
@@ -672,13 +717,34 @@ function RequestLibraryWorkspace({
         ))}</div> : null}
       </div>
 
+      <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black text-white">Import your DJ library export</p>
+            <p className="mt-1 text-xs text-slate-400">rekordbox XML · Traktor NML · VirtualDJ XML · M3U · CSV</p>
+          </div>
+          <label className={`inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-cyan-500 px-4 text-xs font-black uppercase text-slate-950 ${djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
+            {djLibraryImportStatus === 'submitting' ? 'Importing…' : 'Choose export'}
+            <input
+              type="file"
+              accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl"
+              className="sr-only"
+              disabled={djLibraryImportStatus === 'submitting'}
+              onChange={onDjLibraryFileImport}
+            />
+          </label>
+        </div>
+        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Browser import adds request/search metadata. For exact-path loading from Sway, create a linked source and run the booth bridge with <code className="text-cyan-200">--import</code>.</p>
+        {djLibraryImportMessage ? <p className={`mt-2 text-xs ${djLibraryImportStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{djLibraryImportMessage}</p> : null}
+      </div>
+
       <details className="mt-5 rounded-xl border border-white/10 bg-slate-950/60 p-4">
         <summary className="cursor-pointer list-none text-sm font-black text-white">Import a Spotify playlist</summary>
         <form className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onSpotifyPlaylistImport}>
           <input type="text" value={spotifyPlaylistUrl} onChange={(event) => onSpotifyPlaylistUrlChange(event.target.value)} placeholder="Paste a Spotify playlist link" className="min-h-11 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-white" />
           <button type="submit" disabled={spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()} className="min-h-11 rounded-xl bg-emerald-500 px-4 text-xs font-black text-slate-950 disabled:opacity-50">{spotifyImportStatus === 'submitting' ? 'Importing…' : 'Import playlist'}</button>
         </form>
-        <p className="mt-2 text-xs text-slate-500">Imports the song list for requests. Playback remains in your normal music setup.</p>
+        <p className="mt-2 text-xs text-slate-500">Imports the song list for requests. Spotify remains metadata-only; Sway does not control Spotify playback.</p>
         {spotifyImportMessage ? <p className={`mt-2 text-xs ${spotifyImportStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{spotifyImportMessage}</p> : null}
       </details>
 
@@ -759,7 +825,7 @@ function HardwareMappingPanel({
             <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Local bridge token</p>
             <p className="mt-1 truncate text-[10px] text-slate-400">
               {bridgeTokenMessage ?? (bridgeReady
-                ? 'Create a short-lived token for Stream Deck, Companion, or scripts.'
+                ? 'Create a room-scoped 6-hour token for the booth bridge, Stream Deck, or Companion.'
                 : 'Start a room before creating a Stream Deck or Companion preset.')}
             </p>
           </div>
@@ -958,13 +1024,15 @@ function PerformerConnectionsWorkspace({
             <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-900 px-3">
               {[
                 ['OBS / Streamlabs', 'Ready', 'Use either Browser Source URL above; setup is manual and Sway does not change scenes.'],
-                ['Stream Deck / Companion', roomActive ? 'Ready to set up' : 'Needs live room', 'Create the 2-hour token and download the HTTP button preset above.'],
-                ['Serato · rekordbox · VirtualDJ · Traktor · djay', 'No native link', 'Sway does not load decks or control playback. A metadata-only library bridge is available for technical setups.']
+                ['Stream Deck / Companion', roomActive ? 'Ready to set up' : 'Needs live room', 'Create the 6-hour room token, run the local bridge, then use its authenticated HTTP preset.'],
+                ['VirtualDJ 2023+ Pro', 'Full control', 'Official Network Control extension + Sway bridge: exact-path load, play, pause, cue, stop, next/previous, and deck state.'],
+                ['Serato · rekordbox · Traktor · djay', 'MIDI transport', 'Map Sway notes to a virtual MIDI input for one-way play/pause/cue/stop/next/previous. No track load or deck feedback.'],
+                ['rekordbox · Traktor · VirtualDJ exports', 'Built-in import', 'Import XML/NML/M3U/CSV in Sway, or run the library bridge for exact local paths and audio folders.']
               ].map(([name, status, detail]) => (
                 <div key={name} className="grid gap-1 py-3 sm:grid-cols-[minmax(0,0.72fr)_auto_minmax(0,1.28fr)] sm:items-center sm:gap-3">
                   <p className="text-xs font-black text-white">{name}</p>
                   <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase ${
-                    status === 'Ready' || status === 'Ready to set up'
+                    ['Ready', 'Ready to set up', 'Full control', 'MIDI transport', 'Built-in import'].includes(status)
                       ? 'bg-emerald-500/15 text-emerald-200'
                       : status === 'Needs live room'
                         ? 'bg-amber-500/15 text-amber-200'
@@ -1084,6 +1152,8 @@ export default function TalentDashboard({
   const [spotifyPlaylistUrl, setSpotifyPlaylistUrl] = useState('');
   const [spotifyImportStatus, setSpotifyImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [spotifyImportMessage, setSpotifyImportMessage] = useState<string | null>(null);
+  const [djLibraryImportStatus, setDjLibraryImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [djLibraryImportMessage, setDjLibraryImportMessage] = useState<string | null>(null);
   const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [requestLibraryStatus, setRequestLibraryStatus] = useState<'idle' | 'loading' | 'error'>('loading');
@@ -1459,6 +1529,36 @@ export default function TalentDashboard({
     }
   };
 
+  const handleDjLibraryFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || previewMode || djLibraryImportStatus === 'submitting') return;
+    setDjLibraryImportStatus('submitting');
+    setDjLibraryImportMessage(null);
+    try {
+      const parsed = await parseDjLibraryFile(file);
+      const response = await fetch('/api/talent/library/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sourceKey: parsed.sourceKey,
+          sourceLabel: parsed.sourceLabel,
+          tracks: parsed.tracks
+        })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'DJ library import failed.');
+      setDjLibraryImportStatus('success');
+      setDjLibraryImportMessage(`Imported ${data?.importedCount ?? parsed.tracks.length} tracks from ${parsed.sourceLabel}${parsed.truncated ? ' (first 1,000)' : ''}.`);
+      await refreshRequestLibrary();
+    } catch (error) {
+      setDjLibraryImportStatus('error');
+      setDjLibraryImportMessage(error instanceof Error ? error.message : 'DJ library import failed.');
+    } finally {
+      input.value = '';
+    }
+  };
+
   const [stripeConnectStatus, setStripeConnectStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [stripeConnectError, setStripeConnectError] = useState<string | null>(null);
 
@@ -1639,6 +1739,13 @@ export default function TalentDashboard({
     if (previewMode || actionInFlightRef.current) return;
     const topApproved = liveLadderQueue[0] ?? null;
     const topPending = triageQueue[0] ?? null;
+    const playbackAction = actionId.startsWith('playback_')
+      ? actionId.replace(/^playback_/, '').replace('load_top', 'load')
+      : null;
+    if (playbackAction && ['load', 'play', 'pause', 'stop', 'cue', 'next', 'previous'].includes(playbackAction)) {
+      window.dispatchEvent(new CustomEvent('sway:playback-action', { detail: playbackAction }));
+      return;
+    }
 
     if (actionId === 'toggle_requests') {
       void handleToggleRequests(!session.requestsOpen);
@@ -1954,29 +2061,11 @@ export default function TalentDashboard({
             </div>
           </header>
 
-          <section className="grid grid-cols-3 gap-2 text-center" aria-label="Tonight's money rules">
-            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
-              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">
-                {session.paymentsEnabled === false ? 'Requests' : 'Minimum request'}
-              </p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
-                {session.paymentsEnabled === false ? 'Free' : formatValue(session.minimumTip)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
-              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Boost minimum</p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
-                {session.paymentsEnabled === false ? 'Free upvotes' : formatValue(session.minimumTip)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-900 px-2 py-2">
-              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Tip path</p>
-              <p className="mt-0.5 truncate font-mono text-sm font-black text-white">
-                <span className="min-[360px]:hidden">Tips</span>
-                <span className="hidden min-[360px]:inline">Direct tips</span>
-              </p>
-            </div>
-          </section>
+          <PerformerPlaybackController
+            gigId={writableGigId}
+            approvedRequests={liveLadderQueue}
+            previewMode={previewMode}
+          />
 
           <div className="h-32 min-h-0 landscape:hidden">
             <PerformerAudienceScreen
@@ -2363,8 +2452,11 @@ export default function TalentDashboard({
             spotifyPlaylistUrl={spotifyPlaylistUrl}
             spotifyImportStatus={spotifyImportStatus}
             spotifyImportMessage={spotifyImportMessage}
+            djLibraryImportStatus={djLibraryImportStatus}
+            djLibraryImportMessage={djLibraryImportMessage}
             onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
             onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
+            onDjLibraryFileImport={handleDjLibraryFileImport}
             onOpenAdvanced={() => setShowAdvancedLibrary(true)}
           />
         </div>
@@ -2404,12 +2496,12 @@ export default function TalentDashboard({
       <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
-            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Link Any Library Program</h4>
+            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Booth library bridge</h4>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-              For technical users only. Requires writing or running a small script that sends your track list to Sway — there's no built-in connector for Serato, rekordbox, Traktor, or other DJ software yet.
+              Create a source key once, then import rekordbox XML, Traktor NML, VirtualDJ XML, M3U/CSV, or an audio folder from the booth computer.
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              Most performers don't need this. Use it only when you already have a library bridge workflow.
+              The local bridge sends track metadata and exact file paths; it never uploads audio.
             </p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
@@ -2452,7 +2544,7 @@ export default function TalentDashboard({
                 Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
               </p>
               <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                First-party bridge: run `npm run library:bridge -- --sync-key ...` and point local software at `http://127.0.0.1:4314/ingest`.
+                Built-in import: `npm run library:bridge -- --sync-key ... --import "/path/to/export-or-music-folder"`.
               </p>
             </div>
           ) : null}

@@ -1059,6 +1059,9 @@ export const performerSessions = pgTable('performer_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
   tokenHash: text('token_hash').notNull(),
+  sessionType: text('session_type').notNull().default('browser'),
+  gigId: uuid('gig_id').references(() => gigSessions.id),
+  metadata: jsonb('metadata'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
@@ -1066,7 +1069,19 @@ export const performerSessions = pgTable('performer_sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   tokenHashIdx: uniqueIndex('performer_sessions_token_hash_idx').on(table.tokenHash),
-  actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt)
+  actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt),
+  actorTypeGigIdx: index('performer_sessions_actor_type_gig_idx').on(
+    table.actorUserId,
+    table.sessionType,
+    table.gigId,
+    table.expiresAt
+  ),
+  sessionTypeValid: check('performer_sessions_session_type_valid', sql`
+    ${table.sessionType} in ('browser', 'control_bridge')
+  `),
+  bridgeGigScopeValid: check('performer_sessions_bridge_gig_scope_valid', sql`
+    (${table.sessionType} = 'browser') or (${table.sessionType} = 'control_bridge' and ${table.gigId} is not null)
+  `)
 }));
 
 export const performerLoginChallenges = pgTable('performer_login_challenges', {
@@ -1156,6 +1171,76 @@ export const performerMusicSourceConnections = pgTable('performer_music_source_c
     table.providerKey,
     table.connectionStatus
   )
+}));
+
+export const playbackCommands = pgTable('playback_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  actorUserId: uuid('actor_user_id').references(() => users.id),
+  clientCommandId: text('client_command_id').notNull(),
+  sourceKey: text('source_key').notNull(),
+  action: text('action').notNull(),
+  payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  status: text('status').notNull().default('queued'),
+  claimedBy: text('claimed_by'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  failedAt: timestamp('failed_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  result: jsonb('result'),
+  errorText: text('error_text'),
+  ...timestamps
+}, (table) => ({
+  gigClientCommandIdx: uniqueIndex('playback_commands_gig_client_command_idx').on(
+    table.gigId,
+    table.clientCommandId
+  ),
+  claimQueueIdx: index('playback_commands_claim_queue_idx').on(
+    table.gigId,
+    table.sourceKey,
+    table.status,
+    table.createdAt
+  ),
+  statusValid: check('playback_commands_status_valid', sql`
+    ${table.status} in ('queued', 'claimed', 'succeeded', 'failed', 'expired')
+  `),
+  actionValid: check('playback_commands_action_valid', sql`
+    ${table.action} in ('load', 'play', 'pause', 'stop', 'cue', 'next', 'previous')
+  `),
+  sourceKeyValid: check('playback_commands_source_key_valid', sql`length(trim(${table.sourceKey})) > 0`),
+  clientCommandIdValid: check('playback_commands_client_command_id_valid', sql`length(trim(${table.clientCommandId})) > 0`)
+}));
+
+export const playbackStates = pgTable('playback_states', {
+  gigId: uuid('gig_id').primaryKey().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull(),
+  transport: text('transport').notNull(),
+  bridgeInstanceId: text('bridge_instance_id').notNull(),
+  connectionStatus: text('connection_status').notNull().default('connected'),
+  deck: integer('deck'),
+  trackTitle: text('track_title'),
+  trackArtist: text('track_artist'),
+  trackPath: text('track_path'),
+  externalTrackId: text('external_track_id'),
+  playing: boolean('playing'),
+  positionMs: integer('position_ms'),
+  durationMs: integer('duration_ms'),
+  bpmTimes100: integer('bpm_times_100'),
+  revision: integer('revision').notNull().default(0),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  performerObservedIdx: index('playback_states_performer_observed_idx').on(table.performerId, table.observedAt),
+  connectionStatusValid: check('playback_states_connection_status_valid', sql`
+    ${table.connectionStatus} in ('connected', 'degraded', 'disconnected')
+  `),
+  deckValid: check('playback_states_deck_valid', sql`${table.deck} is null or (${table.deck} >= 1 and ${table.deck} <= 8)`),
+  positionValid: check('playback_states_position_valid', sql`${table.positionMs} is null or ${table.positionMs} >= 0`),
+  durationValid: check('playback_states_duration_valid', sql`${table.durationMs} is null or ${table.durationMs} >= 0`)
 }));
 
 export const performerSetlistTracks = pgTable('performer_setlist_tracks', {
