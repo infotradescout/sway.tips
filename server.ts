@@ -2585,6 +2585,7 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   sourceLabel: string;
   rawTracks: unknown[];
   replaceExisting?: boolean;
+  allowLocalPaths?: boolean;
 }) {
   const normalizedTracks = input.rawTracks
     .slice(0, 1000)
@@ -2608,7 +2609,15 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
         album: album || null,
         artworkUrl: artworkUrl || null,
         searchableText,
-        metadata: (track as any)?.metadata && typeof (track as any).metadata === 'object' ? (track as any).metadata : null,
+        metadata: (() => {
+          const rawMetadata = (track as any)?.metadata;
+          if (!rawMetadata || typeof rawMetadata !== 'object' || Array.isArray(rawMetadata)) return null;
+          const metadata = { ...rawMetadata } as Record<string, unknown>;
+          if (!input.allowLocalPaths) {
+            for (const key of ['path', 'filePath', 'location', 'fileLocation']) delete metadata[key];
+          }
+          return metadata;
+        })(),
         lastSeenAt: new Date(),
         updatedAt: new Date()
       };
@@ -11185,7 +11194,11 @@ app.post('/api/library/sync', async (req, res) => {
         sourceKey: sourceRow.sourceKey,
         sourceLabel: sourceRow.sourceLabel,
         rawTracks,
-        replaceExisting
+        replaceExisting,
+        // Only the booth-side sync-key lane may persist exact local paths.
+        // Browser imports remain metadata/search inputs and cannot instruct a
+        // playback bridge to open an arbitrary file on the DJ computer.
+        allowLocalPaths: true
       });
 
       await tx
