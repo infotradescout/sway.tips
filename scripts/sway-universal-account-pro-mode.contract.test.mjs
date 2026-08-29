@@ -154,12 +154,13 @@ for (const term of [
 requireIncludes(accessControl, 'requireAuthenticatedAccountAccess: (req: Request) => Promise<GuardResult>;', 'AccessControl type');
 requireIncludes(accessControl, 'async requireAuthenticatedAccountAccess(req)', 'AccessControl implementation');
 const guardStart = accessControl.indexOf('async requireAuthenticatedAccountAccess(req)');
-const guardEnd = accessControl.indexOf('async requireGigMutationAccess(req, gigId)');
+const guardEnd = accessControl.indexOf('async requireGigMutationAccess(req, gigId, options = {})');
 const guardSource = guardStart >= 0 && guardEnd > guardStart ? accessControl.slice(guardStart, guardEnd) : '';
 if (!guardSource) failures.push('Unable to locate requireAuthenticatedAccountAccess implementation.');
 for (const forbidden of ['hasTalentRole', 'hasAdminRole', 'hasSupportRole']) {
   requireExcludes(guardSource, forbidden, 'Universal account gate must not require a specific role');
 }
+requireIncludes(guardSource, "actor.sessionType === 'control_bridge'", 'Universal account gate must reject room-scoped bridge sessions');
 
 // server.ts: routes gated by the universal account guard (not talent-only),
 // resolving identity only from the session (never from the request body),

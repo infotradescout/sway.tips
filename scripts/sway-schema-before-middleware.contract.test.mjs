@@ -79,7 +79,10 @@ const dbBackedGuardTerms = [
   "from(gigAccessGrants)",
   'async requireTalentAccess(req)',
   'async requireAdminOrSupportAccess(req)',
-  'async requireGigMutationAccess(req, gigId)'
+  'async requireGigMutationAccess(req, gigId, options = {})',
+  "actor.sessionType === 'control_bridge'",
+  'options.allowControlBridge',
+  'actor.sessionGigId !== gigId'
 ];
 
 for (const term of dbBackedGuardTerms) {

@@ -90,7 +90,8 @@ for (const term of [
   'Your owned or cleared audio stored in Sway.',
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
   'Advanced library connections',
-  'Link Any Library Program',
+  'Booth library bridge',
+  'rekordbox XML, Traktor NML, VirtualDJ XML, M3U/CSV, or an audio folder',
   'Create linked source',
   'Sync endpoint',
   'x-sway-library-key',
@@ -112,7 +113,7 @@ for (const term of [
 
 for (const term of [
   '"library:bridge": "node scripts/sway-library-bridge.mjs"',
-  'Sway Library Bridge',
+  'Sway DJ Library Bridge',
   'POST /ingest',
   'replaceExisting',
   'x-sway-library-key'
