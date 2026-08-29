@@ -206,18 +206,25 @@ Verdict:
 
 Current truth:
 
-- no native Serato integration
-- no native rekordbox integration
-- no native Traktor integration
-- no native VirtualDJ integration
-- no native djay integration
-- keyboard and WebMIDI can control Sway room actions, not decks or playback
-- Stream Deck / Companion can control Sway room actions through HTTP, not decks or playback
-- the library bridge can sync metadata/availability from a custom local workflow, not load a deck
+- VirtualDJ 2023+ Pro has bidirectional control through its official Network
+  Control extension and Sway's booth bridge
+- Sway can resolve an approved request to a trusted synced path, load it in
+  VirtualDJ, control play/pause/stop/cue/next/previous, and display low-rate
+  deck state plus command acknowledgement
+- Serato, rekordbox, Traktor, and djay can receive one-way mapped Web MIDI
+  transport through a virtual MIDI port; this lane cannot identify/load the
+  requested track and receives no deck acknowledgement
+- Stream Deck / Companion can use the authenticated local bridge for playback
+  and room actions; header-capable tools can call cloud room actions directly
+- rekordbox XML, Traktor NML, VirtualDJ XML, M3U, CSV, and audio folders have
+  built-in booth import support
+- Spotify remains metadata/import/open-only; TIDAL has no direct connector
+- audio stays in the DJ source and mixer; Sway controls it but does not relay it
 
 Verdict:
 
-- Sway controller layer exists; native DJ software linkage is still missing
+- real VirtualDJ source control is available; generic MIDI expands transport
+  reach while deeper Serato/rekordbox/Traktor/djay adapters remain future work
 
 ### 5. Real-time performer notifications beyond polling
 

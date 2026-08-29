@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const playbackController = readFileSync(join(root, 'src/components/PerformerPlaybackController.tsx'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -33,6 +34,9 @@ for (const term of [
   "onTriage(topPending.id, 'deny')",
   'onHide(topApproved.id)',
   "window.open(topApproved.spotifyUrl, '_blank', 'noopener,noreferrer')",
+  "'playback_load_top'",
+  "'playback_play'",
+  "window.dispatchEvent(new CustomEvent('sway:playback-action'",
   'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY',
   'window.localStorage.setItem(HARDWARE_LISTENING_STORAGE_KEY',
   'Local bridge token',
@@ -40,6 +44,16 @@ for (const term of [
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent hardware mapping missing term: ${term}`);
+  }
+}
+
+for (const term of [
+  "window.addEventListener('sway:playback-action'",
+  'sendPlaybackMidiAction',
+  'MIDI · one-way'
+]) {
+  if (!playbackController.includes(term)) {
+    failures.push(`Playback hardware mapping missing term: ${term}`);
   }
 }
 

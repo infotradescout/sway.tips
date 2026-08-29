@@ -27,9 +27,12 @@ for (const term of [
   'data-sway-dj-software-truth="true"',
   'OBS / Streamlabs',
   'Stream Deck / Companion',
-  'Serato · rekordbox · VirtualDJ · Traktor · djay',
-  'No native link',
-  'Sway does not load decks or control playback.',
+  'VirtualDJ 2023+ Pro',
+  'Full control',
+  'Serato · rekordbox · Traktor · djay',
+  'MIDI transport',
+  'No track load or deck feedback.',
+  'Built-in import',
   'Open advanced music-library connections'
 ]) {
   if (!dashboard.includes(term)) failures.push(`Connections workspace missing term: ${term}`);
