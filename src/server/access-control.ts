@@ -3,11 +3,13 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
-import { createPerformerSessionStore, type ResolvedPerformerSession } from './performer-session-store';
+import { createPerformerSessionStore, type PerformerSessionType, type ResolvedPerformerSession } from './performer-session-store';
 
 export type SwayActor = {
   actorId: string | null;
   sessionId: string | null;
+  sessionType: PerformerSessionType | null;
+  sessionGigId: string | null;
   patronDeviceIdHash: string | null;
 };
 
@@ -26,7 +28,11 @@ export type AccessControl = {
   requireAdminAccess: (req: Request) => Promise<GuardResult>;
   requireAdminOrSupportAccess: (req: Request) => Promise<GuardResult>;
   requireAuthenticatedAccountAccess: (req: Request) => Promise<GuardResult>;
-  requireGigMutationAccess: (req: Request, gigId: string) => Promise<GuardResult>;
+  requireGigMutationAccess: (
+    req: Request,
+    gigId: string,
+    options?: { allowControlBridge?: boolean }
+  ) => Promise<GuardResult>;
   allowPublicPatronAccess: (req: Request) => Promise<GuardResult>;
   requireOverlayAccess: (req: Request) => Promise<GuardResult>;
   requireDevSandboxAccess: (req: Request) => Promise<GuardResult>;
@@ -173,6 +179,8 @@ function resolveRawActor(req: Request): SwayActor {
   return {
     actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
     sessionId: typeof req.headers['x-sway-session-id'] === 'string' ? req.headers['x-sway-session-id'] : null,
+    sessionType: null,
+    sessionGigId: null,
     patronDeviceIdHash: typeof req.headers['x-sway-device-id-hash'] === 'string' ? req.headers['x-sway-device-id-hash'] : null
   };
 }
@@ -192,6 +200,8 @@ function resolveActor(req: Request): SwayActor {
   return {
     actorId: typeof req.headers['x-sway-actor-id'] === 'string' ? req.headers['x-sway-actor-id'] : null,
     sessionId: typeof req.headers['x-sway-session-id'] === 'string' ? req.headers['x-sway-session-id'] : null,
+    sessionType: null,
+    sessionGigId: null,
     patronDeviceIdHash: typeof req.headers['x-sway-device-id-hash'] === 'string' ? req.headers['x-sway-device-id-hash'] : null
   };
 }
@@ -471,6 +481,8 @@ export function createAccessControl({
     return {
       actorId: session?.actorUserId ?? null,
       sessionId: session?.sessionId ?? null,
+      sessionType: session?.sessionType ?? null,
+      sessionGigId: session?.gigId ?? null,
       patronDeviceIdHash: rawActor.patronDeviceIdHash
     };
   }
@@ -521,6 +533,9 @@ export function createAccessControl({
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
+      if (actor.sessionType === 'control_bridge') {
+        return { allowed: false, status: 403, reason: 'Control bridge tokens are valid only for their room control routes.' };
+      }
       if (!db) {
         return resolveTalentFallbackAccess(
           req,
@@ -539,6 +554,9 @@ export function createAccessControl({
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
+      if (actor.sessionType === 'control_bridge') {
+        return { allowed: false, status: 403, reason: 'Control bridge tokens cannot access administration routes.' };
+      }
       if (!db) {
         return resolveAdminFallbackAccess(
           req,
@@ -558,6 +576,9 @@ export function createAccessControl({
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
+      if (actor.sessionType === 'control_bridge') {
+        return { allowed: false, status: 403, reason: 'Control bridge tokens cannot access administration routes.' };
+      }
       if (!db) {
         return resolveAdminFallbackAccess(
           req,
@@ -583,6 +604,9 @@ export function createAccessControl({
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
+      if (actor.sessionType === 'control_bridge') {
+        return { allowed: false, status: 403, reason: 'Control bridge tokens cannot access account routes.' };
+      }
       if (!db) return missingPersistence();
 
       const role = await getActorRole(db, actor.actorId);
@@ -593,11 +617,20 @@ export function createAccessControl({
       return { allowed: true, actor, role };
     },
 
-    async requireGigMutationAccess(req, gigId) {
+    async requireGigMutationAccess(req, gigId, options = {}) {
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
       if (!db) return missingPersistence();
+
+      if (actor.sessionType === 'control_bridge') {
+        if (!options.allowControlBridge) {
+          return { allowed: false, status: 403, reason: 'Control bridge tokens are not valid for this room route.' };
+        }
+        if (!actor.sessionGigId || actor.sessionGigId !== gigId) {
+          return { allowed: false, status: 403, reason: 'Control bridge token is scoped to a different live room.' };
+        }
+      }
 
       const role = await getActorRole(db, actor.actorId);
       if (!role) {
@@ -680,6 +713,9 @@ export function createAccessControl({
       await hydrateRequestActor(req);
       const actor = resolveActor(req);
       if (!actor.actorId) return missingActor();
+      if (actor.sessionType === 'control_bridge') {
+        return { allowed: false, status: 403, reason: 'Control bridge tokens cannot open performer overlays.' };
+      }
       if (!db) {
         return resolveTalentFallbackAccess(
           req,
@@ -716,6 +752,8 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       writeResolvedActor(req, {
         actorId: null,
         sessionId: null,
+        sessionType: null,
+        sessionGigId: null,
         patronDeviceIdHash: null
       });
       next();
@@ -726,6 +764,8 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       writeResolvedActor(req, {
         actorId: null,
         sessionId: null,
+        sessionType: null,
+        sessionGigId: null,
         patronDeviceIdHash: null
       });
       next();
@@ -736,6 +776,8 @@ export function routeFamilyGuard(accessControl: AccessControl) {
       writeResolvedActor(req, {
         actorId: null,
         sessionId: null,
+        sessionType: null,
+        sessionGigId: null,
         patronDeviceIdHash: null
       });
       next();
