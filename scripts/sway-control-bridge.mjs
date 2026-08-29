@@ -360,7 +360,8 @@ async function executeClaimedCommand(command) {
     let outcome;
     try {
       const result = await virtualDj.executeCommand(command);
-      outcome = { success: true, result, error: null, finishedAt: new Date().toISOString() };
+      const finishedAt = new Date().toISOString();
+      outcome = { success: true, result: { ...result, executedAt: finishedAt }, error: null, finishedAt };
     } catch (error) {
       outcome = {
         success: false,

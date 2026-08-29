@@ -186,7 +186,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
           eq(playbackCommands.id, input.commandId),
           eq(playbackCommands.gigId, input.gigId),
           eq(playbackCommands.sourceKey, input.sourceKey),
-          eq(playbackCommands.status, 'claimed'),
+          inArray(playbackCommands.status, ['claimed', 'expired']),
           eq(playbackCommands.claimedBy, input.bridgeInstanceId)
         ))
         .returning();
@@ -202,7 +202,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
           eq(playbackCommands.sourceKey, input.sourceKey)
         ))
         .limit(1);
-      if (existing && ['succeeded', 'failed', 'expired'].includes(existing.status)) {
+      if (existing && ['succeeded', 'failed'].includes(existing.status)) {
         return { command: existing, replay: true };
       }
       return null;
