@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import { playbackCommands, playbackStates } from '../db/schema';
 import {
@@ -244,8 +244,9 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
           target: playbackStates.gigId,
           set: {
             ...values,
-            revision: playbackStates.revision
-          }
+            revision: sql`${playbackStates.revision} + 1`
+          },
+          setWhere: lte(playbackStates.observedAt, state.observedAt as Date)
         })
         .returning();
 
@@ -280,4 +281,3 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
     }
   };
 }
-

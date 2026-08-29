@@ -46,6 +46,14 @@ import { projectPerformerRoomRecap } from "./src/server/live-room-recap";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
+import { createPlaybackControlStore } from "./src/server/playback-control-store";
+import {
+  isPlaybackSourceKey,
+  isUuid as isPlaybackUuid,
+  normalizePlaybackCommandPayload,
+  validatePlaybackCommandInput,
+  type PlaybackCommandPayload
+} from "./src/playback-control";
 import { activateProModeWithPerformer, getProModeStatus } from "./src/server/pro-mode";
 import {
   activateClaimedPerformerAndProMode,
@@ -262,6 +270,9 @@ const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
 });
+const playbackControlStore = businessDb
+  ? createPlaybackControlStore({ db: businessDb })
+  : null;
 const performerLoginChallengeStore = createPerformerLoginChallengeStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -2192,13 +2203,18 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
   }
 }
 
-async function resolveProtectedMutationActor(req: express.Request, res: express.Response, gigId?: string | null): Promise<ProtectedMutationActor | null> {
+async function resolveProtectedMutationActor(
+  req: express.Request,
+  res: express.Response,
+  gigId?: string | null,
+  options: { allowControlBridge?: boolean } = {}
+): Promise<ProtectedMutationActor | null> {
   if (!requirePersistentBusinessStore(res)) {
     return null;
   }
 
   if (gigId) {
-    const result = await accessControl.requireGigMutationAccess(req, gigId);
+    const result = await accessControl.requireGigMutationAccess(req, gigId, options);
     if (result.allowed === false) {
       res.status(result.status).json({ error: result.reason });
       return null;
@@ -5978,18 +5994,43 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
 app.post('/api/talent/control-bridge/token', async (req, res) => {
   applyNoStoreHeaders(res);
 
-  const actor = await resolveProtectedMutationActor(req, res, parseDurableGigId(req.body?.gig_id));
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const actor = await resolveProtectedMutationActor(req, res, gigId);
   if (!actor) return;
 
-  if (!performerSessionStore.hasDurableStore) {
+  if (!performerSessionStore.hasDurableStore || !businessDb || !gigId) {
     res.status(503).json({ error: 'Control bridge token issuance requires durable session persistence.' });
     return;
   }
 
-  const bridgeSession = await performerSessionStore.issueSession({
-    actorUserId: actor.actorId,
-    issuedBy: actor.actorId,
-    ttlHours: 2
+  const bridgeSession = await businessDb.transaction(async (tx) => {
+    const [lockedGig] = await tx
+      .select({ id: gigSessions.id })
+      .from(gigSessions)
+      .where(eq(gigSessions.id, gigId))
+      .limit(1)
+      .for('update');
+    if (!lockedGig) throw new Error('The selected live room no longer exists.');
+
+    await performerSessionStore.revokeActiveSessionsForActorUser({
+      actorUserId: actor.actorId,
+      sessionType: 'control_bridge',
+      gigId,
+      executor: tx
+    });
+
+    return performerSessionStore.issueSession({
+      actorUserId: actor.actorId,
+      issuedBy: actor.actorId,
+      ttlHours: 6,
+      sessionType: 'control_bridge',
+      gigId,
+      metadata: {
+        purpose: 'dj_room_controller',
+        issuedFrom: 'performer_connections'
+      },
+      executor: tx
+    });
   });
 
   const requestOrigin = typeof req.headers.origin === 'string' && req.headers.origin.trim()
@@ -5998,7 +6039,6 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
   const configuredBaseUrl = process.env.SWAY_APP_BASE_URL?.trim().replace(/\/+$/, '') || null;
   const fallbackBaseUrl = `${req.protocol}://${req.get('host')}`;
   const swayUrl = configuredBaseUrl || requestOrigin || fallbackBaseUrl;
-  const gigId = parseDurableGigId(req.body?.gig_id);
   const bridgeCommand = gigId
     ? `npm run control:bridge -- --gig-id ${gigId} --auth-token ${bridgeSession.token} --sway-url ${swayUrl}`
     : null;
@@ -6015,7 +6055,8 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
       metadata: {
         gigId,
         expiresAt: bridgeSession.expiresAt.toISOString(),
-        ttlHours: 2,
+        ttlHours: 6,
+        sessionType: 'control_bridge',
         tokenTransport: 'bridge_auth_token'
       }
     });
@@ -6108,7 +6149,7 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
   const roomContext = await resolveLegacyWritableRoom(req, res);
   if (!roomContext) return;
 
-  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId, { allowControlBridge: true });
   if (!actor) return;
 
   const replayGuard = await reserveControlBridgeMutation({
@@ -6220,6 +6261,231 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
     action,
     result: { openUrl: provider.url(text), title: approved.title, subtitle: approved.subtitle }
   });
+});
+
+async function requireScopedControlBridge(
+  req: express.Request,
+  res: express.Response,
+  gigId: string
+) {
+  const access = await accessControl.requireGigMutationAccess(req, gigId, { allowControlBridge: true });
+  if (access.allowed === false) {
+    res.status(access.status).json({ error: access.reason });
+    return null;
+  }
+  if (access.actor.sessionType !== 'control_bridge') {
+    res.status(403).json({ error: 'A room-scoped control bridge token is required.' });
+    return null;
+  }
+  return access;
+}
+
+function readLibraryTrackPath(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  for (const key of ['path', 'filePath', 'location', 'fileLocation']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 2_048);
+  }
+  return null;
+}
+
+async function resolvePlaybackCommandPayload(input: {
+  gigId: string;
+  performerId: string;
+  action: string;
+  payload: PlaybackCommandPayload;
+}) {
+  const payload = normalizePlaybackCommandPayload(input.payload);
+  if (input.action !== 'load' || !businessDb) return payload;
+
+  const roomSnapshot = await loadRoomState(input.gigId);
+  const requestedRoomItem = payload.track?.requestId
+    ? roomSnapshot.state.requests.find((item) => item.id === payload.track?.requestId) ?? null
+    : null;
+  const sourceTrackId = requestedRoomItem?.sourceTrackId ?? payload.track?.sourceTrackId ?? null;
+  const libraryTrack = sourceTrackId && isPlaybackUuid(sourceTrackId)
+    ? (await businessDb
+        .select({
+          id: performerLibraryTracks.id,
+          externalTrackId: performerLibraryTracks.externalTrackId,
+          title: performerLibraryTracks.title,
+          artist: performerLibraryTracks.artist,
+          metadata: performerLibraryTracks.metadata
+        })
+        .from(performerLibraryTracks)
+        .where(and(
+          eq(performerLibraryTracks.id, sourceTrackId),
+          eq(performerLibraryTracks.performerId, input.performerId)
+        ))
+        .limit(1))[0] ?? null
+    : null;
+
+  return {
+    deck: payload.deck,
+    track: {
+      requestId: requestedRoomItem?.id ?? payload.track?.requestId ?? null,
+      sourceTrackId: libraryTrack?.id ?? sourceTrackId,
+      externalTrackId: libraryTrack?.externalTrackId ?? requestedRoomItem?.externalTrackId ?? payload.track?.externalTrackId ?? null,
+      title: libraryTrack?.title ?? requestedRoomItem?.title ?? payload.track?.title ?? null,
+      artist: libraryTrack?.artist ?? requestedRoomItem?.subtitle ?? payload.track?.artist ?? null,
+      // A local path is accepted only from the performer's persisted library
+      // metadata. Browser input cannot instruct the booth machine to open an
+      // arbitrary path.
+      path: readLibraryTrackPath(libraryTrack?.metadata)
+    }
+  };
+}
+
+app.post('/api/talent/playback/commands', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  if (!gigId || !businessDb || !playbackControlStore) {
+    return res.status(gigId ? 503 : 422).json({ error: gigId ? 'Playback control requires durable persistence.' : 'A valid gig_id is required.' });
+  }
+  const access = await accessControl.requireGigMutationAccess(req, gigId, { allowControlBridge: true });
+  if (access.allowed === false) return res.status(access.status).json({ error: access.reason });
+  if (!access.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+
+  const validated = validatePlaybackCommandInput({
+    clientCommandId: req.body?.clientCommandId,
+    sourceKey: req.body?.sourceKey,
+    action: req.body?.action,
+    payload: req.body?.payload
+  });
+  if (!validated.ok) return res.status(422).json({ error: validated.error });
+  if (access.actor.sessionType === 'control_bridge' && validated.command.sourceKey !== 'virtualdj') {
+    return res.status(403).json({ error: 'Control bridge tokens may queue only VirtualDJ commands for their scoped room.' });
+  }
+
+  const [gig] = await businessDb
+    .select({ performerId: gigSessions.performerId, status: gigSessions.status })
+    .from(gigSessions)
+    .where(eq(gigSessions.id, gigId))
+    .limit(1);
+  if (!gig) return res.status(404).json({ error: 'Live room not found.' });
+  if (!['active', 'closeout_pending'].includes(gig.status)) {
+    return res.status(409).json({ error: 'Playback control is available only while the room is live.' });
+  }
+
+  const payload = await resolvePlaybackCommandPayload({
+    gigId,
+    performerId: gig.performerId,
+    action: validated.command.action,
+    payload: validated.command.payload
+  });
+
+  try {
+    const created = await playbackControlStore.createCommand({
+      gigId,
+      performerId: gig.performerId,
+      actorUserId: access.actor.actorId,
+      clientCommandId: validated.command.clientCommandId,
+      sourceKey: validated.command.sourceKey,
+      action: validated.command.action,
+      payload
+    });
+    await writeAuditEvent(businessDb, {
+      actorId: access.actor.actorId,
+      actorType: access.role ?? 'performer',
+      entityType: 'playback_command',
+      entityId: created.command.id,
+      eventType: created.replay ? 'playback.command.replay' : 'playback.command.queue',
+      previousStatus: null,
+      nextStatus: created.command.status,
+      metadata: {
+        gigId,
+        sourceKey: created.command.sourceKey,
+        action: created.command.action,
+        clientCommandId: created.command.clientCommandId
+      }
+    });
+    return res.status(created.replay ? 200 : 202).json({ success: true, replay: created.replay, command: created.command });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number' ? (error as { status: number }).status : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Playback command could not be queued.' });
+  }
+});
+
+app.get('/api/talent/playback/snapshot/:gigId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.params.gigId);
+  if (!gigId || !playbackControlStore) return res.status(gigId ? 503 : 404).json({ error: 'Playback snapshot is unavailable.' });
+  const access = await accessControl.requireGigMutationAccess(req, gigId);
+  if (access.allowed === false) return res.status(access.status).json({ error: access.reason });
+  return res.json(await playbackControlStore.getSnapshot({ gigId }));
+});
+
+app.get('/api/talent/control-bridge/state/:gigId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.params.gigId);
+  if (!gigId) return res.status(404).json({ error: 'Live room not found.' });
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  const roomSnapshot = await loadRoomState(gigId);
+  if (roomSnapshot.roomStatus === 'missing') return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+  if (roomSnapshot.roomStatus === 'ended') return res.status(410).json({ error: ROOM_LOOKUP_ENDED_COPY });
+  return res.json({
+    session: roomSnapshot.state.session,
+    requests: roomSnapshot.state.requests,
+    performers: roomSnapshot.state.performers,
+    activeGigId: roomSnapshot.state.activeGigId,
+    playback: playbackControlStore ? await playbackControlStore.getSnapshot({ gigId }) : null
+  });
+});
+
+app.post('/api/talent/playback/bridge/claim', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const sourceKey = req.body?.sourceKey;
+  const bridgeInstanceId = normalizeLibraryText(req.body?.bridgeInstanceId, 128);
+  if (!gigId || !isPlaybackSourceKey(sourceKey) || !bridgeInstanceId) {
+    return res.status(422).json({ error: 'gig_id, sourceKey, and bridgeInstanceId are required.' });
+  }
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const commands = await playbackControlStore.claimCommands({ gigId, sourceKey, bridgeInstanceId });
+  return res.json({ commands });
+});
+
+app.post('/api/talent/playback/bridge/complete', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const sourceKey = req.body?.sourceKey;
+  const bridgeInstanceId = normalizeLibraryText(req.body?.bridgeInstanceId, 128);
+  const commandId = parseDurableGigId(req.body?.commandId);
+  if (!gigId || !isPlaybackSourceKey(sourceKey) || !bridgeInstanceId || !commandId || typeof req.body?.success !== 'boolean') {
+    return res.status(422).json({ error: 'A valid command completion identity and success flag are required.' });
+  }
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const completion = await playbackControlStore.completeCommand({
+    gigId,
+    sourceKey,
+    bridgeInstanceId,
+    commandId,
+    success: req.body.success,
+    result: req.body?.result,
+    errorText: normalizeLibraryText(req.body?.error, 1_000)
+  });
+  if (!completion) return res.status(409).json({ error: 'Playback command is not claimed by this bridge.' });
+  return res.json({ success: true, replay: completion.replay, command: completion.command });
+});
+
+app.post('/api/talent/playback/bridge/state', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  if (!gigId) return res.status(422).json({ error: 'A valid gig_id is required.' });
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!businessDb || !playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const [gig] = await businessDb.select({ performerId: gigSessions.performerId }).from(gigSessions).where(eq(gigSessions.id, gigId)).limit(1);
+  if (!gig) return res.status(404).json({ error: 'Live room not found.' });
+  const stateRow = await playbackControlStore.upsertState({ gigId, performerId: gig.performerId, state: req.body?.state });
+  if (!stateRow) return res.status(422).json({ error: 'Playback state payload is invalid.' });
+  return res.status(202).json({ success: true, state: stateRow });
 });
 
 app.post('/api/admin/bootstrap', async (req, res) => {
@@ -9302,6 +9568,7 @@ app.get('/api/talent/library/tracks', async (req, res) => {
     businessDb
       .select({
         id: performerLibraryTracks.id,
+        externalTrackId: performerLibraryTracks.externalTrackId,
         title: performerLibraryTracks.title,
         artist: performerLibraryTracks.artist,
         album: performerLibraryTracks.album,
@@ -12651,6 +12918,8 @@ app.post("/api/request/create", async (req, res) => {
     amount,
     albumArt,
     sourceProvider,
+    sourceTrackId,
+    externalTrackId,
     spotifyUri,
     spotifyUrl,
     client_request_id,
@@ -12863,9 +13132,11 @@ app.post("/api/request/create", async (req, res) => {
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
     : 0;
   const normalizedSourceProvider = normalizeLibraryText(sourceProvider, 80) || null;
+  const normalizedSourceTrackId = normalizeLibraryText(sourceTrackId, 128) || null;
+  const normalizedExternalTrackId = normalizeLibraryText(externalTrackId, 256) || null;
   const normalizedSpotifyUri = normalizeLibraryText(spotifyUri, 256) || null;
   const normalizedSpotifyUrl = normalizeLibraryText(spotifyUrl, 512) || null;
-  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
+  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSourceTrackId, normalizedExternalTrackId, normalizedSpotifyUri, normalizedSpotifyUrl });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash: resolvedPatronDeviceIdHash,
@@ -13030,6 +13301,8 @@ app.post("/api/request/create", async (req, res) => {
     subtitle: isStraightTip ? 'Supported the talent directly!' : (subtitle || ''),
     albumArt: albumArt || (targetType === 'music' ? "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop" : undefined),
     sourceProvider: isStraightTip ? null : normalizedSourceProvider,
+    sourceTrackId: isStraightTip ? null : normalizedSourceTrackId,
+    externalTrackId: isStraightTip ? null : normalizedExternalTrackId,
     spotifyUri: isStraightTip ? null : normalizedSpotifyUri,
     spotifyUrl: isStraightTip ? null : normalizedSpotifyUrl,
     senderName: senderName || "Anonymous Patron",
@@ -14806,6 +15079,7 @@ app.post("/api/music/search", (req, res) => {
     const libraryRows = await businessDb
       .select({
         id: performerLibraryTracks.id,
+        externalTrackId: performerLibraryTracks.externalTrackId,
         title: performerLibraryTracks.title,
         artist: performerLibraryTracks.artist,
         album: performerLibraryTracks.album,
@@ -14845,6 +15119,8 @@ app.post("/api/music/search", (req, res) => {
         })),
         ...libraryRows.map((row) => ({
           id: row.id,
+          sourceTrackId: row.id,
+          externalTrackId: row.externalTrackId,
           title: row.title,
           artist: row.artist,
           albumArt: row.artworkUrl || albumArt,

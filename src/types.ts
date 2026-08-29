@@ -64,6 +64,8 @@ export interface RequestItem {
   subtitle: string;       // Artist, description, or empty
   albumArt?: string;      // Optional URL
   sourceProvider?: string | null;
+  sourceTrackId?: string | null;
+  externalTrackId?: string | null;
   spotifyUri?: string | null;
   spotifyUrl?: string | null;
   senderName: string;
