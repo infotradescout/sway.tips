@@ -79,6 +79,8 @@ Already present:
 - exact local paths accepted only through the booth sync-key lane
 - VirtualDJ exact-path load and bidirectional transport/state through the
   official Network Control extension
+- no-install, no-terminal Windows room connector for that VirtualDJ path;
+  advanced Node bridge remains available for localhost hardware endpoints
 - one-way generic Web MIDI transport for manually mapped DJ applications
 
 Not included:

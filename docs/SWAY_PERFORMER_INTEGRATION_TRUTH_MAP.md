@@ -1,10 +1,13 @@
 # Sway Performer Integration Truth Map
 
-Date: 2026-08-28
+Date: 2026-08-30
 
 ## Decision
 
-The current repo supports a real browser-based room, sharing, streaming-output, and controller workflow. It still does not load or play tracks inside third-party DJ software.
+The current repo supports a real browser-based room, sharing, streaming-output,
+and controller workflow. For VirtualDJ 2023+ Pro specifically, Sway can now
+load a trusted exact local path (or search fallback), control transport, and
+receive deck state through VirtualDJ's official Network Control extension.
 
 The performer surface is currently:
 
@@ -14,12 +17,14 @@ The performer surface is currently:
 - branded and transparent streaming overlay routes
 - persistent keyboard and WebMIDI room controls
 - Stream Deck / Bitfocus Companion HTTP control presets
+- a no-terminal Windows room connector for VirtualDJ
 
 It is not yet:
 
 - a built-in third-party audio playback engine
 - native OBS scene/source automation
-- a DJ software companion
+- a signed, installed desktop companion
+- a direct deck integration for Serato, rekordbox, Traktor, or djay
 - an audio/video broadcast engine
 
 ## Product Reality
@@ -128,17 +133,22 @@ Implemented:
 - short-lived cloud control tokens
 - downloadable Stream Deck / Bitfocus Companion HTTP button presets
 - local control bridge for MIDI routers, foot pedals, and header-less tools
+- downloadable, no-install Windows room connector for VirtualDJ
+- durable playback command claim, local outcome ledger, acknowledgement, and
+  low-rate deck state
 
 Repo evidence:
 
 - `src/components/TalentDashboard.tsx`
 - `server.ts`
 - `scripts/sway-control-bridge.mjs`
+- `src/server/windows-booth-launcher.ts`
 - `docs/SWAY_CONTROL_BRIDGE.md`
 
 Verdict:
 
-- real Sway room control; not music-deck control
+- real Sway room control and real VirtualDJ deck control; the primary Windows
+  path no longer requires Node, a repository checkout, or terminal commands
 
 ## What Is Not A Native Integration
 
@@ -149,6 +159,8 @@ Current truth:
 - patron search can use manual entry, synced performer library rows, curated setlists, and a configured Spotify metadata catalog search
 - Spotify catalog search is metadata/search only; it is not proof that Sway can play the track
 - no production environment has a licensed full-track playback integration for Spotify, Apple Music, YouTube Music, TIDAL, Beatport, or SoundCloud
+- VirtualDJ control is different: audio remains in the DJ's lawful local
+  playback stack while Sway sends deck commands
 
 Repo evidence:
 
@@ -169,7 +181,8 @@ Impact:
 - no TIDAL playback from Sway
 - no SoundCloud playback from Sway
 - no Beatport playback from Sway
-- no verified local library match flow
+- verified exact-path loading exists only when the path entered Sway through a
+  trusted booth sync-key import and VirtualDJ can access that same path
 
 ### 2. Performer-side library matching
 
@@ -178,12 +191,15 @@ Current truth:
 - performer library sources and track sync exist
 - a local bridge can forward a normalized library snapshot to Sway
 - request search can include performer library rows
-- this is metadata/availability sync, not audio playback or deck loading
-- no deck-ready availability indicator
+- trusted synced paths can be sent to VirtualDJ for exact-path deck loading
+- browser uploads deliberately strip executable local paths; other DJ apps do
+  not yet receive exact-path loading or deck acknowledgement
+- the cockpit still needs a clearer per-request deck-ready availability badge
 
 Verdict:
 
-- real first layer, still missing playback and deck integration
+- real availability and VirtualDJ loading layer; cross-app deck readiness and
+  clearer operator feedback remain incomplete
 
 ### 3. OBS integration
 
@@ -253,6 +269,7 @@ Verdict:
 - branded and transparent overlay/browser display
 - persistent keyboard/WebMIDI room controls
 - Stream Deck/Companion room-control preset
+- one-click Windows VirtualDJ room connector
 - real production music search or clearly manual request entry
 - truthful performer copy about what is and is not integrated
 
@@ -275,10 +292,9 @@ Verdict:
 ### Not present and should not be implied
 
 - native OBS scene/source automation
-- DJ deck software sync
-- playlist/crate import
-- automatic library match
-- automatic song loading to deck
+- native DJ deck sync outside VirtualDJ
+- signed desktop installers or automatic software updates
+- automatic deck loading outside VirtualDJ
 - native push-to-stream scene triggers
 - Spotify/SoundCloud/third-party catalog playback from Sway
 
@@ -293,13 +309,14 @@ The repo is currently strongest at:
 - queue management
 - manual OBS/Streamlabs browser outputs
 - keyboard, MIDI, Stream Deck, and Companion control of Sway room actions
-- synced library metadata
+- synced library metadata and DJ export/audio-folder import
+- exact-path VirtualDJ loading, transport, command acknowledgement, and deck state
 
 The repo is currently weakest at:
 
 - music ecosystem integration
 - lawful audio playback
-- native deck software integration
+- native deck software integration beyond VirtualDJ
 - stream/broadcast integration
 - “this fits into a real DJ set” tooling
 
@@ -307,16 +324,17 @@ The repo is currently weakest at:
 
 1. Lock the performer MVP story in product copy:
    audience joins room, pays request/tip, performer manages queue, overlay can be opened in browser or OBS browser source manually
-2. Decide the first real music source:
-   one production connector with a clear capability matrix, or explicit manual-entry-only mode
-3. Add performer-side “can I actually play this?” workflow:
-   available, not available, manual fallback
+2. Prove the first real music source with booth users:
+   harden the Windows VirtualDJ connector, then ship a signed/updatable desktop
+   package if usage justifies it
+3. Make “can I actually play this?” obvious per request:
+   exact-path ready, search fallback, unavailable, and manual fallback
 4. Strengthen overlay workflow for broadcast use:
    browser-source guidance, cleaner now-playing/up-next states, display-safe controls
 5. Define the lawful audio source strategy:
    owned uploads, local files, approved provider playback, and prohibited provider claims
-6. Only then consider deeper integrations:
-   OBS automation, DJ software sync, library import
+6. Expand only where the provider supports it:
+   deeper Serato/rekordbox/Traktor/djay adapters and OBS automation
 
 ## Immediate Repo Truth
 
@@ -324,7 +342,8 @@ Do not claim the current app has:
 
 - third-party music playback integrations
 - OBS integration
-- DJ software integrations
+- universal DJ software integration
+- direct Serato, rekordbox, Traktor, or djay track loading/state
 - built-in audio console playback
 
 Do claim the current app has:
@@ -335,3 +354,5 @@ Do claim the current app has:
 - room QR/link sharing
 - browser overlay route
 - performer library metadata sync
+- VirtualDJ 2023+ Pro control through the official Network Control extension
+- no-terminal Windows VirtualDJ booth connection

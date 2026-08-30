@@ -47,6 +47,7 @@ import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
 import { createPlaybackControlStore } from "./src/server/playback-control-store";
+import { buildWindowsBoothLauncher } from "./src/server/windows-booth-launcher";
 import {
   isPlaybackSourceKey,
   isUuid as isPlaybackUuid,
@@ -6042,15 +6043,18 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
     });
   });
 
-  const requestOrigin = typeof req.headers.origin === 'string' && req.headers.origin.trim()
-    ? req.headers.origin.trim().replace(/\/+$/, '')
-    : null;
-  const configuredBaseUrl = process.env.SWAY_APP_BASE_URL?.trim().replace(/\/+$/, '') || null;
-  const fallbackBaseUrl = `${req.protocol}://${req.get('host')}`;
-  const swayUrl = configuredBaseUrl || requestOrigin || fallbackBaseUrl;
+  // The room token is embedded in the short-lived booth launcher. Never let a
+  // caller-selected Origin or Host decide where that launcher sends it.
+  const swayUrl = resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, '');
   const bridgeCommand = gigId
     ? `npm run control:bridge -- --gig-id ${gigId} --auth-token ${bridgeSession.token} --sway-url ${swayUrl}`
     : null;
+  const windowsLauncher = buildWindowsBoothLauncher({
+    swayUrl,
+    gigId,
+    bridgeToken: bridgeSession.token,
+    expiresAt: bridgeSession.expiresAt
+  });
 
   if (businessDb) {
     await writeAuditEvent(businessDb, {
@@ -6066,7 +6070,8 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
         expiresAt: bridgeSession.expiresAt.toISOString(),
         ttlHours: 6,
         sessionType: 'control_bridge',
-        tokenTransport: 'bridge_auth_token'
+        tokenTransport: 'bridge_auth_token',
+        availableLaunchers: ['windows_cmd_v1']
       }
     });
   }
@@ -6078,6 +6083,7 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
     gigId,
     swayUrl,
     command: bridgeCommand,
+    windowsLauncher,
     tokenTransport: 'auth-token'
   });
 });
