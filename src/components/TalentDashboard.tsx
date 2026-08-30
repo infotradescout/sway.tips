@@ -229,6 +229,14 @@ type HardwareBinding = {
 
 type HardwareBindingMap = Record<HardwareActionId, HardwareBinding>;
 
+type DownloadableBoothLauncher = {
+  filename: string;
+  contentType: 'application/x-msdos-program';
+  contentBase64: string;
+  sha256: string;
+  expiresAt: string;
+};
+
 const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1';
 const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1';
 
@@ -411,6 +419,21 @@ function downloadJsonFile(filename: string, payload: unknown) {
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
   anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(objectUrl);
+}
+
+function downloadBase64File(file: DownloadableBoothLauncher) {
+  const binary = window.atob(file.contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const blob = new Blob([bytes], { type: file.contentType || 'application/octet-stream' });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = file.filename;
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
@@ -777,11 +800,13 @@ function HardwareMappingPanel({
   controlsEnabled,
   bridgeReady,
   bridgeCommand,
+  windowsBoothLauncher,
   bridgeTokenStatus,
   bridgeTokenMessage,
   onLearn,
   onClear,
   onIssueBridgeToken,
+  onDownloadWindowsBooth,
   onDownloadBridgePreset
 }: {
   bindings: HardwareBindingMap;
@@ -790,11 +815,13 @@ function HardwareMappingPanel({
   controlsEnabled: boolean;
   bridgeReady: boolean;
   bridgeCommand: string | null;
+  windowsBoothLauncher: DownloadableBoothLauncher | null;
   bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
   bridgeTokenMessage: string | null;
   onLearn: (actionId: HardwareActionId) => void;
   onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
   onIssueBridgeToken: () => void;
+  onDownloadWindowsBooth: () => void;
   onDownloadBridgePreset: () => void;
 }) {
   const midiLabel = !controlsEnabled
@@ -822,11 +849,11 @@ function HardwareMappingPanel({
       <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Local bridge token</p>
-            <p className="mt-1 truncate text-[10px] text-slate-400">
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Booth connection</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
               {bridgeTokenMessage ?? (bridgeReady
-                ? 'Create a room-scoped 6-hour token for the booth bridge, Stream Deck, or Companion.'
-                : 'Start a room before creating a Stream Deck or Companion preset.')}
+                ? 'Create a six-hour connection for VirtualDJ, Stream Deck, or Companion.'
+                : 'Start a room before connecting booth software or hardware.')}
             </p>
           </div>
           <button
@@ -835,22 +862,47 @@ function HardwareMappingPanel({
             disabled={bridgeTokenStatus === 'submitting' || !bridgeReady}
             className="shrink-0 rounded-lg bg-cyan-500 px-3 py-2 text-[10px] font-black uppercase text-slate-950 disabled:opacity-50"
           >
-            {bridgeTokenStatus === 'submitting' ? 'Creating' : bridgeReady ? 'Create' : 'No room'}
+            {bridgeTokenStatus === 'submitting'
+              ? 'Creating'
+              : bridgeTokenStatus === 'success'
+                ? 'Replace connection'
+                : bridgeReady
+                  ? 'Create connection'
+                  : 'No room'}
           </button>
         </div>
-        {bridgeCommand ? (
-          <div className="mt-3 space-y-2">
-            <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-slate-950 p-2 font-mono text-[10px] leading-relaxed text-cyan-100">
-              {bridgeCommand}
-            </pre>
+        {windowsBoothLauncher ? (
+          <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3">
+            <p className="text-xs font-black text-white">Connect VirtualDJ on this Windows computer</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-emerald-100/80">
+              Download the room file, double-click it, and follow the short VirtualDJ setup. Leave its Sway Booth window open during the room.
+            </p>
             <button
               type="button"
-              onClick={onDownloadBridgePreset}
-              data-sway-control-bridge-preset-download="true"
-              className="w-full rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-fuchsia-100"
+              onClick={onDownloadWindowsBooth}
+              data-sway-windows-booth-download="true"
+              className="mt-3 min-h-11 w-full rounded-xl bg-emerald-400 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-950 hover:bg-emerald-300"
             >
-              Download button preset
+              Download Sway Booth for Windows
             </button>
+          </div>
+        ) : null}
+        {bridgeCommand ? (
+          <div className="mt-3 space-y-2">
+            <details className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+              <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wide text-slate-300">Advanced Stream Deck / Companion setup</summary>
+              <pre className="mt-3 max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-slate-950 p-2 font-mono text-[10px] leading-relaxed text-cyan-100">
+                {bridgeCommand}
+              </pre>
+              <button
+                type="button"
+                onClick={onDownloadBridgePreset}
+                data-sway-control-bridge-preset-download="true"
+                className="mt-2 w-full rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-fuchsia-100"
+              >
+                Download button preset
+              </button>
+            </details>
           </div>
         ) : null}
       </div>
@@ -904,6 +956,7 @@ function PerformerConnectionsWorkspace({
   bindings,
   learnTarget,
   bridgeCommand,
+  windowsBoothLauncher,
   bridgeTokenStatus,
   bridgeTokenMessage,
   previewMode,
@@ -911,6 +964,7 @@ function PerformerConnectionsWorkspace({
   onLearn,
   onClear,
   onIssueBridgeToken,
+  onDownloadWindowsBooth,
   onDownloadBridgePreset,
   onBackToRoom,
   onOpenLibraryConnections
@@ -922,6 +976,7 @@ function PerformerConnectionsWorkspace({
   bindings: HardwareBindingMap;
   learnTarget: HardwareActionId | null;
   bridgeCommand: string | null;
+  windowsBoothLauncher: DownloadableBoothLauncher | null;
   bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
   bridgeTokenMessage: string | null;
   previewMode: boolean;
@@ -929,6 +984,7 @@ function PerformerConnectionsWorkspace({
   onLearn: (actionId: HardwareActionId) => void;
   onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
   onIssueBridgeToken: () => void;
+  onDownloadWindowsBooth: () => void;
   onDownloadBridgePreset: () => void;
   onBackToRoom: () => void;
   onOpenLibraryConnections: () => void;
@@ -1008,11 +1064,13 @@ function PerformerConnectionsWorkspace({
             controlsEnabled={controlsEnabled}
             bridgeReady={roomActive && !previewMode}
             bridgeCommand={bridgeCommand}
+            windowsBoothLauncher={windowsBoothLauncher}
             bridgeTokenStatus={bridgeTokenStatus}
             bridgeTokenMessage={bridgeTokenMessage}
             onLearn={onLearn}
             onClear={onClear}
             onIssueBridgeToken={onIssueBridgeToken}
+            onDownloadWindowsBooth={onDownloadWindowsBooth}
             onDownloadBridgePreset={onDownloadBridgePreset}
           />
 
@@ -1182,11 +1240,23 @@ export default function TalentDashboard({
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [bridgeTokenMessage, setBridgeTokenMessage] = useState<string | null>(null);
   const [bridgeCommand, setBridgeCommand] = useState<string | null>(null);
+  const [windowsBoothLauncher, setWindowsBoothLauncher] = useState<DownloadableBoothLauncher | null>(null);
   const [bridgeToken, setBridgeToken] = useState<string | null>(null);
   const [bridgeSwayUrl, setBridgeSwayUrl] = useState<string | null>(null);
+  const writableGigIdRef = useRef(writableGigId);
+  writableGigIdRef.current = writableGigId;
   const hardwareBindingsRef = useRef(hardwareBindings);
   const hardwareLearnTargetRef = useRef<HardwareActionId | null>(null);
   const runHardwareActionRef = useRef<(actionId: HardwareActionId) => void>(() => {});
+
+  useEffect(() => {
+    setBridgeTokenStatus('idle');
+    setBridgeTokenMessage(null);
+    setBridgeCommand(null);
+    setWindowsBoothLauncher(null);
+    setBridgeToken(null);
+    setBridgeSwayUrl(null);
+  }, [writableGigId]);
 
   useEffect(() => {
     const syncWorkspaceFromLocation = () => {
@@ -1799,28 +1869,55 @@ export default function TalentDashboard({
 
   const issueBridgeToken = async () => {
     if (!writableGigId || bridgeTokenStatus === 'submitting') return;
+    const issuedGigId = writableGigId;
     setBridgeTokenStatus('submitting');
     setBridgeTokenMessage(null);
     setBridgeCommand(null);
+    setWindowsBoothLauncher(null);
     setBridgeToken(null);
     setBridgeSwayUrl(null);
 
     try {
       const response = await postSessionJson('/api/talent/control-bridge/token');
       const data = await response.json().catch(() => null);
+      if (writableGigIdRef.current !== issuedGigId) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to create bridge token.');
       }
 
+      const launcher = data?.windowsLauncher;
+      const validLauncher = launcher
+        && data?.gigId === issuedGigId
+        && typeof launcher.filename === 'string'
+        && /^sway-booth-[a-zA-Z0-9_-]+\.cmd$/.test(launcher.filename)
+        && launcher.contentType === 'application/x-msdos-program'
+        && typeof launcher.contentBase64 === 'string'
+        && launcher.contentBase64.length > 0
+        && launcher.contentBase64.length <= 1_000_000
+        && /^[a-zA-Z0-9+/]+={0,2}$/.test(launcher.contentBase64)
+        && typeof launcher.sha256 === 'string'
+        && /^[a-f0-9]{64}$/.test(launcher.sha256)
+        && typeof launcher.expiresAt === 'string'
+        && Number.isFinite(Date.parse(launcher.expiresAt))
+        && Date.parse(launcher.expiresAt) > Date.now();
+      if (!validLauncher) throw new Error('Sway could not prepare the Windows booth connection. Please try again.');
+
       setBridgeTokenStatus('success');
-      setBridgeTokenMessage(`Token expires ${data?.expiresAt ? new Date(data.expiresAt).toLocaleTimeString() : 'after issue'}.`);
+      setBridgeTokenMessage(`Connection ready until ${new Date(launcher.expiresAt).toLocaleTimeString()}. Keep the room file private; replacing it disconnects the current booth.`);
       setBridgeCommand(typeof data?.command === 'string' ? data.command : null);
+      setWindowsBoothLauncher(launcher as DownloadableBoothLauncher);
       setBridgeToken(typeof data?.bridgeToken === 'string' ? data.bridgeToken : null);
       setBridgeSwayUrl(typeof data?.swayUrl === 'string' ? data.swayUrl : null);
     } catch (error) {
+      if (writableGigIdRef.current !== issuedGigId) return;
       setBridgeTokenStatus('error');
       setBridgeTokenMessage(error instanceof Error ? error.message : 'Unable to create bridge token.');
     }
+  };
+
+  const downloadWindowsBooth = () => {
+    if (!windowsBoothLauncher) return;
+    downloadBase64File(windowsBoothLauncher);
   };
 
   const downloadBridgePreset = () => {
@@ -2419,6 +2516,7 @@ export default function TalentDashboard({
           bindings={hardwareBindings}
           learnTarget={hardwareLearnTarget}
           bridgeCommand={bridgeCommand}
+          windowsBoothLauncher={windowsBoothLauncher}
           bridgeTokenStatus={bridgeTokenStatus}
           bridgeTokenMessage={bridgeTokenMessage}
           previewMode={previewMode}
@@ -2426,6 +2524,7 @@ export default function TalentDashboard({
           onLearn={setHardwareLearnTarget}
           onClear={clearHardwareInput}
           onIssueBridgeToken={issueBridgeToken}
+          onDownloadWindowsBooth={downloadWindowsBooth}
           onDownloadBridgePreset={downloadBridgePreset}
           onBackToRoom={() => openInactiveWorkspace('room')}
           onOpenLibraryConnections={() => {

@@ -4,9 +4,11 @@
 
 Sway is the room controller. The audio stays in the DJ's playback source.
 
-The booth-side bridge connects a live Sway room to VirtualDJ and provides
-authenticated localhost buttons for Stream Deck, Bitfocus Companion, MIDI
-routers, foot pedals, and scripts. It supports:
+The booth-side connector links a live Sway room to VirtualDJ. The primary
+Windows path is a generated, no-install room file; it does not require Node,
+the Sway repository, or a terminal. An advanced Node bridge additionally
+provides authenticated localhost buttons for Stream Deck, Bitfocus Companion,
+MIDI routers, foot pedals, and scripts. Together these paths support:
 
 - exact-path load of a synced crowd pick
 - play, pause, stop, cue, next, and previous
@@ -24,7 +26,7 @@ Full bidirectional source control requires:
 - VirtualDJ 2023 or newer
 - a VirtualDJ Pro license
 - VirtualDJ's official **Network Control** extension
-- the Sway Control Bridge running on the booth computer
+- a Sway booth connector running on the booth computer
 
 Official setup and endpoint reference:
 `https://virtualdj.com/wiki/NetworkControlPlugin.html`
@@ -38,12 +40,32 @@ return deck state.
 Spotify is metadata/import/open-only. Sway does not control Spotify playback.
 TIDAL does not have a direct Sway connector in this release.
 
-## Start the bridge
+## Connect VirtualDJ on Windows
 
 1. In the Sway performer app, start or select the live room.
-2. Open **Connections** and create a room-scoped bridge token.
-3. Install/enable VirtualDJ Network Control and note its local URL/password.
-4. Run the dashboard-provided command on the booth computer:
+2. Open **Connections** and select **Create connection**.
+3. Download **Sway Booth for Windows** on the computer running VirtualDJ.
+4. Double-click the downloaded `.cmd` room file.
+5. Follow its prompts for the Network Control port, target deck, and optional
+   password. Leave the Sway Booth window open during the room.
+
+The generated file contains a room-scoped token, expires after six hours, and
+only contacts the configured Sway app origin plus VirtualDJ on
+`127.0.0.1`. Keep it private and download a new file for a later room.
+
+The connector explains where to install/enable VirtualDJ Network Control and
+checks the local endpoint before it starts polling Sway. No audio file is read,
+uploaded, decoded, or relayed by the connector.
+
+## Advanced Node bridge
+
+Use the advanced bridge when the booth needs Stream Deck, Companion, MIDI
+router, foot-pedal, or script endpoints, or when VirtualDJ runs on macOS.
+This path currently requires Node and a checkout of the Sway repository.
+
+1. Create the six-hour connection in **Connections**.
+2. Expand **Advanced Stream Deck / Companion setup**.
+3. Run the dashboard-provided command on the booth computer:
 
 ```bash
 npm run control:bridge -- \
@@ -158,6 +180,9 @@ loopback VirtualDJ process from the cloud.
   flags; do not use them on public venue networks.
 - Browser library imports cannot persist executable local paths. Exact paths
   enter Sway only through a source-specific booth sync key.
+- The downloadable Windows file embeds its expiring room token, sends it only
+  to Sway's server-configured app origin, and never accepts a caller-selected
+  remote VirtualDJ host.
 
 ## Failure behavior
 

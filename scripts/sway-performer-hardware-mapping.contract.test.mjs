@@ -39,7 +39,7 @@ for (const term of [
   "window.dispatchEvent(new CustomEvent('sway:playback-action'",
   'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY',
   'window.localStorage.setItem(HARDWARE_LISTENING_STORAGE_KEY',
-  'Local bridge token',
+  'Booth connection',
   'onIssueBridgeToken'
 ]) {
   if (!talentDashboard.includes(term)) {
