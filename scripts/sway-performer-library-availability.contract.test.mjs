@@ -52,10 +52,14 @@ for (const term of [
   "app.post('/api/talent/library/sources'",
   "app.post('/api/talent/library/sources/:sourceId/rotate-key'",
   "app.post('/api/talent/library/sources/:sourceId/revoke'",
+  "app.post('/api/library/import-file'",
   "app.post('/api/library/sync'",
   'performerLibraryTracks',
   'performerLibrarySources',
+  "metadata: { importMode: 'browser_file' }",
   'replaceExisting',
+  'buildWindowsLibrarySyncLauncher',
+  "express.text({ type: ['text/plain', 'application/octet-stream'], limit: '10mb' })",
   'removedCount',
   "app.post(\"/api/music/search\"",
   "integrationMode: 'performer_library'"
@@ -89,18 +93,26 @@ for (const term of [
   'Catalog is connected automatically.',
   'Your owned or cleared audio stored in Sway.',
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
-  'Advanced library connections',
-  'Booth library bridge',
-  'rekordbox XML, Traktor NML, VirtualDJ XML, M3U/CSV, or an audio folder',
-  'Create linked source',
+  'Open reusable booth helper',
+  'Make a reusable booth helper',
+  'rekordbox, Traktor, VirtualDJ, M3U, or CSV',
+  'Create private Windows helper',
+  'Download Windows music helper',
+  'data-sway-windows-library-helper-download="true"',
   'Sync endpoint',
   'x-sway-library-key',
-  'Rotate key',
-  'Revoke source',
+  'Make fresh helper',
+  'role="alertdialog"',
+  'Disconnect source',
+  'Disconnect source',
   'Tracks available:',
   'npm run library:bridge -- --sync-key'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing linked-source UX term: ${term}`);
+}
+
+if (talentDashboard.includes('window.confirm(')) {
+  failures.push('Linked-source key replacement and revoke must use the accessible in-page confirmation, not a blocking browser dialog.');
 }
 
 for (const term of [

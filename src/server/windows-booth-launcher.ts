@@ -341,7 +341,7 @@ while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
   Start-Sleep -Milliseconds 750
 }
 
-Write-Host 'This room connection expired. Download a fresh Sway Booth file from Connections.' -ForegroundColor Yellow
+Write-Host 'This room connection expired. Open Room Tools in Sway and download a fresh room file.' -ForegroundColor Yellow
 `.trimStart();
 }
 

@@ -125,9 +125,9 @@ const performerHome = readFileSync(join(root, 'src/components/PerformerAccountHo
 for (const workspace of [
   "{ id: 'home', label: 'Home'",
   "{ id: 'room', label: 'Live Room'",
-  "{ id: 'connections', label: 'Connections'",
-  "{ id: 'library', label: 'Music'",
-  "{ id: 'catalog', label: 'Files'",
+  "{ id: 'connections', label: 'Sources'",
+  "{ id: 'library', label: 'Requests'",
+  "{ id: 'catalog', label: 'Uploads'",
   "{ id: 'profile', label: 'Public Page'",
   "{ id: 'account', label: 'Money'"
 ]) {

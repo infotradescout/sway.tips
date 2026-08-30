@@ -49,6 +49,7 @@ type PublicPerformerProfile = {
   displayName: string;
   stageName: string | null;
   primaryRole: string | null;
+  roles: string[];
   handle: string | null;
   bio: string | null;
   headline: string | null;
@@ -180,6 +181,11 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
 
         setProfile({
           ...data.performer,
+          roles: Array.isArray(data.performer.roles)
+            ? data.performer.roles
+            : data.performer.primaryRole
+              ? [data.performer.primaryRole]
+              : [],
           booking: data.performer.booking || {
             email: null,
             phone: null,
@@ -336,6 +342,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   });
   const pageKindLabel = resolvePublicProfilePageKindLabel({
     primaryRole: profile.primaryRole,
+    roles: profile.roles,
     specialties: profile.specialties,
     isPreview: profile.isPreview
   });

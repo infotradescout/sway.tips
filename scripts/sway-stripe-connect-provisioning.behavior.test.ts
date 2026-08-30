@@ -68,6 +68,9 @@ function createIdempotentStripe() {
     async createOnboardingLink() {
       return { url: 'https://connect.stripe.test/onboarding' };
     },
+    async createManagementLink() {
+      return { url: 'https://connect.stripe.test/management' };
+    },
     async getAccountStatus() {
       return { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false };
     },

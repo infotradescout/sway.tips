@@ -6,24 +6,37 @@ export default function PerformerAccountHome({
   displayName,
   roleLabel,
   stripeReady,
+  musicStatus,
   paymentMode,
   emailVerified,
   onStartRoom,
-  onOpenLibrary
+  onOpenSources
 }: {
   performerHandle?: string | null;
   displayName: string;
   roleLabel: string;
   stripeReady: boolean;
+  musicStatus: 'loading' | 'ready' | 'empty' | 'error';
   paymentMode: 'test' | 'live' | 'unavailable';
   emailVerified: boolean;
   onStartRoom: () => void;
-  onOpenLibrary: () => void;
+  onOpenSources: () => void;
 }) {
   const publicPath = performerHandle ? '/talent/profile?preview=1' : null;
   const readiness = [
     { done: emailVerified, label: 'Verify your account email', href: '/account/resend-verification' },
     { done: Boolean(performerHandle), label: 'Set your performer name and public handle', href: '/talent/profile' },
+    {
+      done: musicStatus === 'ready',
+      pending: musicStatus === 'loading',
+      problem: musicStatus === 'error',
+      label: musicStatus === 'loading'
+        ? 'Checking music for audience requests…'
+        : musicStatus === 'error'
+          ? 'Check your saved music again'
+          : 'Add music for audience requests',
+      href: '/talent/connections'
+    },
     { done: stripeReady, label: 'Finish money setup for paid-mode rehearsal', optional: true, href: '/talent/account' }
   ];
 
@@ -61,9 +74,11 @@ export default function PerformerAccountHome({
         <ol className="mt-5 space-y-2" aria-label="First room readiness">
           {readiness.map((item) => (
             <li key={item.label} className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm">
-              {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <Circle className="h-4 w-4 shrink-0 text-slate-500" />}
+              {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <Circle className={`h-4 w-4 shrink-0 ${item.problem ? 'text-amber-300' : 'text-slate-500'}`} />}
               {item.done ? (
                 <span className="text-slate-300">{item.label}</span>
+              ) : item.pending ? (
+                <span role="status" className="text-slate-400">{item.label}</span>
               ) : (
                 <a href={item.href} className="font-bold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white">
                   {item.label}{item.optional ? ' (only for paid rooms)' : ''}
@@ -87,9 +102,9 @@ export default function PerformerAccountHome({
             <Radio className="h-4 w-4" aria-hidden="true" />
             Start first room
           </button>
-          <button type="button" onClick={onOpenLibrary} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300 hover:text-white">
+          <button type="button" onClick={onOpenSources} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300 hover:text-white">
             <Music2 className="h-4 w-4" aria-hidden="true" />
-            Prepare request library
+            Add or update music
           </button>
           {publicPath ? (
             <a href={publicPath} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-black text-white transition hover:border-white/30 sm:col-span-2">

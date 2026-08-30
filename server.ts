@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -48,6 +48,8 @@ import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap"
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
 import { createPlaybackControlStore } from "./src/server/playback-control-store";
 import { buildWindowsBoothLauncher } from "./src/server/windows-booth-launcher";
+import { buildWindowsLibrarySyncLauncher } from "./src/server/windows-library-sync-launcher";
+import { parseDjLibraryText } from "./src/dj-library-file-parser";
 import {
   isPlaybackSourceKey,
   isUuid as isPlaybackUuid,
@@ -95,6 +97,10 @@ import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from 
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
 import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
+import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
+import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
+import { preparePayoutSetup } from "./src/server/payout-setup";
+import { canConfigurePayoutDestination, normalizePayoutDestinationKind } from "./src/payout-destination";
 import { handleStripeConnectReturn } from "./src/server/stripe-connect-return";
 import { reconcileStripeConnectPerformerStatus } from "./src/server/stripe-connect-status";
 import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-connect-webhook";
@@ -106,7 +112,7 @@ import {
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
-  normalizePublicProfilePrimaryRole,
+  normalizePublicProfileRoles,
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
   normalizePublicProfileUrl,
@@ -355,11 +361,18 @@ const stripeConnectService = createConfiguredStripeConnectService(process.env);
 const stripeConnectOnboardingStore = businessDb
   ? createStripeConnectOnboardingStore(businessDb)
   : null;
+const payoutDestinationStore = businessDb
+  ? createPayoutDestinationStore(businessDb)
+  : null;
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
   paymentProviderConfigured: Boolean(paymentProvider),
   stripeConnectConfigured: Boolean(stripeConnectService),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
+});
+const payoutDestinationCapabilities = resolvePayoutDestinationCapabilities({
+  env: process.env,
+  connectEnabled: liveRoomPaymentRuntimeConfig.connectEnabled
 });
 const testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds({
   paymentMode: liveRoomPaymentRuntimeConfig.mode,
@@ -1587,7 +1600,7 @@ const privacyPageHtml = renderStaticDocument(
       <li>project membership, collaborator connections, selected-file access grants, comments, timecodes, change requests, approvals, revocations, and related audit events</li>
       <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
       <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
-      <li>payment processor identifiers and related lifecycle status</li>
+      <li>payment processor identifiers, the selected payout-destination type, and related lifecycle status; Sway does not store full payout bank or card numbers</li>
       <li>native ticket offer, order, price-and-terms snapshot, admission, refund, performer-transfer, and reconciliation records when native ticket sales are enabled</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
@@ -1658,6 +1671,10 @@ const payoutTermsPageHtml = renderStaticDocument(
     <p>Sway must not promise payouts before required verification and payout enablement are complete.</p>
     <ul>
       <li>performer payout access may require identity, tax, banking, or other verification steps</li>
+      <li>performers may choose an eligible bank account, debit card, Cash App direct-deposit account, or Venmo direct-deposit account during secure provider setup</li>
+      <li>Cash App and Venmo destinations use routing and account numbers supplied by those services; Sway does not send payouts to a username, phone number, Venmo handle, or $cashtag</li>
+      <li>Sway stores the selected destination type, while the payment provider collects and retains full bank or card details</li>
+      <li>debit-card support, payout speed, limits, and any fee depend on provider eligibility shown during setup</li>
       <li>processor rules, disputes, reserve periods, and compliance reviews may delay payout timing</li>
       <li>unverified performers must not be shown payout promises that the processor cannot support</li>
     </ul>
@@ -2145,6 +2162,7 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         charges_enabled: performers.chargesEnabled,
         payouts_enabled: performers.payoutsEnabled,
         stripe_connected_account_id: performers.stripeConnectedAccountId,
+        payout_destination_kind: performerPayoutPreferences.destinationKind,
         performer_is_active: performers.isActive,
         onboarding_status: performers.onboardingStatus,
         payment_account_status: performers.paymentAccountStatus,
@@ -2155,6 +2173,7 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
+      .leftJoin(performerPayoutPreferences, eq(performerPayoutPreferences.performerId, performers.id))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
@@ -2165,13 +2184,16 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
     const previewStageName = performerRow.preview_metadata && typeof performerRow.preview_metadata === 'object'
       ? normalizePublicProfileText((performerRow.preview_metadata as Record<string, unknown>).stageName, 80)
       : null;
+    const profileRoles = resolvePublicRoles(performerRow.profile_metadata);
+    const previewRoles = resolvePublicRoles(performerRow.preview_metadata);
+    const performerRoles = profileRoles.length ? profileRoles : previewRoles;
     return {
       performer_id: performerRow.performer_id,
       display_name: performerRow.display_name,
       handle: performerRow.handle,
       stage_name: profileStageName || previewStageName,
-      primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)
-        || resolvePublicPrimaryRole(performerRow.preview_metadata),
+      primary_role: performerRoles[0] ?? null,
+      roles: performerRoles,
       specialties: performerRow.specialties?.length
         ? performerRow.specialties
         : performerRow.preview_specialties ?? [],
@@ -2180,6 +2202,7 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       charges_enabled: performerRow.charges_enabled,
       payouts_enabled: performerRow.payouts_enabled,
       stripe_connected_account_id: performerRow.stripe_connected_account_id,
+      payout_destination_kind: normalizePayoutDestinationKind(performerRow.payout_destination_kind),
       money_actions_ready: Boolean(
         performerRow.performer_is_active
         && performerRow.onboarding_status !== 'suspended'
@@ -2380,7 +2403,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       handle: performers.handle,
       bio: performers.bio,
       visibilityState: performers.visibilityState,
-      stripeAccountId: performers.stripeConnectedAccountId
+      stripeAccountId: performers.stripeConnectedAccountId,
+      paymentAccountStatus: performers.paymentAccountStatus
     })
     .from(performers)
     .where(eq(performers.ownerUserId, actorUserId))
@@ -2550,8 +2574,13 @@ function resolvePublicStageName(input: {
 }
 
 function resolvePublicPrimaryRole(metadata: unknown) {
-  if (!metadata || typeof metadata !== 'object') return null;
-  return normalizePublicProfilePrimaryRole((metadata as Record<string, unknown>).primaryRole);
+  return resolvePublicRoles(metadata)[0] ?? null;
+}
+
+function resolvePublicRoles(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') return [];
+  const profileMetadata = metadata as Record<string, unknown>;
+  return normalizePublicProfileRoles(profileMetadata.roles, profileMetadata.primaryRole);
 }
 
 function normalizeLibrarySourceKey(value: unknown) {
@@ -3920,6 +3949,7 @@ app.get('/api/payment/config', (_req, res) => {
           : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
       liveRoomMoneyEnabled: false,
+      payoutDestinationCapabilities,
       testModePlatformBalanceEnabled: false
     });
   }
@@ -3928,6 +3958,7 @@ app.get('/api/payment/config', (_req, res) => {
     publishableKey: liveRoomPaymentRuntimeConfig.publishableKey,
     mode: liveRoomPaymentRuntimeConfig.mode,
     liveRoomMoneyEnabled: true,
+    payoutDestinationCapabilities,
     testModePlatformBalanceEnabled
   });
 });
@@ -9078,6 +9109,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
       primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
+      roles: resolvePublicRoles(profileRow?.metadata),
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -9285,7 +9317,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
   const headline = normalizePublicProfileText(req.body?.headline, 140);
   const stageNameProvided = req.body?.stageName !== undefined;
   const stageName = normalizePublicProfileText(req.body?.stageName, 80);
-  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
+  const rolesProvided = req.body?.roles !== undefined;
+  const roles = normalizePublicProfileRoles(req.body?.roles, req.body?.primaryRole);
+  const primaryRole = roles[0] ?? null;
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -9303,8 +9337,11 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
   }
+  if (rolesProvided && !Array.isArray(req.body?.roles)) {
+    return res.status(422).json({ error: 'Performer roles must be an array.' });
+  }
   if (!primaryRole) {
-    return res.status(422).json({ error: 'Choose your primary role.' });
+    return res.status(422).json({ error: 'Choose at least one performer role.' });
   }
 
   const invalidUrlField = [
@@ -9342,7 +9379,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
     const nextMetadata = mergePublicProfileMetadata(existingProfile?.metadata, {
       ...(stageNameProvided ? { stageName } : {}),
-      primaryRole
+      roles
     });
 
     await tx
@@ -9421,7 +9458,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
         hasBookingEmail: Boolean(bookingEmail),
         hasBookingPhone: Boolean(bookingPhone),
         linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null,
-        primaryRole: primaryRole || null
+        primaryRole,
+        roles,
+        roleCount: roles.length
       }
     });
 
@@ -9458,6 +9497,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         80
       ),
       primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
+      roles: resolvePublicRoles(savedLinks.metadata),
       specialties: specialties ?? [],
       city,
       avatarUrl,
@@ -9513,11 +9553,36 @@ app.post('/api/talent/library/import', async (req, res) => {
       performerId: performerOwner.performerId,
       sourceKey,
       sourceLabel,
-      rawTracks
+      rawTracks,
+      replaceExisting: true
     });
     if (!result.importedCount) {
       throw new Error('Imported tracks must include at least one valid title.');
     }
+
+    await tx
+      .insert(performerLibrarySources)
+      .values({
+        performerId: performerOwner.performerId,
+        sourceKey,
+        sourceLabel,
+        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
+        syncKeyPreview: 'file-import',
+        connectionStatus: 'active',
+        lastSyncedAt: new Date(),
+        metadata: { importMode: 'browser_file' },
+        updatedAt: new Date()
+      })
+      .onConflictDoUpdate({
+        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
+        set: {
+          sourceLabel,
+          connectionStatus: 'active',
+          lastSyncedAt: new Date(),
+          metadata: { importMode: 'browser_file' },
+          updatedAt: new Date()
+        }
+      });
   });
 
   return res.status(202).json({
@@ -9740,6 +9805,7 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
 });
 
 app.post('/api/talent/library/sources', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -9763,7 +9829,7 @@ app.post('/api/talent/library/sources', async (req, res) => {
   const syncKeyHash = hashLibrarySyncKey(syncKey);
   const syncKeyPreview = `${syncKey.slice(0, 12)}...`;
 
-  await businessDb
+  const [created] = await businessDb
     .insert(performerLibrarySources)
     .values({
       performerId: performerOwner.performerId,
@@ -9774,27 +9840,61 @@ app.post('/api/talent/library/sources', async (req, res) => {
       connectionStatus: 'active',
       updatedAt: new Date()
     })
-    .onConflictDoUpdate({
-      target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
-      set: {
-        sourceLabel,
-        syncKeyHash,
-        syncKeyPreview,
-        connectionStatus: 'active',
-        updatedAt: new Date()
-      }
+    .onConflictDoNothing({
+      target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey]
+    })
+    .returning({
+      id: performerLibrarySources.id,
+      sourceLabel: performerLibrarySources.sourceLabel,
+      connectionStatus: performerLibrarySources.connectionStatus
     });
+
+  if (!created) {
+    const [existing] = await businessDb
+      .select({
+        sourceLabel: performerLibrarySources.sourceLabel,
+        syncKeyPreview: performerLibrarySources.syncKeyPreview,
+        connectionStatus: performerLibrarySources.connectionStatus
+      })
+      .from(performerLibrarySources)
+      .where(and(
+        eq(performerLibrarySources.performerId, performerOwner.performerId),
+        eq(performerLibrarySources.sourceKey, sourceKey)
+      ))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(409).json({ error: 'That linked source changed while Sway was opening it. Refresh and try again.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      existing: true,
+      sourceKey,
+      sourceLabel: existing.sourceLabel,
+      syncKeyPreview: existing.syncKeyPreview,
+      connectionStatus: existing.connectionStatus,
+      syncEndpointPath: '/api/library/sync'
+    });
+  }
 
   return res.status(201).json({
     success: true,
+    existing: false,
     sourceKey,
-    sourceLabel,
+    sourceLabel: created.sourceLabel,
     syncKey,
-    syncEndpointPath: '/api/library/sync'
+    syncEndpointPath: '/api/library/sync',
+    windowsHelper: buildWindowsLibrarySyncLauncher({
+      swayUrl: resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, ''),
+      sourceKey,
+      syncKey
+    })
   });
 });
 
 app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -9839,7 +9939,12 @@ app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) =>
     sourceKey: rotated.sourceKey,
     sourceLabel: rotated.sourceLabel,
     syncKey: nextSyncKey,
-    syncEndpointPath: '/api/library/sync'
+    syncEndpointPath: '/api/library/sync',
+    windowsHelper: buildWindowsLibrarySyncLauncher({
+      swayUrl: resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, ''),
+      sourceKey: rotated.sourceKey,
+      syncKey: nextSyncKey
+    })
   });
 });
 
@@ -11039,6 +11144,11 @@ async function createStripeConnectOnboardingUrl(accountId: string) {
   return stripeConnectService.createOnboardingLink({ accountId, refreshUrl, returnUrl });
 }
 
+async function createStripeConnectManagementUrl(accountId: string) {
+  if (!stripeConnectService) throw new Error('stripe_connect_unavailable');
+  return stripeConnectService.createManagementLink(accountId);
+}
+
 app.post('/api/talent/connect/onboard', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -11047,8 +11157,30 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   if (!talentAccess.actor.actorId || !businessDb) {
     return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
   }
-  if (!stripeConnectService || !stripeConnectOnboardingStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).json({ error: 'Stripe test-mode Connect onboarding is unavailable until payment execution is fully configured.' });
+  const destinationKindProvided = Boolean(
+    req.body
+    && typeof req.body === 'object'
+    && Object.prototype.hasOwnProperty.call(req.body, 'destinationKind')
+  );
+  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
+  if (destinationKindProvided && !destinationKind) {
+    return res.status(422).json({ error: 'Choose a supported payout destination.' });
+  }
+  if (!stripeConnectService || !stripeConnectOnboardingStore || !payoutDestinationStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
+    return res.status(503).json({ error: 'Secure payout setup is unavailable until payment execution is fully configured.' });
+  }
+  if (destinationKind && !canConfigurePayoutDestination(
+    destinationKind,
+    liveRoomPaymentRuntimeConfig.mode,
+    payoutDestinationCapabilities
+  )) {
+    return res.status(422).json({
+      error: !payoutDestinationCapabilities[destinationKind]
+        ? 'That payout destination is not certified as enabled in the configured Stripe account.'
+        : liveRoomPaymentRuntimeConfig.mode === 'test'
+        ? 'Cash App and Venmo setup is available only for live payouts. Choose a test bank account or test debit card.'
+        : 'That payout destination is unavailable in the current payment mode.'
+    });
   }
 
   const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
@@ -11057,32 +11189,51 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   }
 
   try {
-    const provisioning = await provisionStripeConnectRecipient({
-      performerId: performerOwner.performerId,
-      ownerUserId: talentAccess.actor.actorId,
-      store: stripeConnectOnboardingStore,
-      stripe: stripeConnectService
+    const useManagementPortal = Boolean(
+      performerOwner.stripeAccountId
+      && performerOwner.paymentAccountStatus === 'payouts_enabled'
+    );
+    const setup = await preparePayoutSetup({
+      useManagementPortal,
+      provision: () => provisionStripeConnectRecipient({
+        performerId: performerOwner.performerId,
+        ownerUserId: talentAccess.actor.actorId!,
+        store: stripeConnectOnboardingStore,
+        stripe: stripeConnectService
+      }),
+      createManagementLink: createStripeConnectManagementUrl,
+      createOnboardingLink: createStripeConnectOnboardingUrl,
+      persistDestination: destinationKind
+        ? () => payoutDestinationStore.selectForOwner({
+            performerId: performerOwner.performerId,
+            ownerUserId: talentAccess.actor.actorId!,
+            destinationKind
+          })
+        : undefined
     });
-    if (provisioning.kind === 'not_found') {
+    if (setup.kind === 'not_found') {
       return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
     }
-    if (provisioning.kind === 'unverified') {
+    if (setup.kind === 'unverified') {
       return res.status(409).json({ error: 'A verified performer account email is required before Stripe onboarding.' });
     }
-    if (provisioning.kind === 'busy') {
+    if (setup.kind === 'busy') {
       res.setHeader('Retry-After', '2');
       return res.status(409).json({ error: 'Stripe onboarding is already being prepared. Retry in a moment.' });
     }
 
-    const { url } = await createStripeConnectOnboardingUrl(provisioning.accountId);
-
-    return res.json({ success: true, url });
+    return res.json({
+      success: true,
+      url: setup.url,
+      ...(destinationKind ? { destinationKind } : {}),
+      setupSurface: setup.setupSurface
+    });
   } catch (error) {
     console.error('Stripe Connect onboarding failed.', {
       message: error instanceof Error ? error.message : 'unknown_error'
     });
     return res.status(502).json({
-      error: 'Stripe Connect onboarding could not be started. Confirm Stripe Connect is enabled for the Stripe account and Render is using test-mode Stripe keys.'
+      error: 'Secure payout setup could not be started. Confirm the payment provider is configured for the current payment mode.'
     });
   }
 });
@@ -11154,6 +11305,87 @@ app.get('/talent/connect/return', async (req, res) => {
     }
   });
 });
+
+app.post('/api/library/import-file',
+  async (req, res, next) => {
+    applyNoStoreHeaders(res);
+    if (!businessDb) return res.status(503).json({ error: 'Library import requires a durable database connection.' });
+
+    const bearerToken = req.header('authorization')?.startsWith('Bearer ')
+      ? req.header('authorization')?.slice('Bearer '.length).trim()
+      : null;
+    const rawSyncKey = req.header('x-sway-library-key')?.trim() || bearerToken || null;
+    if (!rawSyncKey) return res.status(401).json({ error: 'A valid library sync key is required.' });
+
+    try {
+      const syncKeyHash = hashLibrarySyncKey(rawSyncKey);
+      const [sourceRow] = await businessDb
+        .select({
+          id: performerLibrarySources.id,
+          performerId: performerLibrarySources.performerId,
+          sourceKey: performerLibrarySources.sourceKey,
+          sourceLabel: performerLibrarySources.sourceLabel
+        })
+        .from(performerLibrarySources)
+        .where(and(
+          eq(performerLibrarySources.syncKeyHash, syncKeyHash),
+          eq(performerLibrarySources.connectionStatus, 'active')
+        ))
+        .limit(1);
+      if (!sourceRow) return res.status(403).json({ error: 'This music helper is no longer connected. Create a fresh helper in Sway.' });
+      res.locals.libraryImportSource = sourceRow;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  },
+  express.text({ type: ['text/plain', 'application/octet-stream'], limit: '10mb' }),
+  async (req, res) => {
+    const sourceRow = res.locals.libraryImportSource as {
+      id: string;
+      performerId: string;
+      sourceKey: string;
+      sourceLabel: string;
+    };
+    const filename = normalizeLibraryText(req.header('x-sway-library-filename'), 180);
+    const content = typeof req.body === 'string' ? req.body : '';
+    if (!filename || !content) {
+      return res.status(422).json({ error: 'Choose a supported DJ library export and try again.' });
+    }
+
+    try {
+      const parsed = parseDjLibraryText(filename, content);
+      const result = await businessDb.transaction(async (tx) => {
+        const imported = await upsertPerformerLibraryTrackBatch(tx, {
+          performerId: sourceRow.performerId,
+          sourceKey: sourceRow.sourceKey,
+          sourceLabel: sourceRow.sourceLabel,
+          rawTracks: parsed.tracks,
+          replaceExisting: true,
+          allowLocalPaths: false
+        });
+        await tx
+          .update(performerLibrarySources)
+          .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
+          .where(eq(performerLibrarySources.id, sourceRow.id));
+        return imported;
+      });
+      return res.status(202).json({
+        success: true,
+        sourceKey: sourceRow.sourceKey,
+        format: parsed.format,
+        importedCount: result.importedCount,
+        removedCount: result.removedCount,
+        truncated: parsed.truncated,
+        replaceExisting: true
+      });
+    } catch (error) {
+      return res.status(422).json({
+        error: error instanceof Error ? error.message : 'Sway could not read that DJ library export.'
+      });
+    }
+  }
+);
 
 app.post('/api/library/sync', async (req, res) => {
   if (!businessDb) {
@@ -11742,6 +11974,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         displayName: profile.displayName,
         stageName,
         primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
+        roles: resolvePublicRoles(effectiveMetadata),
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,

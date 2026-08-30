@@ -24,7 +24,7 @@ type LinkDraft = {
 };
 
 type ProfileForm = {
-  primaryRole: string;
+  roles: string[];
   stageName: string;
   headline: string;
   specialties: string;
@@ -43,7 +43,7 @@ type ProfileForm = {
 };
 
 const EMPTY_FORM: ProfileForm = {
-  primaryRole: '',
+  roles: [],
   stageName: '',
   headline: '',
   specialties: '',
@@ -141,8 +141,13 @@ export default function PerformerPublicProfileEditor({
         }
 
         const profile = data.profile;
+        const roles = Array.isArray(profile.roles)
+          ? profile.roles.filter((role: unknown): role is string => typeof role === 'string')
+          : text(profile.primaryRole)
+            ? [text(profile.primaryRole)]
+            : [];
         setForm({
-          primaryRole: text(profile.primaryRole),
+          roles,
           stageName: text(profile.stageName),
           headline: text(profile.headline),
           specialties: Array.isArray(profile.specialties) ? profile.specialties.join(', ') : '',
@@ -239,6 +244,11 @@ export default function PerformerPublicProfileEditor({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (previewMode || status === 'saving') return;
+    if (!form.roles.length) {
+      setStatus('error');
+      setMessage('Choose at least one performer role.');
+      return;
+    }
     setStatus('saving');
     setMessage(null);
 
@@ -247,7 +257,8 @@ export default function PerformerPublicProfileEditor({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          primaryRole: form.primaryRole || null,
+          roles: form.roles,
+          primaryRole: form.roles[0] || null,
           stageName: form.stageName,
           headline: form.headline,
           specialties,
@@ -444,21 +455,36 @@ export default function PerformerPublicProfileEditor({
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
         <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className={fieldLabel()}>What kind of performer are you?</span>
-              <select
-                className={fieldClass()}
-                required
-                value={form.primaryRole}
-                onChange={(event) => setForm((current) => ({ ...current, primaryRole: event.target.value }))}
-              >
-                <option value="">Choose one</option>
-                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => (
-                  <option key={role.id} value={role.id}>{role.label}</option>
-                ))}
-              </select>
-              <span className="block text-[11px] leading-5 text-slate-500">This appears at the top of your public page instead of a generic “performer” label.</span>
-            </label>
+            <div className="space-y-2 sm:col-span-2" role="group" aria-labelledby="performer-role-label" aria-describedby="performer-role-help">
+              <span id="performer-role-label" className={fieldLabel()}>What kind of performer are you?</span>
+              <p id="performer-role-help" className="text-[11px] leading-5 text-slate-500">Select all that apply. Every selected role appears on your public page.</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => {
+                  const checked = form.roles.includes(role.id);
+                  return (
+                    <label
+                      key={role.id}
+                      className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold transition ${checked ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-slate-950 text-slate-300 hover:border-cyan-400/40'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        name="performerRoles"
+                        value={role.id}
+                        checked={checked}
+                        onChange={(event) => setForm((current) => ({
+                          ...current,
+                          roles: event.target.checked
+                            ? [...current.roles, role.id]
+                            : current.roles.filter((selectedRole) => selectedRole !== role.id)
+                        }))}
+                        className="h-4 w-4 shrink-0 accent-cyan-400"
+                      />
+                      <span>{role.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Stage name — optional</span>
               <input className={fieldClass()} maxLength={80} value={form.stageName} onChange={(event) => setForm((current) => ({ ...current, stageName: event.target.value }))} placeholder="Only if different from your @handle" />
