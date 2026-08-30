@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { buildWindowsBoothLauncher } from '../src/server/windows-booth-launcher';
+import { buildWindowsLibrarySyncLauncher } from '../src/server/windows-library-sync-launcher';
 
 const gigId = '30000000-0000-4000-8000-000000000071';
 const bridgeToken = "sway-room-token-with-a-'quote-and-enough-entropy";
@@ -87,6 +88,53 @@ assert.throws(
     expiresAt: new Date(Date.now() + (8 * 60 * 60 * 1_000)).toISOString()
   }),
   /short-lived room connection/
+);
+
+const librarySyncKey = `sway_lib_${'ab'.repeat(24)}`;
+const libraryLauncher = buildWindowsLibrarySyncLauncher({
+  swayUrl: 'https://app.sway.tips/',
+  sourceKey: 'main-booth-laptop',
+  syncKey: librarySyncKey
+});
+const libraryContent = Buffer.from(libraryLauncher.contentBase64, 'base64');
+const libraryDecoded = libraryContent.toString('utf8');
+assert.equal(libraryLauncher.filename, 'sway-music-main-booth-laptop.cmd');
+assert.equal(libraryLauncher.contentType, 'application/x-msdos-program');
+assert.equal(libraryLauncher.sha256, createHash('sha256').update(libraryContent).digest('hex'));
+for (const term of [
+  '# SWAY_MUSIC_HELPER_POWERSHELL',
+  'SWAY MUSIC HELPER',
+  'Choose your latest DJ library export.',
+  'System.Windows.Forms.OpenFileDialog',
+  'x-sway-library-filename',
+  'x-sway-library-key',
+  '/api/library/import-file',
+  'Your audio files stay on this computer.',
+  "COULDN'T UPDATE YOUR MUSIC",
+  'Nothing was removed. Check your connection or make a fresh helper in Sway.',
+  'DONE - $count $trackReady ready in every room.',
+  'Keep this helper. Double-click it again after your DJ library changes.'
+]) {
+  assert.ok(libraryDecoded.includes(term), `music helper missing ${term}`);
+}
+assert.ok(libraryDecoded.includes(`$SyncKey = '${librarySyncKey}'`));
+assert.ok(!libraryDecoded.includes('/api/session'));
+assert.ok(!libraryDecoded.includes('/api/talent/playback'));
+assert.throws(
+  () => buildWindowsLibrarySyncLauncher({ swayUrl: 'http://app.sway.tips', sourceKey: 'main-booth', syncKey: librarySyncKey }),
+  /requires HTTPS/
+);
+assert.throws(
+  () => buildWindowsLibrarySyncLauncher({ swayUrl: 'https://app.sway.tips/untrusted', sourceKey: 'main-booth', syncKey: librarySyncKey }),
+  /invalid Sway origin/
+);
+assert.throws(
+  () => buildWindowsLibrarySyncLauncher({ swayUrl: 'https://app.sway.tips', sourceKey: '../unsafe', syncKey: librarySyncKey }),
+  /valid source id/
+);
+assert.throws(
+  () => buildWindowsLibrarySyncLauncher({ swayUrl: 'https://app.sway.tips', sourceKey: 'main-booth', syncKey: `${librarySyncKey}\r\ninjected` }),
+  /valid private sync key/
 );
 
 console.log('Sway Windows booth launcher tests passed.');

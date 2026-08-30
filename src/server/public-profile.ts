@@ -47,6 +47,29 @@ export function normalizePublicProfilePrimaryRole(value: unknown): PublicPerform
     : null;
 }
 
+export function normalizePublicProfileRoles(
+  value: unknown,
+  fallbackPrimaryRole?: unknown
+): PublicPerformerPrimaryRoleId[] {
+  const roles: PublicPerformerPrimaryRoleId[] = [];
+  const seen = new Set<PublicPerformerPrimaryRoleId>();
+  const candidates = Array.isArray(value) ? value : [];
+
+  for (const candidate of candidates) {
+    const role = normalizePublicProfilePrimaryRole(candidate);
+    if (!role || seen.has(role)) continue;
+    seen.add(role);
+    roles.push(role);
+  }
+
+  if (!roles.length) {
+    const fallback = normalizePublicProfilePrimaryRole(fallbackPrimaryRole);
+    if (fallback) roles.push(fallback);
+  }
+
+  return roles;
+}
+
 export function labelForPublicPerformerPrimaryRole(roleId: string | null | undefined) {
   const normalizedRoleId = normalizePublicProfilePrimaryRole(roleId);
   if (!normalizedRoleId) return null;
@@ -69,9 +92,14 @@ export function resolvePublicProfileHeroName(input: {
 
 export function resolvePublicProfilePageKindLabel(input: {
   primaryRole: string | null | undefined;
+  roles?: unknown;
   specialties?: string[] | null;
   isPreview?: boolean;
 }) {
+  const roleLabels = normalizePublicProfileRoles(input.roles, input.primaryRole)
+    .map((role) => labelForPublicPerformerPrimaryRole(role))
+    .filter((label): label is NonNullable<typeof label> => Boolean(label));
+  if (roleLabels.length) return roleLabels.join(' · ');
   const roleLabel = labelForPublicPerformerPrimaryRole(input.primaryRole);
   if (roleLabel) return roleLabel;
   const specialty = Array.isArray(input.specialties)
@@ -87,7 +115,7 @@ export function resolvePublicProfilePageKindLabel(input: {
 
 export function mergePublicProfileMetadata(
   existing: unknown,
-  updates: { stageName?: string | null; primaryRole?: string | null }
+  updates: { stageName?: string | null; primaryRole?: string | null; roles?: unknown }
 ) {
   const merged = existing && typeof existing === 'object' && !Array.isArray(existing)
     ? { ...(existing as Record<string, unknown>) }
@@ -97,9 +125,24 @@ export function mergePublicProfileMetadata(
     if (updates.stageName) merged.stageName = updates.stageName;
     else delete merged.stageName;
   }
-  if (updates.primaryRole !== undefined) {
-    if (updates.primaryRole) merged.primaryRole = updates.primaryRole;
-    else delete merged.primaryRole;
+  if (updates.roles !== undefined) {
+    const roles = normalizePublicProfileRoles(updates.roles, updates.primaryRole);
+    if (roles.length) {
+      merged.roles = roles;
+      merged.primaryRole = roles[0];
+    } else {
+      delete merged.roles;
+      delete merged.primaryRole;
+    }
+  } else if (updates.primaryRole !== undefined) {
+    const primaryRole = normalizePublicProfilePrimaryRole(updates.primaryRole);
+    if (primaryRole) {
+      merged.roles = [primaryRole];
+      merged.primaryRole = primaryRole;
+    } else {
+      delete merged.roles;
+      delete merged.primaryRole;
+    }
   }
 
   return Object.keys(merged).length ? merged : null;

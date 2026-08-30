@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, 
   Trash2, 
@@ -35,7 +35,9 @@ import {
   Keyboard,
   Home,
   UserRound,
-  CalendarDays
+  CalendarDays,
+  Landmark,
+  Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
@@ -57,6 +59,16 @@ import {
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import {
+  canConfigurePayoutDestination,
+  NO_PAYOUT_DESTINATION_CAPABILITIES,
+  normalizePayoutDestinationKind,
+  normalizePayoutDestinationCapabilities,
+  PAYOUT_DESTINATIONS,
+  resolvePayoutSetupReturnStatus,
+  type PayoutDestinationCapabilities,
+  type PayoutDestinationKind
+} from '../payout-destination';
 import {
   INACTIVE_PERFORMER_WORKSPACE_PATHS,
   LEGACY_SHOWS_WORKSPACE_HASH,
@@ -86,11 +98,13 @@ interface TalentDashboardProps {
     handle: string | null;
     stage_name: string | null;
     primary_role: string | null;
+    roles?: string[];
     specialties: string[];
     owner_user_id: string;
     charges_enabled?: boolean;
     payouts_enabled?: boolean;
     stripe_connected_account_id?: string | null;
+    payout_destination_kind?: string | null;
     money_actions_ready?: boolean;
     test_mode_platform_balance_allowed?: boolean;
   } | null;
@@ -100,10 +114,10 @@ interface TalentDashboardProps {
 const INACTIVE_PERFORMER_NAVIGATION = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'room', label: 'Live Room', icon: Radio },
-  { id: 'connections', label: 'Connections', icon: LinkIcon },
+  { id: 'connections', label: 'Sources', icon: LinkIcon },
   { id: 'shows', label: 'Shows', icon: CalendarDays },
-  { id: 'library', label: 'Music', icon: Music2 },
-  { id: 'catalog', label: 'Files', icon: AudioLines },
+  { id: 'library', label: 'Requests', icon: Music2 },
+  { id: 'catalog', label: 'Uploads', icon: AudioLines },
   { id: 'profile', label: 'Public Page', icon: UserRound },
   { id: 'account', label: 'Money', icon: WalletCards }
 ] as const;
@@ -127,6 +141,18 @@ type MusicSourceCapability = {
   audienceClaim: string;
   riskNote: string;
 };
+
+type LinkedLibrarySource = {
+  id: string;
+  sourceKey: string;
+  sourceLabel: string;
+  syncKeyPreview: string;
+  connectionStatus: string;
+  lastSyncedAt: string | null;
+  trackCount: number;
+};
+
+type MusicReadinessStatus = 'loading' | 'ready' | 'empty' | 'error';
 
 const DEFAULT_MUSIC_SOURCE_CAPABILITIES: MusicSourceCapability[] = [
   {
@@ -229,13 +255,18 @@ type HardwareBinding = {
 
 type HardwareBindingMap = Record<HardwareActionId, HardwareBinding>;
 
-type DownloadableBoothLauncher = {
+type DownloadableBase64File = {
   filename: string;
   contentType: 'application/x-msdos-program';
   contentBase64: string;
   sha256: string;
+};
+
+type DownloadableBoothLauncher = DownloadableBase64File & {
   expiresAt: string;
 };
+
+type DownloadableLibraryHelper = DownloadableBase64File;
 
 const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1';
 const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1';
@@ -425,7 +456,7 @@ function downloadJsonFile(filename: string, payload: unknown) {
   URL.revokeObjectURL(objectUrl);
 }
 
-function downloadBase64File(file: DownloadableBoothLauncher) {
+function downloadBase64File(file: DownloadableBase64File) {
   const binary = window.atob(file.contentBase64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -438,6 +469,21 @@ function downloadBase64File(file: DownloadableBoothLauncher) {
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(objectUrl);
+}
+
+function validateLibraryHelper(value: unknown): DownloadableLibraryHelper | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<DownloadableLibraryHelper>;
+  const valid = typeof candidate.filename === 'string'
+    && /^sway-music-[a-z0-9_-]+\.cmd$/.test(candidate.filename)
+    && candidate.contentType === 'application/x-msdos-program'
+    && typeof candidate.contentBase64 === 'string'
+    && candidate.contentBase64.length > 0
+    && candidate.contentBase64.length <= 1_000_000
+    && /^[a-zA-Z0-9+/]+={0,2}$/.test(candidate.contentBase64)
+    && typeof candidate.sha256 === 'string'
+    && /^[a-f0-9]{64}$/.test(candidate.sha256);
+  return valid ? candidate as DownloadableLibraryHelper : null;
 }
 
 function CompactRequestPanel({
@@ -757,7 +803,7 @@ function RequestLibraryWorkspace({
             />
           </label>
         </div>
-        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Browser import adds request/search metadata. For exact-path loading from Sway, create a linked source and run the booth bridge with <code className="text-cyan-200">--import</code>.</p>
+        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Browser import adds request and search details. For repeated updates from a Windows booth computer, use the reusable helper under Sources.</p>
         {djLibraryImportMessage ? <p className={`mt-2 text-xs ${djLibraryImportStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{djLibraryImportMessage}</p> : null}
       </div>
 
@@ -771,7 +817,7 @@ function RequestLibraryWorkspace({
         {spotifyImportMessage ? <p className={`mt-2 text-xs ${spotifyImportStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{spotifyImportMessage}</p> : null}
       </details>
 
-      <button type="button" onClick={onOpenAdvanced} className="mt-4 text-xs font-bold text-slate-400 underline decoration-white/20 underline-offset-4">Advanced library connections</button>
+      <button type="button" onClick={onOpenAdvanced} className="mt-4 text-xs font-bold text-slate-400 underline decoration-white/20 underline-offset-4">Open reusable booth helper</button>
     </section>
   );
 }
@@ -807,7 +853,8 @@ function HardwareMappingPanel({
   onClear,
   onIssueBridgeToken,
   onDownloadWindowsBooth,
-  onDownloadBridgePreset
+  onDownloadBridgePreset,
+  showBoothConnection = true
 }: {
   bindings: HardwareBindingMap;
   learnTarget: HardwareActionId | null;
@@ -823,6 +870,7 @@ function HardwareMappingPanel({
   onIssueBridgeToken: () => void;
   onDownloadWindowsBooth: () => void;
   onDownloadBridgePreset: () => void;
+  showBoothConnection?: boolean;
 }) {
   const midiLabel = !controlsEnabled
     ? 'Not listening'
@@ -846,14 +894,14 @@ function HardwareMappingPanel({
         </div>
         <Keyboard className="h-5 w-5 shrink-0 text-cyan-300" />
       </div>
-      <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+      {showBoothConnection ? <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Booth connection</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">Booth connection · this room only</p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
               {bridgeTokenMessage ?? (bridgeReady
-                ? 'Create a six-hour connection for VirtualDJ, Stream Deck, or Companion.'
-                : 'Start a room before connecting booth software or hardware.')}
+                ? 'Create a six-hour connection for VirtualDJ, Stream Deck, or Companion. This temporary room controller never replaces or relinks your saved sources.'
+                : 'Start a room before creating its temporary controller. Your saved linked sources remain connected.')}
             </p>
           </div>
           <button
@@ -905,7 +953,7 @@ function HardwareMappingPanel({
             </details>
           </div>
         ) : null}
-      </div>
+      </div> : null}
       <div className="mt-3 grid gap-2">
         {HARDWARE_ACTIONS.map((action) => (
           <div
@@ -948,9 +996,8 @@ function HardwareMappingPanel({
   );
 }
 
-function PerformerConnectionsWorkspace({
+function PerformerRoomToolsDialog({
   activeGigId,
-  sessionStatus,
   controlsEnabled,
   midiStatus,
   bindings,
@@ -960,17 +1007,15 @@ function PerformerConnectionsWorkspace({
   bridgeTokenStatus,
   bridgeTokenMessage,
   previewMode,
+  onClose,
   onControlsEnabledChange,
   onLearn,
   onClear,
   onIssueBridgeToken,
   onDownloadWindowsBooth,
-  onDownloadBridgePreset,
-  onBackToRoom,
-  onOpenLibraryConnections
+  onDownloadBridgePreset
 }: {
-  activeGigId: string | null;
-  sessionStatus: GigSession['status'];
+  activeGigId: string;
   controlsEnabled: boolean;
   midiStatus: 'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied';
   bindings: HardwareBindingMap;
@@ -980,131 +1025,348 @@ function PerformerConnectionsWorkspace({
   bridgeTokenStatus: 'idle' | 'submitting' | 'success' | 'error';
   bridgeTokenMessage: string | null;
   previewMode: boolean;
+  onClose: () => void;
   onControlsEnabledChange: (enabled: boolean) => void;
   onLearn: (actionId: HardwareActionId) => void;
   onClear: (actionId: HardwareActionId, kind: keyof HardwareBinding) => void;
   onIssueBridgeToken: () => void;
   onDownloadWindowsBooth: () => void;
   onDownloadBridgePreset: () => void;
-  onBackToRoom: () => void;
-  onOpenLibraryConnections: () => void;
 }) {
-  const roomActive = (sessionStatus === 'active' || sessionStatus === 'ending') && Boolean(activeGigId);
-  const listeningCopy = controlsEnabled
-    ? roomActive
-      ? 'Listening across Sway while this dashboard stays open.'
-      : 'Armed now. Room actions begin when your room goes live.'
-    : 'Off. Turn controls on once, then leave setup without losing them.';
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = (Array.from(dialog.querySelectorAll(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+      )) as HTMLElement[]).filter((element) => element.getClientRects().length > 0 && !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleDialogKeyDown);
+    return () => window.removeEventListener('keydown', handleDialogKeyDown);
+  }, [onClose]);
 
   return (
-    <section
-      data-sway-performer-connections-workspace="true"
-      className="order-2 mx-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900/70 shadow-xl"
-    >
-      <header className="flex flex-col gap-3 border-b border-white/10 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Connections</p>
-          <h2 className="mt-1 font-display text-xl font-black uppercase tracking-wide text-white">Room, stream & booth setup</h2>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">One place for the room QR, stream outputs, controllers, and the real integration status of your DJ software.</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-wide ${
-            roomActive
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              : 'border-white/10 bg-slate-900 text-slate-400'
-          }`}>
-            {roomActive ? 'Room live' : 'No live room'}
-          </span>
-          {roomActive ? (
-            <button type="button" onClick={onBackToRoom} className="min-h-10 rounded-xl bg-fuchsia-600 px-4 text-xs font-black uppercase text-white">
-              Back to room
-            </button>
-          ) : null}
-        </div>
-      </header>
+    <div className="absolute inset-0 z-[80] bg-slate-950/95 p-2 backdrop-blur-sm sm:p-4">
+      <section
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-labelledby="sway-room-tools-title"
+        data-sway-current-room-tools="true"
+        className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-900 shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-white/10 bg-slate-950 px-4 py-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">This room only</p>
+            <h2 id="sway-room-tools-title" className="mt-1 text-lg font-black text-white">Room tools</h2>
+            <p className="mt-1 text-xs text-slate-400">Share tonight’s room or connect booth controls. Your saved music sources are not changed here.</p>
+          </div>
+          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close room tools" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-slate-900 text-slate-200">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
-        <PerformerShareKit activeGigId={roomActive ? activeGigId : null} />
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+            <section className="rounded-2xl border border-fuchsia-500/20 bg-slate-950 p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-300">Share this room</p>
+              <h3 className="mt-1 text-sm font-black text-white">QR code and streaming links</h3>
+              <p className="mt-1 text-xs text-slate-400">Use these only for the room that is live right now.</p>
+              <div className="mt-4"><PerformerShareKit activeGigId={activeGigId} /></div>
+            </section>
 
-        <div className="min-w-0 space-y-4">
-          <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4" aria-label="Controller listening status">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Keyboard className="h-4 w-4 text-cyan-300" />
-                  <h3 className="text-xs font-black uppercase tracking-wider text-white">Keyboard & MIDI</h3>
-                  {controlsEnabled ? (
-                    <span data-sway-hardware-controls-enabled="true" className="rounded-full bg-emerald-500/15 px-2 py-1 text-[9px] font-black uppercase text-emerald-200">Armed</span>
-                  ) : null}
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-slate-400">{listeningCopy}</p>
-                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">Keyboard shortcuts work while the Sway tab is focused. MIDI stays attached while this dashboard is open.</p>
-              </div>
+            <section className="rounded-2xl border border-emerald-500/20 bg-slate-950 p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">VirtualDJ on Windows</p>
+              <h3 className="mt-1 text-sm font-black text-white">Connect this live room</h3>
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">Prepare the room file, download it, then double-click it on the computer running VirtualDJ.</p>
               <button
                 type="button"
-                data-sway-enable-hardware-controls="true"
-                onClick={() => onControlsEnabledChange(!controlsEnabled)}
-                disabled={previewMode}
-                aria-pressed={controlsEnabled}
-                className={`min-h-11 shrink-0 rounded-xl px-4 text-xs font-black uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
-                  controlsEnabled
-                    ? 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
-                    : 'bg-cyan-500 text-slate-950'
-                }`}
+                onClick={onIssueBridgeToken}
+                disabled={previewMode || bridgeTokenStatus === 'submitting'}
+                className="mt-4 min-h-12 w-full rounded-xl bg-emerald-400 px-4 text-sm font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {controlsEnabled ? 'Turn off' : 'Turn on controls'}
+                {bridgeTokenStatus === 'submitting' ? 'Preparing…' : windowsBoothLauncher ? 'Prepare a fresh room file' : 'Prepare VirtualDJ connection'}
               </button>
-            </div>
-          </section>
+              {bridgeTokenMessage ? <p className={`mt-3 text-xs leading-relaxed ${bridgeTokenStatus === 'error' ? 'text-rose-200' : 'text-slate-300'}`}>{bridgeTokenMessage}</p> : null}
+              {windowsBoothLauncher ? (
+                <button
+                  type="button"
+                  onClick={onDownloadWindowsBooth}
+                  data-sway-windows-booth-download="true"
+                  className="mt-3 min-h-12 w-full rounded-xl border border-emerald-400/40 bg-emerald-400/10 px-4 text-sm font-black text-emerald-100"
+                >
+                  Download Sway Booth for Windows
+                </button>
+              ) : null}
+            </section>
+          </div>
 
-          <HardwareMappingPanel
-            bindings={bindings}
-            learnTarget={learnTarget}
-            midiStatus={midiStatus}
-            controlsEnabled={controlsEnabled}
-            bridgeReady={roomActive && !previewMode}
-            bridgeCommand={bridgeCommand}
-            windowsBoothLauncher={windowsBoothLauncher}
-            bridgeTokenStatus={bridgeTokenStatus}
-            bridgeTokenMessage={bridgeTokenMessage}
-            onLearn={onLearn}
-            onClear={onClear}
-            onIssueBridgeToken={onIssueBridgeToken}
-            onDownloadWindowsBooth={onDownloadWindowsBooth}
-            onDownloadBridgePreset={onDownloadBridgePreset}
-          />
+          <details className="group mt-4 rounded-2xl border border-white/10 bg-slate-950 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-white">Keyboard, MIDI, Stream Deck, and other DJ software</p>
+                <p className="mt-1 text-xs text-slate-400">Open only if you use advanced booth controls.</p>
+              </div>
+              <span className="text-xs font-black text-cyan-200"><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
+            </summary>
 
-          <section data-sway-dj-software-truth="true" className="rounded-2xl border border-white/10 bg-slate-950 p-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-300">Software status</p>
-              <h3 className="mt-1 text-sm font-black text-white">What Sway connects to today</h3>
+            <div className="mt-4 space-y-4">
+              <section className="rounded-2xl border border-cyan-500/20 bg-slate-900 p-4" aria-label="Controller listening status">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-white">Listen for keyboard and MIDI</h3>
+                      {controlsEnabled ? <span data-sway-hardware-controls-enabled="true" className="text-[10px] font-black text-emerald-300">On</span> : null}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">{controlsEnabled ? 'On for this room while this dashboard stays open.' : 'Off. Turn this on only when you want Sway to react to keys or MIDI.'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    data-sway-enable-hardware-controls="true"
+                    onClick={() => onControlsEnabledChange(!controlsEnabled)}
+                    disabled={previewMode}
+                    aria-pressed={controlsEnabled}
+                    className={`min-h-11 shrink-0 rounded-xl px-4 text-xs font-black disabled:opacity-50 ${controlsEnabled ? 'border border-rose-500/30 bg-rose-500/10 text-rose-200' : 'bg-cyan-500 text-slate-950'}`}
+                  >
+                    {controlsEnabled ? 'Turn off' : 'Turn on'}
+                  </button>
+                </div>
+              </section>
+
+              <HardwareMappingPanel
+                bindings={bindings}
+                learnTarget={learnTarget}
+                midiStatus={midiStatus}
+                controlsEnabled={controlsEnabled}
+                bridgeReady={!previewMode}
+                bridgeCommand={bridgeCommand}
+                windowsBoothLauncher={windowsBoothLauncher}
+                bridgeTokenStatus={bridgeTokenStatus}
+                bridgeTokenMessage={bridgeTokenMessage}
+                onLearn={onLearn}
+                onClear={onClear}
+                onIssueBridgeToken={onIssueBridgeToken}
+                onDownloadWindowsBooth={onDownloadWindowsBooth}
+                onDownloadBridgePreset={onDownloadBridgePreset}
+                showBoothConnection={false}
+              />
+
+              <details data-sway-dj-software-truth="true" className="rounded-2xl border border-white/10 bg-slate-900 p-4">
+                <summary className="cursor-pointer text-sm font-black text-white">See supported software</summary>
+                <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950 px-3">
+                  {[
+                    ['OBS / Streamlabs', 'Room screen and transparent layer'],
+                    ['VirtualDJ 2023+ Pro', 'Load tracks and control playback'],
+                    ['Serato · rekordbox · Traktor · djay', 'Keyboard or MIDI transport controls'],
+                    ['Stream Deck / Companion', 'Advanced button preset']
+                  ].map(([name, detail]) => (
+                    <div key={name} className="py-3">
+                      <p className="text-xs font-black text-white">{name}</p>
+                      <p className="mt-1 text-[11px] text-slate-400">{detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </div>
-            <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-900 px-3">
-              {[
-                ['OBS / Streamlabs', 'Ready', 'Use either Browser Source URL above; setup is manual and Sway does not change scenes.'],
-                ['Stream Deck / Companion', roomActive ? 'Ready to set up' : 'Needs live room', 'Create the 6-hour room token, run the local bridge, then use its authenticated HTTP preset.'],
-                ['VirtualDJ 2023+ Pro', 'Full control', 'Official Network Control extension + Sway bridge: exact-path load, play, pause, cue, stop, next/previous, and deck state.'],
-                ['Serato · rekordbox · Traktor · djay', 'MIDI transport', 'Map Sway notes to a virtual MIDI input for one-way play/pause/cue/stop/next/previous. No track load or deck feedback.'],
-                ['rekordbox · Traktor · VirtualDJ exports', 'Built-in import', 'Import XML/NML/M3U/CSV in Sway, or run the library bridge for exact local paths and audio folders.']
-              ].map(([name, status, detail]) => (
-                <div key={name} className="grid gap-1 py-3 sm:grid-cols-[minmax(0,0.72fr)_auto_minmax(0,1.28fr)] sm:items-center sm:gap-3">
-                  <p className="text-xs font-black text-white">{name}</p>
-                  <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase ${
-                    ['Ready', 'Ready to set up', 'Full control', 'MIDI transport', 'Built-in import'].includes(status)
-                      ? 'bg-emerald-500/15 text-emerald-200'
-                      : status === 'Needs live room'
-                        ? 'bg-amber-500/15 text-amber-200'
-                        : 'bg-slate-800 text-slate-400'
-                  }`}>{status}</span>
-                  <p className="text-[10px] leading-relaxed text-slate-400">{detail}</p>
+          </details>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PerformerConnectionsWorkspace({
+  linkedSources,
+  linkedSourcesStatus,
+  linkedSourcesError,
+  catalogTrackCount,
+  externalTrackCount,
+  requestLibraryStatus,
+  requestLibraryError,
+  spotifyPlaylistUrl,
+  spotifyImportStatus,
+  spotifyImportMessage,
+  djLibraryImportStatus,
+  djLibraryImportMessage,
+  previewMode,
+  onSpotifyPlaylistUrlChange,
+  onSpotifyPlaylistImport,
+  onDjLibraryFileImport,
+  onOpenCatalog,
+  onOpenAdvanced,
+  onRetry
+}: {
+  linkedSources: LinkedLibrarySource[];
+  linkedSourcesStatus: 'loading' | 'ready' | 'error';
+  linkedSourcesError: string | null;
+  catalogTrackCount: number;
+  externalTrackCount: number;
+  requestLibraryStatus: 'loading' | 'ready' | 'error';
+  requestLibraryError: string | null;
+  spotifyPlaylistUrl: string;
+  spotifyImportStatus: 'idle' | 'submitting' | 'success' | 'error';
+  spotifyImportMessage: string | null;
+  djLibraryImportStatus: 'idle' | 'submitting' | 'success' | 'error';
+  djLibraryImportMessage: string | null;
+  previewMode: boolean;
+  onSpotifyPlaylistUrlChange: (value: string) => void;
+  onSpotifyPlaylistImport: (event: React.FormEvent) => void;
+  onDjLibraryFileImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenCatalog: () => void;
+  onOpenAdvanced: () => void;
+  onRetry: () => void;
+}) {
+  const reusableSources = linkedSources.filter((source) => source.connectionStatus !== 'revoked');
+  const reusableSourceTrackCount = reusableSources.reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
+  const retainedExternalTrackCount = Math.max(0, externalTrackCount - reusableSourceTrackCount);
+  const statusLoading = linkedSourcesStatus === 'loading' || requestLibraryStatus === 'loading';
+  const statusError = linkedSourcesStatus === 'error' || requestLibraryStatus === 'error';
+  const canClaimEmpty = !statusLoading && !statusError;
+
+  return (
+    <section data-sway-performer-connections-workspace="true" className="order-2 mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900/70 shadow-xl">
+      <header className="border-b border-white/10 bg-slate-950/60 p-5">
+        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Sources</p>
+        <h2 className="mt-1 font-display text-xl font-black text-white">Your music</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">Add each music source once. It stays on your account and is ready for every future room.</p>
+      </header>
+
+      <div className="space-y-5 p-5">
+        <section data-sway-linked-sources="true">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-black text-white">Saved for every room</h3>
+            <span className={`text-xs font-black ${statusError ? 'text-amber-300' : statusLoading ? 'text-slate-400' : 'text-emerald-300'}`}>
+              {statusLoading ? 'Checking…' : statusError ? 'Check needed' : `${catalogTrackCount + externalTrackCount} ${catalogTrackCount + externalTrackCount === 1 ? 'track' : 'tracks'}`}
+            </span>
+          </div>
+          {statusLoading ? (
+            <div role="status" className="mt-3 rounded-xl border border-white/10 bg-slate-950 px-4 py-4 text-sm text-slate-300">Checking your saved music…</div>
+          ) : null}
+          {statusError ? (
+            <div role="alert" className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-4">
+              <p className="text-sm font-black text-white">Couldn’t check all of your saved music</p>
+              <p className="mt-1 text-xs leading-5 text-amber-100">{requestLibraryError || linkedSourcesError || 'Sway could not load your saved sources. Your music was not removed.'}</p>
+              <button type="button" onClick={onRetry} className="mt-3 min-h-11 rounded-xl bg-amber-300 px-4 text-sm font-black text-slate-950">Try again</button>
+            </div>
+          ) : null}
+          {reusableSources.length ? (
+            <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950 px-4">
+              {reusableSources.map((source) => (
+                <div key={source.id} className="flex items-center justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">{source.sourceLabel}</p>
+                    <p className="mt-1 text-xs text-slate-400">{source.trackCount} {source.trackCount === 1 ? 'track' : 'tracks'}{source.lastSyncedAt ? ` · updated ${new Date(source.lastSyncedAt).toLocaleDateString()}` : ''}</p>
+                  </div>
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="Connected" />
                 </div>
               ))}
+              {catalogTrackCount > 0 ? (
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">Sway uploads</p>
+                    <p className="mt-1 text-xs text-slate-400">{catalogTrackCount} requestable {catalogTrackCount === 1 ? 'track' : 'tracks'} stored in Sway</p>
+                  </div>
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="Ready" />
+                </div>
+              ) : null}
+              {retainedExternalTrackCount > 0 ? (
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">Saved request list</p>
+                    <p className="mt-1 text-xs text-amber-200">{retainedExternalTrackCount} {retainedExternalTrackCount === 1 ? 'track remains' : 'tracks remain'} available; their source is disconnected</p>
+                  </div>
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-300" aria-label="Source disconnected" />
+                </div>
+              ) : null}
             </div>
-            <button type="button" onClick={onOpenLibraryConnections} className="mt-3 min-h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-slate-200 hover:border-cyan-500/40 hover:text-white">
-              Open advanced music-library connections
-            </button>
-          </section>
-        </div>
+          ) : catalogTrackCount > 0 || externalTrackCount > 0 ? (
+            <div className="mt-3 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950 px-4">
+              {catalogTrackCount > 0 ? (
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div>
+                    <p className="text-sm font-black text-white">Sway uploads</p>
+                    <p className="mt-1 text-xs text-slate-400">{catalogTrackCount} requestable {catalogTrackCount === 1 ? 'track' : 'tracks'} stored in Sway</p>
+                  </div>
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="Ready" />
+                </div>
+              ) : null}
+              {externalTrackCount > 0 ? (
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div>
+                    <p className="text-sm font-black text-white">Saved request list</p>
+                    <p className="mt-1 text-xs text-amber-200">{externalTrackCount} {externalTrackCount === 1 ? 'track remains' : 'tracks remain'} available; their source is disconnected</p>
+                  </div>
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-300" aria-label="Source disconnected" />
+                </div>
+              ) : null}
+            </div>
+          ) : canClaimEmpty ? (
+            <div className="mt-3 rounded-xl border border-dashed border-white/15 bg-slate-950 px-4 py-5 text-center">
+              <p className="text-sm font-black text-white">No music added yet</p>
+              <p className="mt-1 text-xs text-slate-400">Start with the DJ library button below.</p>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Add music</p>
+          <h3 className="mt-1 text-base font-black text-white">Choose where your music is now</h3>
+
+          <label className={`mt-4 flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl bg-cyan-500 px-4 text-left text-slate-950 ${previewMode || djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
+            <span>
+              <span className="block text-sm font-black">{djLibraryImportStatus === 'submitting' ? 'Adding your library…' : 'DJ software library'}</span>
+              <span className="mt-0.5 block text-[11px] font-semibold">rekordbox, Traktor, VirtualDJ, M3U, or CSV</span>
+            </span>
+            <Upload className="h-5 w-5 shrink-0" />
+            <input type="file" accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl" className="sr-only" disabled={previewMode || djLibraryImportStatus === 'submitting'} onChange={onDjLibraryFileImport} />
+          </label>
+          {djLibraryImportMessage ? <p className={`mt-2 text-xs ${djLibraryImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{djLibraryImportMessage}</p> : null}
+
+          <details className="group mt-3 rounded-xl border border-white/10 bg-slate-900 p-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-white">
+              Spotify playlist
+              <span className="text-xs text-cyan-200"><span className="group-open:hidden">Add</span><span className="hidden group-open:inline">Close</span></span>
+            </summary>
+            <form className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onSpotifyPlaylistImport}>
+              <input type="text" value={spotifyPlaylistUrl} onChange={(event) => onSpotifyPlaylistUrlChange(event.target.value)} placeholder="Paste a Spotify playlist link" className="min-h-12 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-white" />
+              <button type="submit" disabled={previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()} className="min-h-12 rounded-xl bg-emerald-400 px-4 text-sm font-black text-slate-950 disabled:opacity-50">{spotifyImportStatus === 'submitting' ? 'Adding…' : 'Add playlist'}</button>
+            </form>
+            <p className="mt-2 text-xs text-slate-500">The song list becomes requestable. Playback still opens in Spotify.</p>
+            {spotifyImportMessage ? <p className={`mt-2 text-xs ${spotifyImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{spotifyImportMessage}</p> : null}
+          </details>
+
+          <button type="button" onClick={onOpenCatalog} className="mt-3 min-h-12 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-left text-sm font-black text-white">
+            Music uploaded to Sway
+            <span className="mt-1 block text-[11px] font-normal text-slate-400">Open your files and choose which tracks people may request.</span>
+          </button>
+        </section>
+
+        <button type="button" onClick={onOpenAdvanced} className="min-h-11 w-full text-sm font-bold text-slate-400 underline decoration-white/20 underline-offset-4">Advanced: reusable booth computer helper</button>
       </div>
     </section>
   );
@@ -1139,21 +1401,34 @@ export default function TalentDashboard({
   const welcomePerformerName = defaultPerformerName || session.talentName || 'Sway account';
   const performerRoleLabel = resolvePublicProfilePageKindLabel({
     primaryRole: performerProfile?.primary_role,
+    roles: performerProfile?.roles,
     specialties: performerProfile?.specialties
   });
   const [mobilePanel, setMobilePanel] = useState<'live' | 'share' | 'settings'>('live');
+  const [roomToolsExpanded, setRoomToolsExpanded] = useState(false);
+  const roomToolsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>(() => (
     typeof window === 'undefined' ? 'home' : resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash)
+  ));
+  const [payoutSetupReturnStatus] = useState(() => (
+    typeof window === 'undefined' ? null : resolvePayoutSetupReturnStatus(window.location.search)
   ));
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
   const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
   const [testModePlatformBalanceEnabled, setTestModePlatformBalanceEnabled] = useState(false);
+  const [payoutDestinationCapabilities, setPayoutDestinationCapabilities] = useState<PayoutDestinationCapabilities>(() => ({
+    ...NO_PAYOUT_DESTINATION_CAPABILITIES
+  }));
+  const savedPayoutDestinationKind = normalizePayoutDestinationKind(performerProfile?.payout_destination_kind);
+  const [payoutDestinationOverride, setPayoutDestinationOverride] = useState<PayoutDestinationKind | null>(null);
+  const payoutDestinationKind = payoutDestinationOverride ?? savedPayoutDestinationKind;
 
   useEffect(() => {
     if (previewMode) {
       setLiveRoomPaymentMode('unavailable');
       setTestModePlatformBalanceEnabled(false);
+      setPayoutDestinationCapabilities({ ...NO_PAYOUT_DESTINATION_CAPABILITIES });
       return;
     }
     let cancelled = false;
@@ -1162,6 +1437,11 @@ export default function TalentDashboard({
         const response = await fetch('/api/payment/config', { cache: 'no-store' });
         const data = await response.json().catch(() => null);
         if (!cancelled) {
+          setPayoutDestinationCapabilities(
+            response.ok
+              ? normalizePayoutDestinationCapabilities(data?.payoutDestinationCapabilities)
+              : { ...NO_PAYOUT_DESTINATION_CAPABILITIES }
+          );
           setTestModePlatformBalanceEnabled(
             response.ok
               && data?.mode === 'test'
@@ -1179,6 +1459,7 @@ export default function TalentDashboard({
         if (!cancelled) {
           setLiveRoomPaymentMode('unavailable');
           setTestModePlatformBalanceEnabled(false);
+          setPayoutDestinationCapabilities({ ...NO_PAYOUT_DESTINATION_CAPABILITIES });
         }
       }
     })();
@@ -1190,20 +1471,24 @@ export default function TalentDashboard({
   const moneyReady = liveRoomPaymentMode === 'test'
     ? testModePlatformBalanceReady || Boolean(performerProfile?.money_actions_ready)
     : liveRoomPaymentMode === 'live' && Boolean(performerProfile?.money_actions_ready);
+  const payoutDestinationSetupAllowed = canConfigurePayoutDestination(
+    payoutDestinationKind,
+    liveRoomPaymentMode,
+    payoutDestinationCapabilities
+  );
 
-  const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary Library');
+  const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary DJ computer');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
-  const [libraryLinkMessage, setLibraryLinkMessage] = useState<string | null>(null);
-  const [linkedSources, setLinkedSources] = useState<Array<{
-    id: string;
-    sourceKey: string;
+  const [linkedSourceConfirmation, setLinkedSourceConfirmation] = useState<{
+    action: 'replace_key' | 'revoke';
+    sourceId: string;
     sourceLabel: string;
-    syncKeyPreview: string;
-    connectionStatus: string;
-    lastSyncedAt: string | null;
-    trackCount: number;
-  }>>([]);
+  } | null>(null);
+  const [libraryLinkMessage, setLibraryLinkMessage] = useState<string | null>(null);
+  const [linkedSources, setLinkedSources] = useState<LinkedLibrarySource[]>([]);
+  const [linkedSourcesStatus, setLinkedSourcesStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
+  const [linkedSourcesError, setLinkedSourcesError] = useState<string | null>(null);
   const [musicSourceCapabilities, setMusicSourceCapabilities] = useState<MusicSourceCapability[]>(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
   const [musicSourceCapabilityStatus, setMusicSourceCapabilityStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [musicSourceCapabilityError, setMusicSourceCapabilityError] = useState<string | null>(null);
@@ -1214,7 +1499,7 @@ export default function TalentDashboard({
   const [djLibraryImportMessage, setDjLibraryImportMessage] = useState<string | null>(null);
   const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
-  const [requestLibraryStatus, setRequestLibraryStatus] = useState<'idle' | 'loading' | 'error'>('loading');
+  const [requestLibraryStatus, setRequestLibraryStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
   const [requestLibraryError, setRequestLibraryError] = useState<string | null>(null);
   const [showAdvancedLibrary, setShowAdvancedLibrary] = useState(false);
   const [issuedSyncKey, setIssuedSyncKey] = useState<{
@@ -1222,6 +1507,7 @@ export default function TalentDashboard({
     sourceLabel: string;
     syncKey: string;
     syncEndpointPath: string;
+    windowsHelper: DownloadableLibraryHelper | null;
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
@@ -1235,6 +1521,8 @@ export default function TalentDashboard({
   const queueActionStatusRef = useRef<HTMLDivElement | null>(null);
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
   const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(() => loadHardwareControlsEnabled());
+  const roomHasControlContext = session.status !== 'inactive' && Boolean(writableGigId);
+  const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled;
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
   const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -1258,11 +1546,16 @@ export default function TalentDashboard({
     setBridgeSwayUrl(null);
   }, [writableGigId]);
 
+  const closeRoomTools = useCallback(() => {
+    setRoomToolsExpanded(false);
+    window.requestAnimationFrame(() => roomToolsTriggerRef.current?.focus());
+  }, []);
+
   useEffect(() => {
     const syncWorkspaceFromLocation = () => {
       const workspace = resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash);
       setInactiveWorkspace(workspace);
-      if (workspace === 'library') setShowAdvancedLibrary(false);
+      if (workspace === 'library' || workspace === 'connections') setShowAdvancedLibrary(false);
       if (window.location.hash === LEGACY_SHOWS_WORKSPACE_HASH) {
         const nextLocation = new URL(window.location.href);
         nextLocation.pathname = INACTIVE_PERFORMER_WORKSPACE_PATHS.shows;
@@ -1281,7 +1574,8 @@ export default function TalentDashboard({
 
   const openInactiveWorkspace = (workspace: InactivePerformerWorkspace) => {
     setInactiveWorkspace(workspace);
-    if (workspace === 'library') setShowAdvancedLibrary(false);
+    setRoomToolsExpanded(false);
+    if (workspace !== 'connections') setShowAdvancedLibrary(false);
     const workspacePath = INACTIVE_PERFORMER_WORKSPACE_PATHS[workspace];
     if (window.location.pathname === workspacePath) return;
     const nextLocation = new URL(window.location.href);
@@ -1460,6 +1754,19 @@ export default function TalentDashboard({
   }, [hardwareControlsEnabled]);
 
   useEffect(() => {
+    if (!roomHasControlContext && hardwareControlsEnabled) {
+      setHardwareControlsEnabled(false);
+    }
+  }, [roomHasControlContext, hardwareControlsEnabled]);
+
+  useEffect(() => {
+    if (!payoutSetupReturnStatus || inactiveWorkspace !== 'account' || typeof window === 'undefined') return;
+    const nextLocation = new URL(window.location.href);
+    nextLocation.searchParams.delete('connect');
+    window.history.replaceState({}, '', `${nextLocation.pathname}${nextLocation.search}${nextLocation.hash}`);
+  }, [inactiveWorkspace, payoutSetupReturnStatus]);
+
+  useEffect(() => {
     hardwareLearnTargetRef.current = hardwareLearnTarget;
   }, [hardwareLearnTarget]);
 
@@ -1494,14 +1801,24 @@ export default function TalentDashboard({
   };
 
   const refreshLinkedSources = async () => {
-    if (previewMode) return;
+    if (previewMode) {
+      setLinkedSources([]);
+      setLinkedSourcesStatus('ready');
+      setLinkedSourcesError(null);
+      return;
+    }
+    setLinkedSourcesStatus('loading');
     try {
-      const response = await fetch('/api/talent/library/sources');
-      if (!response.ok) return;
-      const data = await response.json();
+      const response = await fetch('/api/talent/library/sources', { cache: 'no-store' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Could not check your saved sources.');
       setLinkedSources(Array.isArray(data?.sources) ? data.sources : []);
+      setLinkedSourcesStatus('ready');
+      setLinkedSourcesError(null);
     } catch (error) {
       console.warn('Unable to load linked library sources:', error);
+      setLinkedSourcesStatus('error');
+      setLinkedSourcesError(error instanceof Error ? error.message : 'Could not check your saved sources.');
     }
   };
 
@@ -1509,7 +1826,8 @@ export default function TalentDashboard({
     if (previewMode) {
       setCatalogLibraryTracks([]);
       setExternalLibraryTracks([]);
-      setRequestLibraryStatus('idle');
+      setRequestLibraryStatus('ready');
+      setRequestLibraryError(null);
       return;
     }
     setRequestLibraryStatus('loading');
@@ -1520,7 +1838,7 @@ export default function TalentDashboard({
       setCatalogLibraryTracks(Array.isArray(data?.catalog?.tracks) ? data.catalog.tracks : []);
       setExternalLibraryTracks(Array.isArray(data?.external?.tracks) ? data.external.tracks : []);
       setRequestLibraryError(null);
-      setRequestLibraryStatus('idle');
+      setRequestLibraryStatus('ready');
     } catch (error) {
       setRequestLibraryError(error instanceof Error ? error.message : 'Could not load your music.');
       setRequestLibraryStatus('error');
@@ -1533,8 +1851,8 @@ export default function TalentDashboard({
   }, [previewMode]);
 
   useEffect(() => {
-    if (inactiveWorkspace === 'library' && !showAdvancedLibrary) void refreshRequestLibrary();
-  }, [inactiveWorkspace, showAdvancedLibrary]);
+    if (inactiveWorkspace === 'library') void refreshRequestLibrary();
+  }, [inactiveWorkspace]);
 
   const refreshMusicSourceCapabilities = async () => {
     if (previewMode) {
@@ -1568,6 +1886,18 @@ export default function TalentDashboard({
   const linkedTrackCount = linkedSources
     .filter((source) => source.connectionStatus !== 'revoked')
     .reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
+  const requestableTrackCount = catalogLibraryTracks.length + externalLibraryTracks.length;
+  const musicReadinessStatus: MusicReadinessStatus = linkedSourcesStatus === 'loading' || requestLibraryStatus === 'loading'
+    ? 'loading'
+    : linkedSourcesStatus === 'error' || requestLibraryStatus === 'error'
+      ? 'error'
+      : requestableTrackCount > 0
+        ? 'ready'
+        : 'empty';
+  const retrySavedMusic = () => {
+    void refreshLinkedSources();
+    void refreshRequestLibrary();
+  };
 
   const handleSpotifyPlaylistImport = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1619,7 +1949,8 @@ export default function TalentDashboard({
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'DJ library import failed.');
       setDjLibraryImportStatus('success');
-      setDjLibraryImportMessage(`Imported ${data?.importedCount ?? parsed.tracks.length} tracks from ${parsed.sourceLabel}${parsed.truncated ? ' (first 1,000)' : ''}.`);
+      setDjLibraryImportMessage(`Added ${data?.importedCount ?? parsed.tracks.length} tracks from ${parsed.sourceLabel}${parsed.truncated ? ' (first 1,000)' : ''}. This source is ready in every room.`);
+      await refreshLinkedSources();
       await refreshRequestLibrary();
     } catch (error) {
       setDjLibraryImportStatus('error');
@@ -1632,24 +1963,44 @@ export default function TalentDashboard({
   const [stripeConnectStatus, setStripeConnectStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [stripeConnectError, setStripeConnectError] = useState<string | null>(null);
 
-  const handleConnectStripe = async () => {
+  const handlePayoutSetup = async () => {
     if (previewMode || stripeConnectStatus === 'submitting') return;
+    if (!payoutDestinationKind) {
+      setStripeConnectStatus('error');
+      setStripeConnectError('Choose where you want payouts sent.');
+      return;
+    }
+    if (!payoutDestinationSetupAllowed) {
+      setStripeConnectStatus('error');
+      setStripeConnectError(
+        payoutDestinationKind && !payoutDestinationCapabilities[payoutDestinationKind]
+          ? 'That payout destination is not enabled in this Sway deployment yet.'
+          : liveRoomPaymentMode === 'test'
+          ? 'Cash App and Venmo direct-deposit setup stays locked in test mode. Choose Bank account or Debit card and use provider test details only.'
+          : 'That payout destination cannot be configured in the current payment mode.'
+      );
+      return;
+    }
     setStripeConnectStatus('submitting');
     setStripeConnectError(null);
     try {
-      const response = await fetch('/api/talent/connect/onboard', { method: 'POST' });
+      const response = await fetch('/api/talent/connect/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destinationKind: payoutDestinationKind })
+      });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to start Stripe onboarding.');
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to start secure payout setup.');
       }
       if (typeof data?.url === 'string') {
         window.location.href = data.url;
         return;
       }
-      throw new Error('Stripe did not return an onboarding link.');
+      throw new Error('The payment provider did not return a setup link.');
     } catch (error) {
       setStripeConnectStatus('error');
-      setStripeConnectError(error instanceof Error ? error.message : 'Unable to start Stripe onboarding.');
+      setStripeConnectError(error instanceof Error ? error.message : 'Unable to start secure payout setup.');
     }
   };
 
@@ -1677,8 +2028,18 @@ export default function TalentDashboard({
       }
 
       setLibraryLinkStatus('success');
-      setLibraryLinkMessage(`Linked ${data?.sourceLabel ?? librarySourceLabel}. Use the sync key below from any compatible program or companion tool.`);
-      setIssuedSyncKey(data);
+      if (data?.existing === true) {
+        setIssuedSyncKey(null);
+        setLibraryLinkMessage(
+          data?.connectionStatus === 'revoked'
+            ? `${data?.sourceLabel ?? librarySourceLabel} already exists but is disconnected. Use “Reconnect with fresh helper” below if you want to reconnect it.`
+            : `${data?.sourceLabel ?? librarySourceLabel} is already linked to your performer account and works across every room. No relinking is needed.`
+        );
+      } else {
+        const windowsHelper = validateLibraryHelper(data?.windowsHelper);
+        setIssuedSyncKey({ ...data, windowsHelper });
+        setLibraryLinkMessage(`Linked ${data?.sourceLabel ?? librarySourceLabel} to your performer account. Download the private helper below once; this source will be available in every room.`);
+      }
       await refreshLinkedSources();
     } catch (error) {
       setLibraryLinkStatus('error');
@@ -1698,9 +2059,10 @@ export default function TalentDashboard({
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to rotate sync key.');
       }
-      setIssuedSyncKey(data);
+      const windowsHelper = validateLibraryHelper(data?.windowsHelper);
+      setIssuedSyncKey({ ...data, windowsHelper });
       setLibraryLinkStatus('success');
-      setLibraryLinkMessage(`Rotated sync key for ${data?.sourceLabel ?? 'linked source'}. Update the connected program now.`);
+      setLibraryLinkMessage(`Created a fresh private helper for ${data?.sourceLabel ?? 'linked source'}. Download it once; this source remains available across rooms.`);
       await refreshLinkedSources();
     } catch (error) {
       setLibraryLinkStatus('error');
@@ -1708,6 +2070,11 @@ export default function TalentDashboard({
     } finally {
       setPendingSourceId(null);
     }
+  };
+
+  const downloadLibraryHelper = () => {
+    if (!issuedSyncKey?.windowsHelper) return;
+    downloadBase64File(issuedSyncKey.windowsHelper);
   };
 
   const handleRevokeLinkedSource = async (sourceId: string, sourceLabel: string) => {
@@ -1935,7 +2302,7 @@ export default function TalentDashboard({
   };
 
   useEffect(() => {
-    if (!hardwareControlsEnabled && !hardwareLearnTarget) return;
+    if (!hardwareControlsActive && !hardwareLearnTarget) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1949,7 +2316,7 @@ export default function TalentDashboard({
         return;
       }
 
-      if (session.status === 'inactive' || !hardwareControlsEnabled) return;
+      if (!hardwareControlsActive) return;
 
       const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].keyboard === event.code);
       if (!match) return;
@@ -1959,10 +2326,10 @@ export default function TalentDashboard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [session.status, hardwareControlsEnabled, hardwareLearnTarget]);
+  }, [hardwareControlsActive, hardwareLearnTarget]);
 
   useEffect(() => {
-    if (!hardwareControlsEnabled && !hardwareLearnTarget) {
+    if (!hardwareControlsActive && !hardwareLearnTarget) {
       setHardwareInputStatus('idle');
       return;
     }
@@ -1980,7 +2347,7 @@ export default function TalentDashboard({
         return;
       }
 
-      if (session.status === 'inactive' || !hardwareControlsEnabled) return;
+      if (!hardwareControlsActive) return;
 
       const match = HARDWARE_ACTIONS.find((action) => hardwareBindingsRef.current[action.id].midi === binding);
       if (match) runHardwareActionRef.current(match.id);
@@ -2015,7 +2382,7 @@ export default function TalentDashboard({
         });
       }
     };
-  }, [session.status, hardwareControlsEnabled, hardwareLearnTarget]);
+  }, [hardwareControlsActive, hardwareLearnTarget]);
 
   // Formatter for currency
   const formatValue = (val: number) => {
@@ -2036,6 +2403,27 @@ export default function TalentDashboard({
         data-sway-performer-live-cockpit="true"
         className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 p-2 text-slate-100 sm:p-3"
       >
+        {roomToolsExpanded && writableGigId ? (
+          <PerformerRoomToolsDialog
+            activeGigId={writableGigId}
+            controlsEnabled={hardwareControlsActive}
+            midiStatus={hardwareInputStatus}
+            bindings={hardwareBindings}
+            learnTarget={hardwareLearnTarget}
+            bridgeCommand={bridgeCommand}
+            windowsBoothLauncher={windowsBoothLauncher}
+            bridgeTokenStatus={bridgeTokenStatus}
+            bridgeTokenMessage={bridgeTokenMessage}
+            previewMode={previewMode}
+            onClose={closeRoomTools}
+            onControlsEnabledChange={setHardwareControlsEnabled}
+            onLearn={setHardwareLearnTarget}
+            onClear={clearHardwareInput}
+            onIssueBridgeToken={issueBridgeToken}
+            onDownloadWindowsBooth={downloadWindowsBooth}
+            onDownloadBridgePreset={downloadBridgePreset}
+          />
+        ) : null}
         {removeConfirmationRequest ? (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
             <div
@@ -2084,7 +2472,11 @@ export default function TalentDashboard({
             </div>
           </div>
         ) : null}
-        <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]">
+        <div
+          inert={roomToolsExpanded ? true : undefined}
+          aria-hidden={roomToolsExpanded ? true : undefined}
+          className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        >
           {actionError ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
               <div className="flex items-center justify-between gap-2">
@@ -2384,6 +2776,7 @@ export default function TalentDashboard({
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
             </div>
             <button
+              ref={roomToolsTriggerRef}
               type="button"
               onClick={handleCopyLiveRoomLink}
               disabled={!selectedRoomUrl}
@@ -2393,12 +2786,12 @@ export default function TalentDashboard({
             </button>
             <button
               type="button"
-              data-sway-open-connections="true"
-              onClick={() => openInactiveWorkspace('connections')}
+              data-sway-open-room-tools="true"
+              onClick={() => setRoomToolsExpanded(true)}
               className="inline-flex min-h-12 items-center justify-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 text-[10px] font-black uppercase tracking-wide text-cyan-200 sm:px-3 sm:text-xs"
             >
               <LinkIcon className="h-4 w-4" />
-              Connect
+              Room tools
             </button>
             <button
               type="button"
@@ -2454,6 +2847,7 @@ export default function TalentDashboard({
               type="button"
               aria-current={selected ? 'page' : undefined}
               onClick={() => {
+                if (id === 'connections') setShowAdvancedLibrary(false);
                 openInactiveWorkspace(id);
               }}
               className={`inline-flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-black uppercase tracking-wider transition sm:flex-row sm:text-xs ${
@@ -2508,30 +2902,29 @@ export default function TalentDashboard({
       ) : null}
 
       {inactiveWorkspace === 'connections' ? (
-        <PerformerConnectionsWorkspace
-          activeGigId={selectedRoomLink}
-          sessionStatus={session.status}
-          controlsEnabled={hardwareControlsEnabled}
-          midiStatus={hardwareInputStatus}
-          bindings={hardwareBindings}
-          learnTarget={hardwareLearnTarget}
-          bridgeCommand={bridgeCommand}
-          windowsBoothLauncher={windowsBoothLauncher}
-          bridgeTokenStatus={bridgeTokenStatus}
-          bridgeTokenMessage={bridgeTokenMessage}
-          previewMode={previewMode}
-          onControlsEnabledChange={setHardwareControlsEnabled}
-          onLearn={setHardwareLearnTarget}
-          onClear={clearHardwareInput}
-          onIssueBridgeToken={issueBridgeToken}
-          onDownloadWindowsBooth={downloadWindowsBooth}
-          onDownloadBridgePreset={downloadBridgePreset}
-          onBackToRoom={() => openInactiveWorkspace('room')}
-          onOpenLibraryConnections={() => {
-            openInactiveWorkspace('library');
-            setShowAdvancedLibrary(true);
-          }}
-        />
+        !showAdvancedLibrary ? (
+          <PerformerConnectionsWorkspace
+            linkedSources={linkedSources}
+            linkedSourcesStatus={linkedSourcesStatus}
+            linkedSourcesError={linkedSourcesError}
+            catalogTrackCount={catalogLibraryTracks.length}
+            externalTrackCount={externalLibraryTracks.length}
+            requestLibraryStatus={requestLibraryStatus}
+            requestLibraryError={requestLibraryError}
+            spotifyPlaylistUrl={spotifyPlaylistUrl}
+            spotifyImportStatus={spotifyImportStatus}
+            spotifyImportMessage={spotifyImportMessage}
+            djLibraryImportStatus={djLibraryImportStatus}
+            djLibraryImportMessage={djLibraryImportMessage}
+            previewMode={previewMode}
+            onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
+            onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
+            onDjLibraryFileImport={handleDjLibraryFileImport}
+            onOpenCatalog={() => openInactiveWorkspace('catalog')}
+            onOpenAdvanced={() => setShowAdvancedLibrary(true)}
+            onRetry={retrySavedMusic}
+          />
+        ) : null
       ) : null}
 
       {inactiveWorkspace === 'shows' ? (
@@ -2556,14 +2949,17 @@ export default function TalentDashboard({
             onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
             onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
             onDjLibraryFileImport={handleDjLibraryFileImport}
-            onOpenAdvanced={() => setShowAdvancedLibrary(true)}
+            onOpenAdvanced={() => {
+              openInactiveWorkspace('connections');
+              setShowAdvancedLibrary(true);
+            }}
           />
         </div>
       ) : null}
 
-      {inactiveWorkspace === 'library' && showAdvancedLibrary ? (
+      {inactiveWorkspace === 'connections' && showAdvancedLibrary ? (
         <div className="order-2">
-          <button type="button" onClick={() => setShowAdvancedLibrary(false)} className="mx-auto mb-3 block w-full max-w-3xl text-left text-sm font-bold text-cyan-200">← Back to your music</button>
+          <button type="button" onClick={() => setShowAdvancedLibrary(false)} className="mx-auto mb-3 block w-full max-w-3xl text-left text-sm font-bold text-cyan-200">← Back to Sources</button>
           <details
             open
             data-sway-library-workspace="true"
@@ -2571,36 +2967,23 @@ export default function TalentDashboard({
           >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Request library</p>
-            <p className="mt-1 text-xs text-slate-500">Synced catalogs and external music sources used for audience requests.</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Advanced source setup</p>
+            <p className="mt-1 text-xs text-slate-400">Only for a Windows booth computer that will update the same saved source more than once.</p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-300">
-            Manage
+            Advanced
           </span>
         </summary>
         <div className="mt-5 space-y-5">
-      <MusicSourcesPanel
-        providers={musicSourceCapabilities}
-        linkedSourceCount={linkedSourceCount}
-        syncedTrackCount={linkedTrackCount}
-        loading={musicSourceCapabilityStatus === 'loading'}
-        loadError={musicSourceCapabilityError}
-        spotifyPlaylistUrl={spotifyPlaylistUrl}
-        spotifyImportStatus={spotifyImportStatus}
-        spotifyImportMessage={spotifyImportMessage}
-        onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
-        onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
-      />
-
-      <details className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
+      <details open className="group max-w-3xl mx-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-lg">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 text-left">
           <div>
-            <h4 className="font-display text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Booth library bridge</h4>
+            <h4 className="text-sm font-black text-white">Make a reusable booth helper</h4>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-              Create a source key once, then import rekordbox XML, Traktor NML, VirtualDJ XML, M3U/CSV, or an audio folder from the booth computer.
+              Download it once. Reuse it whenever your DJ library changes; every room uses the updated request list.
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              The local bridge sends track metadata and exact file paths; it never uploads audio.
+              The helper sends track names and metadata. It never uploads audio.
             </p>
           </div>
           <span className="shrink-0 rounded-full border border-white/10 bg-slate-950 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
@@ -2611,12 +2994,12 @@ export default function TalentDashboard({
 
         <form className="mt-4 space-y-3" onSubmit={handleLibraryLink}>
           <div className="space-y-1.5">
-            <label className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Source label</label>
+            <label className="text-xs font-bold text-slate-300">Computer name</label>
             <input
               type="text"
               value={librarySourceLabel}
               onChange={(event) => setLibrarySourceLabel(event.target.value)}
-              placeholder="Custom script, laptop bridge, booth PC"
+              placeholder="Main booth laptop"
               className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-emerald-500"
             />
           </div>
@@ -2634,50 +3017,125 @@ export default function TalentDashboard({
           ) : null}
 
           {issuedSyncKey ? (
-            <div className="rounded-xl border border-emerald-500/20 bg-slate-950 px-3 py-3 text-xs text-slate-300">
-              <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync endpoint</p>
-              <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncEndpointPath}</p>
-              <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync key</p>
-              <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
-              <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-                Any compatible program can `POST` tracks to this endpoint with header `x-sway-library-key` set to this sync key.
+            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-4 text-xs text-slate-200">
+              <p className="text-sm font-black text-white">Your private music helper is ready</p>
+              <ol className="mt-3 list-decimal space-y-2 pl-5 text-xs leading-5 text-slate-200">
+                <li>Download the helper to your Windows booth computer.</li>
+                <li>Double-click it and choose your DJ library export.</li>
+                <li>Wait for “DONE.” Keep the helper and reuse it after your library changes.</li>
+              </ol>
+              {issuedSyncKey.windowsHelper ? (
+                <button type="button" onClick={downloadLibraryHelper} data-sway-windows-library-helper-download="true" className="mt-4 min-h-12 w-full rounded-xl bg-emerald-400 px-4 text-sm font-black text-slate-950">
+                  Download Windows music helper
+                </button>
+              ) : (
+                <p role="alert" className="mt-3 text-amber-200">Sway could not prepare the Windows helper. Use Technical details below or replace this connection.</p>
+              )}
+              <p className="mt-3 text-[10px] leading-5 text-amber-100">Keep the downloaded file private. It can update this saved source, but it cannot enter or control a room.</p>
+              <details className="mt-3 rounded-xl border border-white/10 bg-slate-950/70 p-3">
+                <summary className="cursor-pointer text-xs font-bold text-slate-300">Technical details</summary>
+                <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync endpoint</p>
+                <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncEndpointPath}</p>
+                <p className="mt-3 text-[9px] font-mono uppercase tracking-widest text-emerald-300">Sync key</p>
+                <p className="mt-2 break-all font-mono text-white">{issuedSyncKey.syncKey}</p>
+                <p className="mt-3 text-[10px] leading-relaxed text-slate-500">Compatible programs can POST tracks with header x-sway-library-key. Command-line bridge: npm run library:bridge -- --sync-key … --import "/path/to/export-or-music-folder".</p>
+              </details>
+            </div>
+          ) : null}
+
+          {linkedSourceConfirmation ? (
+            <div
+              role="alertdialog"
+              aria-labelledby="linked-source-confirmation-title"
+              aria-describedby="linked-source-confirmation-detail"
+              className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"
+            >
+              <p id="linked-source-confirmation-title" className="text-sm font-black text-white">
+                {linkedSourceConfirmation.action === 'replace_key'
+                  ? `Make a fresh helper for ${linkedSourceConfirmation.sourceLabel}?`
+                  : `Disconnect ${linkedSourceConfirmation.sourceLabel}?`}
               </p>
-              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                Built-in import: `npm run library:bridge -- --sync-key ... --import "/path/to/export-or-music-folder"`.
+              <p id="linked-source-confirmation-detail" className="mt-2 text-xs leading-5 text-amber-100">
+                {linkedSourceConfirmation.action === 'replace_key'
+                  ? 'The current helper will stop working. Download the fresh helper once; other rooms and sources are unchanged.'
+                  : 'This source will stop syncing. Its imported tracks remain until you replace or remove them.'}
               </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLinkedSourceConfirmation(null)}
+                  className="min-h-11 rounded-xl border border-white/15 bg-slate-950 px-3 text-xs font-black text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const confirmation = linkedSourceConfirmation;
+                    setLinkedSourceConfirmation(null);
+                    if (confirmation.action === 'replace_key') {
+                      void handleRotateLinkedSource(confirmation.sourceId);
+                    } else {
+                      void handleRevokeLinkedSource(confirmation.sourceId, confirmation.sourceLabel);
+                    }
+                  }}
+                  className={`min-h-11 rounded-xl px-3 text-xs font-black ${
+                    linkedSourceConfirmation.action === 'replace_key'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'bg-rose-500 text-slate-950'
+                  }`}
+                >
+                  {linkedSourceConfirmation.action === 'replace_key' ? 'Make fresh helper' : 'Disconnect source'}
+                </button>
+              </div>
             </div>
           ) : null}
 
           {linkedSources.length > 0 ? (
             <div className="rounded-xl border border-white/10 bg-slate-950 px-3 py-3">
-              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Linked sources</p>
+              <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500">Reusable account sources</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-slate-400">These stay linked across rooms. Make a fresh helper only if the old file was lost, shared, or disconnected.</p>
               <div className="mt-3 space-y-2">
                 {linkedSources.map((source) => (
                   <div key={source.id} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-3">
                     <p className="text-xs font-bold text-white">{source.sourceLabel}</p>
-                    <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-slate-500">{source.sourceKey}</p>
-                    <p className="mt-1 text-[10px] text-slate-400">Key reference: {source.syncKeyPreview}</p>
                     <p className="mt-1 text-[10px] text-slate-400">Tracks available: {source.trackCount}</p>
-                    <p className="mt-1 text-[10px] text-slate-400">Status: {source.connectionStatus}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Status: {source.connectionStatus === 'revoked' ? 'Disconnected' : 'Connected for every room'}</p>
                     <p className="mt-1 text-[10px] text-slate-400">
                       {source.lastSyncedAt ? `Last synced ${new Date(source.lastSyncedAt).toLocaleString()}` : 'No sync received yet'}
                     </p>
+                    <details className="mt-2 text-[10px] text-slate-500">
+                      <summary className="cursor-pointer">Technical source details</summary>
+                      <p className="mt-1 break-all font-mono">{source.sourceKey} · {source.syncKeyPreview}</p>
+                    </details>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => handleRotateLinkedSource(source.id)}
+                        onClick={() => setLinkedSourceConfirmation({
+                          action: 'replace_key',
+                          sourceId: source.id,
+                          sourceLabel: source.sourceLabel
+                        })}
                         disabled={previewMode || pendingSourceId === source.id}
                         className="inline-flex min-h-10 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[10px] font-bold text-cyan-200 transition-all hover:border-cyan-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        {pendingSourceId === source.id ? 'Rotating...' : 'Rotate key'}
+                        {pendingSourceId === source.id
+                          ? 'Preparing helper…'
+                          : source.connectionStatus === 'revoked'
+                            ? 'Reconnect with fresh helper'
+                            : 'Make fresh helper'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleRevokeLinkedSource(source.id, source.sourceLabel)}
+                        onClick={() => setLinkedSourceConfirmation({
+                          action: 'revoke',
+                          sourceId: source.id,
+                          sourceLabel: source.sourceLabel
+                        })}
                         disabled={previewMode || pendingSourceId === source.id || source.connectionStatus === 'revoked'}
                         className="inline-flex min-h-10 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[10px] font-bold text-rose-200 transition-all hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        {source.connectionStatus === 'revoked' ? 'Revoked' : 'Revoke source'}
+                        {source.connectionStatus === 'revoked' ? 'Disconnected' : 'Disconnect source'}
                       </button>
                     </div>
                   </div>
@@ -2692,9 +3150,27 @@ export default function TalentDashboard({
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <Upload className="h-4 w-4" />
-            {libraryLinkStatus === 'submitting' ? 'Creating linked source...' : 'Create linked source'}
+            {libraryLinkStatus === 'submitting' ? 'Preparing helper…' : 'Create private Windows helper'}
           </button>
         </form>
+      </details>
+
+      <details className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+        <summary className="cursor-pointer text-xs font-bold text-slate-400">Technical compatibility details</summary>
+        <div className="mt-4">
+          <MusicSourcesPanel
+            providers={musicSourceCapabilities}
+            linkedSourceCount={linkedSourceCount}
+            syncedTrackCount={linkedTrackCount}
+            loading={musicSourceCapabilityStatus === 'loading'}
+            loadError={musicSourceCapabilityError}
+            spotifyPlaylistUrl={spotifyPlaylistUrl}
+            spotifyImportStatus={spotifyImportStatus}
+            spotifyImportMessage={spotifyImportMessage}
+            onSpotifyPlaylistUrlChange={setSpotifyPlaylistUrl}
+            onSpotifyPlaylistImport={handleSpotifyPlaylistImport}
+          />
+        </div>
       </details>
 
         </div>
@@ -2709,7 +3185,7 @@ export default function TalentDashboard({
         >
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.28em] text-fuchsia-300">Audio catalog</p>
-            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Your music</h2>
+            <h2 className="mt-1 font-display text-lg font-black uppercase tracking-wide text-white">Your uploads</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
               Upload masters, beats, mixes, spoken word, audiobooks, demos, and any other audio you own. Choose which tracks also appear in Library for requests.
             </p>
@@ -2739,7 +3215,38 @@ export default function TalentDashboard({
             <p className="mt-1 text-xs text-slate-500">Incoming card payments and payout readiness live here. Free rooms do not require payout setup.</p>
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950 p-4 select-none">
+          {payoutSetupReturnStatus ? (
+            <div
+              role="status"
+              data-sway-payout-return-notice={payoutSetupReturnStatus}
+              className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                payoutSetupReturnStatus === 'return'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                  : payoutSetupReturnStatus === 'pending'
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                    : 'border-rose-500/30 bg-rose-500/10 text-rose-100'
+              }`}
+            >
+              <p className="font-black">
+                {payoutSetupReturnStatus === 'return'
+                  ? (moneyReady ? 'Payout setup is ready.' : 'You’re back in Sway.')
+                  : payoutSetupReturnStatus === 'pending'
+                    ? 'Payout setup is not finished yet.'
+                    : 'Sign in as the performer owner to manage payouts.'}
+              </p>
+              <p className="mt-1 text-xs leading-5 opacity-90">
+                {payoutSetupReturnStatus === 'return'
+                  ? (moneyReady
+                    ? 'Your payment and payout status has been checked. You can review or change the destination below.'
+                    : 'We checked your status. If the provider still needs anything, use the button below to finish secure setup.')
+                  : payoutSetupReturnStatus === 'pending'
+                    ? 'Choose your destination below, then continue secure setup. Your existing progress is saved.'
+                    : 'Sign in as the performer owner, then return to Money to check payout setup status.'}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950 p-4 select-none">
             <div className="min-w-0 flex items-start gap-3">
               <div className="shrink-0 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
                 <CreditCard className="h-4 w-4" />
@@ -2747,49 +3254,158 @@ export default function TalentDashboard({
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
                 {liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live' ? (
-                  <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because Stripe could not be verified. Free rooms remain available.</p>
+                  <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because the payment provider could not be verified. Free rooms remain available.</p>
                 ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceReady ? (
                   <p className="mt-0.5 text-[11px] text-cyan-300">
-                    Stripe test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a bank.
+                    Test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a payout destination.
                   </p>
                 ) : performerProfile?.money_actions_ready ? (
                   <p className="mt-0.5 text-[11px] text-emerald-300">
                     {liveRoomPaymentMode === 'live'
-                      ? 'Stripe live mode. Paid requests, tips, and boosts move real money after payout setup.'
-                      : 'Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.'}
+                      ? 'Live payment processing and payout setup are ready.'
+                      : 'Test mode only. Test requests, tips, and boosts do not move real money or reach a payout destination.'}
                   </p>
                 ) : performerProfile?.charges_enabled ? (
                   <p className="mt-0.5 text-[11px] text-amber-300">
                     {liveRoomPaymentMode === 'live'
-                      ? 'Stripe charges are available, but payout setup is incomplete.'
-                      : 'Stripe test charges are available, but test payout setup is incomplete.'}
+                      ? 'Incoming card payments are available, but payout setup is incomplete.'
+                      : 'Test card payments are available, but test payout setup is incomplete.'}
                   </p>
                 ) : performerProfile?.stripe_connected_account_id ? (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Stripe onboarding has started but is not finished.</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Secure payout setup has started but is not finished.</p>
                 ) : (
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     {liveRoomPaymentMode === 'live'
-                      ? 'Connect Stripe before starting paid requests, tips, or boosts.'
-                      : 'Connect Stripe test mode before rehearsing paid requests, tips, or boosts.'}
+                      ? 'Choose a payout destination before starting paid requests, tips, or boosts.'
+                      : 'Choose a test payout destination before rehearsing paid requests, tips, or boosts.'}
                   </p>
                 )}
-                {stripeConnectError ? <p className="mt-1 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
               </div>
             </div>
-            {!moneyReady ? (
+
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <h3 className="text-sm font-black text-white">Where should your earnings go?</h3>
+              <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">
+                {liveRoomPaymentMode === 'test'
+                  ? 'This is a test rehearsal. Choose Bank account or Debit card and use Stripe test details only—never enter a real bank account or card. Sway never stores full bank or card numbers.'
+                  : 'Stripe processes incoming card payments for Sway. Choose your preferred payout destination, then confirm the actual account in secure setup. Sway never stores your full bank or card numbers.'}
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Payout destination">
+                {PAYOUT_DESTINATIONS.map((destination) => {
+                  const selected = payoutDestinationKind === destination.id;
+                  const providerCertified = payoutDestinationCapabilities[destination.id];
+                  const setupAllowed = canConfigurePayoutDestination(
+                    destination.id,
+                    liveRoomPaymentMode,
+                    payoutDestinationCapabilities
+                  );
+                  const DestinationIcon = destination.id === 'bank_account'
+                    ? Landmark
+                    : destination.id === 'debit_card'
+                      ? CreditCard
+                      : Smartphone;
+                  const setupHint = !providerCertified
+                    ? 'Unavailable until Sway confirms this payout rail is enabled in the configured Stripe account.'
+                    : liveRoomPaymentMode === 'test'
+                    ? destination.id === 'bank_account'
+                      ? 'Use the test bank details provided by Stripe. Do not enter real routing or account numbers.'
+                      : destination.id === 'debit_card'
+                        ? 'Use an eligible Stripe test card if secure setup offers card payouts. Do not enter a real card.'
+                        : 'Available after live payouts are enabled. Real direct-deposit details cannot be entered in this test environment.'
+                    : destination.setupHint;
+                  const destinationLabel = liveRoomPaymentMode === 'test'
+                    ? destination.id === 'bank_account'
+                      ? 'Test bank account (simulated)'
+                      : destination.id === 'debit_card'
+                        ? 'Test debit card (simulated)'
+                        : destination.label
+                    : destination.label;
+                  return (
+                    <div
+                      key={destination.id}
+                      className={`rounded-2xl border p-4 transition ${selected ? 'border-emerald-400 bg-emerald-400/10' : 'border-white/10 bg-slate-900/70'} ${setupAllowed ? 'hover:border-emerald-400/40' : 'opacity-55'}`}
+                    >
+                      <label className={`flex items-start gap-3 ${setupAllowed ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <input
+                          type="radio"
+                          name="payoutDestination"
+                          value={destination.id}
+                          checked={selected}
+                          disabled={!setupAllowed}
+                          onChange={() => {
+                            setPayoutDestinationOverride(destination.id);
+                            setStripeConnectStatus('idle');
+                            setStripeConnectError(null);
+                          }}
+                          className="mt-1 h-4 w-4 shrink-0 accent-emerald-400"
+                        />
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-2 text-xs font-black text-white">
+                            <DestinationIcon className="h-4 w-4 text-emerald-300" />
+                            {destinationLabel}
+                          </span>
+                          <span className="mt-1 block text-[11px] leading-5 text-slate-300">{destination.shortDescription}</span>
+                          <span className="mt-1 block text-[10px] leading-4 text-slate-500">{setupHint}</span>
+                          {!setupAllowed ? (
+                            <span className="mt-2 inline-flex rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[9px] font-black uppercase text-amber-200">
+                              {!providerCertified ? 'Not enabled' : 'Live payouts only'}
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                      {destination.helpUrl && liveRoomPaymentMode === 'live' && setupAllowed ? (
+                        <a
+                          href={destination.helpUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-7 mt-2 inline-flex text-[10px] font-bold text-cyan-300 hover:text-cyan-200"
+                        >
+                          Find direct-deposit details
+                        </a>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {liveRoomPaymentMode === 'live' ? (
+                <p className="mt-3 text-[10px] leading-5 text-slate-500">
+                  Cash App and Venmo use their direct-deposit routing and account numbers here; this is not a transfer to a username, phone number, or $cashtag. Debit-card availability and payout speed depend on provider eligibility.
+                </p>
+              ) : (
+                <p className="mt-3 text-[10px] leading-5 text-amber-200">Cash App and Venmo are shown for clarity but cannot be selected until live payouts are enabled.</p>
+              )}
+              {liveRoomPaymentMode === 'test' ? (
+                <p className="mt-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-[10px] leading-5 text-cyan-200">
+                  Test mode is a rehearsal only. No real earnings will be sent to any destination.
+                </p>
+              ) : null}
+              {liveRoomPaymentMode === 'test'
+                && !payoutDestinationCapabilities.bank_account
+                && !payoutDestinationCapabilities.debit_card ? (
+                  <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-5 text-amber-100">Test payout setup is locked until Sway confirms external-account collection in the configured Stripe account.</p>
+                ) : null}
+              {stripeConnectError ? <p className="mt-2 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
+              {!payoutDestinationKind ? <p className="mt-2 text-[10px] text-amber-300">Choose one destination to continue.</p> : null}
+              {payoutDestinationKind && !payoutDestinationSetupAllowed && liveRoomPaymentMode === 'test' ? (
+                <p className="mt-2 text-[10px] text-amber-300">Choose Bank account or Debit card for this test rehearsal. Cash App and Venmo remain saved for live setup but are not opened in test mode.</p>
+              ) : null}
+
               <button
                 type="button"
-                onClick={handleConnectStripe}
-                disabled={previewMode || (liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live') || stripeConnectStatus === 'submitting'}
-                className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handlePayoutSetup}
+                disabled={previewMode || !payoutDestinationSetupAllowed || stripeConnectStatus === 'submitting'}
+                className="mt-4 min-h-11 w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-black text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {stripeConnectStatus === 'submitting'
-                  ? 'Opening Stripe...'
-                  : performerProfile?.stripe_connected_account_id
-                    ? (liveRoomPaymentMode === 'live' ? 'Finish Stripe setup' : 'Finish Stripe test setup')
-                    : (liveRoomPaymentMode === 'live' ? 'Connect Stripe' : 'Connect Stripe test mode')}
+                  ? 'Opening secure setup...'
+                  : moneyReady
+                    ? 'Review or change payout details'
+                    : performerProfile?.stripe_connected_account_id
+                      ? 'Finish payout setup'
+                      : 'Set up payout destination'}
               </button>
-            ) : null}
+            </div>
           </div>
         </section>
       ) : null}
@@ -2801,18 +3417,54 @@ export default function TalentDashboard({
             performerHandle={performerProfile?.handle}
             roleLabel={performerRoleLabel}
             stripeReady={moneyReady}
+            musicStatus={musicReadinessStatus}
             paymentMode={liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live' ? liveRoomPaymentMode : 'unavailable'}
             emailVerified={performerEmailVerified}
             onStartRoom={() => openInactiveWorkspace('room')}
-            onOpenLibrary={() => {
-              openInactiveWorkspace('library');
+            onOpenSources={() => {
+              openInactiveWorkspace('connections');
             }}
           />
         </div>
       ) : null}
 
       {inactiveWorkspace === 'room' ? (
-        <div id="sway-start-room" className="order-3">
+        <div id="sway-start-room" className="order-3 space-y-3">
+          <section data-sway-room-source-readiness="true" className="mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-950 px-4 py-4">
+            {musicReadinessStatus === 'loading' ? (
+              <div role="status" className="flex items-center gap-3">
+                <Hourglass className="h-5 w-5 shrink-0 text-cyan-300" />
+                <div>
+                  <p className="text-sm font-black text-white">Checking your music…</p>
+                  <p className="mt-1 text-xs text-slate-400">Sway is confirming what people can request before you create the room.</p>
+                </div>
+              </div>
+            ) : musicReadinessStatus === 'error' ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-white">Couldn’t check your saved music</p>
+                  <p className="mt-1 text-xs text-amber-200">Your music was not removed. Check again before opening requests.</p>
+                </div>
+                <button type="button" onClick={retrySavedMusic} className="min-h-11 shrink-0 rounded-xl bg-amber-300 px-4 text-sm font-black text-slate-950">Try again</button>
+              </div>
+            ) : musicReadinessStatus === 'ready' ? (
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" />
+                <div>
+                  <p className="text-sm font-black text-white">Music is ready</p>
+                  <p className="mt-1 text-xs text-slate-400">{requestableTrackCount} {requestableTrackCount === 1 ? 'track is' : 'tracks are'} available for requests in this room.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-white">Will people request songs?</p>
+                  <p className="mt-1 text-xs text-slate-400">Add your music once before creating the room. Skip this for non-music rooms.</p>
+                </div>
+                <button type="button" onClick={() => openInactiveWorkspace('connections')} className="min-h-11 shrink-0 rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950">Add music</button>
+              </div>
+            )}
+          </section>
           <PerformerRoomSetup
             performerName={welcomePerformerName}
             talentRole={session.talentRole === 'DJ' ? 'DJ' : 'Performer'}

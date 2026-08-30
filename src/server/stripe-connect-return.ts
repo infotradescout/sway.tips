@@ -30,15 +30,15 @@ export async function handleStripeConnectReturn<Request, Response extends Redire
   try {
     const talentAccess = await input.requireTalentAccess(input.req);
     if (talentAccess.allowed === false || !talentAccess.actor.actorId) {
-      return input.res.redirect(303, '/talent?connect=auth');
+      return input.res.redirect(303, '/talent/account?connect=auth');
     }
     if (!input.runtimeAvailable) {
-      return input.res.redirect(303, '/talent?connect=pending');
+      return input.res.redirect(303, '/talent/account?connect=pending');
     }
     const ownerUserId = talentAccess.actor.actorId;
     const performerOwner = await input.loadOwnedPerformer(ownerUserId);
     if (!performerOwner?.stripeAccountId) {
-      return input.res.redirect(303, '/talent?connect=pending');
+      return input.res.redirect(303, '/talent/account?connect=pending');
     }
     const providerStatus = await input.getAccountStatus(performerOwner.stripeAccountId);
     const result = await input.applyStatus({
@@ -49,10 +49,10 @@ export async function handleStripeConnectReturn<Request, Response extends Redire
     });
     return input.res.redirect(
       303,
-      result.kind === 'not_found' ? '/talent?connect=pending' : '/talent?connect=return'
+      result.kind === 'not_found' ? '/talent/account?connect=pending' : '/talent/account?connect=return'
     );
   } catch (error) {
     input.logError?.(error);
-    return input.res.redirect(303, '/talent?connect=pending');
+    return input.res.redirect(303, '/talent/account?connect=pending');
   }
 }

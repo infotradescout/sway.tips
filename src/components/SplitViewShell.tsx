@@ -11,6 +11,7 @@ type SplitViewShellProps = {
   isEmpty?: boolean;
   badge?: ReactNode;
   showHeader?: boolean;
+  showPrimaryLabel?: boolean;
   primaryOnly?: boolean;
 };
 
@@ -25,6 +26,7 @@ export default function SplitViewShell({
   isEmpty = false,
   badge,
   showHeader = true,
+  showPrimaryLabel = true,
   primaryOnly = false
 }: SplitViewShellProps) {
   return (
@@ -42,9 +44,11 @@ export default function SplitViewShell({
             {badge}
           </div>
         )}
-        <div className="sr-only rounded-xl border border-white/10 bg-slate-950/40 p-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 lg:not-sr-only">
-          {primaryLabel}
-        </div>
+        {showPrimaryLabel ? (
+          <div className="sr-only rounded-xl border border-white/10 bg-slate-950/40 p-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 lg:not-sr-only">
+            {primaryLabel}
+          </div>
+        ) : null}
         <div className="min-w-0">{isEmpty && emptyState ? emptyState : primary}</div>
       </div>
 

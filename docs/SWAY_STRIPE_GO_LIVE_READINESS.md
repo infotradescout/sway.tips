@@ -30,6 +30,23 @@ are Stripe Accounts v2 recipient accounts with the `stripe_balance.stripe_transf
 capability requested and Express dashboard access. Performer payout copy must
 remain conditional on Stripe verification and payout capability status.
 
+## Payout Destination Certification
+
+Payout setup fails closed until an operator verifies the matching Stripe
+Dashboard controls for hosted Connect onboarding:
+
+```text
+SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED=true
+SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED=true  # only when enabled; US accounts only
+```
+
+Before setting the first flag, confirm external payout-account collection is
+enabled for the platform-responsible hosted onboarding configuration. Before
+setting the debit flag, also confirm Stripe's separate debit-card collection
+setting. Sway exposes debit-card destinations only for `US`; Cash App and Venmo
+direct-deposit destinations are also restricted to `US`. Leaving either flag
+unset or false keeps the corresponding choices disabled in both the API and UI.
+
 ## Webhook Replay Rule
 
 Stripe webhooks must acknowledge duplicate, same-state, concurrent, and stale

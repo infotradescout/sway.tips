@@ -336,6 +336,20 @@ export const stripeConnectOnboardingOperations = pgTable('stripe_connect_onboard
   )
 }));
 
+// Stores only the performer's chosen payout rail. Full bank, debit-card,
+// Cash App, and Venmo account details are collected and retained by the
+// payment provider, never by Sway.
+export const performerPayoutPreferences = pgTable('performer_payout_preferences', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  destinationKind: text('destination_kind').notNull(),
+  ...timestamps
+}, (table) => ({
+  destinationKindAllowed: check(
+    'performer_payout_preferences_destination_kind_allowed',
+    sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo_direct_deposit')`
+  )
+}));
+
 export const performerPublicProfiles = pgTable('performer_public_profiles', {
   performerId: uuid('performer_id').primaryKey().references(() => performers.id),
   headline: text('headline'),

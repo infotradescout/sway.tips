@@ -18,6 +18,7 @@ export type StripeConnectService = {
     refreshUrl: string;
     returnUrl: string;
   }) => Promise<{ url: string }>;
+  createManagementLink: (accountId: string) => Promise<{ url: string }>;
   getAccountStatus: (accountId: string) => Promise<ConnectAccountStatus>;
   // Verifies a webhook payload and, only if it is an account.updated event,
   // returns the affected account id + status. Returns null for any other
@@ -202,6 +203,11 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
           }
         }
       });
+      return { url: link.url };
+    },
+
+    async createManagementLink(accountId) {
+      const link = await stripe.accounts.createLoginLink(accountId);
       return { url: link.url };
     },
 

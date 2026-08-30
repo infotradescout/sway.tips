@@ -531,6 +531,8 @@ for (const term of [
   'resolvePublicProfileHeroName',
   'resolvePublicProfilePageKindLabel',
   'primaryRole: string | null',
+  'roles: string[]',
+  'roles: profile.roles',
   'stageName: string | null',
   'canonicalHandle',
   'claims and verifies the profile',
@@ -560,8 +562,11 @@ for (const term of [
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
 for (const term of [
   'What kind of performer are you?',
+  'Select all that apply.',
   'PUBLIC_PERFORMER_PRIMARY_ROLES',
-  'primaryRole: form.primaryRole || null',
+  'type="checkbox"',
+  'roles: form.roles',
+  'primaryRole: form.roles[0] || null',
   'Stage name — optional',
   'Your @handle is the main public name'
 ]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
@@ -569,21 +574,24 @@ for (const term of [
 for (const term of [
   'mergePublicProfileMetadata',
   'primaryRole',
+  'roles: performerRoles',
+  'roles: resolvePublicRoles(savedLinks.metadata)',
   'stageName',
   'profile_metadata: performerPublicProfiles.metadata',
   'preview_metadata: performerProfilePreviews.metadata',
-  'primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)',
+  'primary_role: performerRoles[0] ?? null',
   'stage_name: profileStageName || previewStageName',
   '.leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))',
   '.leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))',
   ': performerRow.preview_specialties ?? []',
-  "return res.status(422).json({ error: 'Choose your primary role.' })"
+  "return res.status(422).json({ error: 'Choose at least one performer role.' })"
 ]) requireIncludes(server, term, 'Profile identity API and console state');
 
 for (const term of [
   'resolvePublicProfileHeroName',
   'resolvePublicProfilePageKindLabel',
   'performerProfile?.primary_role',
+  'performerProfile?.roles',
   'performerProfile?.specialties',
   'Ready to start a live room · ${performerRoleLabel}'
 ]) requireIncludes(talentApp, term, 'Handle-first performer console');

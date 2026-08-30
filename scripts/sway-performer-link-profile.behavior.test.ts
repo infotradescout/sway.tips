@@ -8,6 +8,7 @@ import {
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
   normalizePublicProfilePrimaryRole,
+  normalizePublicProfileRoles,
   normalizePublicProfileSpecialties,
   normalizePublicProfileUrl,
   resolvePublicProfileHeroName,
@@ -99,6 +100,12 @@ assert.equal(normalizePublicProfilePrimaryRole('lawyer'), null);
 assert.equal(labelForPublicPerformerPrimaryRole('host'), 'Host / MC');
 assert.equal(labelForPublicPerformerPrimaryRole('Host / MC'), 'Host / MC');
 assert.equal(labelForPublicPerformerPrimaryRole('other'), 'Other');
+assert.deepEqual(
+  normalizePublicProfileRoles([' DJ ', 'Host / MC', 'dj', 'lawyer', 'Musician']),
+  ['dj', 'host', 'musician']
+);
+assert.deepEqual(normalizePublicProfileRoles(undefined, 'Creator'), ['creator']);
+assert.deepEqual(normalizePublicProfileRoles([], null), []);
 assert.equal(
   resolvePublicProfileHeroName({ handle: 'coreymack', stageName: 'Corey Mack', displayName: 'Legal Name' }),
   '@coreymack'
@@ -114,6 +121,10 @@ assert.equal(
 assert.equal(
   resolvePublicProfilePageKindLabel({ primaryRole: 'dj', specialties: ['Open format'], isPreview: false }),
   'DJ'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: 'dj', roles: ['dj', 'host', 'producer'], specialties: [], isPreview: false }),
+  'DJ · Host / MC · Producer'
 );
 assert.equal(
   resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: ['Beatbox'], isPreview: false }),
@@ -136,7 +147,8 @@ assert.deepEqual(
     analyticsTag: 'keep-me',
     nested: { preserved: true },
     stageName: 'New name',
-    primaryRole: 'musician'
+    primaryRole: 'musician',
+    roles: ['musician']
   }
 );
 assert.deepEqual(
@@ -144,7 +156,14 @@ assert.deepEqual(
     { analyticsTag: 'keep-me', stageName: 'Old name', primaryRole: 'dj' },
     { stageName: null, primaryRole: 'host' }
   ),
-  { analyticsTag: 'keep-me', primaryRole: 'host' }
+  { analyticsTag: 'keep-me', primaryRole: 'host', roles: ['host'] }
+);
+assert.deepEqual(
+  mergePublicProfileMetadata(
+    { analyticsTag: 'keep-me', primaryRole: 'dj' },
+    { roles: ['dj', 'host', 'producer'] }
+  ),
+  { analyticsTag: 'keep-me', primaryRole: 'dj', roles: ['dj', 'host', 'producer'] }
 );
 
 assert.deepEqual(

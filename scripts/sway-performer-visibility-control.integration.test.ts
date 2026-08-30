@@ -221,7 +221,7 @@ async function main() {
     assert.equal(unlisted.body.visibilityState, 'unlisted');
 
     const profileSave = await owner.post('/api/talent/profile/public', {
-      primaryRole: 'dj',
+      roles: ['dj', 'host', 'producer'],
       stageName: 'Visibility Owner',
       headline: 'Updated visibility headline',
       specialties: ['live'],
@@ -234,10 +234,14 @@ async function main() {
     });
     assertStatus(profileSave, 202, 'ordinary profile save', server);
     assert.equal(profileSave.body.profile.visibilityState, 'unlisted');
+    assert.equal(profileSave.body.profile.primaryRole, 'dj');
+    assert.deepEqual(profileSave.body.profile.roles, ['dj', 'host', 'producer']);
 
     const afterProfileSave = await owner.get('/api/talent/profile/public');
     assertStatus(afterProfileSave, 200, 'profile read after ordinary save', server);
     assert.equal(afterProfileSave.body.profile.visibilityState, 'unlisted');
+    assert.equal(afterProfileSave.body.profile.primaryRole, 'dj');
+    assert.deepEqual(afterProfileSave.body.profile.roles, ['dj', 'host', 'producer']);
 
     const draft = await owner.post('/api/talent/profile/visibility', { visibilityState: 'draft' });
     assertStatus(draft, 200, 'owner draft visibility mutation', server);

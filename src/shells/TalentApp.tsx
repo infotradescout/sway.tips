@@ -64,12 +64,14 @@ type TalentPerformerProfile = {
   handle: string | null;
   stage_name: string | null;
   primary_role: string | null;
+  roles: string[];
   specialties: string[];
   owner_user_id: string;
   email_verified_at: string | null;
   charges_enabled: boolean;
   payouts_enabled: boolean;
   stripe_connected_account_id: string | null;
+  payout_destination_kind: string | null;
   money_actions_ready: boolean;
   test_mode_platform_balance_allowed: boolean;
 } | null;
@@ -375,6 +377,7 @@ export default function TalentApp() {
     : session.talentName || 'Sway account';
   const performerRoleLabel = resolvePublicProfilePageKindLabel({
     primaryRole: performerProfile?.primary_role,
+    roles: performerProfile?.roles,
     specialties: performerProfile?.specialties
   });
   const pendingCount = requests.filter((request) => request.status === 'hold' && !request.hidden && !request.removed).length;
@@ -453,6 +456,7 @@ export default function TalentApp() {
               : 'Requests, room link, earnings, and controls'}
             secondaryLabel={LIVE_ROOM_LANGUAGE.roomStatus}
             showHeader={session.status !== 'inactive'}
+            showPrimaryLabel={session.status !== 'inactive'}
             isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
