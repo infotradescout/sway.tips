@@ -1476,6 +1476,13 @@ export default function TalentDashboard({
     liveRoomPaymentMode,
     payoutDestinationCapabilities
   );
+  const hasAvailablePayoutDestination = PAYOUT_DESTINATIONS.some((destination) => (
+    canConfigurePayoutDestination(
+      destination.id,
+      liveRoomPaymentMode,
+      payoutDestinationCapabilities
+    )
+  ));
 
   const [librarySourceLabel, setLibrarySourceLabel] = useState('Primary DJ computer');
   const [libraryLinkStatus, setLibraryLinkStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -1976,7 +1983,7 @@ export default function TalentDashboard({
         payoutDestinationKind && !payoutDestinationCapabilities[payoutDestinationKind]
           ? 'That payout destination is not enabled in this Sway deployment yet.'
           : liveRoomPaymentMode === 'test'
-          ? 'Cash App and Venmo direct-deposit setup stays locked in test mode. Choose Bank account or Debit card and use provider test details only.'
+          ? 'Cash App and Venmo setup stays locked in test mode. Choose an enabled simulated option and use only test values accepted by secure setup.'
           : 'That payout destination cannot be configured in the current payment mode.'
       );
       return;
@@ -2510,10 +2517,12 @@ export default function TalentDashboard({
                       : 'text-amber-300'
                 }`}>
                   {liveRoomPaymentMode === 'live'
-                    ? 'Stripe live mode · real money'
+                    ? 'Live money · real payments'
                     : liveRoomPaymentMode === 'test'
-                      ? 'Stripe test mode · no real money'
-                      : 'Money unavailable · free room only'}
+                      ? 'Test money · no real money'
+                      : liveRoomPaymentMode === 'loading'
+                        ? 'Checking money availability'
+                        : 'Money unavailable · free room only'}
                 </p>
                 {activeRooms.length > 0 ? (
                   <label className="mt-1 flex min-w-0 items-center gap-1 text-[9px] font-bold text-slate-500">
@@ -3253,8 +3262,10 @@ export default function TalentDashboard({
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
-                {liveRoomPaymentMode !== 'test' && liveRoomPaymentMode !== 'live' ? (
-                  <p className="mt-0.5 text-[11px] text-amber-300">Money actions are unavailable because the payment provider could not be verified. Free rooms remain available.</p>
+                {liveRoomPaymentMode === 'loading' ? (
+                  <p className="mt-0.5 text-[11px] text-slate-400">Checking secure payout availability. Nothing has been changed.</p>
+                ) : liveRoomPaymentMode === 'unavailable' ? (
+                  <p className="mt-0.5 text-[11px] text-amber-300">Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.</p>
                 ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceReady ? (
                   <p className="mt-0.5 text-[11px] text-cyan-300">
                     Test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a payout destination.
@@ -3286,11 +3297,38 @@ export default function TalentDashboard({
             <div className="mt-5 border-t border-white/10 pt-5">
               <h3 className="text-sm font-black text-white">Where should your earnings go?</h3>
               <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">
-                {liveRoomPaymentMode === 'test'
-                  ? 'This is a test rehearsal. Choose Bank account or Debit card and use Stripe test details only—never enter a real bank account or card. Sway never stores full bank or card numbers.'
-                  : 'Stripe processes incoming card payments for Sway. Choose your preferred payout destination, then confirm the actual account in secure setup. Sway never stores your full bank or card numbers.'}
+                {liveRoomPaymentMode === 'loading'
+                  ? 'Checking which secure payout options are available. Nothing has been selected or changed.'
+                  : liveRoomPaymentMode === 'unavailable'
+                    ? 'Secure payout setup is temporarily unavailable. Your saved preference is unchanged, and free rooms still work.'
+                    : liveRoomPaymentMode === 'test'
+                      ? 'This is a rehearsal. Choose an enabled simulated option and use only provider-approved test values accepted by secure setup. If setup does not offer a test value, stop and return to Sway. Never enter real bank, card, or wallet details.'
+                      : 'Stripe processes incoming card payments for Sway. Sway automatically creates secure payout setup for you, so you do not need an existing Stripe account. Choose where you prefer earnings to go, then confirm the actual destination in secure setup. Sway never stores your full bank or card numbers.'}
               </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Payout destination">
+              <p className="mt-2 max-w-3xl text-[10px] leading-5 text-cyan-200">
+                Your reusable payout preference is saved to your performer profile when secure setup opens. It remains unverified until secure setup accepts an actual destination, and the preference itself does not prove that an account, card, or wallet destination was accepted.
+              </p>
+              {hasAvailablePayoutDestination
+                && (liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live') ? (
+                <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/70 p-3" data-sway-payout-steps="true">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                    {liveRoomPaymentMode === 'live' ? 'Get paid in 3 steps' : 'Rehearse payout setup in 3 steps'}
+                  </p>
+                  <ol className="mt-2 grid gap-2 text-[10px] leading-4 text-slate-300 sm:grid-cols-3">
+                    <li><span className="font-black text-white">1. Choose</span><span className="block">Pick your reusable payout preference.</span></li>
+                    <li><span className="font-black text-white">2. Confirm</span><span className="block">Confirm your identity and actual destination in secure setup.</span></li>
+                    <li>
+                      <span className="font-black text-white">3. Return</span>
+                      <span className="block">
+                        {liveRoomPaymentMode === 'live'
+                          ? 'Paid rooms unlock only when Sway says Ready. You can start earning then; deposit arrival depends on provider eligibility and schedule.'
+                          : 'Test paid rooms unlock only when Sway says Ready. No real money moves in this rehearsal.'}
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+              ) : null}
+              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Payout preference">
                 {PAYOUT_DESTINATIONS.map((destination) => {
                   const selected = payoutDestinationKind === destination.id;
                   const providerCertified = payoutDestinationCapabilities[destination.id];
@@ -3304,13 +3342,17 @@ export default function TalentDashboard({
                     : destination.id === 'debit_card'
                       ? CreditCard
                       : Smartphone;
-                  const setupHint = !providerCertified
-                    ? 'Unavailable until Sway confirms this payout rail is enabled in the configured Stripe account.'
+                  const setupHint = liveRoomPaymentMode === 'loading'
+                    ? 'Checking whether this option is available.'
+                    : liveRoomPaymentMode === 'unavailable'
+                      ? 'Unavailable while secure payout setup cannot be verified.'
+                      : !providerCertified
+                    ? 'This payout option is not enabled yet.'
                     : liveRoomPaymentMode === 'test'
                     ? destination.id === 'bank_account'
-                      ? 'Use the test bank details provided by Stripe. Do not enter real routing or account numbers.'
+                      ? 'Use only a provider-approved test bank value accepted by secure setup. Never enter real routing or account numbers.'
                       : destination.id === 'debit_card'
-                        ? 'Use an eligible Stripe test card if secure setup offers card payouts. Do not enter a real card.'
+                        ? 'Use only a provider-approved test card if secure setup offers one. Never enter a real card.'
                         : 'Available after live payouts are enabled. Real direct-deposit details cannot be entered in this test environment.'
                     : destination.setupHint;
                   const destinationLabel = liveRoomPaymentMode === 'test'
@@ -3370,11 +3412,11 @@ export default function TalentDashboard({
 
               {liveRoomPaymentMode === 'live' ? (
                 <p className="mt-3 text-[10px] leading-5 text-slate-500">
-                  Cash App and Venmo use their direct-deposit routing and account numbers here; this is not a transfer to a username, phone number, or $cashtag. Debit-card availability and payout speed depend on provider eligibility.
+                  Cash App and Venmo can use routing and account details only when Direct Deposit is available on that wallet account; eligibility and limits apply. This is not a transfer to a username, phone number, Venmo handle, or $cashtag. Debit-card availability and payout speed also depend on provider eligibility.
                 </p>
-              ) : (
+              ) : liveRoomPaymentMode === 'test' ? (
                 <p className="mt-3 text-[10px] leading-5 text-amber-200">Cash App and Venmo are shown for clarity but cannot be selected until live payouts are enabled.</p>
-              )}
+              ) : null}
               {liveRoomPaymentMode === 'test' ? (
                 <p className="mt-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-[10px] leading-5 text-cyan-200">
                   Test mode is a rehearsal only. No real earnings will be sent to any destination.
@@ -3383,12 +3425,14 @@ export default function TalentDashboard({
               {liveRoomPaymentMode === 'test'
                 && !payoutDestinationCapabilities.bank_account
                 && !payoutDestinationCapabilities.debit_card ? (
-                  <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-5 text-amber-100">Test payout setup is locked until Sway confirms external-account collection in the configured Stripe account.</p>
+                  <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-5 text-amber-100">No simulated payout option is enabled right now. Do not enter real financial details. Free rooms still work.</p>
                 ) : null}
               {stripeConnectError ? <p className="mt-2 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
-              {!payoutDestinationKind ? <p className="mt-2 text-[10px] text-amber-300">Choose one destination to continue.</p> : null}
+              {!payoutDestinationKind && hasAvailablePayoutDestination ? (
+                <p className="mt-2 text-[10px] text-amber-300">Choose one destination to continue.</p>
+              ) : null}
               {payoutDestinationKind && !payoutDestinationSetupAllowed && liveRoomPaymentMode === 'test' ? (
-                <p className="mt-2 text-[10px] text-amber-300">Choose Bank account or Debit card for this test rehearsal. Cash App and Venmo remain saved for live setup but are not opened in test mode.</p>
+                <p className="mt-2 text-[10px] text-amber-300">Choose an enabled Bank account or Debit card option for this rehearsal. Cash App and Venmo cannot be opened in test mode.</p>
               ) : null}
 
               <button

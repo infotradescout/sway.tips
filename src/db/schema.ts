@@ -11,6 +11,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -332,6 +333,78 @@ export const stripeConnectOnboardingOperations = pgTable('stripe_connect_onboard
   ),
   boundAccountRequired: check(
     'stripe_connect_onboarding_operations_bound_account_required',
+    sql`${table.status} <> 'bound' or ${table.stripeAccountId} is not null`
+  )
+}));
+
+// Runtime Stripe mode is part of the recipient identity. The original
+// performers.* Connect columns and stripe_connect_onboarding_operations table
+// remain as an immutable compatibility lane for historical test-mode data.
+// New code reads and writes this mode-qualified binding instead, so changing
+// Stripe credentials can never reinterpret a test account as a live account.
+export const performerStripeConnectBindings = pgTable('performer_stripe_connect_bindings', {
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull(),
+  stripeAccountId: text('stripe_account_id').notNull(),
+  paymentAccountStatus: paymentAccountStatusEnum('payment_account_status').notNull().default('not_started'),
+  chargesEnabled: boolean('charges_enabled').notNull().default(false),
+  payoutsEnabled: boolean('payouts_enabled').notNull().default(false),
+  statusCheckedAt: timestamp('status_checked_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  pk: primaryKey({ columns: [table.performerId, table.paymentMode] }),
+  accountModeIdx: uniqueIndex('performer_stripe_connect_bindings_account_mode_idx')
+    .on(table.paymentMode, table.stripeAccountId),
+  performerIdx: index('performer_stripe_connect_bindings_performer_idx').on(table.performerId),
+  paymentModeAllowed: check(
+    'performer_stripe_connect_bindings_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  )
+}));
+
+// Mode-qualified successor to stripe_connect_onboarding_operations. The
+// legacy table is deliberately retained so a rolling pre-migration process
+// can finish a test operation without losing its historic operation key.
+export const stripeConnectModeOnboardingOperations = pgTable('stripe_connect_mode_onboarding_operations', {
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  operationKey: text('operation_key').notNull(),
+  status: text('status').notNull().default('pending'),
+  stripeAccountId: text('stripe_account_id'),
+  leaseToken: uuid('lease_token'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastError: text('last_error'),
+  ...timestamps
+}, (table) => ({
+  pk: primaryKey({ columns: [table.performerId, table.paymentMode] }),
+  operationKeyIdx: uniqueIndex('stripe_connect_mode_onboarding_operations_key_idx').on(table.operationKey),
+  accountModeIdx: uniqueIndex('stripe_connect_mode_onboarding_operations_account_mode_idx')
+    .on(table.paymentMode, table.stripeAccountId)
+    .where(sql`${table.stripeAccountId} is not null`),
+  paymentModeAllowed: check(
+    'stripe_connect_mode_onboarding_operations_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  ),
+  statusAllowed: check(
+    'stripe_connect_mode_onboarding_operations_status_allowed',
+    sql`${table.status} in ('pending', 'provisioning', 'bound')`
+  ),
+  attemptCountValid: check(
+    'stripe_connect_mode_onboarding_operations_attempt_count_valid',
+    sql`${table.attemptCount} >= 0`
+  ),
+  leaseConsistent: check(
+    'stripe_connect_mode_onboarding_operations_lease_consistent',
+    sql`(
+      (${table.status} = 'provisioning' and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+      or
+      (${table.status} <> 'provisioning' and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)
+    )`
+  ),
+  boundAccountRequired: check(
+    'stripe_connect_mode_onboarding_operations_bound_account_required',
     sql`${table.status} <> 'bound' or ${table.stripeAccountId} is not null`
   )
 }));
@@ -1356,6 +1429,9 @@ export const payments = pgTable('payments', {
   actionType: text('action_type'),
   idempotencyKey: text('idempotency_key'),
   destinationAccountId: text('destination_account_id'),
+  // Provider environment snapshot. Existing/pre-migration rows are explicitly
+  // test; live workers must never claim or reconcile them.
+  paymentMode: text('payment_mode').notNull().default('test'),
   // Expand/contract rollout bridge. Migration 0028 defaults this true so the
   // still-running pre-0028 server remains write-compatible while Render applies
   // the migration. New code always writes false and must satisfy the binding
@@ -1404,7 +1480,8 @@ export const payments = pgTable('payments', {
         or (${table.actionType} = 'boost' and ${table.requestId} is null and ${table.requestBoostId} is not null)
       )
     )
-  `)
+  `),
+  paymentModeAllowed: check('payments_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`)
 }));
 
 export const liveRoomPaymentOperations = pgTable('live_room_payment_operations', {
@@ -1419,6 +1496,7 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   processor: text('processor').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   destinationAccountId: text('destination_account_id').notNull(),
+  paymentMode: text('payment_mode').notNull().default('test'),
   requestPayload: jsonb('request_payload').notNull(),
   processorObjectId: text('processor_object_id'),
   resultPayload: jsonb('result_payload'),
@@ -1455,7 +1533,11 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   completionCoherent: check('live_room_payment_operations_completion_coherent', sql`
     (${table.status} in ('succeeded', 'terminal_failed') and ${table.completedAt} is not null)
     or (${table.status} not in ('succeeded', 'terminal_failed') and ${table.completedAt} is null)
-  `)
+  `),
+  paymentModeAllowed: check(
+    'live_room_payment_operations_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  )
 }));
 
 export const liveRoomProcessorEvents = pgTable('live_room_processor_events', {

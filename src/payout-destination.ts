@@ -16,15 +16,15 @@ export const PAYOUT_DESTINATIONS = [
   {
     id: 'cash_app_direct_deposit',
     label: 'Cash App direct deposit',
-    shortDescription: 'Send earnings to the bank details provided by Cash App.',
-    setupHint: 'Get your routing and account numbers in Cash App, then enter them during secure setup.',
+    shortDescription: 'Use Cash App routing and account details only when Direct Deposit is available on your account.',
+    setupHint: 'Eligibility and limits apply. Secure setup confirms whether the routing and account details can be used.',
     helpUrl: 'https://cash.app/help/3111-direct-deposit-account-details'
   },
   {
     id: 'venmo_direct_deposit',
     label: 'Venmo direct deposit',
-    shortDescription: 'Send earnings to the bank details provided by Venmo.',
-    setupHint: 'Get your routing and account numbers in Venmo, then enter them during secure setup.',
+    shortDescription: 'Use Venmo routing and account details only when Direct Deposit is available on your account.',
+    setupHint: 'Eligibility and limits apply. Secure setup confirms whether the routing and account details can be used.',
     helpUrl: 'https://help.venmo.com/cs/articles/direct-deposit-faq-vhel332'
   }
 ] as const;
@@ -79,6 +79,40 @@ export function canConfigurePayoutDestination(
   if (!normalizePayoutDestinationCapabilities(capabilities)[destinationKind]) return false;
   if (paymentMode === 'live') return true;
   return destinationKind === 'bank_account' || destinationKind === 'debit_card';
+}
+
+export type PayoutDestinationSetupRequest =
+  | { ok: true; destinationKind: PayoutDestinationKind }
+  | { ok: false; status: 422 | 503; error: string };
+
+export function resolvePayoutDestinationSetupRequest(input: {
+  destinationKind: unknown;
+  paymentMode: unknown;
+  capabilities: unknown;
+  runtimeAvailable: boolean;
+}): PayoutDestinationSetupRequest {
+  const destinationKind = normalizePayoutDestinationKind(input.destinationKind);
+  if (!destinationKind) {
+    return { ok: false, status: 422, error: 'Choose a supported payout destination.' };
+  }
+  if (!input.runtimeAvailable) {
+    return { ok: false, status: 503, error: 'Secure payout setup is temporarily unavailable. Try again later.' };
+  }
+
+  const capabilities = normalizePayoutDestinationCapabilities(input.capabilities);
+  if (!canConfigurePayoutDestination(destinationKind, input.paymentMode, capabilities)) {
+    return {
+      ok: false,
+      status: 422,
+      error: !capabilities[destinationKind]
+        ? 'That payout destination is not available yet. Choose an enabled option.'
+        : input.paymentMode === 'test'
+          ? 'Cash App and Venmo setup is available only for live payouts. Choose an enabled simulated option.'
+          : 'That payout destination is unavailable in the current payment mode.'
+    };
+  }
+
+  return { ok: true, destinationKind };
 }
 
 export function normalizePayoutDestinationCapabilities(value: unknown): PayoutDestinationCapabilities {

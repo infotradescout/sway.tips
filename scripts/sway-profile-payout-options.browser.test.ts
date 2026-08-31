@@ -36,6 +36,8 @@ async function main() {
   let browser: Browser | null = null;
   const pageErrors: string[] = [];
   let savedProfileBody: Record<string, unknown> | null = null;
+  let payoutSetupBody: Record<string, unknown> | null = null;
+  let paymentConfigGate: Promise<void> | null = null;
   let paymentConfig = {
     mode: 'test',
     liveRoomMoneyEnabled: true,
@@ -68,10 +70,25 @@ async function main() {
       const request = route.request();
       const path = new URL(request.url()).pathname;
       if (path === '/api/payment/config') {
+        if (paymentConfigGate) await paymentConfigGate;
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify(paymentConfig)
+        });
+        return;
+      }
+      if (path === '/api/talent/connect/onboard' && request.method() === 'POST') {
+        payoutSetupBody = request.postDataJSON() as Record<string, unknown>;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            destinationKind: payoutSetupBody.destinationKind,
+            setupSurface: 'onboarding',
+            url: `${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout&connect=pending`
+          })
         });
         return;
       }
@@ -116,6 +133,73 @@ async function main() {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
 
+    let releasePaymentConfig!: () => void;
+    paymentConfigGate = new Promise<void>((resolve) => {
+      releasePaymentConfig = resolve;
+    });
+    const loadingPayoutPage = await context.newPage();
+    loadingPayoutPage.on('pageerror', (error) => pageErrors.push(`loading payout: ${error.stack || error.message}`));
+    await loadingPayoutPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'domcontentloaded' });
+    await loadingPayoutPage.getByText('Checking secure payout availability. Nothing has been changed.', { exact: true }).waitFor({ state: 'visible' });
+    assert.equal(await loadingPayoutPage.getByText('Choose one destination to continue.', { exact: true }).count(), 0, 'Loading mode must not instruct a performer to choose a disabled option.');
+    assert.equal(await loadingPayoutPage.locator('[data-sway-payout-steps="true"]').count(), 0, 'Loading mode must not render actionable setup steps before availability is known.');
+    releasePaymentConfig();
+    paymentConfigGate = null;
+    await loadingPayoutPage.getByText(/This is a rehearsal\./).waitFor({ state: 'visible' });
+    await loadingPayoutPage.close();
+
+    paymentConfig = {
+      mode: 'test',
+      liveRoomMoneyEnabled: false,
+      testModePlatformBalanceEnabled: false,
+      payoutDestinationCapabilities: {
+        bank_account: false,
+        debit_card: false,
+        cash_app_direct_deposit: false,
+        venmo_direct_deposit: false
+      }
+    };
+    const unavailablePayoutPage = await context.newPage();
+    unavailablePayoutPage.on('pageerror', (error) => pageErrors.push(`unavailable payout: ${error.stack || error.message}`));
+    await unavailablePayoutPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+    await unavailablePayoutPage.getByText('Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.', { exact: true }).waitFor({ state: 'visible' });
+    assert.equal(await unavailablePayoutPage.getByRole('radio').count(), 4, 'Unavailable mode must keep all four payout preferences visible.');
+    assert.equal(await unavailablePayoutPage.getByRole('radio').evaluateAll((radios) => radios.every((radio) => (radio as HTMLInputElement).disabled)), true, 'Unavailable mode must disable every payout preference.');
+    assert.equal(await unavailablePayoutPage.getByText('Choose one destination to continue.', { exact: true }).count(), 0, 'Unavailable mode must not instruct a performer to choose a disabled option.');
+    assert.equal(await unavailablePayoutPage.locator('[data-sway-payout-steps="true"]').count(), 0, 'Unavailable mode must not render actionable setup steps.');
+    await unavailablePayoutPage.close();
+
+    paymentConfig = {
+      mode: 'test',
+      liveRoomMoneyEnabled: true,
+      testModePlatformBalanceEnabled: false,
+      payoutDestinationCapabilities: {
+        bank_account: false,
+        debit_card: false,
+        cash_app_direct_deposit: false,
+        venmo_direct_deposit: false
+      }
+    };
+    const zeroCapabilityPayoutPage = await context.newPage();
+    zeroCapabilityPayoutPage.on('pageerror', (error) => pageErrors.push(`zero-capability payout: ${error.stack || error.message}`));
+    await zeroCapabilityPayoutPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+    await zeroCapabilityPayoutPage.getByText(/No simulated payout option is enabled right now/).waitFor({ state: 'visible' });
+    assert.equal(await zeroCapabilityPayoutPage.getByRole('radio').evaluateAll((radios) => radios.every((radio) => (radio as HTMLInputElement).disabled)), true, 'Zero-capability test mode must disable every payout preference.');
+    assert.equal(await zeroCapabilityPayoutPage.getByText('Choose one destination to continue.', { exact: true }).count(), 0, 'Zero-capability mode must not instruct a performer to choose a disabled option.');
+    assert.equal(await zeroCapabilityPayoutPage.locator('[data-sway-payout-steps="true"]').count(), 0, 'Zero-capability mode must not render setup steps that cannot be completed.');
+    await zeroCapabilityPayoutPage.close();
+
+    paymentConfig = {
+      mode: 'test',
+      liveRoomMoneyEnabled: true,
+      testModePlatformBalanceEnabled: false,
+      payoutDestinationCapabilities: {
+        bank_account: true,
+        debit_card: true,
+        cash_app_direct_deposit: true,
+        venmo_direct_deposit: true
+      }
+    };
     const payoutPage = await context.newPage();
     payoutPage.on('pageerror', (error) => pageErrors.push(`payout: ${error.stack || error.message}`));
     await payoutPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
@@ -134,7 +218,17 @@ async function main() {
     assert.equal(await payoutPage.getByRole('link', { name: 'Find direct-deposit details' }).count(), 0, 'Test mode must not link to real wallet direct-deposit details.');
     await payoutPage.getByRole('radio', { name: /Test bank account/ }).check();
     assert.equal(await payoutPage.getByRole('radio', { name: /Test bank account/ }).isChecked(), true, 'Simulated test bank setup must be selectable.');
-    await payoutPage.getByText(/use Stripe test details only—never enter a real bank account or card/i).waitFor({ state: 'visible' });
+    await payoutPage.getByText(/choose an enabled simulated option/i).waitFor({ state: 'visible' });
+    await payoutPage.getByText(/if setup does not offer a test value, stop and return to Sway/i).waitFor({ state: 'visible' });
+    await payoutPage.getByText(/It remains unverified until secure setup accepts an actual destination/i).waitFor({ state: 'visible' });
+    await payoutPage.getByText('Rehearse payout setup in 3 steps', { exact: true }).waitFor({ state: 'visible' });
+    await payoutPage.getByText('No real money moves in this rehearsal.', { exact: false }).waitFor({ state: 'visible' });
+    assert.equal(await payoutPage.getByText(/You can start earning then/).count(), 0, 'Test mode must never claim that rehearsal readiness starts real earnings.');
+    await Promise.all([
+      payoutPage.waitForURL((url) => url.searchParams.get('connect') === 'pending'),
+      payoutPage.getByRole('button', { name: 'Set up payout destination' }).click()
+    ]);
+    assert.deepEqual(payoutSetupBody, { destinationKind: 'bank_account' }, 'Payout setup request must contain only the selected reusable preference, never a provider account id.');
     await assertHealthyPage(payoutPage, 'payout options');
 
     const evidenceDirectory = join(process.cwd(), '.tmp');
@@ -162,7 +256,43 @@ async function main() {
     );
     assert.equal(await uncertifiedLivePayoutPage.getByRole('radio', { name: /Cash App direct deposit/ }).isDisabled(), true);
     assert.equal(await uncertifiedLivePayoutPage.getByRole('radio', { name: /Venmo direct deposit/ }).isDisabled(), true);
+    await uncertifiedLivePayoutPage.getByText(/you do not need an existing Stripe account/i).waitFor({ state: 'visible' });
+    await uncertifiedLivePayoutPage.getByText(/It remains unverified until secure setup accepts an actual destination/i).waitFor({ state: 'visible' });
+    await uncertifiedLivePayoutPage.getByText('Get paid in 3 steps', { exact: true }).waitFor({ state: 'visible' });
+    await uncertifiedLivePayoutPage.getByText(/You can start earning then/).waitFor({ state: 'visible' });
     await assertHealthyPage(uncertifiedLivePayoutPage, 'uncertified live payout options');
+
+    paymentConfig = {
+      ...paymentConfig,
+      payoutDestinationCapabilities: {
+        bank_account: true,
+        debit_card: false,
+        cash_app_direct_deposit: true,
+        venmo_direct_deposit: false
+      }
+    };
+    const cashAppOnlyPage = await context.newPage();
+    await cashAppOnlyPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+    assert.equal(await cashAppOnlyPage.getByRole('radio', { name: /Cash App direct deposit/ }).isDisabled(), false, 'Cash App must be enabled only by its independent attestation.');
+    assert.equal(await cashAppOnlyPage.getByRole('radio', { name: /Venmo direct deposit/ }).isDisabled(), true, 'Cash App attestation must not enable Venmo.');
+    assert.equal(await cashAppOnlyPage.getByRole('link', { name: 'Find direct-deposit details' }).count(), 1);
+    await cashAppOnlyPage.close();
+
+    paymentConfig = {
+      ...paymentConfig,
+      payoutDestinationCapabilities: {
+        bank_account: true,
+        debit_card: false,
+        cash_app_direct_deposit: false,
+        venmo_direct_deposit: true
+      }
+    };
+    const venmoOnlyPage = await context.newPage();
+    await venmoOnlyPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+    assert.equal(await venmoOnlyPage.getByRole('radio', { name: /Cash App direct deposit/ }).isDisabled(), true, 'Venmo attestation must not enable Cash App.');
+    assert.equal(await venmoOnlyPage.getByRole('radio', { name: /Venmo direct deposit/ }).isDisabled(), false, 'Venmo must be enabled only by its independent attestation.');
+    assert.equal(await venmoOnlyPage.getByRole('link', { name: 'Find direct-deposit details' }).count(), 1);
+    await venmoOnlyPage.close();
 
     const sourcesPage = await context.newPage();
     sourcesPage.on('pageerror', (error) => pageErrors.push(`sources: ${error.stack || error.message}`));

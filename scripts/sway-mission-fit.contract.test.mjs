@@ -45,7 +45,7 @@ for (const term of [
   'Should song requests cost money tonight?',
   'Free requests',
   'Test paid requests',
-  'Stripe test mode — no real money moves.',
+  'Test mode — no real money moves.',
   'Share Room',
   'Scan to Request',
   'Pending',

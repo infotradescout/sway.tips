@@ -63,7 +63,7 @@ async function main() {
   const proof = await startEmbeddedPostgresProof('live_room_crash_concurrency');
   const fake = createDeterministicPaymentProvider();
   const idempotencyStore = createIdempotencyStore(proof.databaseUrl);
-  const paymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider });
+  const paymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test' });
   const businessStore = createBusinessStore(proof.databaseUrl, activeSession as never);
 
   async function reserveRequest(input: {
@@ -205,7 +205,7 @@ async function main() {
           status = 'retryable_failed'
       where idempotency_key = $1
     `, [`authorize:${lostAuthorize.idempotencyKey}`]);
-    const restartedPaymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider });
+    const restartedPaymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test' });
     const recovered = await restartedPaymentService.runDueOperations({ limit: 10 });
     assert.equal(recovered.claimed, 1);
     assert.equal(fake.calls.uniqueAuthorizations, 1, 'Restart must not create a second logical PaymentIntent.');
@@ -937,6 +937,10 @@ async function main() {
     // destination, while the provider receives no transfer destination and a
     // captured refund never attempts transfer/application-fee reversal.
     await proof.query(`
+      delete from performer_stripe_connect_bindings
+      where performer_id = $1 and payment_mode = 'test'
+    `, [PERFORMER_ID]);
+    await proof.query(`
       update performers
       set payment_account_status = 'not_started', kyc_status = 'not_required',
           payouts_enabled = false, charges_enabled = false,
@@ -946,6 +950,7 @@ async function main() {
     const platformTestService = createPaymentService({
       databaseUrl: proof.databaseUrl,
       provider: fake.provider,
+      paymentMode: 'test',
       testPlatformBalancePerformerIds: new Set([PERFORMER_ID])
     });
     const platformRequest = await reserveRequest({
@@ -993,6 +998,7 @@ async function main() {
     const disabledPilotDrainService = createPaymentService({
       databaseUrl: proof.databaseUrl,
       provider: fake.provider,
+      paymentMode: 'test',
       testPlatformBalancePerformerIds: new Set()
     });
     const platformCapture = await disabledPilotDrainService.captureAuthorization(platformPayment.rows[0].id);

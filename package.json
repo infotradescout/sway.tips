@@ -59,6 +59,8 @@
     "test:sway-live-pilot-readiness": "node scripts/sway-live-pilot-readiness.contract.test.mjs",
     "test:sway-live-pilot-evidence": "node scripts/sway-live-pilot-evidence.contract.test.mjs",
     "test:integration:payment-execution": "node scripts/sway-payment-execution.integration.test.mjs",
+    "test:integration:payment-mode-fencing": "node --import tsx scripts/sway-payment-mode-fencing.integration.test.ts",
+    "test:integration:live-money-mode-upgrade": "node --import tsx scripts/sway-live-money-mode-upgrade.integration.test.ts",
     "test:integration:live-room-deterministic-recovery": "node --import tsx scripts/sway-live-room-crash-concurrency.integration.test.ts",
     "test:integration:live-room-real-postgres-concurrency": "SWAY_REQUIRE_REAL_POSTGRES_PROOF=true node --import tsx scripts/sway-live-room-crash-concurrency.integration.test.ts",
     "test:integration:simulated-live-night": "node --import tsx scripts/sway-simulated-live-night.integration.test.ts",

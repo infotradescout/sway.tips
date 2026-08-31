@@ -8,6 +8,8 @@ export type ConnectAccountStatus = {
 };
 
 export type StripeConnectService = {
+  /** Derived from STRIPE_SECRET_KEY; authoritative for provider object mode. */
+  readonly mode: 'test' | 'live';
   createRecipientAccount: (input: {
     displayName?: string | null;
     contactEmail: string;
@@ -28,10 +30,11 @@ export type StripeConnectService = {
     signatureHeader: string | null;
     webhookSecret: string;
   }) => Promise<{
-    accountId: string;
-    status: ConnectAccountStatus;
+    accountId: string | null;
+    status: ConnectAccountStatus | null;
     providerEventId: string;
     eventType: string;
+    paymentMode: 'test' | 'live';
   } | null>;
 };
 
@@ -44,6 +47,7 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
   if (!secretKey?.startsWith('sk_test_') && !secretKey?.startsWith('sk_live_')) return null;
 
   const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
+  const mode = secretKey.startsWith('sk_live_') ? 'live' as const : 'test' as const;
   const connectCountry = (env.SWAY_STRIPE_CONNECT_COUNTRY || 'US').trim().toUpperCase();
 
   function mapV1AccountStatus(account: Stripe.Account): ConnectAccountStatus {
@@ -102,9 +106,22 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
       || notification.type === 'v2.core.account_link.returned';
     if (!isAccountStatusEvent) return null;
 
+    const paymentMode = notification.livemode ? 'live' as const : 'test' as const;
     let accountId = 'related_object' in notification
       ? notification.related_object?.id ?? null
       : null;
+
+    // Determine and fence mode from the signed notification before fetching
+    // any related provider object with this process's secret-key client.
+    if (paymentMode !== mode) {
+      return {
+        accountId,
+        status: null,
+        providerEventId: notification.id,
+        eventType: notification.type,
+        paymentMode
+      };
+    }
 
     if (!accountId && notification.type === 'v2.core.account_link.returned') {
       const event = await notification.fetchEvent();
@@ -118,7 +135,8 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
       accountId,
       status: await getAccountStatus(accountId),
       providerEventId: notification.id,
-      eventType: notification.type
+      eventType: notification.type,
+      paymentMode
     };
   }
 
@@ -136,17 +154,29 @@ export function createConfiguredStripeConnectService(env: NodeJS.ProcessEnv = pr
     }
     if (event.type !== 'account.updated') return null;
     const account = event.data.object as Stripe.Account;
+    const paymentMode = event.livemode ? 'live' as const : 'test' as const;
+    if (paymentMode !== mode) {
+      return {
+        accountId: account.id,
+        status: null,
+        providerEventId: event.id,
+        eventType: event.type,
+        paymentMode
+      };
+    }
     return {
       accountId: account.id,
       // Webhook delivery order is not guaranteed. Resolve current provider
       // truth instead of allowing an older event snapshot to restore readiness.
       status: await getAccountStatus(account.id),
       providerEventId: event.id,
-      eventType: event.type
+      eventType: event.type,
+      paymentMode
     };
   }
 
   return {
+    mode,
     async createRecipientAccount(input) {
       for await (const existing of stripe.v2.core.accounts.list({
         applied_configurations: ['recipient'],

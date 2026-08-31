@@ -904,7 +904,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                 value={form.locationAddress}
                 onChange={(event) => setForm((current) => ({ ...current, locationAddress: event.target.value }))}
                 placeholder={form.ticketingMode === 'native_ga'
-                  ? 'Required for Stripe ticket-tax calculation'
+                  ? 'Required for automatic ticket-tax calculation'
                   : 'Only add an address you want visible to everyone'}
               />
             </label>

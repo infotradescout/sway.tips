@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { SwayDb } from '../src/db/client';
 import * as schema from '../src/db/schema';
 import { transferPerformerOwnership } from '../src/server/account-claim';
@@ -21,7 +21,14 @@ async function applyAllMigrations(database: PGlite) {
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())
       .filter(Boolean);
-    for (const statement of statements) await database.exec(statement);
+    await database.exec('BEGIN');
+    try {
+      for (const statement of statements) await database.exec(statement);
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
+    }
   }
 }
 
@@ -111,30 +118,81 @@ await db.insert(schema.performers).values([
 let clock = new Date('2026-08-11T12:00:00Z');
 const store = createStripeConnectOnboardingStore(db, () => new Date(clock));
 
-const reservation = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner });
+const reservation = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner, paymentMode: 'test' });
 assert.equal(reservation.kind, 'reserved');
 if (reservation.kind !== 'reserved') throw new Error('expected reservation');
 
-const concurrent = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner });
+const concurrent = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner, paymentMode: 'test' });
 assert.deepEqual(concurrent, { kind: 'busy' });
 
 clock = new Date(clock.getTime() + 2 * 60 * 1000 + 1);
-const reclaimed = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner });
+const reclaimed = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner, paymentMode: 'test' });
 assert.equal(reclaimed.kind, 'reserved');
 if (reclaimed.kind !== 'reserved') throw new Error('expected reclaimed reservation');
 assert.notEqual(reclaimed.leaseToken, reservation.leaseToken);
 assert.equal(reclaimed.operationKey, reservation.operationKey);
+assert.equal(
+  reclaimed.operationKey,
+  `sway-connect-recipient:${ids.performer}:owner:${ids.owner}:v1`,
+  'test rollout must preserve the historical provider idempotency key'
+);
 
 await store.complete({
   performerId: ids.performer,
   ownerUserId: ids.owner,
+  paymentMode: 'test',
   leaseToken: reclaimed.leaseToken,
   operationKey: reclaimed.operationKey,
   accountId: 'acct_durable_connect_test'
 });
 
-const replay = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner });
+const replay = await store.reserve({ performerId: ids.performer, ownerUserId: ids.owner, paymentMode: 'test' });
 assert.deepEqual(replay, { kind: 'bound', accountId: 'acct_durable_connect_test' });
+
+const liveReservation = await store.reserve({
+  performerId: ids.performer,
+  ownerUserId: ids.owner,
+  paymentMode: 'live'
+});
+assert.equal(liveReservation.kind, 'reserved', 'a test binding must never satisfy live onboarding');
+if (liveReservation.kind !== 'reserved') throw new Error('expected live reservation');
+assert.equal(
+  liveReservation.operationKey,
+  `sway-connect-recipient:live:${ids.performer}:owner:${ids.owner}:v2`
+);
+assert.notEqual(liveReservation.operationKey, reclaimed.operationKey);
+await store.complete({
+  performerId: ids.performer,
+  ownerUserId: ids.owner,
+  paymentMode: 'live',
+  leaseToken: liveReservation.leaseToken,
+  operationKey: liveReservation.operationKey,
+  accountId: 'acct_durable_connect_live'
+});
+const liveReplay = await store.reserve({
+  performerId: ids.performer,
+  ownerUserId: ids.owner,
+  paymentMode: 'live'
+});
+assert.deepEqual(liveReplay, { kind: 'bound', accountId: 'acct_durable_connect_live' });
+
+const modeBindings = await db.select().from(schema.performerStripeConnectBindings)
+  .where(eq(schema.performerStripeConnectBindings.performerId, ids.performer));
+assert.equal(modeBindings.length, 2);
+assert.equal(
+  modeBindings.find((binding) => binding.paymentMode === 'test')?.stripeAccountId,
+  'acct_durable_connect_test'
+);
+assert.equal(
+  modeBindings.find((binding) => binding.paymentMode === 'live')?.stripeAccountId,
+  'acct_durable_connect_live'
+);
+const [testModeOperation] = await db.select().from(schema.stripeConnectModeOnboardingOperations)
+  .where(and(
+    eq(schema.stripeConnectModeOnboardingOperations.performerId, ids.performer),
+    eq(schema.stripeConnectModeOnboardingOperations.paymentMode, 'test')
+  ));
+assert.equal(testModeOperation.operationKey, reclaimed.operationKey);
 
 const [operation] = await db.select().from(schema.stripeConnectOnboardingOperations)
   .where(eq(schema.stripeConnectOnboardingOperations.performerId, ids.performer));
@@ -152,20 +210,22 @@ assert.equal(performer.accountId, 'acct_durable_connect_test');
 
 const auditRows = await db.select().from(schema.auditEvents)
   .where(eq(schema.auditEvents.eventType, 'stripe_connect.account_bound'));
-assert.equal(auditRows.length, 1);
+assert.equal(auditRows.length, 2);
 
 const unverified = await store.reserve({
   performerId: ids.unverifiedPerformer,
-  ownerUserId: ids.unverifiedOwner
+  ownerUserId: ids.unverifiedOwner,
+  paymentMode: 'test'
 });
 assert.deepEqual(unverified, { kind: 'unverified' });
 
-const crossOwner = await store.reserve({ performerId: ids.performer, ownerUserId: ids.outsider });
+const crossOwner = await store.reserve({ performerId: ids.performer, ownerUserId: ids.outsider, paymentMode: 'test' });
 assert.deepEqual(crossOwner, { kind: 'not_found' });
 
 const transferReservation = await store.reserve({
   performerId: ids.transferPerformer,
-  ownerUserId: ids.transferOwner
+  ownerUserId: ids.transferOwner,
+  paymentMode: 'test'
 });
 assert.equal(transferReservation.kind, 'reserved');
 

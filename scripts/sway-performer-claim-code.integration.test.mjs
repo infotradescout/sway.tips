@@ -60,8 +60,15 @@ async function main() {
     const files = readdirSync(migrationDir).filter((n) => /^\d+_.*\.sql$/.test(n)).sort();
     for (const filename of files) {
       const sql = readFileSync(join(migrationDir, filename), 'utf8');
-      for (const statement of sql.split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean)) {
-        await adminClient.query(statement);
+      await adminClient.query('BEGIN');
+      try {
+        for (const statement of sql.split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean)) {
+          await adminClient.query(statement);
+        }
+        await adminClient.query('COMMIT');
+      } catch (error) {
+        await adminClient.query('ROLLBACK');
+        throw error;
       }
     }
 

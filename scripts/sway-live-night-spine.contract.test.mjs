@@ -22,6 +22,7 @@ function requireExcludes(label, source, terms) {
 
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const performerRoomSetup = read('src/components/PerformerRoomSetup.tsx');
+const performerAccountHome = read('src/components/PerformerAccountHome.tsx');
 const performerRoomControls = read('src/components/PerformerRoomControls.tsx');
 const patronView = read('src/components/PatronView.tsx');
 const server = read('server.ts');
@@ -60,7 +61,7 @@ requireIncludes('TalentDashboard', talentDashboard, [
   'Payments & payout setup',
   "fetch('/api/payment/config'",
   "data?.mode === 'test'",
-  'Money actions are unavailable because the payment provider could not be verified. Free rooms remain available.',
+  'Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.',
   'Test mode only. Test requests, tips, and boosts do not move real money or reach a payout destination.',
   'Backers',
   '<PerformerRoomSetup',
@@ -78,13 +79,28 @@ requireIncludes('PerformerRoomSetup', performerRoomSetup, [
   'Open requests',
   'Ready to go live',
   'disabled={!performerEmailVerified || isStarting}',
-  'Stripe test mode — no real money moves',
+  'Test mode — no real money moves',
   'globalThis.crypto.randomUUID()',
   'gig_id: string',
   "useState(false)",
   "role=\"alert\"",
   'Customers may still type a manual request',
   'No real money moves.'
+]);
+
+requireIncludes('PerformerAccountHome live-money guidance', performerAccountHome, [
+  "paymentMode === 'live'",
+  'Finish secure payout setup to start earning',
+  'Ready to earn',
+  'Ready for live paid rooms.',
+  'You do not need an existing Stripe account or Stripe password.',
+  'Deposit arrival follows your payout destination’s eligibility and schedule.',
+  'Finish test payout rehearsal (no real money)',
+  'Test-money ready'
+]);
+
+requireExcludes('PerformerAccountHome live-money guidance', performerAccountHome, [
+  'Finish money setup for paid-mode rehearsal'
 ]);
 
 requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSetup, [
@@ -144,8 +160,9 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready',
-  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready',
+  'paymentsEnabled: requestedPaymentsEnabled && runtimeSellerMoneyEligible',
+  'tipsEnabled: runtimeSellerMoneyEligible',
+  'const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(',
   "code: 'test_payment_runtime_unavailable'",
   "code: 'room_start_id_required'",
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',

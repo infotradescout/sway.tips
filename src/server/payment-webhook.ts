@@ -68,29 +68,18 @@ function recordString(value: unknown) {
 export function createPaymentWebhookService({
   databaseUrl,
   provider,
-  hooks,
-  expectedLivemode = false
+  hooks
 }: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter;
   hooks?: {
     afterClaim?: (event: typeof liveRoomProcessorEvents.$inferSelect) => Promise<void>;
   };
-  /** Must match STRIPE_SECRET_KEY mode: false for sk_test_, true for sk_live_. */
-  expectedLivemode?: boolean;
 }) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
-  const service = createPaymentService({ databaseUrl, provider });
-
-  function assertLivemodeMatch(livemode: boolean, context: string) {
-    if (livemode !== expectedLivemode) {
-      throw new Error(
-        livemode
-          ? `${context}: live-mode Stripe event received while Sway is configured for test keys.`
-          : `${context}: test-mode Stripe event received while Sway is configured for live keys.`
-      );
-    }
-  }
+  const paymentMode = provider.mode;
+  const expectedLivemode = paymentMode === 'live';
+  const service = createPaymentService({ databaseUrl, provider, paymentMode });
 
   async function receiveVerifiedEvent(rawBody: string, event: ProviderWebhookEnvelope) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
@@ -214,7 +203,10 @@ export function createPaymentWebhookService({
 
   async function processClaimedEvent(event: typeof liveRoomProcessorEvents.$inferSelect) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
-    assertLivemodeMatch(event.livemode, 'processClaimedEvent');
+    if (event.livemode !== expectedLivemode) {
+      await markProcessed(event, { status: 'ignored' });
+      return { status: 'ignored' as const, reason: 'opposite_payment_mode' as const };
+    }
     const mappedState = mapProviderEventToPaymentState(event.eventType);
     if (!mappedState) {
       await markProcessed(event, { status: 'ignored' });
@@ -382,15 +374,6 @@ export function createPaymentWebhookService({
     }
     const providerEvent = await provider.parseWebhookEvent(input);
     const received = await receiveVerifiedEvent(input.rawBody, providerEvent);
-    try {
-      assertLivemodeMatch(received.row.livemode, 'ingestWebhook');
-    } catch (error) {
-      const claimed = await claimEvent(received.row.id);
-      if (claimed) {
-        await markFailed(claimed, error, { terminal: true });
-      }
-      throw error;
-    }
     if (['processed', 'ignored'].includes(received.row.status)) {
       return { status: 'duplicate' as const };
     }

@@ -3,6 +3,7 @@ import { handleStripeConnectAccountStatusWebhook } from '../src/server/stripe-co
 
 const accountEvent = {
   accountId: 'acct_webhook_test',
+  paymentMode: 'test' as const,
   status: { chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true },
   providerEventId: 'evt_webhook_test',
   eventType: 'v2.core.account.updated'

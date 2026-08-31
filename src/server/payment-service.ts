@@ -6,6 +6,7 @@ import {
   clientPendingActions,
   liveRoomPaymentOperations,
   payments,
+  performerStripeConnectBindings,
   performers,
   requestBoosts,
   requests
@@ -179,15 +180,19 @@ function actionLink(input: Pick<AuthorizeActionInput, 'actionType' | 'requestId'
 export function createPaymentService(config: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter | null;
+  paymentMode: 'test' | 'live';
   testPlatformBalancePerformerIds?: ReadonlySet<string>;
+  newMoneyAllowedPerformerIds?: ReadonlySet<string>;
 }) {
   const db = config.databaseUrl ? createSwayDb(config.databaseUrl) : null;
-  const provider = config.provider;
+  const provider = config.provider?.mode === config.paymentMode ? config.provider : null;
   const lifecycle = createPaymentLifecycleService(config.databaseUrl);
-  const operationStore = createLiveRoomPaymentOperationStore(config.databaseUrl);
+  const paymentMode = config.paymentMode;
+  const operationStore = createLiveRoomPaymentOperationStore(config.databaseUrl, paymentMode);
   const idempotencyStore = createIdempotencyStore(config.databaseUrl);
   const enabled = Boolean(db && provider);
   const testPlatformBalancePerformerIds = config.testPlatformBalancePerformerIds ?? new Set<string>();
+  const newMoneyAllowedPerformerIds = config.newMoneyAllowedPerformerIds ?? new Set<string>();
   const workerId = `live-room-payment:${process.pid}`;
 
   function isEnabled() {
@@ -199,7 +204,7 @@ export function createPaymentService(config: {
     const [row] = await db
       .select()
       .from(payments)
-      .where(eq(payments.id, paymentId))
+      .where(and(eq(payments.id, paymentId), eq(payments.paymentMode, paymentMode)))
       .limit(1);
     return row ?? null;
   }
@@ -211,6 +216,7 @@ export function createPaymentService(config: {
       .from(liveRoomPaymentOperations)
       .where(and(
         eq(liveRoomPaymentOperations.paymentId, paymentId),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.operationType, 'authorize')
       ))
       .limit(1);
@@ -365,6 +371,7 @@ export function createPaymentService(config: {
       if (existing) {
         if (
           existing.gigId !== input.gigId
+          || existing.paymentMode !== paymentMode
           || existing.actionType !== input.actionType
           || existing.idempotencyKey !== input.idempotencyKey
           || existing.requestId !== link.requestId
@@ -384,6 +391,7 @@ export function createPaymentService(config: {
           .from(liveRoomPaymentOperations)
           .where(and(
             eq(liveRoomPaymentOperations.paymentId, existing.id),
+            eq(liveRoomPaymentOperations.paymentMode, paymentMode),
             eq(liveRoomPaymentOperations.operationType, 'authorize')
           ))
           .limit(1);
@@ -397,29 +405,80 @@ export function createPaymentService(config: {
           roomStatus: gigSessions.status,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
-          paymentAccountStatus: performers.paymentAccountStatus,
+          paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus,
           kycStatus: performers.kycStatus,
-          chargesEnabled: performers.chargesEnabled,
-          payoutsEnabled: performers.payoutsEnabled,
-          stripeConnectedAccountId: performers.stripeConnectedAccountId,
+          chargesEnabled: performerStripeConnectBindings.chargesEnabled,
+          payoutsEnabled: performerStripeConnectBindings.payoutsEnabled,
+          stripeConnectedAccountId: performerStripeConnectBindings.stripeAccountId,
+          legacyTestPaymentAccountStatus: performers.paymentAccountStatus,
+          legacyTestChargesEnabled: performers.chargesEnabled,
+          legacyTestPayoutsEnabled: performers.payoutsEnabled,
+          legacyTestStripeAccountId: performers.stripeConnectedAccountId,
+          legacyTestStatusCheckedAt: performers.stripeConnectStatusCheckedAt,
           payoutHoldReason: performers.payoutHoldReason
         })
         .from(gigSessions)
         .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+        .leftJoin(performerStripeConnectBindings, and(
+          eq(performerStripeConnectBindings.performerId, performers.id),
+          eq(performerStripeConnectBindings.paymentMode, paymentMode)
+        ))
         .where(eq(gigSessions.id, input.gigId))
-        .for('update')
+        // PostgreSQL cannot FOR UPDATE the nullable side of an outer join.
+        // Lock the durable room + performer identity; Connect writers use the
+        // same performer-first lock order, while a missing binding remains a
+        // valid test-platform-balance sentinel only in the explicit test lane.
+        .for('update', { of: [gigSessions, performers] })
         .limit(1);
+      let durableDestination = destination;
+      if (
+        paymentMode === 'test'
+        && destination?.performerId
+        && !destination.stripeConnectedAccountId
+        && destination.legacyTestStripeAccountId
+      ) {
+        const [createdBinding] = await tx.insert(performerStripeConnectBindings).values({
+          performerId: destination.performerId,
+          paymentMode,
+          stripeAccountId: destination.legacyTestStripeAccountId,
+          paymentAccountStatus: destination.legacyTestPaymentAccountStatus,
+          chargesEnabled: destination.legacyTestChargesEnabled,
+          payoutsEnabled: destination.legacyTestPayoutsEnabled,
+          statusCheckedAt: destination.legacyTestStatusCheckedAt
+        }).onConflictDoNothing({
+          target: [performerStripeConnectBindings.performerId, performerStripeConnectBindings.paymentMode]
+        }).returning();
+        const [testBinding] = createdBinding
+          ? [createdBinding]
+          : await tx.select().from(performerStripeConnectBindings).where(and(
+              eq(performerStripeConnectBindings.performerId, destination.performerId),
+              eq(performerStripeConnectBindings.paymentMode, paymentMode)
+            )).for('update').limit(1);
+        if (!testBinding || testBinding.stripeAccountId !== destination.legacyTestStripeAccountId) {
+          throw new Error('stripe_connect_account_binding_conflict');
+        }
+        durableDestination = {
+          ...destination,
+          paymentAccountStatus: testBinding.paymentAccountStatus,
+          chargesEnabled: testBinding.chargesEnabled,
+          payoutsEnabled: testBinding.payoutsEnabled,
+          stripeConnectedAccountId: testBinding.stripeAccountId
+        };
+      }
       const sellerReadiness = resolveLiveRoomSellerMoneyReadiness({
-        roomStatus: destination?.roomStatus,
-        seller: destination,
+        roomStatus: durableDestination?.roomStatus,
+        seller: durableDestination,
         allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
-          destination?.performerId,
+          durableDestination?.performerId,
           testPlatformBalancePerformerIds
         )
       });
       const destinationAccountId = sellerReadiness.destinationAccountId;
-      if (!sellerReadiness.ready || !destinationAccountId || !destination?.performerId) {
-        throw new Error(destination?.roomStatus === 'active' ? 'seller_payout_not_ready' : 'room_not_accepting_money');
+      if (paymentMode === 'live' && !newMoneyAllowedPerformerIds.has(durableDestination?.performerId ?? '')) {
+        throw new Error('live_money_performer_not_allowed');
+      }
+      if (!sellerReadiness.ready || !destinationAccountId || !durableDestination?.performerId) {
+        throw new Error(durableDestination?.roomStatus === 'active' ? 'seller_payout_not_ready' : 'room_not_accepting_money');
       }
 
       if (link.requestId) {
@@ -468,12 +527,13 @@ export function createPaymentService(config: {
         .insert(payments)
         .values({
           gigId: input.gigId,
-          performerId: destination.performerId,
+          performerId: durableDestination.performerId,
           requestId: link.requestId,
           requestBoostId: link.requestBoostId,
           actionType: input.actionType,
           idempotencyKey: input.idempotencyKey,
           destinationAccountId,
+          paymentMode,
           legacyUnlinked: false,
           paymentStatus: 'created',
           processor: provider.processor,
@@ -511,11 +571,12 @@ export function createPaymentService(config: {
         .values({
           paymentId: payment.id,
           gigId: input.gigId,
-          performerId: destination.performerId,
+          performerId: durableDestination.performerId,
           requestId: link.requestId,
           requestBoostId: link.requestBoostId,
           operationType: 'authorize',
           processor: provider.processor,
+          paymentMode,
           idempotencyKey: `authorize:${input.idempotencyKey}`,
           destinationAccountId,
           requestPayload
@@ -705,7 +766,10 @@ export function createPaymentService(config: {
     const [payment] = await db
       .select()
       .from(payments)
-      .where(eq(payments.processorPaymentIntentId, input.processorPaymentIntentId))
+      .where(and(
+        eq(payments.processorPaymentIntentId, input.processorPaymentIntentId),
+        eq(payments.paymentMode, paymentMode)
+      ))
       .limit(1);
     if (!payment) return { status: 'failed', reason: 'payment_intent_not_found' };
     if (
@@ -809,7 +873,7 @@ export function createPaymentService(config: {
       const [locked] = await tx
         .select()
         .from(payments)
-        .where(eq(payments.id, payment.id))
+        .where(and(eq(payments.id, payment.id), eq(payments.paymentMode, paymentMode)))
         .for('update')
         .limit(1);
       if (!locked) throw new Error('payment_not_found');
@@ -823,10 +887,14 @@ export function createPaymentService(config: {
       const [destination] = await tx
         .select({
           performerId: performers.id,
-          destinationAccountId: performers.stripeConnectedAccountId
+          destinationAccountId: performerStripeConnectBindings.stripeAccountId
         })
         .from(gigSessions)
         .innerJoin(performers, eq(performers.id, gigSessions.performerId))
+        .innerJoin(performerStripeConnectBindings, and(
+          eq(performerStripeConnectBindings.performerId, performers.id),
+          eq(performerStripeConnectBindings.paymentMode, paymentMode)
+        ))
         .where(eq(gigSessions.id, locked.gigId))
         .limit(1);
       const destinationAccountId = destination?.destinationAccountId?.trim() || null;
@@ -1310,7 +1378,7 @@ export function createPaymentService(config: {
       const [metadataRow] = await db
         .select({ id: payments.id, processorPaymentIntentId: payments.processorPaymentIntentId })
         .from(payments)
-        .where(eq(payments.id, metadataPaymentId))
+        .where(and(eq(payments.id, metadataPaymentId), eq(payments.paymentMode, paymentMode)))
         .limit(1);
       if (
         metadataRow
@@ -1322,7 +1390,10 @@ export function createPaymentService(config: {
     const [row] = await db
       .select({ id: payments.id })
       .from(payments)
-      .where(eq(payments.processorPaymentIntentId, processorPaymentIntentId))
+      .where(and(
+        eq(payments.processorPaymentIntentId, processorPaymentIntentId),
+        eq(payments.paymentMode, paymentMode)
+      ))
       .limit(1);
     return row?.id ?? null;
   }
@@ -1368,6 +1439,7 @@ export function createPaymentService(config: {
       .where(and(
         eq(requests.clientRequestId, input.clientRequestId),
         eq(requests.idempotencyKey, input.idempotencyKey),
+        eq(payments.paymentMode, paymentMode),
         isNull(requests.activatedAt),
         terminalInvisiblePayment
       ))
@@ -1394,6 +1466,7 @@ export function createPaymentService(config: {
       .where(and(
         eq(requestBoosts.clientRequestId, input.clientRequestId),
         eq(requestBoosts.idempotencyKey, input.idempotencyKey),
+        eq(payments.paymentMode, paymentMode),
         isNull(requestBoosts.activatedAt),
         terminalInvisiblePayment
       ))
@@ -1425,7 +1498,11 @@ export function createPaymentService(config: {
         platformFeeCents: sql<number>`coalesce(sum(${payments.platformFee}), 0)::int`
       })
       .from(payments)
-      .where(and(eq(payments.gigId, gigId), inArray(payments.paymentStatus, ['captured', 'paid_out'])));
+      .where(and(
+        eq(payments.gigId, gigId),
+        eq(payments.paymentMode, paymentMode),
+        inArray(payments.paymentStatus, ['captured', 'paid_out'])
+      ));
     if (!row) return empty;
     return {
       source: 'database_captured_payments',
@@ -1450,7 +1527,7 @@ export function createPaymentService(config: {
         legacyUnlinked: payments.legacyUnlinked
       })
       .from(payments)
-      .where(eq(payments.gigId, gigId));
+      .where(and(eq(payments.gigId, gigId), eq(payments.paymentMode, paymentMode)));
 
     const boostIds = paymentRows
       .map((row) => row.requestBoostId)
@@ -1506,7 +1583,7 @@ export function createPaymentService(config: {
         legacyUnlinked: payments.legacyUnlinked
       })
       .from(payments)
-      .where(eq(payments.gigId, gigId));
+      .where(and(eq(payments.gigId, gigId), eq(payments.paymentMode, paymentMode)));
     return rows
       .filter((payment) => {
         if (['voided', 'refunded'].includes(payment.paymentStatus)) return false;
@@ -1652,6 +1729,7 @@ export function createPaymentService(config: {
           .from(liveRoomPaymentOperations)
           .where(and(
             eq(liveRoomPaymentOperations.operationType, 'authorize'),
+            eq(liveRoomPaymentOperations.paymentMode, paymentMode),
             eq(liveRoomPaymentOperations.status, 'awaiting_customer'),
             isNotNull(liveRoomPaymentOperations.processorObjectId)
           ))
@@ -1712,7 +1790,10 @@ export function createPaymentService(config: {
       })
       .from(requests)
       .innerJoin(gigSessions, eq(gigSessions.id, requests.gigId))
-      .leftJoin(payments, eq(payments.requestId, requests.id))
+      .leftJoin(payments, and(
+        eq(payments.requestId, requests.id),
+        eq(payments.paymentMode, paymentMode)
+      ))
       .innerJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, requests.idempotencyKey))
       .where(and(
         isNull(requests.activatedAt),
@@ -1993,7 +2074,10 @@ export function createPaymentService(config: {
       .from(requestBoosts)
       .innerJoin(requests, eq(requests.id, requestBoosts.requestId))
       .innerJoin(gigSessions, eq(gigSessions.id, requestBoosts.gigId))
-      .leftJoin(payments, eq(payments.requestBoostId, requestBoosts.id))
+      .leftJoin(payments, and(
+        eq(payments.requestBoostId, requestBoosts.id),
+        eq(payments.paymentMode, paymentMode)
+      ))
       .innerJoin(clientPendingActions, eq(clientPendingActions.idempotencyKey, requestBoosts.idempotencyKey))
       .where(and(
         isNull(requestBoosts.activatedAt),

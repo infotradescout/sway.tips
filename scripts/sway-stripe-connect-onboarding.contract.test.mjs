@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const serverSource = readFileSync(join(root, 'server.ts'), 'utf8');
+const envExampleSource = readFileSync(join(root, '.env.example'), 'utf8');
 const connectSource = readFileSync(join(root, 'src/server/stripe-connect.ts'), 'utf8');
 const onboardingSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding.ts'), 'utf8');
 const onboardingStoreSource = readFileSync(join(root, 'src/server/stripe-connect-onboarding-store.ts'), 'utf8');
@@ -36,6 +37,12 @@ const payoutPreferenceMigrationSource = payoutPreferenceMigrationName
   ? readFileSync(join(root, 'drizzle', payoutPreferenceMigrationName), 'utf8')
   : '';
 const talentDashboardSource = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const performerAccountHomeSource = readFileSync(join(root, 'src/components/PerformerAccountHome.tsx'), 'utf8');
+const performerRoomSetupSource = readFileSync(join(root, 'src/components/PerformerRoomSetup.tsx'), 'utf8');
+const performerRoomHistorySource = readFileSync(join(root, 'src/components/PerformerRoomHistory.tsx'), 'utf8');
+const victoryScreenSource = readFileSync(join(root, 'src/components/VictoryScreen.tsx'), 'utf8');
+const accountAccessSource = readFileSync(join(root, 'src/components/AccountAccess.tsx'), 'utf8');
+const patronViewSource = readFileSync(join(root, 'src/components/PatronView.tsx'), 'utf8');
 const connectStatusSource = readFileSync(join(root, 'src/server/stripe-connect-status.ts'), 'utf8');
 const connectReturnSource = readFileSync(join(root, 'src/server/stripe-connect-return.ts'), 'utf8');
 const connectWebhookSource = readFileSync(join(root, 'src/server/stripe-connect-webhook.ts'), 'utf8');
@@ -48,7 +55,7 @@ const requiredServerTerms = [
   'provisionStripeConnectRecipient',
   'createStripeConnectOnboardingUrl',
   'createStripeConnectManagementUrl',
-  'A verified performer account email is required before Stripe onboarding.',
+  'Verify the performer account email before starting secure payout setup.',
   "app.get('/talent/connect/refresh', async (req, res)",
   'accessControl.requireTalentAccess(req)',
   'emailVerifiedAt: users.emailVerifiedAt',
@@ -56,7 +63,7 @@ const requiredServerTerms = [
   'res.redirect(303, url)',
   'liveRoomPaymentRuntimeConfig.connectEnabled',
   "console.error('Stripe Connect onboarding failed.'",
-  'Secure payout setup could not be started',
+  'Secure payout setup is temporarily unavailable. Try again later.',
   'return res.status(502).json',
   "app.get('/talent/connect/return', async (req, res)",
   'applyNoStoreHeaders(res)',
@@ -80,15 +87,15 @@ for (const term of requiredServerTerms) {
 }
 
 for (const term of [
-  'normalizePayoutDestinationKind(req.body?.destinationKind)',
-  "Object.prototype.hasOwnProperty.call(req.body, 'destinationKind')",
-  'destinationKindProvided && !destinationKind',
-  'canConfigurePayoutDestination(',
+  'resolvePayoutDestinationSetupRequest({',
+  'destinationKind: req.body?.destinationKind',
+  'if (payoutSetupRequest.ok === false)',
+  'res.status(payoutSetupRequest.status).json({ error: payoutSetupRequest.error })',
   'payoutDestinationCapabilities',
   'preparePayoutSetup({',
+  'persistDestination: () => payoutDestinationStore.selectForOwner({',
   'payoutDestinationStore.selectForOwner({',
   'destinationKind',
-  "return res.status(422).json({ error: 'Choose a supported payout destination.' })",
   'payout_destination_kind: performerPayoutPreferences.destinationKind',
   ".leftJoin(performerPayoutPreferences, eq(performerPayoutPreferences.performerId, performers.id))"
 ]) {
@@ -98,20 +105,30 @@ for (const term of [
 for (const term of [
   'SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED',
   'SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED',
+  'SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED',
+  'SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED',
   "country === 'US'",
   'bank_account: externalAccountCollectionConfirmed',
   'debit_card: debitCardCollectionConfirmed && isUnitedStates',
-  'cash_app_direct_deposit: externalAccountCollectionConfirmed && isUnitedStates',
-  'venmo_direct_deposit: externalAccountCollectionConfirmed && isUnitedStates'
+  'cash_app_direct_deposit: cashAppDirectDepositConfirmed && isUnitedStates',
+  'venmo_direct_deposit: venmoDirectDepositConfirmed && isUnitedStates'
 ]) {
   if (!payoutCapabilitySource.includes(term)) failures.push(`Payout destination provider capability gate missing term: ${term}`);
+}
+
+for (const term of [
+  'SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED="false"',
+  'SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED="false"',
+  'SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED="false"',
+  'SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED="false"'
+]) {
+  if (!envExampleSource.includes(term)) failures.push(`Payout destination fail-closed environment example missing term: ${term}`);
 }
 
 for (const term of [
   'const provisioning = await input.provision()',
   'await input.createManagementLink(provisioning.accountId)',
   'await input.createOnboardingLink(provisioning.accountId)',
-  'if (input.persistDestination)',
   'const preference = await input.persistDestination()',
   "if (preference.kind === 'not_found') return { kind: 'not_found' }"
 ]) {
@@ -125,9 +142,29 @@ for (const term of [
   'venmo_direct_deposit',
   'normalizePayoutDestinationKind',
   'canConfigurePayoutDestination',
+  'resolvePayoutDestinationSetupRequest',
   'payoutDestinationLabel'
 ]) {
   if (!payoutDestinationSource.includes(term)) failures.push(`Payout destination catalog missing term: ${term}`);
+}
+
+for (const term of [
+  'if (!destinationKind)',
+  'if (!input.runtimeAvailable)',
+  "status: 422, error: 'Choose a supported payout destination.'",
+  "status: 503, error: 'Secure payout setup is temporarily unavailable. Try again later.'",
+  'if (!canConfigurePayoutDestination(destinationKind, input.paymentMode, capabilities))',
+  "status: 422,"
+]) {
+  if (!payoutDestinationSource.includes(term)) failures.push(`Payout destination API guard missing term: ${term}`);
+}
+
+for (const term of [
+  'only when Direct Deposit is available on your account',
+  'Eligibility and limits apply.',
+  'Secure setup confirms whether the routing and account details can be used.'
+]) {
+  if (!payoutDestinationSource.includes(term)) failures.push(`Wallet payout preference copy missing eligibility term: ${term}`);
 }
 
 for (const term of [
@@ -151,13 +188,27 @@ for (const term of [
 
 for (const term of [
   'PAYOUT_DESTINATIONS.map',
-  'Cash App and Venmo use their direct-deposit routing and account numbers',
+  'Get paid in 3 steps',
+  'Rehearse payout setup in 3 steps',
+  'Pick your reusable payout preference.',
+  'Confirm your identity and actual destination in secure setup.',
+  'Paid rooms unlock only when Sway says Ready.',
+  'Test paid rooms unlock only when Sway says Ready. No real money moves in this rehearsal.',
+  'Checking secure payout availability. Nothing has been changed.',
+  'Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.',
+  'Stripe processes incoming card payments for Sway.',
+  'you do not need an existing Stripe account',
+  'Your reusable payout preference is saved to your performer profile',
+  'It remains unverified until secure setup accepts an actual destination',
+  'the preference itself does not prove that an account, card, or wallet destination was accepted.',
+  'If setup does not offer a test value, stop and return to Sway.',
+  'Never enter real bank, card, or wallet details.',
+  'eligibility and limits apply',
   'Test bank account (simulated)',
   'Test debit card (simulated)',
-  'Use the test bank details provided by Stripe. Do not enter real routing or account numbers.',
   'Cash App and Venmo are shown for clarity but cannot be selected until live payouts are enabled.',
   'normalizePayoutDestinationCapabilities(data?.payoutDestinationCapabilities)',
-  'Unavailable until Sway confirms this payout rail is enabled in the configured Stripe account.',
+  'This payout option is not enabled yet.',
   "destination.helpUrl && liveRoomPaymentMode === 'live' && setupAllowed",
   'Sway never stores your full bank or card numbers.',
   'body: JSON.stringify({ destinationKind: payoutDestinationKind })',
@@ -433,6 +484,65 @@ const connectRouteEnd = serverSource.indexOf("app.get('/talent/connect/refresh'"
 const connectRouteSource = connectRouteStart >= 0 && connectRouteEnd > connectRouteStart
   ? serverSource.slice(connectRouteStart, connectRouteEnd)
   : '';
+
+const payoutRequestGuardIndex = connectRouteSource.indexOf('resolvePayoutDestinationSetupRequest({');
+const providerProvisionIndex = connectRouteSource.indexOf('provisionStripeConnectRecipient({');
+if (
+  payoutRequestGuardIndex < 0
+  || providerProvisionIndex < 0
+  || payoutRequestGuardIndex > providerProvisionIndex
+) {
+  failures.push('Missing, invalid, unavailable, and disabled payout requests must be rejected before provider provisioning.');
+}
+
+if (
+  connectRouteSource.includes('destinationKindProvided')
+  || connectRouteSource.includes('persistDestination: destinationKind')
+  || connectRouteSource.includes('...(destinationKind ?')
+) {
+  failures.push('Connect onboarding must not retain a destination-less compatibility path.');
+}
+
+if (payoutSetupSource.includes('persistDestination?:') || payoutSetupSource.includes('if (input.persistDestination)')) {
+  failures.push('Payout setup must always persist the explicit reusable destination preference.');
+}
+
+const performerFacingMoneySource = [
+  talentDashboardSource,
+  performerAccountHomeSource,
+  performerRoomSetupSource,
+  performerRoomHistorySource,
+  victoryScreenSource,
+  accountAccessSource
+].join('\n');
+for (const forbidden of [
+  'Connect Stripe',
+  'Stripe onboarding',
+  'Finish Stripe',
+  'Confirm the payment provider is configured',
+  'configured Stripe account'
+]) {
+  if (performerFacingMoneySource.includes(forbidden)) {
+    failures.push(`Performer payout copy must not imply the performer brings or configures Stripe: ${forbidden}`);
+  }
+}
+for (const requiredPatronDisclosure of [
+  'Stripe live mode — real charges. Use a real card.',
+  'Stripe test mode — use a test card. No real money moves.'
+]) {
+  if (!patronViewSource.includes(requiredPatronDisclosure)) {
+    failures.push(`Patron checkout Stripe disclosure must remain unchanged: ${requiredPatronDisclosure}`);
+  }
+}
+
+const provisionCallStart = connectRouteSource.indexOf('provisionStripeConnectRecipient({');
+const provisionCallEnd = connectRouteSource.indexOf('}),', provisionCallStart);
+const provisionCallSource = provisionCallStart >= 0 && provisionCallEnd > provisionCallStart
+  ? connectRouteSource.slice(provisionCallStart, provisionCallEnd)
+  : '';
+if (provisionCallSource.includes('accountId')) {
+  failures.push('Performers must not supply a provider account id during automatic payout provisioning.');
+}
 
 if (!/try\s*\{[\s\S]*provisionStripeConnectRecipient[\s\S]*createStripeConnectOnboardingUrl[\s\S]*\}\s*catch\s*\(error\)/.test(connectRouteSource)) {
   failures.push('Connect onboarding durable provisioning and link creation must be wrapped in try/catch.');

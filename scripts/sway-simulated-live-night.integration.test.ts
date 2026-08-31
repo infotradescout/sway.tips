@@ -376,8 +376,14 @@ async function main() {
     });
     assertStatus(unavailablePaidRoom, 503, 'paid room fails closed without verified Stripe test execution', server);
     assert.equal(unavailablePaidRoom.body.code, 'test_payment_runtime_unavailable');
-    const unavailableConnect = await primary.client.post('/api/talent/connect/onboard', {});
-    assertStatus(unavailableConnect, 503, 'Connect fails closed without verified Stripe test execution', server);
+    const missingPayoutPreference = await primary.client.post('/api/talent/connect/onboard', {});
+    assertStatus(missingPayoutPreference, 422, 'payout setup requires an explicit destination preference', server);
+    assert.equal(missingPayoutPreference.body.error, 'Choose a supported payout destination.');
+    const invalidPayoutPreference = await primary.client.post('/api/talent/connect/onboard', { destinationKind: 'cash_tag' });
+    assertStatus(invalidPayoutPreference, 422, 'payout setup rejects unsupported destination preferences', server);
+    const unavailablePayoutSetup = await primary.client.post('/api/talent/connect/onboard', { destinationKind: 'bank_account' });
+    assertStatus(unavailablePayoutSetup, 503, 'valid payout setup fails closed when secure provider execution is unavailable', server);
+    assert.equal(unavailablePayoutSetup.body.error, 'Secure payout setup is temporarily unavailable. Try again later.');
 
     const gigId = randomUUID();
     const roomStartBody = {
