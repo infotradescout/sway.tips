@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerHandleClaims, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -73,6 +73,7 @@ import {
   normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
+  normalizePerformerHandleLookup,
   normalizePerformerPhone,
   ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_CLAIM_CODE_TTL_MS,
@@ -82,6 +83,7 @@ import {
   PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
   PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_LOGIN_SUCCESS_COPY,
+  PERFORMER_HANDLE_REQUIREMENTS_COPY,
   PERFORMER_SIGNUP_SUCCESS_COPY,
   resolvePerformerLoginRedirectPath
 } from "./src/server/performer-login";
@@ -631,7 +633,11 @@ type PublicPerformerDiscoveryProfile = {
 };
 
 type PublicPerformerDiscoveryResolution =
-  | { kind: 'public' | 'unlisted'; profile: PublicPerformerDiscoveryProfile }
+  | {
+      kind: 'public' | 'unlisted';
+      profile: PublicPerformerDiscoveryProfile;
+      resolvedViaAlias: boolean;
+    }
   | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
@@ -785,9 +791,10 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
 }
 
 async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<PublicPerformerDiscoveryResolution> {
-  const normalizedHandle = normalizePerformerHandle(rawHandle);
+  const normalizedHandle = normalizePerformerHandleLookup(rawHandle);
   if (!normalizedHandle) return { kind: 'not_resolvable', profile: null };
   if (!businessDb) return { kind: 'unavailable', profile: null };
+  const requestedHandle = normalizedHandle.toLowerCase();
 
   try {
     const profiles = await businessDb
@@ -815,13 +822,25 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
         websiteUrl: performerPublicProfiles.websiteUrl,
         featuredMedia: performerPublicProfiles.featuredMedia,
-        updatedAt: performerPublicProfiles.updatedAt
+        updatedAt: performerPublicProfiles.updatedAt,
+        resolvedRedirect: performerHandleClaims.normalizedHandle
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .leftJoin(
+        performerHandleClaims,
+        and(
+          eq(performerHandleClaims.performerId, performers.id),
+          eq(performerHandleClaims.normalizedHandle, requestedHandle),
+          eq(performerHandleClaims.claimKind, 'redirect')
+        )
+      )
       .where(and(
-        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        or(
+          sql`lower(${performers.handle}) = ${requestedHandle}`,
+          isNotNull(performerHandleClaims.normalizedHandle)
+        ),
         sql`nullif(trim(${performers.bio}), '') is not null`
       ));
 
@@ -829,7 +848,7 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
 
     const candidate = profiles[0];
     if (!isDiscoveryEligibleHandle(candidate.handle)) return { kind: 'not_resolvable', profile: null };
-    const storedHandle = normalizePerformerHandle(candidate.handle);
+    const storedHandle = normalizePerformerHandleLookup(candidate.handle);
     const policy = evaluatePublicPerformerVisibility({
       claimed: true,
       hasOwner: Boolean(candidate.ownerUserId),
@@ -850,7 +869,8 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
       profile: {
         ...candidate,
         handle: storedHandle?.toLowerCase() ?? null
-      }
+      },
+      resolvedViaAlias: requestedHandle !== storedHandle?.toLowerCase()
     };
   } catch (error) {
     console.error('[sway.discovery] claimed performer resolution failed:', error);
@@ -938,6 +958,7 @@ const PUBLIC_PROFILE_NOT_FOUND_HTML = '<!doctype html><html><head><meta charset=
 const PUBLIC_PROFILE_UNAVAILABLE_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway performer profile unavailable</title></head><body><main><h1>Performer profile unavailable</h1><p>Sway could not load this performer profile right now.</p></main></body></html>';
 
 function sendPublicProfileNotFound(res: express.Response) {
+  applyNoStoreHeaders(res);
   return res
     .status(404)
     .type('html')
@@ -946,11 +967,18 @@ function sendPublicProfileNotFound(res: express.Response) {
 }
 
 function sendPublicProfileUnavailable(res: express.Response) {
+  applyNoStoreHeaders(res);
   return res
     .status(503)
     .type('html')
     .set('X-Robots-Tag', 'noindex, nofollow')
     .send(PUBLIC_PROFILE_UNAVAILABLE_HTML);
+}
+
+function canonicalPerformerRedirectPath(req: express.Request, canonicalHandle: string) {
+  const queryStart = req.originalUrl.indexOf('?');
+  const query = queryStart >= 0 ? req.originalUrl.slice(queryStart) : '';
+  return `/p/${encodeURIComponent(canonicalHandle)}${query}`;
 }
 
 async function renderPublicPerformerDocument(
@@ -963,6 +991,10 @@ async function renderPublicPerformerDocument(
   if (resolution.kind === 'unavailable') return sendPublicProfileUnavailable(res);
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
     return sendPublicProfileNotFound(res);
+  }
+  if (resolution.resolvedViaAlias) {
+    applyNoStoreHeaders(res);
+    return res.redirect(308, canonicalPerformerRedirectPath(req, resolution.profile.handle!));
   }
 
   const profile = toPublicShareProfile(resolution.profile, resolution.kind);
@@ -1087,7 +1119,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
   if (!businessDb) return defaultMetadata;
 
   if (pathParts[0] === 'p' && pathParts[1]) {
-    const normalizedHandle = normalizePerformerHandle(pathParts[1]);
+    const normalizedHandle = normalizePerformerHandleLookup(pathParts[1]);
     if (!normalizedHandle) return defaultMetadata;
 
     const profile = await findPublicShareProfile(normalizedHandle);
@@ -2400,20 +2432,48 @@ async function performerSignupEmailExists(executor: any, email: string) {
   return Boolean(row);
 }
 
-async function performerHandleExists(executor: any, handle: string, options: { includePreviews?: boolean } = {}) {
+async function performerHandleExists(
+  executor: any,
+  handle: string,
+  options: { includePreviews?: boolean; excludePerformerId?: string } = {}
+) {
+  const normalizedHandle = handle.toLowerCase();
   const [row] = await executor
     .select({ id: performers.id })
     .from(performers)
-    .where(sql`lower(${performers.handle}) = ${handle.toLowerCase()}`)
+    .where(and(
+      sql`lower(${performers.handle}) = ${normalizedHandle}`,
+      ...(options.excludePerformerId ? [ne(performers.id, options.excludePerformerId)] : [])
+    ))
     .limit(1);
 
-  if (row || options.includePreviews === false) return Boolean(row);
+  if (row) return true;
+
+  const [claim] = await executor
+    .select({
+      normalizedHandle: performerHandleClaims.normalizedHandle,
+      performerId: performerHandleClaims.performerId,
+      claimKind: performerHandleClaims.claimKind
+    })
+    .from(performerHandleClaims)
+    .where(eq(performerHandleClaims.normalizedHandle, normalizedHandle))
+    .limit(1);
+
+  const isOwnedReservation = Boolean(
+    claim
+    && options.excludePerformerId
+    && claim.performerId === options.excludePerformerId
+    && claim.claimKind === 'reservation'
+  );
+  if ((claim && !isOwnedReservation) || options.includePreviews === false) {
+    return Boolean(claim && !isOwnedReservation);
+  }
 
   const [preview] = await executor
     .select({ id: performerProfilePreviews.id })
     .from(performerProfilePreviews)
     .where(and(
-      sql`lower(${performerProfilePreviews.handle}) = ${handle.toLowerCase()}`,
+      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle}`,
       eq(performerProfilePreviews.isActive, true)
     ))
     .limit(1);
@@ -2890,6 +2950,14 @@ function isUniqueConstraintViolation(error: unknown, constraintName: string) {
 
   const candidate = error as { code?: string; constraint?: string };
   return candidate.code === '23505' && candidate.constraint === constraintName;
+}
+
+function isPerformerHandleConflict(error: unknown) {
+  return [
+    'idx_performers_handle',
+    'idx_performers_handle_lower',
+    'performer_handle_claims_pkey'
+  ].some((constraintName) => isUniqueConstraintViolation(error, constraintName));
 }
 
 async function persistStateWithAudit(input: {
@@ -4553,7 +4621,12 @@ app.post('/api/talent/signup', async (req, res) => {
     return;
   }
 
-  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+  if (!normalizedHandle) {
+    res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    return;
+  }
+
+  if (!normalizedEmail || !normalizedDisplayName) {
     res.status(422).json({ error: 'Performer name, handle, and email are required.' });
     return;
   }
@@ -4716,10 +4789,7 @@ app.post('/api/talent/signup', async (req, res) => {
       deliveryResult.provider === 'mock' ? verificationLink : undefined
     ));
   } catch (error) {
-    if (
-      isUniqueConstraintViolation(error, 'idx_performers_handle') ||
-      isUniqueConstraintViolation(error, 'idx_performers_handle_lower')
-    ) {
+    if (isPerformerHandleConflict(error)) {
       res.status(409).json({ error: 'This handle is already taken.' });
       return;
     }
@@ -6054,7 +6124,8 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
   }).from(performers).where(eq(performers.ownerUserId, actorId)).limit(1);
   const displayName = existingPerformer?.displayName ?? normalizePerformerDisplayName(req.body?.displayName);
   const handle = existingPerformer?.handle ?? normalizePerformerHandle(req.body?.handle);
-  if (!displayName || !handle) return res.status(422).json({ error: 'Performer name and handle are required.' });
+  if (!handle) return res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+  if (!displayName) return res.status(422).json({ error: 'Performer name is required.' });
   if (!existingPerformer && await performerHandleExists(businessDb, handle)) {
     return res.status(409).json({ error: 'This handle is already taken.' });
   }
@@ -6074,7 +6145,7 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
       redirectPath: '/talent'
     });
   } catch (error) {
-    if (isUniqueConstraintViolation(error, 'idx_performers_handle') || isUniqueConstraintViolation(error, 'idx_performers_handle_lower')) {
+    if (isPerformerHandleConflict(error)) {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
     throw error;
@@ -6960,7 +7031,12 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     ? req.body.onboardingStatus
     : 'gig_ready';
 
-  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+  if (!normalizedHandle) {
+    res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    return;
+  }
+
+  if (!normalizedEmail || !normalizedDisplayName) {
     res.status(422).json({ error: 'Performer name, handle, and email are required.' });
     return;
   }
@@ -7262,9 +7338,8 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   } else {
     const normalizedHandle = normalizePerformerHandle(req.body?.handle);
     const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
-    if (!normalizedHandle || !normalizedDisplayName) {
-      return res.status(422).json({ error: 'A handle and display name are required to create a new performer slot.' });
-    }
+    if (!normalizedHandle) return res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    if (!normalizedDisplayName) return res.status(422).json({ error: 'A display name is required to create a new performer slot.' });
     if (await performerHandleExists(businessDb, normalizedHandle, { includePreviews: false })) {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
@@ -7455,18 +7530,22 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
 
   if (existingAccount.performerId) {
     if (req.body?.handle !== undefined) {
-      const normalizedHandle = normalizePerformerHandle(req.body.handle);
-      if (!normalizedHandle) {
-        res.status(422).json({ error: 'A valid handle is required.' });
+      const requestedHandle = normalizePerformerHandleLookup(req.body.handle);
+      const existingHandle = normalizePerformerHandleLookup(existingAccount.handle);
+      if (!requestedHandle) {
+        res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
         return;
       }
-      if (normalizedHandle.toLowerCase() !== (existingAccount.handle ?? '').toLowerCase()) {
-        const [conflict] = await businessDb
-          .select({ id: performers.id })
-          .from(performers)
-          .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()} and ${performers.id} != ${existingAccount.performerId}`)
-          .limit(1);
-        if (conflict) {
+      if (requestedHandle.toLowerCase() !== existingHandle?.toLowerCase()) {
+        const normalizedHandle = normalizePerformerHandle(req.body.handle);
+        if (!normalizedHandle) {
+          res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+          return;
+        }
+        if (await performerHandleExists(businessDb, normalizedHandle, {
+          includePreviews: false,
+          excludePerformerId: existingAccount.performerId
+        })) {
           res.status(409).json({ error: 'This handle is already taken.' });
           return;
         }
@@ -7506,7 +7585,8 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     return;
   }
 
-  await businessDb.transaction(async (tx) => {
+  try {
+    await businessDb.transaction(async (tx) => {
     if (Object.keys(userUpdates).length > 0) {
       await tx.update(users).set(userUpdates).where(eq(users.id, req.params.userId));
     }
@@ -7592,20 +7672,27 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
       });
     }
 
-    await writeAuditEvent(tx, {
-      actorId: adminAccess.actor.actorId,
-      actorType: 'admin',
-      entityType: 'user',
-      entityId: req.params.userId,
-      eventType: 'admin_account.update',
-      previousStatus: null,
-      nextStatus: null,
-      metadata: {
-        targetEmail: existingAccount.email,
-        changedFields
-      }
+      await writeAuditEvent(tx, {
+        actorId: adminAccess.actor.actorId,
+        actorType: 'admin',
+        entityType: 'user',
+        entityId: req.params.userId,
+        eventType: 'admin_account.update',
+        previousStatus: null,
+        nextStatus: null,
+        metadata: {
+          targetEmail: existingAccount.email,
+          changedFields
+        }
+      });
     });
-  });
+  } catch (error) {
+    if (isPerformerHandleConflict(error)) {
+      res.status(409).json({ error: 'This handle is already taken.' });
+      return;
+    }
+    throw error;
+  }
 
   const [updatedAccount] = await loadAdminAccountsBaseQuery(businessDb)
     .where(eq(users.id, req.params.userId))
@@ -11824,9 +11911,19 @@ app.get('/api/public/feed', async (_req, res) => {
 
 app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
   const resolution = await resolvePublicPerformerDiscovery(req.params.handle);
-  if (resolution.kind === 'unavailable') return res.status(503).send('Public performer profiles require a durable database connection.');
+  if (resolution.kind === 'unavailable') {
+    applyNoStoreHeaders(res);
+    return res.status(503).send('Public performer profiles require a durable database connection.');
+  }
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
+    applyNoStoreHeaders(res);
     return res.status(404).send('Performer profile not found.');
+  }
+  if (resolution.resolvedViaAlias) {
+    res.setHeader(
+      'Content-Location',
+      `/api/public/performer/${encodeURIComponent(resolution.profile.handle!)}/share-card.png`
+    );
   }
   const profile = toPublicShareProfile(resolution.profile, resolution.kind);
 
@@ -11941,6 +12038,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
   }
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
     return res.status(404).json({ error: 'Performer profile not found.' });
+  }
+  if (resolution.resolvedViaAlias) {
+    res.setHeader(
+      'Content-Location',
+      `/api/public/performer/${encodeURIComponent(resolution.profile.handle!)}`
+    );
   }
 
   const profile = resolution.profile;
@@ -15180,7 +15283,7 @@ app.get('/sitemap.xml', async (_req, res) => {
     const rowsByHandle = new Map<string, typeof profileRows>();
     for (const row of profileRows) {
       if (!isDiscoveryEligibleHandle(row.handle)) continue;
-      const normalizedHandle = normalizePerformerHandle(row.handle)?.toLowerCase();
+      const normalizedHandle = normalizePerformerHandleLookup(row.handle)?.toLowerCase();
       if (!normalizedHandle) continue;
       const existing = rowsByHandle.get(normalizedHandle) ?? [];
       existing.push(row);
@@ -15512,13 +15615,13 @@ app.post("/api/music/search", (req, res) => {
 });
 
 app.get('/:handle', async (req, res, next) => {
-  const normalizedHandle = normalizePerformerHandle(req.params.handle);
+  const normalizedHandle = normalizePerformerHandleLookup(req.params.handle);
   if (!normalizedHandle) return next();
 
   try {
     const profile = await findPublicShareProfile(normalizedHandle);
     if (!profile) return next();
-    return res.redirect(308, `/p/${encodeURIComponent(profile.handle)}`);
+    return res.redirect(308, canonicalPerformerRedirectPath(req, profile.handle));
   } catch (error) {
     return next(error);
   }

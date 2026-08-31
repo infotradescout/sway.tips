@@ -5,6 +5,8 @@ import { StatusBanner, useAuthQueryStatusMessage } from './TalentAuthStatus';
 // Mirrors src/server/performer-login.ts normalizePerformerHandle and
 // src/server/performer-password-auth.ts PERFORMER_PASSWORD_MIN_LENGTH — keep in sync.
 const HANDLE_PATTERN = /^[A-Za-z0-9_-]+$/;
+const HANDLE_MIN_LENGTH = 4;
+const HANDLE_MAX_LENGTH = 30;
 const PASSWORD_MIN_LENGTH = 8;
 
 type SignupStatus = 'idle' | 'submitting' | 'success' | 'error';
@@ -121,9 +123,15 @@ export default function TalentSignupCard() {
     window.history.replaceState({}, '', nextUrl);
   }, [mode, claimCode]);
 
-  const handleError = handle.length > 0 && !HANDLE_PATTERN.test(handle)
-    ? 'Letters, numbers, hyphens, and underscores only.'
-    : null;
+  const handleError = handle.length === 0
+    ? null
+    : !HANDLE_PATTERN.test(handle)
+      ? 'Letters, numbers, hyphens, and underscores only.'
+      : handle.length < HANDLE_MIN_LENGTH
+        ? `Handle must be at least ${HANDLE_MIN_LENGTH} characters.`
+        : handle.length > HANDLE_MAX_LENGTH
+          ? `Handle must be ${HANDLE_MAX_LENGTH} characters or fewer.`
+          : null;
   const passwordError = password.length > 0 && password.length < PASSWORD_MIN_LENGTH
     ? `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`
     : null;
@@ -139,6 +147,8 @@ export default function TalentSignupCard() {
 
   const canCreate = displayName.trim().length > 0
     && HANDLE_PATTERN.test(handle)
+    && handle.length >= HANDLE_MIN_LENGTH
+    && handle.length <= HANDLE_MAX_LENGTH
     && email.trim().length > 0
     && password.length >= PASSWORD_MIN_LENGTH
     && confirmPassword === password
@@ -395,6 +405,8 @@ export default function TalentSignupCard() {
                   value={handle}
                   onChange={(event) => setHandle(event.target.value)}
                   placeholder="dj-sunset"
+                  minLength={HANDLE_MIN_LENGTH}
+                  maxLength={HANDLE_MAX_LENGTH}
                   required
                   aria-invalid={handleError ? true : undefined}
                   className={`w-full rounded-2xl border bg-slate-950 px-4 py-3 text-sm text-white outline-none transition focus:ring-1 ${
@@ -403,7 +415,9 @@ export default function TalentSignupCard() {
                       : 'border-white/10 focus:border-fuchsia-500 focus:ring-fuchsia-500'
                   }`}
                 />
-                {handleError ? <p className="text-xs text-rose-300">{handleError}</p> : null}
+                <p className={`text-xs ${handleError ? 'text-rose-300' : 'text-slate-500'}`}>
+                  {handleError ?? '4–30 characters. Letters, numbers, hyphens, and underscores.'}
+                </p>
               </div>
 
               <div className="space-y-1.5">

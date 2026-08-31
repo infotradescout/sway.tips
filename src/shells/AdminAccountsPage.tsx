@@ -160,7 +160,8 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
         </div>
         <div className="space-y-1">
           <label className={labelClass()}>Handle</label>
-          <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} required />
+          <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} minLength={4} maxLength={30} pattern="[A-Za-z0-9_-]+" title="Use 4–30 letters, numbers, hyphens, or underscores." required />
+          <p className="text-[11px] text-slate-500">4–30 characters. Letters, numbers, hyphens, and underscores.</p>
         </div>
         <div className="space-y-1">
           <label className={labelClass()}>Email — optional</label>
@@ -246,10 +247,26 @@ function EditAccountPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
   const deleteConfirmTarget = account.email ?? account.handle ?? account.id;
+  const originalHandle = account.handle ?? '';
+  const handleChanged = handle.trim().toLowerCase() !== originalHandle.trim().toLowerCase();
+  const handleRenameError = account.performerId && handleChanged
+    ? handle.trim().length < 4
+      ? 'Handle must be at least 4 characters.'
+      : handle.trim().length > 30
+        ? 'Handle must be 30 characters or fewer.'
+        : !/^[A-Za-z0-9_-]+$/.test(handle.trim())
+          ? 'Use only letters, numbers, hyphens, and underscores.'
+          : null
+    : null;
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
+    if (handleRenameError) {
+      setError(handleRenameError);
+      setMessage(null);
+      return;
+    }
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -261,7 +278,7 @@ function EditAccountPanel({
       emailVerified
     };
     if (account.performerId) {
-      body.handle = handle;
+      if (handleChanged) body.handle = handle.trim();
       body.isActive = isActive;
       body.onboardingStatus = onboardingStatus;
       body.payoutHoldReason = payoutHoldReason;
@@ -405,7 +422,18 @@ function EditAccountPanel({
           <>
             <div className="space-y-1">
               <label className={labelClass()}>Handle</label>
-              <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} />
+              <input
+                className={inputClass()}
+                value={handle}
+                onChange={(event) => setHandle(event.target.value)}
+                minLength={handleChanged ? 4 : undefined}
+                maxLength={handleChanged ? 30 : undefined}
+                pattern={handleChanged ? '[A-Za-z0-9_-]+' : undefined}
+                aria-invalid={handleRenameError ? true : undefined}
+              />
+              <p className={`text-[11px] ${handleRenameError ? 'text-rose-300' : 'text-slate-500'}`}>
+                {handleRenameError ?? 'New handles must be 4–30 characters. Existing legacy handles can stay unchanged.'}
+              </p>
             </div>
             <div className="flex items-end gap-2 pb-2">
               <input id="edit-active" type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="h-4 w-4" />

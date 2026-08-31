@@ -7,6 +7,7 @@ const schema = read('src/db/schema.ts');
 const policy = read('src/server/public-profile.ts');
 const server = read('server.ts');
 const migration = read('drizzle/0030_tough_joseph.sql');
+const handleClaimMigration = read('drizzle/0043_bored_sleeper.sql');
 const packageJson = JSON.parse(read('package.json'));
 const failures = [];
 
@@ -28,6 +29,21 @@ requireText(server, 'sendPublicProfileNotFound', 'server profile boundary');
 requireText(server, 'sendPublicProfileUnavailable', 'server profile boundary');
 requireText(server, 'PUBLIC_PROFILE_NOT_FOUND_HTML', 'server profile boundary');
 requireText(server, 'visibilityState: performers.visibilityState', 'server discovery resolver');
+requireText(schema, "export const performerHandleClaims = pgTable('performer_handle_claims'", 'handle claim schema');
+requireText(server, 'performerHandleClaims.normalizedHandle', 'handle redirect resolver');
+requireText(server, "eq(performerHandleClaims.claimKind, 'redirect')", 'redirect-only public resolver');
+requireText(server, 'resolvedViaAlias: requestedHandle !== storedHandle?.toLowerCase()', 'handle alias resolver');
+requireText(server, 'res.redirect(308, canonicalPerformerRedirectPath(req, resolution.profile.handle!))', 'canonical profile redirect');
+requireText(server, 'res.redirect(308, canonicalPerformerRedirectPath(req, profile.handle))', 'legacy short-link redirect');
+requireText(server, "'Content-Location'", 'historical API and share-card continuity');
+requireText(handleClaimMigration, 'BEFORE INSERT OR UPDATE OR DELETE ON "performer_handle_claims"', 'immutable handle claims');
+requireText(handleClaimMigration, 'performer_handle_claim_identity_is_immutable', 'immutable handle claims');
+requireText(handleClaimMigration, "'edgewize',\n    target_performer_id,\n    'reservation'", 'EdgeWize reservation');
+requireText(handleClaimMigration, 'AFTER INSERT OR UPDATE OF "handle" ON "performers"', 'canonical claim synchronization');
+requireText(handleClaimMigration, 'ADD CONSTRAINT "idx_performers_handle_lower" PRIMARY KEY', 'authoritative handle namespace');
+if ((handleClaimMigration.match(/pg_advisory_xact_lock\(hashtextextended\(/g) ?? []).length !== 2) {
+  failures.push('handle claims: performer and claim writes must use the same advisory-lock protocol');
+}
 
 const explicitProfileRoute = server.match(/app\.get\(\s*["']\/p\/:handle["']/);
 const wildcardRoute = server.match(/app\.get\(\s*["']\*["']/);

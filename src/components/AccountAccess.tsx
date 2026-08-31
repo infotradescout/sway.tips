@@ -532,7 +532,8 @@ export function AccountHome() {
             </div>
             <div className="mt-3 space-y-1.5">
               <label htmlFor={performerHandleId} className="block text-xs font-bold text-slate-200">Public handle</label>
-              <input id={performerHandleId} name="performer-handle" autoComplete="username" required value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your-handle" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+              <input id={performerHandleId} name="performer-handle" autoComplete="username" required minLength={4} maxLength={30} pattern="[A-Za-z0-9_-]+" title="Use 4–30 letters, numbers, hyphens, or underscores." value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your-handle" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+              <p className="text-[11px] text-slate-500">4–30 characters. Letters, numbers, hyphens, and underscores.</p>
             </div>
             <button type="submit" disabled={pending} aria-busy={pending} className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60">{pending ? 'Activating…' : 'Activate Pro Mode'}</button>
           </form>

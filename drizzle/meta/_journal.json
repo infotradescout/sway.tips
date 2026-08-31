@@ -302,6 +302,13 @@
       "when": 1788140198237,
       "tag": "0042_chubby_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788149493860,
+      "tag": "0043_bored_sleeper",
+      "breakpoints": true
     }
   ]
 }
