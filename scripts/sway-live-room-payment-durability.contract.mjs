@@ -142,7 +142,10 @@ assert.match(sellerReadinessSource, /input\.paymentMode === 'test'/);
 assert.match(paymentLifecycleSource, /export function isKnownPredecessorPaymentState/);
 assert.match(paymentWebhookSource, /ignored_out_of_order'[\s\S]+isKnownPredecessorPaymentState[\s\S]+status: 'ignored'[\s\S]+stale_predecessor_event/);
 assert.match(paymentWebhookSource, /concurrent_noop'[\s\S]+retry after predecessor state/);
-assert.match(paymentWebhookSource, /\{ terminal: true \}/);
+assert.match(
+  paymentWebhookSource,
+  /event\.livemode !== expectedLivemode[\s\S]+markProcessed\(event, \{ status: 'ignored' \}\)[\s\S]+opposite_payment_mode/
+);
 
 const terminalProcessorClassifier = paymentServiceSource.slice(
   paymentServiceSource.indexOf('function isTerminalProcessorError'),

@@ -13,9 +13,11 @@ export async function provisionStripeConnectRecipient(input: {
   store: StripeConnectOnboardingStore;
   stripe: StripeConnectService;
 }): Promise<StripeConnectProvisioningResult> {
+  const paymentMode = input.stripe.mode;
   const reservation = await input.store.reserve({
     performerId: input.performerId,
-    ownerUserId: input.ownerUserId
+    ownerUserId: input.ownerUserId,
+    paymentMode
   });
 
   if (reservation.kind !== 'reserved') return reservation;
@@ -29,6 +31,7 @@ export async function provisionStripeConnectRecipient(input: {
     const completed = await input.store.complete({
       performerId: input.performerId,
       ownerUserId: input.ownerUserId,
+      paymentMode,
       leaseToken: reservation.leaseToken,
       operationKey: reservation.operationKey,
       accountId: created.accountId
@@ -37,6 +40,7 @@ export async function provisionStripeConnectRecipient(input: {
   } catch (error) {
     await input.store.fail({
       performerId: input.performerId,
+      paymentMode,
       leaseToken: reservation.leaseToken,
       error
     }).catch(() => undefined);

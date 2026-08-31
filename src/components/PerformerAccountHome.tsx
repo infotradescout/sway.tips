@@ -37,7 +37,16 @@ export default function PerformerAccountHome({
           : 'Add music for audience requests',
       href: '/talent/connections'
     },
-    { done: stripeReady, label: 'Finish money setup for paid-mode rehearsal', optional: true, href: '/talent/account' }
+    {
+      done: stripeReady,
+      label: paymentMode === 'live'
+        ? 'Finish secure payout setup to start earning'
+        : paymentMode === 'test'
+          ? 'Finish test payout rehearsal (no real money)'
+          : 'Check money setup availability',
+      optional: true,
+      href: '/talent/account'
+    }
   ];
 
   return (
@@ -53,7 +62,11 @@ export default function PerformerAccountHome({
             <p className="mt-2 text-sm text-slate-400">Finish the essentials, run a free test room, then share your live link or QR.</p>
           </div>
           <div className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${stripeReady ? 'bg-cyan-500/15 text-cyan-200' : 'bg-amber-500/15 text-amber-200'}`}>
-            {stripeReady ? 'Test-money ready' : 'Free rooms only'}
+            {stripeReady && paymentMode === 'live'
+              ? 'Ready to earn'
+              : stripeReady && paymentMode === 'test'
+                ? 'Test-money ready'
+                : 'Free rooms only'}
           </div>
         </div>
 
@@ -65,10 +78,12 @@ export default function PerformerAccountHome({
               : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
         }`}>
           {paymentMode === 'live'
-            ? 'Stripe live mode — real charges. Complete payout setup before starting a paid room.'
+            ? stripeReady
+              ? 'Ready for live paid rooms. You can accept real requests, tips, and boosts. Deposit arrival follows your payout destination’s eligibility and schedule.'
+              : 'Live payments are available. Finish Sway’s secure identity and payout setup before starting a paid room. You do not need an existing Stripe account or Stripe password.'
             : paymentMode === 'test'
-              ? 'Stripe test mode — no real money moves. Start with a free room; use test cards only when rehearsing money flows.'
-              : 'Money actions are unavailable because Stripe could not be verified. Free rooms still work.'}
+              ? 'Test mode only — no real money moves. Start with a free room; use only provider-approved test values when rehearsing money flows.'
+              : 'Money actions are temporarily unavailable. Free rooms still work.'}
         </p>
 
         <ol className="mt-5 space-y-2" aria-label="First room readiness">

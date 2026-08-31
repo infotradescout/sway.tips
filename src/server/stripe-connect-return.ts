@@ -13,6 +13,7 @@ export async function handleStripeConnectReturn<Request, Response extends Redire
   req: Request;
   res: Response;
   runtimeAvailable: boolean;
+  paymentMode: 'test' | 'live';
   requireTalentAccess: (req: Request) => Promise<TalentAccess>;
   loadOwnedPerformer: (ownerUserId: string) => Promise<{
     performerId: string;
@@ -23,6 +24,7 @@ export async function handleStripeConnectReturn<Request, Response extends Redire
     performerId: string;
     ownerUserId: string;
     accountId: string;
+    paymentMode: 'test' | 'live';
     providerStatus: ConnectAccountStatus;
   }) => Promise<StripeConnectStatusReconciliationResult>;
   logError?: (error: unknown) => void;
@@ -45,6 +47,7 @@ export async function handleStripeConnectReturn<Request, Response extends Redire
       performerId: performerOwner.performerId,
       ownerUserId,
       accountId: performerOwner.stripeAccountId,
+      paymentMode: input.paymentMode,
       providerStatus
     });
     return input.res.redirect(

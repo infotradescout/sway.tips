@@ -14,12 +14,16 @@ export function resolvePayoutDestinationCapabilities(input: {
     && explicitlyConfirmed(env.SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED);
   const debitCardCollectionConfirmed = externalAccountCollectionConfirmed
     && explicitlyConfirmed(env.SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED);
+  const cashAppDirectDepositConfirmed = externalAccountCollectionConfirmed
+    && explicitlyConfirmed(env.SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED);
+  const venmoDirectDepositConfirmed = externalAccountCollectionConfirmed
+    && explicitlyConfirmed(env.SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED);
   const isUnitedStates = country === 'US';
 
   return {
     bank_account: externalAccountCollectionConfirmed,
     debit_card: debitCardCollectionConfirmed && isUnitedStates,
-    cash_app_direct_deposit: externalAccountCollectionConfirmed && isUnitedStates,
-    venmo_direct_deposit: externalAccountCollectionConfirmed && isUnitedStates
+    cash_app_direct_deposit: cashAppDirectDepositConfirmed && isUnitedStates,
+    venmo_direct_deposit: venmoDirectDepositConfirmed && isUnitedStates
   };
 }

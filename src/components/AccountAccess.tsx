@@ -525,7 +525,7 @@ export function AccountHome() {
         ) : (
           <form onSubmit={activate} className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
             <div className="flex items-center gap-2"><UserRound className="h-4 w-4 text-cyan-300" /><h2 className="font-black">Activate Pro Mode</h2></div>
-            <p className="mt-2 text-xs leading-5 text-slate-400">Create your performer identity, run free rooms, share your QR, manage requests, and rehearse Stripe test-mode money flows from this same account.</p>
+            <p className="mt-2 text-xs leading-5 text-slate-400">Create your performer identity, run free rooms, share your QR, manage requests, and safely rehearse test-money flows from this same account.</p>
             <div className="mt-4 space-y-1.5">
               <label htmlFor={performerNameId} className="block text-xs font-bold text-slate-200">Performer name</label>
               <input id={performerNameId} name="performer-name" autoComplete="name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />

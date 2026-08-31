@@ -48,8 +48,15 @@ async function applyMigrations(client, options = {}) {
   for (const filename of migrationFiles) {
     const sql = readFileSync(join(migrationDir, filename), 'utf8');
     const statements = splitStatements(sql);
-    for (const statement of statements) {
-      await client.query(statement);
+    await client.query('BEGIN');
+    try {
+      for (const statement of statements) {
+        await client.query(statement);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
   }
 }

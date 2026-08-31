@@ -72,6 +72,7 @@ try {
   const providerCreated = deferred();
   const allowProviderReturn = deferred();
   const providerStripe = {
+    mode: 'test' as const,
     async createRecipientAccount() {
       providerCreated.resolve();
       await allowProviderReturn.promise;
@@ -101,7 +102,7 @@ try {
   // Both paths lock performer -> operation; completion must stay bounded and
   // transfer must lose without changing the owner or account identity.
   const raceStore = createStripeConnectOnboardingStore(dbA);
-  const raceReservation = await raceStore.reserve({ performerId: ids.racePerformer, ownerUserId: ids.raceOwner });
+  const raceReservation = await raceStore.reserve({ performerId: ids.racePerformer, ownerUserId: ids.raceOwner, paymentMode: 'test' });
   assert.equal(raceReservation.kind, 'reserved');
   if (raceReservation.kind !== 'reserved') throw new Error('Expected race reservation.');
 
@@ -109,6 +110,7 @@ try {
     raceStore.complete({
       performerId: ids.racePerformer,
       ownerUserId: ids.raceOwner,
+      paymentMode: 'test',
       leaseToken: raceReservation.leaseToken,
       operationKey: raceReservation.operationKey,
       accountId: 'acct_completion_race'
@@ -131,16 +133,17 @@ try {
   // bind its account after the new owner-bound lease takes over.
   let clock = new Date('2026-08-11T00:00:00.000Z');
   const staleStore = createStripeConnectOnboardingStore(dbA, () => new Date(clock));
-  const staleReservation = await staleStore.reserve({ performerId: ids.stalePerformer, ownerUserId: ids.staleOwner });
+  const staleReservation = await staleStore.reserve({ performerId: ids.stalePerformer, ownerUserId: ids.staleOwner, paymentMode: 'test' });
   assert.equal(staleReservation.kind, 'reserved');
   if (staleReservation.kind !== 'reserved') throw new Error('Expected initial stale-lease reservation.');
   clock = new Date(clock.getTime() + 2 * 60 * 1000 + 1);
-  const replacementReservation = await staleStore.reserve({ performerId: ids.stalePerformer, ownerUserId: ids.staleOwner });
+  const replacementReservation = await staleStore.reserve({ performerId: ids.stalePerformer, ownerUserId: ids.staleOwner, paymentMode: 'test' });
   assert.equal(replacementReservation.kind, 'reserved');
   if (replacementReservation.kind !== 'reserved') throw new Error('Expected replacement stale-lease reservation.');
   await assert.rejects(staleStore.complete({
     performerId: ids.stalePerformer,
     ownerUserId: ids.staleOwner,
+    paymentMode: 'test',
     leaseToken: staleReservation.leaseToken,
     operationKey: staleReservation.operationKey,
     accountId: 'acct_stale_completion'
@@ -148,6 +151,7 @@ try {
   await staleStore.complete({
     performerId: ids.stalePerformer,
     ownerUserId: ids.staleOwner,
+    paymentMode: 'test',
     leaseToken: replacementReservation.leaseToken,
     operationKey: replacementReservation.operationKey,
     accountId: 'acct_replacement_completion'

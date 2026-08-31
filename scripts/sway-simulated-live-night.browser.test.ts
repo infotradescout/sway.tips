@@ -299,7 +299,7 @@ async function main() {
 
     await waitVisible(
       performerPage.getByText(
-        'Money actions are unavailable because Stripe test mode could not be verified. Free rooms still work.',
+        'Money actions are temporarily unavailable. Free rooms still work.',
         { exact: true }
       ),
       'performer payment-unavailable copy',
@@ -313,7 +313,7 @@ async function main() {
     await waitVisible(setup, 'first-room setup', server);
     await waitVisible(
       setup.getByText(
-        'Money actions unavailable — Sway could not verify Stripe test mode. You can still run a free room.',
+        'Money actions are temporarily unavailable. You can still run a free room.',
         { exact: true }
       ),
       'room-setup payment-unavailable copy',

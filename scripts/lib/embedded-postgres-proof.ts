@@ -68,12 +68,19 @@ export async function startEmbeddedPostgresProof(label: string) {
         .filter((name) => /^\d{4}_.+\.sql$/.test(name))
         .sort();
       for (const filename of migrationFiles) {
-        for (const [index, statement] of migrationStatements(join(migrationDirectory, filename)).entries()) {
-          try {
-            await admin.query(statement);
-          } catch (error) {
-            throw new Error(`Real PostgreSQL proof failed to apply ${filename}, statement ${index + 1}.`, { cause: error });
+        await admin.query('BEGIN');
+        try {
+          for (const [index, statement] of migrationStatements(join(migrationDirectory, filename)).entries()) {
+            try {
+              await admin.query(statement);
+            } catch (error) {
+              throw new Error(`Real PostgreSQL proof failed to apply ${filename}, statement ${index + 1}.`, { cause: error });
+            }
           }
+          await admin.query('COMMIT');
+        } catch (error) {
+          await admin.query('ROLLBACK');
+          throw error;
         }
       }
     } finally {
@@ -111,14 +118,21 @@ export async function startEmbeddedPostgresProof(label: string) {
 
   if (!migrationFiles.length) throw new Error('No Drizzle migrations were found.');
   for (const filename of migrationFiles) {
-    for (const [index, statement] of migrationStatements(join(migrationDirectory, filename)).entries()) {
-      try {
-        await database.exec(statement);
-      } catch (error) {
-        throw new Error(`Embedded PostgreSQL proof failed to apply ${filename}, statement ${index + 1}.`, {
-          cause: error
-        });
+    await database.exec('BEGIN');
+    try {
+      for (const [index, statement] of migrationStatements(join(migrationDirectory, filename)).entries()) {
+        try {
+          await database.exec(statement);
+        } catch (error) {
+          throw new Error(`Embedded PostgreSQL proof failed to apply ${filename}, statement ${index + 1}.`, {
+            cause: error
+          });
+        }
       }
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
     }
   }
 

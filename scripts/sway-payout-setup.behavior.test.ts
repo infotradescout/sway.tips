@@ -86,17 +86,6 @@ for (const kind of ['busy', 'unverified', 'not_found'] as const) {
 }
 
 {
-  const { calls, input } = harness({ persistDestination: undefined });
-  assert.deepEqual(await preparePayoutSetup(input), {
-    kind: 'ready',
-    url: 'https://provider.test/onboard',
-    accountId,
-    setupSurface: 'onboarding'
-  });
-  assert.deepEqual(calls, ['provision', 'create_onboarding_link'], 'legacy omitted destination must not invent or persist a preference');
-}
-
-{
   const { calls, input } = harness({ useManagementPortal: true });
   assert.deepEqual(await preparePayoutSetup(input), {
     kind: 'ready',

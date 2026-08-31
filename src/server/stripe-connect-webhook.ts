@@ -3,6 +3,7 @@ import type { StripeConnectStatusReconciliationResult } from './stripe-connect-s
 
 type AccountStatusEvent = {
   accountId: string;
+  paymentMode: 'test' | 'live';
   status: ConnectAccountStatus;
   providerEventId: string;
   eventType: string;

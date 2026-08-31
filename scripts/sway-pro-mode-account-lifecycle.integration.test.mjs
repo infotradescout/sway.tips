@@ -41,8 +41,15 @@ async function applyAllMigrations(client) {
   const files = readdirSync(migrationDir).filter((name) => /^\d+_.*\.sql$/.test(name)).sort();
   for (const filename of files) {
     const sql = readFileSync(join(migrationDir, filename), 'utf8');
-    for (const statement of splitStatements(sql)) {
-      await client.query(statement);
+    await client.query('BEGIN');
+    try {
+      for (const statement of splitStatements(sql)) {
+        await client.query(statement);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
   }
 }

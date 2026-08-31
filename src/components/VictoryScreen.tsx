@@ -54,7 +54,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
     && session.settlementMode === 'connected_account';
   const canShareMoneyRecap = hasVerifiedLiveSettlement;
   const amountLabel = isTestPaymentVolume
-    ? 'Stripe test volume'
+    ? 'Test payment volume'
     : hasVerifiedLiveSettlement
       ? 'Captured payment volume'
       : 'Recorded room volume';
@@ -123,14 +123,14 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
               <p className="text-xs font-bold text-amber-200">Payments weren&apos;t connected this session</p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
                 Requests came in, but no payment provider was connected to capture them, so totals below show
-                $0. Connect Stripe before a real night to collect real earnings.
+                $0. Finish secure payout setup before a real night to collect real earnings.
               </p>
             </div>
           )}
 
           {isTestPaymentVolume && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-sway-test-volume="true">
-              <p className="text-xs font-bold text-amber-200">Stripe test volume — no real money</p>
+              <p className="text-xs font-bold text-amber-200">Test payment volume — no real money</p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
                 These amounts came from a test-mode rehearsal. They are not earnings, are not payable to a bank account,
                 and cannot be shared as a real-money result.

@@ -40,7 +40,7 @@ export default function PerformerRoomHistory() {
           const isTestVolume = room.paymentEnvironment === 'test' || room.settlementMode === 'platform_test_balance';
           const isVerifiedLive = room.paymentEnvironment === 'live' && room.settlementMode === 'connected_account';
           const paymentTruth = isTestVolume
-            ? 'Stripe test volume — no real money or bank payout'
+            ? 'Test payment volume — no real money or payout'
             : isVerifiedLive
               ? 'Captured live payment volume — not a payout total'
               : room.settlementMode === 'no_paid_activity'

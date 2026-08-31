@@ -60,8 +60,15 @@ async function applyMigrations(client) {
     .sort();
   for (const filename of migrationFiles) {
     const sql = readFileSync(join(migrationDir, filename), 'utf8');
-    for (const statement of splitStatements(sql)) {
-      await client.query(statement);
+    await client.query('BEGIN');
+    try {
+      for (const statement of splitStatements(sql)) {
+        await client.query(statement);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
   }
 }
@@ -132,7 +139,7 @@ async function main() {
       secretKey: stripeSecretKey,
       webhookSecret: stripeWebhookSecret
     });
-    service = createPaymentService({ databaseUrl, provider });
+    service = createPaymentService({ databaseUrl, provider, paymentMode: 'test' });
 
     async function reserveRequest(label, amountCents) {
       const requestId = randomUUID();

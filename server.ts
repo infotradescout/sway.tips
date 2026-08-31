@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -100,7 +100,7 @@ import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-
 import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
 import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
 import { preparePayoutSetup } from "./src/server/payout-setup";
-import { canConfigurePayoutDestination, normalizePayoutDestinationKind } from "./src/payout-destination";
+import { normalizePayoutDestinationKind, resolvePayoutDestinationSetupRequest } from "./src/payout-destination";
 import { handleStripeConnectReturn } from "./src/server/stripe-connect-return";
 import { reconcileStripeConnectPerformerStatus } from "./src/server/stripe-connect-status";
 import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-connect-webhook";
@@ -358,6 +358,14 @@ const performerLoginMailer = createPerformerLoginMailer({
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
+const providerPaymentMode = paymentProvider?.mode ?? null;
+const connectPaymentMode = stripeConnectService?.mode ?? null;
+const connectRuntimeMode = connectPaymentMode ?? 'test';
+const providerModesMatch = Boolean(
+  providerPaymentMode
+  && connectPaymentMode
+  && providerPaymentMode === connectPaymentMode
+);
 const stripeConnectOnboardingStore = businessDb
   ? createStripeConnectOnboardingStore(businessDb)
   : null;
@@ -366,8 +374,8 @@ const payoutDestinationStore = businessDb
   : null;
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
-  paymentProviderConfigured: Boolean(paymentProvider),
-  stripeConnectConfigured: Boolean(stripeConnectService),
+  paymentProviderConfigured: Boolean(paymentProvider && providerModesMatch),
+  stripeConnectConfigured: Boolean(stripeConnectService && providerModesMatch),
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
 });
 const payoutDestinationCapabilities = resolvePayoutDestinationCapabilities({
@@ -383,15 +391,46 @@ const testModePlatformBalanceEnabled = testModePlatformBalancePerformerIds.size 
 const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
   provider: paymentProvider,
+  paymentMode: providerPaymentMode ?? 'test',
+  newMoneyAllowedPerformerIds: liveRoomPaymentRuntimeConfig.mode === 'live'
+    && liveRoomPaymentRuntimeConfig.moneyEnabled
+    ? liveRoomPaymentRuntimeConfig.liveAllowedPerformerIds
+    : undefined,
   testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({
       databaseUrl: process.env.DATABASE_URL,
-      provider: paymentProvider,
-      expectedLivemode: liveRoomPaymentRuntimeConfig.mode === 'live'
+      provider: paymentProvider
     })
   : null;
+
+function isPerformerAllowedForRuntimeMoney(performerId: string | null | undefined) {
+  if (liveRoomPaymentRuntimeConfig.mode !== 'live') return true;
+  return Boolean(
+    performerId
+    && liveRoomPaymentRuntimeConfig.liveAllowedPerformerIds.has(performerId.trim().toLowerCase())
+  );
+}
+
+function isSellerRuntimeMoneyEligible(
+  performerId: string | null | undefined,
+  sellerReady: boolean
+) {
+  return Boolean(
+    liveRoomPaymentRuntimeConfig.moneyEnabled
+    && isPerformerAllowedForRuntimeMoney(performerId)
+    && sellerReady
+  );
+}
+
+function roomPaymentEnvironmentMatchesRuntime(session: { paymentEnvironment?: string | null }) {
+  return Boolean(
+    providerPaymentMode
+    && liveRoomPaymentRuntimeConfig.moneyEnabled
+    && session.paymentEnvironment === providerPaymentMode
+  );
+}
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -2159,13 +2198,13 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         preview_specialties: performerProfilePreviews.specialties,
         owner_user_id: performers.ownerUserId,
         email_verified_at: users.emailVerifiedAt,
-        charges_enabled: performers.chargesEnabled,
-        payouts_enabled: performers.payoutsEnabled,
-        stripe_connected_account_id: performers.stripeConnectedAccountId,
+        charges_enabled: performerStripeConnectBindings.chargesEnabled,
+        payouts_enabled: performerStripeConnectBindings.payoutsEnabled,
+        stripe_connected_account_id: performerStripeConnectBindings.stripeAccountId,
         payout_destination_kind: performerPayoutPreferences.destinationKind,
         performer_is_active: performers.isActive,
         onboarding_status: performers.onboardingStatus,
-        payment_account_status: performers.paymentAccountStatus,
+        payment_account_status: performerStripeConnectBindings.paymentAccountStatus,
         kyc_status: performers.kycStatus,
         payout_hold_reason: performers.payoutHoldReason
       })
@@ -2174,6 +2213,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
       .leftJoin(performerPayoutPreferences, eq(performerPayoutPreferences.performerId, performers.id))
+      .leftJoin(performerStripeConnectBindings, and(
+        eq(performerStripeConnectBindings.performerId, performers.id),
+        eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+      ))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
@@ -2205,6 +2248,8 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       payout_destination_kind: normalizePayoutDestinationKind(performerRow.payout_destination_kind),
       money_actions_ready: Boolean(
         performerRow.performer_is_active
+        && liveRoomPaymentRuntimeConfig.moneyEnabled
+        && isPerformerAllowedForRuntimeMoney(performerRow.performer_id)
         && performerRow.onboarding_status !== 'suspended'
         && performerRow.payment_account_status === 'payouts_enabled'
         && ['not_required', 'verified'].includes(performerRow.kyc_status)
@@ -2403,10 +2448,14 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       handle: performers.handle,
       bio: performers.bio,
       visibilityState: performers.visibilityState,
-      stripeAccountId: performers.stripeConnectedAccountId,
-      paymentAccountStatus: performers.paymentAccountStatus
+      stripeAccountId: performerStripeConnectBindings.stripeAccountId,
+      paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus
     })
     .from(performers)
+    .leftJoin(performerStripeConnectBindings, and(
+      eq(performerStripeConnectBindings.performerId, performers.id),
+      eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+    ))
     .where(eq(performers.ownerUserId, actorUserId))
     .limit(1);
 
@@ -11154,38 +11203,34 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
   }
-  if (!talentAccess.actor.actorId || !businessDb) {
+  if (!talentAccess.actor.actorId) {
     return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
   }
-  const destinationKindProvided = Boolean(
-    req.body
-    && typeof req.body === 'object'
-    && Object.prototype.hasOwnProperty.call(req.body, 'destinationKind')
-  );
-  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
-  if (destinationKindProvided && !destinationKind) {
-    return res.status(422).json({ error: 'Choose a supported payout destination.' });
+  const payoutSetupRequest = resolvePayoutDestinationSetupRequest({
+    destinationKind: req.body?.destinationKind,
+    paymentMode: liveRoomPaymentRuntimeConfig.mode,
+    capabilities: payoutDestinationCapabilities,
+    runtimeAvailable: Boolean(
+      businessDb
+      && stripeConnectService
+      && stripeConnectOnboardingStore
+      && payoutDestinationStore
+      && liveRoomPaymentRuntimeConfig.connectEnabled
+    )
+  });
+  if (payoutSetupRequest.ok === false) {
+    return res.status(payoutSetupRequest.status).json({ error: payoutSetupRequest.error });
   }
-  if (!stripeConnectService || !stripeConnectOnboardingStore || !payoutDestinationStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).json({ error: 'Secure payout setup is unavailable until payment execution is fully configured.' });
+  const { destinationKind } = payoutSetupRequest;
+  if (!businessDb || !stripeConnectService || !stripeConnectOnboardingStore || !payoutDestinationStore) {
+    return res.status(503).json({ error: 'Secure payout setup is temporarily unavailable. Try again later.' });
   }
-  if (destinationKind && !canConfigurePayoutDestination(
-    destinationKind,
-    liveRoomPaymentRuntimeConfig.mode,
-    payoutDestinationCapabilities
-  )) {
-    return res.status(422).json({
-      error: !payoutDestinationCapabilities[destinationKind]
-        ? 'That payout destination is not certified as enabled in the configured Stripe account.'
-        : liveRoomPaymentRuntimeConfig.mode === 'test'
-        ? 'Cash App and Venmo setup is available only for live payouts. Choose a test bank account or test debit card.'
-        : 'That payout destination is unavailable in the current payment mode.'
-    });
-  }
-
   const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
+  }
+  if (!isPerformerAllowedForRuntimeMoney(performerOwner.performerId)) {
+    return res.status(403).json({ error: 'Live payout setup is not enabled for this performer.' });
   }
 
   try {
@@ -11203,29 +11248,27 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
       }),
       createManagementLink: createStripeConnectManagementUrl,
       createOnboardingLink: createStripeConnectOnboardingUrl,
-      persistDestination: destinationKind
-        ? () => payoutDestinationStore.selectForOwner({
-            performerId: performerOwner.performerId,
-            ownerUserId: talentAccess.actor.actorId!,
-            destinationKind
-          })
-        : undefined
+      persistDestination: () => payoutDestinationStore.selectForOwner({
+        performerId: performerOwner.performerId,
+        ownerUserId: talentAccess.actor.actorId!,
+        destinationKind
+      })
     });
     if (setup.kind === 'not_found') {
       return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
     }
     if (setup.kind === 'unverified') {
-      return res.status(409).json({ error: 'A verified performer account email is required before Stripe onboarding.' });
+      return res.status(409).json({ error: 'Verify the performer account email before starting secure payout setup.' });
     }
     if (setup.kind === 'busy') {
       res.setHeader('Retry-After', '2');
-      return res.status(409).json({ error: 'Stripe onboarding is already being prepared. Retry in a moment.' });
+      return res.status(409).json({ error: 'Secure payout setup is already being prepared. Retry in a moment.' });
     }
 
     return res.json({
       success: true,
       url: setup.url,
-      ...(destinationKind ? { destinationKind } : {}),
+      destinationKind,
       setupSurface: setup.setupSurface
     });
   } catch (error) {
@@ -11233,7 +11276,7 @@ app.post('/api/talent/connect/onboard', async (req, res) => {
       message: error instanceof Error ? error.message : 'unknown_error'
     });
     return res.status(502).json({
-      error: 'Secure payout setup could not be started. Confirm the payment provider is configured for the current payment mode.'
+      error: 'Secure payout setup is temporarily unavailable. Try again later.'
     });
   }
 });
@@ -11242,25 +11285,33 @@ app.get('/talent/connect/refresh', async (req, res) => {
   applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
-    return res.status(talentAccess.status).send('Authenticate as the performer owner to restart Stripe onboarding.');
+    return res.status(talentAccess.status).send('Sign in as the performer owner to restart secure payout setup.');
   }
   if (!talentAccess.actor.actorId || !businessDb || !stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).send('Stripe onboarding is temporarily unavailable.');
+    return res.status(503).send('Secure payout setup is temporarily unavailable. Try again later.');
   }
 
   const [owner] = await businessDb.select({
-    stripeAccountId: performers.stripeConnectedAccountId,
+    performerId: performers.id,
+    stripeAccountId: performerStripeConnectBindings.stripeAccountId,
     emailVerifiedAt: users.emailVerifiedAt
   }).from(performers)
     .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .leftJoin(performerStripeConnectBindings, and(
+      eq(performerStripeConnectBindings.performerId, performers.id),
+      eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+    ))
     .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
     .limit(1);
 
   if (!owner?.emailVerifiedAt) {
-    return res.status(409).send('Verify the performer owner email before restarting Stripe onboarding.');
+    return res.status(409).send('Verify the performer owner email before restarting secure payout setup.');
   }
   if (!owner.stripeAccountId) {
-    return res.status(409).send('Start Stripe onboarding from the performer account first.');
+    return res.status(409).send('Start secure payout setup from the performer account first.');
+  }
+  if (!isPerformerAllowedForRuntimeMoney(owner.performerId)) {
+    return res.status(403).send('Live payout setup is not enabled for this performer.');
   }
 
   try {
@@ -11270,7 +11321,7 @@ app.get('/talent/connect/refresh', async (req, res) => {
     console.error('Stripe Connect onboarding refresh failed.', {
       message: error instanceof Error ? error.message : 'unknown_error'
     });
-    return res.status(502).send('Stripe onboarding could not be restarted. Return to the performer account and try again.');
+    return res.status(502).send('Secure payout setup could not be restarted. Return to the performer account and try again.');
   }
 });
 
@@ -11282,15 +11333,16 @@ app.get('/talent/connect/return', async (req, res) => {
     runtimeAvailable: Boolean(
       businessDb
       && stripeConnectService
-      && liveRoomPaymentRuntimeConfig.connectEnabled
     ),
+    paymentMode: connectRuntimeMode,
     requireTalentAccess: (request) => accessControl.requireTalentAccess(request),
     loadOwnedPerformer: loadOwnedPerformerByActorUserId,
     getAccountStatus: (accountId) => stripeConnectService!.getAccountStatus(accountId),
-    applyStatus: ({ performerId, ownerUserId, accountId, providerStatus }) => (
+    applyStatus: ({ performerId, ownerUserId, accountId, paymentMode, providerStatus }) => (
       reconcileStripeConnectPerformerStatus({
         db: businessDb!,
         accountId,
+        paymentMode,
         status: providerStatus,
         source: 'return',
         actorId: ownerUserId,
@@ -11506,12 +11558,26 @@ app.post("/api/payment/webhook", async (req, res) => {
     try {
       const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
       if (accountEvent) {
+        if (accountEvent.paymentMode !== connectRuntimeMode) {
+          if (!paymentWebhookService) {
+            return res.status(503).json({ error: 'Durable payment webhook processing is unavailable.' });
+          }
+          const durableResult = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
+          return res.json({
+            received: true,
+            result: { type: 'account.updated', status: 'ignored_opposite_mode', durableResult }
+          });
+        }
+        if (!accountEvent.accountId || !accountEvent.status) {
+          return res.status(400).json({ error: 'Connect webhook account status is incomplete.' });
+        }
         return handleStripeConnectAccountStatusWebhook({
           res,
           accountEvent,
           applyStatus: (event) => reconcileStripeConnectPerformerStatus({
             db: businessDb,
             accountId: event.accountId,
+            paymentMode: event.paymentMode,
             status: event.status,
             source: event.eventType.startsWith('v2.') ? 'webhook_v2' : 'webhook_v1',
             providerEventId: event.providerEventId,
@@ -12629,7 +12695,8 @@ app.post("/api/session/start", async (req, res) => {
       && session.feeType === requestedRoomConfig.feeType
       && session.minimumTip === requestedRoomConfig.minimumTip
       && session.paymentsEnabled === requestedRoomConfig.paymentsEnabled
-      && session.searchScope === requestedRoomConfig.searchScope;
+      && session.searchScope === requestedRoomConfig.searchScope
+      && (!(session.paymentsEnabled || session.tipsEnabled) || roomPaymentEnvironmentMatchesRuntime(session));
     if (ownedByCaller && sameConfig && session.status === 'active') {
       return { kind: 'replay' as const, state: existing.state };
     }
@@ -12652,7 +12719,7 @@ app.post("/api/session/start", async (req, res) => {
 
   if (requestedRoomConfig.paymentsEnabled && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return res.status(503).json({
-      error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+      error: 'Paid-room rehearsal is temporarily unavailable. You can still start a free room.',
       code: 'test_payment_runtime_unavailable'
     });
   }
@@ -12662,13 +12729,18 @@ app.post("/api/session/start", async (req, res) => {
         id: performers.id,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
-        paymentAccountStatus: performers.paymentAccountStatus,
+        paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus,
         kycStatus: performers.kycStatus,
-        chargesEnabled: performers.chargesEnabled,
-        payoutsEnabled: performers.payoutsEnabled,
-        stripeConnectedAccountId: performers.stripeConnectedAccountId,
+        chargesEnabled: performerStripeConnectBindings.chargesEnabled,
+        payoutsEnabled: performerStripeConnectBindings.payoutsEnabled,
+        stripeConnectedAccountId: performerStripeConnectBindings.stripeAccountId,
         payoutHoldReason: performers.payoutHoldReason
-      }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+      }).from(performers)
+        .leftJoin(performerStripeConnectBindings, and(
+          eq(performerStripeConnectBindings.performerId, performers.id),
+          eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+        ))
+        .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
   const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
     seller,
@@ -12678,9 +12750,19 @@ app.post("/api/session/start", async (req, res) => {
     )
   });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
+  const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
+    seller?.id,
+    sellerMoneyReadiness.ready
+  );
+  if (requestedPaymentsEnabled && !isPerformerAllowedForRuntimeMoney(seller?.id)) {
+    return res.status(403).json({
+      error: 'Live paid rooms are not enabled for this performer.',
+      code: 'live_money_performer_not_allowed'
+    });
+  }
   if (requestedPaymentsEnabled && !sellerMoneyReadiness.ready) {
     return res.status(409).json({
-      error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
+      error: 'Complete secure identity and payout setup before starting a paid room.',
       code: 'seller_payout_not_ready'
     });
   }
@@ -12712,12 +12794,12 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: requestedRoomConfig.searchScope,
-    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
-    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
-    settlementMode: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentsEnabled: requestedPaymentsEnabled && runtimeSellerMoneyEligible,
+    tipsEnabled: runtimeSellerMoneyEligible,
+    settlementMode: runtimeSellerMoneyEligible
       ? sellerMoneyReadiness.settlementMode
       : 'unavailable',
-    paymentEnvironment: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentEnvironment: runtimeSellerMoneyEligible
       ? liveRoomPaymentRuntimeConfig.mode
       : 'unavailable',
     totals: {
@@ -12999,8 +13081,14 @@ app.post("/api/session/payments-enabled", async (req, res) => {
   if (enabled) {
     if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
       return res.status(503).json({
-        error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+        error: 'Paid-room rehearsal is temporarily unavailable. You can still run free requests.',
         code: 'test_payment_runtime_unavailable'
+      });
+    }
+    if (!roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+      return res.status(409).json({
+        error: 'This room was opened under a different payment environment. Start a new room before accepting money.',
+        code: 'payment_environment_mismatch'
       });
     }
     const [seller] = businessDb && actor.actorId
@@ -13008,13 +13096,18 @@ app.post("/api/session/payments-enabled", async (req, res) => {
           id: performers.id,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
-          paymentAccountStatus: performers.paymentAccountStatus,
+          paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus,
           kycStatus: performers.kycStatus,
-          chargesEnabled: performers.chargesEnabled,
-          payoutsEnabled: performers.payoutsEnabled,
-          stripeConnectedAccountId: performers.stripeConnectedAccountId,
+          chargesEnabled: performerStripeConnectBindings.chargesEnabled,
+          payoutsEnabled: performerStripeConnectBindings.payoutsEnabled,
+          stripeConnectedAccountId: performerStripeConnectBindings.stripeAccountId,
           payoutHoldReason: performers.payoutHoldReason
-        }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+        }).from(performers)
+          .leftJoin(performerStripeConnectBindings, and(
+            eq(performerStripeConnectBindings.performerId, performers.id),
+            eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+          ))
+          .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
       : [];
     const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
       seller,
@@ -13023,9 +13116,19 @@ app.post("/api/session/payments-enabled", async (req, res) => {
         testModePlatformBalancePerformerIds
       )
     });
-    if (!sellerMoneyReadiness.ready) {
+    const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
+      seller?.id,
+      sellerMoneyReadiness.ready
+    );
+    if (!isPerformerAllowedForRuntimeMoney(seller?.id)) {
+      return res.status(403).json({
+        error: 'Live paid rooms are not enabled for this performer.',
+        code: 'live_money_performer_not_allowed'
+      });
+    }
+    if (!runtimeSellerMoneyEligible) {
       return res.status(409).json({
-        error: 'Complete Stripe identity, charge, and payout setup before enabling paid requests.',
+        error: 'Complete secure identity and payout setup before enabling paid requests.',
         code: 'seller_payout_not_ready'
       });
     }
@@ -13375,8 +13478,14 @@ app.post("/api/request/create", async (req, res) => {
 
   if (paymentsEnabledForAction && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return rejectAfterConfirmedAuthorization(503, {
-      error: 'This paid action is paused until Stripe test-mode payment execution is fully configured.',
+      error: 'This paid action is temporarily unavailable. Free room actions still work.',
       code: 'test_payment_runtime_unavailable'
+    });
+  }
+  if (paymentsEnabledForAction && !roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'This room belongs to a different payment environment and cannot accept this paid action.',
+      code: 'payment_environment_mismatch'
     });
   }
 
@@ -14000,8 +14109,14 @@ app.post("/api/request/boost", async (req, res) => {
   const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
   if (paymentsEnabledForRoom && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return rejectAfterConfirmedAuthorization(503, {
-      error: 'Paid boosts are paused until Stripe test-mode payment execution is fully configured.',
+      error: 'Paid boosts are temporarily unavailable. Free room actions still work.',
       code: 'test_payment_runtime_unavailable'
+    });
+  }
+  if (paymentsEnabledForRoom && !roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'This room belongs to a different payment environment and cannot accept this paid boost.',
+      code: 'payment_environment_mismatch'
     });
   }
   let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip); // Paid boosts follow the room minimum.

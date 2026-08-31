@@ -21,12 +21,19 @@ async function applyAllMigrations(database: PGlite) {
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())
       .filter(Boolean);
-    for (const [index, statement] of statements.entries()) {
-      try {
-        await database.exec(statement);
-      } catch (error) {
-        throw new Error(`Migration failed: ${migrationFile}, statement ${index + 1}`, { cause: error });
+    await database.exec('BEGIN');
+    try {
+      for (const [index, statement] of statements.entries()) {
+        try {
+          await database.exec(statement);
+        } catch (error) {
+          throw new Error(`Migration failed: ${migrationFile}, statement ${index + 1}`, { cause: error });
+        }
       }
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
     }
   }
 }

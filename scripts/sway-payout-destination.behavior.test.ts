@@ -11,6 +11,7 @@ import {
   normalizePayoutDestinationKind,
   payoutDestinationLabel,
   PAYOUT_DESTINATIONS,
+  resolvePayoutDestinationSetupRequest,
   resolvePayoutSetupReturnStatus
 } from '../src/payout-destination';
 import { createPayoutDestinationStore } from '../src/server/payout-destination-store';
@@ -37,6 +38,44 @@ assert.equal(canConfigurePayoutDestination('bank_account', 'unavailable', allCap
 assert.equal(canConfigurePayoutDestination('bank_account', 'loading', allCapabilities), false);
 assert.equal(canConfigurePayoutDestination('bank_account', 'unknown', allCapabilities), false);
 assert.equal(canConfigurePayoutDestination('bank_account', 'test', {}), false);
+
+let providerProvisionCalls = 0;
+function attemptPayoutSetup(destinationKind: unknown, runtimeAvailable: boolean, capabilities: unknown) {
+  const result = resolvePayoutDestinationSetupRequest({
+    destinationKind,
+    paymentMode: 'live',
+    capabilities,
+    runtimeAvailable
+  });
+  if (result.ok) providerProvisionCalls += 1;
+  return result;
+}
+assert.deepEqual(attemptPayoutSetup(undefined, true, allCapabilities), {
+  ok: false,
+  status: 422,
+  error: 'Choose a supported payout destination.'
+});
+assert.deepEqual(attemptPayoutSetup('cash_tag', true, allCapabilities), {
+  ok: false,
+  status: 422,
+  error: 'Choose a supported payout destination.'
+});
+assert.deepEqual(attemptPayoutSetup('bank_account', true, {}), {
+  ok: false,
+  status: 422,
+  error: 'That payout destination is not available yet. Choose an enabled option.'
+});
+assert.deepEqual(attemptPayoutSetup('bank_account', false, allCapabilities), {
+  ok: false,
+  status: 503,
+  error: 'Secure payout setup is temporarily unavailable. Try again later.'
+});
+assert.equal(providerProvisionCalls, 0, 'omitted, invalid, disabled, and unavailable requests must make zero provider provisioning calls');
+assert.deepEqual(attemptPayoutSetup('bank_account', true, allCapabilities), {
+  ok: true,
+  destinationKind: 'bank_account'
+});
+assert.equal(providerProvisionCalls, 1, 'only an explicit valid and enabled destination may proceed to provider provisioning');
 assert.equal(resolvePayoutSetupReturnStatus('?connect=return'), 'return');
 assert.equal(resolvePayoutSetupReturnStatus('?connect=pending'), 'pending');
 assert.equal(resolvePayoutSetupReturnStatus('?connect=bogus'), null);
@@ -52,7 +91,14 @@ for (const migrationFile of migrationFiles) {
     .split('--> statement-breakpoint')
     .map((statement) => statement.trim())
     .filter(Boolean);
-  for (const statement of statements) await database.exec(statement);
+  await database.exec('BEGIN');
+  try {
+    for (const statement of statements) await database.exec(statement);
+    await database.exec('COMMIT');
+  } catch (error) {
+    await database.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 const db = drizzle(database, { schema }) as unknown as SwayDb;

@@ -50,12 +50,15 @@ function createInMemoryStore(options: { verified?: boolean; failCompleteOnce?: b
 
 function createIdempotentStripe() {
   const accountByOperation = new Map<string, string>();
+  const createInputs: Array<Record<string, unknown>> = [];
   let createInvocations = 0;
   let distinctAccountsCreated = 0;
 
   const stripe = {
-    async createRecipientAccount(input: { operationKey: string }) {
+    mode: 'test' as const,
+    async createRecipientAccount(input: { operationKey: string; displayName: string; contactEmail: string }) {
       createInvocations += 1;
+      createInputs.push({ ...input });
       await new Promise((resolve) => setTimeout(resolve, 20));
       let accountId = accountByOperation.get(input.operationKey);
       if (!accountId) {
@@ -82,7 +85,8 @@ function createIdempotentStripe() {
   return {
     stripe,
     getCreateInvocations: () => createInvocations,
-    getDistinctAccountsCreated: () => distinctAccountsCreated
+    getDistinctAccountsCreated: () => distinctAccountsCreated,
+    getCreateInputs: () => createInputs
   };
 }
 
@@ -98,6 +102,11 @@ function createIdempotentStripe() {
   assert.equal(concurrent.kind, 'busy');
   assert.equal(provider.getCreateInvocations(), 1);
   assert.equal(provider.getDistinctAccountsCreated(), 1);
+  assert.deepEqual(provider.getCreateInputs(), [{
+    displayName: 'Pilot Performer',
+    contactEmail: 'verified@example.test',
+    operationKey: memory.operationKey
+  }], 'automatic provisioning must use verified profile identity and the durable operation key, never a performer-supplied account id');
   assert.equal(memory.getBoundAccountId(), 'acct_test_1');
 
   const replay = await provisionStripeConnectRecipient({
@@ -129,6 +138,18 @@ function createIdempotentStripe() {
   assert.deepEqual(retry, { kind: 'bound', accountId: 'acct_test_1' });
   assert.equal(provider.getCreateInvocations(), 2, 'The retry must reconcile through the same durable operation key.');
   assert.equal(provider.getDistinctAccountsCreated(), 1, 'A DB failure followed by retry must not create a second Stripe account.');
+  assert.deepEqual(provider.getCreateInputs(), [
+    {
+      displayName: 'Pilot Performer',
+      contactEmail: 'verified@example.test',
+      operationKey: memory.operationKey
+    },
+    {
+      displayName: 'Pilot Performer',
+      contactEmail: 'verified@example.test',
+      operationKey: memory.operationKey
+    }
+  ], 'retry must reuse the same verified identity and durable provider operation');
   assert.equal(memory.getBoundAccountId(), 'acct_test_1');
 }
 

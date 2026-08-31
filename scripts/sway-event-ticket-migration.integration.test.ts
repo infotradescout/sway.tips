@@ -49,15 +49,22 @@ async function applyMigrations(database: PGlite, files: string[]) {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
-    for (const [statementIndex, statement] of statements.entries()) {
-      try {
-        await database.exec(statement);
-      } catch (error) {
-        throw new Error(
-          `Migration failed: ${migrationFile}, statement ${statementIndex + 1}`,
-          { cause: error }
-        );
+    await database.exec('BEGIN');
+    try {
+      for (const [statementIndex, statement] of statements.entries()) {
+        try {
+          await database.exec(statement);
+        } catch (error) {
+          throw new Error(
+            `Migration failed: ${migrationFile}, statement ${statementIndex + 1}`,
+            { cause: error }
+          );
+        }
       }
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
     }
   }
 }

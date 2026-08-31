@@ -11,7 +11,7 @@ export async function preparePayoutSetup(input: {
   provision: () => Promise<StripeConnectProvisioningResult>;
   createOnboardingLink: (accountId: string) => Promise<{ url: string }>;
   createManagementLink: (accountId: string) => Promise<{ url: string }>;
-  persistDestination?: () => Promise<{ kind: 'updated' | 'unchanged' | 'not_found' }>;
+  persistDestination: () => Promise<{ kind: 'updated' | 'unchanged' | 'not_found' }>;
 }): Promise<PreparedPayoutSetup> {
   const provisioning = await input.provision();
   if (provisioning.kind !== 'bound') return provisioning;
@@ -21,10 +21,8 @@ export async function preparePayoutSetup(input: {
     ? await input.createManagementLink(provisioning.accountId)
     : await input.createOnboardingLink(provisioning.accountId);
 
-  if (input.persistDestination) {
-    const preference = await input.persistDestination();
-    if (preference.kind === 'not_found') return { kind: 'not_found' };
-  }
+  const preference = await input.persistDestination();
+  if (preference.kind === 'not_found') return { kind: 'not_found' };
 
   return {
     kind: 'ready',

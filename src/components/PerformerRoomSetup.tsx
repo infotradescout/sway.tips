@@ -40,8 +40,8 @@ export default function PerformerRoomSetup({
 
   const pricingSummary = paymentsEnabled
     ? paymentMode === 'live'
-      ? `Stripe live · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
-      : `Stripe test mode · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
+      ? `Live money · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
+      : `Test money · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
     : payoutReady
       ? (paymentMode === 'live' ? 'Free requests and upvotes · tips available' : 'Free requests and upvotes · test tips available')
       : 'Free requests and upvotes · money actions off';
@@ -101,10 +101,10 @@ export default function PerformerRoomSetup({
             : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
       }`}>
         {paymentMode === 'live'
-          ? 'Stripe live mode — real money moves. Paid rooms require completed payout setup.'
+          ? 'Live money — real payments move. Paid rooms require completed secure payout setup.'
           : paymentMode === 'test'
-            ? 'Stripe test mode — no real money moves. Paid-mode rehearsals require Stripe test cards.'
-            : 'Money actions unavailable — Sway could not verify Stripe. You can still run a free room.'}
+            ? 'Test mode — no real money moves. Use only provider-approved test values accepted by secure setup.'
+            : 'Money actions are temporarily unavailable. You can still run a free room.'}
       </div>
 
       <div className="mt-5 min-h-[18rem]">
@@ -113,7 +113,7 @@ export default function PerformerRoomSetup({
             <p className="text-xs font-bold text-cyan-300">{performerName}</p>
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" disabled={!payoutReady || !moneyConfigured || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">{paymentMode === 'live' ? 'Paid requests' : 'Test paid requests'}</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? (paymentMode === 'live' ? `Requests and boosts start at $${minimumTip}. Real money moves.` : `Test requests and boosts start at $${minimumTip}. No real money moves.`) : (paymentMode === 'live' ? 'Finish Stripe charge and payout setup first.' : 'Finish Stripe test charge and payout setup first.')}</span></button>
+              <button type="button" disabled={!payoutReady || !moneyConfigured || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">{paymentMode === 'live' ? 'Paid requests' : 'Test paid requests'}</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? (paymentMode === 'live' ? `Requests and boosts start at $${minimumTip}. Real money moves.` : `Test requests and boosts start at $${minimumTip}. No real money moves.`) : (paymentMode === 'live' ? 'Finish secure identity and payout setup first.' : 'Finish secure test payout setup first.')}</span></button>
               <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? (paymentMode === 'live' ? 'Direct tips remain available.' : 'Test-mode direct tips remain available.') : 'All money actions stay off.'}</span></button>
             </div>
             {paymentsEnabled ? (

@@ -38,14 +38,21 @@ Dashboard controls for hosted Connect onboarding:
 ```text
 SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED=true
 SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED=true  # only when enabled; US accounts only
+SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED=true                # only after Cash App eligibility proof
+SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED=true                   # only after Venmo eligibility proof
 ```
 
 Before setting the first flag, confirm external payout-account collection is
 enabled for the platform-responsible hosted onboarding configuration. Before
 setting the debit flag, also confirm Stripe's separate debit-card collection
 setting. Sway exposes debit-card destinations only for `US`; Cash App and Venmo
-direct-deposit destinations are also restricted to `US`. Leaving either flag
-unset or false keeps the corresponding choices disabled in both the API and UI.
+direct-deposit preferences are also restricted to `US` and require their own
+explicit operator attestations. A generic external-account confirmation enables
+bank accounts only; it does not prove either wallet path is eligible. Leaving a
+flag unset or false keeps the corresponding choice disabled in both the API and
+UI. Wallet preferences refer only to routing/account details supplied by an
+eligible Direct Deposit feature, never a username, phone number, handle, or
+$cashtag.
 
 ## Webhook Replay Rule
 

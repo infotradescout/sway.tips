@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 import { and, eq, ne } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
-import { performers, proModeStatusEvents, stripeConnectOnboardingOperations, users } from '../db/schema';
+import {
+  performerStripeConnectBindings,
+  performers,
+  proModeStatusEvents,
+  stripeConnectModeOnboardingOperations,
+  stripeConnectOnboardingOperations,
+  users
+} from '../db/schema';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -27,9 +34,9 @@ export function mapClaimInspectionToClientError(status: string): { status: numbe
     case 'profile_already_claimed':
       return { status: 409, code: 'profile_already_claimed', error: 'Profile already claimed' };
     case 'payment_account_configured':
-      return { status: 409, code: 'payment_account_configured', error: 'Disconnect or transfer the payout account before transferring this profile' };
+      return { status: 409, code: 'payment_account_configured', error: 'This profile cannot be transferred after secure payout setup has started. Contact Sway support.' };
     case 'stripe_connect_provisioning_in_progress':
-      return { status: 409, code: 'stripe_connect_provisioning_in_progress', error: 'Finish or cancel Stripe onboarding before transferring this profile' };
+      return { status: 409, code: 'stripe_connect_provisioning_in_progress', error: 'This profile cannot be transferred after secure payout setup has started. Contact Sway support.' };
     case 'unavailable':
       return { status: 503, code: 'unavailable', error: 'Code temporarily unavailable for validation' };
     case 'rate_limited':
@@ -122,6 +129,27 @@ export async function assertPerformerClaimableByHandoff(
   if (performer.stripeConnectedAccountId) {
     return { ok: false, code: 'payment_account_configured' };
   }
+  const [legacyConnectOperation] = await tx
+    .select({ performerId: stripeConnectOnboardingOperations.performerId })
+    .from(stripeConnectOnboardingOperations)
+    .where(eq(stripeConnectOnboardingOperations.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (legacyConnectOperation) return { ok: false, code: 'stripe_connect_provisioning_in_progress' };
+  const [modeConnectOperation] = await tx
+    .select({ performerId: stripeConnectModeOnboardingOperations.performerId })
+    .from(stripeConnectModeOnboardingOperations)
+    .where(eq(stripeConnectModeOnboardingOperations.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (modeConnectOperation) return { ok: false, code: 'stripe_connect_provisioning_in_progress' };
+  const [modeBinding] = await tx
+    .select({ performerId: performerStripeConnectBindings.performerId })
+    .from(performerStripeConnectBindings)
+    .where(eq(performerStripeConnectBindings.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (modeBinding) return { ok: false, code: 'payment_account_configured' };
   return { ok: true, displayName: performer.displayName, handle: performer.handle };
 }
 
@@ -159,20 +187,8 @@ export async function transferPerformerOwnership(
   });
   if (!claimable.ok) return claimable;
 
-  // The performer row is already locked by assertPerformerClaimableByHandoff.
-  // Lock the provisioning row second, matching the Connect store's global
-  // performer -> operation lock order, and fence even an expired/pending
-  // operation because Stripe may already hold an account created for the
-  // former owner's verified email.
-  const [connectOperation] = await tx
-    .select({ performerId: stripeConnectOnboardingOperations.performerId })
-    .from(stripeConnectOnboardingOperations)
-    .where(eq(stripeConnectOnboardingOperations.performerId, input.performerId))
-    .for('update')
-    .limit(1);
-  if (connectOperation) {
-    return { ok: false, code: 'stripe_connect_provisioning_in_progress' };
-  }
+  // assertPerformerClaimableByHandoff already locked the performer, legacy
+  // operation, mode operation, and all mode bindings in that global order.
 
   const [updated] = await tx
     .update(performers)

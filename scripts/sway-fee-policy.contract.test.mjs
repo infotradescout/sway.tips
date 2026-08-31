@@ -99,7 +99,8 @@ const confirmationSource = serviceSource.slice(
   serviceSource.indexOf('async function confirmAuthorizedAction'),
   serviceSource.indexOf('async function ensureDurablePaymentBinding')
 );
-requireIncludes(confirmationSource, '.where(eq(payments.processorPaymentIntentId, input.processorPaymentIntentId))', 'Confirmation must resolve the immutable payment by its provider identity.');
+requireIncludes(confirmationSource, 'eq(payments.processorPaymentIntentId, input.processorPaymentIntentId)', 'Confirmation must resolve the immutable payment by its provider identity.');
+requireIncludes(confirmationSource, 'eq(payments.paymentMode, paymentMode)', 'Confirmation must fence provider identity by payment mode.');
 requireIncludes(confirmationSource, 'const payload = asRecord(operation.requestPayload);', 'Confirmation must load the durable authorization snapshot.');
 requireIncludes(confirmationSource, '...feePolicyFromPayload(payload)', 'Confirmation results must return the durable fee-policy snapshot.');
 requireIncludes(serverSource, 'const authorization = confirmedAuthorization ?? await paymentService.authorizeAction({', 'A confirmed authorization must supersede any fee proposal recomputed from the follow-up request.');

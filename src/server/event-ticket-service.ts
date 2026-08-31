@@ -509,7 +509,7 @@ function assertSellerReady(performer: TicketSellerReadiness) {
     serviceError(
       409,
       'ticket_seller_payout_not_ready',
-      'Complete Stripe identity, transfer, and payout onboarding before selling native tickets.'
+      'Complete secure identity and payout setup before selling native tickets.'
     );
   }
 }
@@ -683,6 +683,14 @@ export function createEventTicketService(options: EventTicketServiceOptions) {
 
   function requireCheckoutAvailability() {
     const config = requireSalesConfiguration(runtimeConfig);
+    if (expectedStripeLivemode) {
+      serviceError(
+        503,
+        'ticket_live_seller_mode_binding_required',
+        'Live native ticket sales are paused until seller payout bindings are mode-isolated.',
+        { retryable: true }
+      );
+    }
     if (!provider) {
       serviceError(
         503,
