@@ -287,12 +287,48 @@ export const performers = pgTable('performers', {
   ...timestamps
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
-  handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
+  handleLowerLookupIdx: index('idx_performers_handle_lower_lookup')
+    .on(sql`lower(${table.handle})`)
+    .where(sql`${table.handle} is not null`),
   stripeConnectedAccountUnique: uniqueIndex('performers_stripe_connected_account_id_unique')
     .on(table.stripeConnectedAccountId)
     .where(sql`${table.stripeConnectedAccountId} is not null`),
   handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
+}));
+
+// One durable namespace owns every canonical, historical, and reserved public
+// performer handle. Database triggers keep canonical claims synchronized with
+// performer inserts and renames so old and new runtimes share the invariant.
+export const performerHandleClaims = pgTable('performer_handle_claims', {
+  normalizedHandle: text('normalized_handle').notNull(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id, { onDelete: 'cascade' }),
+  claimKind: text('claim_kind').notNull(),
+  legacyException: boolean('legacy_exception').notNull().default(false),
+  ...timestamps
+}, (table) => ({
+  // Keep the legacy constraint name so old runtimes still classify conflicts
+  // from the new authoritative namespace as ordinary handle-taken errors.
+  normalizedHandlePk: primaryKey({
+    name: 'idx_performers_handle_lower',
+    columns: [table.normalizedHandle]
+  }),
+  performerIdx: index('performer_handle_claims_performer_idx').on(table.performerId),
+  canonicalPerformerIdx: uniqueIndex('performer_handle_claims_canonical_performer_idx')
+    .on(table.performerId)
+    .where(sql`${table.claimKind} = 'canonical'`),
+  lowercaseHandle: check(
+    'performer_handle_claims_lowercase_handle',
+    sql`${table.normalizedHandle} = lower(${table.normalizedHandle})`
+  ),
+  validHandle: check(
+    'performer_handle_claims_valid_handle',
+    sql`${table.normalizedHandle} ~ '^[a-z0-9_-]{4,30}$' or (${table.legacyException} = true and ${table.normalizedHandle} ~ '^[a-z0-9_-]{1,64}$' and ${table.claimKind} in ('canonical', 'redirect'))`
+  ),
+  claimKindAllowed: check(
+    'performer_handle_claims_kind_allowed',
+    sql`${table.claimKind} in ('canonical', 'redirect', 'reservation')`
+  )
 }));
 
 // Durable outbox/lease for Stripe recipient provisioning. The provider call
