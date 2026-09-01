@@ -46,11 +46,9 @@ if (/platformFeeCapCents|partnerTermsVersion|partnerEntitlement/i.test(feePolicy
 requireIncludes(feePolicySource, 'proposedPlatformFeeCents:', 'resolveProposedPlatformFee must return a proposedPlatformFeeCents field.');
 
 // 3. Sway never invents the promoted rate -- it must come from the campaign, never
-//    a code constant, and the creator-direct tier must stay a fixed, independent
-//    constant (not the room's configurable minimumTip).
-requireIncludes(feePolicySource, 'CREATOR_DIRECT_TIER_THRESHOLD_CENTS = 500', 'Creator-direct tier threshold must be the fixed $5 breakpoint.');
-requireIncludes(feePolicySource, 'CREATOR_DIRECT_PCT_BELOW_THRESHOLD = 0.20', 'Creator-direct rate below the threshold must be 20%.');
-requireIncludes(feePolicySource, 'CREATOR_DIRECT_FLAT_CENTS_AT_OR_ABOVE = 100', 'Creator-direct flat rate at/above the threshold must be $1.');
+//    a code constant, and the creator-direct fee stays a fixed $1 independent
+//    of the room's configurable minimumTip.
+requireIncludes(feePolicySource, 'CREATOR_DIRECT_TRANSACTION_FEE_CENTS = 100', 'Creator-direct transactions must always charge Sway\'s fixed $1 fee.');
 requireIncludes(feePolicySource, "input.attribution.kind === 'sway_promoted'\n    ? Math.round(input.subtotalCents * input.attribution.commissionBps / 10000)", 'Promoted commission must be computed from the campaign-supplied commissionBps, never a hardcoded rate.');
 if (/commissionBps\s*=\s*\d/.test(feePolicySource)) {
   failures.push('fee-policy.ts must not hardcode a promoted commissionBps value.');
@@ -126,7 +124,7 @@ if (/commissionBps:\s*integer\('commission_bps'\)[^,\n]*\.default\(/.test(schema
 }
 
 // 8. Runtime arithmetic check (executes the real pure function via tsx, not just
-//    a text match) -- locks in the tier boundary and the promoted-rate math.
+//    a text match) -- locks in the $1 creator-direct fee and promoted-rate math.
 const tmpCheckFile = join(root, `_tmp_fee_policy_runtime_check_${process.pid}.mjs`);
 try {
   writeFileSync(tmpCheckFile, `
@@ -144,9 +142,9 @@ console.log(JSON.stringify(cases.map((c) => resolveProposedPlatformFee(c))));
   const results = JSON.parse(stdout.trim().split('\n').pop());
 
   const expectations = [
-    { proposedPlatformFeeCents: 60, attributionSource: 'creator_direct' },   // $3.00 creator-direct: 20% = 60c
-    { proposedPlatformFeeCents: 100, attributionSource: 'creator_direct' }, // $4.99 creator-direct: 20% rounds to $1, matches the flat tier
-    { proposedPlatformFeeCents: 100, attributionSource: 'creator_direct' }, // $5.00 creator-direct: flat $1
+    { proposedPlatformFeeCents: 100, attributionSource: 'creator_direct' }, // $3.00 creator-direct: fixed $1
+    { proposedPlatformFeeCents: 100, attributionSource: 'creator_direct' }, // $4.99 creator-direct: fixed $1
+    { proposedPlatformFeeCents: 100, attributionSource: 'creator_direct' }, // $5.00 creator-direct: fixed $1
     { proposedPlatformFeeCents: 350, attributionSource: 'sway_promoted', commissionBpsApplied: 3500 } // $10 at a 35% negotiated campaign rate
   ];
 

@@ -1,9 +1,6 @@
-// Fixed tier for creator-direct sales -- intentionally independent of the room's
-// configurable minimumTip. That's a price floor the performer sets; this is a
-// commission-rate breakpoint Sway sets.
-const CREATOR_DIRECT_TIER_THRESHOLD_CENTS = 500;
-const CREATOR_DIRECT_PCT_BELOW_THRESHOLD = 0.20;
-const CREATOR_DIRECT_FLAT_CENTS_AT_OR_ABOVE = 100;
+// Sway's creator-direct transaction fee is always $1. It is added to the
+// customer's checkout total and never deducted from performer earnings.
+const CREATOR_DIRECT_TRANSACTION_FEE_CENTS = 100;
 
 export type FeeAttribution =
   | { kind: 'creator_direct' }
@@ -31,9 +28,7 @@ export function resolveProposedPlatformFee(input: {
 }): ProposedFee {
   const proposedPlatformFeeCents = input.attribution.kind === 'sway_promoted'
     ? Math.round(input.subtotalCents * input.attribution.commissionBps / 10000)
-    : (input.subtotalCents < CREATOR_DIRECT_TIER_THRESHOLD_CENTS
-        ? Math.round(input.subtotalCents * CREATOR_DIRECT_PCT_BELOW_THRESHOLD)
-        : CREATOR_DIRECT_FLAT_CENTS_AT_OR_ABOVE);
+    : CREATOR_DIRECT_TRANSACTION_FEE_CENTS;
 
   return {
     proposedPlatformFeeCents,

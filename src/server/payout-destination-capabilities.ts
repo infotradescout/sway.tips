@@ -6,24 +6,17 @@ function explicitlyConfirmed(value: string | undefined) {
 
 export function resolvePayoutDestinationCapabilities(input: {
   env?: NodeJS.ProcessEnv;
-  connectEnabled: boolean;
+  connectEnabled?: boolean;
 }): PayoutDestinationCapabilities {
   const env = input.env ?? process.env;
-  const country = (env.SWAY_STRIPE_CONNECT_COUNTRY || 'US').trim().toUpperCase();
-  const externalAccountCollectionConfirmed = input.connectEnabled
-    && explicitlyConfirmed(env.SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED);
-  const debitCardCollectionConfirmed = externalAccountCollectionConfirmed
-    && explicitlyConfirmed(env.SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED);
-  const cashAppDirectDepositConfirmed = externalAccountCollectionConfirmed
-    && explicitlyConfirmed(env.SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED);
-  const venmoDirectDepositConfirmed = externalAccountCollectionConfirmed
-    && explicitlyConfirmed(env.SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED);
-  const isUnitedStates = country === 'US';
+  const plaidEnabled = explicitlyConfirmed(env.SWAY_PLAID_TRANSFER_PAYOUTS_CONFIRMED);
+  const paypalEnabled = explicitlyConfirmed(env.SWAY_PAYPAL_PAYOUTS_CONFIRMED);
 
   return {
-    bank_account: externalAccountCollectionConfirmed,
-    debit_card: debitCardCollectionConfirmed && isUnitedStates,
-    cash_app_direct_deposit: cashAppDirectDepositConfirmed && isUnitedStates,
-    venmo_direct_deposit: venmoDirectDepositConfirmed && isUnitedStates
+    bank_account: plaidEnabled,
+    debit_card: explicitlyConfirmed(env.SWAY_DEBIT_CARD_PAYOUTS_CONFIRMED),
+    cash_app_direct_deposit: plaidEnabled,
+    venmo: paypalEnabled && explicitlyConfirmed(env.SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED),
+    paypal: paypalEnabled
   };
 }

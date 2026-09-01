@@ -236,9 +236,10 @@ const performerPaidAmounts = calculateSwayPaymentAmounts({
   platformFeeCents: 100,
   platformFeePayer: 'performer'
 });
+assert.deepEqual(performerPaidAmounts, patronPaidAmounts, 'legacy performer-paid input must be ignored so the customer always covers Sway checkout costs');
 assert.equal(performerPaidAmounts.platformFeeCents, 100);
-assert.equal(performerPaidAmounts.platformFeeChargedToPatronCents, 0);
-assert.equal(performerPaidAmounts.amountTotalCents, 1_000);
-assert.equal(performerPaidAmounts.amountTotalCents - performerPaidAmounts.platformFeeCents, 900);
+assert.equal(performerPaidAmounts.platformFeeChargedToPatronCents, 100);
+assert.equal(performerPaidAmounts.amountTotalCents, 1_100);
+assert.equal(performerPaidAmounts.amountTotalCents - performerPaidAmounts.platformFeeCents, 1_000);
 
 console.log('Performer link profile behavior tests passed.');

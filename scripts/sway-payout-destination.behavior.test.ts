@@ -20,19 +20,21 @@ assert.deepEqual(PAYOUT_DESTINATIONS.map((destination) => destination.id), [
   'bank_account',
   'debit_card',
   'cash_app_direct_deposit',
-  'venmo_direct_deposit'
+  'venmo',
+  'paypal'
 ]);
 assert.equal(normalizePayoutDestinationKind('bank'), 'bank_account');
 assert.equal(normalizePayoutDestinationKind('Debit Card'), 'debit_card');
 assert.equal(normalizePayoutDestinationKind('cashapp'), 'cash_app_direct_deposit');
-assert.equal(normalizePayoutDestinationKind('Venmo'), 'venmo_direct_deposit');
+assert.equal(normalizePayoutDestinationKind('Venmo'), 'venmo');
+assert.equal(normalizePayoutDestinationKind('PayPal'), 'paypal');
 assert.equal(normalizePayoutDestinationKind('$cashtag'), null);
 assert.equal(payoutDestinationLabel('cash_app'), 'Cash App direct deposit');
 const allCapabilities = Object.fromEntries(PAYOUT_DESTINATIONS.map((destination) => [destination.id, true]));
 assert.equal(canConfigurePayoutDestination('bank_account', 'test', allCapabilities), true);
 assert.equal(canConfigurePayoutDestination('debit_card', 'test', allCapabilities), true);
-assert.equal(canConfigurePayoutDestination('cash_app_direct_deposit', 'test', allCapabilities), false);
-assert.equal(canConfigurePayoutDestination('venmo_direct_deposit', 'test', allCapabilities), false);
+assert.equal(canConfigurePayoutDestination('cash_app_direct_deposit', 'test', allCapabilities), true);
+assert.equal(canConfigurePayoutDestination('venmo', 'test', allCapabilities), true);
 assert.equal(canConfigurePayoutDestination('cash_app_direct_deposit', 'live', allCapabilities), true);
 assert.equal(canConfigurePayoutDestination('bank_account', 'unavailable', allCapabilities), false);
 assert.equal(canConfigurePayoutDestination('bank_account', 'loading', allCapabilities), false);

@@ -455,7 +455,7 @@ export const performerPayoutPreferences = pgTable('performer_payout_preferences'
 }, (table) => ({
   destinationKindAllowed: check(
     'performer_payout_preferences_destination_kind_allowed',
-    sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo_direct_deposit')`
+    sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')`
   )
 }));
 
@@ -1636,6 +1636,42 @@ export const payouts = pgTable('payouts', {
   ...timestamps
 }, (table) => ({
   performerStatusIdx: index('payouts_performer_status_idx').on(table.performerId, table.payoutStatus)
+}));
+
+// One withdrawal debits the performer's accumulated captured earnings. The
+// gross amount is removed from the Sway balance once; the provider fee and net
+// delivery amount are immutable quote snapshots for reconciliation.
+export const performerWithdrawals = pgTable('performer_withdrawals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  idempotencyKey: text('idempotency_key').notNull(),
+  destinationKind: text('destination_kind').notNull(),
+  deliverySpeed: text('delivery_speed').notNull(),
+  status: text('status').notNull().default('requested'),
+  grossAmountCents: integer('gross_amount_cents').notNull(),
+  providerFeeCents: integer('provider_fee_cents').notNull(),
+  netAmountCents: integer('net_amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  provider: text('provider'),
+  providerPayoutId: text('provider_payout_id'),
+  failureCode: text('failure_code'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  performerCreatedIdx: index('performer_withdrawals_performer_created_idx').on(table.performerId, table.createdAt),
+  performerIdempotencyIdx: uniqueIndex('performer_withdrawals_performer_idempotency_idx').on(table.performerId, table.idempotencyKey),
+  providerPayoutIdx: uniqueIndex('performer_withdrawals_provider_payout_idx')
+    .on(table.provider, table.providerPayoutId)
+    .where(sql`${table.providerPayoutId} is not null`),
+  destinationAllowed: check('performer_withdrawals_destination_allowed', sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')`),
+  speedAllowed: check('performer_withdrawals_speed_allowed', sql`${table.deliverySpeed} in ('standard', 'instant')`),
+  statusAllowed: check('performer_withdrawals_status_allowed', sql`${table.status} in ('requested', 'processing', 'paid', 'failed', 'canceled')`),
+  positiveGross: check('performer_withdrawals_positive_gross', sql`${table.grossAmountCents} > 0`),
+  nonnegativeFee: check('performer_withdrawals_nonnegative_fee', sql`${table.providerFeeCents} >= 0`),
+  amountEquation: check('performer_withdrawals_amount_equation', sql`${table.netAmountCents} > 0 and ${table.netAmountCents} + ${table.providerFeeCents} = ${table.grossAmountCents}`),
+  currencyUsd: check('performer_withdrawals_currency_usd', sql`${table.currency} = 'USD'`),
+  paidShape: check('performer_withdrawals_paid_shape', sql`(${table.status} = 'paid' and ${table.paidAt} is not null and ${table.providerPayoutId} is not null) or (${table.status} <> 'paid' and ${table.paidAt} is null)`)
 }));
 
 export const moderationEvents = pgTable('moderation_events', {

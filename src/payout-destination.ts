@@ -21,11 +21,18 @@ export const PAYOUT_DESTINATIONS = [
     helpUrl: 'https://cash.app/help/3111-direct-deposit-account-details'
   },
   {
-    id: 'venmo_direct_deposit',
-    label: 'Venmo direct deposit',
-    shortDescription: 'Use Venmo routing and account details only when Direct Deposit is available on your account.',
-    setupHint: 'Eligibility and limits apply. Secure setup confirms whether the routing and account details can be used.',
-    helpUrl: 'https://help.venmo.com/cs/articles/direct-deposit-faq-vhel332'
+    id: 'venmo',
+    label: 'Venmo',
+    shortDescription: 'Send earnings to your Venmo account.',
+    setupHint: 'Confirm the Venmo handle, email, or mobile number that should receive payouts.',
+    helpUrl: null
+  },
+  {
+    id: 'paypal',
+    label: 'PayPal',
+    shortDescription: 'Send earnings to your PayPal account.',
+    setupHint: 'Confirm the email address connected to your PayPal account.',
+    helpUrl: null
   }
 ] as const;
 
@@ -37,7 +44,8 @@ export const NO_PAYOUT_DESTINATION_CAPABILITIES: PayoutDestinationCapabilities =
   bank_account: false,
   debit_card: false,
   cash_app_direct_deposit: false,
-  venmo_direct_deposit: false
+  venmo: false,
+  paypal: false
 };
 
 const PAYOUT_DESTINATION_IDS = new Set<PayoutDestinationKind>(
@@ -55,8 +63,9 @@ export function normalizePayoutDestinationKind(value: unknown): PayoutDestinatio
     cash_app: 'cash_app_direct_deposit',
     cashapp: 'cash_app_direct_deposit',
     cash_app_direct_deposit: 'cash_app_direct_deposit',
-    venmo: 'venmo_direct_deposit',
-    venmo_direct_deposit: 'venmo_direct_deposit'
+    venmo: 'venmo',
+    venmo_direct_deposit: 'venmo',
+    paypal: 'paypal'
   };
   return aliases[normalized]
     ?? (PAYOUT_DESTINATION_IDS.has(normalized as PayoutDestinationKind)
@@ -77,8 +86,7 @@ export function canConfigurePayoutDestination(
   const destinationKind = normalizePayoutDestinationKind(value);
   if (!destinationKind || (paymentMode !== 'test' && paymentMode !== 'live')) return false;
   if (!normalizePayoutDestinationCapabilities(capabilities)[destinationKind]) return false;
-  if (paymentMode === 'live') return true;
-  return destinationKind === 'bank_account' || destinationKind === 'debit_card';
+  return paymentMode === 'test' || paymentMode === 'live';
 }
 
 export type PayoutDestinationSetupRequest =
@@ -106,9 +114,7 @@ export function resolvePayoutDestinationSetupRequest(input: {
       status: 422,
       error: !capabilities[destinationKind]
         ? 'That payout destination is not available yet. Choose an enabled option.'
-        : input.paymentMode === 'test'
-          ? 'Cash App and Venmo setup is available only for live payouts. Choose an enabled simulated option.'
-          : 'That payout destination is unavailable in the current payment mode.'
+        : 'That payout destination is unavailable in the current payment mode.'
     };
   }
 
@@ -122,7 +128,8 @@ export function normalizePayoutDestinationCapabilities(value: unknown): PayoutDe
     bank_account: raw.bank_account === true,
     debit_card: raw.debit_card === true,
     cash_app_direct_deposit: raw.cash_app_direct_deposit === true,
-    venmo_direct_deposit: raw.venmo_direct_deposit === true
+    venmo: raw.venmo === true,
+    paypal: raw.paypal === true
   };
 }
 

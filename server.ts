@@ -100,6 +100,7 @@ import { createConfiguredStripeConnectService } from "./src/server/stripe-connec
 import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
 import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
 import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
+import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS } from "./src/server/performer-withdrawal-service";
 import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
 import { preparePayoutSetup } from "./src/server/payout-setup";
 import { normalizePayoutDestinationKind, resolvePayoutDestinationSetupRequest } from "./src/payout-destination";
@@ -373,6 +374,9 @@ const stripeConnectOnboardingStore = businessDb
   : null;
 const payoutDestinationStore = businessDb
   ? createPayoutDestinationStore(businessDb)
+  : null;
+const performerWithdrawalService = businessDb
+  ? createPerformerWithdrawalService(businessDb)
   : null;
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
@@ -1839,7 +1843,7 @@ function createInactiveSession(): GigSession {
     lastMutationActorUserId: null,
     talentName: "",
     talentRole: 'DJ',
-    feeType: 'patron',
+    feeType: 'patron' as const,
     minimumTip: 5,
     endGigTimerStartedAt: null,
     isFeatured: false,
@@ -4077,6 +4081,126 @@ app.get('/api/payment/config', (_req, res) => {
     liveRoomMoneyEnabled: true,
     payoutDestinationCapabilities,
     testModePlatformBalanceEnabled
+  });
+});
+
+app.get('/api/talent/payouts/balance', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !performerWithdrawalService) {
+    return res.status(503).json({ error: 'Performer balances require a durable database connection.' });
+  }
+  if (liveRoomPaymentRuntimeConfig.mode === 'unavailable') {
+    return res.status(503).json({ error: 'Performer balances are temporarily unavailable while payment mode is unresolved.' });
+  }
+  const balance = await performerWithdrawalService.getOwnerBalance({
+    ownerUserId: talentAccess.actor.actorId,
+    paymentMode: liveRoomPaymentRuntimeConfig.mode
+  });
+  if (balance.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+  return res.json({
+    pendingCents: balance.pendingCents,
+    availableCents: balance.availableCents,
+    reservedCents: balance.reservedCents,
+    currency: balance.currency,
+    minimumWithdrawalCents: MINIMUM_WITHDRAWAL_CENTS,
+    payoutMarkupCents: 0,
+    liveWithdrawalsEnabled: false
+  });
+});
+
+app.post('/api/talent/payouts/destination', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !payoutDestinationStore) {
+    return res.status(503).json({ error: 'Payout preferences require a durable database connection.' });
+  }
+  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
+  if (!destinationKind || payoutDestinationCapabilities[destinationKind] !== true) {
+    return res.status(422).json({ error: 'Choose an enabled payout destination.' });
+  }
+  if (liveRoomPaymentRuntimeConfig.mode !== 'test') {
+    return res.status(503).json({
+      error: 'Live payout setup remains locked until the selected provider is verified.',
+      code: 'live_payout_provider_required'
+    });
+  }
+  const owner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!owner) return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
+  const saved = await payoutDestinationStore.selectForOwner({
+    performerId: owner.performerId,
+    ownerUserId: talentAccess.actor.actorId,
+    destinationKind
+  });
+  if (saved.kind === 'not_found') return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
+  return res.json({ success: true, destinationKind, simulated: true });
+});
+
+app.post('/api/talent/payouts/withdrawals', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !performerWithdrawalService) {
+    return res.status(503).json({ error: 'Performer withdrawals require a durable database connection.' });
+  }
+  if (
+    liveRoomPaymentRuntimeConfig.mode !== 'test'
+    || process.env.SWAY_TEST_PAYOUT_WITHDRAWALS_ENABLED?.trim().toLowerCase() !== 'true'
+  ) {
+    return res.status(503).json({
+      error: 'Cash-out rehearsal is locked until the test withdrawal switch is enabled. No real money moved.',
+      code: 'payout_withdrawals_locked'
+    });
+  }
+  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
+  if (!destinationKind || payoutDestinationCapabilities[destinationKind] !== true) {
+    return res.status(422).json({ error: 'Choose an enabled payout destination.' });
+  }
+  const deliverySpeed = req.body?.deliverySpeed === 'instant'
+    ? 'instant' as const
+    : req.body?.deliverySpeed === 'standard'
+      ? 'standard' as const
+      : null;
+  if (!deliverySpeed) return res.status(422).json({ error: 'Choose standard or instant delivery.' });
+  const grossAmountCents = Number(req.body?.grossAmountCents);
+  const result = await performerWithdrawalService.requestTestWithdrawal({
+    ownerUserId: talentAccess.actor.actorId,
+    paymentMode: 'test',
+    idempotencyKey: req.body?.idempotencyKey,
+    destinationKind,
+    deliverySpeed,
+    grossAmountCents
+  });
+  if (result.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+  if (result.kind === 'invalid_idempotency_key') return res.status(422).json({ error: 'A valid cash-out request identity is required.' });
+  if (result.kind === 'below_minimum') return res.status(422).json({ error: 'The minimum cash-out amount is $10.00.' });
+  if (result.kind === 'insufficient_balance') return res.status(409).json({ error: 'Cash-out exceeds the available balance.', availableCents: result.availableCents });
+  if (result.kind === 'idempotency_conflict') return res.status(409).json({ error: 'That cash-out request identity was already used for different details.' });
+  if (result.kind === 'fee_exceeds_amount') return res.status(422).json({ error: 'The provider fee must be less than the cash-out amount.' });
+  if (result.kind === 'live_provider_required') return res.status(503).json({ error: 'A verified live payout provider is required.' });
+  const withdrawal = result.withdrawal;
+  return res.status(result.kind === 'created' ? 201 : 200).json({
+    replayed: result.kind === 'replay',
+    withdrawal: {
+      id: withdrawal.id,
+      status: withdrawal.status,
+      destinationKind: withdrawal.destinationKind,
+      deliverySpeed: withdrawal.deliverySpeed,
+      grossAmountCents: withdrawal.grossAmountCents,
+      providerFeeCents: withdrawal.providerFeeCents,
+      payoutMarkupCents: 0,
+      netAmountCents: withdrawal.netAmountCents,
+      currency: withdrawal.currency,
+      simulated: true
+    }
   });
 });
 
@@ -12770,7 +12894,7 @@ app.post("/api/session/start", async (req, res) => {
     }
   }
 
-  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
+  const { talentName, talentRole, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
   const requestedGigId = parseDurableGigId(gig_id);
   if (!requestedGigId) {
     return res.status(422).json({
@@ -12781,7 +12905,7 @@ app.post("/api/session/start", async (req, res) => {
   const requestedRoomConfig = {
     talentName: talentName || "DJ Pro",
     talentRole: talentRole || 'DJ',
-    feeType: feeType || 'patron',
+    feeType: 'patron' as const,
     minimumTip: Math.max(5, Number(minimumTip) || 5),
     paymentsEnabled: paymentsEnabled === true,
     searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'
@@ -13722,7 +13846,9 @@ app.post("/api/request/create", async (req, res) => {
     : { kind: 'creator_direct' as const };
   const proposedFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution });
   const proposedPlatformFeeCents = paymentsEnabledForAction ? proposedFee.proposedPlatformFeeCents : 0;
-  const platformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
+  // Performer earnings are never reduced by Sway's checkout fee. The customer
+  // sees and pays that disclosed amount at checkout.
+  const platformFeePayer = 'patron' as const;
 
   const moderationOutcome = await moderationService.evaluateSubmission({
     senderName: senderName || "Patron",
@@ -14397,7 +14523,7 @@ app.post("/api/request/boost", async (req, res) => {
     : { kind: 'creator_direct' as const };
   const proposedBoostFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution: boostAttribution });
   let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? proposedBoostFee.proposedPlatformFeeCents : 0;
-  const boostPlatformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
+  const boostPlatformFeePayer = 'patron' as const;
 
   // As with requests, the boost must have a stable invisible database identity
   // before Stripe is contacted. Concurrent duplicates converge on this row.

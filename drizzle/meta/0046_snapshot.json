@@ -1,6 +1,6 @@
 {
-  "id": "af1a6c2d-4b78-45e9-9203-31c57da84410",
-  "prevId": "8d3b624a-3d5d-417a-9758-3d345a6dab4f",
+  "id": "1b883905-55f1-4871-9781-d2c4723c5e97",
+  "prevId": "b72a5381-9e27-49c1-a1bf-63b76af90645",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12330,7 +12330,7 @@
       "checkConstraints": {
         "performer_payout_preferences_destination_kind_allowed": {
           "name": "performer_payout_preferences_destination_kind_allowed",
-          "value": "\"performer_payout_preferences\".\"destination_kind\" in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo_direct_deposit')"
+          "value": "\"performer_payout_preferences\".\"destination_kind\" in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')"
         }
       },
       "isRLSEnabled": false
@@ -13298,6 +13298,251 @@
         "performer_stripe_connect_bindings_payment_mode_allowed": {
           "name": "performer_stripe_connect_bindings_payment_mode_allowed",
           "value": "\"performer_stripe_connect_bindings\".\"payment_mode\" in ('test', 'live')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.performer_withdrawals": {
+      "name": "performer_withdrawals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "performer_id": {
+          "name": "performer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_kind": {
+          "name": "destination_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delivery_speed": {
+          "name": "delivery_speed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'requested'"
+        },
+        "gross_amount_cents": {
+          "name": "gross_amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_fee_cents": {
+          "name": "provider_fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "net_amount_cents": {
+          "name": "net_amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'USD'"
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_payout_id": {
+          "name": "provider_payout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "performer_withdrawals_performer_created_idx": {
+          "name": "performer_withdrawals_performer_created_idx",
+          "columns": [
+            {
+              "expression": "performer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "performer_withdrawals_performer_idempotency_idx": {
+          "name": "performer_withdrawals_performer_idempotency_idx",
+          "columns": [
+            {
+              "expression": "performer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "performer_withdrawals_provider_payout_idx": {
+          "name": "performer_withdrawals_provider_payout_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_payout_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"performer_withdrawals\".\"provider_payout_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "performer_withdrawals_performer_id_performers_id_fk": {
+          "name": "performer_withdrawals_performer_id_performers_id_fk",
+          "tableFrom": "performer_withdrawals",
+          "tableTo": "performers",
+          "columnsFrom": [
+            "performer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "performer_withdrawals_owner_user_id_users_id_fk": {
+          "name": "performer_withdrawals_owner_user_id_users_id_fk",
+          "tableFrom": "performer_withdrawals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "performer_withdrawals_destination_allowed": {
+          "name": "performer_withdrawals_destination_allowed",
+          "value": "\"performer_withdrawals\".\"destination_kind\" in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')"
+        },
+        "performer_withdrawals_speed_allowed": {
+          "name": "performer_withdrawals_speed_allowed",
+          "value": "\"performer_withdrawals\".\"delivery_speed\" in ('standard', 'instant')"
+        },
+        "performer_withdrawals_status_allowed": {
+          "name": "performer_withdrawals_status_allowed",
+          "value": "\"performer_withdrawals\".\"status\" in ('requested', 'processing', 'paid', 'failed', 'canceled')"
+        },
+        "performer_withdrawals_positive_gross": {
+          "name": "performer_withdrawals_positive_gross",
+          "value": "\"performer_withdrawals\".\"gross_amount_cents\" > 0"
+        },
+        "performer_withdrawals_nonnegative_fee": {
+          "name": "performer_withdrawals_nonnegative_fee",
+          "value": "\"performer_withdrawals\".\"provider_fee_cents\" >= 0"
+        },
+        "performer_withdrawals_amount_equation": {
+          "name": "performer_withdrawals_amount_equation",
+          "value": "\"performer_withdrawals\".\"net_amount_cents\" > 0 and \"performer_withdrawals\".\"net_amount_cents\" + \"performer_withdrawals\".\"provider_fee_cents\" = \"performer_withdrawals\".\"gross_amount_cents\""
+        },
+        "performer_withdrawals_currency_usd": {
+          "name": "performer_withdrawals_currency_usd",
+          "value": "\"performer_withdrawals\".\"currency\" = 'USD'"
+        },
+        "performer_withdrawals_paid_shape": {
+          "name": "performer_withdrawals_paid_shape",
+          "value": "(\"performer_withdrawals\".\"status\" = 'paid' and \"performer_withdrawals\".\"paid_at\" is not null and \"performer_withdrawals\".\"provider_payout_id\" is not null) or (\"performer_withdrawals\".\"status\" <> 'paid' and \"performer_withdrawals\".\"paid_at\" is null)"
         }
       },
       "isRLSEnabled": false
