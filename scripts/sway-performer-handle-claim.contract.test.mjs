@@ -13,6 +13,7 @@ process.once('unhandledRejection', failHard);
 
 const root = process.cwd();
 const migration = readFileSync(join(root, 'drizzle/0043_bored_sleeper.sql'), 'utf8');
+const cutoverMigration = readFileSync(join(root, 'drizzle/0044_edgewize_identity_cutover.sql'), 'utf8');
 const snapshot = readFileSync(join(root, 'drizzle/meta/0043_snapshot.json'), 'utf8');
 const schema = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
@@ -58,6 +59,17 @@ assert.doesNotMatch(
   migration,
   /update\s+(payments|payouts|performer_stripe_connect_bindings|stripe_connect_onboarding_operations)/i,
   'The handle namespace migration must not mutate money state.'
+);
+assert.match(cutoverMigration, /b705a2fb-9491-4fa8-b9e9-b14b7e1c1289/);
+assert.match(cutoverMigration, /current_handle IS DISTINCT FROM 'edgewyze'/);
+assert.match(cutoverMigration, /"normalized_handle" = 'edgewize'[\s\S]*"claim_kind" = 'reservation'/);
+assert.match(cutoverMigration, /"handle" = 'edgewize'/);
+assert.match(cutoverMigration, /"display_name" = 'EdgeWize'/);
+assert.match(cutoverMigration, /'historicalRedirect', 'edgewyze'/);
+assert.doesNotMatch(
+  cutoverMigration,
+  /update\s+(payments|payouts|performer_stripe_connect_bindings|stripe_connect_onboarding_operations)/i,
+  'The exact identity cutover must not mutate money state.'
 );
 
 assert.match(snapshot, /"public\.performer_handle_claims"/);
@@ -133,13 +145,15 @@ try {
   await database.exec(`
     create table users (
       id uuid primary key,
-      display_name text
+      display_name text,
+      updated_at timestamptz not null default now()
     );
     create table performers (
       id uuid primary key,
       owner_user_id uuid not null references users(id),
       handle text,
       display_name text not null,
+      bio text,
       payment_account_status text not null default 'not_started',
       kyc_status text not null default 'not_required',
       payouts_enabled boolean not null default false,
@@ -148,6 +162,7 @@ try {
       lifetime_gross_volume integer not null default 0,
       payout_hold_reason text,
       verification_required_at_amount integer not null default 10000
+      ,updated_at timestamptz not null default now()
     );
     create unique index idx_performers_handle on performers(handle) where handle is not null;
     create unique index idx_performers_handle_lower on performers(lower(handle)) where handle is not null;
@@ -321,11 +336,14 @@ try {
     { pattern: /performer_handle_claim_kind_transition_is_invalid/i }
   );
 
-  await database.exec(`
-    update performers
-       set handle = 'edgewize', display_name = 'EdgeWize'
-     where id = '${EDGEWIZE_PERFORMER_ID}'
-  `);
+  await database.exec('BEGIN');
+  try {
+    for (const statement of statementsFor(cutoverMigration)) await database.exec(statement);
+    await database.exec('COMMIT');
+  } catch (error) {
+    await database.exec('ROLLBACK');
+    throw error;
+  }
   const renamedClaims = await database.query(`
     select normalized_handle, claim_kind
       from performer_handle_claims
@@ -336,6 +354,39 @@ try {
     { normalized_handle: 'edgewize', claim_kind: 'canonical' },
     { normalized_handle: 'edgewyze', claim_kind: 'redirect' }
   ]);
+  assert.deepEqual(
+    (await database.query(`select handle, display_name from performers where id = '${EDGEWIZE_PERFORMER_ID}'`)).rows,
+    [{ handle: 'edgewize', display_name: 'EdgeWize' }]
+  );
+  assert.deepEqual(
+    (await database.query(`select display_name from users where id = '${EDGEWIZE_OWNER_ID}'`)).rows,
+    [{ display_name: 'EdgeWize' }]
+  );
+  assert.deepEqual(
+    (await database.query(`select previous_status, next_status, metadata from audit_events where event_type = 'performer_identity.correct'`)).rows,
+    [{
+      previous_status: 'edgewyze',
+      next_status: 'edgewize',
+      metadata: {
+        operation: 'edgewize_identity_cutover',
+        previousDisplayName: 'EdgeWyze',
+        accountDisplayName: 'EdgeWize',
+        performerDisplayName: 'EdgeWize',
+        historicalRedirect: 'edgewyze',
+        moneyFieldsChanged: false,
+        accessFieldsChanged: false
+      }
+    }]
+  );
+
+  const moneyAfterCutover = await database.query(`
+    select payment_account_status, kyc_status, payouts_enabled, charges_enabled,
+           stripe_connected_account_id, lifetime_gross_volume,
+           payout_hold_reason, verification_required_at_amount
+      from performers
+     where id = '${EDGEWIZE_PERFORMER_ID}'
+  `);
+  assert.deepEqual(moneyAfterCutover.rows, moneyBefore.rows, 'EdgeWize identity cutover must preserve every money field.');
 
   await expectPgError(
     database.exec(`update performers set handle = 'edgewyze' where id = '${EDGEWIZE_PERFORMER_ID}'`),
