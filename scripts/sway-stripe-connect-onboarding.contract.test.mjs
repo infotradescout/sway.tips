@@ -103,15 +103,14 @@ for (const term of [
 }
 
 for (const term of [
-  'SWAY_STRIPE_CONNECT_EXTERNAL_ACCOUNT_COLLECTION_CONFIRMED',
-  'SWAY_STRIPE_CONNECT_DEBIT_CARD_COLLECTION_CONFIRMED',
-  'SWAY_CASH_APP_DIRECT_DEPOSIT_CONFIRMED',
-  'SWAY_VENMO_DIRECT_DEPOSIT_CONFIRMED',
-  "country === 'US'",
-  'bank_account: externalAccountCollectionConfirmed',
-  'debit_card: debitCardCollectionConfirmed && isUnitedStates',
-  'cash_app_direct_deposit: cashAppDirectDepositConfirmed && isUnitedStates',
-  'venmo_direct_deposit: venmoDirectDepositConfirmed && isUnitedStates'
+  'SWAY_PLAID_TRANSFER_PAYOUTS_CONFIRMED',
+  'SWAY_DEBIT_CARD_PAYOUTS_CONFIRMED',
+  'SWAY_PAYPAL_PAYOUTS_CONFIRMED',
+  'SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED',
+  'bank_account: plaidEnabled',
+  'cash_app_direct_deposit: plaidEnabled',
+  'venmo: paypalEnabled',
+  'paypal: paypalEnabled'
 ]) {
   if (!payoutCapabilitySource.includes(term)) failures.push(`Payout destination provider capability gate missing term: ${term}`);
 }
@@ -196,21 +195,19 @@ for (const term of [
   'Test paid rooms unlock only when Sway says Ready. No real money moves in this rehearsal.',
   'Checking secure payout availability. Nothing has been changed.',
   'Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.',
-  'Stripe processes incoming card payments for Sway.',
-  'you do not need an existing Stripe account',
+  'Stripe processes incoming customer payments only.',
+  'Performer cash-out does not use Stripe.',
   'Your reusable payout preference is saved to your performer profile',
-  'It remains unverified until secure setup accepts an actual destination',
-  'the preference itself does not prove that an account, card, or wallet destination was accepted.',
-  'If setup does not offer a test value, stop and return to Sway.',
-  'Never enter real bank, card, or wallet details.',
+  'It remains unverified until the selected payout provider accepts the actual destination.',
+  'Never enter real bank, card, or wallet details in test mode.',
   'eligibility and limits apply',
   'Test bank account (simulated)',
   'Test debit card (simulated)',
-  'Cash App and Venmo are shown for clarity but cannot be selected until live payouts are enabled.',
   'normalizePayoutDestinationCapabilities(data?.payoutDestinationCapabilities)',
   'This payout option is not enabled yet.',
   "destination.helpUrl && liveRoomPaymentMode === 'live' && setupAllowed",
-  'Sway never stores your full bank or card numbers.',
+  "fetch('/api/talent/payouts/withdrawals'",
+  'Sway payout markup: $0.',
   'body: JSON.stringify({ destinationKind: payoutDestinationKind })',
   'Review or change payout details'
 ]) {

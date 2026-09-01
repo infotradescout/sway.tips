@@ -316,6 +316,20 @@
       "when": 1788220800000,
       "tag": "0044_edgewize_identity_cutover",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788307200000,
+      "tag": "0045_provider_neutral_payout_destinations",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788229455064,
+      "tag": "0046_accumulated_performer_withdrawals",
+      "breakpoints": true
     }
   ]
 }

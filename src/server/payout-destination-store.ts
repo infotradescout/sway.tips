@@ -57,7 +57,11 @@ export function createPayoutDestinationStore(db: SwayDb, now = () => new Date())
             nextStatus: input.destinationKind,
             metadata: {
               storesSensitiveAccountData: false,
-              setupProvider: 'stripe_connect'
+              setupProvider: input.destinationKind === 'venmo' || input.destinationKind === 'paypal'
+                ? 'paypal_payouts'
+                : input.destinationKind === 'debit_card'
+                  ? 'debit_card_payout_provider'
+                  : 'plaid_transfer'
             }
           });
         }

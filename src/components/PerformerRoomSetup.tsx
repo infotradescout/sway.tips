@@ -31,7 +31,7 @@ export default function PerformerRoomSetup({
   const [step, setStep] = useState(0);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [minimumTip, setMinimumTip] = useState(5);
-  const [feeType, setFeeType] = useState<'talent' | 'patron'>('patron');
+  const feeType = 'patron' as const;
   const [searchScope, setSearchScope] = useState<'library' | 'catalog'>('library');
   const [isStarting, setIsStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -121,8 +121,8 @@ export default function PerformerRoomSetup({
                 <div className="flex justify-between text-sm font-bold text-white"><span>Minimum</span><span>${minimumTip}</span></div>
                 <input aria-label="Minimum request amount" type="range" min="5" max="25" value={minimumTip} onChange={(event) => setMinimumTip(Number(event.target.value))} className="mt-3 w-full accent-fuchsia-500" />
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setFeeType('patron')} className={`rounded-lg px-3 py-2 text-xs font-bold ${feeType === 'patron' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>Customer pays fee</button>
-                  <button type="button" onClick={() => setFeeType('talent')} className={`rounded-lg px-3 py-2 text-xs font-bold ${feeType === 'talent' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>I absorb fee</button>
+                  <div className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950">Customer covers checkout costs</div>
+                  <p className="text-[11px] leading-5 text-slate-400">Your stated earnings are credited intact. Sway does not subtract checkout costs from them.</p>
                 </div>
               </div>
             ) : null}

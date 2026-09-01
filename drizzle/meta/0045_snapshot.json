@@ -1,6 +1,6 @@
 {
-  "id": "af1a6c2d-4b78-45e9-9203-31c57da84410",
-  "prevId": "8d3b624a-3d5d-417a-9758-3d345a6dab4f",
+  "id": "b72a5381-9e27-49c1-a1bf-63b76af90645",
+  "prevId": "af1a6c2d-4b78-45e9-9203-31c57da84410",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12330,7 +12330,7 @@
       "checkConstraints": {
         "performer_payout_preferences_destination_kind_allowed": {
           "name": "performer_payout_preferences_destination_kind_allowed",
-          "value": "\"performer_payout_preferences\".\"destination_kind\" in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo_direct_deposit')"
+          "value": "\"performer_payout_preferences\".\"destination_kind\" in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')"
         }
       },
       "isRLSEnabled": false

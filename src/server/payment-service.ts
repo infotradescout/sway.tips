@@ -106,10 +106,10 @@ export function calculateSwayPaymentAmounts(input: {
   platformFeeCents: number;
   platformFeePayer?: 'patron' | 'performer';
 }) {
-  const platformFeePayer = input.platformFeePayer === 'performer' ? 'performer' : 'patron';
-  const platformFeeChargedToPatronCents = platformFeePayer === 'patron'
-    ? input.platformFeeCents
-    : 0;
+  // Sway's checkout costs are customer-facing. Performer earnings always equal
+  // amountSubtotalCents and are never reduced by this fee.
+  const platformFeePayer = 'patron' as const;
+  const platformFeeChargedToPatronCents = input.platformFeeCents;
   return {
     amountSubtotalCents: input.amountSubtotalCents,
     platformFeeCents: input.platformFeeCents,

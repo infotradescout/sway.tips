@@ -110,7 +110,8 @@ requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSe
 ]);
 
 requireIncludes('Session start request scope', server, [
-  'const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
+  'const { talentName, talentRole, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
+  "feeType: 'patron' as const",
   "searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'",
   'loadMatchingStartedRoom',
   "error.message === 'gig_session_state_revision_conflict'",
