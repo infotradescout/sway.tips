@@ -79,6 +79,10 @@ for (const term of [
   "code: 'expired'",
   "code: 'already_used'",
   "code: 'profile_already_claimed'",
+  "code: 'payout_identity_configured'",
+  'performerPayoutPreferences',
+  'performerWithdrawals',
+  'performerPayoutKycReviews',
   'transferPerformerOwnership',
   'claimCodeFingerprint'
 ]) {

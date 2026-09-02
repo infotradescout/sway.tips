@@ -38,7 +38,7 @@ const inactiveSession: GigSession = {
   searchScope: 'library',
   paymentsEnabled: true,
   tipsEnabled: true,
-  settlementMode: 'connected_account',
+  settlementMode: 'platform_test_balance',
   paymentEnvironment: 'test',
   totals: { totalTips: 0, accumulatedFees: 0, totalCount: 0, topRequest: 'None yet' }
 };
@@ -62,6 +62,8 @@ const performerProfile = {
   payouts_enabled: false,
   stripe_connected_account_id: null,
   payout_destination_kind: null,
+  payout_recipient_type: null,
+  payout_recipient_preview: null,
   money_actions_ready: false,
   test_mode_platform_balance_allowed: false
 };

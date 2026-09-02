@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { and, asc, eq, inArray, lte, ne, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, or } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { liveRoomProcessorEvents, payments } from '../db/schema';
 import type { PaymentProviderAdapter, ProviderWebhookEnvelope } from './payment-provider';
@@ -270,14 +270,15 @@ export function createPaymentWebhookService({
         || amountRefundedCents < payment.amountTotal
       ) === false;
       if (payment.paymentStatus !== 'refunded') {
-        await db
-          .update(payments)
-          .set({ refundStatus: 'pending', updatedAt: new Date() })
-          .where(and(
-            eq(payments.id, paymentId),
-            ne(payments.paymentStatus, 'refunded'),
-            ne(payments.refundStatus, 'refunded')
-          ));
+        const pending = await service.markRefundPending({
+          paymentId,
+          processor: provider.processor,
+          actorType: 'provider_webhook',
+          source: `verified_webhook:${event.processorEventId}`
+        });
+        if (pending.status === 'missing' || pending.status === 'unavailable') {
+          throw new Error(`Payment refund fence ${pending.status}.`);
+        }
 
         // Reconcile every refund from current provider truth, including a full
         // refund delivered before its capture predecessor. For partial refunds,

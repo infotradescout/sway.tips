@@ -91,7 +91,7 @@ closeout creates audit events
 
 ### Problem
 
-Stripe Connect and similar payout systems require performer identity verification. Forcing full KYC before a performer sees product value may crush onboarding conversion.
+Financial providers and marketplace rules may require performer identity or tax verification. Forcing that work before a performer sees product value may crush onboarding conversion.
 
 ### Product Rule
 
@@ -136,7 +136,7 @@ verification_required_at_amount = 10000 cents lifetime gross volume
 
 This is a product gating threshold, not a promise that all processors allow all payment flows before verification.
 
-Implementation must follow the selected payment processor's current Connect/account requirements.
+Implementation must follow PayPal's production Payouts approval and any identity, tax, sanctions, recipient, or reporting requirements PayPal assigns to Sway's marketplace-earnings use case. Stripe remains incoming-only and cannot satisfy this payout approval.
 
 ### UX Rule
 
@@ -147,7 +147,7 @@ performer can create profile
 performer can create gig
 performer can generate QR/link
 performer can see pending/earned dashboard balance when legally/processor-supported
-payouts remain locked until verification is complete
+payouts remain locked until the owner email is verified, the performer is active and unrestricted, no payout hold exists, and PayPal Payouts execution is explicitly enabled
 UI must clearly say verification is required before payout
 ```
 
@@ -157,7 +157,7 @@ Forbidden copy:
 instant payout guaranteed
 withdraw anytime before verification
 money is yours with no verification
-bank transfer ready before KYC
+PayPal or Venmo payout ready before provider approval
 ```
 
 ### Required Tests

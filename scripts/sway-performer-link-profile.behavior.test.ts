@@ -27,6 +27,7 @@ import {
   RESERVED_PERFORMER_HANDLES
 } from '../src/server/performer-login';
 import { calculateSwayPaymentAmounts } from '../src/server/payment-service';
+import { estimateCardProcessingFeeCents } from '../src/payment-pricing';
 
 assert.equal(normalizePublicProfileUrl('javascript:alert(1)'), null);
 assert.equal(normalizePublicProfileUrl('data:text/html,<script>alert(1)</script>'), null);
@@ -228,8 +229,14 @@ const patronPaidAmounts = calculateSwayPaymentAmounts({
 });
 assert.equal(patronPaidAmounts.platformFeeCents, 100);
 assert.equal(patronPaidAmounts.platformFeeChargedToPatronCents, 100);
-assert.equal(patronPaidAmounts.amountTotalCents, 1_100);
-assert.equal(patronPaidAmounts.amountTotalCents - patronPaidAmounts.platformFeeCents, 1_000);
+assert.equal(patronPaidAmounts.processorFeeRecoveryCents, 64);
+assert.equal(patronPaidAmounts.amountTotalCents, 1_164);
+assert.equal(
+  patronPaidAmounts.amountTotalCents
+    - estimateCardProcessingFeeCents(patronPaidAmounts.amountTotalCents, { basisPoints: 290, fixedCents: 30 }),
+  1_100,
+  'configured incoming processing cost must not reduce performer earnings or Sway\'s $1 fee'
+);
 
 const performerPaidAmounts = calculateSwayPaymentAmounts({
   amountSubtotalCents: 1_000,
@@ -239,7 +246,29 @@ const performerPaidAmounts = calculateSwayPaymentAmounts({
 assert.deepEqual(performerPaidAmounts, patronPaidAmounts, 'legacy performer-paid input must be ignored so the customer always covers Sway checkout costs');
 assert.equal(performerPaidAmounts.platformFeeCents, 100);
 assert.equal(performerPaidAmounts.platformFeeChargedToPatronCents, 100);
-assert.equal(performerPaidAmounts.amountTotalCents, 1_100);
-assert.equal(performerPaidAmounts.amountTotalCents - performerPaidAmounts.platformFeeCents, 1_000);
+assert.equal(performerPaidAmounts.processorFeeRecoveryCents, 64);
+assert.equal(performerPaidAmounts.amountTotalCents, 1_164);
+
+for (const amountSubtotalCents of [1, 50, 100, 499, 500, 1_000, 10_000, 999_999]) {
+  const amounts = calculateSwayPaymentAmounts({ amountSubtotalCents, platformFeeCents: 100 });
+  const processorFee = estimateCardProcessingFeeCents(
+    amounts.amountTotalCents,
+    { basisPoints: 290, fixedCents: 30 }
+  );
+  assert.ok(
+    amounts.amountTotalCents - processorFee >= amountSubtotalCents + 100,
+    'gross-up must preserve the subtotal plus Sway fee across supported amounts'
+  );
+  if (amounts.amountTotalCents > 0) {
+    assert.ok(
+      amounts.amountTotalCents - 1
+        - estimateCardProcessingFeeCents(
+          amounts.amountTotalCents - 1,
+          { basisPoints: 290, fixedCents: 30 }
+        ) < amountSubtotalCents + 100,
+      'gross-up must use the lowest cent that preserves the protected net'
+    );
+  }
+}
 
 console.log('Performer link profile behavior tests passed.');

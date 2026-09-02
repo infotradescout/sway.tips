@@ -11,6 +11,7 @@ export type LiveRoomPaymentRuntimeConfig = {
     | 'ready'
     | 'mode_key_mismatch'
     | 'configuration_incomplete'
+    | 'processing_fee_configuration_unapproved'
     | 'durability_writes_disabled'
     | 'live_activation_not_approved';
 };
@@ -37,7 +38,8 @@ function keyMode(value: string, prefixes: { test: string; live: string }) {
 export function resolveLiveRoomPaymentRuntimeConfig(input: {
   env?: NodeJS.ProcessEnv;
   paymentProviderConfigured: boolean;
-  stripeConnectConfigured: boolean;
+  payoutProviderConfigured: boolean;
+  processingPricingConfigured: boolean;
   durabilityWritesEnabled: boolean;
 }): LiveRoomPaymentRuntimeConfig {
   const env = input.env ?? process.env;
@@ -79,7 +81,11 @@ export function resolveLiveRoomPaymentRuntimeConfig(input: {
   }
 
   const mode = publishableMode;
-  const configurationComplete = input.paymentProviderConfigured && input.stripeConnectConfigured;
+  // Stripe is the incoming processor only. Test-mode payment rehearsals do not
+  // require a real payout account, while live collection fails closed unless
+  // the independent payout provider is configured too.
+  const configurationComplete = input.paymentProviderConfigured
+    && (mode === 'test' || input.payoutProviderConfigured);
   if (!configurationComplete) {
     return {
       mode: 'unavailable',
@@ -89,6 +95,18 @@ export function resolveLiveRoomPaymentRuntimeConfig(input: {
       liveAllowedPerformerIds,
       liveApprovalVersion,
       reason: 'configuration_incomplete'
+    };
+  }
+
+  if (mode === 'live' && !input.processingPricingConfigured) {
+    return {
+      mode,
+      publishableKey: null,
+      moneyEnabled: false,
+      connectEnabled: false,
+      liveAllowedPerformerIds,
+      liveApprovalVersion,
+      reason: 'processing_fee_configuration_unapproved'
     };
   }
 
@@ -120,7 +138,7 @@ export function resolveLiveRoomPaymentRuntimeConfig(input: {
     mode,
     publishableKey,
     moneyEnabled: true,
-    connectEnabled: true,
+    connectEnabled: false,
     liveAllowedPerformerIds,
     liveApprovalVersion,
     reason: 'ready'

@@ -17,7 +17,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerHandleClaims, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerHandleClaims, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutKycReviews, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -30,6 +30,7 @@ import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { resolveLiveRoomPaymentRuntimeConfig } from "./src/server/live-room-payment-config";
+import { resolveStripeProcessingFeeConfig } from "./src/server/payment-processing-config";
 import {
   createPaymentService,
   type CloseoutTotals,
@@ -97,14 +98,19 @@ import {
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
-import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
-import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
 import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
-import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS } from "./src/server/performer-withdrawal-service";
+import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS, persistedPayoutFailureCode } from "./src/server/performer-withdrawal-service";
 import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
-import { preparePayoutSetup } from "./src/server/payout-setup";
-import { normalizePayoutDestinationKind, resolvePayoutDestinationSetupRequest } from "./src/payout-destination";
-import { handleStripeConnectReturn } from "./src/server/stripe-connect-return";
+import {
+  normalizePayoutDestinationKind,
+  normalizePayoutRecipient,
+  type PayoutDestinationKind
+} from "./src/payout-destination";
+import { createConfiguredPayoutRecipientCipher } from "./src/server/payout-recipient-crypto";
+import { createConfiguredPayPalPayoutsAdapter, PayPalPayoutsError } from "./src/server/paypal-payouts";
+import { resolvePayPalPayoutReadiness } from "./src/server/paypal-payout-readiness";
+import { createPerformerKycReviewStore, PERFORMER_KYC_PROCESS_APPROVAL_VERSION } from "./src/server/performer-kyc-review";
+import { createPayoutRecipientPrivacyService } from "./src/server/payout-recipient-privacy";
 import { reconcileStripeConnectPerformerStatus } from "./src/server/stripe-connect-status";
 import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-connect-webhook";
 import { lookupLyrics } from "./src/server/lyrics-provider";
@@ -360,33 +366,67 @@ const performerLoginMailer = createPerformerLoginMailer({
   isProduction
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
+const stripeProcessingFeeConfig = resolveStripeProcessingFeeConfig(process.env);
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
 const providerPaymentMode = paymentProvider?.mode ?? null;
 const connectPaymentMode = stripeConnectService?.mode ?? null;
 const connectRuntimeMode = connectPaymentMode ?? 'test';
-const providerModesMatch = Boolean(
+const paypalPayoutsProvider = createConfiguredPayPalPayoutsAdapter(process.env);
+const payoutRecipientCipher = createConfiguredPayoutRecipientCipher(process.env);
+const paypalPayoutsModeMatches = Boolean(
   providerPaymentMode
-  && connectPaymentMode
-  && providerPaymentMode === connectPaymentMode
+  && paypalPayoutsProvider
+  && providerPaymentMode === paypalPayoutsProvider.mode
 );
-const stripeConnectOnboardingStore = businessDb
-  ? createStripeConnectOnboardingStore(businessDb)
+const payoutDestinationStore = businessDb && payoutRecipientCipher && paypalPayoutsProvider
+  ? createPayoutDestinationStore(businessDb, payoutRecipientCipher, paypalPayoutsProvider.mode)
   : null;
-const payoutDestinationStore = businessDb
-  ? createPayoutDestinationStore(businessDb)
+const payoutRecipientPrivacyService = businessDb
+  ? createPayoutRecipientPrivacyService(businessDb)
   : null;
-const performerWithdrawalService = businessDb
-  ? createPerformerWithdrawalService(businessDb)
-  : null;
-const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
-  env: process.env,
-  paymentProviderConfigured: Boolean(paymentProvider && providerModesMatch),
-  stripeConnectConfigured: Boolean(stripeConnectService && providerModesMatch),
-  durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
-});
 const payoutDestinationCapabilities = resolvePayoutDestinationCapabilities({
   env: process.env,
-  connectEnabled: liveRoomPaymentRuntimeConfig.connectEnabled
+  providerConfigured: Boolean(paypalPayoutsModeMatches),
+  destinationStorageConfigured: Boolean(payoutDestinationStore)
+});
+const paypalPayoutReadiness = resolvePayPalPayoutReadiness({
+  env: process.env,
+  providerMode: paypalPayoutsProvider?.mode ?? null,
+  providerFeeCents: paypalPayoutsProvider?.feeCents ?? null,
+  capabilities: payoutDestinationCapabilities
+});
+const paypalTestExecutionEnabled = Boolean(
+  paypalPayoutsModeMatches && paypalPayoutReadiness.testExecutionEnabled
+);
+const paypalLiveExecutionEnabled = Boolean(
+  paypalPayoutsModeMatches && paypalPayoutReadiness.liveExecutionEnabled
+);
+const performerKycReviewStore = businessDb
+  ? createPerformerKycReviewStore({
+      db: businessDb,
+      processApprovalVersion: paypalPayoutReadiness.kycProcessApprovalVersion
+    })
+  : null;
+const performerWithdrawalService = businessDb && payoutDestinationStore && paypalPayoutsProvider
+  ? createPerformerWithdrawalService({
+      db: businessDb,
+      destinationStore: payoutDestinationStore,
+      provider: paypalPayoutsProvider,
+      kycReviewStore: performerKycReviewStore,
+      liveCanaryPerformerId: paypalPayoutReadiness.liveCanaryPerformerId
+    })
+  : null;
+const hasConfirmedPayoutDestination = Object.values(payoutDestinationCapabilities).some(Boolean);
+const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
+  env: process.env,
+  paymentProviderConfigured: Boolean(paymentProvider),
+  payoutProviderConfigured: Boolean(
+    paypalPayoutsModeMatches
+    && paypalLiveExecutionEnabled
+    && hasConfirmedPayoutDestination
+  ),
+  processingPricingConfigured: stripeProcessingFeeConfig.livePricingApproved,
+  durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
 });
 const testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds({
   paymentMode: liveRoomPaymentRuntimeConfig.mode,
@@ -402,6 +442,13 @@ const paymentService = createPaymentService({
     && liveRoomPaymentRuntimeConfig.moneyEnabled
     ? liveRoomPaymentRuntimeConfig.liveAllowedPerformerIds
     : undefined,
+  enabledPayoutDestinationKinds: new Set(
+    (Object.entries(payoutDestinationCapabilities) as Array<[PayoutDestinationKind, boolean]>)
+      .filter(([, enabled]) => enabled)
+      .map(([destinationKind]) => destinationKind)
+  ),
+  payoutKycProcessApprovalVersion: paypalPayoutReadiness.kycProcessApprovalVersion,
+  processingPricing: stripeProcessingFeeConfig,
   testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
@@ -1675,7 +1722,7 @@ const privacyPageHtml = renderStaticDocument(
       <li>project membership, collaborator connections, selected-file access grants, comments, timecodes, change requests, approvals, revocations, and related audit events</li>
       <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
       <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
-      <li>payment processor identifiers, the selected payout-destination type, and related lifecycle status; Sway does not store full payout bank or card numbers</li>
+      <li>payment processor identifiers, the selected PayPal or Venmo destination, an encrypted recipient identifier, a masked recipient preview, and related payout lifecycle status; Sway does not store payout bank or card numbers</li>
       <li>native ticket offer, order, price-and-terms snapshot, admission, refund, performer-transfer, and reconciliation records when native ticket sales are enabled</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
@@ -1731,6 +1778,8 @@ const paymentTermsPageHtml = renderStaticDocument(
     <p>Sway must only describe payment behavior that is actually implemented by the backend and processor configuration.</p>
     <ul>
       <li>request, tip, and boost submissions create payment-related records tied to the live room and request lifecycle</li>
+      <li>Stripe processes incoming customer card payments only; it does not choose or deliver a performer cash-out</li>
+      <li>the customer checkout total includes the applicable Sway platform fee, including Sway’s fixed $1 creator-direct transaction fee, while the performer’s stated request, tip, or boost amount is credited to performer earnings</li>
       <li>a denied or unresolved request may be voided or refunded according to the implemented lifecycle</li>
       <li>payment success is not final until backend confirmation is recorded</li>
       <li>processor timelines, disputes, and refunds may affect final settlement timing</li>
@@ -1741,19 +1790,21 @@ const paymentTermsPageHtml = renderStaticDocument(
 
 const payoutTermsPageHtml = renderStaticDocument(
   'Sway Performer Payout Terms',
-  'How performer payout eligibility and verification constraints work in Sway.',
+  'How combined performer earnings cash out to PayPal or Venmo through PayPal Payouts.',
   `
-    <p>Sway must not promise payouts before required verification and payout enablement are complete.</p>
+    <p>Stripe processes incoming customer card payments only. Captured performer amounts accumulate in one Sway earnings balance. Performer withdrawals use PayPal Payouts and never use a Stripe performer account.</p>
     <ul>
-      <li>performer payout access may require identity, tax, banking, or other verification steps</li>
-      <li>performers may choose an eligible bank account, debit card, Cash App direct-deposit account, or Venmo direct-deposit account during secure provider setup</li>
-      <li>Cash App and Venmo destinations use routing and account numbers supplied by those services; Sway does not send payouts to a username, phone number, Venmo handle, or $cashtag</li>
-      <li>Sway stores the selected destination type, while the payment provider collects and retains full bank or card details</li>
-      <li>debit-card support, payout speed, limits, and any fee depend on provider eligibility shown during setup</li>
-      <li>processor rules, disputes, reserve periods, and compliance reviews may delay payout timing</li>
-      <li>unverified performers must not be shown payout promises that the processor cannot support</li>
+      <li>the available destinations in this release are a PayPal account email or a genuine Venmo recipient identified by Venmo handle, account email, or U.S. mobile number</li>
+      <li>Sway encrypts the full recipient identifier at rest and shows only a masked preview after it is saved; payout and audit records do not contain the raw recipient</li>
+      <li>the performer must review the masked destination before confirming because money sent to a valid but incorrect recipient may not be recoverable</li>
+      <li>captured earnings accumulate across paid interactions; one combined cash-out creates one provider payout instead of one payout for every customer transaction</li>
+      <li>the minimum cash-out is $10; before confirmation Sway shows the gross cash-out, PayPal’s configured payout fee, Sway payout markup of $0, and the estimated amount delivered</li>
+      <li>the performer is never debited more than the disclosed payout fee; if PayPal reports a lower actual fee, the difference remains in the performer balance</li>
+      <li>refunds, disputes, reversals, risk holds, insufficient funds, an unclaimed recipient, PayPal review, or compliance obligations may reduce the available balance or delay, fail, hold, return, or cancel a cash-out</li>
+      <li>PayPal controls final delivery timing and recipient eligibility; a submitted payout is not described as paid until provider confirmation is recorded</li>
+      <li>real cash-out remains unavailable until PayPal approves Sway for production Payouts, the business account is verified and funded, production credentials and webhooks are installed, and Sway’s versioned release switches are enabled</li>
     </ul>
-    <p>Current payout terms must stay aligned with the configured payment provider and KYC state.</p>
+    <p>PayPal or Venmo recipients may need to sign in or claim a payment under PayPal’s rules. Sway does not promise a delivery speed that PayPal has not confirmed.</p>
   `
 );
 
@@ -2238,6 +2289,8 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         payouts_enabled: performerStripeConnectBindings.payoutsEnabled,
         stripe_connected_account_id: performerStripeConnectBindings.stripeAccountId,
         payout_destination_kind: performerPayoutPreferences.destinationKind,
+        payout_recipient_type: performerPayoutPreferences.recipientType,
+        payout_recipient_preview: performerPayoutPreferences.recipientValuePreview,
         performer_is_active: performers.isActive,
         onboarding_status: performers.onboardingStatus,
         payment_account_status: performerStripeConnectBindings.paymentAccountStatus,
@@ -2248,7 +2301,10 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
-      .leftJoin(performerPayoutPreferences, eq(performerPayoutPreferences.performerId, performers.id))
+      .leftJoin(performerPayoutPreferences, and(
+        eq(performerPayoutPreferences.performerId, performers.id),
+        eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
+      ))
       .leftJoin(performerStripeConnectBindings, and(
         eq(performerStripeConnectBindings.performerId, performers.id),
         eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
@@ -2266,6 +2322,19 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
     const profileRoles = resolvePublicRoles(performerRow.profile_metadata);
     const previewRoles = resolvePublicRoles(performerRow.preview_metadata);
     const performerRoles = profileRoles.length ? profileRoles : previewRoles;
+    const payoutDestinationKind = normalizePayoutDestinationKind(performerRow.payout_destination_kind);
+    const currentPayoutKycApproved = liveRoomPaymentRuntimeConfig.mode === 'test'
+      || Boolean(await performerKycReviewStore?.loadCurrentApproval(performerRow.performer_id));
+    const livePayoutPreferenceReady = Boolean(
+      payoutDestinationKind
+      && payoutDestinationCapabilities[payoutDestinationKind]
+      && paypalLiveExecutionEnabled
+      && currentPayoutKycApproved
+    );
+    const testPlatformBalanceReady = isTestModePlatformBalancePerformerAllowed(
+      performerRow.performer_id,
+      testModePlatformBalancePerformerIds
+    );
     return {
       performer_id: performerRow.performer_id,
       display_name: performerRow.display_name,
@@ -2281,23 +2350,23 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       charges_enabled: performerRow.charges_enabled,
       payouts_enabled: performerRow.payouts_enabled,
       stripe_connected_account_id: performerRow.stripe_connected_account_id,
-      payout_destination_kind: normalizePayoutDestinationKind(performerRow.payout_destination_kind),
+      payout_destination_kind: payoutDestinationKind,
+      payout_recipient_type: performerRow.payout_recipient_type,
+      payout_recipient_preview: performerRow.payout_recipient_preview,
+      payout_kyc_approved: currentPayoutKycApproved,
       money_actions_ready: Boolean(
         performerRow.performer_is_active
+        && performerRow.email_verified_at
         && liveRoomPaymentRuntimeConfig.moneyEnabled
         && isPerformerAllowedForRuntimeMoney(performerRow.performer_id)
+        && performerRow.onboarding_status !== 'restricted'
         && performerRow.onboarding_status !== 'suspended'
-        && performerRow.payment_account_status === 'payouts_enabled'
-        && ['not_required', 'verified'].includes(performerRow.kyc_status)
-        && performerRow.charges_enabled
-        && performerRow.payouts_enabled
-        && performerRow.stripe_connected_account_id?.trim()
         && !performerRow.payout_hold_reason
+        && (liveRoomPaymentRuntimeConfig.mode === 'test'
+          ? testPlatformBalanceReady
+          : livePayoutPreferenceReady)
       ),
-      test_mode_platform_balance_allowed: isTestModePlatformBalancePerformerAllowed(
-        performerRow.performer_id,
-        testModePlatformBalancePerformerIds
-      )
+      test_mode_platform_balance_allowed: testPlatformBalanceReady
     };
   } catch (error) {
     console.warn('Unable to resolve authenticated performer profile for /api/state.', {
@@ -4067,10 +4136,16 @@ app.get('/api/payment/config', (_req, res) => {
         ? 'Live-room money is temporarily paused by the durability safety switch.'
         : liveRoomPaymentRuntimeConfig.reason === 'mode_key_mismatch'
           ? 'Stripe publishable and secret keys must both be test or both be live.'
+          : liveRoomPaymentRuntimeConfig.reason === 'processing_fee_configuration_unapproved'
+            ? 'Live card-processing pricing has not been confirmed for this release.'
           : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
       liveRoomMoneyEnabled: false,
       payoutDestinationCapabilities,
+      processingPricing: {
+        basisPoints: stripeProcessingFeeConfig.basisPoints,
+        fixedCents: stripeProcessingFeeConfig.fixedCents
+      },
       testModePlatformBalanceEnabled: false
     });
   }
@@ -4080,6 +4155,10 @@ app.get('/api/payment/config', (_req, res) => {
     mode: liveRoomPaymentRuntimeConfig.mode,
     liveRoomMoneyEnabled: true,
     payoutDestinationCapabilities,
+    processingPricing: {
+      basisPoints: stripeProcessingFeeConfig.basisPoints,
+      fixedCents: stripeProcessingFeeConfig.fixedCents
+    },
     testModePlatformBalanceEnabled
   });
 });
@@ -4105,10 +4184,16 @@ app.get('/api/talent/payouts/balance', async (req, res) => {
     pendingCents: balance.pendingCents,
     availableCents: balance.availableCents,
     reservedCents: balance.reservedCents,
+    deficitCents: balance.deficitCents,
     currency: balance.currency,
     minimumWithdrawalCents: MINIMUM_WITHDRAWAL_CENTS,
+    providerFeeCents: balance.providerFeeCents,
     payoutMarkupCents: 0,
-    liveWithdrawalsEnabled: false
+    withdrawalsEnabled: balance.withdrawalRestriction === null && (liveRoomPaymentRuntimeConfig.mode === 'test'
+      ? paypalTestExecutionEnabled
+      : paypalLiveExecutionEnabled && isPerformerAllowedForRuntimeMoney(balance.performerId)),
+    withdrawalRestriction: balance.withdrawalRestriction,
+    providerMode: paypalPayoutsProvider?.mode ?? null
   });
 });
 
@@ -4119,27 +4204,47 @@ app.post('/api/talent/payouts/destination', async (req, res) => {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
   }
   if (!talentAccess.actor.actorId || !payoutDestinationStore) {
-    return res.status(503).json({ error: 'Payout preferences require a durable database connection.' });
+    return res.status(503).json({ error: 'Secure PayPal/Venmo payout storage is not configured.' });
   }
-  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
-  if (!destinationKind || payoutDestinationCapabilities[destinationKind] !== true) {
-    return res.status(422).json({ error: 'Choose an enabled payout destination.' });
+  const recipient = normalizePayoutRecipient({
+    destinationKind: req.body?.destinationKind,
+    recipientType: req.body?.recipientType,
+    recipientValue: req.body?.recipientValue
+  });
+  if (!recipient || payoutDestinationCapabilities[recipient.destinationKind] !== true) {
+    return res.status(422).json({
+      error: 'Enter a valid recipient for an enabled PayPal or Venmo destination.'
+    });
   }
-  if (liveRoomPaymentRuntimeConfig.mode !== 'test') {
-    return res.status(503).json({
-      error: 'Live payout setup remains locked until the selected provider is verified.',
-      code: 'live_payout_provider_required'
+  if (paypalPayoutsProvider?.mode === 'test' && recipient.destinationKind === 'venmo' && recipient.recipientType === 'phone') {
+    return res.status(422).json({
+      error: 'PayPal Sandbox does not support Venmo mobile recipients. Use a sandbox Venmo handle or email.'
     });
   }
   const owner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
   if (!owner) return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
-  const saved = await payoutDestinationStore.selectForOwner({
+  const verification = await loadPerformerOwnerVerificationState(talentAccess.actor.actorId);
+  if (!verification?.emailVerifiedAt || !verification.isActive) {
+    return res.status(403).json({ error: 'Verify and activate the performer account before saving a payout recipient.' });
+  }
+  const saved = await payoutDestinationStore.saveForOwner({
     performerId: owner.performerId,
     ownerUserId: talentAccess.actor.actorId,
-    destinationKind
+    recipient
   });
   if (saved.kind === 'not_found') return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
-  return res.json({ success: true, destinationKind, simulated: true });
+  if (saved.kind === 'withdrawal_in_progress') {
+    return res.status(409).json({
+      error: 'Wait until the current cash-out is complete before changing the payout destination.'
+    });
+  }
+  return res.json({
+    success: true,
+    destinationKind: saved.destinationKind,
+    recipientType: saved.recipientType,
+    recipientPreview: saved.recipientPreview,
+    encryptedAtRest: true
+  });
 });
 
 app.post('/api/talent/payouts/withdrawals', async (req, res) => {
@@ -4151,12 +4256,23 @@ app.post('/api/talent/payouts/withdrawals', async (req, res) => {
   if (!talentAccess.actor.actorId || !performerWithdrawalService) {
     return res.status(503).json({ error: 'Performer withdrawals require a durable database connection.' });
   }
-  if (
-    liveRoomPaymentRuntimeConfig.mode !== 'test'
-    || process.env.SWAY_TEST_PAYOUT_WITHDRAWALS_ENABLED?.trim().toLowerCase() !== 'true'
-  ) {
+  const paymentMode = liveRoomPaymentRuntimeConfig.mode;
+  if (paymentMode !== 'test' && paymentMode !== 'live') {
     return res.status(503).json({
-      error: 'Cash-out rehearsal is locked until the test withdrawal switch is enabled. No real money moved.',
+      error: 'Cash-out is unavailable while the payment environment is unresolved.',
+      code: 'payout_withdrawals_locked'
+    });
+  }
+  const owner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!owner) return res.status(404).json({ error: 'Performer account not found.' });
+  const executionEnabled = paymentMode === 'test'
+    ? paypalTestExecutionEnabled
+    : paypalLiveExecutionEnabled && isPerformerAllowedForRuntimeMoney(owner.performerId);
+  if (!executionEnabled) {
+    return res.status(503).json({
+      error: paymentMode === 'live'
+        ? 'Real cash-out remains locked until PayPal activates Sway Payouts and the approved live release flags are set.'
+        : 'PayPal sandbox cash-out remains locked until the test execution switch is enabled.',
       code: 'payout_withdrawals_locked'
     });
   }
@@ -4164,44 +4280,98 @@ app.post('/api/talent/payouts/withdrawals', async (req, res) => {
   if (!destinationKind || payoutDestinationCapabilities[destinationKind] !== true) {
     return res.status(422).json({ error: 'Choose an enabled payout destination.' });
   }
-  const deliverySpeed = req.body?.deliverySpeed === 'instant'
-    ? 'instant' as const
-    : req.body?.deliverySpeed === 'standard'
-      ? 'standard' as const
-      : null;
-  if (!deliverySpeed) return res.status(422).json({ error: 'Choose standard or instant delivery.' });
   const grossAmountCents = Number(req.body?.grossAmountCents);
-  const result = await performerWithdrawalService.requestTestWithdrawal({
+  const recipientConfirmation = normalizePayoutRecipient({
+    destinationKind,
+    recipientType: req.body?.recipientType,
+    recipientValue: req.body?.recipientConfirmationValue
+  });
+  if (!recipientConfirmation) {
+    return res.status(422).json({ error: 'Re-enter the exact saved payout recipient to confirm this cash-out.' });
+  }
+  const result = await performerWithdrawalService.requestWithdrawal({
     ownerUserId: talentAccess.actor.actorId,
-    paymentMode: 'test',
+    paymentMode,
     idempotencyKey: req.body?.idempotencyKey,
     destinationKind,
-    deliverySpeed,
+    recipientConfirmation,
     grossAmountCents
   });
   if (result.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+  if (result.kind === 'email_verification_required') return res.status(403).json({ error: 'Verify the performer account email before cashing out.' });
+  if (result.kind === 'account_restricted') return res.status(403).json({ error: 'Cash-out is blocked while the performer account has a restriction or payout hold.' });
+  if (result.kind === 'identity_verification_required') return res.status(403).json({ error: 'Current payout identity review is required before real cash-out.' });
+  if (result.kind === 'live_canary_not_allowed') return res.status(403).json({ error: 'Real cash-out is limited to the approved canary performer.' });
+  if (result.kind === 'live_canary_amount_required') return res.status(422).json({ error: 'The first real cash-out must be exactly $10.00.' });
+  if (result.kind === 'live_canary_already_used') return res.status(409).json({ error: 'The one-time real payout canary has already been used.' });
   if (result.kind === 'invalid_idempotency_key') return res.status(422).json({ error: 'A valid cash-out request identity is required.' });
+  if (result.kind === 'invalid_recipient_confirmation') return res.status(422).json({ error: 'Re-enter the exact saved payout recipient to confirm this cash-out.' });
   if (result.kind === 'below_minimum') return res.status(422).json({ error: 'The minimum cash-out amount is $10.00.' });
   if (result.kind === 'insufficient_balance') return res.status(409).json({ error: 'Cash-out exceeds the available balance.', availableCents: result.availableCents });
+  if (result.kind === 'negative_balance') return res.status(409).json({ error: 'Cash-out is paused while a refund or dispute balance is resolved.', deficitCents: result.deficitCents });
+  if (result.kind === 'destination_not_ready') return res.status(409).json({ error: 'Save and confirm this payout destination before cashing out.' });
+  if (result.kind === 'destination_changed') return res.status(409).json({ error: 'The payout destination changed. Review the saved recipient before cashing out.' });
   if (result.kind === 'idempotency_conflict') return res.status(409).json({ error: 'That cash-out request identity was already used for different details.' });
   if (result.kind === 'fee_exceeds_amount') return res.status(422).json({ error: 'The provider fee must be less than the cash-out amount.' });
-  if (result.kind === 'live_provider_required') return res.status(503).json({ error: 'A verified live payout provider is required.' });
+  if (result.kind === 'provider_mode_mismatch') return res.status(503).json({ error: 'The PayPal payout environment does not match the Stripe payment environment.' });
+  if (result.kind === 'provider_rejected') return res.status(422).json({ error: 'PayPal rejected this payout destination or transfer.', withdrawal: { id: result.withdrawal.id, status: result.withdrawal.status } });
   const withdrawal = result.withdrawal;
-  return res.status(result.kind === 'created' ? 201 : 200).json({
+  const accepted = result.kind === 'provider_retryable'
+    || result.kind === 'provider_review_required'
+    || result.kind === 'processing';
+  return res.status(result.kind === 'created' ? 201 : accepted ? 202 : 200).json({
     replayed: result.kind === 'replay',
     withdrawal: {
       id: withdrawal.id,
       status: withdrawal.status,
       destinationKind: withdrawal.destinationKind,
-      deliverySpeed: withdrawal.deliverySpeed,
+      recipientPreview: withdrawal.recipientPreview,
       grossAmountCents: withdrawal.grossAmountCents,
       providerFeeCents: withdrawal.providerFeeCents,
+      actualProviderFeeCents: withdrawal.actualProviderFeeCents,
       payoutMarkupCents: 0,
       netAmountCents: withdrawal.netAmountCents,
       currency: withdrawal.currency,
-      simulated: true
+      provider: 'paypal_payouts',
+      paymentMode: withdrawal.paymentMode
     }
   });
+});
+
+app.post('/api/payouts/paypal/webhook', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
+  if (!paypalPayoutsProvider || !performerWithdrawalService || typeof rawBody !== 'string') {
+    return res.status(503).json({ error: 'PayPal payout webhook handling is unavailable.' });
+  }
+  const headers = {
+    authAlgo: req.header('paypal-auth-algo')?.trim() ?? '',
+    certUrl: req.header('paypal-cert-url')?.trim() ?? '',
+    transmissionId: req.header('paypal-transmission-id')?.trim() ?? '',
+    transmissionSig: req.header('paypal-transmission-sig')?.trim() ?? '',
+    transmissionTime: req.header('paypal-transmission-time')?.trim() ?? ''
+  };
+  if (Object.values(headers).some((value) => !value)) {
+    return res.status(400).json({ error: 'Required PayPal webhook verification headers are missing.' });
+  }
+  try {
+    const event = await paypalPayoutsProvider.verifyWebhook({ rawBody, headers });
+    const result = await performerWithdrawalService.ingestWebhook({
+      event,
+      rawBody,
+      paymentMode: paypalPayoutsProvider.mode
+    });
+    await payoutRecipientPrivacyService?.purgeDeferred(25);
+    return res.status(200).json({ received: true, result: result.kind });
+  } catch (error) {
+    const status = error instanceof PayPalPayoutsError && error.status >= 400 && error.status < 500
+      ? error.status
+      : 503;
+    console.error('PayPal payout webhook processing failed.', {
+      code: persistedPayoutFailureCode(error, 'paypal_payout_webhook_failed')
+    });
+    return res.status(status).json({ error: status === 503 ? 'PayPal payout reconciliation is temporarily unavailable.' : 'PayPal webhook verification failed.' });
+  }
 });
 
 app.post('/api/talent/invite/accept', async (req, res) => {
@@ -7022,6 +7192,21 @@ const adminAccountSelectColumns = {
   payoutsEnabled: performers.payoutsEnabled,
   chargesEnabled: performers.chargesEnabled,
   payoutHoldReason: performers.payoutHoldReason,
+  payoutKycStatus: sql<string | null>`(
+    select ${performerPayoutKycReviews.status}
+    from ${performerPayoutKycReviews}
+    where ${performerPayoutKycReviews.performerId} = ${performers.id}
+      and ${performerPayoutKycReviews.processApprovalVersion} = ${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}
+    limit 1
+  )`,
+  payoutKycProcessApprovalVersion: sql<string>`${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}`,
+  payoutKycReviewedAt: sql<Date | null>`(
+    select ${performerPayoutKycReviews.reviewedAt}
+    from ${performerPayoutKycReviews}
+    where ${performerPayoutKycReviews.performerId} = ${performers.id}
+      and ${performerPayoutKycReviews.processApprovalVersion} = ${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}
+    limit 1
+  )`,
   partnerEntitlementId: performerPartnerEntitlements.id,
   partnerTermsVersion: performerPartnerEntitlements.termsVersion,
   partnerTermsHash: performerPartnerEntitlements.termsHash,
@@ -7825,6 +8010,71 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
   res.json({ account: updatedAccount });
 });
 
+app.post('/api/admin/accounts/:userId/payout-kyc-review', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  }
+  if (!businessDb || !performerKycReviewStore?.configured) {
+    return res.status(503).json({
+      error: 'The current payout identity-review process has not been approved and configured.'
+    });
+  }
+  if (!adminAccess.actor.actorId || !UUID_PATTERN.test(req.params.userId)) {
+    return res.status(404).json({ error: 'Performer account not found.' });
+  }
+  applyNoStoreHeaders(res);
+
+  const [account] = await businessDb.select({ performerId: performers.id })
+    .from(users)
+    .innerJoin(performers, eq(performers.ownerUserId, users.id))
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+  if (!account) return res.status(404).json({ error: 'Performer account not found.' });
+
+  if (req.body?.action === 'approve') {
+    const result = await performerKycReviewStore.approve({
+      performerId: account.performerId,
+      reviewerUserId: adminAccess.actor.actorId,
+      evidenceReference: req.body?.evidenceReference
+    });
+    if (result.kind === 'invalid_evidence_reference') {
+      return res.status(422).json({
+        error: 'Enter an opaque identity-review evidence reference between 8 and 200 characters.'
+      });
+    }
+    if (result.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+    if (result.kind === 'process_not_approved') {
+      return res.status(503).json({ error: 'The current identity-review process is not approved.' });
+    }
+    return res.json({
+      payoutKycStatus: result.review.status,
+      payoutKycProcessApprovalVersion: result.review.processApprovalVersion,
+      payoutKycReviewedAt: result.review.reviewedAt
+    });
+  }
+
+  if (req.body?.action === 'revoke') {
+    const result = await performerKycReviewStore.revoke({
+      performerId: account.performerId,
+      reviewerUserId: adminAccess.actor.actorId
+    });
+    if (result.kind === 'not_found') {
+      return res.status(404).json({ error: 'No current approved payout identity review was found.' });
+    }
+    if (result.kind === 'process_not_approved') {
+      return res.status(503).json({ error: 'The current identity-review process is not approved.' });
+    }
+    return res.json({
+      payoutKycStatus: result.review.status,
+      payoutKycProcessApprovalVersion: result.review.processApprovalVersion,
+      payoutKycReviewedAt: result.review.reviewedAt
+    });
+  }
+
+  return res.status(422).json({ error: "action must be 'approve' or 'revoke'." });
+});
+
 app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
   const adminAccess = await accessControl.requireAdminAccess(req);
   if (adminAccess.allowed === false) {
@@ -7975,6 +8225,12 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
           actorUserId: adminAccess.actor.actorId
         });
       }
+
+      await payoutRecipientPrivacyService?.requestDeletion({
+        performerId: existingAccount.performerId,
+        actorUserId: adminAccess.actor.actorId,
+        executor: tx
+      });
     }
 
     if (performerSessionStore.hasDurableStore) {
@@ -7993,8 +8249,10 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
       previousStatus: null,
       nextStatus: 'deleted',
       metadata: {
-        targetEmail: existingAccount.email,
-        targetHandle: existingAccount.handle
+        targetAccountId: existingAccount.id,
+        targetHadEmail: Boolean(existingAccount.email),
+        targetHadHandle: Boolean(existingAccount.handle),
+        rawIdentityDataStoredInAudit: false
       }
     });
   });
@@ -11387,187 +11645,19 @@ app.post('/api/talent/setlist/remove', async (req, res) => {
   return res.json({ success: true, removed: true });
 });
 
-// Creates (if needed) the performer's Stripe recipient connected account and
-// returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
-// existing connected account on repeat calls instead of creating duplicates.
-function resolveStripeConnectOnboardingUrls() {
-  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  return {
-    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
-    returnUrl: `${appBaseUrl}/talent/connect/return`
-  };
-}
-
-async function createStripeConnectOnboardingUrl(accountId: string) {
-  if (!stripeConnectService) throw new Error('stripe_connect_unavailable');
-  const { refreshUrl, returnUrl } = resolveStripeConnectOnboardingUrls();
-  return stripeConnectService.createOnboardingLink({ accountId, refreshUrl, returnUrl });
-}
-
-async function createStripeConnectManagementUrl(accountId: string) {
-  if (!stripeConnectService) throw new Error('stripe_connect_unavailable');
-  return stripeConnectService.createManagementLink(accountId);
-}
-
-app.post('/api/talent/connect/onboard', async (req, res) => {
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) {
-    return res.status(talentAccess.status).json({ error: talentAccess.reason });
-  }
-  if (!talentAccess.actor.actorId) {
-    return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
-  }
-  const payoutSetupRequest = resolvePayoutDestinationSetupRequest({
-    destinationKind: req.body?.destinationKind,
-    paymentMode: liveRoomPaymentRuntimeConfig.mode,
-    capabilities: payoutDestinationCapabilities,
-    runtimeAvailable: Boolean(
-      businessDb
-      && stripeConnectService
-      && stripeConnectOnboardingStore
-      && payoutDestinationStore
-      && liveRoomPaymentRuntimeConfig.connectEnabled
-    )
-  });
-  if (payoutSetupRequest.ok === false) {
-    return res.status(payoutSetupRequest.status).json({ error: payoutSetupRequest.error });
-  }
-  const { destinationKind } = payoutSetupRequest;
-  if (!businessDb || !stripeConnectService || !stripeConnectOnboardingStore || !payoutDestinationStore) {
-    return res.status(503).json({ error: 'Secure payout setup is temporarily unavailable. Try again later.' });
-  }
-  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
-  if (!performerOwner) {
-    return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
-  }
-  if (!isPerformerAllowedForRuntimeMoney(performerOwner.performerId)) {
-    return res.status(403).json({ error: 'Live payout setup is not enabled for this performer.' });
-  }
-
-  try {
-    const useManagementPortal = Boolean(
-      performerOwner.stripeAccountId
-      && performerOwner.paymentAccountStatus === 'payouts_enabled'
-    );
-    const setup = await preparePayoutSetup({
-      useManagementPortal,
-      provision: () => provisionStripeConnectRecipient({
-        performerId: performerOwner.performerId,
-        ownerUserId: talentAccess.actor.actorId!,
-        store: stripeConnectOnboardingStore,
-        stripe: stripeConnectService
-      }),
-      createManagementLink: createStripeConnectManagementUrl,
-      createOnboardingLink: createStripeConnectOnboardingUrl,
-      persistDestination: () => payoutDestinationStore.selectForOwner({
-        performerId: performerOwner.performerId,
-        ownerUserId: talentAccess.actor.actorId!,
-        destinationKind
-      })
-    });
-    if (setup.kind === 'not_found') {
-      return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
-    }
-    if (setup.kind === 'unverified') {
-      return res.status(409).json({ error: 'Verify the performer account email before starting secure payout setup.' });
-    }
-    if (setup.kind === 'busy') {
-      res.setHeader('Retry-After', '2');
-      return res.status(409).json({ error: 'Secure payout setup is already being prepared. Retry in a moment.' });
-    }
-
-    return res.json({
-      success: true,
-      url: setup.url,
-      destinationKind,
-      setupSurface: setup.setupSurface
-    });
-  } catch (error) {
-    console.error('Stripe Connect onboarding failed.', {
-      message: error instanceof Error ? error.message : 'unknown_error'
-    });
-    return res.status(502).json({
-      error: 'Secure payout setup is temporarily unavailable. Try again later.'
-    });
-  }
-});
-
-app.get('/talent/connect/refresh', async (req, res) => {
+// Stripe is incoming-only for all new Sway money. Retire every performer-facing
+// Connect entry point before the historical compatibility handlers below can
+// run; old bindings and webhooks remain readable for prior transactions.
+const retiredStripePayoutResponse = (_req: express.Request, res: express.Response) => {
   applyNoStoreHeaders(res);
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) {
-    return res.status(talentAccess.status).send('Sign in as the performer owner to restart secure payout setup.');
-  }
-  if (!talentAccess.actor.actorId || !businessDb || !stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).send('Secure payout setup is temporarily unavailable. Try again later.');
-  }
-
-  const [owner] = await businessDb.select({
-    performerId: performers.id,
-    stripeAccountId: performerStripeConnectBindings.stripeAccountId,
-    emailVerifiedAt: users.emailVerifiedAt
-  }).from(performers)
-    .innerJoin(users, eq(users.id, performers.ownerUserId))
-    .leftJoin(performerStripeConnectBindings, and(
-      eq(performerStripeConnectBindings.performerId, performers.id),
-      eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
-    ))
-    .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
-    .limit(1);
-
-  if (!owner?.emailVerifiedAt) {
-    return res.status(409).send('Verify the performer owner email before restarting secure payout setup.');
-  }
-  if (!owner.stripeAccountId) {
-    return res.status(409).send('Start secure payout setup from the performer account first.');
-  }
-  if (!isPerformerAllowedForRuntimeMoney(owner.performerId)) {
-    return res.status(403).send('Live payout setup is not enabled for this performer.');
-  }
-
-  try {
-    const { url } = await createStripeConnectOnboardingUrl(owner.stripeAccountId);
-    return res.redirect(303, url);
-  } catch (error) {
-    console.error('Stripe Connect onboarding refresh failed.', {
-      message: error instanceof Error ? error.message : 'unknown_error'
-    });
-    return res.status(502).send('Secure payout setup could not be restarted. Return to the performer account and try again.');
-  }
-});
-
-app.get('/talent/connect/return', async (req, res) => {
-  applyNoStoreHeaders(res);
-  return handleStripeConnectReturn({
-    req,
-    res,
-    runtimeAvailable: Boolean(
-      businessDb
-      && stripeConnectService
-    ),
-    paymentMode: connectRuntimeMode,
-    requireTalentAccess: (request) => accessControl.requireTalentAccess(request),
-    loadOwnedPerformer: loadOwnedPerformerByActorUserId,
-    getAccountStatus: (accountId) => stripeConnectService!.getAccountStatus(accountId),
-    applyStatus: ({ performerId, ownerUserId, accountId, paymentMode, providerStatus }) => (
-      reconcileStripeConnectPerformerStatus({
-        db: businessDb!,
-        accountId,
-        paymentMode,
-        status: providerStatus,
-        source: 'return',
-        actorId: ownerUserId,
-        expectedPerformerId: performerId,
-        expectedOwnerUserId: ownerUserId
-      })
-    ),
-    logError: (error) => {
-      console.error('Stripe Connect return reconciliation failed.', {
-        message: error instanceof Error ? error.message : 'unknown_error'
-      });
-    }
+  return res.status(410).json({
+    error: 'Stripe performer payout onboarding is retired. Use PayPal or Venmo in Sway Money.',
+    code: 'stripe_performer_payouts_retired'
   });
-});
+};
+app.all('/api/talent/connect/onboard', retiredStripePayoutResponse);
+app.all('/talent/connect/refresh', retiredStripePayoutResponse);
+app.all('/talent/connect/return', retiredStripePayoutResponse);
 
 app.post('/api/library/import-file',
   async (req, res, next) => {
@@ -12956,16 +13046,20 @@ app.post("/api/session/start", async (req, res) => {
         id: performers.id,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
-        paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus,
         kycStatus: performers.kycStatus,
-        chargesEnabled: performerStripeConnectBindings.chargesEnabled,
-        payoutsEnabled: performerStripeConnectBindings.payoutsEnabled,
-        stripeConnectedAccountId: performerStripeConnectBindings.stripeAccountId,
-        payoutHoldReason: performers.payoutHoldReason
+        payoutDestinationKind: performerPayoutPreferences.destinationKind,
+        payoutHoldReason: performers.payoutHoldReason,
+        currentPayoutKycApproved: sql<boolean>`exists (
+          select 1
+          from ${performerPayoutKycReviews}
+          where ${performerPayoutKycReviews.performerId} = ${performers.id}
+            and ${performerPayoutKycReviews.processApprovalVersion} = ${paypalPayoutReadiness.kycProcessApprovalVersion ?? ''}
+            and ${performerPayoutKycReviews.status} = 'approved'
+        )`
       }).from(performers)
-        .leftJoin(performerStripeConnectBindings, and(
-          eq(performerStripeConnectBindings.performerId, performers.id),
-          eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+        .leftJoin(performerPayoutPreferences, and(
+          eq(performerPayoutPreferences.performerId, performers.id),
+          eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
         ))
         .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
@@ -12974,7 +13068,9 @@ app.post("/api/session/start", async (req, res) => {
     allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
       seller?.id,
       testModePlatformBalancePerformerIds
-    )
+    ),
+    allowPlatformBalance: liveRoomPaymentRuntimeConfig.mode === 'live'
+      && (seller?.payoutDestinationKind === 'paypal' || seller?.payoutDestinationKind === 'venmo')
   });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
   const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
@@ -13323,16 +13419,20 @@ app.post("/api/session/payments-enabled", async (req, res) => {
           id: performers.id,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
-          paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus,
           kycStatus: performers.kycStatus,
-          chargesEnabled: performerStripeConnectBindings.chargesEnabled,
-          payoutsEnabled: performerStripeConnectBindings.payoutsEnabled,
-          stripeConnectedAccountId: performerStripeConnectBindings.stripeAccountId,
-          payoutHoldReason: performers.payoutHoldReason
+          payoutDestinationKind: performerPayoutPreferences.destinationKind,
+          payoutHoldReason: performers.payoutHoldReason,
+          currentPayoutKycApproved: sql<boolean>`exists (
+            select 1
+            from ${performerPayoutKycReviews}
+            where ${performerPayoutKycReviews.performerId} = ${performers.id}
+              and ${performerPayoutKycReviews.processApprovalVersion} = ${paypalPayoutReadiness.kycProcessApprovalVersion ?? ''}
+              and ${performerPayoutKycReviews.status} = 'approved'
+          )`
         }).from(performers)
-          .leftJoin(performerStripeConnectBindings, and(
-            eq(performerStripeConnectBindings.performerId, performers.id),
-            eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+          .leftJoin(performerPayoutPreferences, and(
+            eq(performerPayoutPreferences.performerId, performers.id),
+            eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
           ))
           .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
       : [];
@@ -13341,7 +13441,9 @@ app.post("/api/session/payments-enabled", async (req, res) => {
       allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
         seller?.id,
         testModePlatformBalancePerformerIds
-      )
+      ),
+      allowPlatformBalance: liveRoomPaymentRuntimeConfig.mode === 'live'
+        && (seller?.payoutDestinationKind === 'paypal' || seller?.payoutDestinationKind === 'venmo')
     });
     const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
       seller?.id,
@@ -13997,7 +14099,11 @@ app.post("/api/request/create", async (req, res) => {
         payment_status: 'requires_confirmation',
         payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
-        client_secret: authorization.clientSecret
+        client_secret: authorization.clientSecret,
+        amount_subtotal_cents: authorization.amountSubtotalCents,
+        platform_fee_cents: authorization.platformFeeChargedToPatronCents,
+        processing_fee_recovery_cents: authorization.processorFeeRecoveryCents,
+        amount_total_cents: authorization.amountTotalCents
       });
     }
     if (authorization.status === 'processing') {
@@ -14594,7 +14700,11 @@ app.post("/api/request/boost", async (req, res) => {
         payment_status: 'requires_confirmation',
         payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
-        client_secret: authorization.clientSecret
+        client_secret: authorization.clientSecret,
+        amount_subtotal_cents: authorization.amountSubtotalCents,
+        platform_fee_cents: authorization.platformFeeChargedToPatronCents,
+        processing_fee_recovery_cents: authorization.processorFeeRecoveryCents,
+        amount_total_cents: authorization.amountTotalCents
       });
     }
     if (authorization.status === 'processing') {
@@ -15810,6 +15920,52 @@ function startLiveRoomPaymentWorker() {
   timer.unref();
 }
 
+function startPerformerPayoutWorker() {
+  const executionEnabled = paypalPayoutsProvider?.mode === 'test'
+    ? paypalTestExecutionEnabled
+    : paypalLiveExecutionEnabled;
+  if (!performerWithdrawalService || !executionEnabled) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await performerWithdrawalService.reconcilePending(25);
+    } catch (error) {
+      console.error(
+        '[sway.payouts] PayPal reconciliation iteration failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), 30_000);
+  timer.unref();
+}
+
+function startPayoutRecipientPrivacyWorker() {
+  if (!payoutRecipientPrivacyService) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await payoutRecipientPrivacyService.purgeDeferred(100);
+    } catch {
+      // Privacy failures are intentionally logged without provider or recipient
+      // payloads; the durable deletion marker makes the next tick retry.
+      console.error('[sway.payouts] deferred recipient privacy purge failed');
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), 60_000);
+  timer.unref();
+}
+
 function startAudioUploadCleanupWorker() {
   if (!audioPublishingService) return;
   let running = false;
@@ -15849,6 +16005,8 @@ async function startServer() {
   await refreshBusinessState();
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
+  startPerformerPayoutWorker();
+  startPayoutRecipientPrivacyWorker();
   startAudioUploadCleanupWorker();
 
   if (process.env.NODE_ENV !== "production") {

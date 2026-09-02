@@ -40,8 +40,8 @@ export default function PerformerRoomSetup({
 
   const pricingSummary = paymentsEnabled
     ? paymentMode === 'live'
-      ? `Live money · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays fee' : 'you absorb fee'}`
-      : `Test money · $${minimumTip} minimum · ${feeType === 'patron' ? 'customer pays test fee' : 'you absorb test fee'}`
+      ? `Live money · $${minimumTip} minimum · customer pays checkout costs`
+      : `Test money · $${minimumTip} minimum · customer pays test checkout costs`
     : payoutReady
       ? (paymentMode === 'live' ? 'Free requests and upvotes · tips available' : 'Free requests and upvotes · test tips available')
       : 'Free requests and upvotes · money actions off';

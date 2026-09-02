@@ -573,10 +573,10 @@ Initial threshold:
 Rules:
 
 - Performer can reach `gig_ready` before payout verification.
-- Payout route is blocked until `payouts_enabled` is true.
+- Payout route is blocked until the owner email is verified, the performer is active and unrestricted, no payout hold exists, and PayPal Payouts execution is explicitly enabled.
 - UI copy cannot promise unverified payouts.
-- Stripe Connect verification requirements vary by country, capability, business type, risk, and other factors.
-- Incremental onboarding may collect more information as the account earns more revenue.
+- PayPal Payouts and marketplace compliance requirements vary by recipient, business type, country, risk, and other factors; Stripe remains incoming-only.
+- Incremental onboarding may collect more information when PayPal or Sway's legal and tax obligations require it.
 
 ## Addendum: Offline Client Resilience
 

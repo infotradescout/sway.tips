@@ -445,17 +445,81 @@ export const stripeConnectModeOnboardingOperations = pgTable('stripe_connect_mod
   )
 }));
 
-// Stores only the performer's chosen payout rail. Full bank, debit-card,
-// Cash App, and Venmo account details are collected and retained by the
-// payment provider, never by Sway.
+// PayPal/Venmo recipient identifiers are encrypted before persistence. Only a
+// masked preview and a keyed fingerprint are available to ordinary reads and
+// audit records; decryption is isolated to the server-side payout adapter.
 export const performerPayoutPreferences = pgTable('performer_payout_preferences', {
   performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull().default('test'),
   destinationKind: text('destination_kind').notNull(),
+  recipientType: text('recipient_type').notNull(),
+  recipientValueEncrypted: text('recipient_value_encrypted').notNull(),
+  recipientValueFingerprint: text('recipient_value_fingerprint').notNull(),
+  recipientValuePreview: text('recipient_value_preview').notNull(),
+  provider: text('provider').notNull().default('paypal_payouts'),
+  privacyDeletionRequestedAt: timestamp('privacy_deletion_requested_at', { withTimezone: true }),
   ...timestamps
 }, (table) => ({
   destinationKindAllowed: check(
     'performer_payout_preferences_destination_kind_allowed',
-    sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')`
+    sql`${table.destinationKind} in ('paypal', 'venmo')`
+  ),
+  paymentModeAllowed: check(
+    'performer_payout_preferences_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  ),
+  recipientTypeAllowed: check(
+    'performer_payout_preferences_recipient_type_allowed',
+    sql`(${table.destinationKind} = 'paypal' and ${table.recipientType} = 'email')
+      or (${table.destinationKind} = 'venmo' and ${table.recipientType} in ('email', 'phone', 'user_handle'))`
+  ),
+  fingerprintValid: check(
+    'performer_payout_preferences_fingerprint_valid',
+    sql`${table.recipientValueFingerprint} ~ '^[0-9a-f]{64}$'`
+  ),
+  encryptedValueValid: check(
+    'performer_payout_preferences_encrypted_value_valid',
+    sql`length(${table.recipientValueEncrypted}) >= 32 and ${table.recipientValueEncrypted} like 'v1.%'`
+  ),
+  previewValid: check(
+    'performer_payout_preferences_preview_valid',
+    sql`length(trim(${table.recipientValuePreview})) between 3 and 320`
+  ),
+  providerAllowed: check(
+    'performer_payout_preferences_provider_allowed',
+    sql`${table.provider} = 'paypal_payouts'`
+  )
+}));
+
+// Sway stores only an opaque reference to the external identity/tax/sanctions
+// evidence. Identity documents and tax data stay with the approved reviewer;
+// a payout requires an approved row for the exact current process version.
+export const performerPayoutKycReviews = pgTable('performer_payout_kyc_reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  processApprovalVersion: text('process_approval_version').notNull(),
+  status: text('status').notNull(),
+  evidenceReference: text('evidence_reference').notNull(),
+  reviewerUserId: uuid('reviewer_user_id').notNull().references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  performerProcessIdx: uniqueIndex('performer_payout_kyc_reviews_performer_process_idx')
+    .on(table.performerId, table.processApprovalVersion),
+  currentLookupIdx: index('performer_payout_kyc_reviews_current_lookup_idx')
+    .on(table.performerId, table.status, table.processApprovalVersion),
+  statusAllowed: check(
+    'performer_payout_kyc_reviews_status_allowed',
+    sql`${table.status} in ('approved', 'revoked')`
+  ),
+  evidenceReferenceValid: check(
+    'performer_payout_kyc_reviews_evidence_reference_valid',
+    sql`length(trim(${table.evidenceReference})) between 8 and 200`
+  ),
+  revokedShape: check(
+    'performer_payout_kyc_reviews_revoked_shape',
+    sql`(${table.status} = 'revoked' and ${table.revokedAt} is not null) or (${table.status} = 'approved' and ${table.revokedAt} is null)`
   )
 }));
 
@@ -1478,9 +1542,13 @@ export const payments = pgTable('payments', {
   processorPaymentIntentId: text('processor_payment_intent_id'),
   processorChargeId: text('processor_charge_id'),
   amountSubtotal: integer('amount_subtotal').notNull(),
-  // Sway's actual commission collected (== Stripe application_fee_amount), regardless of
-  // whether it was added to the patron's charge or deducted from the performer's payout.
+  // Sway's customer-paid platform fee. New platform-balance payments do not use
+  // Stripe Connect application fees and never deduct this from performer earnings.
   platformFee: integer('platform_fee').notNull().default(0),
+  // Customer-paid pass-through amount that grosses up the card charge for the
+  // configured incoming-processor cost. It is neither performer earnings nor a
+  // Sway payout fee.
+  processorFeeRecovery: integer('processor_fee_recovery').notNull().default(0),
   amountTotal: integer('amount_total').notNull(),
   currency: text('currency').notNull().default('USD'),
   attributionSource: attributionSourceEnum('attribution_source').notNull().default('creator_direct'),
@@ -1517,7 +1585,15 @@ export const payments = pgTable('payments', {
       )
     )
   `),
-  paymentModeAllowed: check('payments_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`)
+  paymentModeAllowed: check('payments_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  processorFeeRecoveryValid: check(
+    'payments_processor_fee_recovery_valid',
+    sql`${table.processorFeeRecovery} >= 0`
+  ),
+  newMoneyAmountShape: check('payments_new_money_amount_shape', sql`
+    ${table.legacyUnlinked}
+    or ${table.amountTotal} = ${table.amountSubtotal} + ${table.platformFee} + ${table.processorFeeRecovery}
+  `)
 }));
 
 export const liveRoomPaymentOperations = pgTable('live_room_payment_operations', {
@@ -1647,16 +1723,31 @@ export const performerWithdrawals = pgTable('performer_withdrawals', {
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
   idempotencyKey: text('idempotency_key').notNull(),
   destinationKind: text('destination_kind').notNull(),
-  deliverySpeed: text('delivery_speed').notNull(),
+  recipientType: text('recipient_type').notNull(),
+  recipientFingerprint: text('recipient_fingerprint').notNull(),
+  recipientPreview: text('recipient_preview').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  deliverySpeed: text('delivery_speed').notNull().default('provider'),
   status: text('status').notNull().default('requested'),
   grossAmountCents: integer('gross_amount_cents').notNull(),
   providerFeeCents: integer('provider_fee_cents').notNull(),
   netAmountCents: integer('net_amount_cents').notNull(),
   currency: text('currency').notNull().default('USD'),
-  provider: text('provider'),
+  provider: text('provider').notNull().default('paypal_payouts'),
   providerPayoutId: text('provider_payout_id'),
+  providerSenderItemId: text('provider_sender_item_id'),
+  providerItemId: text('provider_item_id'),
+  providerTransactionId: text('provider_transaction_id'),
+  providerStatus: text('provider_status'),
+  actualProviderFeeCents: integer('actual_provider_fee_cents'),
   failureCode: text('failure_code'),
+  lastError: text('last_error'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),
+  returnedAt: timestamp('returned_at', { withTimezone: true }),
   ...timestamps
 }, (table) => ({
   performerCreatedIdx: index('performer_withdrawals_performer_created_idx').on(table.performerId, table.createdAt),
@@ -1664,14 +1755,53 @@ export const performerWithdrawals = pgTable('performer_withdrawals', {
   providerPayoutIdx: uniqueIndex('performer_withdrawals_provider_payout_idx')
     .on(table.provider, table.providerPayoutId)
     .where(sql`${table.providerPayoutId} is not null`),
-  destinationAllowed: check('performer_withdrawals_destination_allowed', sql`${table.destinationKind} in ('bank_account', 'debit_card', 'cash_app_direct_deposit', 'venmo', 'paypal')`),
-  speedAllowed: check('performer_withdrawals_speed_allowed', sql`${table.deliverySpeed} in ('standard', 'instant')`),
-  statusAllowed: check('performer_withdrawals_status_allowed', sql`${table.status} in ('requested', 'processing', 'paid', 'failed', 'canceled')`),
+  providerItemIdx: uniqueIndex('performer_withdrawals_provider_item_idx')
+    .on(table.provider, table.providerItemId)
+    .where(sql`${table.providerItemId} is not null`),
+  senderItemIdx: uniqueIndex('performer_withdrawals_provider_sender_item_idx')
+    .on(table.provider, table.providerSenderItemId)
+    .where(sql`${table.providerSenderItemId} is not null`),
+  destinationAllowed: check('performer_withdrawals_destination_allowed', sql`${table.destinationKind} in ('paypal', 'venmo')`),
+  recipientTypeAllowed: check('performer_withdrawals_recipient_type_allowed', sql`(${table.destinationKind} = 'paypal' and ${table.recipientType} = 'email') or (${table.destinationKind} = 'venmo' and ${table.recipientType} in ('email', 'phone', 'user_handle'))`),
+  recipientFingerprintValid: check('performer_withdrawals_recipient_fingerprint_valid', sql`${table.recipientFingerprint} ~ '^[0-9a-f]{64}$'`),
+  paymentModeAllowed: check('performer_withdrawals_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  speedAllowed: check('performer_withdrawals_speed_allowed', sql`${table.deliverySpeed} = 'provider'`),
+  statusAllowed: check('performer_withdrawals_status_allowed', sql`${table.status} in ('requested', 'submitting', 'processing', 'unclaimed', 'held', 'paid', 'failed', 'returned', 'canceled')`),
   positiveGross: check('performer_withdrawals_positive_gross', sql`${table.grossAmountCents} > 0`),
   nonnegativeFee: check('performer_withdrawals_nonnegative_fee', sql`${table.providerFeeCents} >= 0`),
+  actualFeeValid: check('performer_withdrawals_actual_fee_valid', sql`${table.actualProviderFeeCents} is null or ${table.actualProviderFeeCents} >= 0`),
   amountEquation: check('performer_withdrawals_amount_equation', sql`${table.netAmountCents} > 0 and ${table.netAmountCents} + ${table.providerFeeCents} = ${table.grossAmountCents}`),
   currencyUsd: check('performer_withdrawals_currency_usd', sql`${table.currency} = 'USD'`),
-  paidShape: check('performer_withdrawals_paid_shape', sql`(${table.status} = 'paid' and ${table.paidAt} is not null and ${table.providerPayoutId} is not null) or (${table.status} <> 'paid' and ${table.paidAt} is null)`)
+  providerAllowed: check('performer_withdrawals_provider_allowed', sql`${table.provider} = 'paypal_payouts'`),
+  leaseShape: check('performer_withdrawals_lease_shape', sql`(${table.status} = 'submitting' and ${table.leaseOwner} is not null and ${table.leaseExpiresAt} is not null) or (${table.status} <> 'submitting' and ${table.leaseOwner} is null and ${table.leaseExpiresAt} is null)`),
+  attemptCountValid: check('performer_withdrawals_attempt_count_valid', sql`${table.attemptCount} >= 0`),
+  paidShape: check('performer_withdrawals_paid_shape', sql`(${table.status} = 'paid' and ${table.paidAt} is not null and ${table.providerPayoutId} is not null) or (${table.status} <> 'paid' and ${table.paidAt} is null)`),
+  returnedShape: check('performer_withdrawals_returned_shape', sql`(${table.status} = 'returned' and ${table.returnedAt} is not null) or (${table.status} <> 'returned' and ${table.returnedAt} is null)`)
+}));
+
+export const payoutProcessorEvents = pgTable('payout_processor_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: text('provider').notNull(),
+  providerEventId: text('provider_event_id').notNull(),
+  eventType: text('event_type').notNull(),
+  withdrawalId: uuid('withdrawal_id').references(() => performerWithdrawals.id),
+  payloadSha256: text('payload_sha256').notNull(),
+  payload: jsonb('payload').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  status: text('status').notNull().default('pending'),
+  lastError: text('last_error'),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  providerEventIdx: uniqueIndex('payout_processor_events_provider_event_idx').on(table.provider, table.providerEventId),
+  withdrawalIdx: index('payout_processor_events_withdrawal_idx').on(table.withdrawalId, table.createdAt),
+  statusIdx: index('payout_processor_events_status_idx').on(table.status, table.createdAt),
+  providerAllowed: check('payout_processor_events_provider_allowed', sql`${table.provider} = 'paypal_payouts'`),
+  paymentModeAllowed: check('payout_processor_events_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  statusAllowed: check('payout_processor_events_status_allowed', sql`${table.status} in ('pending', 'processed', 'ignored', 'failed')`),
+  payloadHashValid: check('payout_processor_events_payload_hash_valid', sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`),
+  payloadValid: check('payout_processor_events_payload_valid', sql`jsonb_typeof(${table.payload}) = 'object'`),
+  processedShape: check('payout_processor_events_processed_shape', sql`(${table.status} in ('processed', 'ignored') and ${table.processedAt} is not null) or (${table.status} not in ('processed', 'ignored') and ${table.processedAt} is null)`)
 }));
 
 export const moderationEvents = pgTable('moderation_events', {

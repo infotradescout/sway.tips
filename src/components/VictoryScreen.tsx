@@ -51,7 +51,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
   const isTestPaymentVolume = session.paymentEnvironment === 'test'
     || session.settlementMode === 'platform_test_balance';
   const hasVerifiedLiveSettlement = session.paymentEnvironment === 'live'
-    && session.settlementMode === 'connected_account';
+    && (session.settlementMode === 'platform_balance' || session.settlementMode === 'connected_account');
   const canShareMoneyRecap = hasVerifiedLiveSettlement;
   const amountLabel = isTestPaymentVolume
     ? 'Test payment volume'
@@ -132,7 +132,7 @@ export default function VictoryScreen({ session, requests, onRestart }: VictoryS
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-sway-test-volume="true">
               <p className="text-xs font-bold text-amber-200">Test payment volume — no real money</p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
-                These amounts came from a test-mode rehearsal. They are not earnings, are not payable to a bank account,
+                These amounts came from a test-mode rehearsal. They are not earnings, cannot be cashed out to PayPal or Venmo,
                 and cannot be shared as a real-money result.
               </p>
             </div>

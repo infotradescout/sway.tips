@@ -14,9 +14,12 @@ const runtime = [
 const requiredTerms = [
   'verification_required_at_amount = 10000',
   'gig_ready',
-  'payouts_enabled',
+  'owner email is verified',
+  'no payout hold exists',
+  'PayPal Payouts execution is explicitly enabled',
   'UI copy cannot promise unverified payouts',
-  'Stripe Connect verification requirements vary',
+  'Stripe remains incoming-only',
+  'PayPal Payouts and marketplace compliance requirements vary',
   'Incremental onboarding'
 ];
 

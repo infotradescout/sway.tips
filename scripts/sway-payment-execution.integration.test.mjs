@@ -239,7 +239,9 @@ async function main() {
     const totals = await service.aggregateCapturedTotals(GIG_ID);
     assert.equal(totals.source, 'database_captured_payments');
     assert.equal(totals.capturedSubtotalCents, 1500, 'captured subtotal must match');
-    assert.equal(totals.capturedTotalCents, 1600, 'captured total must include fee');
+    assert.equal(totals.platformFeeCents, 100, 'captured Sway fee must remain intact');
+    assert.equal(totals.processorFeeRecoveryCents, 79, 'captured total must separately record card-processing recovery');
+    assert.equal(totals.capturedTotalCents, 1679, 'captured total must include Sway and processing charges');
 
     // 4. Void releases an authorized hold (deny path).
     const request2 = await reserveRequest('void', 800);
