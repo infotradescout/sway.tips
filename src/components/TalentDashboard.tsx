@@ -36,7 +36,6 @@ import {
   Home,
   UserRound,
   CalendarDays,
-  Landmark,
   Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -65,9 +64,9 @@ import {
   normalizePayoutDestinationKind,
   normalizePayoutDestinationCapabilities,
   PAYOUT_DESTINATIONS,
-  resolvePayoutSetupReturnStatus,
   type PayoutDestinationCapabilities,
-  type PayoutDestinationKind
+  type PayoutDestinationKind,
+  type PayoutRecipientType
 } from '../payout-destination';
 import {
   INACTIVE_PERFORMER_WORKSPACE_PATHS,
@@ -105,6 +104,8 @@ interface TalentDashboardProps {
     payouts_enabled?: boolean;
     stripe_connected_account_id?: string | null;
     payout_destination_kind?: string | null;
+    payout_recipient_type?: string | null;
+    payout_recipient_preview?: string | null;
     money_actions_ready?: boolean;
     test_mode_platform_balance_allowed?: boolean;
   } | null;
@@ -1410,12 +1411,10 @@ export default function TalentDashboard({
   const [inactiveWorkspace, setInactiveWorkspace] = useState<InactivePerformerWorkspace>(() => (
     typeof window === 'undefined' ? 'home' : resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash)
   ));
-  const [payoutSetupReturnStatus] = useState(() => (
-    typeof window === 'undefined' ? null : resolvePayoutSetupReturnStatus(window.location.search)
-  ));
   const [timeLeft, setTimeLeft] = useState<string>('05:00');
   const [liveLinkCopied, setLiveLinkCopied] = useState(false);
   const [liveRoomPaymentMode, setLiveRoomPaymentMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
+  const [payoutProviderMode, setPayoutProviderMode] = useState<'loading' | 'test' | 'live' | 'unavailable'>('loading');
   const [testModePlatformBalanceEnabled, setTestModePlatformBalanceEnabled] = useState(false);
   const [payoutDestinationCapabilities, setPayoutDestinationCapabilities] = useState<PayoutDestinationCapabilities>(() => ({
     ...NO_PAYOUT_DESTINATION_CAPABILITIES
@@ -1424,20 +1423,44 @@ export default function TalentDashboard({
     pendingCents: number;
     availableCents: number;
     reservedCents: number;
+    deficitCents: number;
     minimumWithdrawalCents: number;
+    providerFeeCents: number;
     payoutMarkupCents: number;
-    liveWithdrawalsEnabled: boolean;
+    withdrawalsEnabled: boolean;
+    withdrawalRestriction?: 'email_verification_required' | 'account_restricted' | 'identity_verification_required' | null;
   } | null>(null);
-  const [cashOutSpeed, setCashOutSpeed] = useState<'standard' | 'instant'>('standard');
   const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [cashOutMessage, setCashOutMessage] = useState<string | null>(null);
+  const cashOutIdempotencyKeyRef = useRef<string | null>(null);
   const savedPayoutDestinationKind = normalizePayoutDestinationKind(performerProfile?.payout_destination_kind);
   const [payoutDestinationOverride, setPayoutDestinationOverride] = useState<PayoutDestinationKind | null>(null);
   const payoutDestinationKind = payoutDestinationOverride ?? savedPayoutDestinationKind;
+  const initialRecipientType = performerProfile?.payout_recipient_type === 'phone'
+    || performerProfile?.payout_recipient_type === 'user_handle'
+    ? performerProfile.payout_recipient_type
+    : 'email';
+  const [payoutRecipientType, setPayoutRecipientType] = useState<PayoutRecipientType>(initialRecipientType);
+  const [payoutRecipientValue, setPayoutRecipientValue] = useState('');
+  const [savedRecipientPreview, setSavedRecipientPreview] = useState(performerProfile?.payout_recipient_preview ?? null);
+  const [savedRecipientType, setSavedRecipientType] = useState<PayoutRecipientType>(initialRecipientType);
+  const [savedRecipientDestinationKind, setSavedRecipientDestinationKind] = useState<PayoutDestinationKind | null>(savedPayoutDestinationKind);
+
+  useEffect(() => {
+    const profileDestination = normalizePayoutDestinationKind(performerProfile?.payout_destination_kind);
+    setSavedRecipientDestinationKind(profileDestination);
+    setSavedRecipientPreview(performerProfile?.payout_recipient_preview ?? null);
+    setSavedRecipientType(
+      performerProfile?.payout_recipient_type === 'phone' || performerProfile?.payout_recipient_type === 'user_handle'
+        ? performerProfile.payout_recipient_type
+        : 'email'
+    );
+  }, [performerProfile?.payout_destination_kind, performerProfile?.payout_recipient_preview, performerProfile?.payout_recipient_type]);
 
   useEffect(() => {
     if (previewMode) {
       setLiveRoomPaymentMode('unavailable');
+      setPayoutProviderMode('unavailable');
       setTestModePlatformBalanceEnabled(false);
       setPayoutDestinationCapabilities({ ...NO_PAYOUT_DESTINATION_CAPABILITIES });
       return;
@@ -1448,11 +1471,8 @@ export default function TalentDashboard({
         const response = await fetch('/api/payment/config', { cache: 'no-store' });
         const data = await response.json().catch(() => null);
         if (!cancelled) {
-          setPayoutDestinationCapabilities(
-            response.ok
-              ? normalizePayoutDestinationCapabilities(data?.payoutDestinationCapabilities)
-              : { ...NO_PAYOUT_DESTINATION_CAPABILITIES }
-          );
+          setPayoutDestinationCapabilities(normalizePayoutDestinationCapabilities(data?.payoutDestinationCapabilities));
+          setPayoutProviderMode(data?.mode === 'test' || data?.mode === 'live' ? data.mode : 'unavailable');
           setTestModePlatformBalanceEnabled(
             response.ok
               && data?.mode === 'test'
@@ -1469,6 +1489,7 @@ export default function TalentDashboard({
       } catch {
         if (!cancelled) {
           setLiveRoomPaymentMode('unavailable');
+          setPayoutProviderMode('unavailable');
           setTestModePlatformBalanceEnabled(false);
           setPayoutDestinationCapabilities({ ...NO_PAYOUT_DESTINATION_CAPABILITIES });
         }
@@ -1488,9 +1509,16 @@ export default function TalentDashboard({
           pendingCents: Number(data?.pendingCents ?? 0),
           availableCents: Number(data?.availableCents ?? 0),
           reservedCents: Number(data?.reservedCents ?? 0),
+          deficitCents: Number(data?.deficitCents ?? 0),
           minimumWithdrawalCents: Number(data?.minimumWithdrawalCents ?? 1000),
+          providerFeeCents: Number(data?.providerFeeCents ?? 25),
           payoutMarkupCents: Number(data?.payoutMarkupCents ?? 0),
-          liveWithdrawalsEnabled: data?.liveWithdrawalsEnabled === true
+          withdrawalsEnabled: data?.withdrawalsEnabled === true,
+          withdrawalRestriction: data?.withdrawalRestriction === 'email_verification_required'
+            || data?.withdrawalRestriction === 'account_restricted'
+            || data?.withdrawalRestriction === 'identity_verification_required'
+            ? data.withdrawalRestriction
+            : null
         });
       })
       .catch(() => undefined);
@@ -1504,13 +1532,13 @@ export default function TalentDashboard({
     : liveRoomPaymentMode === 'live' && Boolean(performerProfile?.money_actions_ready);
   const payoutDestinationSetupAllowed = canConfigurePayoutDestination(
     payoutDestinationKind,
-    liveRoomPaymentMode,
+    payoutProviderMode,
     payoutDestinationCapabilities
   );
   const hasAvailablePayoutDestination = PAYOUT_DESTINATIONS.some((destination) => (
     canConfigurePayoutDestination(
       destination.id,
-      liveRoomPaymentMode,
+      payoutProviderMode,
       payoutDestinationCapabilities
     )
   ));
@@ -1798,13 +1826,6 @@ export default function TalentDashboard({
   }, [roomHasControlContext, hardwareControlsEnabled]);
 
   useEffect(() => {
-    if (!payoutSetupReturnStatus || inactiveWorkspace !== 'account' || typeof window === 'undefined') return;
-    const nextLocation = new URL(window.location.href);
-    nextLocation.searchParams.delete('connect');
-    window.history.replaceState({}, '', `${nextLocation.pathname}${nextLocation.search}${nextLocation.hash}`);
-  }, [inactiveWorkspace, payoutSetupReturnStatus]);
-
-  useEffect(() => {
     hardwareLearnTargetRef.current = hardwareLearnTarget;
   }, [hardwareLearnTarget]);
 
@@ -1998,49 +2019,60 @@ export default function TalentDashboard({
     }
   };
 
-  const [stripeConnectStatus, setStripeConnectStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
-  const [stripeConnectError, setStripeConnectError] = useState<string | null>(null);
+  const [payoutSaveStatus, setPayoutSaveStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
+  const [payoutSaveError, setPayoutSaveError] = useState<string | null>(null);
 
   const handlePayoutSetup = async () => {
-    if (previewMode || stripeConnectStatus === 'submitting') return;
+    if (previewMode || payoutSaveStatus === 'submitting') return;
     if (!payoutDestinationKind) {
-      setStripeConnectStatus('error');
-      setStripeConnectError('Choose where you want payouts sent.');
+      setPayoutSaveStatus('error');
+      setPayoutSaveError('Choose PayPal or Venmo.');
       return;
     }
     if (!payoutDestinationSetupAllowed) {
-      setStripeConnectStatus('error');
-      setStripeConnectError(
-        payoutDestinationKind && !payoutDestinationCapabilities[payoutDestinationKind]
-          ? 'That payout destination is not enabled in this Sway deployment yet.'
-          : liveRoomPaymentMode === 'test'
-          ? 'Cash App and Venmo setup stays locked in test mode. Choose an enabled simulated option and use only test values accepted by secure setup.'
-          : 'That payout destination cannot be configured in the current payment mode.'
+      setPayoutSaveStatus('error');
+      setPayoutSaveError('That payout destination is not enabled in this Sway deployment yet.');
+      return;
+    }
+    if (!payoutRecipientValue.trim()) {
+      setPayoutSaveStatus('error');
+      setPayoutSaveError(
+        payoutDestinationKind === 'paypal'
+          ? 'Enter the email connected to your PayPal account.'
+          : 'Enter your Venmo handle, email, or U.S. mobile number.'
       );
       return;
     }
-    setStripeConnectStatus('submitting');
-    setStripeConnectError(null);
+    setPayoutSaveStatus('submitting');
+    setPayoutSaveError(null);
     try {
       const response = await fetch('/api/talent/payouts/destination', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ destinationKind: payoutDestinationKind })
+        body: JSON.stringify({
+          destinationKind: payoutDestinationKind,
+          recipientType: payoutRecipientType,
+          recipientValue: payoutRecipientValue
+        })
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to start secure payout setup.');
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save the payout destination.');
       }
       if (data?.success === true) {
-        setStripeConnectStatus('idle');
+        setPayoutSaveStatus('idle');
         setPayoutDestinationOverride(payoutDestinationKind);
-        setStripeConnectError(null);
+        setSavedRecipientDestinationKind(payoutDestinationKind);
+        setSavedRecipientPreview(typeof data?.recipientPreview === 'string' ? data.recipientPreview : null);
+        setSavedRecipientType(payoutRecipientType);
+        setPayoutRecipientValue('');
+        setPayoutSaveError(null);
         return;
       }
       throw new Error('The payout destination was not saved.');
     } catch (error) {
-      setStripeConnectStatus('error');
-      setStripeConnectError(error instanceof Error ? error.message : 'Unable to start secure payout setup.');
+      setPayoutSaveStatus('error');
+      setPayoutSaveError(error instanceof Error ? error.message : 'Unable to save the payout destination.');
     }
   };
 
@@ -2049,25 +2081,48 @@ export default function TalentDashboard({
       previewMode
       || cashOutStatus === 'submitting'
       || !payoutBalance
-      || !payoutDestinationKind
+      || !savedRecipientDestinationKind
+      || !savedRecipientPreview
+      || !payoutBalance.withdrawalsEnabled
       || payoutBalance.availableCents < payoutBalance.minimumWithdrawalCents
     ) return;
+    const recipientConfirmationValue = window.prompt(
+      savedRecipientDestinationKind === 'paypal'
+        ? `Re-enter the exact PayPal email saved as ${savedRecipientPreview} to confirm this cash-out.`
+        : `Re-enter the exact Venmo ${savedRecipientType === 'user_handle' ? 'handle' : savedRecipientType} saved as ${savedRecipientPreview} to confirm this cash-out.`
+    );
+    if (!recipientConfirmationValue?.trim()) {
+      setCashOutStatus('error');
+      setCashOutMessage('Cash-out canceled. The saved recipient was not re-entered.');
+      return;
+    }
     setCashOutStatus('submitting');
     setCashOutMessage(null);
     try {
-      const idempotencyKey = `withdrawal:${crypto.randomUUID()}`;
+      const idempotencyKey = cashOutIdempotencyKeyRef.current ?? `withdrawal:${crypto.randomUUID()}`;
+      cashOutIdempotencyKeyRef.current = idempotencyKey;
       const response = await fetch('/api/talent/payouts/withdrawals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idempotencyKey,
-          destinationKind: payoutDestinationKind,
-          deliverySpeed: cashOutSpeed,
+          destinationKind: savedRecipientDestinationKind,
+          recipientType: savedRecipientType,
+          recipientConfirmationValue,
           grossAmountCents: payoutBalance.availableCents
         })
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Cash-out could not be reserved.');
+      if (!response.ok) {
+        // Keep the same identity after timeouts, rate limits, or server/provider
+        // uncertainty. A fresh key after an ambiguous submission can create a
+        // second real payout; deterministic client errors may start fresh.
+        if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) {
+          cashOutIdempotencyKeyRef.current = null;
+        }
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Cash-out could not be reserved.');
+      }
+      cashOutIdempotencyKeyRef.current = null;
       const grossAmountCents = Number(data?.withdrawal?.grossAmountCents ?? 0);
       const providerFeeCents = Number(data?.withdrawal?.providerFeeCents ?? 0);
       const netAmountCents = Number(data?.withdrawal?.netAmountCents ?? 0);
@@ -2078,7 +2133,7 @@ export default function TalentDashboard({
       } : current);
       setCashOutStatus('success');
       setCashOutMessage(
-        `Reserved ${(netAmountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} after a ${(providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} simulated provider fee. Sway added $0.`
+        `${(netAmountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} is ${data?.withdrawal?.status === 'paid' ? 'paid' : 'being sent'} after PayPal's ${(providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} payout fee. Sway added $0.`
       );
     } catch (error) {
       setCashOutStatus('error');
@@ -3299,37 +3354,6 @@ export default function TalentDashboard({
             <p className="mt-1 text-xs text-slate-500">Incoming card payments and payout readiness live here. Free rooms do not require payout setup.</p>
           </div>
 
-          {payoutSetupReturnStatus ? (
-            <div
-              role="status"
-              data-sway-payout-return-notice={payoutSetupReturnStatus}
-              className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
-                payoutSetupReturnStatus === 'return'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-                  : payoutSetupReturnStatus === 'pending'
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                    : 'border-rose-500/30 bg-rose-500/10 text-rose-100'
-              }`}
-            >
-              <p className="font-black">
-                {payoutSetupReturnStatus === 'return'
-                  ? (moneyReady ? 'Payout setup is ready.' : 'You’re back in Sway.')
-                  : payoutSetupReturnStatus === 'pending'
-                    ? 'Payout setup is not finished yet.'
-                    : 'Sign in as the performer owner to manage payouts.'}
-              </p>
-              <p className="mt-1 text-xs leading-5 opacity-90">
-                {payoutSetupReturnStatus === 'return'
-                  ? (moneyReady
-                    ? 'Your payment and payout status has been checked. You can review or change the destination below.'
-                    : 'We checked your status. If the provider still needs anything, use the button below to finish secure setup.')
-                  : payoutSetupReturnStatus === 'pending'
-                    ? 'Choose your destination below, then continue secure setup. Your existing progress is saved.'
-                    : 'Sign in as the performer owner, then return to Money to check payout setup status.'}
-              </p>
-            </div>
-          ) : null}
-
           <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950 p-4 select-none">
             <div className="min-w-0 flex items-start gap-3">
               <div className="shrink-0 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-300">
@@ -3337,33 +3361,25 @@ export default function TalentDashboard({
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payouts</p>
-                {liveRoomPaymentMode === 'loading' ? (
+                {payoutProviderMode === 'loading' ? (
                   <p className="mt-0.5 text-[11px] text-slate-400">Checking secure payout availability. Nothing has been changed.</p>
-                ) : liveRoomPaymentMode === 'unavailable' ? (
+                ) : payoutProviderMode === 'unavailable' ? (
                   <p className="mt-0.5 text-[11px] text-amber-300">Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.</p>
-                ) : liveRoomPaymentMode === 'test' && testModePlatformBalanceReady ? (
+                ) : payoutProviderMode === 'test' && testModePlatformBalanceReady ? (
                   <p className="mt-0.5 text-[11px] text-cyan-300">
                     Test rehearsal is ready. Test requests, tips, boosts, refunds, and earnings do not move real money or reach a payout destination.
                   </p>
                 ) : performerProfile?.money_actions_ready ? (
                   <p className="mt-0.5 text-[11px] text-emerald-300">
-                    {liveRoomPaymentMode === 'live'
-                      ? 'Live payment processing and payout setup are ready.'
+                    {payoutProviderMode === 'live'
+                      ? 'Stripe incoming payments and PayPal/Venmo cash-out are ready.'
                       : 'Test mode only. Test requests, tips, and boosts do not move real money or reach a payout destination.'}
                   </p>
-                ) : performerProfile?.charges_enabled ? (
-                  <p className="mt-0.5 text-[11px] text-amber-300">
-                    {liveRoomPaymentMode === 'live'
-                      ? 'Incoming card payments are available, but payout setup is incomplete.'
-                      : 'Test card payments are available, but test payout setup is incomplete.'}
-                  </p>
-                ) : performerProfile?.stripe_connected_account_id ? (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Secure payout setup has started but is not finished.</p>
                 ) : (
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    {liveRoomPaymentMode === 'live'
-                      ? 'Choose a payout destination before starting paid requests, tips, or boosts.'
-                      : 'Choose a test payout destination before rehearsing paid requests, tips, or boosts.'}
+                    {payoutProviderMode === 'live'
+                      ? 'Save PayPal or Venmo before starting paid requests, tips, or boosts.'
+                      : 'PayPal sandbox cash-out is not active. The Stripe test-room rehearsal remains separate.'}
                   </p>
                 )}
               </div>
@@ -3372,16 +3388,16 @@ export default function TalentDashboard({
             <div className="mt-5 border-t border-white/10 pt-5">
               <h3 className="text-sm font-black text-white">Where should your earnings go?</h3>
               <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">
-                {liveRoomPaymentMode === 'loading'
+                {payoutProviderMode === 'loading'
                   ? 'Checking which secure payout options are available. Nothing has been selected or changed.'
-                  : liveRoomPaymentMode === 'unavailable'
+                  : payoutProviderMode === 'unavailable'
                     ? 'Secure payout setup is temporarily unavailable. Your saved preference is unchanged, and free rooms still work.'
-                    : liveRoomPaymentMode === 'test'
-                      ? 'This is a rehearsal. Choose where the combined earnings balance should go. Never enter real bank, card, or wallet details in test mode.'
-                      : 'Stripe processes incoming customer payments only. Choose where you want the combined earnings balance sent. Performer cash-out does not use Stripe.'}
+                    : payoutProviderMode === 'test'
+                      ? 'This is PayPal Sandbox. Use only PayPal-provided sandbox recipient details—never a real PayPal or Venmo account.'
+                      : 'Stripe processes incoming customer payments only. Cash-out goes directly through PayPal Payouts to PayPal or Venmo.'}
               </p>
               <p className="mt-2 max-w-3xl text-[10px] leading-5 text-cyan-200">
-                Your reusable payout preference is saved to your performer profile. It remains unverified until the selected payout provider accepts the actual destination.
+                Sway encrypts the recipient identifier. Only its masked value is shown after saving, and PayPal validates it when you cash out.
               </p>
               {payoutBalance ? (
                 <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4" data-sway-cash-out="true">
@@ -3390,46 +3406,59 @@ export default function TalentDashboard({
                     <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Pending</span><span className="text-lg font-black text-white">{(payoutBalance.pendingCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
                     <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Cash-out minimum</span><span className="text-lg font-black text-white">{(payoutBalance.minimumWithdrawalCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
                   </div>
-                  <p className="mt-2 text-[10px] leading-5 text-emerald-100">Your paid interactions accumulate here. One provider fee applies when you cash out the combined balance. Sway payout markup: $0.</p>
+                  <p className="mt-2 text-[10px] leading-5 text-emerald-100">
+                    Your paid interactions accumulate here. PayPal’s quoted payout fee is {(payoutBalance.providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} once per cash-out. Sway payout markup: $0.
+                  </p>
+                  {payoutBalance.availableCents >= payoutBalance.minimumWithdrawalCents ? (
+                    <p className="mt-1 text-[10px] text-slate-300">
+                      Cash out {(payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} → receive about {(Math.max(0, payoutBalance.availableCents - payoutBalance.providerFeeCents) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}. PayPal’s actual fee is reconciled on completion.
+                    </p>
+                  ) : null}
+                  {payoutBalance.deficitCents > 0 ? (
+                    <p className="mt-2 text-[10px] text-rose-300">Cash-out is paused because refunds or disputes created a {(payoutBalance.deficitCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} balance deficit.</p>
+                  ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => setCashOutSpeed('standard')} className={`rounded-lg px-3 py-2 text-[10px] font-black ${cashOutSpeed === 'standard' ? 'bg-white text-slate-950' : 'bg-slate-800 text-slate-300'}`}>Standard</button>
-                    <button type="button" onClick={() => setCashOutSpeed('instant')} className={`rounded-lg px-3 py-2 text-[10px] font-black ${cashOutSpeed === 'instant' ? 'bg-white text-slate-950' : 'bg-slate-800 text-slate-300'}`}>Instant</button>
                     <button
                       type="button"
                       onClick={handleCashOut}
                       disabled={
                         previewMode
                         || cashOutStatus === 'submitting'
-                        || !payoutDestinationKind
+                        || !savedRecipientDestinationKind
+                        || !savedRecipientPreview
+                        || !payoutBalance.withdrawalsEnabled
+                        || payoutBalance.deficitCents > 0
                         || payoutBalance.availableCents < payoutBalance.minimumWithdrawalCents
-                        || liveRoomPaymentMode !== 'test'
                       }
                       className="min-h-9 rounded-lg bg-emerald-500 px-4 py-2 text-[10px] font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {cashOutStatus === 'submitting' ? 'Reserving...' : 'Cash out available balance'}
+                      {cashOutStatus === 'submitting' ? 'Sending safely...' : `Cash out to ${savedRecipientDestinationKind === 'venmo' ? 'Venmo' : 'PayPal'}`}
                     </button>
                   </div>
                   {cashOutMessage ? <p className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
-                  {liveRoomPaymentMode !== 'test' ? <p className="mt-2 text-[10px] text-amber-200">Real cash-out remains locked until a live payout provider returns the exact fee and accepts the transfer.</p> : null}
+                  {!payoutBalance.withdrawalsEnabled ? (
+                    <p className="mt-2 text-[10px] text-amber-200">
+                      {payoutBalance.withdrawalRestriction === 'email_verification_required'
+                        ? 'Verify the performer account email before cashing out.'
+                        : payoutBalance.withdrawalRestriction === 'account_restricted'
+                          ? 'Cash-out is blocked while this performer account has a restriction or payout hold.'
+                          : payoutBalance.withdrawalRestriction === 'identity_verification_required'
+                            ? 'Current payout identity review is required before real cash-out.'
+                            : 'Cash-out remains locked until PayPal activates Sway Payouts and the matching release switch is enabled.'}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
               {hasAvailablePayoutDestination
-                && (liveRoomPaymentMode === 'test' || liveRoomPaymentMode === 'live') ? (
+                && (payoutProviderMode === 'test' || payoutProviderMode === 'live') ? (
                 <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/70 p-3" data-sway-payout-steps="true">
                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">
-                    {liveRoomPaymentMode === 'live' ? 'Get paid in 3 steps' : 'Rehearse payout setup in 3 steps'}
+                    {payoutProviderMode === 'live' ? 'Cash out in Sway' : 'PayPal Sandbox rehearsal'}
                   </p>
                   <ol className="mt-2 grid gap-2 text-[10px] leading-4 text-slate-300 sm:grid-cols-3">
-                    <li><span className="font-black text-white">1. Choose</span><span className="block">Pick your reusable payout preference.</span></li>
-                    <li><span className="font-black text-white">2. Confirm</span><span className="block">Confirm your identity and actual destination in secure setup.</span></li>
-                    <li>
-                      <span className="font-black text-white">3. Return</span>
-                      <span className="block">
-                        {liveRoomPaymentMode === 'live'
-                          ? 'Paid rooms unlock only when Sway says Ready. You can start earning then; deposit arrival depends on provider eligibility and schedule.'
-                          : 'Test paid rooms unlock only when Sway says Ready. No real money moves in this rehearsal.'}
-                      </span>
-                    </li>
+                    <li><span className="font-black text-white">1. Save</span><span className="block">Choose PayPal or Venmo and save the matching recipient.</span></li>
+                    <li><span className="font-black text-white">2. Earn</span><span className="block">Requests, tips, and boosts accumulate in one Sway balance.</span></li>
+                    <li><span className="font-black text-white">3. Cash out</span><span className="block">Review the one PayPal fee and send the combined balance.</span></li>
                   </ol>
                 </div>
               ) : null}
@@ -3439,33 +3468,21 @@ export default function TalentDashboard({
                   const providerCertified = payoutDestinationCapabilities[destination.id];
                   const setupAllowed = canConfigurePayoutDestination(
                     destination.id,
-                    liveRoomPaymentMode,
+                    payoutProviderMode,
                     payoutDestinationCapabilities
                   );
-                  const DestinationIcon = destination.id === 'bank_account'
-                    ? Landmark
-                    : destination.id === 'debit_card'
-                      ? CreditCard
-                      : Smartphone;
-                  const setupHint = liveRoomPaymentMode === 'loading'
+                  const DestinationIcon = Smartphone;
+                  const setupHint = payoutProviderMode === 'loading'
                     ? 'Checking whether this option is available.'
-                    : liveRoomPaymentMode === 'unavailable'
+                    : payoutProviderMode === 'unavailable'
                       ? 'Unavailable while secure payout setup cannot be verified.'
                       : !providerCertified
                     ? 'This payout option is not enabled yet.'
-                    : liveRoomPaymentMode === 'test'
-                    ? destination.id === 'bank_account'
-                      ? 'Use only a provider-approved test bank value accepted by secure setup. Never enter real routing or account numbers.'
-                      : destination.id === 'debit_card'
-                        ? 'Use only a provider-approved test card if secure setup offers one. Never enter a real card.'
-                        : 'Available after live payouts are enabled. Real direct-deposit details cannot be entered in this test environment.'
+                    : payoutProviderMode === 'test'
+                    ? 'Use only a PayPal Sandbox recipient. Never enter a real account in test mode.'
                     : destination.setupHint;
-                  const destinationLabel = liveRoomPaymentMode === 'test'
-                    ? destination.id === 'bank_account'
-                      ? 'Test bank account (simulated)'
-                      : destination.id === 'debit_card'
-                        ? 'Test debit card (simulated)'
-                        : destination.label
+                  const destinationLabel = payoutProviderMode === 'test'
+                    ? `${destination.label} (Sandbox)`
                     : destination.label;
                   return (
                     <div
@@ -3481,8 +3498,10 @@ export default function TalentDashboard({
                           disabled={!setupAllowed}
                           onChange={() => {
                             setPayoutDestinationOverride(destination.id);
-                            setStripeConnectStatus('idle');
-                            setStripeConnectError(null);
+                            setPayoutRecipientType('email');
+                            setPayoutRecipientValue('');
+                            setPayoutSaveStatus('idle');
+                            setPayoutSaveError(null);
                           }}
                           className="mt-1 h-4 w-4 shrink-0 accent-emerald-400"
                         />
@@ -3493,6 +3512,9 @@ export default function TalentDashboard({
                           </span>
                           <span className="mt-1 block text-[11px] leading-5 text-slate-300">{destination.shortDescription}</span>
                           <span className="mt-1 block text-[10px] leading-4 text-slate-500">{setupHint}</span>
+                          {selected && savedRecipientPreview && savedRecipientDestinationKind === destination.id ? (
+                            <span className="mt-2 block text-[10px] font-bold text-emerald-200">Saved: {savedRecipientPreview}</span>
+                          ) : null}
                           {!setupAllowed ? (
                             <span className="mt-2 inline-flex rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[9px] font-black uppercase text-amber-200">
                               {!providerCertified ? 'Not enabled' : 'Live payouts only'}
@@ -3500,59 +3522,86 @@ export default function TalentDashboard({
                           ) : null}
                         </span>
                       </label>
-                      {destination.helpUrl && liveRoomPaymentMode === 'live' && setupAllowed ? (
-                        <a
-                          href={destination.helpUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ml-7 mt-2 inline-flex text-[10px] font-bold text-cyan-300 hover:text-cyan-200"
-                        >
-                          Find direct-deposit details
-                        </a>
-                      ) : null}
                     </div>
                   );
                 })}
               </div>
 
-              {liveRoomPaymentMode === 'live' ? (
-                <p className="mt-3 text-[10px] leading-5 text-slate-500">
-                  Cash App and Venmo can use routing and account details only when Direct Deposit is available on that wallet account; eligibility and limits apply. This is not a transfer to a username, phone number, Venmo handle, or $cashtag. Debit-card availability and payout speed also depend on provider eligibility.
-                </p>
-              ) : liveRoomPaymentMode === 'test' ? (
-                <p className="mt-3 text-[10px] leading-5 text-amber-200">Cash App and Venmo are shown for clarity but cannot be selected until live payouts are enabled.</p>
+              {payoutDestinationKind && payoutDestinationSetupAllowed ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-4">
+                  {payoutDestinationKind === 'venmo' ? (
+                    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Venmo recipient type">
+                      {([
+                        ['user_handle', 'Venmo handle'],
+                        ['email', 'Email'],
+                        ['phone', 'U.S. mobile']
+                      ] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          disabled={payoutProviderMode === 'test' && value === 'phone'}
+                          onClick={() => {
+                            setPayoutRecipientType(value);
+                            setPayoutRecipientValue('');
+                            setPayoutSaveError(null);
+                          }}
+                          className={`rounded-lg px-3 py-2 text-[10px] font-black disabled:cursor-not-allowed disabled:opacity-50 ${payoutRecipientType === value ? 'bg-white text-slate-950' : 'bg-slate-800 text-slate-300'}`}
+                        >
+                          {payoutProviderMode === 'test' && value === 'phone' ? `${label} (live only)` : label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400" htmlFor="sway-payout-recipient">
+                    {payoutDestinationKind === 'paypal'
+                      ? 'PayPal email'
+                      : payoutRecipientType === 'user_handle'
+                        ? 'Venmo handle'
+                        : payoutRecipientType === 'phone'
+                          ? 'Venmo U.S. mobile number'
+                          : 'Venmo account email'}
+                  </label>
+                  <input
+                    id="sway-payout-recipient"
+                    type={payoutRecipientType === 'email' ? 'email' : payoutRecipientType === 'phone' ? 'tel' : 'text'}
+                    autoComplete={payoutRecipientType === 'email' ? 'email' : payoutRecipientType === 'phone' ? 'tel' : 'off'}
+                    value={payoutRecipientValue}
+                    onChange={(event) => setPayoutRecipientValue(event.target.value)}
+                    placeholder={payoutDestinationKind === 'paypal'
+                      ? 'you@example.com'
+                      : payoutRecipientType === 'user_handle'
+                        ? '@your-venmo-handle'
+                        : payoutRecipientType === 'phone'
+                          ? '(985) 555-0123'
+                          : 'you@example.com'}
+                    className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-white outline-none focus:border-emerald-400"
+                  />
+                  <p className="mt-2 text-[10px] leading-5 text-slate-500">Sway encrypts this value and never shows the full recipient again. PayPal receives it only when sending your cash-out.</p>
+                </div>
               ) : null}
-              {liveRoomPaymentMode === 'test' ? (
+              {payoutProviderMode === 'test' ? (
                 <p className="mt-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-[10px] leading-5 text-cyan-200">
-                  Test mode is a rehearsal only. No real earnings will be sent to any destination.
+                  PayPal Sandbox is a rehearsal only. Use a sandbox receiver account; no real earnings will be sent.
                 </p>
               ) : null}
-              {liveRoomPaymentMode === 'test'
-                && !payoutDestinationCapabilities.bank_account
-                && !payoutDestinationCapabilities.debit_card ? (
-                  <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-5 text-amber-100">No simulated payout option is enabled right now. Do not enter real financial details. Free rooms still work.</p>
-                ) : null}
-              {stripeConnectError ? <p className="mt-2 text-[10px] text-rose-400">{stripeConnectError}</p> : null}
+              {!hasAvailablePayoutDestination && payoutProviderMode !== 'loading' ? (
+                <p className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] leading-5 text-amber-100">PayPal Payouts is not enabled for this deployment yet. Free rooms remain available.</p>
+              ) : null}
+              {payoutSaveError ? <p className="mt-2 text-[10px] text-rose-400">{payoutSaveError}</p> : null}
               {!payoutDestinationKind && hasAvailablePayoutDestination ? (
                 <p className="mt-2 text-[10px] text-amber-300">Choose one destination to continue.</p>
               ) : null}
-              {payoutDestinationKind && !payoutDestinationSetupAllowed && liveRoomPaymentMode === 'test' ? (
-                <p className="mt-2 text-[10px] text-amber-300">Choose an enabled Bank account or Debit card option for this rehearsal. Cash App and Venmo cannot be opened in test mode.</p>
-              ) : null}
-
               <button
                 type="button"
                 onClick={handlePayoutSetup}
-                disabled={previewMode || !payoutDestinationSetupAllowed || stripeConnectStatus === 'submitting'}
+                disabled={previewMode || !payoutDestinationSetupAllowed || payoutSaveStatus === 'submitting'}
                 className="mt-4 min-h-11 w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-black text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
-                {stripeConnectStatus === 'submitting'
-                  ? 'Saving destination...'
-                  : moneyReady
-                    ? 'Review or change payout details'
-                    : performerProfile?.stripe_connected_account_id
-                      ? 'Finish payout setup'
-                      : 'Save payout destination'}
+                {payoutSaveStatus === 'submitting'
+                  ? 'Encrypting and saving...'
+                  : savedRecipientPreview && savedRecipientDestinationKind === payoutDestinationKind
+                    ? 'Update payout destination'
+                    : 'Save payout destination'}
               </button>
             </div>
           </div>

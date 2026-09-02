@@ -11,7 +11,7 @@ export interface TrackReference {
   genre?: string;
 }
 
-export type LiveRoomSettlementMode = 'connected_account' | 'platform_test_balance' | 'unavailable';
+export type LiveRoomSettlementMode = 'connected_account' | 'platform_test_balance' | 'platform_balance' | 'unavailable';
 export type LiveRoomPaymentEnvironment = 'test' | 'live' | 'unavailable';
 export type PatronPaymentStatus =
   | 'not_applicable'
@@ -125,7 +125,7 @@ export interface GigSession {
   lastMutationActorUserId?: string | null;
   talentName: string;
   talentRole: 'DJ' | 'Bartender' | 'Performer';
-  feeType: 'talent' | 'patron'; // Who pays the $1 platform fee
+  feeType: 'talent' | 'patron'; // Legacy room value; new checkout always charges the customer.
   minimumTip: number;           // Usually $5
   endGigTimerStartedAt: string | null; // Match timestamp for 5-minute Post-Gig closeout
   isFeatured: boolean;          // Featured Performer Status

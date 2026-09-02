@@ -130,10 +130,10 @@ assert.match(
 assert.match(renderConfigSource, /SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED[\s\S]+value: "false"/);
 assert.match(operationStoreSource, /ne\(liveRoomPaymentOperations\.id, operation\.id\)/);
 assert.match(operationStoreSource, /gt\(liveRoomPaymentOperations\.leaseExpiresAt, now\)/);
-assert.match(paymentServiceSource, /reverseConnectedTransfer = !isSwayTestPlatformBalanceDestination/);
+assert.match(paymentServiceSource, /reverseConnectedTransfer = !isSwayPlatformBalanceDestination/);
 assert.match(paymentServiceSource, /reverseTransfer: reverseConnectedTransfer,[\s\S]+refundApplicationFee: reverseConnectedTransfer/);
-assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : operation\.destinationAccountId/);
-assert.match(paymentServiceSource, /usesTestPlatformBalance \? undefined : payment\.platformFee/);
+assert.match(paymentServiceSource, /usesPlatformBalance \? undefined : operation\.destinationAccountId/);
+assert.match(paymentServiceSource, /usesPlatformBalance \? undefined : payment\.platformFee/);
 assert.match(sellerReadinessSource, /baseEligible && input\.allowTestPlatformBalance/);
 assert.match(sellerReadinessSource, /seller\.onboardingStatus !== 'restricted'/);
 assert.match(serverSource, /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds/);
@@ -175,7 +175,12 @@ assert.match(paymentWebhookSource, /Reconcile every refund from current provider
 assert.match(paymentServiceSource, /isFullRefundTruth[\s\S]+refund_provider_truth_not_terminal/);
 assert.match(paymentServiceSource, /`\$\{operation\.idempotencyKey\}:refund`/);
 assert.match(paymentServiceSource, /`\$\{operation\.idempotencyKey\}:void`/);
-assert.match(paymentServiceSource, /refundStatus: 'pending'[\s\S]+supersedePendingCaptureForCloseout/);
+assert.match(paymentServiceSource, /source: 'closeout_reverse_intent'[\s\S]+supersedePendingCaptureForCloseout/);
+assert.match(paymentServiceSource, /provider_truth_already_refunded[\s\S]+const advance/);
+assert.match(
+  paymentLifecycleSource,
+  /async function markRefundPending[\s\S]+from\(performers\)[\s\S]+for\('update'\)[\s\S]+from\(payments\)[\s\S]+for\('update'\)[\s\S]+refundStatus: 'pending'/
+);
 assert.match(paymentLifecycleSource, /paid_out: \['refunded', 'disputed'\]/);
 
 assert.match(paymentServiceSource, /loadInvisibleRequestDisposition[\s\S]+stillInvisible[\s\S]+eligible/);

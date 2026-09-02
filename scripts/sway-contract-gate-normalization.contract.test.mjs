@@ -26,7 +26,7 @@ const hardCommands = testContracts
   .filter(Boolean);
 
 const hardScriptPaths = hardCommands.map((command) => {
-  const match = command.match(/^node\s+(scripts\/[^\s]+\.mjs)$/);
+  const match = command.match(/^node(?:\s+--import\s+tsx)?\s+(scripts\/[^\s]+\.(?:mjs|ts))$/);
   if (!match) failures.push(`test:contracts command is not a direct node script gate: ${command}`);
   return match?.[1];
 }).filter(Boolean);

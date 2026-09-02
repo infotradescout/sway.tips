@@ -3,6 +3,9 @@ import { and, eq, ne } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import {
   performerStripeConnectBindings,
+  performerPayoutKycReviews,
+  performerPayoutPreferences,
+  performerWithdrawals,
   performers,
   proModeStatusEvents,
   stripeConnectModeOnboardingOperations,
@@ -37,6 +40,8 @@ export function mapClaimInspectionToClientError(status: string): { status: numbe
       return { status: 409, code: 'payment_account_configured', error: 'This profile cannot be transferred after secure payout setup has started. Contact Sway support.' };
     case 'stripe_connect_provisioning_in_progress':
       return { status: 409, code: 'stripe_connect_provisioning_in_progress', error: 'This profile cannot be transferred after secure payout setup has started. Contact Sway support.' };
+    case 'payout_identity_configured':
+      return { status: 409, code: 'payout_identity_configured', error: 'This profile cannot be transferred after payout setup or cash-out activity has started. Contact Sway support.' };
     case 'unavailable':
       return { status: 503, code: 'unavailable', error: 'Code temporarily unavailable for validation' };
     case 'rate_limited':
@@ -150,6 +155,27 @@ export async function assertPerformerClaimableByHandoff(
     .for('update')
     .limit(1);
   if (modeBinding) return { ok: false, code: 'payment_account_configured' };
+  const [payoutPreference] = await tx
+    .select({ performerId: performerPayoutPreferences.performerId })
+    .from(performerPayoutPreferences)
+    .where(eq(performerPayoutPreferences.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (payoutPreference) return { ok: false, code: 'payout_identity_configured' };
+  const [payoutWithdrawal] = await tx
+    .select({ id: performerWithdrawals.id })
+    .from(performerWithdrawals)
+    .where(eq(performerWithdrawals.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (payoutWithdrawal) return { ok: false, code: 'payout_identity_configured' };
+  const [payoutKycReview] = await tx
+    .select({ id: performerPayoutKycReviews.id })
+    .from(performerPayoutKycReviews)
+    .where(eq(performerPayoutKycReviews.performerId, input.performerId))
+    .for('update')
+    .limit(1);
+  if (payoutKycReview) return { ok: false, code: 'payout_identity_configured' };
   return { ok: true, displayName: performer.displayName, handle: performer.handle };
 }
 

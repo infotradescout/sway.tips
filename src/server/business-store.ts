@@ -138,7 +138,9 @@ function coerceGigSession(raw: unknown, fallback: GigSession): GigSession {
     tipsEnabled: typeof input.tipsEnabled === 'boolean'
       ? input.tipsEnabled
       : (fallback.tipsEnabled ?? false),
-    settlementMode: input.settlementMode === 'connected_account' || input.settlementMode === 'platform_test_balance'
+    settlementMode: input.settlementMode === 'connected_account'
+      || input.settlementMode === 'platform_test_balance'
+      || input.settlementMode === 'platform_balance'
       ? input.settlementMode
       : (fallback.settlementMode ?? 'unavailable'),
     paymentEnvironment: input.paymentEnvironment === 'test' || input.paymentEnvironment === 'live'

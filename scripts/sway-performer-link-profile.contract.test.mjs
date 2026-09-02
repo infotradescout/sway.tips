@@ -372,11 +372,16 @@ for (const term of [
   'requestPayload',
   'feePolicyFromPayload(payload)',
   'calculateSwayPaymentAmounts',
+  'calculateCustomerPaidProcessingRecovery',
   "const platformFeePayer = 'patron' as const",
   'const platformFeeChargedToPatronCents = input.platformFeeCents',
-  'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
+  'processorFeeRecovery: amounts.processorFeeRecoveryCents',
+  'const usesPlatformBalance = isSwayPlatformBalanceDestination(operation.destinationAccountId)',
+  'destinationAccountId: usesPlatformBalance ? undefined : operation.destinationAccountId',
+  'applicationFeeAmountCents: usesPlatformBalance ? undefined : payment.platformFee',
+  "usesPlatformBalance ? 'platform_balance' : 'connected_account'",
   'sway_platform_fee_cents: String(payment.platformFee)',
+  'sway_processing_recovery_cents: String(payment.processorFeeRecovery)',
   "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
   "sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');

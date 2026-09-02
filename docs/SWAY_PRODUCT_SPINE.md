@@ -12,7 +12,7 @@ See `docs/SWAY_COMPLETE_PRODUCT_GAP.md` for the honest shipped-vs-missing ledger
 
 ## Product Law
 
-1. One Sway account can act as audience and creator. Stripe verification unlocks receiving payouts / paid intake — not permission to use the site.
+1. One Sway account can act as audience and creator. Stripe is incoming-only; approved PayPal/Venmo payout readiness unlocks paid intake — not permission to use the site.
 2. A live room is optional night mode. Users must be able to use Sway with zero live room (home, profile, join others, files/collab entry).
 3. The live-night money loop remains sacred and must stay truthful, but it is **one surface**, not the whole product.
 4. Publishing / collaboration / file-sharing foundations that exist only as schema or side branches are unfinished until durable runtime + UI + production evidence exist.
@@ -27,7 +27,7 @@ See `docs/SWAY_COMPLETE_PRODUCT_GAP.md` for the honest shipped-vs-missing ledger
 - Profile and public page
 - Always-visible entry to the universal Collaborator Inbox
 - Private connections, selected files shared with/by the account, permission-gated download/review, and revocation
-- Stripe Connect status for getting paid
+- PayPal/Venmo cash-out destination and payout status
 
 ### B. Live-night money loop (shipped locally; production payments in test)
 Room settings -> Create room -> Show QR/link -> Request/Tip/Boost -> Approve/Deny/Complete -> Patron status -> Earnings -> End room -> Recap.
@@ -75,7 +75,7 @@ Sway is the creator’s account for live audience money **and** audio collaborat
 
 - Old “patron accounts held” gate is **lifted by owner direction** (2026-07-21): unified account home is required for completeness.
 - Pro Mode must not be marketed as a patron upsell until the account home and payment gates are honest.
-- Stripe Connect / payout readiness remains the gate for **getting paid**, not for logging in or joining rooms.
+- PayPal Payouts readiness remains the gate for **getting paid**, not for logging in or joining rooms. Performers never need a Stripe payout account.
 
 ## Required Route Spine (current + target)
 

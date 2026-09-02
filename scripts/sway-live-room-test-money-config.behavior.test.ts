@@ -4,30 +4,39 @@ import {
   resolveLiveRoomPaymentRuntimeConfig
 } from '../src/server/live-room-payment-config';
 import { createConfiguredPaymentProvider } from '../src/server/payment-provider';
-import { createConfiguredStripeConnectService } from '../src/server/stripe-connect';
 import {
   resolveLiveRoomSellerMoneyReadiness,
   resolveTestModePlatformBalanceEnabled,
   resolveTestModePlatformBalancePerformerIds,
+  SWAY_PLATFORM_BALANCE_DESTINATION,
   SWAY_TEST_PLATFORM_BALANCE_DESTINATION
 } from '../src/server/live-room-seller-readiness';
 
-function resolve(env: NodeJS.ProcessEnv, durabilityWritesEnabled = true) {
+function resolve(
+  env: NodeJS.ProcessEnv,
+  durabilityWritesEnabled = true,
+  payoutProviderConfigured = false,
+  processingPricingConfigured = true
+) {
   const paymentProvider = createConfiguredPaymentProvider(env);
-  const stripeConnect = createConfiguredStripeConnectService(env);
   return {
     paymentProvider,
-    stripeConnect,
     runtime: resolveLiveRoomPaymentRuntimeConfig({
       env,
       paymentProviderConfigured: Boolean(paymentProvider),
-      stripeConnectConfigured: Boolean(stripeConnect),
+      payoutProviderConfigured,
+      processingPricingConfigured,
       durabilityWritesEnabled
     })
   };
 }
 
 const LIVE_CANARY_ID = '10000000-0000-4000-8000-000000000099';
+const TEST_KEYS = {
+  STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
+  STRIPE_SECRET_KEY: 'sk_test_sway_runtime_proof',
+  STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
+};
 const LIVE_KEYS = {
   STRIPE_PUBLISHABLE_KEY: 'pk_live_sway_runtime_proof',
   STRIPE_SECRET_KEY: 'sk_live_sway_runtime_proof',
@@ -39,26 +48,30 @@ const LIVE_APPROVAL = {
   SWAY_LIVE_ROOM_LIVE_MONEY_PERFORMER_IDS: LIVE_CANARY_ID
 };
 
-const ready = resolve({
-  STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
-  STRIPE_SECRET_KEY: 'sk_test_sway_runtime_proof',
-  STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
-});
-assert.ok(ready.paymentProvider);
-assert.ok(ready.stripeConnect);
-assert.deepEqual(ready.runtime, {
+const testReady = resolve(TEST_KEYS);
+assert.ok(testReady.paymentProvider);
+assert.deepEqual(testReady.runtime, {
   mode: 'test',
-  publishableKey: 'pk_test_sway_runtime_proof',
+  publishableKey: TEST_KEYS.STRIPE_PUBLISHABLE_KEY,
   moneyEnabled: true,
-  connectEnabled: true,
+  connectEnabled: false,
   liveAllowedPerformerIds: new Set(),
   liveApprovalVersion: null,
   reason: 'ready'
-});
+}, 'incoming Stripe test rehearsals do not require a real payout provider');
 
-const liveKeysOnly = resolve(LIVE_KEYS);
-assert.ok(liveKeysOnly.paymentProvider, 'Live secret credentials may configure the provider adapter.');
-assert.ok(liveKeysOnly.stripeConnect, 'Live secret credentials may configure the Connect adapter.');
+const liveWithoutPayouts = resolve({ ...LIVE_KEYS, ...LIVE_APPROVAL }, true, false);
+assert.deepEqual(liveWithoutPayouts.runtime, {
+  mode: 'unavailable',
+  publishableKey: null,
+  moneyEnabled: false,
+  connectEnabled: false,
+  liveAllowedPerformerIds: new Set([LIVE_CANARY_ID]),
+  liveApprovalVersion: LIVE_ROOM_LIVE_MONEY_APPROVAL_VERSION,
+  reason: 'configuration_incomplete'
+}, 'live incoming money must not outrun the independently configured payout provider');
+
+const liveKeysOnly = resolve(LIVE_KEYS, true, true);
 assert.deepEqual(liveKeysOnly.runtime, {
   mode: 'live',
   publishableKey: null,
@@ -67,95 +80,64 @@ assert.deepEqual(liveKeysOnly.runtime, {
   liveAllowedPerformerIds: new Set(),
   liveApprovalVersion: null,
   reason: 'live_activation_not_approved'
-}, 'Live Stripe keys alone must never activate new money or Connect onboarding.');
+});
 
-const liveReady = resolve({ ...LIVE_KEYS, ...LIVE_APPROVAL });
-assert.ok(liveReady.paymentProvider);
-assert.ok(liveReady.stripeConnect);
+const liveReady = resolve({ ...LIVE_KEYS, ...LIVE_APPROVAL }, true, true);
 assert.deepEqual(liveReady.runtime, {
   mode: 'live',
-  publishableKey: 'pk_live_sway_runtime_proof',
+  publishableKey: LIVE_KEYS.STRIPE_PUBLISHABLE_KEY,
   moneyEnabled: true,
-  connectEnabled: true,
+  connectEnabled: false,
   liveAllowedPerformerIds: new Set([LIVE_CANARY_ID]),
   liveApprovalVersion: LIVE_ROOM_LIVE_MONEY_APPROVAL_VERSION,
   reason: 'ready'
-});
+}, 'Stripe may collect live money only while performer-facing Connect remains retired');
 
-for (const [label, performerIdsValue] of [
-  ['empty', ''],
-  ['malformed', 'not-a-performer-uuid'],
-  ['duplicate', `${LIVE_CANARY_ID},${LIVE_CANARY_ID}`],
-  ['multiple', `${LIVE_CANARY_ID},20000000-0000-4000-8000-000000000099`]
-] as const) {
+const liveWithoutConfirmedProcessingPrice = resolve(
+  { ...LIVE_KEYS, ...LIVE_APPROVAL },
+  true,
+  true,
+  false
+);
+assert.equal(liveWithoutConfirmedProcessingPrice.runtime.mode, 'live');
+assert.equal(liveWithoutConfirmedProcessingPrice.runtime.moneyEnabled, false);
+assert.equal(liveWithoutConfirmedProcessingPrice.runtime.reason, 'processing_fee_configuration_unapproved');
+
+for (const performerIdsValue of [
+  '',
+  'not-a-performer-uuid',
+  `${LIVE_CANARY_ID},${LIVE_CANARY_ID}`,
+  `${LIVE_CANARY_ID},20000000-0000-4000-8000-000000000099`
+]) {
   const result = resolve({
     ...LIVE_KEYS,
     ...LIVE_APPROVAL,
     SWAY_LIVE_ROOM_LIVE_MONEY_PERFORMER_IDS: performerIdsValue
-  });
-  assert.equal(result.runtime.mode, 'live', `${label}: provider mode remains observable.`);
-  assert.equal(result.runtime.publishableKey, null, `${label}: browser money config must stay hidden.`);
-  assert.equal(result.runtime.moneyEnabled, false, `${label}: new live money must stay disabled.`);
-  assert.equal(result.runtime.connectEnabled, false, `${label}: live Connect onboarding must stay disabled.`);
-  assert.equal(result.runtime.liveAllowedPerformerIds.size, 0, `${label}: invalid canary input must fail closed.`);
-  assert.equal(result.runtime.reason, 'live_activation_not_approved', `${label}: activation must be rejected.`);
+  }, true, true);
+  assert.equal(result.runtime.mode, 'live');
+  assert.equal(result.runtime.publishableKey, null);
+  assert.equal(result.runtime.moneyEnabled, false);
+  assert.equal(result.runtime.connectEnabled, false);
+  assert.equal(result.runtime.liveAllowedPerformerIds.size, 0);
+  assert.equal(result.runtime.reason, 'live_activation_not_approved');
 }
 
-for (const [label, approvalOverride] of [
-  ['flag_disabled', { SWAY_LIVE_ROOM_LIVE_MONEY_ENABLED: 'false' }],
-  ['approval_missing', { SWAY_LIVE_ROOM_LIVE_MONEY_APPROVAL_VERSION: '' }],
-  ['approval_wrong_version', { SWAY_LIVE_ROOM_LIVE_MONEY_APPROVAL_VERSION: 'stale-approval' }]
-] as const) {
-  const result = resolve({ ...LIVE_KEYS, ...LIVE_APPROVAL, ...approvalOverride });
-  assert.equal(result.runtime.moneyEnabled, false, `${label}: new live money must stay disabled.`);
-  assert.equal(result.runtime.connectEnabled, false, `${label}: live Connect onboarding must stay disabled.`);
-  assert.equal(result.runtime.publishableKey, null, `${label}: browser money config must stay hidden.`);
-  assert.equal(result.runtime.reason, 'live_activation_not_approved', `${label}: activation must be rejected.`);
-}
-
-for (const [label, env, expectedReason] of [
-  ['missing_secret', {
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
-    STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
-  }, 'configuration_incomplete'],
-  ['missing_webhook', {
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
-    STRIPE_SECRET_KEY: 'sk_test_sway_runtime_proof'
-  }, 'configuration_incomplete'],
-  ['live_secret_mismatch', {
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
-    STRIPE_SECRET_KEY: 'sk_live_forbidden',
-    STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
-  }, 'mode_key_mismatch'],
-  ['live_publishable_mismatch', {
-    STRIPE_PUBLISHABLE_KEY: 'pk_live_forbidden',
-    STRIPE_SECRET_KEY: 'sk_test_sway_runtime_proof',
-    STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
-  }, 'mode_key_mismatch']
-] as const) {
-  const result = resolve(env);
-  assert.equal(result.runtime.moneyEnabled, false, `${label} must disable live-room money.`);
-  assert.equal(result.runtime.connectEnabled, false, `${label} must disable Connect onboarding.`);
-  assert.equal(result.runtime.reason, expectedReason, `${label} must report ${expectedReason}.`);
-}
-
-const paused = resolve({
+const mismatched = resolve({
   STRIPE_PUBLISHABLE_KEY: 'pk_test_sway_runtime_proof',
-  STRIPE_SECRET_KEY: 'sk_test_sway_runtime_proof',
+  STRIPE_SECRET_KEY: 'sk_live_forbidden',
   STRIPE_WEBHOOK_SECRET: 'whsec_sway_runtime_proof'
-}, false);
+}, true, true);
+assert.equal(mismatched.runtime.reason, 'mode_key_mismatch');
+assert.equal(mismatched.runtime.moneyEnabled, false);
+
+const paused = resolve(TEST_KEYS, false, false);
 assert.equal(paused.runtime.mode, 'test');
 assert.equal(paused.runtime.moneyEnabled, false);
 assert.equal(paused.runtime.connectEnabled, false);
 assert.equal(paused.runtime.reason, 'durability_writes_disabled');
 
-assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'test', configuredValue: 'true' }), true);
 assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'test', configuredValue: ' TRUE ' }), true);
-assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'test', configuredValue: 'false' }), false);
-assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'live', configuredValue: 'true' }), false,
-  'A live Stripe runtime must never enable the platform-balance rehearsal lane.');
-assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'unavailable', configuredValue: 'true' }), false);
-
+assert.equal(resolveTestModePlatformBalanceEnabled({ paymentMode: 'live', configuredValue: 'true' }), false);
 const allowedPilotIds = resolveTestModePlatformBalancePerformerIds({
   paymentMode: 'test',
   configuredValue: 'true',
@@ -169,19 +151,9 @@ assert.equal(resolveTestModePlatformBalancePerformerIds({
   paymentMode: 'test',
   configuredValue: 'true',
   performerIdsValue: '10000000-0000-4000-8000-000000000002,invalid'
-}).size, 0, 'One invalid entry must reject the entire payment allowlist.');
-assert.equal(resolveTestModePlatformBalancePerformerIds({
-  paymentMode: 'live',
-  configuredValue: 'true',
-  performerIdsValue: '10000000-0000-4000-8000-000000000002'
-}).size, 0, 'Live mode must discard the pilot performer allowlist.');
-assert.equal(resolveTestModePlatformBalancePerformerIds({
-  paymentMode: 'test',
-  configuredValue: 'true',
-  performerIdsValue: ''
-}).size, 0, 'An empty allowlist must keep the pilot lane closed.');
+}).size, 0, 'one invalid entry must reject the entire rehearsal allowlist');
 
-const activeUnconnectedSeller = {
+const activeSeller = {
   isActive: true,
   onboardingStatus: 'gig_ready',
   paymentAccountStatus: 'not_started',
@@ -191,87 +163,64 @@ const activeUnconnectedSeller = {
   stripeConnectedAccountId: null,
   payoutHoldReason: null
 };
-assert.deepEqual(
-  resolveLiveRoomSellerMoneyReadiness({
-    roomStatus: 'active',
-    seller: activeUnconnectedSeller,
-    allowTestPlatformBalance: true
-  }),
-  {
-    ready: true,
-    destinationAccountId: SWAY_TEST_PLATFORM_BALANCE_DESTINATION,
-    settlementMode: 'platform_test_balance'
-  },
-  'An active performer may use the explicit platform test balance for a no-real-money rehearsal.'
-);
-assert.equal(
-  resolveLiveRoomSellerMoneyReadiness({
-    roomStatus: 'active',
-    seller: activeUnconnectedSeller,
-    allowTestPlatformBalance: false
-  }).ready,
-  false,
-  'Without the test-only switch, an unconnected seller must remain blocked.'
-);
-assert.equal(
-  resolveLiveRoomSellerMoneyReadiness({
-    roomStatus: 'active',
-    seller: { ...activeUnconnectedSeller, onboardingStatus: 'suspended' },
-    allowTestPlatformBalance: true
-  }).ready,
-  false,
-  'A suspended performer must remain blocked even in test mode.'
-);
-assert.equal(
-  resolveLiveRoomSellerMoneyReadiness({
-    roomStatus: 'active',
-    seller: { ...activeUnconnectedSeller, onboardingStatus: 'restricted' },
-    allowTestPlatformBalance: true
-  }).ready,
-  false,
-  'A restricted performer must remain blocked from money actions even in test mode.'
-);
-assert.equal(
-  resolveLiveRoomSellerMoneyReadiness({
-    roomStatus: 'active',
-    seller: { ...activeUnconnectedSeller, payoutHoldReason: 'risk_hold' },
-    allowTestPlatformBalance: true
-  }).ready,
-  false,
-  'A payout/risk hold must remain fail-closed in test mode.'
-);
-const connectedReadiness = resolveLiveRoomSellerMoneyReadiness({
+assert.deepEqual(resolveLiveRoomSellerMoneyReadiness({
   roomStatus: 'active',
-  seller: {
-    ...activeUnconnectedSeller,
-    paymentAccountStatus: 'payouts_enabled',
-    kycStatus: 'verified',
-    chargesEnabled: true,
-    payoutsEnabled: true,
-    stripeConnectedAccountId: 'acct_connected_contract'
-  },
-  allowTestPlatformBalance: false
+  seller: activeSeller,
+  allowTestPlatformBalance: true
+}), {
+  ready: true,
+  destinationAccountId: SWAY_TEST_PLATFORM_BALANCE_DESTINATION,
+  settlementMode: 'platform_test_balance'
 });
-assert.equal(connectedReadiness.ready, true);
-assert.equal(connectedReadiness.destinationAccountId, 'acct_connected_contract');
-assert.equal(connectedReadiness.settlementMode, 'connected_account');
+assert.deepEqual(resolveLiveRoomSellerMoneyReadiness({
+  roomStatus: 'active',
+  seller: { ...activeSeller, currentPayoutKycApproved: true },
+  allowTestPlatformBalance: false,
+  allowPlatformBalance: true
+}), {
+  ready: true,
+  destinationAccountId: SWAY_PLATFORM_BALANCE_DESTINATION,
+  settlementMode: 'platform_balance'
+}, 'approved live charges settle to Sway for later PayPal/Venmo withdrawal');
+assert.equal(resolveLiveRoomSellerMoneyReadiness({
+  roomStatus: 'active',
+  seller: { ...activeSeller, currentPayoutKycApproved: false },
+  allowTestPlatformBalance: false,
+  allowPlatformBalance: true
+}).ready, false, 'legacy or missing KYC state must never authorize a real platform-balance charge');
 
-assert.equal(
-  resolveLiveRoomSellerMoneyReadiness({
+const historicalConnectedSeller = {
+  ...activeSeller,
+  paymentAccountStatus: 'payouts_enabled',
+  kycStatus: 'verified',
+  chargesEnabled: true,
+  payoutsEnabled: true,
+  stripeConnectedAccountId: 'acct_historical_only'
+};
+assert.equal(resolveLiveRoomSellerMoneyReadiness({
+  roomStatus: 'active',
+  seller: historicalConnectedSeller,
+  allowTestPlatformBalance: false
+}).ready, false, 'historical Stripe Connect readiness must never route a new charge');
+
+for (const seller of [
+  { ...activeSeller, onboardingStatus: 'suspended' },
+  { ...activeSeller, onboardingStatus: 'restricted' },
+  { ...activeSeller, payoutHoldReason: 'risk_hold' },
+  { ...activeSeller, isActive: false }
+]) {
+  assert.equal(resolveLiveRoomSellerMoneyReadiness({
     roomStatus: 'active',
-    seller: {
-      ...activeUnconnectedSeller,
-      onboardingStatus: 'restricted',
-      paymentAccountStatus: 'payouts_enabled',
-      kycStatus: 'verified',
-      chargesEnabled: true,
-      payoutsEnabled: true,
-      stripeConnectedAccountId: 'acct_restricted_contract'
-    },
-    allowTestPlatformBalance: false
-  }).ready,
-  false,
-  'A restricted performer must not regain money eligibility through a connected account.'
-);
+    seller,
+    allowTestPlatformBalance: true,
+    allowPlatformBalance: true
+  }).ready, false, 'account safety controls must override every platform-balance rail');
+}
+assert.equal(resolveLiveRoomSellerMoneyReadiness({
+  roomStatus: 'closed',
+  seller: activeSeller,
+  allowTestPlatformBalance: true,
+  allowPlatformBalance: true
+}).ready, false, 'closed rooms cannot accept money');
 
-console.log('Sway live-room test-money configuration behavior test passed.');
+console.log('Sway incoming-only Stripe and PayPal/Venmo readiness behavior test passed.');

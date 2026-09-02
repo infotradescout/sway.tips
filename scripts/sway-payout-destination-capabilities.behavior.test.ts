@@ -1,38 +1,54 @@
 import assert from 'node:assert/strict';
 import { resolvePayoutDestinationCapabilities } from '../src/server/payout-destination-capabilities';
 
-const disabled = {
-  bank_account: false,
-  debit_card: false,
-  cash_app_direct_deposit: false,
-  venmo: false,
-  paypal: false
-};
+const disabled = { paypal: false, venmo: false };
 
-assert.deepEqual(resolvePayoutDestinationCapabilities({ env: {} }), disabled,
-  'all payout rails must fail closed without provider confirmation');
+assert.deepEqual(resolvePayoutDestinationCapabilities({
+  env: {},
+  providerConfigured: false,
+  destinationStorageConfigured: false
+}), disabled, 'all payout destinations must fail closed without provider and encrypted storage');
 
 assert.deepEqual(resolvePayoutDestinationCapabilities({
   env: {
-    SWAY_PLAID_TRANSFER_PAYOUTS_CONFIRMED: 'true',
-    SWAY_DEBIT_CARD_PAYOUTS_CONFIRMED: 'true',
     SWAY_PAYPAL_PAYOUTS_CONFIRMED: 'true',
     SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED: 'true'
-  }
-}), {
-  bank_account: true,
-  debit_card: true,
-  cash_app_direct_deposit: true,
-  venmo: true,
-  paypal: true
-});
+  },
+  providerConfigured: false,
+  destinationStorageConfigured: true
+}), disabled, 'environment flags alone must never expose a payout destination');
 
 assert.deepEqual(resolvePayoutDestinationCapabilities({
-  env: { SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED: 'true' }
-}), disabled, 'Venmo must stay locked until PayPal Payouts itself is confirmed');
+  env: {
+    SWAY_PAYPAL_PAYOUTS_CONFIRMED: 'true',
+    SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED: 'true'
+  },
+  providerConfigured: true,
+  destinationStorageConfigured: false
+}), disabled, 'raw recipient storage must never be used as a fallback');
 
 assert.deepEqual(resolvePayoutDestinationCapabilities({
-  env: { SWAY_PLAID_TRANSFER_PAYOUTS_CONFIRMED: 'yes' }
-}), disabled, 'only an explicit true confirmation may enable a payout provider');
+  env: { SWAY_PAYPAL_PAYOUTS_CONFIRMED: 'true' },
+  providerConfigured: true,
+  destinationStorageConfigured: true
+}), { paypal: true, venmo: false }, 'PayPal can be released without claiming Venmo approval');
+
+assert.deepEqual(resolvePayoutDestinationCapabilities({
+  env: {
+    SWAY_PAYPAL_PAYOUTS_CONFIRMED: 'true',
+    SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED: 'true'
+  },
+  providerConfigured: true,
+  destinationStorageConfigured: true
+}), { paypal: true, venmo: true });
+
+assert.deepEqual(resolvePayoutDestinationCapabilities({
+  env: {
+    SWAY_PAYPAL_PAYOUTS_CONFIRMED: 'yes',
+    SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED: 'true'
+  },
+  providerConfigured: true,
+  destinationStorageConfigured: true
+}), disabled, 'only an explicit true confirmation may enable PayPal Payouts');
 
 console.log('Payout destination capability behavior test passed.');

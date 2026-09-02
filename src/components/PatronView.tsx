@@ -31,6 +31,7 @@ import { TrackReference, RequestItem, GigSession, CustomMenuItem, PerformerProfi
 import { getInitialNetworkStatus, subscribeToNetworkStatus } from '../native/swayNativeBridge';
 import { sendBoostStarted, sendRequestStarted } from '../shells/frictionClient';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import { calculateCustomerPaidProcessingRecovery } from '../payment-pricing';
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_PENDING_ACTION_RETRIES = 3;
@@ -62,11 +63,21 @@ export function resolvePausedRequestToast(tipsEnabled: boolean) {
     : 'Requests are paused by the host. Try again when requests reopen.';
 }
 
-// Preview only -- mirrors the creator-direct tier (20% below $5, flat $1 at $5+).
-// The server is authoritative: a Sway-promoted room's true fee is resolved there
-// (campaign rate isn't known to the client), so this is just the common-case estimate.
+// Preview only. The server remains authoritative for promoted/partner terms and
+// returns the exact total before the customer confirms their card.
 function estimatePlatformFee(amountDollars: number): number {
-  return amountDollars < 5 ? Math.round(amountDollars * 0.20 * 100) / 100 : 1.0;
+  return amountDollars > 0 ? 1 : 0;
+}
+
+function estimateCheckoutAmounts(amountDollars: number, platformFeeDollars: number) {
+  const amounts = calculateCustomerPaidProcessingRecovery({
+    amountSubtotalCents: Math.round(amountDollars * 100),
+    platformFeeCents: Math.round(platformFeeDollars * 100)
+  });
+  return {
+    processingFee: amounts.processorFeeRecoveryCents / 100,
+    total: amounts.amountTotalCents / 100
+  };
 }
 
 interface PatronViewProps {
@@ -316,7 +327,8 @@ export default function PatronView({
   const [boostPatronName, setBoostPatronName] = useState('');
   const [boostAmount, setBoostAmount] = useState<number>(5);
 
-  // Temporary confirmation overlay until the real payment processor flow is implemented.
+  // Durable checkout preview. The server returns authoritative totals before
+  // the Stripe Payment Element can confirm the card.
   const [checkoutPayload, setCheckoutPayload] = useState<{
     open: boolean;
     type: 'request' | 'boost';
@@ -324,6 +336,7 @@ export default function PatronView({
     artist?: string;
     amount: number;
     fee: number;
+    processingFee: number;
     total: number;
     targetId?: string; // used for boost routing
     trackArt?: string;
@@ -331,8 +344,8 @@ export default function PatronView({
     idempotencyKey: string;
     expires_at: string;
     gigId: string;
-    // A straight tip always goes through Stripe's test-only payment path,
-    // regardless of the room's free/paid toggle. No real money moves.
+    // A straight tip always goes through the configured incoming Stripe path,
+    // regardless of the room's free/paid request toggle.
     isTip?: boolean;
     clientSecret?: string;
     paymentIntentId?: string;
@@ -983,8 +996,10 @@ export default function PatronView({
       amt = paymentsEnabledForRoom ? targetBoostAmount : 1;
     }
 
-    const platformFee = paymentsEnabledForRoom && session.feeType === 'patron' ? estimatePlatformFee(amt) : 0;
-    const total = amt + platformFee;
+    const platformFee = paymentsEnabledForRoom ? estimatePlatformFee(amt) : 0;
+    const { processingFee, total } = paymentsEnabledForRoom
+      ? estimateCheckoutAmounts(amt, platformFee)
+      : { processingFee: 0, total: amt };
 
     if (type === 'request') {
       sendRequestStarted(funnelTelemetryPayload);
@@ -1000,6 +1015,7 @@ export default function PatronView({
       artist,
       amount: amt,
       fee: platformFee,
+      processingFee,
       total,
       targetId: type === 'boost' ? (boostTarget ?? boostingItem)?.id : undefined,
       trackArt,
@@ -1077,7 +1093,16 @@ export default function PatronView({
       setCheckoutPayload((current) => current ? {
         ...current,
         clientSecret: typeof body?.client_secret === 'string' ? body.client_secret : current.clientSecret,
-        paymentIntentId: typeof body?.payment_intent_id === 'string' ? body.payment_intent_id : current.paymentIntentId
+        paymentIntentId: typeof body?.payment_intent_id === 'string' ? body.payment_intent_id : current.paymentIntentId,
+        fee: Number.isSafeInteger(body?.platform_fee_cents)
+          ? body.platform_fee_cents / 100
+          : current.fee,
+        processingFee: Number.isSafeInteger(body?.processing_fee_recovery_cents)
+          ? body.processing_fee_recovery_cents / 100
+          : current.processingFee,
+        total: Number.isSafeInteger(body?.amount_total_cents)
+          ? body.amount_total_cents / 100
+          : current.total
       } : current);
       setPendingAction(null);
       setPendingActionMessage(PAYMENT_CONFIRMATION_WAITING_COPY);
@@ -1220,7 +1245,8 @@ export default function PatronView({
       return;
     }
 
-    const platformFee = session.feeType === 'patron' ? estimatePlatformFee(tipAmount) : 0;
+    const platformFee = estimatePlatformFee(tipAmount);
+    const { processingFee, total } = estimateCheckoutAmounts(tipAmount, platformFee);
     sendRequestStarted(funnelTelemetryPayload);
     setPaymentConfirmationState(null);
     setCheckoutPayload({
@@ -1231,7 +1257,8 @@ export default function PatronView({
       artist: 'A direct tip supporting the performer.',
       amount: tipAmount,
       fee: platformFee,
-      total: tipAmount + platformFee,
+      processingFee,
+      total,
       gigId,
       ...createClientActionIds()
     });
@@ -2368,7 +2395,8 @@ export default function PatronView({
                                 return;
                               }
                               // Open confirmation
-                              const platformFee = session.feeType === 'patron' ? estimatePlatformFee(tipAmount) : 0;
+                              const platformFee = estimatePlatformFee(tipAmount);
+                              const { processingFee, total } = estimateCheckoutAmounts(tipAmount, platformFee);
                               sendRequestStarted(funnelTelemetryPayload);
                               setPaymentConfirmationState(null);
                               setCheckoutPayload({
@@ -2378,7 +2406,8 @@ export default function PatronView({
                                 artist: `A direct tip supporting ${p.name} in this Live Room`,
                                 amount: tipAmount,
                                 fee: platformFee,
-                                total: tipAmount + platformFee,
+                                processingFee,
+                                total,
                                 gigId,
                                 ...createClientActionIds()
                               });
@@ -2495,21 +2524,26 @@ export default function PatronView({
 
                       <div className="flex justify-between text-xs">
                         <span className="text-slate-500 mt-0.5">{checkoutCopy?.amountLabel ?? 'Request amount:'}</span>
-                        <span className="text-white">${checkoutPayload.amount}.00</span>
+                        <span className="text-white">{getFormat(checkoutPayload.amount)}</span>
                       </div>
 
                       <div className="flex justify-between text-xs font-sans">
-                        <span className="text-slate-500">Estimated Sway fee:</span>
+                        <span className="text-slate-500">Sway fee:</span>
                         <span className="text-fuchsia-400 font-bold">
-                          {checkoutPayload.fee > 0 ? getFormat(checkoutPayload.fee) : 'Absorbed by Performer'}
+                          {getFormat(checkoutPayload.fee)}
                         </span>
+                      </div>
+
+                      <div className="flex justify-between text-xs font-sans">
+                        <span className="text-slate-500">Payment processing:</span>
+                        <span className="text-slate-200 font-bold">{getFormat(checkoutPayload.processingFee)}</span>
                       </div>
 
                       <div className="border-t border-white/10 pt-2.5 flex justify-between text-xs font-mono font-black">
                         <span className="text-slate-400">Estimated {checkoutCopy?.totalLabel?.toLowerCase() ?? 'request total:'}</span>
-                        <span className="text-cyan-400 font-bold">${checkoutPayload.total}.00</span>
+                        <span className="text-cyan-400 font-bold">{getFormat(checkoutPayload.total)}</span>
                       </div>
-                      <p className="text-[10px] text-slate-500 font-sans">The payment provider confirms the final amount before submission.</p>
+                      <p className="text-[10px] text-slate-500 font-sans">The customer pays the Sway and card-processing charges. The performer receives the full amount shown above. The server confirms the exact total before card confirmation.</p>
                     </div>
                   ) : (
                     <div className="bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5 text-left font-mono">
@@ -2554,7 +2588,11 @@ export default function PatronView({
                               // sync as the patron edits, or their edit here would be
                               // silently ignored at submit time.
                               setCheckoutPayload((prev) => (prev
-                                ? { ...prev, amount: nextAmount, total: nextAmount + prev.fee }
+                                ? {
+                                    ...prev,
+                                    amount: nextAmount,
+                                    ...estimateCheckoutAmounts(nextAmount, prev.fee)
+                                  }
                                 : prev));
                             }}
                             className="w-full bg-slate-950 border border-white/10 px-4 py-2 text-xs rounded-xl text-white focus:border-fuchsia-500 outline-none"

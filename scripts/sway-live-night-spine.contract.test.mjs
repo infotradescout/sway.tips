@@ -93,8 +93,8 @@ requireIncludes('PerformerAccountHome live-money guidance', performerAccountHome
   'Finish secure payout setup to start earning',
   'Ready to earn',
   'Ready for live paid rooms.',
-  'You do not need an existing Stripe account or Stripe password.',
-  'Deposit arrival follows your payout destination’s eligibility and schedule.',
+  'Performers never create a Stripe payout account.',
+  'your combined earnings cash out through PayPal or Venmo',
   'Finish test payout rehearsal (no real money)',
   'Test-money ready'
 ]);

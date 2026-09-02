@@ -169,7 +169,7 @@ Lean ≠ naïve. These are in-scope even for a simple product:
 
 | Risk | Lean control |
 | --- | --- |
-| Fake seller / unpaid payouts | Stripe Connect (or current payout readiness) required before ticket sales go live; suspended/onboarding-blocked sellers cannot publish |
+| Fake seller / unpaid payouts | Verified PayPal/Venmo payout readiness is required before ticket sales go live; suspended/onboarding-blocked sellers cannot publish |
 | Seller paid before show | **Forbidden.** Escrow until QR accept. |
 | Card fraud / friendly fraud | Processor Radar + 3DS where offered; durable orders + idempotency; escrow makes pre-entry disputes reverse without clawing seller payouts |
 | Chargebacks while escrowed | Prefer reverse from hold; evidence still stored (order, email, event snapshot, not-yet-accepted state) |

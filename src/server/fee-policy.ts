@@ -10,8 +10,8 @@ export type ProposedFee = {
   // The fee Sway proposes to charge for this sale, before any Brand Partner cap is
   // applied. resolveSwayPlatformFeePolicyForGig (partner-entitlement-store.ts) is the
   // downstream authority that may clamp this down -- this function never applies or
-  // knows about that cap, and never decides who's billed for it (platformFeePayer,
-  // resolved separately from the room's feeType, handles that split).
+  // knows about that cap. payment-service.ts always adds the resulting fee to the
+  // customer total and ignores legacy performer-paid room input.
   proposedPlatformFeeCents: number;
   attributionSource: 'creator_direct' | 'sway_promoted';
   campaignId: string | null;

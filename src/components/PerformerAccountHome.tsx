@@ -79,8 +79,8 @@ export default function PerformerAccountHome({
         }`}>
           {paymentMode === 'live'
             ? stripeReady
-              ? 'Ready for live paid rooms. You can accept real requests, tips, and boosts. Deposit arrival follows your payout destination’s eligibility and schedule.'
-              : 'Live payments are available. Finish Sway’s secure identity and payout setup before starting a paid room. You do not need an existing Stripe account or Stripe password.'
+              ? 'Ready for live paid rooms. Stripe collects customer payments; your combined earnings cash out through PayPal or Venmo under PayPal’s eligibility and delivery status.'
+              : 'Live payments are locked. Save an approved PayPal or Venmo recipient before starting a paid room. Performers never create a Stripe payout account.'
             : paymentMode === 'test'
               ? 'Test mode only — no real money moves. Start with a free room; use only provider-approved test values when rehearsing money flows.'
               : 'Money actions are temporarily unavailable. Free rooms still work.'}
