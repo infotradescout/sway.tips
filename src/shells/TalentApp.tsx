@@ -92,7 +92,8 @@ export default function TalentApp() {
   const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
   const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
-  const { bState, isLoading, setBState } = useSwayState({ statePath });
+  const { bState, isLoading, setBState, roomActionsBlocked } = useSwayState({ statePath });
+  const [roomActionError, setRoomActionError] = useState<string | null>(null);
 
   const refreshPerformerProfile = async () => {
     if (isAuthEntryRoute) {
@@ -211,50 +212,61 @@ export default function TalentApp() {
 
   const handleEndSession = async () => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) { setRoomActionError('Reconnect before ending or closing this room.'); return; }
+    setRoomActionError(null);
     try {
       const data = await postJson('/api/session/end', { gig_id: selectedGigId ?? bState.activeGigId });
       setBState(data.state);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      setRoomActionError('That room action failed. Reconnect and try again.');
     }
   };
 
   const handleCloseout = async () => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) { setRoomActionError('Reconnect before ending or closing this room.'); return; }
+    setRoomActionError(null);
     try {
       const data = await postJson('/api/session/closeout', { gig_id: selectedGigId ?? bState.activeGigId });
       setBState(data.state);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      setRoomActionError('That room action failed. Reconnect and try again.');
     }
   };
 
   const handleTriageRequest = async (requestId: string, action: 'approve' | 'deny') => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) throw new Error('Reconnect to the live room before changing requests.');
     try {
       const data = await postJson('/api/request/triage', { requestId, action });
       applyDurableMutationState(data);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
   const handleFulfillRequest = async (requestId: string) => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) throw new Error('Reconnect to the live room before changing requests.');
     try {
       const data = await postJson('/api/request/fulfill', { requestId });
       applyDurableMutationState(data);
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
   const handleHideRequest = async (requestId: string) => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) throw new Error('Reconnect to the live room before changing requests.');
     try {
       const data = await postJson('/api/moderation/hide', {
         requestId,
@@ -264,11 +276,13 @@ export default function TalentApp() {
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
   const handleRemoveRequest = async (requestId: string) => {
     if (demoMode) return rejectDemoMutation();
+    if (roomActionsBlocked) throw new Error('Reconnect to the live room before changing requests.');
     try {
       const data = await postJson('/api/moderation/remove', {
         requestId,
@@ -278,6 +292,7 @@ export default function TalentApp() {
       await refreshActiveRooms();
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -402,6 +417,9 @@ export default function TalentApp() {
     return (
       <div className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
         {!demoMode ? <button type="button" onClick={() => { void handleLogout(); }} className="absolute right-3 top-3 z-50 inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 text-xs font-bold text-slate-200 shadow-xl"><LogOut className="h-4 w-4" /> Log out</button> : null}
+        {roomActionsBlocked ? <div role="alert" className="absolute inset-x-3 top-14 z-50 rounded-xl border border-white/20 bg-slate-950 p-4 text-sm text-white"><p>Connection interrupted. Showing the last confirmed queue. Room actions are paused until we reconnect.</p><button type="button" className="mt-3 min-h-11 rounded-lg bg-fuchsia-600 px-4 font-bold" onClick={() => window.dispatchEvent(new Event('re-fetch-state'))}>Retry connection</button><a className="ml-4 underline" href="/talent/profile">Open profile</a></div> : null}
+        {roomActionError ? <div role="alert" className="absolute inset-x-3 bottom-3 z-50 rounded-xl bg-slate-950 p-4 text-sm text-white">{roomActionError}</div> : null}
+        <div inert={roomActionsBlocked} className="h-full">
         <TalentDashboard
           session={session}
           requests={requests}
@@ -419,7 +437,9 @@ export default function TalentApp() {
           previewMode={demoMode}
           performerProfile={performerProfile}
           performerEmailVerified={performerEmailVerified}
+          roomActionsBlocked={roomActionsBlocked}
         />
+        </div>
       </div>
     );
   }
@@ -482,6 +502,7 @@ export default function TalentApp() {
                 previewMode={demoMode}
                 performerProfile={performerProfile}
                 performerEmailVerified={performerEmailVerified}
+          roomActionsBlocked={roomActionsBlocked}
               />
             }
             secondary={

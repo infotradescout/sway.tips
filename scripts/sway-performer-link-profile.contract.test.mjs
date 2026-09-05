@@ -633,7 +633,8 @@ for (const term of [
   'PatronNoSessionRecovery'
 ]) requireIncludes(patronApp, term, 'Patron route separation');
 requireExcludes(patronApp, 'performerHandle={route.name', 'Patron route separation');
-requireIncludes(sharedShell, 'if (!statePath || isDemoModeEnabled()) return;', 'Standalone profile polling guard');
+requireIncludes(sharedShell, 'scope.path && !isDemoModeEnabled() ? setInterval', 'Standalone profile polling guard');
+requireIncludes(sharedShell, "if (!scope.path) { clear('missing', null); return; }", 'Standalone profile fetch guard');
 
 for (const term of [
   "SWAY_DISPOSABLE_MIGRATION_PROOF === '1'",

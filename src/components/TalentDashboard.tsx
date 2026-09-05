@@ -91,6 +91,7 @@ interface TalentDashboardProps {
   selectedGigId?: string | null;
   onSelectGigId?: (gigId: string | null) => void;
   previewMode?: boolean;
+  roomActionsBlocked?: boolean;
   performerProfile?: {
     performer_id: string;
     display_name: string;
@@ -717,6 +718,17 @@ type RequestLibraryTrack = {
   sourceKey: string;
 };
 
+function RequestLibraryPager({ label, total, page, onPage }: { label: string; total: number; page: number; onPage: (page: number) => void }) {
+  const last = Math.max(0, Math.ceil(total / 30) - 1);
+  return <nav aria-label={label + ' pages'} className="mt-3 flex flex-wrap items-center justify-between gap-2">
+    <p className="text-xs text-slate-400">Showing {page * 30 + 1}–{Math.min((page + 1) * 30, total)} of {total}</p>
+    {last > 0 ? <div className="flex gap-2">
+      <button type="button" disabled={page === 0} onClick={() => onPage(page - 1)} className="min-h-11 rounded-lg border border-white/20 px-3 text-sm disabled:opacity-40">Previous</button>
+      <button type="button" disabled={page === last} onClick={() => onPage(page + 1)} className="min-h-11 rounded-lg border border-white/20 px-3 text-sm disabled:opacity-40">Next</button>
+    </div> : null}
+  </nav>;
+}
+
 function RequestLibraryWorkspace({
   catalogTracks,
   externalTracks,
@@ -747,6 +759,15 @@ function RequestLibraryWorkspace({
   onOpenAdvanced: () => void;
 }) {
   const totalTracks = catalogTracks.length + externalTracks.length;
+  const [query, setQuery] = useState('');
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [externalPage, setExternalPage] = useState(0);
+  const needle = query.trim().toLocaleLowerCase();
+  const match = (track: RequestLibraryTrack) => !needle || [track.title, track.artist, track.album, track.sourceLabel].filter(Boolean).join(' ').toLocaleLowerCase().includes(needle);
+  const filteredCatalog = catalogTracks.filter(match);
+  const filteredExternal = externalTracks.filter(match);
+  const safeCatalogPage = Math.min(catalogPage, Math.max(0, Math.ceil(filteredCatalog.length / 30) - 1));
+  const safeExternalPage = Math.min(externalPage, Math.max(0, Math.ceil(filteredExternal.length / 30) - 1));
 
   return (
     <section data-sway-library-workspace="true" className="mx-auto w-full max-w-6xl rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-lg">
@@ -770,6 +791,10 @@ function RequestLibraryWorkspace({
         </div>
       </div>
 
+      <label className="mt-5 block text-sm font-bold text-white">Search your request library
+        <input type="search" aria-label="Search request library" value={query} onChange={event => { setQuery(event.target.value); setCatalogPage(0); setExternalPage(0); }} placeholder="Song, artist, album, or source" className="mt-2 min-h-11 w-full rounded-xl border border-white/20 bg-slate-950 px-3 py-2 text-sm text-white" />
+      </label>
+      <p role="status" className="mt-2 text-xs text-slate-400">{filteredCatalog.length + filteredExternal.length} matching tracks out of {totalTracks}.</p>
       <div className="mt-5 space-y-2">
         {loading ? <p className="text-sm text-slate-400">Loading your music…</p> : null}
         {error ? <p className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
@@ -779,14 +804,15 @@ function RequestLibraryWorkspace({
             <p className="mt-2 text-sm text-slate-400">Upload music in Catalog and turn on “Allow requests,” or import a playlist below.</p>
           </div>
         ) : null}
-        {catalogTracks.length > 0 ? <div className="pt-2"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-300">Catalog audio · stored in Sway</p>{catalogTracks.slice(0, 30).map((track) => (
+        {filteredCatalog.length > 0 ? <div className="pt-2"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-300">Catalog audio · stored in Sway</p>{filteredCatalog.slice(safeCatalogPage * 30, (safeCatalogPage + 1) * 30).map((track) => (
           <div key={track.id} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 px-4 py-3"><div className="min-w-0"><p className="truncate text-sm font-black text-white">{track.title}</p><p className="truncate text-xs text-slate-400">{track.artist}{track.album ? ` · ${track.album}` : ''}</p></div><span className="shrink-0 rounded-full border border-fuchsia-500/20 px-2 py-1 text-[10px] font-bold text-fuchsia-200">Catalog</span></div>
-        ))}</div> : null}
-        {externalTracks.length > 0 ? <div className="pt-3"><p className="mb-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">External request music</p><p className="mb-2 text-xs text-slate-500">Open or play these tracks from their external source.</p>{externalTracks.slice(0, 30).map((track) => (
+        ))}<RequestLibraryPager label="Catalog" total={filteredCatalog.length} page={safeCatalogPage} onPage={setCatalogPage} /></div> : null}
+        {filteredExternal.length > 0 ? <div className="pt-3"><p className="mb-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">External request music</p><p className="mb-2 text-xs text-slate-500">Open or play these tracks from their external source.</p>{filteredExternal.slice(safeExternalPage * 30, (safeExternalPage + 1) * 30).map((track) => (
           <div key={track.id} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3"><div className="min-w-0"><p className="truncate text-sm font-black text-white">{track.title}</p><p className="truncate text-xs text-slate-400">{track.artist}{track.album ? ` · ${track.album}` : ''}</p></div><span className="shrink-0 rounded-full border border-cyan-500/20 px-2 py-1 text-[10px] font-bold text-cyan-200">{track.sourceLabel}</span></div>
-        ))}</div> : null}
+        ))}<RequestLibraryPager label="External music" total={filteredExternal.length} page={safeExternalPage} onPage={setExternalPage} /></div> : null}
       </div>
 
+      {!loading && !error && totalTracks > 0 && filteredCatalog.length + filteredExternal.length === 0 ? <p className="mt-4 text-sm text-slate-300">No matching tracks. Try another song, artist, or source.</p> : null}
       <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1050,7 +1076,18 @@ function PerformerRoomToolsDialog({
       if (!dialog) return;
       const focusable = (Array.from(dialog.querySelectorAll(
         'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
-      )) as HTMLElement[]).filter((element) => element.getClientRects().length > 0 && !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true');
+      )) as HTMLElement[]).filter((element) => {
+        if (element.tabIndex < 0 || !element.getClientRects().length || element.closest('[inert], [hidden], [aria-hidden="true"]')) return false;
+        if (getComputedStyle(element).visibility !== 'visible') return false;
+        // Collapsed details can still report layout rectangles for unfocusable descendants.
+        for (let parent = element.parentElement; parent && parent !== dialog; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement && !parent.open) {
+            const summary = parent.querySelector(':scope > summary');
+            if (!summary?.contains(element)) return false;
+          }
+        }
+        return true;
+      });
       if (!focusable.length) {
         event.preventDefault();
         dialog.focus();
@@ -1388,6 +1425,7 @@ export default function TalentDashboard({
   selectedGigId = null,
   onSelectGigId = () => {},
   previewMode = false,
+  roomActionsBlocked = false,
   performerProfile = null,
   performerEmailVerified = true
 }: TalentDashboardProps) {
@@ -1588,7 +1626,7 @@ export default function TalentDashboard({
   const [hardwareBindings, setHardwareBindings] = useState<HardwareBindingMap>(() => loadHardwareBindings());
   const [hardwareControlsEnabled, setHardwareControlsEnabled] = useState(() => loadHardwareControlsEnabled());
   const roomHasControlContext = session.status !== 'inactive' && Boolean(writableGigId);
-  const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled;
+  const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled && !roomActionsBlocked;
   const [hardwareLearnTarget, setHardwareLearnTarget] = useState<HardwareActionId | null>(null);
   const [hardwareInputStatus, setHardwareInputStatus] = useState<'idle' | 'midi-ready' | 'midi-unavailable' | 'midi-denied'>('idle');
   const [bridgeTokenStatus, setBridgeTokenStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -1651,6 +1689,7 @@ export default function TalentDashboard({
   };
 
   const postSessionJson = async (path: string, body: Record<string, unknown> = {}) => {
+    if (roomActionsBlocked) throw new Error('Reconnect before changing the live room.');
     if (actionInFlightRef.current) {
       throw new Error('An action is already in progress.');
     }
@@ -1689,6 +1728,7 @@ export default function TalentDashboard({
     run: () => void | Promise<void>
   ) => {
     const key = queueActionKey(requestId, action);
+    if (roomActionsBlocked) { setActionError('Reconnect before changing requests.'); return; }
     if (queueActionPendingRef.current) return;
     queueActionPendingRef.current = key;
     setQueueActionPendingKey(key);
@@ -2909,13 +2949,13 @@ export default function TalentDashboard({
               ref={queueActionStatusRef}
               tabIndex={-1}
               aria-label="Queue action status"
-              className="hidden min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:block"
+              role="status"
+              className="col-span-3 sm:col-span-1 min-w-0 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:block"
             >
               <p className="truncate text-[11px] font-bold text-white">{operatorNextAction}</p>
               <p className="truncate text-[10px] text-slate-400">{operatorNextDetail}</p>
             </div>
             <button
-              ref={roomToolsTriggerRef}
               type="button"
               onClick={handleCopyLiveRoomLink}
               disabled={!selectedRoomUrl}
@@ -2924,6 +2964,7 @@ export default function TalentDashboard({
               {liveLinkCopied ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomLink}
             </button>
             <button
+              ref={roomToolsTriggerRef}
               type="button"
               data-sway-open-room-tools="true"
               onClick={() => setRoomToolsExpanded(true)}
