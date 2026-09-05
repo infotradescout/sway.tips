@@ -126,6 +126,19 @@ if (!failures.length) {
   }
 }
 
+// A late action snapshot must not revive denied access or a closed room.
+// Keep this rendered prerequisite in the full gate; source checks cannot replace it.
+if (!failures.length) {
+  const responseOrder = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'scripts/sway-room-response-order.browser.test.ts'],
+    { cwd: root, stdio: 'inherit', timeout: 120_000 }
+  );
+  if (responseOrder.status !== 0) {
+    failures.push(`Rendered room response-order test failed with status ${responseOrder.status ?? 'unknown'}.`);
+  }
+}
+
 if (failures.length) {
   console.error('Payment closeout DB-backed contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
