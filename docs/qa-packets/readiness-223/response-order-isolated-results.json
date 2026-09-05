@@ -5,7 +5,7 @@
   "react": "19.1.1",
   "limits": "Isolated exact shared hook with mocked API/discovery boundaries. React 19.1.1 is bundled with installed Playwright, not the product lockfile. No full-app, Windows, real API, authorization, provider, or production proof.",
   "beforeSourceSha256": "4955405bcda803a6579fc0df94574fc4b93199620a70f1906baecf7c6a8bb9fb",
-  "afterSourceSha256": "779a1bf039226ddc244373456c60be1dcf8feda4d335cf0de5543a0a7bb234d4",
+  "afterSourceSha256": "711e1c460934578777bee8ad086e3a00a4f30ded672883c7921fe64a66ab90ab",
   "nativeRepositoryBrowserSuite": "UNRUN; no full checkout or exact project dependencies; Windows device offline",
   "before": {
     "pass": 1,

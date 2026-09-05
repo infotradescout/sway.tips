@@ -264,7 +264,7 @@ export function useSwayState(options?: {
           }
           const data = await response.json().catch(() => null);
           if (!stillCurrent(sequence)) return;
-          clear(data?.room_lookup === 'ended' ? 'ended' : 'missing', response.status === 401 || response.status === 403 ? 'Your access changed. Sign in again to continue.' : 'This room is not available.');
+          clear(data?.room_lookup === 'ended' ? 'ended' : 'missing', 'This room is not available.');
           return;
         }
         if (!response.ok) throw new Error('Room temporarily unavailable');
