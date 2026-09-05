@@ -139,6 +139,19 @@ if (!failures.length) {
   }
 }
 
+// Creation is another asynchronous room-selection boundary, including recap restart.
+// This isolated shell test supplements, and never replaces, the rendered gates above.
+if (!failures.length) {
+  const roomStart = spawnSync(
+    process.execPath,
+    ['scripts/sway-performer-room-start.browser.test.mjs'],
+    { cwd: root, stdio: 'inherit', timeout: 120_000 }
+  );
+  if (roomStart.status !== 0) {
+    failures.push(`Performer room-start isolation test failed with status ${roomStart.status ?? 'unknown'}.`);
+  }
+}
+
 if (failures.length) {
   console.error('Payment closeout DB-backed contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
