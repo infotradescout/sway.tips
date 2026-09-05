@@ -74,6 +74,7 @@
     "test:integration:live-room-real-postgres-concurrency": "SWAY_REQUIRE_REAL_POSTGRES_PROOF=true node --import tsx scripts/sway-live-room-crash-concurrency.integration.test.ts",
     "test:integration:simulated-live-night": "node --import tsx scripts/sway-simulated-live-night.integration.test.ts",
     "test:integration:simulated-live-night-browser": "node --import tsx scripts/sway-simulated-live-night.browser.test.ts",
+    "test:browser:readiness-223": "node scripts/sway-readiness-223.browser.test.mjs",
     "test:browser:refund-confirmation": "node --import tsx scripts/sway-refund-confirmation.browser.test.ts",
     "test:browser:payment-modal-viewport": "node --import tsx scripts/sway-payment-modal-viewport.browser.test.ts",
     "test:browser:profile-payout-options": "node --import tsx scripts/sway-profile-payout-options.browser.test.ts",

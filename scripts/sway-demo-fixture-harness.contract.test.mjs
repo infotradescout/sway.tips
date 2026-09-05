@@ -51,8 +51,8 @@ for (const term of [
 for (const term of [
   'loadDemoBackendState',
   'if (isDemoModeEnabled())',
-  "fetch('/api/state')",
-  'setInterval(fetchState, 4000)'
+  "fetch(scope.path, {",
+  'setInterval(() => { void fetchState(); }, 4000)'
 ]) {
   requireIncludes(shared, term, `Shared state loader missing demo/real split: ${term}`);
 }

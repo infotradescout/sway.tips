@@ -61,7 +61,7 @@ if (!sharedSource.includes('statePath?: string | null;')) {
   failures.push('Shared room-state hook must accept a gig-scoped state path.');
 }
 
-if (!sharedSource.includes("if (!statePath) {")) {
+if (!sharedSource.includes("if (!scope.path) {")) {
   failures.push('Shared room-state hook must gracefully fall back when no gig-scoped path exists.');
 }
 

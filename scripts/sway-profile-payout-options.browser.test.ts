@@ -306,7 +306,7 @@ async function main() {
     assert.equal(await venmoOnlyPage.getByRole('radio', { name: /^Venmo/ }).isDisabled(), false, 'Genuine Venmo must be enabled by its own PayPal approval flag.');
     await venmoOnlyPage.getByRole('radio', { name: /^Venmo/ }).check();
     await venmoOnlyPage.getByRole('button', { name: 'Venmo handle' }).click();
-    await venmoOnlyPage.getByLabel('Venmo handle').fill('@sandbox-artist');
+    await venmoOnlyPage.getByRole('textbox', { name: 'Venmo handle', exact: true }).fill('@sandbox-artist');
     await venmoOnlyPage.getByRole('button', { name: 'Save payout destination' }).click();
     await venmoOnlyPage.getByText('Saved: @sa•••t', { exact: true }).waitFor({ state: 'visible' });
     assert.deepEqual(savedPayoutBody, {
@@ -336,7 +336,7 @@ async function main() {
     const sourcesPage = await context.newPage();
     sourcesPage.on('pageerror', (error) => pageErrors.push(`sources: ${error.stack || error.message}`));
     await sourcesPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=sources`, { waitUntil: 'networkidle' });
-    await sourcesPage.getByRole('heading', { name: 'Your music' }).waitFor({ state: 'visible' });
+    await sourcesPage.getByRole('heading', { name: 'Your music', exact: true }).waitFor({ state: 'visible' });
     assert.equal(await sourcesPage.getByText('Saved for every room').isVisible(), true, 'Sources must explain that saved music is reused across rooms.');
     assert.equal(await sourcesPage.getByText('VirtualDJ library').isVisible(), true, 'Saved DJ library must render on Sources.');
     assert.equal(await sourcesPage.getByText('Spotify: Saturday set').isVisible(), true, 'Saved Spotify playlist must render on Sources.');
@@ -373,6 +373,12 @@ async function main() {
     assert.equal(await roomPage.locator('[data-sway-performer-live-cockpit="true"] > div[inert]').count(), 1, 'Live-room controls behind Room Tools must be inert.');
     await roomPage.keyboard.press('Shift+Tab');
     await roomPage.keyboard.press('Tab');
+    if (!await closeRoomTools.evaluate(element => element === document.activeElement)) {
+      console.log('ROOM_TOOLS_FOCUS_DIAGNOSTIC', await roomToolsDialog.evaluate(dialog => ({
+        active: document.activeElement?.outerHTML,
+        candidates: Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')).filter(element => element.getClientRects().length > 0).map(element => ({ tag: element.tagName, text: element.textContent?.trim().slice(0, 80), tabIndex: element.tabIndex, visible: element.checkVisibility(), closedDetails: Boolean(element.closest('details:not([open])')) }))
+      })));
+    }
     assert.equal(await closeRoomTools.evaluate((element) => element === document.activeElement), true, 'Tab must remain contained inside Room Tools.');
     assert.equal(await roomToolsDialog.getByText('Your saved music sources are not changed here.').isVisible(), true);
     assert.equal(await roomToolsDialog.getByRole('button', { name: 'Prepare VirtualDJ connection' }).isVisible(), true);

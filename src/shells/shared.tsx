@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { isDemoModeEnabled, loadDemoBackendState } from '../demo-mode';
 import { BackendState, GigSession } from '../types';
@@ -161,97 +161,111 @@ export function useSwayState(options?: {
   statePath?: string | null;
 }) {
   const statePath = options?.statePath === undefined ? '/api/state' : options.statePath;
-  const [bState, setBState] = useState<BackendState>(initialState);
-  const [isLoading, setIsLoading] = useState(true);
-  const [roomLookup, setRoomLookup] = useState<RoomLookupState>({
-    status: statePath === '/api/state' ? 'global' : 'missing',
-    message: null
-  });
-  const discoveryRoomEntryRecordedRef = useRef(false);
-
-  const fetchState = async () => {
-    if (!statePath) {
-      setBState(initialState);
-      setRoomLookup({ status: 'missing', message: null });
-      setIsLoading(false);
-      return;
-    }
-
-    if (isDemoModeEnabled()) {
-      try {
-        const demoState = await loadDemoBackendState();
-        if (demoState) {
-          setBState(demoState);
-          setRoomLookup({ status: statePath === '/api/state' ? 'global' : 'active', message: null });
-        }
-      } catch (e) {
-        console.warn('Unable to load demo fixture state:', e);
-      } finally {
-        setIsLoading(false);
-      }
-      return;
-    }
-
-    try {
-      const response = statePath === '/api/state'
-        ? await fetch('/api/state')
-        : await fetch(statePath, {
-            headers: {
-              ...buildPatronRequestHeaders(),
-              ...(!discoveryRoomEntryRecordedRef.current ? {
-                'x-sway-discovery-journey': getOrCreateDiscoveryJourneyId(),
-                'x-sway-discovery-source': getEffectiveDiscoveryChannel(),
-                'x-sway-discovery-entry-path': getDiscoveryEntryPath(),
-                'x-sway-discovery-entry-once': '1'
-              } : {})
-            }
-          });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setBState(initialState);
-        setRoomLookup({
-          status: data?.room_lookup === 'ended' ? 'ended' : 'missing',
-          message: typeof data?.message === 'string'
-            ? data.message
-            : (typeof data?.error === 'string' ? data.error : null)
-        });
-        return;
-      }
-
-      setBState(normalizeBackendState(data));
-      setRoomLookup({
-        status: data?.room_lookup === 'active' ? 'active' : 'global',
-        message: typeof data?.message === 'string' ? data.message : null
-      });
-      if (statePath !== '/api/state' && response.headers.get('x-sway-discovery-recorded') === '1') {
-        discoveryRoomEntryRecordedRef.current = true;
-      }
-    } catch (e) {
-      console.warn('Unable to sync server state:', e);
-      setBState(initialState);
-      setRoomLookup({ status: 'error', message: 'Unable to sync live room state right now.' });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchState();
-
-    if (!statePath || isDemoModeEnabled()) return;
-
-    const interval = setInterval(fetchState, 4000);
-    const handleForceSync = () => fetchState();
-    window.addEventListener('re-fetch-state', handleForceSync);
-
+  // A distinct scope prevents late responses from crossing rooms, including A -> B -> A.
+  const scope = useMemo(() => ({ path: statePath, sequence: 0, pending: false, controller: null as AbortController | null, discoveryRecorded: false }), [statePath]);
+  const activeScope = useRef<typeof scope | null>(scope);
+  useLayoutEffect(() => {
+    activeScope.current = scope;
     return () => {
-      clearInterval(interval);
+      if (activeScope.current === scope) activeScope.current = null;
+      scope.controller?.abort();
+      scope.pending = false;
+    };
+  }, [scope]);
+  const initialLookup: RoomLookupState = { status: statePath === '/api/state' ? 'global' : 'missing', message: null };
+  const [snapshot, setSnapshot] = useState({ scope, state: initialState, loading: Boolean(statePath), lookup: initialLookup });
+  const current = snapshot.scope === scope ? snapshot : { scope, state: initialState, loading: Boolean(statePath), lookup: initialLookup };
+  const matchesRoom = useCallback((data: BackendState) => {
+    const expected = scope.path?.startsWith('/api/state/') ? scope.path.slice('/api/state/'.length) : null;
+    return !expected || data.activeGigId === expected;
+  }, [scope]);
+  const setBState: React.Dispatch<React.SetStateAction<BackendState>> = useCallback((update) => {
+    if (activeScope.current !== scope) return;
+    // A confirmed mutation invalidates reads that started before its result arrived.
+    scope.sequence += 1;
+    scope.pending = false;
+    scope.controller?.abort();
+    setSnapshot(previous => {
+      if (activeScope.current !== scope) return previous;
+      const prior = previous.scope === scope ? previous.state : initialState;
+      const next = normalizeBackendState(typeof update === 'function' ? update(prior) : update);
+      if (!matchesRoom(next)) return previous;
+      return { scope, state: next, loading: false, lookup: { status: next.activeGigId ? 'active' : 'global', message: null } };
+    });
+  }, [scope, matchesRoom]);
+  useEffect(() => {
+    let disposed = false;
+    const stillCurrent = (sequence: number) => !disposed && activeScope.current === scope && scope.sequence === sequence;
+    const clear = (status: RoomLookupStatus, message: string | null) => setSnapshot({ scope, state: initialState, loading: false, lookup: { status, message } });
+    const fetchState = async (force = false) => {
+      if (scope.pending && !force) return;
+      if (!scope.path) { clear('missing', null); return; }
+      const sequence = ++scope.sequence;
+      scope.controller?.abort();
+      const controller = new AbortController();
+      scope.controller = controller;
+      scope.pending = true;
+      const deadline = window.setTimeout(() => {
+        if (!stillCurrent(sequence)) return;
+        controller.abort();
+        scope.pending = false;
+        setSnapshot(previous => ({ scope, state: previous.scope === scope ? previous.state : initialState, loading: false, lookup: { status: 'error', message: 'The connection is taking too long. Retry to reconnect.' } }));
+      }, 15000);
+      try {
+        if (isDemoModeEnabled()) {
+          const data = await loadDemoBackendState();
+          if (stillCurrent(sequence)) setSnapshot({ scope, state: normalizeBackendState(data), loading: false, lookup: { status: scope.path === '/api/state' ? 'global' : 'active', message: null } });
+          return;
+        }
+        const response = await fetch(scope.path, {
+          signal: controller.signal,
+          headers: scope.path === '/api/state' ? undefined : {
+            ...buildPatronRequestHeaders(),
+            ...(!scope.discoveryRecorded ? {
+              'x-sway-discovery-journey': getOrCreateDiscoveryJourneyId(),
+              'x-sway-discovery-source': getEffectiveDiscoveryChannel(),
+              'x-sway-discovery-entry-path': getDiscoveryEntryPath(),
+              'x-sway-discovery-entry-once': '1'
+            } : {})
+          }
+        });
+        if (!stillCurrent(sequence)) return;
+        if ([401, 403, 404, 410].includes(response.status)) {
+          const data = await response.json().catch(() => null);
+          if (!stillCurrent(sequence)) return;
+          clear(data?.room_lookup === 'ended' ? 'ended' : 'missing', response.status === 401 || response.status === 403 ? 'Your access changed. Sign in again to continue.' : 'This room is not available.');
+          return;
+        }
+        if (!response.ok) throw new Error('Room temporarily unavailable');
+        const data = await response.json();
+        if (!stillCurrent(sequence)) return;
+        const normalized = normalizeBackendState(data);
+        if (!matchesRoom(normalized)) throw new Error('Room response did not match the selected room');
+        if (data?.room_lookup === 'ended') { clear('ended', ENDED_LIVE_ROOM_COPY); return; }
+        setSnapshot({ scope, state: normalized, loading: false, lookup: { status: data?.room_lookup === 'active' ? 'active' : 'global', message: null } });
+        if (response.headers.get('x-sway-discovery-recorded') === '1') scope.discoveryRecorded = true;
+      } catch (error) {
+        if (!stillCurrent(sequence) || controller.signal.aborted) return;
+        console.warn('Unable to sync server state:', error);
+        setSnapshot(previous => ({ scope, state: previous.scope === scope ? previous.state : initialState, loading: false, lookup: { status: 'error', message: 'Connection interrupted. Reconnecting to your live room.' } }));
+      } finally {
+        window.clearTimeout(deadline);
+        if (stillCurrent(sequence)) scope.pending = false;
+      }
+    };
+    void fetchState();
+    const interval = scope.path && !isDemoModeEnabled() ? setInterval(() => { void fetchState(); }, 4000) : null;
+    const handleForceSync = () => { void fetchState(true); };
+    window.addEventListener('re-fetch-state', handleForceSync);
+    return () => {
+      disposed = true;
+      scope.controller?.abort();
+      if (interval) clearInterval(interval);
       window.removeEventListener('re-fetch-state', handleForceSync);
     };
-  }, [statePath]);
-
-  return { bState, isLoading, setBState, roomLookup };
+  }, [scope, matchesRoom]);
+  return { bState: current.state, setBState, isLoading: current.loading, roomLookup: current.lookup,
+    roomActionsBlocked: Boolean(statePath) && (current.loading || !['active', 'global'].includes(current.lookup.status)) };
 }
 
 export async function postJson(url: string, body?: unknown) {

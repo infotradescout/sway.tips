@@ -2,6 +2,7 @@ import { Check, Copy, Download, ExternalLink, Link as LinkIcon, Printer, QrCode 
 import { useEffect, useRef, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { sendShareLinkCopied } from '../shells/frictionClient';
+import { copyRoomLink } from './PerformerRoomShare';
 
 const MISSING_CONTEXT_COPY = 'No active live session. Create a room to generate your room link and QR code.';
 const ACTIVE_BODY_COPY = 'Patrons can scan this QR code or open this room link to land directly in your live Request, Tip, and Boost room.';
@@ -72,22 +73,7 @@ export default function PerformerShareKit({ activeGigId }: { activeGigId: string
     setShareFeedback(null);
   }, [activeGigId]);
 
-  const copyToClipboard = async (value: string) => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      return;
-    }
-
-    const textArea = document.createElement('textarea');
-    textArea.value = value;
-    textArea.setAttribute('readonly', 'true');
-    textArea.style.position = 'absolute';
-    textArea.style.left = '-9999px';
-    document.body.appendChild(textArea);
-    textArea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textArea);
-  };
+  const copyToClipboard = copyRoomLink;
 
   const handleCopy = async () => {
     if (!roomLink) return;
