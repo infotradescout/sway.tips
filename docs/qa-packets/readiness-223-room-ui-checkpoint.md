@@ -1,5 +1,7 @@
 # sway.tips production-readiness checkpoint — issue 223
 
+This is historical evidence for draft commit `57a43a255d3a170ef335e705e666220d82c72e01`. See [the subsequent mobile/queue checkpoint](readiness-223-mobile-queue-checkpoint.md) for current status. The browser passes below do not verify later source changes.
+
 ## Decision
 
 Draft repair only. NOT ready to merge, deploy, activate money, or close issue 223.
