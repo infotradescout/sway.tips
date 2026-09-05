@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LogOut, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
@@ -89,8 +89,29 @@ export default function TalentApp() {
     || Boolean(eventDoorId);
   const demoMode = isDemoModeEnabled();
   const [activeRooms, setActiveRooms] = useState<ActiveRoomSummary[]>([]);
-  const [selectedGigId, setSelectedGigId] = useState<string | null>(null);
+  const [selectedGigId, applySelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
+  const roomSelectionRevision = useRef(0);
+  const explicitRoomSelection = useRef(false);
+  const roomStartInFlight = useRef(false);
+  const roomStartContext = useRef<{ active: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    // Pending room creation belongs to this committed account/route context.
+    const context = { active: true };
+    roomStartContext.current = context;
+    return () => {
+      context.active = false;
+      if (roomStartContext.current === context) roomStartContext.current = null;
+    };
+  }, [demoMode, isAuthEntryRoute, performerProfile?.owner_user_id, performerProfile?.performer_id]);
+
+  const setSelectedGigId = useCallback((gigId: string | null) => {
+    // Track intent, not just the final id: A -> B -> A still supersedes a start.
+    roomSelectionRevision.current += 1;
+    explicitRoomSelection.current = true;
+    applySelectedGigId(gigId);
+  }, []);
   const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
   const { bState, isLoading, setBState, roomActionsBlocked } = useSwayState({ statePath });
   const [roomActionError, setRoomActionError] = useState<string | null>(null);
@@ -176,8 +197,12 @@ export default function TalentApp() {
     // global endpoint, which then loses activeGigId and 409s the closeout
     // request. The user (or handleStartSession) is the only thing that
     // should change an existing selection.
-    if (selectedGigId) return;
-    setSelectedGigId(activeRooms[0]?.gigId ?? null);
+    if (selectedGigId || explicitRoomSelection.current || roomStartInFlight.current) return;
+    const firstRoomId = activeRooms[0]?.gigId;
+    if (firstRoomId) {
+      roomSelectionRevision.current += 1;
+      applySelectedGigId(firstRoomId);
+    }
   }, [activeRooms, selectedGigId]);
 
   const rejectDemoMutation = async () => {
@@ -194,20 +219,37 @@ export default function TalentApp() {
 
   const handleStartSession = async (setupData: PerformerRoomSetupData) => {
     if (demoMode) return rejectDemoMutation();
-    const performerIdentityName = performerProfile
-      ? resolvePublicProfileHeroName({
-          handle: performerProfile.handle,
-          stageName: performerProfile.stage_name,
-          displayName: performerProfile.display_name
-        })
-      : '';
-    const data = await postJson('/api/session/start', {
-      ...setupData,
-      talentName: setupData.talentName.trim() || performerIdentityName
-    });
-    setBState(data.state);
-    setSelectedGigId(data.state?.activeGigId ?? null);
-    await refreshActiveRooms();
+    if (roomStartInFlight.current) throw new Error('A room is already being created. Wait for its result before starting another.');
+    const context = roomStartContext.current;
+    if (!context?.active || isAuthEntryRoute) throw new Error('Open your performer account before creating a room.');
+    const selectionRevision = roomSelectionRevision.current;
+    const requestedGigId = setupData.gig_id;
+    roomStartInFlight.current = true;
+    try {
+      const performerIdentityName = performerProfile
+        ? resolvePublicProfileHeroName({
+            handle: performerProfile.handle,
+            stageName: performerProfile.stage_name,
+            displayName: performerProfile.display_name
+          })
+        : '';
+      const data = await postJson('/api/session/start', {
+        ...setupData,
+        talentName: setupData.talentName.trim() || performerIdentityName
+      });
+      if (!context.active || roomStartContext.current !== context) return;
+      const createdGigId = data?.state?.activeGigId;
+      if (!createdGigId || createdGigId !== requestedGigId) {
+        throw new Error('The room response could not be confirmed. Retry with the same room setup.');
+      }
+      // Never inject a new room snapshot into the previously selected room.
+      // Selecting the new id starts its own confirmed read in useSwayState.
+      if (roomSelectionRevision.current !== selectionRevision) return;
+      setSelectedGigId(createdGigId);
+      await refreshActiveRooms();
+    } finally {
+      roomStartInFlight.current = false;
+    }
   };
 
   const handleEndSession = async () => {
@@ -310,6 +352,7 @@ export default function TalentApp() {
 
   const handleLogout = async () => {
     if (demoMode) return;
+    roomSelectionRevision.current += 1;
     await postJson('/api/account/logout', {});
     window.location.assign('/');
   };
