@@ -36,7 +36,9 @@ import {
   Home,
   UserRound,
   CalendarDays,
-  Smartphone
+  Smartphone,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActiveRoomSummary, GigSession, RequestItem } from '../types';
@@ -491,33 +493,50 @@ function validateLibraryHelper(value: unknown): DownloadableLibraryHelper | null
 function CompactRequestPanel({
   title,
   empty,
-  overflowCount,
   requests,
   renderActions,
   paymentsEnabled = true
 }: {
   title: string;
   empty: string;
-  overflowCount: number;
   requests: RequestItem[];
   renderActions: (request: RequestItem) => React.ReactNode;
   paymentsEnabled?: boolean;
 }) {
+  const [page, setPage] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const pageSize = 5;
+  const pageCount = Math.max(1, Math.ceil(requests.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRequests = requests.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+
+  useEffect(() => { setPage(currentPage); }, [currentPage]);
+  useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [currentPage]);
+
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <section aria-label={`${title} requests`} className="flex min-w-0 min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/90 p-3">
+      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-1">
         <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">{title}</h3>
         <span className="rounded-full border border-white/10 bg-slate-950 px-2 py-1 text-[10px] font-black text-slate-300">
-          {requests.length + overflowCount}
+          {requests.length}
         </span>
+        {pageCount > 1 ? (
+          <nav aria-label={`${title} request pages`} className="flex items-center gap-1">
+            <button type="button" aria-label={`Previous ${title.toLowerCase()} requests`} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+            <select aria-label={`${title} request page`} value={currentPage} onChange={(event) => setPage(Number(event.target.value))} className="h-8 max-w-20 rounded-lg border border-white/10 bg-slate-950 text-[10px] text-slate-200">
+              {Array.from({ length: pageCount }, (_, index) => <option key={index} value={index}>{index + 1}/{pageCount}</option>)}
+            </select>
+            <button type="button" aria-label={`Next ${title.toLowerCase()} requests`} disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+          </nav>
+        ) : null}
       </div>
-      <div className="grid min-h-0 flex-1 content-start gap-2 overflow-hidden">
+      <div ref={listRef} tabIndex={0} aria-label={`${title} request list`} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto overscroll-contain rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
         {requests.length === 0 ? (
           <div className="flex h-full min-h-24 items-center justify-center rounded-xl border border-dashed border-white/10 bg-slate-950/60 px-3 text-center text-xs font-bold text-slate-500">
             {empty}
           </div>
         ) : (
-          requests.map((request) => (
+          visibleRequests.map((request) => (
             <article key={request.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-3 py-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-black text-white">{request.title}</p>
@@ -539,11 +558,6 @@ function CompactRequestPanel({
           ))
         )}
       </div>
-      {overflowCount > 0 ? (
-        <p className="mt-2 truncate text-center text-[10px] font-bold text-slate-500">
-          {overflowCount} more visible after clearing the top items.
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -2340,8 +2354,15 @@ export default function TalentDashboard({
   const selectedRoomUrl = resolveLiveRoomLink(selectedRoomLink);
   const handleCopyLiveRoomLink = async () => {
     if (!selectedRoomUrl) return;
-    await copyRoomLink(selectedRoomUrl);
-    setLiveLinkCopied(true);
+    const copiedGigId = writableGigId;
+    try {
+      await copyRoomLink(selectedRoomUrl);
+      if (writableGigIdRef.current !== copiedGigId) return;
+      setLiveLinkCopied(true);
+    } catch {
+      if (writableGigIdRef.current !== copiedGigId) return;
+      setActionError('Copy failed. Open Share Room or Room tools to select the link.');
+    }
   };
 
   useEffect(() => {
@@ -2567,10 +2588,6 @@ export default function TalentDashboard({
   };
 
   if (shouldRenderPerformerLiveRoom(session.status, inactiveWorkspace)) {
-    const visiblePending = triageQueue.slice(0, 4);
-    const visibleApproved = liveLadderQueue.slice(0, 5);
-    const overflowPending = Math.max(0, triageQueue.length - visiblePending.length);
-    const overflowApproved = Math.max(0, liveLadderQueue.length - visibleApproved.length);
     const roomOpenLabel = session.requestsOpen ? 'Open' : LIVE_ROOM_LANGUAGE.paused;
     const roomStatusTone = session.requestsOpen ? 'text-emerald-300' : 'text-rose-300';
 
@@ -2650,14 +2667,15 @@ export default function TalentDashboard({
           </div>
         ) : null}
         <div
-          inert={roomToolsExpanded ? true : undefined}
-          aria-hidden={roomToolsExpanded ? true : undefined}
-          className="grid h-full min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto] gap-2 landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+          inert={roomToolsExpanded || Boolean(removeConfirmationRequest) ? true : undefined}
+          aria-hidden={roomToolsExpanded || Boolean(removeConfirmationRequest) ? true : undefined}
+          className="sway-live-layout"
+          data-mobile-panel={mobilePanel}
         >
           {actionError ? (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
+            <div role="alert" className="max-h-20 shrink-0 overflow-y-auto rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-100">
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate">{actionError}</span>
+                <span className="min-w-0 break-words">{actionError}</span>
                 <button type="button" onClick={() => setActionError(null)} className="shrink-0 text-rose-200">
                   <span className="sr-only">Dismiss error</span>
                   <X className="h-4 w-4" />
@@ -2666,7 +2684,7 @@ export default function TalentDashboard({
             </div>
           ) : null}
 
-          <header className="grid gap-2 rounded-2xl border border-white/10 bg-slate-900/90 p-3 shadow-xl landscape:grid-cols-[minmax(0,1fr)_auto] landscape:items-center">
+          <header className="sway-live-header grid shrink-0 gap-2 rounded-2xl border border-white/10 bg-slate-900/90 p-3 shadow-xl">
             <div className="flex min-w-0 items-center gap-3">
               <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-slate-950 text-cyan-300">
                 <span className={`absolute -right-1 -top-1 h-3 w-3 rounded-full ${session.requestsOpen ? 'bg-emerald-400' : 'bg-rose-400'}`} />
@@ -2714,7 +2732,7 @@ export default function TalentDashboard({
                 ) : null}
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-1.5 text-center landscape:w-[23rem]">
+            <div className="sway-live-counts grid grid-cols-4 gap-1.5 text-center">
               {[
                 [LIVE_ROOM_LANGUAGE.pending, triageQueue.length, 'text-amber-300'],
                 [LIVE_ROOM_LANGUAGE.approved, liveLadderQueue.length, 'text-cyan-300'],
@@ -2729,22 +2747,7 @@ export default function TalentDashboard({
             </div>
           </header>
 
-          <PerformerPlaybackController
-            gigId={writableGigId}
-            approvedRequests={liveLadderQueue}
-            previewMode={previewMode}
-          />
-
-          <div className="h-32 min-h-0 landscape:hidden">
-            <PerformerAudienceScreen
-              activeGigId={selectedGigId ?? activeGigId}
-              session={session}
-              nowPlayingRequest={nowPlayingRequest}
-              approvedQueue={liveLadderQueue}
-            />
-          </div>
-
-          <section className="grid grid-cols-3 gap-2 landscape:hidden" aria-label="Live-night sections">
+          <section className="sway-live-tabs grid shrink-0 grid-cols-3 gap-2" aria-label="Live-night sections">
             {[
               { id: 'live', label: LIVE_ROOM_LANGUAGE.requests },
               { id: 'share', label: LIVE_ROOM_LANGUAGE.shareRoom },
@@ -2753,6 +2756,7 @@ export default function TalentDashboard({
               <button
                 key={item.id}
                 type="button"
+                aria-pressed={mobilePanel === item.id}
                 onClick={() => setMobilePanel(item.id as 'live' | 'share' | 'settings')}
                 className={`min-h-10 rounded-xl px-2 text-xs font-black uppercase tracking-wide ${
                   mobilePanel === item.id ? 'bg-cyan-500 text-slate-950' : 'border border-white/10 bg-slate-900 text-slate-300'
@@ -2763,14 +2767,19 @@ export default function TalentDashboard({
             ))}
           </section>
 
-          <main className="min-h-0 min-w-0 overflow-hidden">
-            <div className="hidden h-full min-h-0 gap-2 landscape:grid landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]">
-              <div className="grid min-h-0 grid-cols-2 gap-2">
+          <main className="sway-live-content" aria-label="Live room workspace">
+            <div key={`playback-${writableGigId}`} className="sway-live-playback">
+              <PerformerPlaybackController
+                gigId={writableGigId}
+                approvedRequests={liveLadderQueue}
+                previewMode={previewMode}
+              />
+            </div>
+              <div key={`queues-${writableGigId}`} className="sway-live-queues">
                 <CompactRequestPanel
                   title={LIVE_ROOM_LANGUAGE.pending}
                   empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
-                  overflowCount={overflowPending}
-                  requests={visiblePending}
+                  requests={triageQueue}
                   paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
@@ -2800,8 +2809,7 @@ export default function TalentDashboard({
                 <CompactRequestPanel
                   title={LIVE_ROOM_LANGUAGE.approved}
                   empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
-                  overflowCount={overflowApproved}
-                  requests={visibleApproved}
+                  requests={liveLadderQueue}
                   paymentsEnabled={session.paymentsEnabled !== false}
                   renderActions={(request) => (
                     <>
@@ -2840,6 +2848,7 @@ export default function TalentDashboard({
                   )}
                 />
               </div>
+            <div className="sway-live-audience">
               <PerformerAudienceScreen
                 activeGigId={selectedGigId ?? activeGigId}
                 session={session}
@@ -2847,104 +2856,26 @@ export default function TalentDashboard({
                 approvedQueue={liveLadderQueue}
               />
             </div>
-
-            <div className="h-full min-h-0 min-w-0 landscape:hidden">
-              {mobilePanel === 'live' ? (
-                <div className="grid h-full min-h-0 grid-rows-2 gap-2">
-                  <CompactRequestPanel
-                    title={LIVE_ROOM_LANGUAGE.pending}
-                    empty={isCrowdAutopilot ? 'Autopilot is moving clean requests into the queue.' : 'No pending requests.'}
-                    overflowCount={overflowPending}
-                    requests={visiblePending.slice(0, 3)}
-                    paymentsEnabled={session.paymentsEnabled !== false}
-                    renderActions={(request) => (
-                      <>
-                        <button
-                          type="button"
-                          aria-label={`Approve ${request.title}`}
-                          onClick={() => void runQueueAction(request.id, 'approve', () => onTriage(request.id, 'approve'))}
-                          disabled={previewMode || isRequestQueueActionPending(request.id)}
-                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'approve') ? 'true' : 'false'}
-                          className="bg-emerald-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Deny ${request.title}`}
-                          onClick={() => void runQueueAction(request.id, 'veto', () => onTriage(request.id, 'deny'))}
-                          disabled={previewMode || isRequestQueueActionPending(request.id)}
-                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'veto') ? 'true' : 'false'}
-                          className="bg-rose-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
-                  />
-                  <CompactRequestPanel
-                    title={LIVE_ROOM_LANGUAGE.approved}
-                    empty={isCrowdAutopilot ? 'Waiting for the crowd to pick what is next.' : 'No approved queue yet.'}
-                    overflowCount={overflowApproved}
-                    requests={visibleApproved.slice(0, 3)}
-                    paymentsEnabled={session.paymentsEnabled !== false}
-                    renderActions={(request) => (
-                      <>
-                        <button
-                          type="button"
-                          aria-label={`Mark ${request.title} played`}
-                          onClick={() => void runQueueAction(request.id, 'fulfill', () => onFulfill(request.id))}
-                          disabled={previewMode || isRequestQueueActionPending(request.id)}
-                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'fulfill') ? 'true' : 'false'}
-                          className="bg-cyan-500 text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Play className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Hide ${request.title}`}
-                          onClick={() => void runQueueAction(request.id, 'hide', () => onHide(request.id))}
-                          disabled={previewMode || isRequestQueueActionPending(request.id)}
-                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'hide') ? 'true' : 'false'}
-                          className="border border-white/10 bg-slate-950 text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${request.title}${session.paymentsEnabled === false ? '' : ' and reverse payment'}`}
-                          onClick={(event) => confirmAndRemoveRequest(request, event.currentTarget)}
-                          disabled={previewMode || isRequestQueueActionPending(request.id)}
-                          data-sway-queue-action-pending={isQueueActionPending(request.id, 'remove') ? 'true' : 'false'}
-                          className="border border-rose-500/30 bg-rose-950/60 text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                        <SpotifyOpenLink request={request} />
-                      </>
-                    )}
-                  />
-                </div>
-              ) : mobilePanel === 'share' ? (
-                <PerformerRoomShare activeGigId={selectedGigId ?? activeGigId} />
-              ) : (
-                <PerformerRoomControls
-                  session={session}
-                  requestScopeLabel={requestScopeLabel}
-                  selectedRoomLink={selectedRoomLink}
-                  operatorNextAction={operatorNextAction}
-                  operatorNextDetail={operatorNextDetail}
-                  actionPending={actionPending}
-                  onToggleRequests={handleToggleRequests}
-                  onSetMode={handleSetMode}
-                  onSetSearchScope={handleSetSearchScope}
-                  onEndSession={onEndSession}
-                />
-              )}
+            <div key={`share-${writableGigId}`} className="sway-live-share">
+              <PerformerRoomShare activeGigId={selectedGigId ?? activeGigId} />
+            </div>
+            <div className="sway-live-controls">
+              <PerformerRoomControls
+                session={session}
+                requestScopeLabel={requestScopeLabel}
+                selectedRoomLink={selectedRoomLink}
+                operatorNextAction={operatorNextAction}
+                operatorNextDetail={operatorNextDetail}
+                actionPending={actionPending}
+                onToggleRequests={handleToggleRequests}
+                onSetMode={handleSetMode}
+                onSetSearchScope={handleSetSearchScope}
+                onEndSession={onEndSession}
+              />
             </div>
           </main>
 
-          <footer className="grid grid-cols-3 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
+          <footer className="sway-live-footer grid shrink-0 grid-cols-3 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
             <div
               ref={queueActionStatusRef}
               tabIndex={-1}

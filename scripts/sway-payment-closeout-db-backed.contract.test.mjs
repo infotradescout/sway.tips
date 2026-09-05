@@ -100,8 +100,9 @@ for (const term of [
   }
 }
 
-if ((talentDashboardSource.match(/onClick=\{\(event\) => confirmAndRemoveRequest\(request, event\.currentTarget\)\}/g) ?? []).length !== 2) {
-  failures.push('Desktop and mobile approved queues must both expose the confirmed remove-and-refund action.');
+if ((talentDashboardSource.match(/onClick=\{\(event\) => confirmAndRemoveRequest\(request, event\.currentTarget\)\}/g) ?? []).length !== 1
+  || !talentDashboardSource.includes('className="sway-live-queues"')) {
+  failures.push('The shared desktop/mobile approved queue must expose the confirmed remove-and-refund action exactly once.');
 }
 
 if (talentDashboardSource.includes('window.confirm(')) {

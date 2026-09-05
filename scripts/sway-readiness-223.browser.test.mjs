@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 const artifacts = path.resolve('artifacts/readiness-223', process.env.PROOF_RUN || 'latest');
 fs.mkdirSync(artifacts, { recursive: true });
 const results = [];
-const sourceHashes = Object.fromEntries(['src/shells/shared.tsx','src/shells/TalentApp.tsx','src/components/TalentDashboard.tsx'].map(file=>[file,createHash('sha256').update(fs.readFileSync(file)).digest('hex')]));
+const sourceHashes = Object.fromEntries(['src/shells/shared.tsx','src/shells/TalentApp.tsx','src/components/TalentDashboard.tsx','src/components/PerformerRoomShare.tsx','src/index.css', 'scripts/sway-readiness-223.browser.test.mjs'].map(file=>[file,createHash('sha256').update(fs.readFileSync(file)).digest('hex')]));
 const session = { status:'active', startedAt:new Date().toISOString(), autoCloseoutAt:null, closedAt:null, talentName:'Readiness Test', talentRole:'DJ', feeType:'patron', minimumTip:5, endGigTimerStartedAt:null, isFeatured:false, featuredExpiresAt:null, featuredCost:0, featuredDurationHours:0, requestsOpen:true, requestWindowMode:'manual', requestWindowExpiresAt:null, requestWindowDuration:null, requestWindowLabel:null, requestPresets:[], operatingMode:'manual', searchScope:'library', paymentsEnabled:true, tipsEnabled:true, settlementMode:'platform_test_balance', paymentEnvironment:'test', totals:{totalTips:5,accumulatedFees:1,totalCount:1,topRequest:'Shoutout'} };
 const request = {id:'22222222-2222-4222-8222-222222222222',type:'request',targetType:'custom',title:'Shoutout',subtitle:'Test request',senderName:'Synthetic Patron',amount:5,holdAmount:5,platformFee:1,sponsorCount:1,status:'approved',shadowBanned:false,createdAt:new Date().toISOString(),paymentStatus:'captured',boosts:[]};
 const profile = {performer_id:'33333333-3333-4333-8333-333333333333',display_name:'Readiness Test',handle:'readiness-test',stage_name:null,primary_role:'dj',roles:['dj'],specialties:[],owner_user_id:'44444444-4444-4444-8444-444444444444',email_verified_at:new Date().toISOString(),charges_enabled:true,payouts_enabled:false,money_actions_ready:true,test_mode_platform_balance_allowed:true};
@@ -20,6 +20,7 @@ const vite=await createServer({root:process.cwd(),logLevel:'error',cacheDir:path
 await vite.listen();
 const base='http://127.0.0.1:'+vite.httpServer.address().port;
 const browser=await chromium.launch({channel:'chrome',headless:true});
+const browserVersion=browser.version();
 console.log('Installed Chrome:',browser.version(),'Fixture:',base);
 async function test(name,run,viewport={width:390,height:844}){
   const context=await browser.newContext({viewport,serviceWorkers:'block'});
@@ -57,10 +58,14 @@ await test('clear-room-with-pending-response',async(page,context)=>{
   await page.getByRole('button',{name:'Clear room',exact:true}).click(); await shown(page,null); if(delayed) await json(delayed,state('room-A')).catch(()=>{}); await page.waitForTimeout(100);
   assert.equal((await read(page)).shown,null,'Clearing room must invalidate pending responses');
 });
-async function appRoutes(context,{library=false,count=31}={}){
+async function appRoutes(context,{library=false,count=31,queueCount=1}={}){
   await context.route('**/api/**',route=>{const p=new URL(route.request().url()).pathname;
     if(p==='/api/talent/active-rooms') return json(route,{rooms:library?[]:[{gigId:A,performerName:'Readiness Test',talentRole:'DJ',routePath:'/g/'+A,startedAt:session.startedAt,requestCount:1}]});
-    if(p==='/api/state'||p.startsWith('/api/state/')) return json(route,state(A));
+    if(p==='/api/state'||p.startsWith('/api/state/')) {
+      const response = state(A);
+      if(queueCount > 1) response.requests = ['hold', 'approved'].flatMap(status => Array.from({length:queueCount}, (_,i)=>({...request, id:status+'-'+i, status, title:(status==='hold'?'Pending':'Approved')+' Track '+(i+1)})));
+      return json(route,response);
+    }
     if(p==='/api/payment/config') return json(route,{mode:'test',liveRoomMoneyEnabled:true,testModePlatformBalanceEnabled:true,payoutDestinationCapabilities:{}});
     if(p==='/api/moderation/remove') return json(route,{error:'Synthetic removal failure'},503);
     if(p==='/api/talent/library/tracks'){const tracks=prefix=>Array.from({length:count},(_,i)=>({id:prefix+i,title:prefix+' Track '+(i+1),artist:'Synthetic Artist',album:null,artworkUrl:null,sourceLabel:prefix,sourceKey:prefix})); return json(route,{catalog:{tracks:tracks('Catalog')},external:{tracks:tracks('External')}});}
@@ -126,7 +131,71 @@ for(const viewport of [{width:320,height:568},{width:844,height:390},{width:1366
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'No horizontal page overflow');
   if(!expanded)await page.screenshot({path:path.join(artifacts,'cockpit-'+viewport.width+'.png'),fullPage:true});
 },viewport);
+// Width-only tests miss controls clipped by fixed-height ancestors. Verify the actual
+// controls after ordinary scrolling, including each clipping ancestor and the viewport.
+async function reachable(locator, label) {
+  await locator.scrollIntoViewIfNeeded();
+  const result = await locator.evaluate(node => {
+    const rect=node.getBoundingClientRect();
+    let left=0,top=0,right=innerWidth,bottom=innerHeight;
+    for(let parent=node.parentElement;parent;parent=parent.parentElement){
+      const style=getComputedStyle(parent), bounds=parent.getBoundingClientRect();
+      if(/hidden|clip|auto|scroll/.test(style.overflowX)){left=Math.max(left,bounds.left);right=Math.min(right,bounds.right);}
+      if(/hidden|clip|auto|scroll/.test(style.overflowY)){top=Math.max(top,bounds.top);bottom=Math.min(bottom,bounds.bottom);}
+    }
+    return {width:rect.width,height:rect.height,fullyVisible:rect.left>=left-1&&rect.right<=right+1&&rect.top>=top-1&&rect.bottom<=bottom+1};
+  });
+  assert.ok(result.width>0&&result.height>0&&result.fullyVisible,label+' must be reachable without clipping: '+JSON.stringify(result));
+}
+for(const viewport of [{width:320,height:568},{width:390,height:844},{width:844,height:390},{width:320,height:360}]) {
+  await test('share-controls-reachable-'+viewport.width+'x'+viewport.height,async(page,context)=>{
+    await appRoutes(context);await page.goto(base+'/scripts/browser-fixtures/sway-readiness-223.html?mode=talent');
+    await page.getByRole('button',{name:'Share Room',exact:true}).click();
+    const share=page.locator('[data-sway-performer-room-share="true"]');
+    const qr=share.locator('canvas');await reachable(qr,'Room QR');
+    assert.ok((await qr.boundingBox()).width>=100,'QR must remain large enough to scan');
+    for(const name of ['Copy Room Link','Copy Room Screen']) await reachable(share.getByRole('button',{name,exact:true}),name);
+    for(const name of ['Open Room','Open Room Screen']) await reachable(share.getByRole('link',{name,exact:true}),name);
+    await reachable(page.getByRole('button',{name:'Room tools',exact:true}),'Room tools');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'No page-wide horizontal scroll');
+    await page.screenshot({path:path.join(artifacts,'share-'+viewport.width+'x'+viewport.height+'.png'),fullPage:true});
+  },viewport);
+  await test('playback-controls-reachable-'+viewport.width+'x'+viewport.height,async(page,context)=>{
+    await appRoutes(context);await page.goto(base+'/scripts/browser-fixtures/sway-readiness-223.html?mode=talent');
+    await page.getByRole('button',{name:'Controls',exact:true}).click();
+    await reachable(page.getByRole('combobox',{name:'Playback source',exact:true}),'Playback source');
+    await reachable(page.getByRole('button',{name:'Play deck 1',exact:true}),'Play');
+    await reachable(page.getByRole('button',{name:'Next deck 1',exact:true}),'Next');
+    await reachable(page.locator('[data-sway-performer-room-controls="true"]').getByRole('button',{name:'End Room',exact:true}),'End room within controls');
+  },viewport);
+}
+for(const viewport of [{width:320,height:568},{width:844,height:390},{width:1366,height:768}]) await test('queue-last-page-'+viewport.width,async(page,context)=>{
+  await appRoutes(context,{queueCount:1001});await page.goto(base+'/scripts/browser-fixtures/sway-readiness-223.html?mode=talent');
+  const pending=page.getByRole('region',{name:'Pending requests',exact:true});
+  const approved=page.getByRole('region',{name:'Approved requests',exact:true});
+  await pending.locator('article').first().waitFor();
+  assert.equal(await pending.locator('article').count(),5,'Queue must render a bounded page');
+  await approved.getByRole('combobox',{name:'Approved request page',exact:true}).selectOption('200');
+  const last=approved.getByRole('button',{name:'Remove Approved Track 1001 and reverse payment',exact:true});
+  await reachable(last,'Last request removal');
+  assert.equal(await pending.locator('article').count(),5,'Paging approved requests must preserve pending requests');
+  await last.click();
+  const dialog=page.locator('[data-sway-remove-confirmation="true"]');
+  await reachable(dialog.getByRole('button',{name:'Cancel',exact:true}),'Confirmation cancel');
+  assert.equal(await page.locator('.sway-live-layout[inert]').count(),1,'A confirmation must block background room controls');
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
+  assert.equal(await page.locator('.sway-live-layout[inert]').count(),0,'Cancel must release the room controls');
+  await page.screenshot({path:path.join(artifacts,'queue-'+viewport.width+'.png'),fullPage:true});
+},viewport);
+await test('clipboard-failure-visible',async(page,context)=>{
+  await context.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('Clipboard denied');}}});});
+  await appRoutes(context);await page.goto(base+'/scripts/browser-fixtures/sway-readiness-223.html?mode=talent');
+  await page.getByRole('button',{name:'Share Room',exact:true}).click();
+  const share=page.locator('[data-sway-performer-room-share="true"]');await share.getByRole('button',{name:'Copy Room Link',exact:true}).click();
+  await share.getByRole('alert').waitFor();
+  assert.equal(await share.getByRole('button',{name:'Copied',exact:true}).count(),0,'Failed copy must never show success');
+});
 } finally { await browser.close(); await vite.close(); }
-fs.writeFileSync(path.join(artifacts,'results.json'),JSON.stringify({browser:'Installed Google Chrome, isolated temporary profile',backend:'Mocked API only; no production or provider calls',sourceHashes,results},null,2));
+fs.writeFileSync(path.join(artifacts,'results.json'),JSON.stringify({browserVersion,backend:'Mocked API only; no production or provider calls',sourceHashes,results},null,2));
 console.log('TOTAL',results.length,'PASS',results.filter(x=>x.status==='PASS').length,'FAIL',results.filter(x=>x.status==='FAIL').length);
 process.exitCode=results.some(x=>x.status==='FAIL')?1:0;
