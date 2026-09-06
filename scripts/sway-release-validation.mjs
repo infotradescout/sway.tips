@@ -35,6 +35,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['catalog-read-recovery', ['--import', 'tsx', 'scripts/sway-performer-catalog-reads.behavior.test.mjs'], 180_000, process.execPath],
   ['catalog-recovery-browser', ['scripts/sway-performer-catalog-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['profile-editor-integration-browser', ['--import', 'tsx', 'scripts/sway-profile-editor-integration.browser.test.ts'], 300_000, process.execPath],
