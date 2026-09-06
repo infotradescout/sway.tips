@@ -156,8 +156,23 @@ async function waitVisible(locator: Locator, label: string, server: RunningServe
   try {
     await locator.waitFor({ state: 'visible', timeout });
   } catch (error) {
+    // Only inspect this synthetic loopback application. Never log cookies, form
+    // values, verification URLs, arbitrary response bodies, or provider secrets.
+    let pageEvidence: unknown = 'Page evidence unavailable';
+    const page = locator.page();
+    if (new URL(page.url()).origin === new URL(server.baseUrl).origin) {
+      pageEvidence = await page.evaluate(() => ({
+        path: window.location.pathname,
+        headings: Array.from(document.querySelectorAll('h1,h2,h3,[role="heading"]')).map((node) => ({
+          text: node.textContent?.trim().slice(0, 200),
+          rendered: (node as HTMLElement).innerText?.trim().slice(0, 200),
+          visible: (node as HTMLElement).getClientRects().length > 0
+        })).slice(0, 20),
+        alerts: Array.from(document.querySelectorAll('[role="alert"]')).map((node) => node.textContent?.trim().slice(0, 300)).slice(0, 10)
+      })).catch(() => 'Page evidence unavailable');
+    }
     throw new Error(
-      `${label} was not visible within ${timeout}ms: ${error instanceof Error ? error.message : String(error)}\n${server.logs()}`
+      `${label} was not visible within ${timeout}ms: ${error instanceof Error ? error.message : String(error)}\nPAGE_EVIDENCE ${JSON.stringify(pageEvidence)}\n${server.logs()}`
     );
   }
 }
@@ -333,6 +348,7 @@ async function main() {
       'open-request review',
       server
     );
+    await waitVisible(setup.getByText(performerName, { exact: true }), 'reviewed room host identity', server);
     await setup.getByRole('button', { name: 'Next' }).click();
     await waitVisible(setup.getByRole('heading', { name: 'Ready to go live' }), 'ready-to-start review', server);
     await setup.getByRole('button', { name: 'Create room' }).click();
@@ -352,6 +368,17 @@ async function main() {
     assert.equal(roomUrl.origin, new URL(server.baseUrl).origin);
     assert.match(roomUrl.pathname, /^\/g\/[0-9a-f-]{36}$/i);
     const gigId = roomUrl.pathname.slice('/g/'.length);
+
+    const publicRoomResponse = await fetch(`${server.baseUrl}/api/state/${gigId}`, {
+      signal: AbortSignal.timeout(10_000)
+    });
+    assert.equal(publicRoomResponse.status, 200, 'The created room must be publicly readable.');
+    const publicRoom = await publicRoomResponse.json();
+    assert.equal(publicRoom.activeGigId, gigId, 'The shared room must retain its persisted identity.');
+    assert.equal(publicRoom.session?.talentName, performerName, 'The shared room must retain the reviewed host name.');
+    assert.equal(publicRoom.session?.status, 'active');
+    assert.equal(publicRoom.session?.paymentsEnabled, false);
+    console.log('LIVE_NIGHT_SAVED_ROOM Identity, host, active status and free-room pricing verified.');
 
     const roomQr = sharePanel
       .locator('[data-sway-compact-room-qr="true"]')
