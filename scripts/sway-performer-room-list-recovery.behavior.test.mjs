@@ -212,11 +212,22 @@ test('recovery notice is account scoped even before layout cleanup', () => {
   assert.equal(evaluate(false, false, identity, snapshot), message);
   for (const args of [[false, false, 'other', snapshot], [false, false, null, snapshot], [true, false, identity, snapshot], [false, true, identity, snapshot]]) assert.equal(evaluate(...args), null);
 });
-test('home and live views expose the same explicit read-only retry control', () => {
+test('closed, live and home views each expose the same guarded read-only recovery', () => {
   assert.match(source, /<button type="button" onClick=\{retryPerformerReads\}/);
   assert.match(source, /Retry profile and rooms/);
-  assert.equal((source.match(/\{recoveryContent\}<\/div>/g) ?? []).length, 2);
-  assert.equal((source.match(/roomActionError \|\| profileReadError \|\| roomsReadError/g) ?? []).length, 2);
+  const closedStart = source.indexOf("  if (session.status === 'closed' && shouldRenderPerformerLiveRoom");
+  const liveStart = source.indexOf('  if (shouldRenderPerformerLiveRoom', closedStart + 1);
+  const homeStart = source.indexOf('  return (\n    <div className="min-h-screen flex flex-col', liveStart + 1);
+  assert.ok(closedStart >= 0 && liveStart > closedStart && homeStart > liveStart, 'All three room-view boundaries must exist in order.');
+  for (const [name, view] of [
+    ['closed', source.slice(closedStart, liveStart)],
+    ['live', source.slice(liveStart, homeStart)],
+    ['home', source.slice(homeStart)]
+  ]) {
+    assert.equal((view.match(/\{recoveryContent\}<\/div>/g) ?? []).length, 1, `${name} must render shared recovery exactly once.`);
+    assert.equal((view.match(/roomActionError \|\| profileReadError \|\| roomsReadError/g) ?? []).length, 1, `${name} must retain every recovery trigger.`);
+    assert.match(view, /<div role="alert"[^>]*>\{recoveryContent\}<\/div>/, `${name} recovery must remain an accessible alert.`);
+  }
 });
 test('account-context creation and logout clear previous recovery notice', () => {
   assert.match(source, /roomsReadContext\.current = context;\s+setRoomsReadErrorSnapshot\(null\);/);
