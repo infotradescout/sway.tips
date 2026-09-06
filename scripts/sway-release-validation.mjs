@@ -80,7 +80,7 @@ async function runStep(name, args, timeoutMs, command = npm) {
     });
   } finally {
     clearTimeout(timeout);
-    if (escalation) clearInterval(escalation);
+    if (escalation) clearTimeout(escalation);
     // A failed suite must not leave its local server or browser behind for the
     // following suite. Every child is in this isolated process group.
     signalTree(child, 'SIGKILL');
