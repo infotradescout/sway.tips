@@ -35,6 +35,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  ['active-room-registry-owned-database', ['--import', 'tsx', 'scripts/sway-active-room-registry-owned-database.behavior.test.mjs'], 180_000, process.execPath],
   // Run broad contracts before browser journeys so infrastructure failures surface early.
   // Every existing gate below still executes, including the complete room lifecycle.
   ['contracts', ['run', 'test:contracts'], 1_200_000],
