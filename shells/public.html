@@ -125,9 +125,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 100vh;
-        min-height: 100svh;
-        min-height: var(--sway-viewport-height, 100vh);
+        min-height: 0;
         padding: clamp(72px, 12vh, 132px) 16px 32px;
       }
 
@@ -207,20 +205,19 @@
         align-items: center;
         justify-content: center;
         min-height: 58px;
-        padding: 0 20px;
+        padding: 12px 20px;
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         color: #f8fafc;
         font-size: 16px;
         font-weight: 900;
-        line-height: 1;
+        line-height: 1.3;
         text-decoration: none;
         text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
-        opacity: 0;
-        pointer-events: none;
+        opacity: 1;
+        pointer-events: auto;
         backdrop-filter: blur(16px);
         transition:
-          opacity 1.15s cubic-bezier(0.4, 0, 0.2, 1) 0.52s,
           border-color 0.14s ease,
           background 0.14s ease,
           box-shadow 0.14s ease;
@@ -244,6 +241,12 @@
         box-shadow: 0 0 34px rgba(217, 70, 239, 0.26);
       }
 
+      .cta-stack a:focus-visible,
+      footer a:focus-visible {
+        outline: 3px solid #67e8f9;
+        outline-offset: 4px;
+      }
+
       .tagline {
         position: relative;
         isolation: isolate;
@@ -260,9 +263,9 @@
         text-shadow:
           0 0 8px rgba(244, 114, 182, 0.72),
           0 0 18px rgba(217, 70, 239, 0.46);
-        opacity: 0;
-        filter: blur(6px);
-        pointer-events: none;
+        opacity: 1;
+        filter: blur(0);
+        pointer-events: auto;
         transition: opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1),
           filter 1.4s cubic-bezier(0.22, 1, 0.36, 1) 0.2s;
       }
@@ -296,10 +299,7 @@
 
       footer {
         width: min(1120px, calc(100% - 32px));
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        position: relative;
         z-index: 2;
         margin: 0 auto;
         padding: 22px 0 30px;
@@ -308,9 +308,8 @@
         gap: 16px;
         align-items: center;
         justify-content: center;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 1.1s cubic-bezier(0.4, 0, 0.2, 1) 0.9s;
+        opacity: 1;
+        pointer-events: auto;
       }
 
       html.landing-ui-ready footer {
@@ -494,7 +493,7 @@
         .desktop-copy {
           display: block;
           max-width: 560px;
-          opacity: 0;
+          opacity: 1;
           transition: opacity 1.1s cubic-bezier(0.4, 0, 0.2, 1) 0.42s;
         }
 
@@ -743,7 +742,8 @@
           </section>
 
           <nav class="cta-stack" aria-label="Sway entry actions">
-            <a class="btn primary" href="/home">SCAN</a>
+            <a class="btn primary" href="/account/signup?intent=performer">Create your performer page</a>
+            <a class="btn secondary" href="/home">SCAN</a>
             <a class="btn secondary" href="/discover">Discover shows</a>
             <a class="btn secondary" href="/account/signup">Create account</a>
             <a class="btn secondary" href="/account/login">Login</a>
