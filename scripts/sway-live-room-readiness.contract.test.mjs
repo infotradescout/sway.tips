@@ -223,4 +223,8 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Keep room-list failure recovery in the existing hard contract chain.
+await import('./sway-performer-room-list-recovery.behavior.test.mjs');
+if (process.exitCode) process.exit(process.exitCode);
+
 console.log('Sway live room readiness contract passed.');

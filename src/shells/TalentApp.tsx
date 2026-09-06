@@ -107,6 +107,10 @@ export default function TalentApp() {
     performerIdentity: string | null;
     rooms: ActiveRoomSummary[];
   }>({ performerIdentity: null, rooms: [] });
+  const [roomsReadErrorSnapshot, setRoomsReadErrorSnapshot] = useState<{
+    performerIdentity: string;
+    message: string;
+  } | null>(null);
   const [selectedGigId, applySelectedGigId] = useState<string | null>(null);
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
   const roomSelectionRevision = useRef(0);
@@ -124,6 +128,9 @@ export default function TalentApp() {
   // same React batch, before the account-change layout cleanup runs.
   const activeRooms = activeRoomsSnapshot.performerIdentity === performerIdentity
     ? activeRoomsSnapshot.rooms : EMPTY_ACTIVE_ROOMS;
+  const roomsReadError = !demoMode && !isAuthEntryRoute && performerIdentity
+    && roomsReadErrorSnapshot?.performerIdentity === performerIdentity
+    ? roomsReadErrorSnapshot.message : null;
   const setActiveRooms = (rooms: ActiveRoomSummary[]) => {
     setActiveRoomsSnapshot({ performerIdentity, rooms });
   };
@@ -151,6 +158,7 @@ export default function TalentApp() {
   useLayoutEffect(() => {
     const context: PerformerReadContext = { active: true, revision: 0, controller: null };
     roomsReadContext.current = context;
+    setRoomsReadErrorSnapshot(null);
     const previousIdentity = confirmedPerformerIdentity.current;
     confirmedPerformerIdentity.current = performerIdentity;
     if (previousIdentity !== performerIdentity) {
@@ -228,6 +236,7 @@ export default function TalentApp() {
     if (logoutInFlight.current || !context?.active || context !== expectedContext) return;
     if (isAuthEntryRoute) {
       setActiveRooms([]);
+      setRoomsReadErrorSnapshot(null);
       return;
     }
 
@@ -243,6 +252,7 @@ export default function TalentApp() {
           }]
         : [];
       setActiveRooms(demoRooms);
+      setRoomsReadErrorSnapshot(null);
       return;
     }
 
@@ -256,6 +266,16 @@ export default function TalentApp() {
     const isCurrent = () => context.active && roomsReadContext.current === context
       && context.revision === revision && !controller.signal.aborted
       && confirmedPerformerIdentity.current === performerIdentity;
+    const reportFailure = () => setRoomsReadErrorSnapshot({
+      performerIdentity,
+      message: 'Your room list could not refresh. Retry to check your rooms.'
+    });
+    // A stalled read must not leave an empty-looking room list indefinitely.
+    const timeout = setTimeout(() => {
+      if (!isCurrent()) return;
+      reportFailure();
+      controller.abort();
+    }, 15_000);
     try {
       const response = await fetch('/api/talent/active-rooms', { signal: controller.signal });
       if (!isCurrent()) return;
@@ -273,16 +293,34 @@ export default function TalentApp() {
             return currentIdentity === performerIdentity ? null : profile;
           });
           setActiveRooms([]);
+          setRoomsReadErrorSnapshot(null);
+        } else {
+          reportFailure();
         }
         return;
       }
       const data = await response.json();
       if (!isCurrent()) return;
-      setActiveRooms(Array.isArray(data.rooms) ? data.rooms : []);
+      if (!Array.isArray(data?.rooms)) {
+        reportFailure();
+        return;
+      }
+      setActiveRooms(data.rooms);
+      setRoomsReadErrorSnapshot(null);
     } catch (error) {
       if (!isCurrent()) return;
       console.warn('Unable to load active room summaries:', error);
+      reportFailure();
+    } finally {
+      clearTimeout(timeout);
+      if (context.controller === controller) context.controller = null;
     }
+  };
+
+  const retryPerformerReads = () => {
+    // Read-only recovery: never resend a room, request, or payment mutation.
+    void refreshPerformerProfile();
+    void refreshActiveRooms();
   };
 
   useEffect(() => {
@@ -478,6 +516,7 @@ export default function TalentApp() {
     roomSelectionRevision.current += 1;
     cancelPerformerRead(context);
     cancelPerformerRead(roomsReadContext.current);
+    setRoomsReadErrorSnapshot(null);
     setRoomActionError(null);
     let failed = false;
     try {
@@ -589,6 +628,18 @@ export default function TalentApp() {
       : 'My Library';
 
   const performerEmailVerified = Boolean(performerProfile?.email_verified_at);
+  const recoveryContent = (
+    <>
+      {roomActionError ? <p>{roomActionError}</p> : null}
+      {profileReadError ? <p>{profileReadError}</p> : null}
+      {roomsReadError ? <p>{roomsReadError}</p> : null}
+      {profileReadError || roomsReadError ? (
+        <button type="button" onClick={retryPerformerReads} className="mt-3 min-h-11 rounded-lg bg-fuchsia-600 px-4 font-bold">
+          Retry profile and rooms
+        </button>
+      ) : null}
+    </>
+  );
 
   if (session.status === 'closed' && shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
     return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
@@ -599,7 +650,7 @@ export default function TalentApp() {
       <div className="relative h-[var(--sway-viewport-height,100vh)] overflow-hidden bg-slate-950 text-slate-100">
         {!demoMode ? <button type="button" onClick={() => { void handleLogout(); }} className="absolute right-3 top-3 z-50 inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 text-xs font-bold text-slate-200 shadow-xl"><LogOut className="h-4 w-4" /> Log out</button> : null}
         {roomActionsBlocked ? <div role="alert" className="absolute inset-x-3 top-14 z-50 rounded-xl border border-white/20 bg-slate-950 p-4 text-sm text-white"><p>Connection interrupted. Showing the last confirmed queue. Room actions are paused until we reconnect.</p><button type="button" className="mt-3 min-h-11 rounded-lg bg-fuchsia-600 px-4 font-bold" onClick={() => window.dispatchEvent(new Event('re-fetch-state'))}>Retry connection</button><a className="ml-4 underline" href="/talent/profile">Open profile</a></div> : null}
-        {roomActionError || profileReadError ? <div role="alert" className="absolute inset-x-3 bottom-3 z-50 rounded-xl bg-slate-950 p-4 text-sm text-white">{roomActionError ?? profileReadError}</div> : null}
+        {roomActionError || profileReadError || roomsReadError ? <div role="alert" className="absolute inset-x-3 bottom-3 z-50 rounded-xl bg-slate-950 p-4 text-sm text-white">{recoveryContent}</div> : null}
         <div inert={roomActionsBlocked} className="h-full">
         <TalentDashboard
           session={session}
@@ -646,7 +697,7 @@ export default function TalentApp() {
         </div>
       </div>
 
-      {roomActionError || profileReadError ? <div role="alert" className="mx-auto mt-3 w-full max-w-6xl rounded-xl bg-slate-900 p-4 text-sm text-white">{roomActionError ?? profileReadError}</div> : null}
+      {roomActionError || profileReadError || roomsReadError ? <div role="alert" className="mx-auto mt-3 w-full max-w-6xl rounded-xl bg-slate-900 p-4 text-sm text-white">{recoveryContent}</div> : null}
       <main className="flex-1">
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <SplitViewShell
