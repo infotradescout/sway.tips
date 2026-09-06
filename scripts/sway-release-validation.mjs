@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Deliberately separate from the production build/start commands. This runner
@@ -29,29 +29,20 @@ if (process.env.SWAY_VALIDATION_EXPECTED_SHA) assert.equal(head, process.env.SWA
 assert.equal(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(), '', 'Validation requires an unchanged checkout.');
 console.log(`SWAY_VALIDATION_SOURCE ${head} node=${process.version}`);
 
-// Temporary, read-only source locations for the reproducible closeout failure.
-// No source is patched and no inherited credentials or customer data are read.
-const serverLines = readFileSync('server.ts', 'utf8').split('\n');
-for (const anchor of ['function syncActiveGigRouteContext', '/api/state/:gigId', "case 'end_session'", "case 'closeout_session'"]) {
-  const index = serverLines.findIndex((line) => line.includes(anchor));
-  console.log(`SWAY_ROOM_SOURCE_LOCATION ${JSON.stringify({ anchor, line: index + 1 })}`);
-  if (index >= 0) console.log(`SWAY_ROOM_SOURCE_EXCERPT ${JSON.stringify(serverLines.slice(Math.max(0, index - 4), index + 90).join('\n'))}`);
-}
-
 const publishDirectory = resolve('.validation-public');
 rmSync(publishDirectory, { recursive: true, force: true });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
-  ['catalog-action-behavior', ['scripts/sway-catalog-actions.behavior.test.mjs'], 180_000, process.execPath],
-  ['catalog-action-browser', ['scripts/sway-catalog-actions.browser.test.mjs'], 300_000, process.execPath],
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  // Exercise the complete real account/room lifecycle first, without dropping any other gate.
+  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
+  ['catalog-action-behavior', ['scripts/sway-catalog-actions.behavior.test.mjs'], 180_000, process.execPath],
+  ['catalog-action-browser', ['scripts/sway-catalog-actions.browser.test.mjs'], 300_000, process.execPath],
   ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['catalog-read-recovery', ['--import', 'tsx', 'scripts/sway-performer-catalog-reads.behavior.test.mjs'], 180_000, process.execPath],
   ['catalog-recovery-browser', ['scripts/sway-performer-catalog-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['profile-editor-integration-browser', ['--import', 'tsx', 'scripts/sway-profile-editor-integration.browser.test.ts'], 300_000, process.execPath],
-  // Exercise real account/room transitions early; every remaining gate still runs.
-  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['payment-pricing', ['run', 'test:payment-pricing'], 180_000],
   ['event-read-recovery', ['--import', 'tsx', 'scripts/sway-performer-event-reads.behavior.test.mjs'], 180_000, process.execPath],
   ['events-recovery-browser', ['scripts/sway-performer-events-recovery.browser.test.mjs'], 300_000, process.execPath],
