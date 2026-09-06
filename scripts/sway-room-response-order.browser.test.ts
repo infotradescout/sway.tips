@@ -80,41 +80,24 @@ async function main() {
         await page.waitForFunction(() => document.querySelector('[data-testid="response-view"]')?.textContent?.includes('"shown":"room-A"'));
         await page.getByRole('button', { name: 'Start delayed action', exact: true }).click();
         if (scenario === 'access-headers-before-body' || scenario === 'expired-body-response') {
-          // Header revocation uses the ordinary browser scheduler; only the deadline
-          // scenario uses virtual time, installed before the application loaded.
-          await page.evaluate(kind => {
-            const counters = document.documentElement.dataset;
-            counters.responseOrderKind = kind;
-            counters.responseOrderFetches = '0';
-            counters.responseOrderBodies = '0';
-            counters.responseOrderStatusReads = '0';
-            // Deliberately ignore abort in the body: acceptance must also reject an expired reply.
-            window.fetch = async () => {
-              counters.responseOrderFetches = String(Number(counters.responseOrderFetches) + 1);
-              return {
-                ok: kind !== 'access-headers-before-body',
-                get status() {
-                  counters.responseOrderStatusReads = String(Number(counters.responseOrderStatusReads) + 1);
-                  return kind === 'access-headers-before-body' ? 403 : 200;
-                },
-                headers: new Headers(), json: () => {
-                  counters.responseOrderBodies = String(Number(counters.responseOrderBodies) + 1);
-                  return new Promise(resolve => {
-                    const receive = (event: Event) => resolve((event as CustomEvent).detail);
-                    window.addEventListener('sway:test:body', receive, { once: true });
-                  });
-                }
-              } as Response;
-            };
-            window.dispatchEvent(new Event('re-fetch-state'));
-          }, scenario);
+          // Only send data across the Node/browser boundary. Vite compiles the
+          // actual pending-response functions in the browser fixture module.
+          await page.evaluate(detail => window.dispatchEvent(new CustomEvent('sway:test:fetch-probe', { detail })), { kind: scenario });
           await page.waitForTimeout(100);
+          assert.equal(await page.evaluate(() => document.documentElement.dataset.responseOrderKind), scenario);
+          assert.equal(await page.evaluate(() => document.documentElement.dataset.responseOrderFetches), '1', 'The intended synthetic response must actually be requested.');
+          assert.ok(Number(await page.evaluate(() => document.documentElement.dataset.responseOrderStatusReads)) > 0, 'The hook must observe response headers, not a fixture exception.');
+          assert.equal(warnings.some(message => message.includes('__name')), false, 'Browser fixtures must not depend on Node transform helpers.');
           if (scenario === 'expired-body-response') {
+            assert.equal(await page.evaluate(() => document.documentElement.dataset.responseOrderBodies), '1', 'The success response body must genuinely remain pending.');
+            assert.equal((await read(page)).status, 'active', 'A broken fixture or premature error must not count as timeout proof.');
+            assert.equal((await read(page)).title, 'old');
             await page.clock.fastForward(15001);
             assert.equal((await read(page)).status, 'error');
             await page.evaluate(data => window.dispatchEvent(new CustomEvent('sway:test:body', { detail: data })), snapshot('expired'));
             await page.waitForTimeout(100);
             assert.equal((await read(page)).status, 'error', 'A late body must not revive a timed-out response');
+            assert.equal((await read(page)).title, 'old', 'A timed-out body must not replace the confirmed queue.');
           } else {
             await page.waitForFunction(() => {
               const view = document.querySelector('[data-testid="response-view"]')?.textContent;
