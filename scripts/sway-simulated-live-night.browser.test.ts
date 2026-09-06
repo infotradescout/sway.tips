@@ -344,7 +344,7 @@ async function main() {
       .locator('[data-sway-performer-room-share="true"]')
       .filter({ visible: true });
     await waitVisible(sharePanel, 'live-room share panel', server);
-    const openRoomLink = sharePanel.getByRole('link', { name: 'Open Room' });
+    const openRoomLink = sharePanel.getByRole('link', { name: 'Open Room', exact: true });
     await waitVisible(openRoomLink, 'customer room link', server);
     const roomHref = await openRoomLink.getAttribute('href');
     assert.ok(roomHref, 'The live share panel must publish a customer room href.');
@@ -358,9 +358,9 @@ async function main() {
       .filter({ visible: true });
     await waitVisible(roomQr, 'rendered customer-room QR', server);
     assert.equal(await roomQr.getAttribute('title'), 'Scan to open this live Sway room');
-    const copyRoomButton = sharePanel.getByRole('button', { name: 'Copy Room Link' });
+    const copyRoomButton = sharePanel.getByRole('button', { name: 'Copy Room Link', exact: true });
     await copyRoomButton.click();
-    await waitVisible(sharePanel.getByRole('button', { name: 'Copied' }), 'copied-room confirmation', server);
+    await waitVisible(sharePanel.getByRole('button', { name: 'Copied', exact: true }), 'copied-room confirmation', server);
     assert.equal(await performerPage.evaluate(() => navigator.clipboard.readText()), roomUrl.toString());
 
     const customerContext = await browser.newContext({
