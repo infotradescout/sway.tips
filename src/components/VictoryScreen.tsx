@@ -42,7 +42,7 @@ function RequestHistory({ requests }: { requests: RequestItem[] }) {
           <input type="search" value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} className="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-white/20 bg-gray-950 px-3 text-white" />
         </label>
         <label className="min-w-0 text-sm">Request status
-          <select value={status} onChange={event => { setStatus(event.target.value); setPage(0); }} className="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-white/20 bg-gray-950 px-3 text-white">
+          <select aria-label="Request status" value={status} onChange={event => { setStatus(event.target.value); setPage(0); }} className="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-white/20 bg-gray-950 px-3 text-white">
             <option value="all">All statuses</option>
             {Object.entries(RECAP_REQUEST_STATUS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
@@ -148,7 +148,7 @@ function RecapView({ session, requests, onRestart }: VictoryScreenProps) {
             <button type="button" onClick={handleShare} disabled={!payment.canShare || shareState === 'pending'} className={`${buttonClass} flex w-full items-center justify-center gap-2`}><Share2 aria-hidden="true" className="h-4 w-4" />{shareState === 'pending' ? 'Sharing recap…' : 'Share recap text'}</button>
             {!payment.canShare ? <p className="text-sm text-amber-200">{payment.test ? 'Sharing Disabled for Test Volume' : 'Sharing Requires Verified Live Settlement'}</p> : null}
             <div role="status" aria-live="polite" className="text-sm text-gray-300">{shareState === 'copied' ? 'Recap text copied.' : shareState === 'shared' ? 'Recap sent to your sharing app.' : ''}</div>
-            {shareState === 'error' && payment.canShare && shareText ? <div className="min-w-0 rounded-xl border border-amber-500/30 p-4"><p role="alert" className="text-sm text-amber-200">The recap was not shared. Try again or select and copy the text below.</p><label className="mt-3 block text-sm">Recap text<textarea readOnly value={shareText} rows={5} className="mt-2 w-full min-w-0 rounded-lg border border-white/20 bg-gray-950 p-3 text-sm" /></label></div> : null}
+            {shareState === 'error' && payment.canShare && shareText ? <div className="min-w-0 rounded-xl border border-amber-500/30 p-4"><p role="alert" className="text-sm text-amber-200">The recap was not shared. Try again or select and copy the text below.</p><label className="mt-3 block text-sm">Recap text<textarea aria-label="Recap text" readOnly value={shareText} rows={5} className="mt-2 w-full min-w-0 rounded-lg border border-white/20 bg-gray-950 p-3 text-sm" /></label></div> : null}
           </section>
         </div>
         <RequestHistory requests={requests} />
