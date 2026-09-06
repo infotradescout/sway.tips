@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createPerformerEventReads } from '../performer-event-reads';
 import {
   CalendarDays,
   CheckCircle2,
@@ -383,7 +384,11 @@ function fieldLabel() {
   return 'text-[9px] font-black uppercase tracking-[0.2em] text-slate-500';
 }
 
-export default function PerformerEventsManager({ previewMode = false }: { previewMode?: boolean }) {
+export default function PerformerEventsManager(props: { previewMode?: boolean }) {
+  return <ScopedPerformerEventsManager key={props.previewMode === true ? 'preview' : 'live'} {...props} />;
+}
+
+function ScopedPerformerEventsManager({ previewMode = false }: { previewMode?: boolean }) {
   const [events, setEvents] = useState<ManagedEvent[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
   const [actionPending, setActionPending] = useState(false);
@@ -397,68 +402,78 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
     externalProviderConfirmed: boolean;
   } | null>(null);
   const [failedCoverImages, setFailedCoverImages] = useState<Set<string>>(() => new Set());
+  const [eventsReadError, setEventsReadError] = useState<string | null>(null);
+  const [capabilityReadError, setCapabilityReadError] = useState<string | null>(null);
+  const [eventAccessDenied, setEventAccessDenied] = useState(false);
+  const eventAccessDeniedRef = useRef(false);
+  const eventReads = useRef<ReturnType<typeof createPerformerEventReads> | null>(null);
+  const managementBlocked = previewMode || eventAccessDenied;
 
-  const loadEvents = async (signal?: AbortSignal) => {
-    if (previewMode) return;
-    setStatus('loading');
-    try {
-      const response = await fetch('/api/talent/events', { cache: 'no-store', signal });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || 'Unable to load your events.');
-      const capabilityResponse = await fetch('/api/talent/events/native-ticket-capability', {
-        cache: 'no-store',
-        signal
-      });
-      const capabilityData = await capabilityResponse.json().catch(() => null);
-      const capability = capabilityData?.capability;
-      setNativeCapability(
-        capabilityResponse.ok && capability && typeof capability === 'object'
-          ? {
-              salesAvailable: capability.salesAvailable === true,
-              reasonCodes: Array.isArray(capability.reasonCodes)
-                ? capability.reasonCodes.filter((value: unknown): value is string => typeof value === 'string')
-                : [],
-              feeBps: nullableInteger(capability.feeBps),
-              feeFixedCents: nullableInteger(capability.feeFixedCents),
-              taxMode: capability.taxMode === 'stripe_automatic' || capability.taxMode === 'not_required'
-                ? capability.taxMode
-                : null,
-              reservationMinutes: nullableInteger(capability.reservationMinutes),
-              refundGraceMinutes: nullableInteger(capability.refundGraceMinutes),
-              termsVersion: text(capability.termsVersion),
-              termsHash: text(capability.termsHash),
-              supportEmail: text(capability.supportEmail) || null
-            }
-          : {
-              salesAvailable: false,
-              reasonCodes: ['native_ticket_readiness_unavailable'],
-              feeBps: null,
-              feeFixedCents: null,
-              taxMode: null,
-              reservationMinutes: null,
-              refundGraceMinutes: null,
-              termsVersion: '',
-              termsHash: '',
-              supportEmail: null
-            }
-      );
-      const normalized = Array.isArray(data?.events)
-        ? data.events.map(normalizeManagedEvent).filter((event): event is ManagedEvent => Boolean(event))
-        : [];
-      setEvents(normalized);
-      setStatus('ready');
-      if (normalized.length === 0) setFormOpen(true);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Unable to load your events.');
-    }
+  const loadEvents = async () => {
+    if (!previewMode) await eventReads.current?.load();
   };
 
   useEffect(() => {
-    const controller = new AbortController();
-    void loadEvents(controller.signal);
-    return () => controller.abort();
+    if (previewMode) return;
+    const reader = createPerformerEventReads({
+      onLoading: () => {
+        setStatus('loading');
+        setEventsReadError(null);
+      },
+      onEvents: (rows) => {
+        const normalized = rows.map(normalizeManagedEvent);
+        if (normalized.some((event) => event === null)) {
+          throw new Error('Your shows could not be read. Try again.');
+        }
+        setEvents(normalized.filter((event): event is ManagedEvent => event !== null));
+        setStatus('ready');
+        eventAccessDeniedRef.current = false;
+        setEventAccessDenied(false);
+        if (normalized.length === 0) setFormOpen(true);
+      },
+      onEventError: () => {
+        setStatus('error');
+        setEventsReadError('Shows could not refresh. Your saved shows were not changed.');
+      },
+      onCapability: (capability) => {
+        setNativeCapability(capability ? {
+          salesAvailable: capability.salesAvailable === true,
+          reasonCodes: Array.isArray(capability.reasonCodes)
+            ? capability.reasonCodes.filter((value: unknown): value is string => typeof value === 'string')
+            : [],
+          feeBps: nullableInteger(capability.feeBps),
+          feeFixedCents: nullableInteger(capability.feeFixedCents),
+          taxMode: capability.taxMode === 'stripe_automatic' || capability.taxMode === 'not_required'
+            ? capability.taxMode
+            : null,
+          reservationMinutes: nullableInteger(capability.reservationMinutes),
+          refundGraceMinutes: nullableInteger(capability.refundGraceMinutes),
+          termsVersion: text(capability.termsVersion),
+          termsHash: text(capability.termsHash),
+          supportEmail: text(capability.supportEmail) || null
+        } : null);
+      },
+      onCapabilityError: setCapabilityReadError,
+      onAccessLost: () => {
+        eventAccessDeniedRef.current = true;
+        setEventAccessDenied(true);
+        setEvents([]);
+        setNativeCapability(null);
+        setForm(emptyForm());
+        setFormOpen(false);
+        setCancelDraft(null);
+        setCapabilityReadError(null);
+        setMessage(null);
+        setStatus('error');
+        setEventsReadError('Your access changed. Reload shows before editing.');
+      }
+    });
+    eventReads.current = reader;
+    void reader.load();
+    return () => {
+      reader.dispose();
+      if (eventReads.current === reader) eventReads.current = null;
+    };
   }, [previewMode]);
 
   const sortedEvents = useMemo(() => {
@@ -508,12 +523,14 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   };
 
   const openNewEvent = () => {
+    if (previewMode || eventAccessDeniedRef.current || actionPending) return;
     resetForm();
     setCancelDraft(null);
     setFormOpen(true);
   };
 
   const openEditEvent = (event: ManagedEvent) => {
+    if (previewMode || eventAccessDeniedRef.current || actionPending) return;
     setForm(editForm(event));
     setCancelDraft(null);
     setFormOpen(true);
@@ -523,7 +540,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
 
   const handleSave = async (submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
-    if (previewMode || actionPending) return;
+    if (previewMode || eventAccessDeniedRef.current || actionPending) return;
     setActionPending(true);
     setMessage(null);
 
@@ -652,7 +669,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   };
 
   const publishEvent = async (event: ManagedEvent) => {
-    if (previewMode || actionPending) return;
+    if (previewMode || eventAccessDeniedRef.current || actionPending) return;
     if (!event.updatedAt) {
       setMessage('This event is missing its update version. Reload before publishing it.');
       return;
@@ -681,7 +698,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
   };
 
   const cancelEvent = async (event: ManagedEvent) => {
-    if (previewMode || actionPending || cancelDraft?.eventId !== event.id) return;
+    if (previewMode || eventAccessDeniedRef.current || actionPending || cancelDraft?.eventId !== event.id) return;
     if (!cancelDraft.reason.trim()) {
       setMessage('Add a clear cancellation reason before cancelling this event.');
       return;
@@ -741,7 +758,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
           <button
             type="button"
             onClick={openNewEvent}
-            disabled={previewMode || actionPending}
+            disabled={managementBlocked || actionPending}
             className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-xs font-black text-white transition hover:bg-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
@@ -783,7 +800,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
             </button>
           </div>
 
-          <fieldset disabled={previewMode || actionPending} className="grid gap-4 disabled:opacity-60 sm:grid-cols-2">
+          <fieldset disabled={managementBlocked || actionPending} className="grid gap-4 disabled:opacity-60 sm:grid-cols-2">
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Event title</span>
               <input
@@ -1162,7 +1179,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
 
           <button
             type="submit"
-            disabled={previewMode || actionPending}
+            disabled={managementBlocked || actionPending}
             className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-cyan-500 px-5 text-sm font-black text-white transition hover:from-fuchsia-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {actionPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
@@ -1172,18 +1189,30 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
       ) : null}
 
       <div className="p-4 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Your event listings</p>
             <p className="mt-1 text-xs text-slate-400">Draft, publish, update, or truthfully cancel each event.</p>
           </div>
-          {status === 'loading' ? <Loader2 className="h-5 w-5 animate-spin text-fuchsia-200" aria-label="Loading events" /> : null}
+          <div className="flex items-center gap-3">
+            {status === 'loading' ? <Loader2 className="h-5 w-5 animate-spin text-fuchsia-200" aria-label="Loading events" /> : null}
+            <button type="button" onClick={() => void loadEvents()} disabled={previewMode || actionPending || status === 'loading'} className="min-h-11 rounded-xl border border-white/10 px-3 text-xs font-bold text-slate-200 disabled:opacity-50">
+              Refresh shows
+            </button>
+          </div>
         </div>
 
         {status === 'error' ? (
-          <div className="mt-4 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-xs leading-5 text-rose-100">
-            Events could not load. Your saved profile data was not changed.
-            <button type="button" onClick={() => void loadEvents()} className="ml-2 font-black underline">Try again</button>
+          <div role="alert" className="mt-4 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-xs leading-5 text-rose-100">
+            {eventsReadError || 'Events could not load. Your saved profile data was not changed.'}
+            <button type="button" disabled={previewMode || actionPending} onClick={() => void loadEvents()} className="ml-2 min-h-11 font-black underline disabled:opacity-50">Try again</button>
+          </div>
+        ) : null}
+
+        {capabilityReadError ? (
+          <div role="status" className="mt-4 rounded-2xl border border-amber-300/25 bg-amber-300/[0.06] p-4 text-xs leading-5 text-amber-100">
+            {capabilityReadError}
+            <button type="button" disabled={previewMode || actionPending || status === 'loading'} onClick={() => void loadEvents()} className="ml-2 min-h-11 font-black underline disabled:opacity-50">Retry ticket check</button>
           </div>
         ) : null}
 
@@ -1191,7 +1220,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
           <button
             type="button"
             onClick={openNewEvent}
-            disabled={previewMode}
+            disabled={managementBlocked}
             className="mt-4 min-h-24 w-full rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-5 text-sm font-bold text-slate-400 transition hover:border-fuchsia-300/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             Add your first upcoming show
@@ -1290,7 +1319,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                       type="button"
                       onClick={() => openEditEvent(event)}
                       disabled={
-                        previewMode
+                        managementBlocked
                         || actionPending
                         || cancelled
                         || (published && cancellationClosed)
@@ -1311,7 +1340,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                         type="button"
                         onClick={() => void publishEvent(event)}
                         disabled={
-                          previewMode
+                          managementBlocked
                           || actionPending
                           || !ticketingReady
                           || started
@@ -1372,7 +1401,7 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                           reason: '',
                           externalProviderConfirmed: false
                         })}
-                        disabled={previewMode || actionPending}
+                        disabled={managementBlocked || actionPending}
                         className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-xs font-black text-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1439,7 +1468,8 @@ export default function PerformerEventsManager({ previewMode = false }: { previe
                           type="button"
                           onClick={() => void cancelEvent(event)}
                           disabled={
-                            actionPending
+                            managementBlocked
+                            || actionPending
                             || !cancelDraft.reason.trim()
                             || (
                               event.ticketingMode === 'external'
