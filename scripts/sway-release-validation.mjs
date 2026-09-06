@@ -36,6 +36,7 @@ const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
   ['payment-pricing', ['run', 'test:payment-pricing'], 180_000],
+  ['room-restart', ['scripts/sway-performer-room-restart.behavior.test.mjs'], 180_000, process.execPath],
   ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['readiness-browser', ['run', 'test:browser:readiness-223'], 600_000],
   ['payment-viewport-browser', ['run', 'test:browser:payment-modal-viewport'], 300_000],
@@ -53,12 +54,12 @@ function signalTree(child, signal) {
   }
 }
 
-async function runStep(name, args, timeoutMs) {
+async function runStep(name, args, timeoutMs, command = npm) {
   console.log(`SWAY_VALIDATION_BEGIN ${name}`);
   const startedAt = Date.now();
   let timedOut = false;
   let escalation;
-  const child = spawn(npm, args, {
+  const child = spawn(command, args, {
     cwd: process.cwd(),
     env: { ...process.env, CI: 'true' },
     stdio: 'inherit',
@@ -90,8 +91,8 @@ async function runStep(name, args, timeoutMs) {
 }
 
 const results = [];
-for (const [name, args, timeoutMs] of steps) {
-  results.push(await runStep(name, args, timeoutMs));
+for (const [name, args, timeoutMs, command] of steps) {
+  results.push(await runStep(name, args, timeoutMs, command));
 }
 const failed = results.filter((result) => !result.passed).map((result) => result.name);
 console.log(`SWAY_VALIDATION_SUMMARY ${JSON.stringify({ head, passed: results.length - failed.length, failed, total: results.length })}`);
