@@ -22,6 +22,7 @@ const forbidden = Object.keys(process.env).filter((name) => (
 )).filter((name) => Boolean(process.env[name]?.trim()));
 assert.deepEqual(forbidden, [], 'Do not attach existing databases or provider credentials to this runner.');
 
+await import('./sway-room-context-maintenance.mjs');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 assert.match(head, /^[a-f0-9]{40}$/);
 if (process.env.RENDER_GIT_COMMIT) assert.equal(head, process.env.RENDER_GIT_COMMIT, 'Render source identity does not match the checkout.');
@@ -42,6 +43,7 @@ const publishDirectory = resolve('.validation-public');
 rmSync(publishDirectory, { recursive: true, force: true });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
+  ['room-context', ['scripts/sway-room-context.behavior.test.mjs'], 180_000, process.execPath],
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
   ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
