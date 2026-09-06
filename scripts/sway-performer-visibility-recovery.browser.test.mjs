@@ -8,7 +8,11 @@ import { createServer } from 'vite';
 const directory = join('artifacts', 'readiness-223', `visibility-${Date.now()}`);
 mkdirSync(directory, { recursive: true });
 const results = [], regressions = [];
-const baselineRef = 'da5094534427a57048867220d08801ec502afcdf';
+// Use the commit that introduced the original component, not an unrelated
+// recovery snapshot where the historical path cannot be resolved. Verify the
+// exact original blob before running negative controls; never substitute current code.
+const baselineRef = '30356d34315a0dab7900cc204f39c55160f7b1f7';
+const baselineBlob = 'f6b5536858b563e30e55f281053bdc4a09196b66';
 const respond = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const save = page => page.getByRole('button', { name: 'Save visibility', exact: true });
 const check = page => page.getByRole('button', { name: 'Check saved visibility', exact: true });
@@ -23,6 +27,9 @@ const waitFor = async predicate => {
 let browser;
 
 async function withServer(baseline, callback) {
+  if (baseline) {
+    assert.equal(execFileSync('git', ['rev-parse', `${baselineRef}:src/components/PerformerVisibilityControl.tsx`], { encoding: 'utf8' }).trim(), baselineBlob, 'Negative controls require the verified original component.');
+  }
   const source = baseline ? execFileSync('git', ['show', `${baselineRef}:src/components/PerformerVisibilityControl.tsx`], { encoding: 'utf8' }) : null;
   const component = resolve('src/components/PerformerVisibilityControl.tsx');
   const vite = await createServer({ root: process.cwd(), logLevel: 'error', server: { host: '127.0.0.1', port: 0 },
