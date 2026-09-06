@@ -70,13 +70,14 @@ async function main() {
         return respond(route, snapshot('new'));
       });
       try {
+        // Install virtual time before navigation, never after the app has created timers.
+        if (scenario === 'expired-body-response') await page.clock.install();
         await page.goto(`${base}/scripts/browser-fixtures/sway-room-response-order.html`);
         await page.waitForFunction(() => document.querySelector('[data-testid="response-view"]')?.textContent?.includes('"shown":"room-A"'));
         await page.getByRole('button', { name: 'Start delayed action', exact: true }).click();
         if (scenario === 'access-headers-before-body' || scenario === 'expired-body-response') {
-          // Only the deadline scenario needs virtual time. Header revocation must
-          // render with the ordinary browser scheduler, without waiting on a body.
-          if (scenario === 'expired-body-response') await page.clock.install();
+          // Header revocation uses the ordinary browser scheduler; only the deadline
+          // scenario uses virtual time, installed before the application loaded.
           await page.evaluate(kind => {
             const counters = document.documentElement.dataset;
             counters.responseOrderFetches = '0';
