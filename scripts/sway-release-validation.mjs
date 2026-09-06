@@ -42,6 +42,8 @@ const publishDirectory = resolve('.validation-public');
 rmSync(publishDirectory, { recursive: true, force: true });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
+  ['catalog-action-behavior', ['scripts/sway-catalog-actions.behavior.test.mjs'], 180_000, process.execPath],
+  ['catalog-action-browser', ['scripts/sway-catalog-actions.browser.test.mjs'], 300_000, process.execPath],
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
   ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
