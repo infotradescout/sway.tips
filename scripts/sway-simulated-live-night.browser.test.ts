@@ -212,6 +212,9 @@ async function main() {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
     const performerName = `DJ Browser ${suffix.slice(0, 6)}`;
     const performerHandle = `dj-browser-${suffix}`;
+    // Public room identity follows the existing handle-first profile contract,
+    // not the separate account/display name entered during signup.
+    const publicPerformerName = `@${performerHandle}`;
     const email = `browser-${suffix}@example.test`;
     const password = `SwayBrowser!2026-${suffix}`;
     const requestTitle = `Browser Pilot Song ${suffix.slice(0, 6)}`;
@@ -348,7 +351,7 @@ async function main() {
       'open-request review',
       server
     );
-    await waitVisible(setup.getByText(performerName, { exact: true }), 'reviewed room host identity', server);
+    await waitVisible(setup.getByText(publicPerformerName, { exact: true }), 'reviewed room host identity', server);
     await setup.getByRole('button', { name: 'Next' }).click();
     await waitVisible(setup.getByRole('heading', { name: 'Ready to go live' }), 'ready-to-start review', server);
     await setup.getByRole('button', { name: 'Create room' }).click();
@@ -375,7 +378,7 @@ async function main() {
     assert.equal(publicRoomResponse.status, 200, 'The created room must be publicly readable.');
     const publicRoom = await publicRoomResponse.json();
     assert.equal(publicRoom.activeGigId, gigId, 'The shared room must retain its persisted identity.');
-    assert.equal(publicRoom.session?.talentName, performerName, 'The shared room must retain the reviewed host name.');
+    assert.equal(publicRoom.session?.talentName, publicPerformerName, 'The shared room must retain the reviewed public handle.');
     assert.equal(publicRoom.session?.status, 'active');
     assert.equal(publicRoom.session?.paymentsEnabled, false);
     console.log('LIVE_NIGHT_SAVED_ROOM Identity, host, active status and free-room pricing verified.');
@@ -409,10 +412,11 @@ async function main() {
     await networkProbe;
 
     await waitVisible(
-      customerPage.getByRole('heading', { name: performerName }),
+      customerPage.getByRole('heading', { name: publicPerformerName, exact: true }),
       'customer live-room performer heading',
       server
     );
+    assert.equal(await customerPage.getByRole('heading', { name: performerName, exact: true }).count(), 0, 'The separate account name must not replace the public handle.');
     await waitVisible(
       customerPage.getByText(
         'Send a free request or upvote an approved queue item. Money actions are off for this room.',
