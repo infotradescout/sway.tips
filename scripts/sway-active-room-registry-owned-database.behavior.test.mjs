@@ -118,7 +118,15 @@ try {
   assert.equal(closed.activeGigId, null, 'The store must not advertise a closed room as active.');
   assert.equal(closed.state.session.status, 'closed');
   assert.equal(closed.state.session.talentName, roomStates[2].session.talentName);
-  assert.deepEqual(closed.state.requests, savedStates[2].requests, 'Closing must preserve the original saved request history.');
+  // persistState uses optimistic version checks and advances each updated row
+  // exactly once. This bookkeeping must change; the request history must not.
+  assert.ok(Number.isSafeInteger(savedStates[2].session.stateRevision));
+  assert.equal(closed.state.session.stateRevision, savedStates[2].session.stateRevision + 1);
+  const expectedClosedRequests = savedStates[2].requests.map(request => {
+    assert.ok(Number.isSafeInteger(request.stateRevision));
+    return { ...request, stateRevision: request.stateRevision + 1 };
+  });
+  assert.deepEqual(closed.state.requests, expectedClosedRequests, 'Closing must advance each saved version once without changing request history.');
 
   // Read again through a newly constructed store instead of relying on the
   // writer's state. The separate real-server lifecycle test also restarts Node.
