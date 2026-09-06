@@ -10,6 +10,7 @@ import {
   type Page
 } from 'playwright';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
+import { verifyFreeRoomLifecycle } from './lib/free-room-lifecycle.browser';
 
 const UI_TIMEOUT_MS = 30_000;
 
@@ -517,6 +518,10 @@ async function main() {
         `Public room state exposed performer-private field ${privateField}.`
       );
     }
+
+    await verifyFreeRoomLifecycle({
+      performerPage, customerPage, baseUrl: server.baseUrl, gigId, publicPerformerName, requestTitle
+    });
 
     const pageErrors = [...performerPageErrors, ...customerPageErrors];
     assert.deepEqual(pageErrors, [], `Browser page errors were raised:\n${pageErrors.join('\n')}\n${server.logs()}`);
