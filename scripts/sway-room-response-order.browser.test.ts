@@ -52,7 +52,11 @@ async function main() {
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
       const page = await context.newPage();
       const errors: string[] = [];
+      const warnings: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => {
+        if (message.type() === 'warning' || message.type() === 'error') warnings.push(message.text().slice(0, 1000));
+      });
       page.setDefaultTimeout(5000);
       page.setDefaultNavigationTimeout(30000);
       let phase: Scenario | 'initial' = 'initial';
@@ -80,13 +84,19 @@ async function main() {
           // scenario uses virtual time, installed before the application loaded.
           await page.evaluate(kind => {
             const counters = document.documentElement.dataset;
+            counters.responseOrderKind = kind;
             counters.responseOrderFetches = '0';
             counters.responseOrderBodies = '0';
+            counters.responseOrderStatusReads = '0';
             // Deliberately ignore abort in the body: acceptance must also reject an expired reply.
             window.fetch = async () => {
               counters.responseOrderFetches = String(Number(counters.responseOrderFetches) + 1);
               return {
-                ok: kind !== 'access-headers-before-body', status: kind === 'access-headers-before-body' ? 403 : 200,
+                ok: kind !== 'access-headers-before-body',
+                get status() {
+                  counters.responseOrderStatusReads = String(Number(counters.responseOrderStatusReads) + 1);
+                  return kind === 'access-headers-before-body' ? 403 : 200;
+                },
                 headers: new Headers(), json: () => {
                   counters.responseOrderBodies = String(Number(counters.responseOrderBodies) + 1);
                   return new Promise(resolve => {
@@ -151,6 +161,15 @@ async function main() {
         assert.deepEqual(errors, []);
         results.push({ scenario, status: 'PASS' });
       } catch (error) {
+        // This local-only fixture contains no real account, provider or browser secrets.
+        const evidence = await page.evaluate(() => ({
+          view: document.querySelector('[data-testid="response-view"]')?.textContent,
+          kind: document.documentElement.dataset.responseOrderKind,
+          fetches: document.documentElement.dataset.responseOrderFetches,
+          bodies: document.documentElement.dataset.responseOrderBodies,
+          statusReads: document.documentElement.dataset.responseOrderStatusReads
+        })).catch(() => null);
+        console.error('RESPONSE_ORDER_FAILURE_EVIDENCE', JSON.stringify({ scenario, evidence, errors, warnings: warnings.slice(-10) }));
         results.push({ scenario, status: 'FAIL', error: error instanceof Error ? error.message : String(error) });
         await page.screenshot({ path: join(directory, `${scenario}.png`), fullPage: true }).catch(() => undefined);
       } finally { await context.close(); }
