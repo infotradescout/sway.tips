@@ -19,18 +19,26 @@ const results = [];
 let vite, browser, base;
 const spin = async check => { for (let n = 0; n < 100; n++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 20)); } assert.fail('Fixture condition did not settle'); };
 const refresh = page => page.getByRole('button', { name: 'Refresh Catalog', exact: true });
-const firstFile = page => page.getByRole('article').first();
+const fileRows = page => page.locator('section[aria-label="Your Catalog"] article[aria-label]');
+const firstFile = page => fileRows(page).first();
+const idle = page => page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Refresh Catalog' && !button.disabled));
 async function run(name, viewport, configure, scenario) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
   const page = await context.newPage(); page.setDefaultTimeout(12_000);
   const state = { projects, fileCount: 1, long: false, projectStatus: 200, fileStatus: 200, storageStatus: 200,
     projectPayload: null, filePayload: null, holdStorage: false, heldStorage: [], holdFiles: null, heldFiles: [],
-    allowWrite: false, holdWrite: false, heldWrites: [], failAfterWrite: false, calls: [], writes: [], errors: [], unexpected: [] };
+    allowWrite: false, holdWrite: false, heldWrites: [], failAfterWrite: false, calls: [], writes: [], errors: [], unexpected: [], blockedFonts: [] };
   configure(state);
   page.on('pageerror', error => state.errors.push(error.message));
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url()), method = request.method();
-    if (url.origin !== base) { state.unexpected.push('External request'); return route.abort('blockedbyclient'); }
+    if (url.origin !== base) {
+      // The production stylesheet imports Google Fonts. Keep that request blocked
+      // and report it; all other external requests still fail this fixture.
+      if (url.origin === 'https://fonts.googleapis.com' && url.pathname === '/css2' && request.resourceType() === 'stylesheet') state.blockedFonts.push(url.href);
+      else state.unexpected.push(`${method} ${url.origin}${url.pathname}`);
+      return route.abort('blockedbyclient');
+    }
     if (!url.pathname.startsWith('/api/')) return route.continue();
     state.calls.push({ method, path: url.pathname });
     if (method === 'GET') {
@@ -75,7 +83,7 @@ async function run(name, viewport, configure, scenario) {
     assert.deepEqual(state.errors, []); assert.deepEqual(state.unexpected, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'Catalog must fit the viewport');
     await page.screenshot({ path: join(directory, `${name}-${viewport.width}x${viewport.height}.png`), fullPage: true });
-    results.push({ name, viewport, status: 'PASS', requests: state.calls.length, writes: state.writes.length });
+    results.push({ name, viewport, status: 'PASS', requests: state.calls.length, writes: state.writes.length, blockedFontRequests: state.blockedFonts.length });
   } catch (error) {
     results.push({ name, viewport, status: 'FAIL', error: String(error), pageErrors: state.errors, unexpected: state.unexpected });
     await page.screenshot({ path: join(directory, `${name}-${viewport.width}x${viewport.height}-failure.png`), fullPage: true }).catch(() => {});
@@ -94,7 +102,8 @@ try {
     await run('project-switch-clears-old-files-and-ignores-late-response', viewport, () => {}, async (page, state) => {
       await firstFile(page).waitFor(); await page.getByText('Organize projects', { exact: true }).click();
       state.holdFiles = 'B'; await page.getByLabel('Selected project', { exact: true }).selectOption('B');
-      assert.equal(await page.getByRole('article').count(), 0);
+      await spin(() => state.heldFiles.length > 0);
+      assert.equal(await fileRows(page).count(), 0);
       await page.getByLabel('Selected project', { exact: true }).selectOption('A'); await firstFile(page).waitFor();
       for (const route of state.heldFiles) await respond(route, files('B')).catch(() => {});
       assert.match(await firstFile(page).getAttribute('aria-label'), /^A-/); assert.equal(state.writes.length, 0);
@@ -103,7 +112,7 @@ try {
       await firstFile(page).waitFor(); await page.getByText('Organize projects', { exact: true }).click();
       await page.getByLabel('Project title', { exact: true }).fill('Unsaved project title'); state.fileStatus = 503;
       await refresh(page).click(); await page.getByRole('alert').waitFor();
-      assert.equal(await page.getByRole('article').count(), 1);
+      assert.equal(await fileRows(page).count(), 1);
       assert.equal(await page.getByRole('button', { name: 'Allow requests', exact: true }).isDisabled(), true);
       assert.equal(await page.getByLabel('Project title', { exact: true }).inputValue(), 'Unsaved project title');
       state.fileStatus = 200; await refresh(page).click(); await page.getByRole('alert').waitFor({ state: 'hidden' });
@@ -111,27 +120,27 @@ try {
     });
     await run('malformed-files-do-not-become-empty', viewport, () => {}, async (page, state) => {
       await firstFile(page).waitFor(); state.filePayload = { assets: [], versions: null }; await refresh(page).click();
-      await page.getByRole('alert').waitFor(); assert.equal(await page.getByRole('article').count(), 1);
+      await page.getByRole('alert').waitFor(); assert.equal(await fileRows(page).count(), 1);
       assert.equal(await page.getByText('No saved files in this project yet.', { exact: true }).count(), 0);
     });
     await run('empty-projects-clear-old-files', viewport, () => {}, async (page, state) => {
       await firstFile(page).waitFor(); state.projects = []; await refresh(page).click();
-      await page.getByText('No saved files in this project yet.', { exact: true }).waitFor(); assert.equal(await page.getByRole('article').count(), 0);
+      await page.getByText('No saved files in this project yet.', { exact: true }).waitFor(); assert.equal(await fileRows(page).count(), 0);
     });
     await run('access-loss-clears-private-files-and-reloads', viewport, () => {}, async (page, state) => {
       await firstFile(page).waitFor(); state.storageStatus = 403; await refresh(page).click();
       await page.getByRole('alert').filter({ hasText: 'Your access changed' }).waitFor();
-      assert.equal(await page.getByRole('article').count(), 0); assert.equal(await page.getByLabel('Selected connection', { exact: true }).count(), 0);
+      assert.equal(await fileRows(page).count(), 0); assert.equal(await page.getByLabel('Selected connection', { exact: true }).count(), 0);
       state.storageStatus = 200; await page.getByRole('button', { name: 'Reload Catalog', exact: true }).click();
       await firstFile(page).waitFor(); assert.equal(state.writes.length, 0);
     });
     await run('long-files-search-and-paging', viewport, state => { state.fileCount = 1001; state.long = true; }, async page => {
-      await firstFile(page).waitFor(); assert.equal(await page.getByRole('article').count(), 30);
+      await firstFile(page).waitFor(); assert.equal(await fileRows(page).count(), 30);
       await page.getByRole('button', { name: 'Next files', exact: true }).click();
       assert.match(await firstFile(page).getAttribute('aria-label'), /^A-0030/);
       assert.equal(await page.getByRole('heading', { name: 'Catalog files', exact: true }).evaluate(element => element === document.activeElement), true);
       await page.getByLabel('Search Catalog files', { exact: true }).fill('A-1000');
-      assert.equal(await page.getByRole('article').count(), 1); assert.match(await firstFile(page).getAttribute('aria-label'), /^A-1000/);
+      assert.equal(await fileRows(page).count(), 1); assert.match(await firstFile(page).getAttribute('aria-label'), /^A-1000/);
       await firstFile(page).getByText('File details and sharing', { exact: true }).click();
       await firstFile(page).getByRole('button', { name: 'Create one-time link', exact: true }).scrollIntoViewIfNeeded();
     });
@@ -140,7 +149,7 @@ try {
   for (const count of [0, 1, 30, 31]) await run(`file-boundary-${count}`, phone, state => { state.fileCount = count; }, async page => {
     if (count === 0) await page.getByText('No saved files in this project yet.', { exact: true }).waitFor();
     else await firstFile(page).waitFor();
-    assert.equal(await page.getByRole('article').count(), Math.min(30, count));
+    assert.equal(await fileRows(page).count(), Math.min(30, count));
     assert.equal(await page.getByRole('button', { name: 'Next files', exact: true }).count(), count > 30 ? 1 : 0);
   });
   await run('double-create-submits-once-and-retains-confirmation', phone, state => { state.allowWrite = true; state.holdWrite = true; }, async (page, state) => {
@@ -175,9 +184,9 @@ try {
     await page.getByText('Catalog unmounted', { exact: true }).waitFor(); assert.equal(state.calls.some(call => call.path.endsWith('/C/assets')), false);
   });
   await run('real-read-deadline-has-explicit-recovery', phone, () => {}, async (page, state) => {
-    await firstFile(page).waitFor(); state.holdFiles = 'A'; await refresh(page).click();
+    await firstFile(page).waitFor(); await idle(page); state.holdFiles = 'A'; await refresh(page).click();
     await page.getByRole('alert').filter({ hasText: 'too long' }).waitFor({ timeout: 22_000 });
-    assert.equal(await page.getByRole('article').count(), 1); state.holdFiles = null; await refresh(page).click();
+    assert.equal(await fileRows(page).count(), 1); state.holdFiles = null; await refresh(page).click();
     await page.getByRole('alert').waitFor({ state: 'hidden' }); assert.equal(state.writes.length, 0);
   });
 } finally {
