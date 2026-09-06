@@ -17,7 +17,8 @@ await build({
   outfile, bundle: true, platform: 'node', format: 'cjs', packages: 'external', jsx: 'automatic',
   plugins: [{ name: 'recap-fixture', setup(builder) {
     builder.onResolve({ filter: /\/VictoryScreen$/ }, () => ({ path: 'recap', namespace: 'fixture' }));
-    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ loader: 'jsx', contents: `
+    builder.onResolve({ filter: /^react(?:\/.*)?$/, namespace: 'fixture' }, args => ({ path: args.path, external: true }));
+    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ loader: 'jsx', resolveDir: process.cwd(), contents: `
       import React from 'react';
       export default function Recap({session,onRestart}) {
         return <section data-recap="true"><h1>Night recap</h1><p>{session.totals.totalTips}</p><button onClick={onRestart}>Start New Room</button></section>;
@@ -164,6 +165,8 @@ try {
     await act(async () => { create.click(); create.click(); });
     assert.equal(f.starts.length, 1);
     assert.equal(button(f.host, 'Back to night recap').matches(':disabled'), true);
+    assert.equal(button(f.host, 'Creating room…').matches(':disabled'), true);
+    assert.equal(button(f.host, 'Creating room…').getAttribute('aria-busy'), 'true');
     await act(async () => { release(); await pending; });
     assert.equal(button(f.host, 'Back to night recap').matches(':disabled'), false);
   });
@@ -226,7 +229,7 @@ try {
     await f.update({ performerProfile: profile });
     await click(f.host, 'Create room');
     assert.equal(f.starts.length, 0);
-    assert.match(f.host.querySelector('[data-sway-performer-room-setup] [role="alert"]').textContent, /Paid requests are not available/);
+    assert.match(f.host.querySelector('[data-sway-performer-room-setup] [role="alert"]').textContent, /Paid requests are (?:not|no longer) available/);
   });
   await test('shell reuses its guarded start and keys setup to the account and room', async () => {
     const source = readFileSync(resolve('src/shells/TalentApp.tsx'), 'utf8');
@@ -235,7 +238,8 @@ try {
     const block = source.slice(source.indexOf('<PerformerRoomRestart'), source.indexOf('/>', source.indexOf('<PerformerRoomRestart')));
     assert.match(block, /onStartSession=\{handleStartSession\}/);
     assert.match(block, /performerName=\{performerIdentityName\}/);
-    assert.match(block, /roomActionsBlocked=\{roomActionsBlocked\}/);
+    assert.match(block, /roomActionsBlocked=\{restartBlocked\}/);
+    assert.match(source, /const restartBlocked = roomActionsBlocked && roomLookup\.status !== 'ended'/);
   });
 } finally {
   globalThis.fetch = originalFetch;
