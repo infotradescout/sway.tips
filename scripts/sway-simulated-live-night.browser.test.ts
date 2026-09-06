@@ -337,9 +337,9 @@ async function main() {
     await waitVisible(setup.getByRole('heading', { name: 'Ready to go live' }), 'ready-to-start review', server);
     await setup.getByRole('button', { name: 'Create room' }).click();
 
-    const showQrButton = performerPage.getByRole('button', { name: 'Show QR' });
-    await waitVisible(showQrButton, 'live-room QR tab', server);
-    await showQrButton.click();
+    const shareRoomButton = performerPage.getByRole('button', { name: 'Share Room', exact: true });
+    await waitVisible(shareRoomButton, 'live-room sharing tab', server);
+    await shareRoomButton.click();
     const sharePanel = performerPage
       .locator('[data-sway-performer-room-share="true"]')
       .filter({ visible: true });
@@ -437,8 +437,8 @@ async function main() {
       server
     );
 
-    const liveButton = performerPage.getByRole('button', { name: 'Live', exact: true });
-    await liveButton.click();
+    const requestsButton = performerPage.getByRole('button', { name: 'Requests', exact: true });
+    await requestsButton.click();
     await waitVisible(
       performerPage.getByText(requestTitle, { exact: true }).filter({ visible: true }).first(),
       'customer request in performer pending queue',
