@@ -184,7 +184,7 @@ export default function TalentApp() {
     applySelectedGigId(gigId);
   }, []);
   const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
-  const { bState, isLoading, setBState, roomActionsBlocked } = useSwayState({ statePath });
+  const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath });
   const [roomActionError, setRoomActionError] = useState<string | null>(null);
   const [profileReadError, setProfileReadError] = useState<string | null>(null);
 
@@ -630,6 +630,9 @@ export default function TalentApp() {
   );
 
   if (session.status === 'closed' && shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
+    // A confirmed closeout blocks writes to the old room, not setup of a new one.
+    // Failed/missing reads still block restart; revoked access clears this snapshot.
+    const restartBlocked = roomActionsBlocked && roomLookup.status !== 'ended';
     return <div className="min-h-screen bg-slate-950 text-white">
       {roomActionError || profileReadError || roomsReadError ? <div role="alert" className="mx-auto w-full max-w-2xl p-4 text-sm">{recoveryContent}</div> : null}
       <PerformerRoomRestart
@@ -640,7 +643,7 @@ export default function TalentApp() {
         performerEmailVerified={performerEmailVerified}
         performerProfile={performerProfile}
         previewMode={demoMode}
-        roomActionsBlocked={roomActionsBlocked}
+        roomActionsBlocked={restartBlocked}
         onStartSession={handleStartSession}
       />
     </div>;
