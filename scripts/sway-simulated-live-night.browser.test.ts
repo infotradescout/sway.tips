@@ -520,7 +520,17 @@ async function main() {
     }
 
     await verifyFreeRoomLifecycle({
-      performerPage, customerPage, baseUrl: server.baseUrl, gigId, publicPerformerName, requestTitle
+      performerPage, customerPage, baseUrl: server.baseUrl, gigId, publicPerformerName, requestTitle,
+      restartServer: async () => {
+        assert.ok(server && proof, 'Only the server and database created by this proof may be restarted.');
+        const previousOrigin = new URL(server.baseUrl);
+        assert.equal(previousOrigin.hostname, '127.0.0.1');
+        await server.stop();
+        // Start a new process against the SAME disposable database and origin.
+        // No seeding, session recreation or mocked read is allowed after restart.
+        server = await startSwayServer(proof.databaseUrl, Number(previousOrigin.port));
+        assert.equal(server.baseUrl, previousOrigin.origin);
+      }
     });
 
     const pageErrors = [...performerPageErrors, ...customerPageErrors];

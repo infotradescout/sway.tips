@@ -18,7 +18,7 @@ type RoomView = {
  * This is free-room proof, never a substitute for payment-provider verification.
  */
 export async function verifyFreeRoomLifecycle({
-  performerPage, customerPage, baseUrl, gigId, publicPerformerName, requestTitle
+  performerPage, customerPage, baseUrl, gigId, publicPerformerName, requestTitle, restartServer
 }: {
   performerPage: Page;
   customerPage: Page;
@@ -26,6 +26,7 @@ export async function verifyFreeRoomLifecycle({
   gigId: string;
   publicPerformerName: string;
   requestTitle: string;
+  restartServer: () => Promise<void>;
 }): Promise<void> {
   const origin = new URL(baseUrl);
   assert.equal(origin.hostname, '127.0.0.1', 'Lifecycle proof is loopback-only.');
@@ -106,6 +107,22 @@ export async function verifyFreeRoomLifecycle({
     phase = 'closed-public-boundary';
     await assertClosedHistoryPrivate();
 
+    phase = 'restart-server-with-only-closed-room';
+    await restartServer();
+    const restoredClosed = await readRoom(gigId);
+    assert.equal(restoredClosed.activeGigId, gigId);
+    assert.equal(restoredClosed.session?.status, 'closed');
+    assert.equal(restoredClosed.session?.talentName, publicPerformerName);
+    assert.equal(restoredClosed.room_read_only, true);
+    assert.equal(restoredClosed.room_lookup, 'ended');
+    assert.deepEqual(restoredClosed.session?.totals, closed.session?.totals, 'A new server process must preserve completed room totals.');
+    assert.deepEqual(restoredClosed.requests, closed.requests, 'A new server process must restore the saved request history without reseeding.');
+    await assertClosedHistoryPrivate();
+    const emptyRegistryResponse = await performerPage.context().request.get(`${origin.origin}/api/talent/active-rooms`);
+    assert.equal(emptyRegistryResponse.status(), 200, 'The existing owner session must survive server restart.');
+    const emptyRegistry = await emptyRegistryResponse.json();
+    assert.deepEqual(emptyRegistry.rooms, [], 'Startup must not resurrect the only closed room as active.');
+
     phase = 'reload-recap';
     await performerPage.reload({ waitUntil: 'domcontentloaded' });
     await performerPage.getByRole('heading', { name: 'Night recap', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
@@ -154,6 +171,33 @@ export async function verifyFreeRoomLifecycle({
     const registry = await registryResponse.json();
     assert.equal(registry.rooms?.filter((room: { gigId: string }) => room.gigId === nextId).length, 1, 'One reviewed creation must create one active room.');
     assert.equal(registry.rooms?.some((room: { gigId: string }) => room.gigId === gigId), false, 'The closed room must not become active again.');
+
+    phase = 'restart-server-with-active-and-closed-rooms';
+    await restartServer();
+    const restoredActive = await readRoom(nextId);
+    assert.equal(restoredActive.activeGigId, nextId);
+    assert.equal(restoredActive.session?.status, 'active');
+    assert.equal(restoredActive.session?.talentName, publicPerformerName);
+    assert.equal(restoredActive.session?.paymentsEnabled, false);
+    assert.deepEqual(restoredActive.requests, [], 'Restart must not copy completed requests into the active room.');
+    assert.deepEqual(restoredActive.session?.totals, nextRoom.session?.totals);
+    const stillClosed = await readRoom(gigId);
+    assert.equal(stillClosed.session?.status, 'closed');
+    assert.equal(stillClosed.activeGigId, gigId);
+    assert.equal(stillClosed.room_lookup, 'ended');
+    assert.equal(stillClosed.room_read_only, true);
+    assert.deepEqual(stillClosed.session?.totals, closed.session?.totals);
+    assert.deepEqual(stillClosed.requests, closed.requests);
+    await assertClosedHistoryPrivate();
+    const restoredRegistryResponse = await performerPage.context().request.get(`${origin.origin}/api/talent/active-rooms`);
+    assert.equal(restoredRegistryResponse.status(), 200);
+    const restoredRegistry = await restoredRegistryResponse.json();
+    assert.deepEqual(restoredRegistry.rooms?.map((room: { gigId: string }) => room.gigId), [nextId], 'Only the new active room belongs in the restored registry.');
+    await performerPage.reload({ waitUntil: 'domcontentloaded' });
+    await performerPage.getByRole('button', { name: 'Share Room', exact: true }).click();
+    const restoredShare = performerPage.locator('[data-sway-performer-room-share="true"]').filter({ visible: true });
+    assert.equal(new URL((await restoredShare.getByRole('link', { name: 'Open Room', exact: true }).getAttribute('href'))!, origin.origin).pathname, `/g/${nextId}`, 'Reload must keep the new room selected after server restart.');
+    console.log('FREE_ROOM_RESTART_PERSISTENCE_PASS Two new server processes retained owner access, closed history, totals, public privacy and the isolated active room.');
     console.log('FREE_ROOM_LIFECYCLE_PASS Approval, fulfillment, closeout, private recap, reload, reviewed restart and isolated new-room history verified.');
   } catch (error) {
     // The enclosing proof created both accounts and this room in its own local
