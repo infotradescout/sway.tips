@@ -7,7 +7,7 @@ import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
 import PerformerEventDoorPage from '../components/PerformerEventDoorPage';
-import VictoryScreen from '../components/VictoryScreen';
+import PerformerRoomRestart from '../components/PerformerRoomRestart';
 import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
 import type { ActiveRoomSummary } from '../types';
 import { LoadingState, postJson, useSwayState } from './shared';
@@ -497,18 +497,6 @@ export default function TalentApp() {
     }
   };
 
-  const resetInactiveSession = () => {
-    void handleStartSession({
-      gig_id: globalThis.crypto.randomUUID(),
-      talentName: 'Sway Performer',
-      talentRole: 'DJ',
-      feeType: 'patron',
-      minimumTip: 5,
-      paymentsEnabled: false,
-      searchScope: 'library'
-    });
-  };
-
   const handleLogout = async () => {
     if (demoMode || logoutInFlight.current) return;
     logoutInFlight.current = true;
@@ -642,7 +630,20 @@ export default function TalentApp() {
   );
 
   if (session.status === 'closed' && shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
-    return <VictoryScreen session={session} requests={requests} onRestart={resetInactiveSession} />;
+    return <div className="min-h-screen bg-slate-950 text-white">
+      {roomActionError || profileReadError || roomsReadError ? <div role="alert" className="mx-auto w-full max-w-2xl p-4 text-sm">{recoveryContent}</div> : null}
+      <PerformerRoomRestart
+        key={JSON.stringify([performerIdentity, selectedRoomRoute])}
+        session={session}
+        requests={requests}
+        performerName={performerIdentityName}
+        performerEmailVerified={performerEmailVerified}
+        performerProfile={performerProfile}
+        previewMode={demoMode}
+        roomActionsBlocked={roomActionsBlocked}
+        onStartSession={handleStartSession}
+      />
+    </div>;
   }
 
   if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace)) {
