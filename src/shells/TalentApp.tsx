@@ -6,7 +6,7 @@
     savePerformerRoomSelection(performerIdentity, gigId);
   }, [performerIdentity]);
   const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
-  const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath });
+  const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath, accessScope: performerIdentity });
 
   useEffect(() => {
     // A confirmed unavailable selection must not trap reloads on a deleted or

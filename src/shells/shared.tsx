@@ -1,9 +1,11 @@
 export function useSwayState(options?: {
   statePath?: string | null;
+  accessScope?: string | null;
 }) {
   const statePath = options?.statePath === undefined ? '/api/state' : options.statePath;
-  // A distinct scope prevents late responses from crossing rooms, including A -> B -> A.
-  const scope = useMemo(() => ({ path: statePath, sequence: 0, revision: 0, pending: false, controller: null as AbortController | null, discoveryRecorded: false }), [statePath]);
+  const accessScope = options?.accessScope ?? null;
+  // Account changes invalidate observations even when both accounts select the same room.
+  const scope = useMemo(() => ({ path: statePath, accessScope, sequence: 0, revision: 0, pending: false, controller: null as AbortController | null, discoveryRecorded: false }), [statePath, accessScope]);
   const activeScope = useRef<typeof scope | null>(scope);
   useLayoutEffect(() => {
     activeScope.current = scope;
