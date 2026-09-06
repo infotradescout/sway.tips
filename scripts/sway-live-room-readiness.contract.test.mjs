@@ -47,8 +47,8 @@ requireIncludes(
 );
 requireIncludes(
   talentApp,
-  "fetch('/api/talent/active-rooms')",
-  'TalentApp must load read-only active room summaries from /api/talent/active-rooms.'
+  "fetch('/api/talent/active-rooms', { signal: controller.signal })",
+  'TalentApp must load read-only active room summaries from /api/talent/active-rooms with cancellation.'
 );
 requireIncludes(
   talentLoginCard,
