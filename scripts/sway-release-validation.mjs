@@ -38,6 +38,8 @@ const steps = [
   // Exercise the complete real account/room lifecycle first, without dropping any other gate.
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
+  ['recap-display-behavior', ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], 180_000, process.execPath],
+  ['recap-browser', ['scripts/sway-recap.browser.test.mjs'], 300_000, process.execPath],
   ['catalog-action-behavior', ['scripts/sway-catalog-actions.behavior.test.mjs'], 180_000, process.execPath],
   ['catalog-action-browser', ['scripts/sway-catalog-actions.browser.test.mjs'], 300_000, process.execPath],
   ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
