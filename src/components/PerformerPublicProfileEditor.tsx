@@ -10,7 +10,7 @@ import {
   Save,
   Trash2
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
 import { PerformerVisibilityControl } from './PerformerVisibilityControl';
 
@@ -88,14 +88,35 @@ function fieldLabel() {
   return 'text-[9px] font-black uppercase tracking-[0.2em] text-slate-500';
 }
 
-export default function PerformerPublicProfileEditor({
-  performerHandle,
-  previewMode = false
-}: {
+type ProfileEditorProps = {
   performerHandle?: string | null;
   previewMode?: boolean;
-}) {
+};
+
+type ProfileEditorScope = {
+  active: boolean;
+  controller: AbortController;
+  saving: boolean;
+  accepting: boolean;
+};
+
+export default function PerformerPublicProfileEditor(props: ProfileEditorProps) {
+  // A performer or live/preview transition must discard the entire previous draft,
+  // including its visibility control and any unsubmitted terms confirmation.
+  return <ScopedPerformerPublicProfileEditor
+    key={JSON.stringify([props.performerHandle ?? null, props.previewMode === true])}
+    {...props}
+  />;
+}
+
+function ScopedPerformerPublicProfileEditor({
+  performerHandle,
+  previewMode = false
+}: ProfileEditorProps) {
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const operationScope = useRef<ProfileEditorScope | null>(null);
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'success' | 'error'>(previewMode ? 'idle' : 'loading');
   const [message, setMessage] = useState<string | null>(null);
   const [showOwnerPreview, setShowOwnerPreview] = useState(() => (
@@ -124,18 +145,60 @@ export default function PerformerPublicProfileEditor({
   const [partnerAcceptanceStatus, setPartnerAcceptanceStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [partnerAcceptanceMessage, setPartnerAcceptanceMessage] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    const scope: ProfileEditorScope = {
+      active: true, controller: new AbortController(), saving: false, accepting: false
+    };
+    operationScope.current = scope;
+    return () => {
+      scope.active = false;
+      scope.controller.abort();
+      if (operationScope.current === scope) operationScope.current = null;
+    };
+  }, [loadAttempt]);
+
+  const isCurrentScope = (scope: ProfileEditorScope | null): scope is ProfileEditorScope => (
+    scope !== null && scope.active && operationScope.current === scope
+  );
+
+  const revokeProfileAccess = (scope: ProfileEditorScope) => {
+    if (!isCurrentScope(scope)) return;
+    scope.active = false;
+    scope.controller.abort();
+    setProfileLoaded(false);
+    setForm(EMPTY_FORM);
+    setPartner({
+      granted: false, active: false, accepted: false, suspended: false,
+      acceptanceRequired: false, termsVersion: null, termsHash: null, termsText: null
+    });
+    setPartnerAcceptanceConfirmed(false);
+    setPartnerAcceptanceStatus('idle');
+    setPartnerAcceptanceMessage(null);
+    setShowOwnerPreview(false);
+    setStatus('error');
+    setMessage('Your access changed. Reload your profile before editing.');
+  };
+
   useEffect(() => {
     if (previewMode) return;
+    const scope = operationScope.current;
+    if (!isCurrentScope(scope)) return;
     let cancelled = false;
     const controller = new AbortController();
 
     const load = async () => {
+      setProfileLoaded(false);
       setStatus('loading');
       setMessage(null);
       try {
         const response = await fetch('/api/talent/profile/public', { cache: 'no-store', signal: controller.signal });
+        if (cancelled || !isCurrentScope(scope)) return;
+        if (response.status === 401 || response.status === 403) {
+          revokeProfileAccess(scope);
+          return;
+        }
         const data = await response.json().catch(() => null);
-        if (cancelled) return;
+        if (cancelled || !isCurrentScope(scope)) return;
         if (!response.ok || !data?.profile) {
           throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to load your public page.');
         }
@@ -183,9 +246,10 @@ export default function PerformerPublicProfileEditor({
           termsHash: text(profile.partner?.termsHash) || null,
           termsText: text(profile.partner?.termsText) || null
         });
+        setProfileLoaded(true);
         setStatus('idle');
       } catch (error) {
-        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
+        if (cancelled || !isCurrentScope(scope) || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
         setMessage(error instanceof Error ? error.message : 'Unable to load your public page.');
       }
@@ -196,7 +260,7 @@ export default function PerformerPublicProfileEditor({
       cancelled = true;
       controller.abort();
     };
-  }, [previewMode]);
+  }, [previewMode, loadAttempt]);
 
   const specialties = useMemo(() => form.specialties
     .split(',')
@@ -243,18 +307,21 @@ export default function PerformerPublicProfileEditor({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (previewMode || status === 'saving') return;
+    const scope = operationScope.current;
+    if (previewMode || !profileLoaded || !isCurrentScope(scope) || scope.saving) return;
     if (!form.roles.length) {
       setStatus('error');
       setMessage('Choose at least one performer role.');
       return;
     }
+    scope.saving = true;
     setStatus('saving');
     setMessage(null);
 
     try {
       const response = await fetch('/api/talent/profile/public', {
         method: 'POST',
+        signal: scope.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roles: form.roles,
@@ -286,7 +353,13 @@ export default function PerformerPublicProfileEditor({
           }))
         })
       });
+      if (!isCurrentScope(scope)) return;
+      if (response.status === 401 || response.status === 403) {
+        revokeProfileAccess(scope);
+        return;
+      }
       const data = await response.json().catch(() => null);
+      if (!isCurrentScope(scope)) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save your public page.');
       }
@@ -294,25 +367,35 @@ export default function PerformerPublicProfileEditor({
       setMessage('Public page saved.');
       window.dispatchEvent(new Event('sway:performer-profile-updated'));
     } catch (error) {
+      if (!isCurrentScope(scope)) return;
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Unable to save your public page.');
+    } finally {
+      scope.saving = false;
     }
   };
 
   const handleAcceptPartnerTerms = async () => {
+    const scope = operationScope.current;
     if (
       previewMode
+      || !profileLoaded
+      || !isCurrentScope(scope)
+      || scope.accepting
+      || !partner.acceptanceRequired
       || partnerAcceptanceStatus === 'submitting'
       || !partnerAcceptanceConfirmed
       || !partner.termsVersion
       || !partner.termsHash
     ) return;
 
+    scope.accepting = true;
     setPartnerAcceptanceStatus('submitting');
     setPartnerAcceptanceMessage(null);
     try {
       const response = await fetch('/api/talent/partner/terms/accept', {
         method: 'POST',
+        signal: scope.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accepted: true,
@@ -320,7 +403,13 @@ export default function PerformerPublicProfileEditor({
           termsHash: partner.termsHash
         })
       });
+      if (!isCurrentScope(scope)) return;
+      if (response.status === 401 || response.status === 403) {
+        revokeProfileAccess(scope);
+        return;
+      }
       const data = await response.json().catch(() => null);
+      if (!isCurrentScope(scope)) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to record Brand Partner acceptance.');
       }
@@ -334,8 +423,11 @@ export default function PerformerPublicProfileEditor({
       setPartnerAcceptanceStatus('idle');
       setPartnerAcceptanceMessage('Brand Partner terms accepted. Your immutable receipt is recorded.');
     } catch (error) {
+      if (!isCurrentScope(scope)) return;
       setPartnerAcceptanceStatus('error');
       setPartnerAcceptanceMessage(error instanceof Error ? error.message : 'Unable to record Brand Partner acceptance.');
+    } finally {
+      scope.accepting = false;
     }
   };
 
@@ -450,10 +542,10 @@ export default function PerformerPublicProfileEditor({
         <div className="border-b border-emerald-500/20 bg-emerald-500/5 px-5 py-3 text-xs text-emerald-100">{partnerAcceptanceMessage}</div>
       ) : null}
 
-      <PerformerVisibilityControl previewMode={previewMode} />
+      {profileLoaded || previewMode ? <PerformerVisibilityControl previewMode={previewMode} /> : null}
 
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
-        <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
+        <fieldset disabled={previewMode || !profileLoaded || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2" role="group" aria-labelledby="performer-role-label" aria-describedby="performer-role-help">
               <span id="performer-role-label" className={fieldLabel()}>What kind of performer are you?</span>
@@ -605,7 +697,17 @@ export default function PerformerPublicProfileEditor({
           </div>
         ) : null}
 
-        <button type="submit" disabled={previewMode || status === 'loading' || status === 'saving'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-fuchsia-950/30 transition hover:from-cyan-400 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60">
+        {!previewMode && !profileLoaded && status === 'error' ? (
+          <button
+            type="button"
+            onClick={() => { setStatus('loading'); setLoadAttempt((attempt) => attempt + 1); }}
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-cyan-300/25 px-4 py-2 text-sm font-bold text-cyan-100"
+          >
+            Reload profile
+          </button>
+        ) : null}
+
+        <button type="submit" disabled={previewMode || !profileLoaded || status === 'loading' || status === 'saving'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-fuchsia-950/30 transition hover:from-cyan-400 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60">
           <Save className="h-4 w-4" />
           {status === 'loading' ? 'Loading page...' : status === 'saving' ? 'Saving page...' : 'Save public page'}
         </button>

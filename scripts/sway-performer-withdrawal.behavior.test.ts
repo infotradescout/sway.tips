@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
@@ -28,15 +30,30 @@ process.on('unhandledRejection', (error) => {
   process.exit(1);
 });
 
-await import('./sway-payout-destination-capabilities.behavior.test');
-await import('./sway-payout-destination.behavior.test');
-await import('./sway-payment-pricing.behavior.test');
-await import('./sway-paypal-payouts.behavior.test');
-await import('./sway-paypal-payout-readiness.behavior.test');
-await import('./sway-payout-recipient-privacy.behavior.test');
-await import('./sway-performer-payout-kyc.behavior.test');
-await import('./sway-performer-live-withdrawal-canary.behavior.test');
-await import('./sway-withdrawal-refund-concurrency.integration.test');
+// Keep every prerequisite, but release its database/Wasm runtime with its own
+// process instead of accumulating independent PGlite lifecycles in one VM.
+// Any assertion, signal, nonzero exit or timeout still fails this parent gate.
+for (const script of [
+  './sway-payout-destination-capabilities.behavior.test.ts',
+  './sway-payout-destination.behavior.test.ts',
+  './sway-payment-pricing.behavior.test.ts',
+  './sway-paypal-payouts.behavior.test.ts',
+  './sway-paypal-payout-readiness.behavior.test.ts',
+  './sway-payout-recipient-privacy.behavior.test.ts',
+  './sway-performer-payout-kyc.behavior.test.ts',
+  './sway-performer-live-withdrawal-canary.behavior.test.ts',
+  './sway-withdrawal-refund-concurrency.integration.test.ts'
+]) {
+  console.log(`WITHDRAWAL_PREREQUISITE_BEGIN ${script}`);
+  execFileSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL(script, import.meta.url))], {
+    cwd: process.cwd(),
+    env: { ...process.env },
+    stdio: 'inherit',
+    timeout: 180_000,
+    killSignal: 'SIGKILL'
+  });
+  console.log(`WITHDRAWAL_PREREQUISITE_PASS ${script}`);
+}
 
 const root = process.cwd();
 const database = new PGlite();

@@ -73,7 +73,7 @@ for (const term of [
 
 for (const term of [
   'ref={roomToolsTriggerRef}',
-  'inert={roomToolsExpanded ? true : undefined}',
+  'inert={roomToolsExpanded || Boolean(removeConfirmationRequest) ? true : undefined}',
   'closeButtonRef.current?.focus()',
   "event.key !== 'Tab'",
   'roomToolsTriggerRef.current?.focus()'

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   escapePublicProfileMetadataAttribute,
   labelForPublicPerformerPrimaryRole,
@@ -270,5 +272,8 @@ for (const amountSubtotalCents of [1, 50, 100, 499, 500, 1_000, 10_000, 999_999]
     );
   }
 }
+
+// Keep lifecycle regressions in the existing full profile contract gate.
+execFileSync(process.execPath, [fileURLToPath(new URL('./sway-profile-editor.behavior.test.mjs', import.meta.url))], { stdio: 'inherit' });
 
 console.log('Performer link profile behavior tests passed.');

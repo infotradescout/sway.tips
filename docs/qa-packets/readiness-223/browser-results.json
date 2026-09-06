@@ -1,0 +1,159 @@
+{
+  "browser": "Installed Google Chrome, isolated temporary profile",
+  "backend": "Mocked API only; no production or provider calls",
+  "sourceHashes": {
+    "src/shells/shared.tsx": "4955405bcda803a6579fc0df94574fc4b93199620a70f1906baecf7c6a8bb9fb",
+    "src/shells/TalentApp.tsx": "1827f74f3e09c22d6808e31188d7ab697dd8ab4d33627ca1c47d60e8e49d4b47",
+    "src/components/TalentDashboard.tsx": "134f37a968ed170e4709c82634dce92a51ee21ffb5cdc24867aa13dc91bcd736"
+  },
+  "results": [
+    {
+      "name": "late-room-response",
+      "status": "PASS"
+    },
+    {
+      "name": "out-of-order-refresh",
+      "status": "PASS"
+    },
+    {
+      "name": "recover-network",
+      "status": "PASS"
+    },
+    {
+      "name": "recover-503",
+      "status": "PASS"
+    },
+    {
+      "name": "clear-room-with-pending-response",
+      "status": "PASS"
+    },
+    {
+      "name": "visible-remove-failure",
+      "status": "PASS"
+    },
+    {
+      "name": "library-last-track-31",
+      "status": "PASS"
+    },
+    {
+      "name": "library-last-track-1001",
+      "status": "PASS"
+    },
+    {
+      "name": "slow-poll-completes",
+      "status": "PASS"
+    },
+    {
+      "name": "clear-on-401",
+      "status": "PASS"
+    },
+    {
+      "name": "clear-on-403",
+      "status": "PASS"
+    },
+    {
+      "name": "clear-on-404",
+      "status": "PASS"
+    },
+    {
+      "name": "performer-stale-readonly-and-retry",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-0",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-1",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-30",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-31",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-200",
+      "status": "PASS"
+    },
+    {
+      "name": "library-320x568-1001",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-0",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-1",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-30",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-31",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-200",
+      "status": "PASS"
+    },
+    {
+      "name": "library-844x390-1001",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-0",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-1",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-30",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-31",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-200",
+      "status": "PASS"
+    },
+    {
+      "name": "library-1366x768-1001",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-320-collapsed",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-320-expanded",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-844-collapsed",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-844-expanded",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-1366-collapsed",
+      "status": "PASS"
+    },
+    {
+      "name": "room-tools-1366-expanded",
+      "status": "PASS"
+    }
+  ]
+}

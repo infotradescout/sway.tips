@@ -100,8 +100,9 @@ for (const term of [
   }
 }
 
-if ((talentDashboardSource.match(/onClick=\{\(event\) => confirmAndRemoveRequest\(request, event\.currentTarget\)\}/g) ?? []).length !== 2) {
-  failures.push('Desktop and mobile approved queues must both expose the confirmed remove-and-refund action.');
+if ((talentDashboardSource.match(/onClick=\{\(event\) => confirmAndRemoveRequest\(request, event\.currentTarget\)\}/g) ?? []).length !== 1
+  || !talentDashboardSource.includes('className="sway-live-queues"')) {
+  failures.push('The shared desktop/mobile approved queue must expose the confirmed remove-and-refund action exactly once.');
 }
 
 if (talentDashboardSource.includes('window.confirm(')) {
@@ -122,6 +123,32 @@ if (!failures.length) {
   );
   if (interaction.status !== 0) {
     failures.push(`Rendered refund-confirmation interaction test failed with status ${interaction.status ?? 'unknown'}.`);
+  }
+}
+
+// A late action snapshot must not revive denied access or a closed room.
+// Keep this rendered prerequisite in the full gate; source checks cannot replace it.
+if (!failures.length) {
+  const responseOrder = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'scripts/sway-room-response-order.browser.test.ts'],
+    { cwd: root, stdio: 'inherit', timeout: 120_000 }
+  );
+  if (responseOrder.status !== 0) {
+    failures.push(`Rendered room response-order test failed with status ${responseOrder.status ?? 'unknown'}.`);
+  }
+}
+
+// Creation is another asynchronous room-selection boundary, including recap restart.
+// This isolated shell test supplements, and never replaces, the rendered gates above.
+if (!failures.length) {
+  const roomStart = spawnSync(
+    process.execPath,
+    ['scripts/sway-performer-room-start.browser.test.mjs'],
+    { cwd: root, stdio: 'inherit', timeout: 120_000 }
+  );
+  if (roomStart.status !== 0) {
+    failures.push(`Performer room-start isolation test failed with status ${roomStart.status ?? 'unknown'}.`);
   }
 }
 

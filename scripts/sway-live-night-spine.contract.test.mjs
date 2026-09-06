@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -194,18 +195,33 @@ requireIncludes('OverlayApp', overlayApp, [
   'Boosts'
 ]);
 
+// Captured payment action count is not fulfilled request count. Require the
+// actual request filter and rendered counter, plus executable amount boundaries.
 requireIncludes('VictoryScreen', victoryScreen, [
   'Night recap',
   'Fulfilled requests',
-  '{session.totals.totalCount} Requests'
+  "request.type === 'request' && request.status === 'fulfilled'",
+  'data-testid="recap-fulfilled">{fulfilled}',
+  'data-sway-recap-history="true"',
+  'formatRecapMoney(session.totals.accumulatedFees)',
+  "disabled={!payment.canShare || shareState === 'pending'}",
+  'Share recap text'
 ]);
 
 requireExcludes('VictoryScreen', victoryScreen, [
   'no card was charged',
   '{session.totals.totalCount} Gigs',
+  '{session.totals.totalCount} Requests',
   'Start New Gig Session',
-  'GIG CLEARED SUCCESSFULLY'
+  'GIG CLEARED SUCCESSFULLY',
+  'Share Recap to Instagram &amp; TikTok Stories'
 ]);
+
+try {
+  execFileSync(process.execPath, ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 30_000 });
+} catch {
+  failures.push('Recap amount, settlement or sharing behavior failed.');
+}
 
 for (const [label, source] of [
   ['TalentApp', talentApp],

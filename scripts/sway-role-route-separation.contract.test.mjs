@@ -4,6 +4,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
 const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
+const roomRestart = readFileSync(join(root, 'src/components/PerformerRoomRestart.tsx'), 'utf8');
 
 const failures = [];
 
@@ -53,6 +54,7 @@ for (const forbidden of [
 
 for (const required of [
   "import TalentDashboard from '../components/TalentDashboard'",
+  "import PerformerRoomRestart from '../components/PerformerRoomRestart'",
   "pathname === '/talent/login'",
   "pathname === '/talent/signup'",
   'handleStartSession',
@@ -60,9 +62,24 @@ for (const required of [
   'handleCloseout',
   'handleTriageRequest',
   'handleFulfillRequest',
-  '<VictoryScreen'
+  '<PerformerRoomRestart'
 ]) {
   if (!talentApp.includes(required)) failures.push(`Canonical TalentApp missing performer runtime behavior: ${required}`);
+}
+
+// The recap moved into a performer-owned restart component; it was not removed.
+// Check both layers so replacing the recap with an empty wrapper cannot pass.
+for (const required of [
+  "import VictoryScreen from './VictoryScreen'",
+  '<VictoryScreen session={session} requests={requests}',
+  '<PerformerRoomSetup',
+  'onStartSession={startNextRoom}'
+]) {
+  if (!roomRestart.includes(required)) failures.push(`Performer restart must preserve recap and reviewed setup: ${required}`);
+}
+const restartBlock = /<PerformerRoomRestart\b[\s\S]*?\/>/.exec(talentApp)?.[0] ?? '';
+if (!restartBlock.includes('onStartSession={handleStartSession}')) {
+  failures.push('Performer restart must use the canonical guarded room-start handler.');
 }
 
 if (failures.length) {

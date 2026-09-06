@@ -10,6 +10,7 @@ import {
   type Page
 } from 'playwright';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
+import { verifyFreeRoomLifecycle } from './lib/free-room-lifecycle.browser';
 
 const UI_TIMEOUT_MS = 30_000;
 
@@ -156,8 +157,23 @@ async function waitVisible(locator: Locator, label: string, server: RunningServe
   try {
     await locator.waitFor({ state: 'visible', timeout });
   } catch (error) {
+    // Only inspect this synthetic loopback application. Never log cookies, form
+    // values, verification URLs, arbitrary response bodies, or provider secrets.
+    let pageEvidence: unknown = 'Page evidence unavailable';
+    const page = locator.page();
+    if (new URL(page.url()).origin === new URL(server.baseUrl).origin) {
+      pageEvidence = await page.evaluate(() => ({
+        path: window.location.pathname,
+        headings: Array.from(document.querySelectorAll('h1,h2,h3,[role="heading"]')).map((node) => ({
+          text: node.textContent?.trim().slice(0, 200),
+          rendered: (node as HTMLElement).innerText?.trim().slice(0, 200),
+          visible: (node as HTMLElement).getClientRects().length > 0
+        })).slice(0, 20),
+        alerts: Array.from(document.querySelectorAll('[role="alert"]')).map((node) => node.textContent?.trim().slice(0, 300)).slice(0, 10)
+      })).catch(() => 'Page evidence unavailable');
+    }
     throw new Error(
-      `${label} was not visible within ${timeout}ms: ${error instanceof Error ? error.message : String(error)}\n${server.logs()}`
+      `${label} was not visible within ${timeout}ms: ${error instanceof Error ? error.message : String(error)}\nPAGE_EVIDENCE ${JSON.stringify(pageEvidence)}\n${server.logs()}`
     );
   }
 }
@@ -197,6 +213,9 @@ async function main() {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
     const performerName = `DJ Browser ${suffix.slice(0, 6)}`;
     const performerHandle = `dj-browser-${suffix}`;
+    // Public room identity follows the existing handle-first profile contract,
+    // not the separate account/display name entered during signup.
+    const publicPerformerName = `@${performerHandle}`;
     const email = `browser-${suffix}@example.test`;
     const password = `SwayBrowser!2026-${suffix}`;
     const requestTitle = `Browser Pilot Song ${suffix.slice(0, 6)}`;
@@ -333,18 +352,19 @@ async function main() {
       'open-request review',
       server
     );
+    await waitVisible(setup.getByText(publicPerformerName, { exact: true }), 'reviewed room host identity', server);
     await setup.getByRole('button', { name: 'Next' }).click();
     await waitVisible(setup.getByRole('heading', { name: 'Ready to go live' }), 'ready-to-start review', server);
     await setup.getByRole('button', { name: 'Create room' }).click();
 
-    const showQrButton = performerPage.getByRole('button', { name: 'Show QR' });
-    await waitVisible(showQrButton, 'live-room QR tab', server);
-    await showQrButton.click();
+    const shareRoomButton = performerPage.getByRole('button', { name: 'Share Room', exact: true });
+    await waitVisible(shareRoomButton, 'live-room sharing tab', server);
+    await shareRoomButton.click();
     const sharePanel = performerPage
       .locator('[data-sway-performer-room-share="true"]')
       .filter({ visible: true });
     await waitVisible(sharePanel, 'live-room share panel', server);
-    const openRoomLink = sharePanel.getByRole('link', { name: 'Open Room' });
+    const openRoomLink = sharePanel.getByRole('link', { name: 'Open Room', exact: true });
     await waitVisible(openRoomLink, 'customer room link', server);
     const roomHref = await openRoomLink.getAttribute('href');
     assert.ok(roomHref, 'The live share panel must publish a customer room href.');
@@ -353,14 +373,25 @@ async function main() {
     assert.match(roomUrl.pathname, /^\/g\/[0-9a-f-]{36}$/i);
     const gigId = roomUrl.pathname.slice('/g/'.length);
 
+    const publicRoomResponse = await fetch(`${server.baseUrl}/api/state/${gigId}`, {
+      signal: AbortSignal.timeout(10_000)
+    });
+    assert.equal(publicRoomResponse.status, 200, 'The created room must be publicly readable.');
+    const publicRoom = await publicRoomResponse.json();
+    assert.equal(publicRoom.activeGigId, gigId, 'The shared room must retain its persisted identity.');
+    assert.equal(publicRoom.session?.talentName, publicPerformerName, 'The shared room must retain the reviewed public handle.');
+    assert.equal(publicRoom.session?.status, 'active');
+    assert.equal(publicRoom.session?.paymentsEnabled, false);
+    console.log('LIVE_NIGHT_SAVED_ROOM Identity, host, active status and free-room pricing verified.');
+
     const roomQr = sharePanel
       .locator('[data-sway-compact-room-qr="true"]')
       .filter({ visible: true });
     await waitVisible(roomQr, 'rendered customer-room QR', server);
     assert.equal(await roomQr.getAttribute('title'), 'Scan to open this live Sway room');
-    const copyRoomButton = sharePanel.getByRole('button', { name: 'Copy Room Link' });
+    const copyRoomButton = sharePanel.getByRole('button', { name: 'Copy Room Link', exact: true });
     await copyRoomButton.click();
-    await waitVisible(sharePanel.getByRole('button', { name: 'Copied' }), 'copied-room confirmation', server);
+    await waitVisible(sharePanel.getByRole('button', { name: 'Copied', exact: true }), 'copied-room confirmation', server);
     assert.equal(await performerPage.evaluate(() => navigator.clipboard.readText()), roomUrl.toString());
 
     const customerContext = await browser.newContext({
@@ -382,10 +413,11 @@ async function main() {
     await networkProbe;
 
     await waitVisible(
-      customerPage.getByRole('heading', { name: performerName }),
+      customerPage.getByRole('heading', { name: publicPerformerName, exact: true }),
       'customer live-room performer heading',
       server
     );
+    assert.equal(await customerPage.getByRole('heading', { name: performerName, exact: true }).count(), 0, 'The separate account name must not replace the public handle.');
     await waitVisible(
       customerPage.getByText(
         'Send a free request or upvote an approved queue item. Money actions are off for this room.',
@@ -437,8 +469,8 @@ async function main() {
       server
     );
 
-    const liveButton = performerPage.getByRole('button', { name: 'Live', exact: true });
-    await liveButton.click();
+    const requestsButton = performerPage.getByRole('button', { name: 'Requests', exact: true });
+    await requestsButton.click();
     await waitVisible(
       performerPage.getByText(requestTitle, { exact: true }).filter({ visible: true }).first(),
       'customer request in performer pending queue',
@@ -486,6 +518,20 @@ async function main() {
         `Public room state exposed performer-private field ${privateField}.`
       );
     }
+
+    await verifyFreeRoomLifecycle({
+      performerPage, customerPage, baseUrl: server.baseUrl, gigId, publicPerformerName, requestTitle,
+      restartServer: async () => {
+        assert.ok(server && proof, 'Only the server and database created by this proof may be restarted.');
+        const previousOrigin = new URL(server.baseUrl);
+        assert.equal(previousOrigin.hostname, '127.0.0.1');
+        await server.stop();
+        // Start a new process against the SAME disposable database and origin.
+        // No seeding, session recreation or mocked read is allowed after restart.
+        server = await startSwayServer(proof.databaseUrl, Number(previousOrigin.port));
+        assert.equal(server.baseUrl, previousOrigin.origin);
+      }
+    });
 
     const pageErrors = [...performerPageErrors, ...customerPageErrors];
     assert.deepEqual(pageErrors, [], `Browser page errors were raised:\n${pageErrors.join('\n')}\n${server.logs()}`);

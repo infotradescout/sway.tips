@@ -22,6 +22,7 @@ const schema = read('src/db/schema.ts');
 const service = read('src/server/performer-event-service.ts');
 const server = read('server.ts');
 const manager = read('src/components/PerformerEventsManager.tsx');
+const eventReads = read('src/performer-event-reads.ts');
 const eventPage = read('src/components/PublicEventPage.tsx');
 const discoverPage = read('src/components/PublicDiscoverPage.tsx');
 const profilePage = read('src/components/PerformerPublicProfilePage.tsx');
@@ -245,7 +246,11 @@ if (!/return res\.json\(\{[\s\S]*rooms:[\s\S]*events:/.test(feedRoute)) {
 
 requireTerms(manager, 'Performer event manager', [
   'data-sway-events-manager="true"',
-  "fetch('/api/talent/events'",
+  'createPerformerEventReads({',
+  'eventReads.current?.load()',
+  'reader.dispose()',
+  'Refresh shows',
+  'Retry ticket check',
   '`/api/talent/events/${encodeURIComponent(event.id)}/publish`',
   '`/api/talent/events/${encodeURIComponent(event.id)}/cancel`',
   'Sway is not selling this ticket or verifying the provider.',
@@ -254,6 +259,15 @@ requireTerms(manager, 'Performer event manager', [
   'does not cancel tickets, issue refunds',
   'externalProviderConfirmed',
   '`/api/public/events/${encodeURIComponent(event.id)}/ticket`'
+]);
+requireTerms(eventReads, 'Independent read-only scheduling recovery', [
+  "readJson('/api/talent/events')",
+  "readJson('/api/talent/events/native-ticket-capability')",
+  "cache: 'no-store'",
+  'timeoutMs = 15_000',
+  'Array.isArray(data.events)',
+  'onAccessLost()',
+  'await eventsRead'
 ]);
 if (
   !dashboard.includes('<PerformerEventsManager previewMode={previewMode} />')
@@ -298,6 +312,7 @@ const eventRuntime = [
   eventSchema,
   service,
   manager,
+  eventReads,
   eventPage,
   discoverPage
 ].join('\n');
@@ -336,6 +351,7 @@ if (failures.length) {
 }
 
 for (const [label, script] of [
+  ['read recovery', 'scripts/sway-performer-event-reads.behavior.test.mjs'],
   ['behavior', 'scripts/sway-public-event-listings.behavior.test.ts'],
   ['integration', 'scripts/sway-public-event-listings.integration.test.ts']
 ]) {

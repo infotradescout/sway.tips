@@ -1,0 +1,85 @@
+{
+  "baseCommit": "2b71605690cf58eec2823cb82d1802bffbfcad2e",
+  "proofKind": "isolated-in-memory-browser-hook",
+  "browser": "System Chromium 144.0.7559.96 on Linux; in-memory execution, no network navigation",
+  "react": "19.1.1",
+  "limits": "Isolated exact shared hook with mocked API/discovery boundaries. React 19.1.1 is bundled with installed Playwright, not the product lockfile. No full-app, Windows, real API, authorization, provider, or production proof.",
+  "beforeSourceSha256": "4955405bcda803a6579fc0df94574fc4b93199620a70f1906baecf7c6a8bb9fb",
+  "afterSourceSha256": "711e1c460934578777bee8ad086e3a00a4f30ded672883c7921fe64a66ab90ab",
+  "nativeRepositoryBrowserSuite": "UNRUN; no full checkout or exact project dependencies; Windows device offline",
+  "before": {
+    "pass": 1,
+    "fail": 12
+  },
+  "after": {
+    "pass": 13,
+    "fail": 0
+  },
+  "cases": [
+    {
+      "name": "newer-read",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "401",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "403",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "404",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "410",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "503",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "offline",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "closed-current",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "wrong-room-pending",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "same-room-current",
+      "before": "PASS",
+      "after": "PASS"
+    },
+    {
+      "name": "access-headers-before-body",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "expired-body-response",
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "name": "recovered-before-old-action",
+      "before": "FAIL",
+      "after": "PASS"
+    }
+  ]
+}

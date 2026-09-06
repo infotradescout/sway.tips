@@ -79,3 +79,43 @@ html.is-meta-in-app-browser {
   background: rgba(192, 38, 211, 0.6);
 }
 
+/* The live workspace owns its scroll area; room controls stay within the viewport. */
+.sway-live-layout { display: flex; height: 100%; min-height: 0; flex-direction: column; gap: .5rem; }
+.sway-live-content { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; }
+.sway-live-queues { display: grid; height: 100%; min-height: 21rem; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.sway-live-playback, .sway-live-audience, .sway-live-share, .sway-live-controls { display: none; min-width: 0; }
+.sway-live-layout[data-mobile-panel="share"] .sway-live-queues,
+.sway-live-layout[data-mobile-panel="settings"] .sway-live-queues { display: none; }
+.sway-live-layout[data-mobile-panel="share"] .sway-live-share,
+.sway-live-layout[data-mobile-panel="settings"] .sway-live-playback,
+.sway-live-layout[data-mobile-panel="settings"] .sway-live-controls { display: block; }
+.sway-live-controls { margin-top: .5rem; }
+.sway-live-header > div:first-child { padding-right: 5.5rem; }
+
+@media (min-width: 600px) {
+  .sway-live-header { grid-template-columns: minmax(0, 1fr) minmax(16rem, .7fr); align-items: center; padding-right: 7rem; }
+  .sway-live-header > div:first-child { padding-right: 0; }
+  .sway-live-queues { min-height: 11rem; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); }
+}
+
+@media (max-height: 500px) {
+  .sway-live-layout { overflow-y: auto; overscroll-behavior: contain; }
+  .sway-live-content { min-height: 11rem; }
+  .sway-live-counts { display: none; }
+  .sway-live-header { grid-template-columns: minmax(0, 1fr); padding: .5rem 7rem .5rem .5rem; }
+  .sway-live-header > div:first-child { padding-right: 0; }
+  .sway-live-footer [role="status"] { padding-top: .25rem; padding-bottom: .25rem; }
+  .sway-live-footer [role="status"] p + p { display: none; }
+}
+
+@media (min-width: 900px) and (min-height: 600px) {
+  .sway-live-tabs { display: none; }
+  .sway-live-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .45fr); grid-template-rows: auto minmax(0, 1fr); gap: .5rem; overflow: hidden; }
+  .sway-live-playback, .sway-live-audience { display: block; min-height: 0; }
+  .sway-live-playback { grid-column: 1 / -1; }
+  .sway-live-layout[data-mobile-panel] .sway-live-queues { display: grid; min-height: 0; }
+  .sway-live-layout[data-mobile-panel] .sway-live-share,
+  .sway-live-layout[data-mobile-panel] .sway-live-controls { display: none; }
+  .sway-live-audience [data-sway-performer-audience-screen] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .sway-live-audience [data-sway-performer-audience-screen] > div:first-child { width: clamp(96px, 20vh, 176px); margin-inline: auto; }
+}

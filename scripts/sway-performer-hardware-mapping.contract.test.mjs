@@ -23,7 +23,7 @@ for (const term of [
   'data-sway-performer-connections-workspace="true"',
   "if (!hardwareControlsActive && !hardwareLearnTarget) return;",
   'On for this room while this dashboard stays open.',
-  "const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled;",
+  "const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled && !roomActionsBlocked;",
   "if (!roomHasControlContext && hardwareControlsEnabled)",
   'Open only if you use advanced booth controls.',
   'navigator as any).requestMIDIAccess',

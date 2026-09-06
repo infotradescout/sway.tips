@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import {
   parseLibraryCsv,
   parseM3u,
@@ -35,7 +36,9 @@ const traktor = parseTraktorNml(`
 `);
 assert.equal(traktor.length, 1);
 assert.equal(traktor[0].album, 'Late Set');
-assert.equal(traktor[0].metadata.path, '/Music/Sets/night-drive.flac');
+// Traktor's encoded directory is decoded to the bridge machine's native path.
+assert.equal(traktor[0].metadata.path, `${path.sep}Music${path.sep}Sets${path.sep}night-drive.flac`);
+assert.equal(traktor[0].metadata.traktorVolume, 'Macintosh HD');
 
 const virtualDj = parseVirtualDjXml(`
   <VirtualDJ_Database Version="8.5">
@@ -55,7 +58,13 @@ const m3u = parseM3u('#EXTM3U\n#EXTINF:245,Artist A - Track A\nMusic/track-a.mp3
 });
 assert.equal(m3u.length, 1);
 assert.equal(m3u[0].title, 'Track A');
-assert.equal(m3u[0].metadata.path, '/Users/dj/Music/track-a.mp3');
+// Resolve the fixture's relative track on the current machine, including its drive on Windows.
+assert.equal(m3u[0].metadata.path, `${path.parse(process.cwd()).root}Users${path.sep}dj${path.sep}Music${path.sep}track-a.mp3`);
+
+const absoluteM3u = parseM3u('#EXTM3U\nfile://localhost/C:/Music/One%20Two.mp3\n');
+assert.equal(absoluteM3u[0].metadata.path, 'C:/Music/One Two.mp3');
+const networkM3u = parseM3u('#EXTM3U\nfile://music-server/Library/Night%20Drive.flac\n');
+assert.equal(networkM3u[0].metadata.path, '//music-server/Library/Night Drive.flac');
 
 const csv = parseLibraryCsv('Title,Artist,Album,File Path,BPM\n"Track, Live",Artist B,Set,/music/live.wav,126\n');
 assert.equal(csv.length, 1);

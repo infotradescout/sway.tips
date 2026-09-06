@@ -106,8 +106,8 @@ for (const accessibleAction of [
   'aria-label={`Hide ${request.title}`}'
 ]) {
   const occurrenceCount = surfaces.performer.split(accessibleAction).length - 1;
-  if (occurrenceCount !== 2) {
-    failures.push(`Performer request controls need this accessible label in both responsive branches: ${accessibleAction}`);
+  if (occurrenceCount !== 1 || !surfaces.performer.includes('className="sway-live-queues"')) {
+    failures.push(`The shared responsive request queue needs this accessible label exactly once: ${accessibleAction}`);
   }
 }
 
