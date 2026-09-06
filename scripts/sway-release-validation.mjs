@@ -37,6 +37,7 @@ const steps = [
   ['build', ['run', 'build'], 300_000],
   // Exercise the complete real account/room lifecycle first, without dropping any other gate.
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
+  ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
   ['catalog-action-behavior', ['scripts/sway-catalog-actions.behavior.test.mjs'], 180_000, process.execPath],
   ['catalog-action-browser', ['scripts/sway-catalog-actions.browser.test.mjs'], 300_000, process.execPath],
   ['playback-recovery-browser', ['scripts/sway-playback-recovery.browser.test.mjs'], 300_000, process.execPath],
@@ -110,7 +111,7 @@ console.log(`SWAY_VALIDATION_SUMMARY ${JSON.stringify({ head, passed: results.le
 if (failed.length) {
   process.exitCode = 1;
 } else {
-  mkdirSync(publishDirectory, { recursive: true });
+  mkdirSync(publishDirectory, { recursive: true, force: true });
   writeFileSync(resolve(publishDirectory, 'index.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Validation</title><p>Isolated validation passed. This is not the Sway application or production release approval.</p></html>\n');
   writeFileSync(resolve(publishDirectory, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
 }
