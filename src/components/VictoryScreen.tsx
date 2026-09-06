@@ -119,7 +119,7 @@ function RecapView({ session, requests, onRestart }: VictoryScreenProps) {
             <p className="text-sm leading-relaxed text-gray-300">Your completed room is saved. These figures are room records, not your available cash-out balance.</p>
             {hasUncapturedPayments && session.totals.totalTips === 0 ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4" role="note">
               <p className="font-semibold text-amber-200">Some payments are not confirmed as captured</p>
-              <p className="mt-2 text-sm text-amber-100/90">A request amount is not proof that money was collected. The recorded captured total is $0. This recap does not establish why a payment was not captured.</p>
+              <p className="mt-2 text-sm text-amber-100/90">A request amount is not proof that money was collected. This room has $0 in confirmed payments. This recap does not establish why a payment was not collected.</p>
             </div> : null}
             {payment.test ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4" data-sway-test-volume="true">
               <p className="font-semibold text-amber-200">Test payment volume — no real money</p>
