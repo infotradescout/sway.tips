@@ -38,8 +38,6 @@ import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
   }, [performerIdentity]);
   const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
   const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath });
-  const [roomActionError, setRoomActionError] = useState<string | null>(null);
-  const [profileReadError, setProfileReadError] = useState<string | null>(null);
 
   useEffect(() => {
     // A confirmed unavailable selection must not trap reloads on a deleted or
@@ -52,6 +50,9 @@ import { DemoModeBanner, isDemoModeEnabled } from '../demo-mode';
     explicitRoomSelection.current = false;
     applySelectedGigId(null);
   }, [selectedGigId, isLoading, performerIdentity, roomLookup.status, bState.session.status]);
+
+  const [roomActionError, setRoomActionError] = useState<string | null>(null);
+  const [profileReadError, setProfileReadError] = useState<string | null>(null);
 
     if (selectedGigId || explicitRoomSelection.current || roomStartInFlight.current) return;
     const firstRoomId = activeRooms[0]?.gigId;
