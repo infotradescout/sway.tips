@@ -3,6 +3,8 @@ import type { Page } from 'playwright';
 
 type RoomView = {
   activeGigId?: string | null;
+  room_lookup?: string;
+  room_read_only?: boolean;
   session?: {
     status?: string;
     talentName?: string;
@@ -36,6 +38,15 @@ export async function verifyFreeRoomLifecycle({
     const response = await page.context().request.get(roomUrl(id), { timeout: 10_000 });
     assert.equal(response.status(), 200, 'A confirmed room must remain readable in its own account scope.');
     return response.json();
+  };
+  const assertClosedHistoryPrivate = async () => {
+    const response = await customerPage.context().request.get(roomUrl(gigId), { timeout: 10_000 });
+    assert.equal(response.status(), 410, 'A customer cannot read the performer private closed recap.');
+    const body = await response.json();
+    assert.equal(body.room_lookup, 'ended');
+    for (const field of ['session', 'requests', 'performers', 'activeGigId', 'room_read_only']) {
+      assert.equal(field in body, false, `Closed public responses must not expose ${field}.`);
+    }
   };
   const waitForRoom = async (id: string, description: string, accepts: (room: RoomView) => boolean) => {
     const deadline = Date.now() + 15_000;
@@ -78,6 +89,7 @@ export async function verifyFreeRoomLifecycle({
     const endBody = await endResponse.json();
     console.log('FREE_ROOM_END_RESPONSE', JSON.stringify({ status: endResponse.status(), roomStatus: endBody.state?.session?.status, selectedRoomMatches: endBody.state?.activeGigId === gigId }));
     assert.equal(endBody.state?.session?.status, 'ending');
+    assert.equal(endBody.state?.activeGigId, gigId, 'Ending must preserve the exact selected room identity.');
     await waitForRoom(gigId, 'ending', room => room.session?.status === 'ending');
     phase = 'ending-interface';
     const recapButton = footer.getByRole('button', { name: 'Room Recap', exact: true });
@@ -87,7 +99,12 @@ export async function verifyFreeRoomLifecycle({
     await performerPage.getByRole('heading', { name: 'Night recap', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
     const closed = await waitForRoom(gigId, 'closeout', room => room.session?.status === 'closed');
     assert.equal(closed.session?.talentName, publicPerformerName);
+    assert.equal(closed.activeGigId, gigId);
+    assert.equal(closed.room_lookup, 'ended');
+    assert.equal(closed.room_read_only, true);
     assert.equal(closed.requests?.some(request => request.id === pending.id && request.status === 'fulfilled'), true, 'Closing a room must retain its fulfilled request history.');
+    phase = 'closed-public-boundary';
+    await assertClosedHistoryPrivate();
 
     phase = 'reload-recap';
     await performerPage.reload({ waitUntil: 'domcontentloaded' });
@@ -129,12 +146,13 @@ export async function verifyFreeRoomLifecycle({
     assert.equal(oldRoom.session?.status, 'closed');
     assert.deepEqual(oldRoom.session?.totals, closed.session?.totals);
     assert.equal(oldRoom.requests?.some(request => request.id === pending.id && request.status === 'fulfilled'), true);
+    await assertClosedHistoryPrivate();
     const registryResponse = await performerPage.context().request.get(`${origin.origin}/api/talent/active-rooms`);
     assert.equal(registryResponse.status(), 200);
     const registry = await registryResponse.json();
     assert.equal(registry.rooms?.filter((room: { gigId: string }) => room.gigId === nextId).length, 1, 'One reviewed creation must create one active room.');
     assert.equal(registry.rooms?.some((room: { gigId: string }) => room.gigId === gigId), false, 'The closed room must not become active again.');
-    console.log('FREE_ROOM_LIFECYCLE_PASS Approval, fulfillment, closeout, reload, preserved recap, reviewed restart and isolated new-room history verified.');
+    console.log('FREE_ROOM_LIFECYCLE_PASS Approval, fulfillment, closeout, private recap, reload, reviewed restart and isolated new-room history verified.');
   } catch (error) {
     // The enclosing proof created both accounts and this room in its own local
     // database. Inspect only state labels and visible controls, never credentials.
