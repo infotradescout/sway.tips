@@ -46,7 +46,8 @@ async function main() {
     vite = await createViteServer({ root: process.cwd(), logLevel: 'error', server: { host: '127.0.0.1', port, strictPort: true } });
     await vite.listen();
     const base = `http://127.0.0.1:${port}`;
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    browser = await chromium.launch({ headless: true });
+    console.log('Response-order Playwright Chromium:', browser.version());
     for (const scenario of scenarios) {
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
       const page = await context.newPage();
