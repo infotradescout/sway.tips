@@ -23,7 +23,7 @@ app.get("/api/state/:gigId", async (req, res) => {
   if (roomSnapshot.roomStatus === 'ended') {
     // The public room has ended; only an authorized performer may read its recap.
     const recapAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
-    if (recapAccess.allowed) {
+    if (recapAccess.allowed === true) {
       return res.json({
         session: roomSnapshot.state.session,
         requests: roomSnapshot.state.requests,
@@ -54,7 +54,7 @@ app.get("/api/state/:gigId", async (req, res) => {
   await recordDirectRoomDiscoveryOutcome(req, res, requestedGigId);
 
   const privateRoomAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
-  if (privateRoomAccess.allowed) {
+  if (privateRoomAccess.allowed === true) {
     return res.json({
       session: roomSnapshot.state.session,
       requests: roomSnapshot.state.requests,
