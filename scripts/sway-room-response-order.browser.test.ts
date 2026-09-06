@@ -74,16 +74,27 @@ async function main() {
         await page.waitForFunction(() => document.querySelector('[data-testid="response-view"]')?.textContent?.includes('"shown":"room-A"'));
         await page.getByRole('button', { name: 'Start delayed action', exact: true }).click();
         if (scenario === 'access-headers-before-body' || scenario === 'expired-body-response') {
-          await page.clock.install();
+          // Only the deadline scenario needs virtual time. Header revocation must
+          // render with the ordinary browser scheduler, without waiting on a body.
+          if (scenario === 'expired-body-response') await page.clock.install();
           await page.evaluate(kind => {
+            const counters = document.documentElement.dataset;
+            counters.responseOrderFetches = '0';
+            counters.responseOrderBodies = '0';
             // Deliberately ignore abort in the body: acceptance must also reject an expired reply.
-            window.fetch = async () => ({
-              ok: kind !== 'access-headers-before-body', status: kind === 'access-headers-before-body' ? 403 : 200,
-              headers: new Headers(), json: () => new Promise(resolve => {
-                const receive = (event: Event) => resolve((event as CustomEvent).detail);
-                window.addEventListener('sway:test:body', receive, { once: true });
-              })
-            } as Response);
+            window.fetch = async () => {
+              counters.responseOrderFetches = String(Number(counters.responseOrderFetches) + 1);
+              return {
+                ok: kind !== 'access-headers-before-body', status: kind === 'access-headers-before-body' ? 403 : 200,
+                headers: new Headers(), json: () => {
+                  counters.responseOrderBodies = String(Number(counters.responseOrderBodies) + 1);
+                  return new Promise(resolve => {
+                    const receive = (event: Event) => resolve((event as CustomEvent).detail);
+                    window.addEventListener('sway:test:body', receive, { once: true });
+                  });
+                }
+              } as Response;
+            };
             window.dispatchEvent(new Event('re-fetch-state'));
           }, scenario);
           await page.waitForTimeout(100);
@@ -93,7 +104,15 @@ async function main() {
             await page.evaluate(data => window.dispatchEvent(new CustomEvent('sway:test:body', { detail: data })), snapshot('expired'));
             await page.waitForTimeout(100);
             assert.equal((await read(page)).status, 'error', 'A late body must not revive a timed-out response');
-          } else assert.equal((await read(page)).shown, null, 'Access loss clears before the body finishes');
+          } else {
+            await page.waitForFunction(() => {
+              const view = document.querySelector('[data-testid="response-view"]')?.textContent;
+              return view && JSON.parse(view).shown === null;
+            }, null, { timeout: 3000 });
+            assert.equal((await read(page)).shown, null, 'Access loss clears before the body finishes');
+            assert.equal(await page.evaluate(() => document.documentElement.dataset.responseOrderFetches), '1', 'The first denied response must clear access before another poll.');
+            assert.equal(await page.evaluate(() => document.documentElement.dataset.responseOrderBodies), '0', 'Denied headers must clear private data without reading the response body.');
+          }
           assert.equal((await read(page)).blocked, true);
         } else if (scenario === 'recovered-before-old-action') {
           phase = '503'; await refresh(page);
