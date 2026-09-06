@@ -227,4 +227,8 @@ if (failures.length) {
 await import('./sway-performer-room-list-recovery.behavior.test.mjs');
 if (process.exitCode) process.exit(process.exitCode);
 
+// Room setup must preserve guarded, explicit submission on every entry path.
+await import('./sway-room-setup-submission.behavior.test.mjs');
+if (process.exitCode) process.exit(process.exitCode);
+
 console.log('Sway live room readiness contract passed.');

@@ -35,6 +35,7 @@ export default function PerformerRoomSetup({
   const [searchScope, setSearchScope] = useState<'library' | 'catalog'>('library');
   const [isStarting, setIsStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const startPendingRef = useRef(false);
   const startAttemptRef = useRef<{ fingerprint: string; gigId: string } | null>(null);
   const moneyConfigured = paymentMode === 'test' || paymentMode === 'live';
 
@@ -42,7 +43,7 @@ export default function PerformerRoomSetup({
     ? paymentMode === 'live'
       ? `Live money · $${minimumTip} minimum · customer pays checkout costs`
       : `Test money · $${minimumTip} minimum · customer pays test checkout costs`
-    : payoutReady
+    : payoutReady && moneyConfigured
       ? (paymentMode === 'live' ? 'Free requests and upvotes · tips available' : 'Free requests and upvotes · test tips available')
       : 'Free requests and upvotes · money actions off';
   const requestSummary = searchScope === 'library'
@@ -50,26 +51,41 @@ export default function PerformerRoomSetup({
     : 'Customers can type any request; you approve or deny it';
 
   const submit = async () => {
-    if (isStarting) return;
-    const setup = {
-      talentName: performerName,
-      talentRole,
-      feeType,
-      minimumTip: Math.max(5, minimumTip),
-      paymentsEnabled,
-      searchScope
-    };
-    const fingerprint = JSON.stringify(setup);
-    if (!startAttemptRef.current || startAttemptRef.current.fingerprint !== fingerprint) {
-      startAttemptRef.current = { fingerprint, gigId: globalThis.crypto.randomUUID() };
-    }
-    setIsStarting(true);
+    // State updates are batched; the ref also blocks a second same-turn tap.
+    if (isStarting || startPendingRef.current) return;
     setStartError(null);
+    if (!performerEmailVerified) {
+      setStartError('Verify your email before creating a room.');
+      return;
+    }
+    if (paymentsEnabled && (!payoutReady || !moneyConfigured)) {
+      setStartError('Paid requests are no longer available. Go Back to choose free requests or finish payout setup.');
+      return;
+    }
+    if (!performerName.trim()) {
+      setStartError('Add your performer name before creating a room.');
+      return;
+    }
+    startPendingRef.current = true;
+    setIsStarting(true);
     try {
+      const setup = {
+        talentName: performerName,
+        talentRole,
+        feeType,
+        minimumTip: Math.max(5, minimumTip),
+        paymentsEnabled,
+        searchScope
+      };
+      const fingerprint = JSON.stringify(setup);
+      if (!startAttemptRef.current || startAttemptRef.current.fingerprint !== fingerprint) {
+        startAttemptRef.current = { fingerprint, gigId: globalThis.crypto.randomUUID() };
+      }
       await onStartSession({ ...setup, gig_id: startAttemptRef.current.gigId });
     } catch (error) {
       setStartError(error instanceof Error ? error.message : 'The room could not be created. Retry uses the same safe room start.');
     } finally {
+      startPendingRef.current = false;
       setIsStarting(false);
     }
   };
@@ -114,12 +130,12 @@ export default function PerformerRoomSetup({
             <p className="text-sm text-slate-400">Should song requests cost money tonight?</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <button type="button" disabled={!payoutReady || !moneyConfigured || isStarting} onClick={() => setPaymentsEnabled(true)} className={`rounded-2xl border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">{paymentMode === 'live' ? 'Paid requests' : 'Test paid requests'}</span><span className="mt-2 block text-xs text-slate-400">{payoutReady ? (paymentMode === 'live' ? `Requests and boosts start at $${minimumTip}. Real money moves.` : `Test requests and boosts start at $${minimumTip}. No real money moves.`) : (paymentMode === 'live' ? 'Finish secure identity and payout setup first.' : 'Finish secure test payout setup first.')}</span></button>
-              <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady ? (paymentMode === 'live' ? 'Direct tips remain available.' : 'Test-mode direct tips remain available.') : 'All money actions stay off.'}</span></button>
+              <button type="button" disabled={isStarting} onClick={() => setPaymentsEnabled(false)} className={`rounded-2xl border p-4 text-left ${!paymentsEnabled ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Free requests</span><span className="mt-2 block text-xs text-slate-400">Requests and upvotes are free. {payoutReady && moneyConfigured ? (paymentMode === 'live' ? 'Direct tips remain available.' : 'Test-mode direct tips remain available.') : 'All money actions stay off.'}</span></button>
             </div>
             {paymentsEnabled ? (
               <div className="rounded-xl border border-white/10 bg-slate-950 p-4">
                 <div className="flex justify-between text-sm font-bold text-white"><span>Minimum</span><span>${minimumTip}</span></div>
-                <input aria-label="Minimum request amount" type="range" min="5" max="25" value={minimumTip} onChange={(event) => setMinimumTip(Number(event.target.value))} className="mt-3 w-full accent-fuchsia-500" />
+                <input aria-label="Minimum request amount" type="range" disabled={isStarting} min="5" max="25" value={minimumTip} onChange={(event) => setMinimumTip(Number(event.target.value))} className="mt-3 w-full accent-fuchsia-500" />
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <div className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950">Customer covers checkout costs</div>
                   <p className="text-[11px] leading-5 text-slate-400">Your stated earnings are credited intact. Sway does not subtract checkout costs from them.</p>
@@ -130,8 +146,8 @@ export default function PerformerRoomSetup({
         ) : step === 1 ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">What can customers ask for?</p>
-            <button type="button" onClick={() => setSearchScope('library')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'library' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">My synced library first</span><span className="mt-2 block text-xs text-slate-400">Show synced tracks first. Customers may still type a manual request for you to approve or deny.</span></button>
-            <button type="button" onClick={() => setSearchScope('catalog')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'catalog' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Open requests</span><span className="mt-2 block text-xs text-slate-400">Customers type anything. Nothing enters the approved queue until you allow it.</span></button>
+            <button type="button" disabled={isStarting} onClick={() => setSearchScope('library')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'library' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">My synced library first</span><span className="mt-2 block text-xs text-slate-400">Show synced tracks first. Customers may still type a manual request for you to approve or deny.</span></button>
+            <button type="button" disabled={isStarting} onClick={() => setSearchScope('catalog')} className={`w-full rounded-2xl border p-5 text-left ${searchScope === 'catalog' ? 'border-fuchsia-500 bg-fuchsia-500/15' : 'border-white/10 bg-slate-950'}`}><span className="font-black text-white">Open requests</span><span className="mt-2 block text-xs text-slate-400">Customers type anything. Nothing enters the approved queue until you allow it.</span></button>
           </div>
         ) : step === 2 ? (
           <div className="space-y-3">
@@ -154,7 +170,7 @@ export default function PerformerRoomSetup({
       <div className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-3">
         <button type="button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || isStarting} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-bold text-slate-300 disabled:opacity-30"><ArrowLeft className="h-4 w-4" /> Back</button>
         {step < 3 ? (
-          <button type="button" onClick={() => setStep((current) => Math.min(3, current + 1))} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white">Next <ArrowRight className="h-4 w-4" /></button>
+          <button type="button" disabled={isStarting} onClick={() => setStep((current) => Math.min(3, current + 1))} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-fuchsia-600 px-4 text-sm font-black text-white">Next <ArrowRight className="h-4 w-4" /></button>
         ) : (
           <button type="button" onClick={() => { void submit(); }} disabled={!performerEmailVerified || isStarting} aria-busy={isStarting} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-slate-950 disabled:bg-slate-800 disabled:text-slate-500"><Play className="h-4 w-4" /> {isStarting ? 'Creating room…' : 'Create room'}</button>
         )}
