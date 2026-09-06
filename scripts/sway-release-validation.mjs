@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Deliberately separate from the production build/start commands. This runner
@@ -28,6 +28,15 @@ if (process.env.RENDER_GIT_COMMIT) assert.equal(head, process.env.RENDER_GIT_COM
 if (process.env.SWAY_VALIDATION_EXPECTED_SHA) assert.equal(head, process.env.SWAY_VALIDATION_EXPECTED_SHA, 'Unexpected validation source.');
 assert.equal(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(), '', 'Validation requires an unchanged checkout.');
 console.log(`SWAY_VALIDATION_SOURCE ${head} node=${process.version}`);
+
+// Temporary, read-only source locations for the reproducible closeout failure.
+// No source is patched and no inherited credentials or customer data are read.
+const serverLines = readFileSync('server.ts', 'utf8').split('\n');
+for (const anchor of ['function syncActiveGigRouteContext', '/api/state/:gigId', "case 'end_session'", "case 'closeout_session'"]) {
+  const index = serverLines.findIndex((line) => line.includes(anchor));
+  console.log(`SWAY_ROOM_SOURCE_LOCATION ${JSON.stringify({ anchor, line: index + 1 })}`);
+  if (index >= 0) console.log(`SWAY_ROOM_SOURCE_EXCERPT ${JSON.stringify(serverLines.slice(Math.max(0, index - 4), index + 90).join('\n'))}`);
+}
 
 const publishDirectory = resolve('.validation-public');
 rmSync(publishDirectory, { recursive: true, force: true });
