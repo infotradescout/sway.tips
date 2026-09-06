@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, Upload } from 'lucide-react';
 import CollaboratorInbox, { type FileConnection } from './CollaboratorInbox';
 import { usePerformerCatalog } from '../use-performer-catalog';
+import { CatalogActionUnconfirmedError, requestCatalogAction } from '../catalog-action-request';
 
 async function sha256Hex(file: File) {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
@@ -25,7 +26,7 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 ** unit)).toLocaleString(undefined, { maximumFractionDigits: unit === 0 ? 0 : 1 })} ${units[unit]}`;
 }
 const PAGE_SIZE = 30;
-type Action = { active: boolean };
+type Action = { active: boolean; controller: AbortController };
 
 export default function PerformerAudioFiles() {
   const catalog = usePerformerCatalog();
@@ -34,6 +35,9 @@ export default function PerformerAudioFiles() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const actionRef = useRef<Action | null>(null);
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const refreshRequiredRef = useRef(false);
+  const recoveryReadRequested = useRef(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [connections, setConnections] = useState<FileConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
@@ -49,25 +53,42 @@ export default function PerformerAudioFiles() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages - 1);
   const visibleVersions = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-  const projectsReady = !catalog.accessDenied && catalog.projectsState === 'ready';
+  const projectsReady = !catalog.accessDenied && !refreshRequired && catalog.projectsState === 'ready';
   const filesReady = projectsReady && catalog.filesState === 'ready';
   const uploadReady = filesReady && catalog.storageState === 'ready';
   const loading = [catalog.projectsState, catalog.filesState, catalog.storageState].includes('loading');
   const readErrors = [catalog.projectsError, catalog.filesError, catalog.storageError].filter(Boolean);
 
   useEffect(() => () => {
-    if (actionRef.current) actionRef.current.active = false;
+    if (actionRef.current) {
+      actionRef.current.active = false;
+      actionRef.current.controller.abort();
+    }
   }, []);
   useEffect(() => {
     setSearch(''); setPage(0); setShareToken(null);
   }, [selectedProjectId]);
   useEffect(() => {
     if (!catalog.accessDenied) return;
-    if (actionRef.current) actionRef.current.active = false;
+    if (actionRef.current) {
+      actionRef.current.active = false;
+      actionRef.current.controller.abort();
+    }
     actionRef.current = null;
+    refreshRequiredRef.current = false; recoveryReadRequested.current = false;
+    setRefreshRequired(false);
     setBusy(false); setShareToken(null); setStatus(null);
     setConnections([]); setSelectedConnectionId(''); setTitle('Masters'); setSearch(''); setPage(0);
   }, [catalog.accessDenied]);
+  useEffect(() => {
+    // Only an explicit read-only refresh can unlock an unconfirmed action.
+    // refreshAll returns before selected-project files finish; observe all reads.
+    if (!refreshRequired || !recoveryReadRequested.current || catalog.accessDenied
+      || catalog.projectsState !== 'ready' || catalog.filesState !== 'ready' || catalog.storageState !== 'ready') return;
+    refreshRequiredRef.current = false; recoveryReadRequested.current = false;
+    setRefreshRequired(false);
+    setStatus('Catalog refreshed. Check your files and projects before repeating the previous action. Nothing was repeated automatically.');
+  }, [refreshRequired, catalog.accessDenied, catalog.projectsState, catalog.filesState, catalog.storageState]);
   useEffect(() => {
     if (!busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -75,43 +96,66 @@ export default function PerformerAudioFiles() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [busy]);
 
-  const ensureActive = (action: Action) => {
-    if (!action.active || actionRef.current !== action || !reader.isActive()) throw new Error('Catalog changed before the action finished. Reload it to check the result.');
+  const requireRefresh = () => {
+    refreshRequiredRef.current = true; recoveryReadRequested.current = false;
+    setRefreshRequired(true);
   };
-  const readAction = async (response: Response, fallback: string, action: Action) => {
+  const refreshCatalog = () => {
+    if (actionRef.current) return;
+    recoveryReadRequested.current = refreshRequiredRef.current;
+    void reader.refreshAll();
+  };
+  const stopWaiting = () => {
+    const action = actionRef.current;
+    if (!action) return;
+    action.active = false;
+    action.controller.abort();
+    actionRef.current = null;
+    requireRefresh(); setBusy(false); setShareToken(null);
+    setStatus('Stopped waiting. The action may already have completed. Refresh Catalog to check before trying again.');
+  };
+  const ensureActive = (action: Action) => {
+    if (!action.active || action.controller.signal.aborted || actionRef.current !== action || !reader.isActive()) throw new Error('Catalog changed before the action finished. Reload it to check the result.');
+  };
+  const sendAction = async (url: string, init: RequestInit, fallback: string, action: Action) => {
     ensureActive(action);
-    if (response.status === 401 || response.status === 403) { reader.revoke(); throw new Error('Your access changed. Reload Catalog to continue.'); }
-    const data = await response.json().catch(() => null);
+    const data = await requestCatalogAction(url, init, action.controller.signal, fallback, {
+      onAccessDenied: () => { ensureActive(action); reader.revoke(); }
+    });
     ensureActive(action);
-    if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : fallback);
-    if (!data || typeof data !== 'object') throw new Error('The result could not be confirmed. Refresh Catalog before trying the action again.');
     return data;
   };
   const runAction = async (kind: 'project' | 'file' | 'upload', operation: (action: Action) => Promise<void>) => {
     const snapshot = reader.getSnapshot();
-    if (actionRef.current || !reader.isActive() || snapshot.projectsState !== 'ready'
+    if (actionRef.current || refreshRequiredRef.current || !reader.isActive() || snapshot.projectsState !== 'ready'
       || (kind !== 'project' && snapshot.filesState !== 'ready')
       || (kind === 'upload' && snapshot.storageState !== 'ready')) return;
-    const action = { active: true };
+    const action: Action = { active: true, controller: new AbortController() };
     actionRef.current = action;
     setBusy(true); setStatus(null); setShareToken(null);
     try { await operation(action); }
-    catch (error) { if (action.active && reader.isActive()) setStatus(error instanceof Error ? error.message : 'Catalog action failed.'); }
-    finally {
+    catch (error) {
+      if (action.active && reader.isActive()) {
+        if (error instanceof CatalogActionUnconfirmedError) requireRefresh();
+        setStatus(error instanceof Error ? error.message : 'Catalog action failed.');
+      }
+    } finally {
       if (actionRef.current === action) {
         actionRef.current = null;
         if (action.active) setBusy(false);
       }
+      action.active = false;
+      action.controller.abort();
     }
   };
   const createProject = () => runAction('project', async action => {
     const nextTitle = title.trim();
     if (!nextTitle) throw new Error('Enter a project title.');
-    const response = await fetch('/api/talent/audio/projects', {
+    const data = await sendAction('/api/talent/audio/projects', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: nextTitle })
-    });
-    const data = await readAction(response, 'Could not create project.', action);
-    reader.acceptProject(data.project);
+    }, 'Could not create project.', action);
+    try { reader.acceptProject(data.project); }
+    catch { throw new CatalogActionUnconfirmedError(); }
     setStatus('Project created.');
   });
   const uploadFile = (file: File | null) => {
@@ -125,39 +169,36 @@ export default function PerformerAudioFiles() {
       let projectId = selectedProjectId;
       if (!projectId) {
         setStatus('Preparing your Catalog…');
-        const response = await fetch('/api/talent/audio/projects', {
+        const data = await sendAction('/api/talent/audio/projects', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'My Catalog' })
-        });
-        const data = await readAction(response, 'Could not prepare your Catalog.', action);
-        projectId = reader.acceptProject(data.project);
+        }, 'Could not prepare your Catalog.', action);
+        try { projectId = reader.acceptProject(data.project); }
+        catch { throw new CatalogActionUnconfirmedError(); }
       }
       setStatus(`Preparing ${file.name}…`);
       const expectedSha256 = await sha256Hex(file);
       ensureActive(action);
       const partSize = 5 * 1024 * 1024;
-      const start = await fetch(`/api/talent/audio/projects/${encodeURIComponent(projectId)}/uploads`, {
+      const startData = await sendAction(`/api/talent/audio/projects/${encodeURIComponent(projectId)}/uploads`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: file.name, assetKind: inferAssetKind(file), originalFilename: file.name,
           mimeType: file.type || 'application/octet-stream', expectedByteSize: file.size, expectedSha256,
           idempotencyKey: `upload:${projectId}:${expectedSha256}:${file.size}`, partSizeBytes: partSize })
-      });
-      const startData = await readAction(start, 'Could not start upload.', action);
-      if (typeof startData.uploadSession?.id !== 'string' || !startData.uploadSession.id) throw new Error('Upload was not confirmed. Refresh Catalog before trying again.');
+      }, 'Could not start upload.', action);
+      if (typeof startData.uploadSession?.id !== 'string' || !startData.uploadSession.id) throw new CatalogActionUnconfirmedError('Upload was not confirmed. Refresh Catalog before trying again.');
       const uploadId = encodeURIComponent(startData.uploadSession.id);
       const parts = chunkFile(file, partSize);
       for (let index = 0; index < parts.length; index += 1) {
         ensureActive(action);
         setStatus(`Uploading part ${index + 1}/${parts.length}…`);
-        const response = await fetch(`/api/talent/audio/uploads/${uploadId}/parts/${index + 1}`, {
+        await sendAction(`/api/talent/audio/uploads/${uploadId}/parts/${index + 1}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: parts[index]
-        });
-        await readAction(response, `Part ${index + 1} failed.`, action);
+        }, `Part ${index + 1} failed.`, action);
       }
       ensureActive(action);
       setStatus('Saving your original file…');
-      const complete = await fetch(`/api/talent/audio/uploads/${uploadId}/complete`, { method: 'POST' });
-      const data = await readAction(complete, 'Could not finish upload.', action);
-      if (!Number.isInteger(data.version?.versionNumber)) throw new Error('The upload result could not be confirmed. Refresh Catalog before uploading again.');
+      const data = await sendAction(`/api/talent/audio/uploads/${uploadId}/complete`, { method: 'POST' }, 'Could not finish upload.', action);
+      if (!Number.isInteger(data.version?.versionNumber)) throw new CatalogActionUnconfirmedError('The upload result could not be confirmed. Refresh Catalog before uploading again.');
       const [filesLoaded, usageLoaded] = await Promise.all([reader.refreshAssets(projectId), reader.refreshStorageUsage()]);
       ensureActive(action);
       setStatus(`File saved · version ${data.version.versionNumber}.${filesLoaded && usageLoaded ? '' : ' The file list or storage could not refresh. Use Refresh Catalog; do not upload it again.'}`);
@@ -166,32 +207,29 @@ export default function PerformerAudioFiles() {
   const setRequestable = (assetId: string, requestable: boolean) => runAction('file', async action => {
     if (!reader.getSnapshot().assets.some(asset => asset.id === assetId)) return;
     const projectId = reader.getSnapshot().projectId;
-    const response = await fetch(`/api/talent/audio/assets/${encodeURIComponent(assetId)}/requestable`, {
+    await sendAction(`/api/talent/audio/assets/${encodeURIComponent(assetId)}/requestable`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestable })
-    });
-    await readAction(response, 'Could not update request availability.', action);
+    }, 'Could not update request availability.', action);
     const refreshed = await reader.refreshAssets(projectId);
     ensureActive(action);
     setStatus(`${requestable ? 'This track is now available in Library.' : 'This track is private to Catalog.'}${refreshed ? '' : ' The list could not refresh. Use Refresh Catalog to check it.'}`);
   });
   const createShare = (versionId: string) => runAction('file', async action => {
     if (!reader.getSnapshot().versions.some(version => version.id === versionId)) return;
-    const response = await fetch(`/api/talent/audio/versions/${encodeURIComponent(versionId)}/shares`, {
+    const data = await sendAction(`/api/talent/audio/versions/${encodeURIComponent(versionId)}/shares`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxUses: 1 })
-    });
-    const data = await readAction(response, 'Could not create share.', action);
-    if (typeof data.shareToken !== 'string' || !data.shareToken) throw new Error('The share result could not be confirmed. Refresh before trying again.');
+    }, 'Could not create share.', action);
+    if (typeof data.shareToken !== 'string' || !data.shareToken) throw new CatalogActionUnconfirmedError('The share result could not be confirmed. Refresh before trying again.');
     setShareToken(data.shareToken);
     setStatus('One-time share created. Copy the code below now; it is shown once.');
   });
   const shareWithConnection = (versionId: string) => runAction('file', async action => {
     if (!reader.getSnapshot().versions.some(version => version.id === versionId)) return;
     if (!connections.some(connection => connection.connectionId === selectedConnectionId)) throw new Error('Pair with another account before sharing a selected file.');
-    const response = await fetch(`/api/talent/audio/pairing/connections/${encodeURIComponent(selectedConnectionId)}/shares`, {
+    const data = await sendAction(`/api/talent/audio/pairing/connections/${encodeURIComponent(selectedConnectionId)}/shares`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ versionId, canDownloadOriginal: true, canComment: true, canApprove: true })
-    });
-    const data = await readAction(response, 'Could not share selected file.', action);
+    }, 'Could not share selected file.', action);
     setCollaborationRefreshKey(current => current + 1);
     setStatus(data.reused ? 'This version is already shared with that connection.' : 'Selected version shared for download, review, and approval.');
   });
@@ -209,11 +247,13 @@ export default function PerformerAudioFiles() {
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">Your Catalog</p>
           <p className="mt-1 text-xs text-slate-400">Keep masters, artwork, and rights documents together. Files stay private unless you explicitly share them or allow an audio master for requests.</p>
         </div>
-        <button type="button" onClick={() => void reader.refreshAll()} disabled={busy || loading} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 text-xs font-bold text-white disabled:opacity-50">
+        <button type="button" onClick={refreshCatalog} disabled={busy || loading} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 text-xs font-bold text-white disabled:opacity-50">
           <RefreshCw className="h-4 w-4" aria-hidden="true" />{catalog.accessDenied ? 'Reload Catalog' : 'Refresh Catalog'}
         </button>
+        {busy ? <button type="button" onClick={stopWaiting} className="min-h-11 rounded-xl border border-amber-500/30 px-3 text-xs font-bold text-amber-100">Stop waiting</button> : null}
         {busy || loading ? <Loader2 className="h-4 w-4 animate-spin text-cyan-300" aria-label="Catalog loading" /> : null}
       </div>
+      {refreshRequired && !catalog.accessDenied ? <p role="alert" className="mt-3 rounded-xl border border-amber-500/30 p-3 text-sm text-amber-100">The previous action is unconfirmed. Refresh Catalog before creating, uploading, or sharing again. Stopping the wait does not undo saved work.</p> : null}
       {catalog.accessDenied ? <p role="alert" className="mt-3 rounded-xl border border-amber-500/30 p-3 text-sm text-amber-100">Your access changed. Private Catalog files have been cleared. Reload Catalog to continue.</p> : null}
       {readErrors.length ? <div role="alert" className="mt-3 rounded-xl border border-amber-500/30 p-3 text-xs text-amber-100">
         {readErrors.map((error, index) => <p key={index}>{error}</p>)}
