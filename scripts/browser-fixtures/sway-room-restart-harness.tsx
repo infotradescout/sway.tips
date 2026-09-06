@@ -12,7 +12,9 @@ function RestartHarness() {
   if (created) return <h1>New room confirmed</h1>;
   const restartBlocked = view.roomActionsBlocked && view.roomLookup.status !== 'ended';
   return <>
-    <output data-testid="restart-state">{JSON.stringify({
+    {/* Diagnostic JSON is not part of the product. Keep it measurable by text
+        reads without making the fixture itself overflow a phone viewport. */}
+    <output hidden data-testid="restart-state">{JSON.stringify({
       status: view.roomLookup.status, closed: view.bState.session.status === 'closed',
       oldRoomBlocked: view.roomActionsBlocked, restartBlocked
     })}</output>
