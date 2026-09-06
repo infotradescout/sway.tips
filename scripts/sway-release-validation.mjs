@@ -35,7 +35,9 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
-  // Exercise the complete real account/room lifecycle first, without dropping any other gate.
+  // Run broad contracts before browser journeys so infrastructure failures surface early.
+  // Every existing gate below still executes, including the complete room lifecycle.
+  ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
   ['recap-display-behavior', ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], 180_000, process.execPath],
@@ -52,7 +54,6 @@ const steps = [
   ['event-listings-contract', ['scripts/sway-public-event-listings.contract.test.mjs'], 300_000, process.execPath],
   ['room-restart', ['scripts/sway-performer-room-restart.behavior.test.mjs'], 180_000, process.execPath],
   ['room-restart-browser', ['scripts/sway-performer-room-restart.browser.test.mjs'], 180_000, process.execPath],
-  ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['readiness-browser', ['run', 'test:browser:readiness-223'], 600_000],
   ['payment-viewport-browser', ['run', 'test:browser:payment-modal-viewport'], 300_000],
   ['profile-payout-browser', ['run', 'test:browser:profile-payout-options'], 300_000]
