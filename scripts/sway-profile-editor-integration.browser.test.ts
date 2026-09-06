@@ -222,6 +222,30 @@ async function main() {
     assert.equal((await readProfile(firstContext, baseUrl)).headline, recoveredHeadline);
     record('offline-failure-preserves-edits-and-explicit-retry-saves');
 
+    // Exercise the actual owner controls and API, not substituted response handlers.
+    const visibility = editor.locator('[data-sway-visibility-control="true"]');
+    await firstPage.waitForFunction(() => {
+      const radio = document.querySelector('[data-sway-visibility-control="true"] input[type="radio"]');
+      return radio instanceof HTMLInputElement && !radio.disabled;
+    }, { timeout: TIMEOUT });
+    for (const value of ['public', 'unlisted', 'draft']) {
+      await visibility.locator(`input[name="performer-visibility"][value="${value}"]`).check();
+      const [response] = await Promise.all([
+        firstPage.waitForResponse(response => new URL(response.url()).pathname === '/api/talent/profile/visibility' && response.request().method() === 'POST'),
+        visibility.getByRole('button', { name: 'Save visibility', exact: true }).click()
+      ]);
+      assert.equal(response.status(), 200);
+      assert.equal((await response.json()).visibilityState, value);
+      await visibility.getByText('Visibility saved.', { exact: true }).waitFor({ state: 'visible' });
+      const saved = await readProfile(firstContext, baseUrl);
+      assert.equal(saved.visibilityState, value);
+      assert.equal(saved.headline, recoveredHeadline);
+      assert.equal(saved.bio, bio);
+      assert.equal(saved.booking.email, first.email);
+      assert.equal(await editor.getByLabel('Headline', { exact: true }).inputValue(), recoveredHeadline);
+    }
+    record('real-owner-public-unlisted-draft-controls-preserve-profile-content');
+
     const secondContext = await newContext(browser, baseUrl, 1280, 800);
     const secondPage = await secondContext.newPage();
     secondPage.setDefaultTimeout(TIMEOUT);
@@ -262,6 +286,7 @@ async function main() {
     stored = await readProfile(restoredContext, baseUrl);
     assert.equal(stored.headline, recoveredHeadline);
     assert.equal(stored.bio, bio);
+    assert.equal(stored.visibilityState, 'draft');
     await editor.getByRole('button', { name: 'Save public page', exact: true }).scrollIntoViewIfNeeded();
     await editor.getByRole('button', { name: 'Save public page', exact: true }).click();
     await editor.getByText('Public page saved.', { exact: true }).waitFor({ state: 'visible' });

@@ -40,6 +40,9 @@ const steps = [
   // Every existing gate below still executes, including the complete room lifecycle.
   ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
+  ['visibility-request-behavior', ['scripts/sway-performer-visibility-request.behavior.test.mjs'], 180_000, process.execPath],
+  ['visibility-recovery-browser', ['scripts/sway-performer-visibility-recovery.browser.test.mjs'], 300_000, process.execPath],
+  ['visibility-durable-integration', ['run', 'test:integration:performer-visibility-control'], 300_000],
   ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
   ['recap-display-behavior', ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], 180_000, process.execPath],
   ['recap-browser', ['scripts/sway-recap.browser.test.mjs'], 300_000, process.execPath],
