@@ -2,7 +2,12 @@ let state: BackendState = createEmptyBackendState();
 let activeGigId: string | null = null;
 
 function syncActiveGigRouteContext(inputState: BackendState, gigId: string | null = activeGigId) {
-  inputState.activeGigId = inputState.session.status === 'active' ? (gigId ?? null) : null;
+  // This response field identifies the selected room, not registry membership.
+  // Ending and closed snapshots must retain it so clients can reject other rooms.
+  const hasRoomIdentity = inputState.session.status === 'active'
+    || inputState.session.status === 'ending'
+    || inputState.session.status === 'closed';
+  inputState.activeGigId = hasRoomIdentity ? (gigId ?? null) : null;
 }
 
 function prepareRoomState(inputState: BackendState, gigId: string | null) {
@@ -114,7 +119,8 @@ async function loadRoomState(gigId: string) {
   const snapshot = await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState());
   return {
     ...snapshot,
-    state: prepareRoomState(snapshot.state, snapshot.activeGigId)
+    // Closed rows are no longer active, but this confirmed row still owns its recap.
+    state: prepareRoomState(snapshot.state, snapshot.roomStatus === 'ended' ? gigId : snapshot.activeGigId)
   };
 }
 
