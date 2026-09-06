@@ -1,9 +1,13 @@
 export function useSwayState(options?: {
   statePath?: string | null;
+  privateRoomView?: boolean;
+  accessScope?: string | null;
 }) {
   const statePath = options?.statePath === undefined ? '/api/state' : options.statePath;
+  const privateRoomView = options?.privateRoomView === true;
+  const accessScope = options?.accessScope ?? null;
   // A distinct scope prevents late responses from crossing rooms, including A -> B -> A.
-  const scope = useMemo(() => ({ path: statePath, sequence: 0, revision: 0, pending: false, controller: null as AbortController | null, discoveryRecorded: false }), [statePath]);
+  const scope = useMemo(() => ({ path: statePath, privateRoomView, accessScope, sequence: 0, revision: 0, pending: false, controller: null as AbortController | null, discoveryRecorded: false }), [statePath, privateRoomView, accessScope]);
   const activeScope = useRef<typeof scope | null>(scope);
   useLayoutEffect(() => {
     activeScope.current = scope;
@@ -87,6 +91,7 @@ export function useSwayState(options?: {
           signal: controller.signal,
           headers: scope.path === '/api/state' ? undefined : {
             ...buildPatronRequestHeaders(),
+            ...(scope.privateRoomView ? { 'x-sway-room-view': 'performer' } : {}),
             ...(!scope.discoveryRecorded ? {
               'x-sway-discovery-journey': getOrCreateDiscoveryJourneyId(),
               'x-sway-discovery-source': getEffectiveDiscoveryChannel(),
@@ -111,9 +116,20 @@ export function useSwayState(options?: {
         if (!response.ok) throw new Error('Room temporarily unavailable');
         const data = await response.json();
         if (!stillCurrent(sequence)) return;
+        if (scope.privateRoomView && data?.room_access !== 'performer') {
+          clear('missing', 'Your room access could not be confirmed. Reload your performer account.');
+          return;
+        }
         const normalized = normalizeBackendState(data);
         if (!matchesRoom(normalized)) throw new Error('Room response did not match the selected room');
-        if (data?.room_lookup === 'ended') { clear('ended', ENDED_LIVE_ROOM_COPY); return; }
+        if (data?.room_lookup === 'ended') {
+          if (scope.privateRoomView && normalized.session.status === 'closed') {
+            publish({ scope, state: normalized, loading: false, lookup: { status: 'ended', message: null } });
+          } else {
+            clear('ended', ENDED_LIVE_ROOM_COPY);
+          }
+          return;
+        }
         publish({ scope, state: normalized, loading: false, lookup: { status: data?.room_lookup === 'active' ? 'active' : 'global', message: null } });
         if (response.headers.get('x-sway-discovery-recorded') === '1') scope.discoveryRecorded = true;
       } catch (error) {

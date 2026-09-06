@@ -16,6 +16,7 @@ import {
   resolvePublicProfilePageKindLabel
 } from '../server/public-profile';
 import { LIVE_ROOM_LANGUAGE } from '../live-room-language';
+import { readPerformerRoomSelection, writePerformerRoomSelection } from '../performer-room-selection';
 import {
   buildFileConnectLoginHref,
   FILE_COLLABORATION_PATHS,
@@ -111,10 +112,14 @@ export default function TalentApp() {
     performerIdentity: string;
     message: string;
   } | null>(null);
-  const [selectedGigId, applySelectedGigId] = useState<string | null>(null);
+  const [selectedGigId, applySelectedGigId] = useState<string | null>(() => (
+    !demoMode && !isAuthEntryRoute && typeof window !== 'undefined'
+      && (requestedWorkspace === 'home' || requestedWorkspace === 'room')
+      ? readPerformerRoomSelection(window.location.search) : null
+  ));
   const [performerProfile, setPerformerProfile] = useState<TalentPerformerProfile>(null);
   const roomSelectionRevision = useRef(0);
-  const explicitRoomSelection = useRef(false);
+  const explicitRoomSelection = useRef(Boolean(selectedGigId));
   const roomStartInFlight = useRef(false);
   const roomStartContext = useRef<{ active: boolean } | null>(null);
   const profileReadContext = useRef<PerformerReadContext | null>(null);
@@ -183,10 +188,22 @@ export default function TalentApp() {
     explicitRoomSelection.current = true;
     applySelectedGigId(gigId);
   }, []);
-  const statePath = isAuthEntryRoute || !selectedGigId ? null : `/api/state/${selectedGigId}`;
-  const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath });
+  const statePath = isAuthEntryRoute || !selectedGigId || !performerIdentity ? null : `/api/state/${selectedGigId}`;
+  const { bState, isLoading, setBState, roomActionsBlocked, roomLookup } = useSwayState({ statePath, privateRoomView: true, accessScope: performerIdentity });
   const [roomActionError, setRoomActionError] = useState<string | null>(null);
   const [profileReadError, setProfileReadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (demoMode || isAuthEntryRoute || (requestedWorkspace !== 'home' && requestedWorkspace !== 'room')) return;
+    writePerformerRoomSelection(selectedGigId);
+  }, [demoMode, isAuthEntryRoute, requestedWorkspace, selectedGigId]);
+
+  useEffect(() => {
+    if (demoMode || isAuthEntryRoute || (requestedWorkspace !== 'home' && requestedWorkspace !== 'room')) return;
+    const restoreAddressSelection = () => setSelectedGigId(readPerformerRoomSelection(window.location.search));
+    window.addEventListener('popstate', restoreAddressSelection);
+    return () => window.removeEventListener('popstate', restoreAddressSelection);
+  }, [demoMode, isAuthEntryRoute, requestedWorkspace, setSelectedGigId]);
 
   const refreshPerformerProfile = async () => {
     if (logoutInFlight.current) return;
