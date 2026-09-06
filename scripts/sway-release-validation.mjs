@@ -37,6 +37,7 @@ const steps = [
   ['build', ['run', 'build'], 300_000],
   ['payment-pricing', ['run', 'test:payment-pricing'], 180_000],
   ['room-restart', ['scripts/sway-performer-room-restart.behavior.test.mjs'], 180_000, process.execPath],
+  ['room-restart-browser', ['scripts/sway-performer-room-restart.browser.test.mjs'], 180_000, process.execPath],
   ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['readiness-browser', ['run', 'test:browser:readiness-223'], 600_000],
   ['payment-viewport-browser', ['run', 'test:browser:payment-modal-viewport'], 300_000],
@@ -79,7 +80,7 @@ async function runStep(name, args, timeoutMs, command = npm) {
     });
   } finally {
     clearTimeout(timeout);
-    if (escalation) clearTimeout(escalation);
+    if (escalation) clearInterval(escalation);
     // A failed suite must not leave its local server or browser behind for the
     // following suite. Every child is in this isolated process group.
     signalTree(child, 'SIGKILL');
