@@ -19,9 +19,9 @@ const shown=(page,id)=>page.waitForFunction(id=>JSON.parse(document.querySelecto
 const vite=await createServer({root:process.cwd(),logLevel:'error',cacheDir:path.resolve('node_modules/.vite-readiness-223'),server:{host:'127.0.0.1',port:0,strictPort:false,watch:null}});
 await vite.listen();
 const base='http://127.0.0.1:'+vite.httpServer.address().port;
-const browser=await chromium.launch({channel:'chrome',headless:true});
+const browser=await chromium.launch({headless:true});
 const browserVersion=browser.version();
-console.log('Installed Chrome:',browser.version(),'Fixture:',base);
+console.log('Playwright Chromium:',browser.version(),'Fixture:',base);
 async function test(name,run,viewport={width:390,height:844}){
   const context=await browser.newContext({viewport,serviceWorkers:'block'});
   await context.route('**/*',route=>new URL(route.request().url()).origin===base?route.continue():route.abort());
