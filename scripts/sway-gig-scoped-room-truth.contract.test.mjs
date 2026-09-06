@@ -1,4 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+// Execute the actual server functions; a failure must stop the hard contract.
+execFileSync(process.execPath, [fileURLToPath(new URL('./sway-room-context.behavior.test.mjs', import.meta.url))], {
+  stdio: 'inherit', timeout: 30_000
+});
 
 const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
 const storeSource = readFileSync(new URL('../src/server/business-store.ts', import.meta.url), 'utf8');
