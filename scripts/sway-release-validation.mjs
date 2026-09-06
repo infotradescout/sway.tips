@@ -35,14 +35,14 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
-  ['active-room-registry-owned-database', ['--import', 'tsx', 'scripts/sway-active-room-registry-owned-database.behavior.test.mjs'], 180_000, process.execPath],
-  // Run broad contracts before browser journeys so infrastructure failures surface early.
-  // Every existing gate below still executes, including the complete room lifecycle.
-  ['contracts', ['run', 'test:contracts'], 1_200_000],
-  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
+  // Surface the repaired visibility fixture early without omitting any gate.
   ['visibility-request-behavior', ['scripts/sway-performer-visibility-request.behavior.test.mjs'], 180_000, process.execPath],
   ['visibility-recovery-browser', ['scripts/sway-performer-visibility-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['visibility-durable-integration', ['run', 'test:integration:performer-visibility-control'], 300_000],
+  ['active-room-registry-owned-database', ['--import', 'tsx', 'scripts/sway-active-room-registry-owned-database.behavior.test.mjs'], 180_000, process.execPath],
+  // Every broad contract and complete room lifecycle still executes.
+  ['contracts', ['run', 'test:contracts'], 1_200_000],
+  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
   ['recap-display-behavior', ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], 180_000, process.execPath],
   ['recap-browser', ['scripts/sway-recap.browser.test.mjs'], 300_000, process.execPath],
