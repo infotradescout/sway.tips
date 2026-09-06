@@ -35,6 +35,8 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  // Exercise real account/room transitions early; every remaining gate still runs.
+  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['payment-pricing', ['run', 'test:payment-pricing'], 180_000],
   ['event-read-recovery', ['--import', 'tsx', 'scripts/sway-performer-event-reads.behavior.test.mjs'], 180_000, process.execPath],
   ['events-recovery-browser', ['scripts/sway-performer-events-recovery.browser.test.mjs'], 300_000, process.execPath],
@@ -44,8 +46,7 @@ const steps = [
   ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['readiness-browser', ['run', 'test:browser:readiness-223'], 600_000],
   ['payment-viewport-browser', ['run', 'test:browser:payment-modal-viewport'], 300_000],
-  ['profile-payout-browser', ['run', 'test:browser:profile-payout-options'], 300_000],
-  ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000]
+  ['profile-payout-browser', ['run', 'test:browser:profile-payout-options'], 300_000]
 ];
 
 function signalTree(child, signal) {
