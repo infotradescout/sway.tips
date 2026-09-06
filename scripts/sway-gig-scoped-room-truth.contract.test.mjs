@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-// Execute the actual server functions and selection helper; failures stop the hard contract.
+// Execute the actual server functions, selection helper and account-scope browser boundary.
 for (const script of [
   './sway-room-context.behavior.test.mjs',
   './sway-closed-room-read.behavior.test.mjs',
-  './sway-room-selection.behavior.test.mjs'
+  './sway-room-selection.behavior.test.mjs',
+  './sway-room-account-scope.browser.test.mjs'
 ]) {
   execFileSync(process.execPath, [fileURLToPath(new URL(script, import.meta.url))], {
-    stdio: 'inherit', timeout: 30_000
+    stdio: 'inherit', timeout: script.endsWith('.browser.test.mjs') ? 180_000 : 30_000
   });
 }
 

@@ -113,9 +113,11 @@ export async function verifyFreeRoomLifecycle({
     await performerPage.getByRole('button', { name: 'Start New Room', exact: true }).click();
     const setup = performerPage.locator('[data-sway-performer-room-setup="true"]');
     await setup.waitFor({ state: 'visible', timeout: 15_000 });
-    await setup.getByRole('button', { name: 'Free requests', exact: true }).click();
+    // Choice cards include their explanatory text in the accessible name.
+    // Match the anchored choice title, not an invented title-only button name.
+    await setup.getByRole('button', { name: /^Free requests\b/ }).click();
     await setup.getByRole('button', { name: 'Next', exact: true }).click();
-    await setup.getByRole('button', { name: 'Open requests', exact: true }).click();
+    await setup.getByRole('button', { name: /^Open requests\b/ }).click();
     await setup.getByRole('button', { name: 'Next', exact: true }).click();
     await setup.getByText(publicPerformerName, { exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
     await performerPage.getByRole('button', { name: 'Back to night recap', exact: true }).click();
