@@ -35,6 +35,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  ['profile-editor-integration-browser', ['--import', 'tsx', 'scripts/sway-profile-editor-integration.browser.test.ts'], 300_000, process.execPath],
   // Exercise real account/room transitions early; every remaining gate still runs.
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['payment-pricing', ['run', 'test:payment-pricing'], 180_000],
