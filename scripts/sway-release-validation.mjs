@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Deliberately separate from the production build/start commands. This runner
@@ -31,16 +31,18 @@ console.log(`SWAY_VALIDATION_SOURCE ${head} node=${process.version}`);
 
 const publishDirectory = resolve('.validation-public');
 rmSync(publishDirectory, { recursive: true, force: true });
+// Observation is explicitly separate from test pass totals. It never mutates production.
+await import('./sway-public-product-audit.mjs');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
+  ['public-entry-contract', ['scripts/sway-public-entry-contract.mjs'], 180_000, process.execPath],
+  ['public-entry-browser', ['scripts/sway-public-entry-qa.mjs'], 300_000, process.execPath],
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
-  // Surface the repaired visibility fixture early without omitting any gate.
   ['visibility-request-behavior', ['scripts/sway-performer-visibility-request.behavior.test.mjs'], 180_000, process.execPath],
   ['visibility-recovery-browser', ['scripts/sway-performer-visibility-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['visibility-durable-integration', ['run', 'test:integration:performer-visibility-control'], 300_000],
   ['active-room-registry-owned-database', ['--import', 'tsx', 'scripts/sway-active-room-registry-owned-database.behavior.test.mjs'], 180_000, process.execPath],
-  // Every broad contract and complete room lifecycle still executes.
   ['contracts', ['run', 'test:contracts'], 1_200_000],
   ['simulated-live-night-browser', ['run', 'test:integration:simulated-live-night-browser'], 600_000],
   ['room-account-scope-browser', ['scripts/sway-room-account-scope.browser.test.mjs'], 180_000, process.execPath],
@@ -99,8 +101,6 @@ async function runStep(name, args, timeoutMs, command = npm) {
   } finally {
     clearTimeout(timeout);
     if (escalation) clearTimeout(escalation);
-    // A failed suite must not leave its local server or browser behind for the
-    // following suite. Every child is in this isolated process group.
     signalTree(child, 'SIGKILL');
   }
   const passed = !timedOut && result.code === 0 && !result.error;
@@ -119,6 +119,10 @@ if (failed.length) {
   process.exitCode = 1;
 } else {
   mkdirSync(publishDirectory, { recursive: true, force: true });
-  writeFileSync(resolve(publishDirectory, 'index.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Validation</title><p>Isolated validation passed. This is not the Sway application or production release approval.</p></html>\n');
+  writeFileSync(resolve(publishDirectory, 'index.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Validation</title><p>Isolated validation passed. This is not the Sway application or whole-product readiness approval. Public screenshots are anonymous, read-only observations.</p></html>\n');
   writeFileSync(resolve(publishDirectory, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
+  for (const name of ['public-product-audit', 'public-entry-qa']) {
+    const source = resolve('tmp', name);
+    if (existsSync(source)) cpSync(source, resolve(publishDirectory, name), { recursive: true });
+  }
 }

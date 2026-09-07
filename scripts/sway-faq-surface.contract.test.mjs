@@ -7,9 +7,10 @@ const publicHtml = readFileSync(join(root, 'shells/public.html'), 'utf8');
 const packageJson = readFileSync(join(root, 'package.json'), 'utf8');
 const failures = [];
 
+// Preserve the existing product and rights boundaries in the server source.
+// The production route module is checked in an actual Express/Chromium test below.
 for (const term of [
   "const aboutPageHtml = renderStaticDocument(",
-  "const faqPageHtml = aboutPageHtml;",
   "app.get('/about'",
   "app.get('/faq'",
   "faqPath: '/faq'",
@@ -36,58 +37,26 @@ for (const term of [
   'contracted DSP delivery provider',
   'Money, ownership, and control'
 ]) {
-  if (!server.includes(term)) failures.push(`FAQ surface missing server term: ${term}`);
+  if (!server.includes(term)) failures.push(`Product information missing server term: ${term}`);
 }
-
-if (!publicHtml.includes('<a class="tagline" href="/about">sway to play</a>')) {
-  failures.push('Public landing sway to play tagline must route to /about.');
+if (!publicHtml.includes('<a class="tagline" href="/about">sway to play</a>')) failures.push('Public landing sway to play tagline must route to /about.');
+if (!publicHtml.includes('href="/about"')) failures.push('Public landing must include a visible /about link.');
+const start = server.indexOf("const aboutPageHtml = renderStaticDocument(");
+const end = start === -1 ? -1 : server.indexOf('\n);', start);
+const template = start === -1 || end === -1 ? server : server.slice(start,end);
+for (const staleClaim of ['each release draft connects one verified master to one recording','does not yet add or reorder recordings for an EP or album','Multi-recording EP and album assembly with track add and reorder controls']) {
+  if (template.includes(staleClaim)) failures.push(`About source still presents implemented multi-track assembly as missing: ${staleClaim}`);
 }
-
-if (!publicHtml.includes('href="/about"')) {
-  failures.push('Public landing must include a visible /about link.');
+const productionSurface = readFileSync(join(root,'scripts/sway-dj-beta-about-preload.cjs'),'utf8');
+for (const forbidden of ['instagram.com/','tiktok.com/','x.com/','twitter.com/','facebook.com/','youtube.com/','discord.gg/']) {
+  if (template.includes(forbidden) || publicHtml.includes(forbidden) || productionSurface.includes(forbidden)) failures.push(`Public information must not invent an unapproved social link: ${forbidden}`);
 }
-
-// Scope the forbidden-link scan to the FAQ page template itself, not the
-// whole server.ts file -- unrelated features (like control-bridge search
-// deep links) may legitimately reference these hosts elsewhere.
-const faqTemplateStart = server.indexOf("const aboutPageHtml = renderStaticDocument(");
-const faqTemplateEnd = faqTemplateStart === -1 ? -1 : server.indexOf('\n);', faqTemplateStart);
-const faqTemplate = faqTemplateStart === -1 || faqTemplateEnd === -1
-  ? server
-  : server.slice(faqTemplateStart, faqTemplateEnd);
-
-for (const staleMultiTrackClaim of [
-  'each release draft connects one verified master to one recording',
-  'does not yet add or reorder recordings for an EP or album',
-  'Multi-recording EP and album assembly with track add and reorder controls'
-]) {
-  if (faqTemplate.includes(staleMultiTrackClaim)) {
-    failures.push(`About surface still presents implemented multi-track assembly as missing: ${staleMultiTrackClaim}`);
-  }
-}
-
-for (const forbidden of [
-  'instagram.com/',
-  'tiktok.com/',
-  'x.com/',
-  'twitter.com/',
-  'facebook.com/',
-  'youtube.com/',
-  'discord.gg/'
-]) {
-  if (faqTemplate.includes(forbidden) || publicHtml.includes(forbidden)) {
-    failures.push(`FAQ/public surface must not invent unapproved social link: ${forbidden}`);
-  }
-}
-
-if (!packageJson.includes('sway-faq-surface.contract.test.mjs')) {
-  failures.push('test:contracts must include FAQ surface contract.');
-}
-
+if (!packageJson.includes('sway-faq-surface.contract.test.mjs')) failures.push('test:contracts must include FAQ surface contract.');
 if (failures.length) {
   console.error('FAQ surface contract failed:');
-  failures.forEach((failure) => console.error(`- ${failure}`));
+  failures.forEach(failure => console.error(`- ${failure}`));
   process.exit(1);
 }
-
-console.log('FAQ surface contract passed.');
+await import('./sway-public-information.browser.test.mjs');
+await import('./sway-public-artwork.browser.test.mjs');
+console.log('FAQ surface source and real browser contract passed.');
