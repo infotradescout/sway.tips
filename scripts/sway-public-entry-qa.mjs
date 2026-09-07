@@ -29,18 +29,20 @@ try {
   for (const scenario of cases) {
     const { name, doubleText, ...options } = scenario;
     const context = await browser.newContext({ ...options, serviceWorkers: 'block' });
-    // Fulfill just the shell under a reserved test domain; abort all assets and navigation.
+    // Inject the enlarged-text stylesheet before parsing, so this fixture does
+    // not depend on addStyleTag's script execution in a no-JavaScript context.
+    const fixtureHtml = doubleText ? html.replace('</head>', '<style>.cta-stack a, footer a { font-size: 32px !important; letter-spacing: 0 !important; }</style></head>') : html;
     await context.route('**/*', route => route.request().url() === `${origin}/`
-      ? route.fulfill({ status: 200, contentType: 'text/html', body: html })
+      ? route.fulfill({ status: 200, contentType: 'text/html', body: fixtureHtml })
       : route.abort());
     const page = await context.newPage();
+    page.setDefaultTimeout(5000);
+    page.setDefaultNavigationTimeout(15000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    console.log('PUBLIC_ENTRY_BROWSER_BEGIN ' + name);
     try {
       await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
-      if (doubleText) {
-        await page.addStyleTag({ content: '.cta-stack a, footer a { font-size: 32px !important; letter-spacing: 0 !important; }' });
-      }
       const initial = await page.locator('.cta-stack a').evaluateAll(links => links.map(link => ({
         href: link.getAttribute('href'), opacity: getComputedStyle(link).opacity,
         pointerEvents: getComputedStyle(link).pointerEvents
@@ -73,10 +75,12 @@ try {
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.screenshot({ path: resolve(output, `${name}.png`), fullPage: true });
       results.push({ name, status: 'PASS' });
+      console.log('PUBLIC_ENTRY_BROWSER_PASS ' + name);
     } catch (error) {
       const blocked = /ERR_BLOCKED_BY_ADMINISTRATOR/.test(error.message);
       results.push({ name, status: blocked ? 'BLOCKED' : 'FAIL', error: error.message });
-      if (blocked) break; // Do not retry or bypass browser policy.
+      console.error('PUBLIC_ENTRY_BROWSER_FAILURE ' + JSON.stringify(results.at(-1)));
+      if (blocked) break;
     } finally {
       await context.close();
     }
@@ -92,7 +96,7 @@ try {
     notRun: cases.length - results.length
   };
   writeFileSync(resolve(output, 'results.json'), JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify(report, null, 2));
+  console.log('PUBLIC_ENTRY_BROWSER_SUMMARY ' + JSON.stringify(report));
   await browser.close();
-  if (report.failed || report.blocked) process.exitCode = 1;
+  if (report.failed || report.blocked || report.notRun) process.exitCode = 1;
 }

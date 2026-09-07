@@ -1,585 +1,66 @@
 'use strict';
 
-/**
- * Opening DJ beta About/FAQ surface.
- *
- * This file is loaded with NODE_OPTIONS in production so the existing
- * /about and /faq registrations serve the focused live-room explanation
- * without changing Request, Tip, Boost, payment, queue, or account behavior.
- */
-
-const DJ_BETA_ABOUT_HTML = String.raw`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#05050b" />
-    <title>Sway for DJs | Run the crowd without stopping the set</title>
-    <meta
-      name="description"
-      content="Sway gives DJs and live performers one room for Requests, Tips, and Boosts. Share a QR code or link, manage the queue, and keep control of what gets approved and played."
-    />
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #05050b;
-        --panel: rgba(17, 18, 31, 0.88);
-        --panel-strong: rgba(22, 23, 39, 0.96);
-        --line: rgba(255, 255, 255, 0.11);
-        --text: #f8f8ff;
-        --muted: #b7b8ca;
-        --pink: #f04bd8;
-        --purple: #9f6dff;
-        --cyan: #42d9ff;
-        --green: #65e6b3;
-        --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
-      }
-
-      * { box-sizing: border-box; }
-      html { scroll-behavior: smooth; }
-      body {
-        margin: 0;
-        min-width: 320px;
-        min-height: 100vh;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: var(--text);
-        background:
-          radial-gradient(900px 520px at 12% -8%, rgba(240, 75, 216, 0.18), transparent 62%),
-          radial-gradient(840px 520px at 96% 4%, rgba(66, 217, 255, 0.14), transparent 58%),
-          linear-gradient(180deg, #070712 0%, var(--bg) 42%, #030308 100%);
-      }
-
-      a { color: inherit; }
-      a:focus-visible,
-      button:focus-visible {
-        outline: 3px solid var(--cyan);
-        outline-offset: 3px;
-      }
-
-      .page {
-        width: min(1120px, calc(100% - 28px));
-        margin: 0 auto;
-        padding: 18px 0 64px;
-      }
-
-      .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        min-height: 58px;
-      }
-
-      .brand {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        text-decoration: none;
-        font-size: 20px;
-        font-weight: 900;
-        letter-spacing: -0.03em;
-      }
-
-      .brand-mark {
-        display: grid;
-        width: 34px;
-        height: 34px;
-        place-items: center;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(240, 75, 216, 0.95), rgba(66, 217, 255, 0.9));
-        box-shadow: 0 0 30px rgba(240, 75, 216, 0.27);
-        color: #fff;
-        font-size: 18px;
-      }
-
-      .top-link {
-        color: var(--muted);
-        font-size: 14px;
-        font-weight: 800;
-        text-decoration: none;
-      }
-
-      .top-link:hover { color: var(--text); }
-
-      .hero {
-        position: relative;
-        overflow: hidden;
-        margin-top: 14px;
-        padding: clamp(28px, 7vw, 68px);
-        border: 1px solid var(--line);
-        border-radius: 28px;
-        background:
-          linear-gradient(145deg, rgba(22, 18, 39, 0.96), rgba(8, 10, 21, 0.92)),
-          var(--panel-strong);
-        box-shadow: var(--shadow);
-      }
-
-      .hero::after {
-        content: "";
-        position: absolute;
-        width: 330px;
-        height: 330px;
-        right: -120px;
-        top: -150px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(66, 217, 255, 0.2), transparent 68%);
-        pointer-events: none;
-      }
-
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        margin: 0;
-        color: #f8c9ff;
-        font-size: 12px;
-        font-weight: 900;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-      }
-
-      .eyebrow::before {
-        content: "";
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--green);
-        box-shadow: 0 0 18px rgba(101, 230, 179, 0.75);
-      }
-
-      h1 {
-        max-width: 850px;
-        margin: 18px 0 0;
-        font-size: clamp(42px, 8vw, 84px);
-        line-height: 0.98;
-        letter-spacing: -0.055em;
-      }
-
-      .hero-copy {
-        max-width: 760px;
-        margin: 22px 0 0;
-        color: #d9d9e8;
-        font-size: clamp(17px, 2.5vw, 21px);
-        line-height: 1.58;
-      }
-
-      .setup-note {
-        max-width: 800px;
-        margin: 20px 0 0;
-        padding: 15px 17px;
-        border: 1px solid rgba(66, 217, 255, 0.2);
-        border-radius: 14px;
-        background: rgba(66, 217, 255, 0.07);
-        color: #dff8ff;
-        font-size: 15px;
-        line-height: 1.58;
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 11px;
-        margin-top: 28px;
-      }
-
-      .action {
-        display: inline-flex;
-        min-height: 48px;
-        align-items: center;
-        justify-content: center;
-        padding: 0 18px;
-        border: 1px solid var(--line);
-        border-radius: 13px;
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--text);
-        font-size: 14px;
-        font-weight: 900;
-        text-decoration: none;
-        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
-      }
-
-      .action:hover {
-        transform: translateY(-1px);
-        border-color: rgba(255, 255, 255, 0.25);
-      }
-
-      .action.primary {
-        border-color: rgba(240, 75, 216, 0.55);
-        background: linear-gradient(100deg, var(--pink), var(--purple) 58%, #6a9dff);
-        box-shadow: 0 12px 38px rgba(159, 109, 255, 0.28);
-      }
-
-      section.content {
-        margin-top: 44px;
-      }
-
-      .section-heading {
-        max-width: 760px;
-        margin-bottom: 18px;
-      }
-
-      h2 {
-        margin: 0;
-        font-size: clamp(28px, 4.5vw, 44px);
-        line-height: 1.08;
-        letter-spacing: -0.035em;
-      }
-
-      .section-heading p {
-        margin: 10px 0 0;
-        color: var(--muted);
-        font-size: 16px;
-        line-height: 1.62;
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 14px;
-      }
-
-      .card,
-      .step,
-      .control-panel,
-      .beta-panel {
-        border: 1px solid var(--line);
-        background: var(--panel);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-        backdrop-filter: blur(18px);
-      }
-
-      .card {
-        min-height: 170px;
-        padding: 22px;
-        border-radius: 18px;
-      }
-
-      .card-number {
-        display: grid;
-        width: 32px;
-        height: 32px;
-        place-items: center;
-        border-radius: 11px;
-        background: linear-gradient(135deg, rgba(240, 75, 216, 0.18), rgba(66, 217, 255, 0.14));
-        color: #f7c5ff;
-        font-size: 13px;
-        font-weight: 900;
-      }
-
-      h3 {
-        margin: 16px 0 0;
-        font-size: 19px;
-        letter-spacing: -0.02em;
-      }
-
-      .card p,
-      .step p {
-        margin: 8px 0 0;
-        color: var(--muted);
-        font-size: 15px;
-        line-height: 1.62;
-      }
-
-      .steps {
-        display: grid;
-        gap: 11px;
-      }
-
-      .step {
-        display: grid;
-        grid-template-columns: 42px minmax(0, 1fr);
-        gap: 14px;
-        align-items: start;
-        padding: 17px;
-        border-radius: 16px;
-      }
-
-      .step-index {
-        display: grid;
-        width: 42px;
-        height: 42px;
-        place-items: center;
-        border-radius: 14px;
-        background: linear-gradient(135deg, rgba(240, 75, 216, 0.9), rgba(159, 109, 255, 0.9));
-        color: #fff;
-        font-size: 14px;
-        font-weight: 900;
-      }
-
-      .step h3 { margin: 2px 0 0; }
-
-      .truth-note {
-        margin-top: 13px;
-        padding: 17px 18px;
-        border-left: 3px solid var(--cyan);
-        border-radius: 0 14px 14px 0;
-        background: rgba(66, 217, 255, 0.07);
-        color: #e4faff;
-        font-size: 15px;
-        line-height: 1.62;
-      }
-
-      .control-panel,
-      .beta-panel {
-        padding: clamp(20px, 4vw, 30px);
-        border-radius: 20px;
-      }
-
-      .control-list {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px 22px;
-        margin: 18px 0 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .control-list li {
-        position: relative;
-        padding-left: 25px;
-        color: #d9d9e7;
-        font-size: 15px;
-        line-height: 1.55;
-      }
-
-      .control-list li::before {
-        content: "✓";
-        position: absolute;
-        left: 0;
-        top: 0;
-        color: var(--green);
-        font-weight: 900;
-      }
-
-      .beta-panel {
-        border-color: rgba(240, 75, 216, 0.23);
-        background:
-          linear-gradient(135deg, rgba(240, 75, 216, 0.09), rgba(66, 217, 255, 0.06)),
-          var(--panel);
-      }
-
-      .beta-panel p {
-        max-width: 820px;
-        margin: 12px 0 0;
-        color: #dbdbea;
-        font-size: 16px;
-        line-height: 1.65;
-      }
-
-      .final-actions {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 18px;
-      }
-
-      .final-actions .action {
-        width: 100%;
-        min-height: 54px;
-      }
-
-      footer {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px 18px;
-        align-items: center;
-        justify-content: center;
-        margin-top: 42px;
-        padding: 24px 0 0;
-        border-top: 1px solid var(--line);
-      }
-
-      footer a {
-        color: #999bad;
-        font-size: 12px;
-        font-weight: 750;
-        text-decoration: none;
-      }
-
-      footer a:hover { color: var(--text); }
-
-      @media (max-width: 760px) {
-        .page { width: min(100% - 20px, 1120px); padding-top: 8px; }
-        .topbar { min-height: 54px; }
-        .hero { border-radius: 22px; }
-        .actions { display: grid; grid-template-columns: 1fr; }
-        .action { width: 100%; }
-        section.content { margin-top: 34px; }
-        .grid,
-        .control-list,
-        .final-actions { grid-template-columns: 1fr; }
-        .card { min-height: 0; }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        html { scroll-behavior: auto; }
-        .action { transition: none; }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="page">
-      <nav class="topbar" aria-label="Sway navigation">
-        <a class="brand" href="/">
-          <span class="brand-mark" aria-hidden="true">S</span>
-          <span>Sway</span>
-        </a>
-        <a class="top-link" href="/home">Join a live room</a>
-      </nav>
-
-      <header class="hero">
-        <p class="eyebrow">Sway live rooms</p>
-        <h1>Run the crowd without stopping the set.</h1>
-        <p class="hero-copy">Sway gives DJs and live performers one room for Requests, Tips, and Boosts. Start a room, share the QR code or link, manage the queue, and keep control of what gets approved and played.</p>
-        <p class="setup-note"><strong>Sway works alongside your existing DJ setup.</strong> Keep using Serato, Rekordbox, VirtualDJ, Tidal, USB drives, or your normal deck workflow. Sway handles the audience interaction around it. No patron app download is required for the web experience.</p>
-        <div class="actions" aria-label="Get started with Sway">
-          <a class="action primary" href="/account/signup">Create your DJ account</a>
-          <a class="action" href="/account/login">Log in and start</a>
-          <a class="action" href="/home">Join a live room</a>
-        </div>
-      </header>
-
-      <section class="content" aria-labelledby="handles-heading">
-        <div class="section-heading">
-          <h2 id="handles-heading">What Sway handles</h2>
-          <p>The crowd gets one clear place to interact. You get one queue instead of shouted requests, messages, screenshots, and paper notes.</p>
-        </div>
-        <div class="grid">
-          <article class="card">
-            <span class="card-number">01</span>
-            <h3>Requests in one queue</h3>
-            <p>Collect song requests and custom requests inside one performer-controlled live room.</p>
-          </article>
-          <article class="card">
-            <span class="card-number">02</span>
-            <h3>Tips in the same room</h3>
-            <p>When paid actions are available for the performer, patrons can send direct support without leaving the room.</p>
-          </article>
-          <article class="card">
-            <span class="card-number">03</span>
-            <h3>Approved boosts</h3>
-            <p>Patrons can Boost an already-approved Request. A Boost never forces approval and never takes control away from the DJ.</p>
-          </article>
-          <article class="card">
-            <span class="card-number">04</span>
-            <h3>Clear status</h3>
-            <p>Patrons can follow what happened to their action instead of repeatedly asking whether you saw it.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="content" aria-labelledby="patron-heading">
-        <div class="section-heading">
-          <h2 id="patron-heading">How patrons use Sway</h2>
-          <p>The crowd can enter from a phone browser and finish the action without learning your equipment or interrupting the set.</p>
-        </div>
-        <div class="steps">
-          <article class="step"><span class="step-index">1</span><div><h3>Enter the right room</h3><p>Scan the DJ’s Sway QR code or open the shared room link.</p></div></article>
-          <article class="step"><span class="step-index">2</span><div><h3>Choose an action</h3><p>Send a Request, Tip, or Boost that is available in that room.</p></div></article>
-          <article class="step"><span class="step-index">3</span><div><h3>Review before submitting</h3><p>Confirm the request details and any applicable amount before authorizing it.</p></div></article>
-          <article class="step"><span class="step-index">4</span><div><h3>Follow the result</h3><p>Use the private status view to see what happened without interrupting the DJ.</p></div></article>
-        </div>
-        <p class="truth-note"><strong>A Request is not a promise that a song will be played.</strong> The DJ keeps artistic and operational control of the room. Payment is not shown as complete before the backend and payment provider confirm it.</p>
-      </section>
-
-      <section class="content" aria-labelledby="performer-heading">
-        <div class="section-heading">
-          <h2 id="performer-heading">How to run Sway tonight</h2>
-          <p>The opening flow stays centered on the live room, so you can get from account to working QR code quickly.</p>
-        </div>
-        <div class="steps">
-          <article class="step"><span class="step-index">1</span><div><h3>Create or open your account</h3><p>Sign up or log in, then activate Pro Mode if your account has not yet been set up as a performer.</p></div></article>
-          <article class="step"><span class="step-index">2</span><div><h3>Start your live room</h3><p>Confirm the room settings, Request source, minimum support amount, and operating mode.</p></div></article>
-          <article class="step"><span class="step-index">3</span><div><h3>Share the room</h3><p>Display the Sway QR code or send the room link where the crowd can reach it.</p></div></article>
-          <article class="step"><span class="step-index">4</span><div><h3>Manage the queue</h3><p>Review incoming actions, approve or deny Requests, order approved items, pause or resume intake, update status, and complete fulfilled items.</p></div></article>
-          <article class="step"><span class="step-index">5</span><div><h3>Close the room</h3><p>End the session cleanly and review the room recap, activity, and available earnings information.</p></div></article>
-        </div>
-      </section>
-
-      <section class="content" aria-labelledby="control-heading">
-        <div class="control-panel">
-          <h2 id="control-heading">You remain in control</h2>
-          <ul class="control-list">
-            <li>Sway does not replace DJ software or control the decks.</li>
-            <li>A paid Request does not guarantee that it will be played.</li>
-            <li>Boosts apply only to Requests the performer has already approved.</li>
-            <li>Patrons cannot buy control of the performance.</li>
-            <li>Payment success waits for confirmed provider and backend state.</li>
-            <li>Refund, release, capture, and payout language follows the recorded outcome.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="content" aria-labelledby="beta-heading">
-        <div class="beta-panel">
-          <p class="eyebrow">Opening beta</p>
-          <h2 id="beta-heading">Focused on the live room</h2>
-          <p>The opening DJ beta is focused on Request, Tip, Boost, queue control, patron status, and room recap. No DJ software connection or patron app download is required.</p>
-          <div class="final-actions">
-            <a class="action primary" href="/account/signup">Create your DJ account</a>
-            <a class="action" href="/account/login">Log in and start</a>
-            <a class="action" href="/home">Join a live room</a>
-          </div>
-        </div>
-      </section>
-
-      <footer aria-label="Sway legal and support links">
-        <a href="/privacy">Privacy Policy</a>
-        <a href="/terms">Terms</a>
-        <a href="/support">Support</a>
-        <a href="/privacy/data-deletion">Data deletion</a>
-        <a href="/legal/payments">Payment terms</a>
-        <a href="/legal/payouts">Payout terms</a>
-        <a href="/legal/tickets">Ticket terms</a>
-      </footer>
-    </main>
-  </body>
-</html>`;
+// Retain this entry point for existing NODE_OPTIONS configuration. About and
+// FAQ have different jobs; neither may reduce Sway to an opening DJ beta.
+const styles = `
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f8f8ff;background:#05050b}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 520px at 12% -8%,rgba(240,75,216,.13),transparent 62%),#05050b;line-height:1.65}a{color:#b9edff;text-underline-offset:4px}a:focus-visible,summary:focus-visible{outline:3px solid #42d9ff;outline-offset:4px}.page{width:min(960px,calc(100% - 32px));margin:auto;padding:16px 0 40px}.topbar,.links,.actions,footer{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}.topbar{justify-content:space-between;border-bottom:1px solid #ffffff20;padding-bottom:16px}.brand{font-size:24px;font-weight:900;color:#f8f8ff;text-decoration:none}.links a,footer a{padding:8px 0}.hero{padding:32px 0 24px}h1{font-size:clamp(32px,6vw,52px);line-height:1.12;letter-spacing:-.035em;margin:0 0 16px}h2{font-size:25px;line-height:1.25;margin:0 0 12px}h3{font-size:20px;line-height:1.35;margin:0 0 10px}p{margin:0 0 14px;color:#c8cada}.intro{max-width:760px;font-size:18px}.actions{margin-top:20px}.action{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:12px 18px;border:1px solid #ffffff35;border-radius:12px;font-weight:800;text-align:center;text-decoration:none;color:#fff}.primary{background:#a21caf;border-color:#d946ef}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card,.note,details{border:1px solid #ffffff20;background:#11121fe0;border-radius:16px}.card{padding:22px}.card a{display:inline-block;padding:6px 0}.note{padding:22px;margin-top:24px}section.content{margin:28px 0}details{margin:10px 0;padding:0 18px}summary{cursor:pointer;min-height:52px;padding:15px 0;font-size:17px;font-weight:750;line-height:1.5}details p{padding:2px 0 8px}.topics{margin-bottom:24px}.topics a{display:inline-block;padding:8px 0;margin-right:18px}footer{margin-top:36px;padding-top:18px;border-top:1px solid #ffffff20;font-size:14px}h1,h2,h3,p,a,summary{overflow-wrap:anywhere}section{scroll-margin-top:20px}.skip{position:absolute;left:16px;top:-100px;padding:10px 16px;background:#05050b;z-index:2}.skip:focus{top:8px}@media(max-width:640px){.grid{grid-template-columns:1fr}.hero{padding-top:26px}.actions{align-items:stretch;flex-direction:column}.action{width:100%}.links{gap:8px 16px}.card,.note{padding:18px}}
+`;
+const footer = `<footer aria-label="Sway help and terms"><a href="/about">About Sway</a><a href="/faq">FAQ</a><a href="/support">Support</a><a href="/privacy">Privacy Policy</a><a href="/terms">Terms</a><a href="/privacy/data-deletion">Data deletion</a><a href="/legal/payments">Payment terms</a><a href="/legal/payouts">Payout terms</a><a href="/legal/tickets">Ticket terms</a></footer>`;
+function renderPage(path, title, description, content) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#05050b"><title>${title}</title><meta name="description" content="${description}"><link rel="canonical" href="https://app.sway.tips${path}"><style>${styles}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="page"><nav class="topbar" aria-label="Sway navigation"><a class="brand" href="/">Sway</a><div class="links"><a href="/discover">Discover</a><a href="/home">Join a room</a><a href="/account/login">Log in</a></div></nav><main id="main">${content}</main>${footer}</div></body></html>`;
+}
+const ABOUT_PAGE_HTML = renderPage('/about', 'About Sway | Every Way to Play', 'Your performer page, live rooms, music projects, and release work in one Sway account.', `
+<header class="hero"><h1>About Sway</h1><p class="intro">Sway connects your performer page, live audience, music projects, and release work in one account. Fans, DJs, musicians, songwriters, and collaborators use different parts of the same platform.</p><div class="actions"><a class="action primary" href="/account/signup?intent=performer">Create your performer page</a><a class="action" href="/home">Join a live room</a></div></header>
+<section class="content" aria-labelledby="parts"><h2 id="parts">Find what you came to do</h2><div class="grid">
+<article class="card"><h3>Your public page</h3><p>Share your name, story, featured media, booking details, and links. Choose whether your page is Public, Unlisted, or Draft.</p><a href="/talent/profile">Open Profile</a></article>
+<article class="card"><h3>Your live rooms and shows</h3><p>Share a room link or QR code, review requests, manage the queue, and keep the recap when a room ends. Manage upcoming events in Shows. A request never takes control away from the performer.</p><a href="/talent/gigs">Open Live Rooms</a> · <a href="/talent/shows">Open Shows</a></article>
+<article class="card"><h3>Your music and collaborators</h3><p>Keep original recordings and works in progress in Catalog. Share selected work with collaborators by permission. Private files do not become public just because they are uploaded.</p><a href="/talent/files">Open Catalog</a></article>
+<article class="card"><h3>Your release work</h3><p>Prepare singles, EPs, and albums with track order, artwork, credits, and rights information. Saving a release draft does not send it to music stores.</p><a href="/talent/files">Open music projects</a></article>
+</div></section>
+<section class="note" aria-labelledby="listening"><h2 id="listening">sway.dio and music distribution</h2><p>sway.dio is the original-music listening part of Sway being developed alongside these tools. Complete external distribution, royalty accounting, collaborator split payouts, and transfers from another distributor are not available in the current release.</p><p>Keep an existing distribution service in place until Sway can confirm delivery and continuity for your music.</p></section>
+<section class="content" aria-labelledby="control"><h2 id="control">Your work stays yours</h2><p>Uploading music or preparing a release does not transfer your music ownership to Sway. Performers decide what to approve and play. Paid requests, tips, and cash-outs are available only when the required account and payment setup is ready.</p><p>Check the <a href="/legal/payments">payment terms</a> and <a href="/legal/payouts">cash-out terms</a> before authorizing money. For practical questions, open the <a href="/faq">Sway FAQ</a>.</p></section>`);
+const FAQ_PAGE_HTML = renderPage('/faq', 'Sway FAQ | Accounts, rooms, music, and earnings', 'Answers about Sway accounts, performer pages, live rooms, music projects, releases, and cash-outs.', `
+<header class="hero"><h1>Sway FAQ</h1><p class="intro">Answers about accounts, live rooms, music, and earnings.</p></header>
+<nav class="topics" aria-label="FAQ topics"><a href="#getting-started">Getting started</a><a href="#live-rooms">Live rooms</a><a href="#music">Music and releases</a><a href="#money">Payments and help</a></nav>
+<section id="getting-started" class="content" aria-labelledby="getting-started-heading"><h2 id="getting-started-heading">Getting started</h2>
+<details><summary>Do I need to download an app?</summary><p>No. Open Sway in your phone or computer browser. A performer’s shared room link or QR code takes you to their room.</p></details>
+<details><summary>How do I create my performer page?</summary><p>Choose <a href="/account/signup?intent=performer">Create your performer page</a>, create your account, and verify your email. Continue through performer setup in the same account. Already registered? <a href="/account/login?next=%2Faccount%3Fintent%3Dperformer">Log in to continue performer setup</a>.</p></details>
+<details><summary>What do Public, Unlisted, and Draft mean?</summary><p>Public pages can appear in discovery. Unlisted pages can be opened with their direct link but are not listed in discovery. Draft pages are not published. Change this in your <a href="/talent/profile">Profile</a> and wait for the saved setting to be confirmed.</p></details>
+</section>
+<section id="live-rooms" class="content" aria-labelledby="live-rooms-heading"><h2 id="live-rooms-heading">Live rooms</h2>
+<details><summary>How do I join the right room?</summary><p>Open the performer’s room link or scan their Sway QR code. You can also <a href="/home">join with a room link or ID</a>. Check the performer and room before sending a request or authorizing a payment.</p></details>
+<details><summary>Does a paid request guarantee a song will be played?</summary><p>No. The performer chooses which requests to approve and play. A Boost applies to an already-approved request; it does not buy approval. Check your private request status and the <a href="/legal/payments">payment and refund terms</a> for the recorded outcome.</p></details>
+<details><summary>What happens when I end a room?</summary><p>The room stops taking new requests and opens its recap. Start a new room for a new session rather than overwriting the previous room’s history. Wait for the close to finish before leaving the screen.</p></details>
+</section>
+<section id="music" class="content" aria-labelledby="music-heading"><h2 id="music-heading">Music and releases</h2>
+<details><summary>Are my Catalog files public?</summary><p>No. Catalog holds private music projects and files. Sharing selected work with a collaborator is separate from publishing it. Review who has access before sharing and use <a href="/talent/files">Catalog</a> to manage your projects.</p></details>
+<details><summary>Does a release draft put my music on streaming services?</summary><p>No. A draft prepares the tracks, artwork, credits, and rights information. It is not confirmation of delivery to Spotify, Apple Music, or another service. Complete external distribution and royalty accounting are not available in the current release.</p></details>
+<details><summary>What is sway.dio?</summary><p>sway.dio is the original-music listening part of Sway. It is being developed alongside performer pages, live rooms, Catalog, collaboration, and release preparation. Read <a href="/about">About Sway</a> for the wider product and current limits.</p></details>
+</section>
+<section id="money" class="content" aria-labelledby="money-heading"><h2 id="money-heading">Payments and help</h2>
+<details><summary>Why is a payment or cash-out unavailable?</summary><p>Payment and cash-out options depend on the required account and payment setup. A saved PayPal or Venmo destination alone does not mean withdrawals are enabled. Review the availability shown in your account and the <a href="/legal/payouts">cash-out terms</a>. No cash-out is complete until payment is confirmed.</p></details>
+<details><summary>What should I do when a save or payment is interrupted?</summary><p>Keep the page open and check its status before submitting again. A lost connection does not always mean the first attempt failed. Keep your room, order, or payment reference. The <a href="/support">Support page</a> lists current help options; do not post passwords, payment details, or private links publicly.</p></details>
+</section>`);
 
 function installDjBetaAboutSurface() {
   let express;
-  try {
-    express = require('express');
-  } catch (error) {
-    // NODE_OPTIONS also runs during dependency installation. The route patch
-    // becomes active when the real server starts after Express is installed.
-    if (error && error.code === 'MODULE_NOT_FOUND') return;
-    throw error;
-  }
-
-  const patchFlag = Symbol.for('sway.djBetaAboutSurface.v1');
-  if (express.application[patchFlag]) return;
-
+  try { express = require('express'); }
+  catch (error) { if (error && error.code === 'MODULE_NOT_FOUND') return; throw error; }
+  const flag = Symbol.for('sway.djBetaAboutSurface.v1');
+  if (express.application[flag]) return;
   const originalGet = express.application.get;
-  let registrationLogged = false;
-
-  express.application.get = function swayDjBetaAboutGet(path, ...handlers) {
+  express.application.get = function swayPublicInformationGet(path, ...handlers) {
     if ((path === '/about' || path === '/faq') && handlers.length > 0) {
-      if (!registrationLogged) {
-        registrationLogged = true;
-        console.log('[sway.about] DJ beta About and FAQ surface active.');
-      }
+      const html = path === '/faq' ? FAQ_PAGE_HTML : ABOUT_PAGE_HTML;
       return originalGet.call(this, path, (_req, res) => {
         res.set('Cache-Control', 'no-store');
-        res.status(200).type('html').send(DJ_BETA_ABOUT_HTML);
+        res.status(200).type('html').send(html);
       });
     }
-
     return originalGet.call(this, path, ...handlers);
   };
-
-  Object.defineProperty(express.application, patchFlag, {
-    value: true,
-    configurable: false,
-    enumerable: false,
-    writable: false
-  });
+  Object.defineProperty(express.application, flag, { value: true, configurable: false, enumerable: false, writable: false });
 }
-
 installDjBetaAboutSurface();
-
-module.exports = {
-  DJ_BETA_ABOUT_HTML,
-  installDjBetaAboutSurface
-};
+module.exports = { ABOUT_PAGE_HTML, FAQ_PAGE_HTML, DJ_BETA_ABOUT_HTML: ABOUT_PAGE_HTML, installDjBetaAboutSurface };
