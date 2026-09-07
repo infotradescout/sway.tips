@@ -58,4 +58,5 @@ if (failures.length) {
   process.exit(1);
 }
 await import('./sway-public-information.browser.test.mjs');
+await import('./sway-public-artwork.browser.test.mjs');
 console.log('FAQ surface source and real browser contract passed.');
