@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -16,8 +17,18 @@ assert.equal(head,process.env.SWAY_VALIDATION_EXPECTED_SHA);
 assert.equal(head,process.env.RENDER_GIT_COMMIT);
 assert.equal(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim(),'');
 const expectedProduction='b84ad1814dca1fc40861468c65ff6ac3a72519db';
-const differences=execFileSync('git',['diff','--name-only',expectedProduction,head],{encoding:'utf8'}).trim().split('\n').filter(Boolean).sort();
-assert.deepEqual(differences,['scripts/sway-public-release-delivery-proof.mjs','scripts/sway-release-validation-suite.mjs','scripts/sway-release-validation.mjs'].sort(),'All inspected application files must match production exactly.');
+// Render uses a shallow checkout. Reconstruct the production tree in a temporary
+// index rather than assuming the parent commit exists. This changes no source
+// files or real index and verifies every application file, not just selected ones.
+const indexDirectory=mkdtempSync(resolve(tmpdir(),'sway-delivery-index-'));
+try {
+  const options={encoding:'utf8',env:{...process.env,GIT_INDEX_FILE:resolve(indexDirectory,'index')}};
+  execFileSync('git',['read-tree','HEAD'],options);
+  execFileSync('git',['update-index','--force-remove','scripts/sway-public-release-delivery-proof.mjs','scripts/sway-release-validation-suite.mjs'],options);
+  execFileSync('git',['update-index','--add','--cacheinfo','100644,6dbc1875e41012b405d54e01e8fa80246b0e6767,scripts/sway-release-validation.mjs'],options);
+  const reconstructed=execFileSync('git',['write-tree'],options).trim();
+  assert.equal(reconstructed,'27531b0538af5234f901bb76de5e173435ccd3dc','All application files must exactly match the tested production tree.');
+} finally {rmSync(indexDirectory,{recursive:true,force:true});}
 const require=createRequire(import.meta.url);
 const {ABOUT_PAGE_HTML,FAQ_PAGE_HTML}=require('./sway-dj-beta-about-preload.cjs');
 const output=resolve('.validation-public');
