@@ -132,6 +132,7 @@ import {
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
+import { bindAffiliateReferral, bindAffiliateReferralForFirstClaim, loadSwayProgramMembershipForPerformer, readAffiliateReferralCode, registerAffiliateRoutes } from "./src/server/affiliate-program";
 import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
@@ -565,6 +566,7 @@ const LIVE_ROOM_MUTATION_ROLLOUT_PATHS = [
   /^\/api\/moderation\/(?:hide|remove)(?:\/|$)/i,
   /^\/api\/talent\/control-bridge\/action(?:\/|$)/i
 ];
+registerAffiliateRoutes({ app, db: businessDb, accessControl, isProduction });
 app.use((req, res, next) => {
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   const isLiveRoomMutation = LIVE_ROOM_MUTATION_ROLLOUT_PATHS.some((pattern) => pattern.test(req.path));
@@ -4553,6 +4555,7 @@ app.post('/api/talent/invite/accept', async (req, res) => {
 
       if (!account || account.passwordHash) return null;
 
+      await bindAffiliateReferralForFirstClaim(tx, account.userId, readAffiliateReferralCode(req));
       const completedAt = new Date();
       const [updatedUser] = await tx
         .update(users)
@@ -4782,6 +4785,7 @@ app.post('/api/talent/claim/accept', async (req, res) => {
       // "already has a password" guard. Whatever the artist submits here
       // overrides whatever was there before -- that's the handoff.
       const wasHandoff = Boolean(account.passwordHash);
+      await bindAffiliateReferralForFirstClaim(tx, account.userId, readAffiliateReferralCode(req));
       const completedAt = new Date();
       const [updatedUser] = await tx
         .update(users)
@@ -6059,6 +6063,7 @@ app.post('/api/account/signup', async (req, res) => {
           throw err;
         }
 
+        await bindAffiliateReferralForFirstClaim(tx, claim.actorUserId, readAffiliateReferralCode(req));
         const completedAt = new Date();
         const [updatedUser] = await tx
           .update(users)
@@ -6170,6 +6175,7 @@ app.post('/api/account/signup', async (req, res) => {
       role: 'patron',
       proModeStatus: 'disabled'
     }).returning({ id: users.id });
+    await bindAffiliateReferral(tx, account.id, readAffiliateReferralCode(req));
     const challenge = await performerLoginChallengeStore.issueChallenge({
       actorUserId: account.id,
       targetEmail: email,
@@ -12371,7 +12377,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
   try {
 
     const publicProfilePerformerId = profile.performerId;
-    const [[activeRoom], linkRows, partnerState, publicReleaseRows, publicEventRows] = await Promise.all([
+    const [[activeRoom], linkRows, partnerState, publicReleaseRows, publicEventRows, programMembership] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -12422,7 +12428,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         .limit(12),
       performerEventService
         ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      loadSwayProgramMembershipForPerformer(businessDb, profile.performerId)
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -12483,12 +12490,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         links: combinedLinkRows,
         featuredMedia: publicMedia,
         partner: {
-          active: partnerState?.isEffective ?? false,
-          kind: partnerState?.isEffective ? partnerState.partnerKind : null,
+          active: programMembership.isPartner || programMembership.isExclusive || (partnerState?.isEffective ?? false),
+          kind: programMembership.isExclusive ? 'exclusive' : programMembership.isPartner ? 'partner' : partnerState?.isEffective ? partnerState.partnerKind : null,
           termsVersion: partnerState?.isEffective ? partnerState.termsVersion : null
         },
         isPreview: false,
-        claimState: 'claimed'
+        claimState: profile.ownerEmailVerifiedAt ? 'claimed' : 'pending'
       },
       activeRoom: activeRoom
         ? {
