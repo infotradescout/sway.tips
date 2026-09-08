@@ -51,7 +51,7 @@ try {
 
   const port = 47600 + Math.floor(Math.random() * 300);
   const base = `http://127.0.0.1:${port}`;
-  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { env: { ...process.env, NODE_ENV: 'test', PORT: String(port), HOST: '127.0.0.1', DATABASE_URL: proof.databaseUrl, SWAY_EMAIL_PROVIDER: 'mock', SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX: '100', SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION: 'true' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { env: { ...process.env, NODE_ENV: 'test', PORT: String(port), HOST: '127.0.0.1', DATABASE_URL: proof.databaseUrl, SWAY_EMAIL_PROVIDER: '', SWAY_PERFORMER_SIGNUP_RATE_LIMIT_MAX: '100', SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION: 'true' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });
   let ready = false;
