@@ -291,7 +291,7 @@ requireTerms(eventPage, 'Public event page', [
   'isEventCancelled'
 ]);
 requireTerms(discoverPage, 'Public discovery page', [
-  "fetch('/api/public/feed'",
+  "fetch('/api/public/feed?' + params",
   'Array.isArray(data.events)',
   '<PublicEventCard',
   'No live rooms or upcoming shows right now'
