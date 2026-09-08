@@ -94,7 +94,7 @@ try {
   const settleProfile = async () => {
     await page.evaluate(() => document.fonts.ready);
     await page.waitForFunction(() => {
-      const hero = document.querySelector('main > section');
+      const hero = document.querySelector('[data-profile-section="identity"]');
       const avatar = hero?.querySelector('img');
       return hero && (!avatar || (avatar.complete && avatar.naturalWidth > 0))
         && [...document.querySelectorAll('main [style*="opacity"]')].every((element) => Number(getComputedStyle(element).opacity) >= 0.99);
@@ -105,7 +105,7 @@ try {
     await page.getByText('Sway Partner', { exact: true }).waitFor({ state: 'visible' });
     assert.ok((await page.locator('body').innerText()).includes(name));
     await settleProfile();
-    console.log(`PROFILE_RENDER ${JSON.stringify({ handle, avatar: await page.locator('main > section img').count() ? 'loaded' : 'fallback' })}`);
+    console.log(`PROFILE_RENDER ${JSON.stringify({ handle, avatar: await page.locator('[data-profile-section="identity"] img').count() ? 'loaded' : 'fallback' })}`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${handle} mobile overflow`);
     await page.screenshot({ path: `tmp/friend-profile-proof/${handle}-mobile.png`, fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1000 });

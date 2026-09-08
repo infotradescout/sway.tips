@@ -1,9 +1,13 @@
 import {
   ArrowUpRight,
+  ArrowDown,
+  ArrowUp,
   BadgeCheck,
   CalendarDays,
   Disc3,
   Globe2,
+  GripVertical,
+  LayoutGrid,
   LockKeyhole,
   Mail,
   MapPin,
@@ -11,10 +15,10 @@ import {
   Play,
   Radio,
   Share2,
-  Sparkles
+  Sparkles,
+  UserRound
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { captureCampaignCode } from '../shells/campaignAttribution';
 import {
   captureDiscoveryAttribution,
@@ -23,7 +27,9 @@ import {
 import { sendAcquisitionEvent, sendDiscoveryEvent } from '../shells/frictionClient';
 import {
   resolvePublicProfileHeroName,
-  resolvePublicProfilePageKindLabel
+  resolvePublicProfilePageKindLabel,
+  resolvePublicProfileSectionOrder,
+  type PublicProfileSectionId
 } from '../server/public-profile';
 import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
 import { PublicEventCard, type PublicEventDto } from './PublicEventPage';
@@ -46,6 +52,7 @@ type PublicProfileMedia = {
 };
 
 type PublicPerformerProfile = {
+  layout?: { sectionOrder: PublicProfileSectionId[]; customized: boolean; revision: number };
   displayName: string;
   stageName: string | null;
   primaryRole: string | null;
@@ -143,6 +150,26 @@ function formatLinkKind(kind: string) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+const PROFILE_SECTIONS = {
+  identity: { label: 'Profile header', icon: UserRound },
+  about: { label: 'About', icon: UserRound },
+  live: { label: 'Live room', icon: Radio },
+  events: { label: 'Shows & events', icon: CalendarDays },
+  releases: { label: 'Releases', icon: Disc3 },
+  media: { label: 'Featured performances', icon: Play },
+  links: { label: 'Links', icon: ArrowUpRight },
+  booking: { label: 'Booking', icon: Mail },
+  social: { label: 'Social links', icon: Globe2 }
+} as const;
+
+function isMusicDestination(url: string) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return ['music.apple.com', 'open.spotify.com', 'audiomack.com', 'soundcloud.com', 'bandcamp.com'].includes(host)
+      || host.endsWith('.bandcamp.com');
+  } catch { return false; }
+}
+
 export default function PerformerPublicProfilePage({ performerHandle }: { performerHandle: string }) {
   // A Sway-issued campaign link may land here (?camp=<code>) before the fan clicks
   // through to the live room; this just needs the persistence side effect -- PatronApp
@@ -156,6 +183,21 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [shareFallback, setShareFallback] = useState(false);
+  const selectShareLink = useCallback((input: HTMLInputElement | null) => {
+    if (input) { input.focus(); input.select(); }
+  }, []);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [ownerLayout, setOwnerLayout] = useState<{ sectionOrder: PublicProfileSectionId[]; customized: boolean; revision: number } | null>(null);
+  const [arranging, setArranging] = useState(false);
+  const [draftOrder, setDraftOrder] = useState<PublicProfileSectionId[]>([]);
+  const [resetLayout, setResetLayout] = useState(false);
+  const [layoutSaving, setLayoutSaving] = useState(false);
+  const [layoutMessage, setLayoutMessage] = useState('');
+  const [layoutConflict, setLayoutConflict] = useState(false);
+  const [dragging, setDragging] = useState<PublicProfileSectionId | null>(null);
+  const dragId = useRef<PublicProfileSectionId | null>(null);
+  const layoutScope = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,10 +291,119 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       cancelled = true;
       controller.abort();
     };
-  }, [performerHandle]);
+  }, [performerHandle, loadAttempt]);
+
+  useEffect(() => {
+    const scope = ++layoutScope.current;
+    const controller = new AbortController();
+    setOwnerLayout(null);
+    setArranging(false);
+    setLayoutMessage('');
+    setLayoutSaving(false);
+    setLayoutConflict(false);
+    if (status !== 'ready' || !profile) return;
+    const handle = profile.handle || performerHandle;
+    void fetch(`/api/talent/profile/layout?handle=${encodeURIComponent(handle)}`, { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) return;
+        const data = await response.json();
+        if (scope === layoutScope.current && data.handle === handle && data.layout) setOwnerLayout(data.layout);
+      }).catch(() => { /* Public viewing does not depend on an owner session. */ });
+    return () => { controller.abort(); layoutScope.current++; };
+  }, [performerHandle, status, loadAttempt]);
+
+  const savedOrder = useMemo(() => resolvePublicProfileSectionOrder({
+    roles: profile?.roles,
+    primaryRole: profile?.primaryRole,
+    sectionOrder: ownerLayout?.sectionOrder || profile?.layout?.sectionOrder
+  }), [profile, ownerLayout]);
+  const layoutDirty = arranging && (resetLayout || draftOrder.join(',') !== savedOrder.join(','));
+
+  useEffect(() => {
+    if (!layoutDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [layoutDirty]);
+
+  const moveSection = (id: PublicProfileSectionId, target: PublicProfileSectionId) => {
+    if (layoutSaving || id === target) return;
+    setDraftOrder(current => {
+      const from = current.indexOf(id);
+      const to = current.indexOf(target);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      next.splice(from, 1);
+      next.splice(to, 0, id);
+      return next;
+    });
+    setResetLayout(false);
+    setLayoutMessage(`${PROFILE_SECTIONS[id].label} moved. Save to update your public page.`);
+  };
+
+  const saveLayout = async () => {
+    if (!ownerLayout || !profile || layoutSaving || !layoutDirty) return;
+    const scope = layoutScope.current;
+    setLayoutSaving(true);
+    setLayoutMessage('Saving your layout…');
+    try {
+      const response = await fetch('/api/talent/profile/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: profile.handle || performerHandle, sectionOrder: resetLayout ? null : draftOrder, expectedRevision: ownerLayout.revision })
+      });
+      const data = await response.json().catch(() => null);
+      if (scope !== layoutScope.current) return;
+      if (response.status === 401 || response.status === 403) {
+        setOwnerLayout(null);
+        setArranging(false);
+        setLayoutMessage('Your editing session ended. Sign in again to arrange your profile.');
+        return;
+      }
+      if (response.status === 409) {
+        setLayoutConflict(true);
+        setLayoutMessage('Your layout changed on another device. Keep your arrangement to save it over the latest layout, or reload the saved layout.');
+        return;
+      }
+      if (!response.ok || !data?.layout) throw new Error(data?.error || 'Your layout could not be saved. Your draft is still here; try again.');
+      setOwnerLayout(data.layout);
+      setProfile(current => current ? { ...current, layout: data.layout } : current);
+      setDraftOrder(data.layout.sectionOrder);
+      setArranging(false);
+      setResetLayout(false);
+      setLayoutConflict(false);
+      setLayoutMessage('Layout saved. Your public page is updated.');
+    } catch {
+      if (scope === layoutScope.current) setLayoutMessage('Your layout could not be saved. Your draft is still here; try again.');
+    } finally {
+      if (scope === layoutScope.current) setLayoutSaving(false);
+    }
+  };
+
+  const reloadLayout = async (keepDraft = false) => {
+    const scope = layoutScope.current;
+    setLayoutSaving(true);
+    try {
+      const response = await fetch(`/api/talent/profile/layout?handle=${encodeURIComponent(profile?.handle || performerHandle)}`, { cache: 'no-store' });
+      const data = await response.json().catch(() => null);
+      if (scope !== layoutScope.current) return;
+      if (response.status === 401 || response.status === 403) {
+        setOwnerLayout(null); setArranging(false);
+        setLayoutMessage('Your editing session ended. Sign in again to arrange your profile.');
+        return;
+      }
+      if (!response.ok || !data?.layout) throw new Error('reload');
+      setOwnerLayout(data.layout);
+      if (!keepDraft) { setDraftOrder(data.layout.sectionOrder); setResetLayout(false); }
+      setLayoutConflict(false);
+      setLayoutMessage(keepDraft ? 'Your arrangement is kept. Save to replace the latest public layout.' : 'Saved layout loaded.');
+    } catch { if (scope === layoutScope.current) setLayoutMessage('The saved layout could not load. Your draft is still here.'); }
+    finally { if (scope === layoutScope.current) setLayoutSaving(false); }
+  };
 
   const socialLinks = useMemo(() => Object.entries(profile?.socialLinks || {})
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0), [profile]);
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0)
+    .filter(([, url]) => !profile?.links.some(link => link.url === url)), [profile]);
 
   const profileUrl = useMemo(() => {
     if (!profile) return '';
@@ -295,8 +446,10 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       });
       setShareMessage('Link copied');
       window.setTimeout(() => setShareMessage(null), 1800);
-    } catch {
+    } catch (error) {
       // A dismissed native share sheet should leave the page unchanged.
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setShareFallback(true);
     }
   };
 
@@ -324,6 +477,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               ? 'No public Sway page was found for this link.'
               : 'Sway could not load this page. Try again in a moment.'}
           </p>
+          {status === 'error' ? <button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="mt-6 mr-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-cyan-200 px-4 py-3 text-sm font-bold text-slate-950">Try again</button> : null}
           <a href="/" className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-white hover:border-fuchsia-400/40">
             Return to Sway
           </a>
@@ -332,308 +486,148 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
     );
   }
 
-  const telephoneHref = profile.booking.phone
-    ? `tel:${profile.booking.phone.replace(/[^\d+]/g, '')}`
-    : null;
-  const publicHeroName = resolvePublicProfileHeroName({
-    handle: profile.handle,
-    stageName: profile.stageName,
-    displayName: profile.displayName
-  });
-  const pageKindLabel = resolvePublicProfilePageKindLabel({
-    primaryRole: profile.primaryRole,
-    roles: profile.roles,
-    specialties: profile.specialties,
-    isPreview: profile.isPreview
-  });
+  const telephoneHref = profile.booking.phone ? `tel:${profile.booking.phone.replace(/[^\d+]/g, '')}` : null;
+  const publicHeroName = resolvePublicProfileHeroName({ handle: profile.handle, stageName: profile.stageName, displayName: profile.displayName });
+  const pageKindLabel = resolvePublicProfilePageKindLabel({ primaryRole: profile.primaryRole, roles: profile.roles, specialties: profile.specialties, isPreview: profile.isPreview });
   const publicAvatarUrl = profile.avatarUrl || (profile.handle ? CURATED_PUBLIC_AVATAR_FALLBACKS[profile.handle.toLowerCase()] || null : null);
-  const avatarSeed = profile.handle || profile.displayName;
+  const role = profile.primaryRole || profile.roles[0] || 'other';
+  const musicFirst = role === 'musician' || role === 'producer';
+  const bookingLink = profile.links.find(link => link.kind === 'booking');
+  const musicLink = profile.links.find(link => isMusicDestination(link.url));
+  const mediaLink = profile.featuredMedia[0];
+  const performanceLink = mediaLink || profile.links.find(link => {
+    try { return ['youtube.com', 'www.youtube.com', 'youtu.be', 'vimeo.com', 'www.vimeo.com'].includes(new URL(link.url).hostname); }
+    catch { return false; }
+  });
+  const roleLink = musicFirst ? musicLink : performanceLink || bookingLink;
+  const mainAction = activeRoom
+    ? { url: activeRoom.routePath, label: 'Join live room', external: false }
+    : roleLink
+      ? { url: roleLink.url, label: 'label' in roleLink ? roleLink.label : `Watch ${roleLink.title}`, external: true }
+      : releases[0]
+        ? { url: releases[0].releasePath, label: `View ${releases[0].title}`, external: false }
+        : profile.links[0]
+          ? { url: profile.links[0].url, label: profile.links[0].label, external: true }
+          : null;
+  const visibleOrder = arranging ? draftOrder : savedOrder;
+  const onRoomEntry = () => activeRoom && sendDiscoveryEvent('discovery_primary_action', {
+    shell: 'patron', surface: 'public-profile', route_family: 'performer-profile', has_route_context: true,
+    has_session_context: false, build_commit: 'unknown', attribution_channel: getEffectiveDiscoveryChannel(),
+    entity_kind: 'live_room', entity_key: activeRoom.routePath.split('/').filter(Boolean).at(-1),
+    action_kind: 'room_entry', visibility_eligibility: 'eligible'
+  });
+
+  const sectionHeading = (id: PublicProfileSectionId, title = PROFILE_SECTIONS[id].label as string) => {
+    const Icon = PROFILE_SECTIONS[id].icon;
+    return <h2 className="mb-5 flex items-center gap-2.5 font-display text-lg font-bold tracking-tight text-white"><Icon aria-hidden="true" className="h-4 w-4 text-cyan-300" />{title}</h2>;
+  };
+
+  const sections: Record<PublicProfileSectionId, ReactNode> = {
+    identity: <>
+      <div className="flex flex-col-reverse gap-6 sm:flex-row sm:items-center sm:justify-between sm:gap-10">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">{pageKindLabel}</p>
+            {profile.partner.active ? <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/25 px-2.5 py-1 text-[10px] font-semibold text-amber-100"><BadgeCheck aria-hidden="true" className="h-3.5 w-3.5" />{profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}</span> : null}
+          </div>
+          <h1 className="mt-4 break-words font-display text-[clamp(2rem,5.5vw,4.5rem)] font-black leading-[1.05] tracking-[-0.055em] text-white">{publicHeroName}</h1>
+          {profile.headline ? <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-200 sm:text-xl">{profile.headline}</p> : null}
+          {profile.city ? <p className="mt-3 flex items-center gap-1.5 text-sm text-slate-400"><MapPin aria-hidden="true" className="h-3.5 w-3.5" />{profile.city}</p> : null}
+          {mainAction ? <a href={mainAction.url} target={mainAction.external ? '_blank' : undefined} rel={mainAction.external ? 'noreferrer' : undefined} onClick={activeRoom ? onRoomEntry : undefined} className="mt-6 inline-flex min-h-12 max-w-full items-center justify-between gap-4 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-200"><span>{mainAction.label}</span>{activeRoom ? <Radio aria-hidden="true" className="h-4 w-4 shrink-0" /> : <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />}</a> : null}
+        </div>
+        <div className="relative w-28 shrink-0 self-start sm:w-[30%] sm:max-w-64 sm:self-center">
+          {publicAvatarUrl && !avatarFailed ? <img src={publicAvatarUrl} alt={`${publicHeroName} profile`} onError={() => setAvatarFailed(true)} className="aspect-square w-full rounded-2xl border border-white/10 object-cover shadow-2xl sm:rounded-3xl" /> : <div className="flex aspect-square w-full items-center justify-center rounded-2xl border border-white/10 bg-cyan-200/10 font-display text-4xl font-black text-cyan-100">{profileInitials(profile.handle || profile.displayName)}</div>}
+        </div>
+      </div>
+      {profile.isPreview ? <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-400"><p className="font-semibold text-cyan-200">Public page · unclaimed</p><span className="text-xs">{profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}</span><p className="mt-2">This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.</p></div> : null}
+    </>,
+    about: profile.bio || profile.specialties.length ? <>
+      {sectionHeading('about')}
+      {profile.bio ? <p className="whitespace-pre-line text-[15px] leading-7 text-slate-300">{profile.bio}</p> : null}
+      {profile.specialties.length ? <ul className="mt-5 flex flex-wrap gap-x-3 gap-y-2 border-t border-white/10 pt-4 text-xs text-slate-400" aria-label="Specialties">{profile.specialties.map(specialty => <li key={specialty}>{specialty}</li>)}</ul> : null}
+    </> : null,
+    live: activeRoom ? <>
+      <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-cyan-200"><span className="h-2 w-2 rounded-full bg-cyan-200" />Live now</p>
+      <h2 className="font-display text-2xl font-bold text-white">Be part of the show.</h2>
+      <p className="mt-2 text-sm text-slate-300">{activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'} in the room.</p>
+      <a href={activeRoom.routePath} onClick={onRoomEntry} className="mt-5 inline-flex min-h-12 items-center gap-3 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950">Join the {activeRoom.talentRole || pageKindLabel} room <ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a>
+    </> : null,
+    events: events.length ? <>
+      {sectionHeading('events')}
+      <div className="grid gap-4" aria-label="Upcoming shows">{events.map(event => <PublicEventCard key={event.id} event={event} showExternalPolicy />)}</div>
+    </> : null,
+    releases: releases.length ? <>
+      {sectionHeading('releases', musicFirst ? 'Music and releases' : 'Releases')}
+      <p className="-mt-3 mb-5 text-xs text-slate-400">Official release pages from this performer</p>
+      <div className="grid gap-4">{releases.map(release => <a key={release.id} href={release.releasePath} className="group rounded-xl border border-white/10 p-3 transition hover:border-cyan-200/40">
+        <span className="flex items-center gap-4">{release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <Disc3 aria-hidden="true" className="h-12 w-12 shrink-0 text-cyan-200" />}<span className="min-w-0"><span className="block break-words font-bold text-white">{release.title}</span><span className="mt-1 block text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-xs text-cyan-200">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span><ArrowUpRight aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-slate-400" /></span>
+        <span className="mt-3 flex flex-wrap gap-1.5">{release.creationTags.map(tag => <span key={tag} className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${releaseTagClass(tag)}`}>{tag}</span>)}</span>
+      </a>)}</div>
+    </> : null,
+    media: profile.featuredMedia.length ? <>
+      {sectionHeading('media', role === 'dj' ? 'Sets & performances' : 'Featured performances')}
+      <div className="space-y-6">{profile.featuredMedia.map(media => <article key={`${media.sortOrder}:${media.embedUrl}`}>
+        <div className="aspect-video overflow-hidden rounded-xl bg-black"><iframe title={media.title} src={media.embedUrl} className="h-full w-full" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>
+        <div className="mt-3 flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="text-sm font-bold text-white">{media.title}</h3>{media.description ? <p className="mt-1 text-xs leading-5 text-slate-400">{media.description}</p> : null}</div><a href={media.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 text-xs font-bold text-cyan-200">Watch <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
+      </article>)}</div>
+    </> : null,
+    links: profile.links.some(link => link.url !== bookingLink?.url) ? <>
+      {sectionHeading('links', musicFirst && musicLink ? 'Listen & explore' : 'Explore more')}
+      <div className="divide-y divide-white/10" aria-label="Profile links">{profile.links.map(link => link.url === bookingLink?.url ? null : <a key={`${link.sortOrder}:${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="group flex min-h-20 items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+        <span className="min-w-0">{link.kind !== 'other' ? <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-400">{formatLinkKind(link.kind)}</span> : null}<span className="block text-base font-semibold text-white group-hover:text-cyan-200">{link.label}</span>{link.description ? <span className="mt-1 block text-sm leading-6 text-slate-400">{link.description}</span> : null}</span><ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:text-cyan-200" />
+      </a>)}</div>
+    </> : null,
+    booking: profile.booking.email || telephoneHref || bookingLink || profile.booking.verificationRequired ? <>
+      {sectionHeading('booking')}
+      <div className="flex flex-wrap gap-3">{profile.booking.email ? <a href={`mailto:${profile.booking.email}`} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-cyan-200 px-4 py-3 text-sm font-bold text-slate-950"><Mail aria-hidden="true" className="h-4 w-4" />Book / contact</a> : null}{telephoneHref ? <a href={telephoneHref} className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold"><Phone aria-hidden="true" className="h-4 w-4" />Call</a> : null}{bookingLink ? <a href={bookingLink.url} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-cyan-200">{bookingLink.label}<ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a> : null}</div>
+      {profile.booking.verificationRequired ? <p className="mt-3 flex gap-2 text-xs leading-6 text-slate-400"><LockKeyhole aria-hidden="true" className="mt-1 h-3.5 w-3.5 shrink-0" />Direct booking contact unlocks after this performer claims and verifies the profile.</p> : null}
+    </> : null,
+    social: socialLinks.length ? <>
+      {sectionHeading('social', 'Find me elsewhere')}
+      <div className="flex flex-wrap gap-2" aria-label="Social links">{socialLinks.map(([key, url]) => <a key={key} href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-slate-200 hover:border-cyan-200/50">{SOCIAL_LABELS[key] || key}<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" /></a>)}</div>
+    </> : null
+  };
 
   return (
-    <div className="relative isolate min-h-screen overflow-hidden bg-[#05060a] text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-20 bg-[radial-gradient(circle_at_16%_0%,rgba(217,70,239,0.24),transparent_33%),radial-gradient(circle_at_88%_18%,rgba(34,211,238,0.18),transparent_30%),linear-gradient(180deg,#070811_0%,#05060a_55%,#020306_100%)]" />
-      <div className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-px bg-gradient-to-r from-transparent via-fuchsia-400/70 to-transparent" />
-
-      <main className="mx-auto w-full max-w-2xl px-4 pb-14 pt-5 sm:px-6 sm:pt-8">
-        <header className="flex items-center justify-between gap-3">
-          <a href="/" aria-label="Sway home" className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] font-display text-lg font-black text-white backdrop-blur hover:border-fuchsia-400/40">
-            S
-          </a>
+    <div className="min-h-screen bg-[#080b12] text-slate-100 [overflow-wrap:anywhere] selection:bg-cyan-200 selection:text-slate-950">
+      <main className="mx-auto w-full max-w-6xl px-4 pb-10 pt-5 sm:px-8 sm:pt-7">
+        <header className="mb-7 flex items-center justify-between gap-3 border-b border-white/10 pb-5">
+          <a href="/" aria-label="Sway home" className="font-display text-xl font-black tracking-[-0.06em] text-white">SWAY<span className="text-cyan-200">.</span></a>
           <div className="flex items-center gap-2">
-            <a
-              href="/discover"
-              className="inline-flex min-h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-slate-200 backdrop-blur transition hover:border-fuchsia-300/40 hover:text-white"
-            >
-              Discover shows
-            </a>
-            <button
-              type="button"
-              onClick={handleShare}
-              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-slate-200 backdrop-blur transition hover:border-cyan-300/40 hover:text-white"
-            >
-              <Share2 className="h-3.5 w-3.5" />
-              {shareMessage || 'Share'}
-            </button>
+            <a href="/discover" className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-slate-300 hover:text-white">Discover shows</a>
+            <button type="button" onClick={handleShare} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-200/50"><Share2 aria-hidden="true" className="h-3.5 w-3.5" />{shareMessage || 'Share'}</button>
           </div>
         </header>
 
-        <motion.section
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="mt-7 overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/65 p-5 shadow-2xl shadow-fuchsia-950/20 backdrop-blur-xl sm:p-7"
-        >
-          <div className="flex flex-col items-center text-center">
-            <div className="relative">
-              <div className="absolute -inset-2 rounded-[2rem] bg-gradient-to-br from-fuchsia-500/45 to-cyan-400/35 blur-xl" />
-              {publicAvatarUrl && !avatarFailed ? (
-                <img
-                  src={publicAvatarUrl}
-                  alt={`${publicHeroName} profile`}
-                  onError={() => setAvatarFailed(true)}
-                  className="relative h-28 w-28 rounded-[1.75rem] border border-white/15 object-cover shadow-2xl sm:h-32 sm:w-32"
-                />
-              ) : (
-                <div className="relative flex h-28 w-28 items-center justify-center rounded-[1.75rem] border border-white/15 bg-gradient-to-br from-fuchsia-500/25 to-cyan-400/15 font-display text-3xl font-black text-white shadow-2xl sm:h-32 sm:w-32">
-                  {profileInitials(avatarSeed)}
-                </div>
-              )}
-            </div>
+        {shareFallback ? <label className="mb-5 block text-xs text-slate-300">Copy this profile link<input aria-label="Profile link to copy" readOnly value={profileUrl} ref={selectShareLink} className="mt-2 min-h-11 w-full rounded-xl border border-cyan-200/30 bg-slate-950 px-3 text-sm text-white" /></label> : null}
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-300">{pageKindLabel}</p>
-              {profile.isPreview ? (
-                <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-cyan-100">
-                  {profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}
-                </span>
-              ) : null}
-              {profile.partner.active ? (
-                <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-amber-100">
-                  <BadgeCheck className="h-3.5 w-3.5" /> {profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}
-                </span>
-              ) : null}
-            </div>
-            <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-white sm:text-4xl">{publicHeroName}</h1>
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
-              {profile.city ? (
-                <span className="inline-flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
-                  {profile.city}
-                </span>
-              ) : null}
-            </div>
-            {profile.headline ? <p className="mt-4 max-w-xl text-base font-bold leading-7 text-slate-100">{profile.headline}</p> : null}
-            {profile.specialties.length ? (
-              <div className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Specialties">
-                {profile.specialties.map((specialty) => (
-                  <span key={specialty} className="rounded-full border border-white/10 bg-white/[0.045] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-300">
-                    {specialty}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {profile.bio ? <p className="mt-3 max-w-xl whitespace-pre-line text-sm leading-6 text-slate-400">{profile.bio}</p> : null}
-          </div>
+        {ownerLayout && !arranging ? <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-200/20 bg-cyan-200/[0.04] px-4 py-3"><p className="text-xs text-slate-300">This is your public profile.</p><button type="button" onClick={() => { setDraftOrder(savedOrder); setResetLayout(false); setLayoutConflict(false); setLayoutMessage(''); setArranging(true); }} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-200/30 px-3 py-2 text-xs font-bold text-cyan-100"><LayoutGrid aria-hidden="true" className="h-4 w-4" />Arrange profile</button></div> : null}
 
-          {profile.isPreview ? (
-            <div className="mt-6 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.06] px-4 py-4 text-left">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Public page · unclaimed</p>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
-                This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.
-              </p>
-            </div>
-          ) : null}
-
-          {activeRoom ? (
-            <a
-              href={activeRoom.routePath}
-              onClick={() => sendDiscoveryEvent('discovery_primary_action', {
-                shell: 'patron',
-                surface: 'public-profile',
-                route_family: 'performer-profile',
-                has_route_context: true,
-                has_session_context: false,
-                build_commit: 'unknown',
-                attribution_channel: getEffectiveDiscoveryChannel(),
-                entity_kind: 'live_room',
-                entity_key: activeRoom.routePath.split('/').filter(Boolean).at(-1),
-                action_kind: 'room_entry',
-                visibility_eligibility: 'eligible'
-              })}
-              className="mt-6 flex min-h-16 items-center justify-between gap-4 rounded-2xl border border-fuchsia-300/30 bg-gradient-to-r from-fuchsia-600 to-violet-600 px-5 py-4 text-left shadow-lg shadow-fuchsia-950/30 transition hover:from-fuchsia-500 hover:to-violet-500"
-            >
-              <span>
-                <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-100">
-                  <Radio className="h-3.5 w-3.5" /> Live now
-                </span>
-                <span className="mt-1 block text-sm font-black text-white">Join the {activeRoom.talentRole || pageKindLabel} room</span>
-              </span>
-              <span className="shrink-0 text-xs font-bold text-fuchsia-100">
-                {activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'}
-              </span>
-            </a>
-          ) : null}
-
-          {events.length ? (
-            <section className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.05] p-4 text-left" aria-label="Upcoming shows">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
-                  <CalendarDays className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Upcoming shows</p>
-                  <p className="mt-0.5 text-xs text-slate-500">Events from this performer</p>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-3">
-                {events.map((event) => (
-                  <div key={event.id}>
-                    <PublicEventCard event={event} showExternalPolicy />
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {releases.length ? (
-            <section className="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/[0.06] p-4 text-left" aria-label="Releases">
-              <div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200"><Disc3 className="h-4 w-4" /></span><div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-200">Music and releases</p><p className="mt-0.5 text-xs text-slate-500">Official release pages from this performer</p></div></div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">{releases.map((release) => <a key={release.id} href={release.releasePath} className="group min-h-24 rounded-xl border border-white/10 bg-slate-950/70 p-3 transition hover:border-violet-300/40">
-                <span className="flex items-center gap-3">
-                  {release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-200"><Disc3 className="h-6 w-6" /></span>}
-                  <span className="min-w-0"><span className="block truncate text-sm font-black text-white group-hover:text-violet-100">{release.title}</span><span className="mt-1 block truncate text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-violet-300">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span>
-                </span>
-                <span className="mt-3 flex flex-wrap gap-1.5">{release.creationTags.map((tag) => <span key={tag} className={`rounded-full border px-2 py-1 text-[9px] font-black ${releaseTagClass(tag)}`}>{tag}</span>)}</span>
-              </a>)}</div>
-            </section>
-          ) : null}
-
-          {profile.featuredMedia.length ? (
-            <section className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/30" aria-label="Featured media">
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-500/15 text-red-200">
-                    <Play className="h-4 w-4 fill-current" />
-                  </span>
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-200">Featured performance</p>
-                    <p className="mt-0.5 text-xs text-slate-500">Watch the work in motion</p>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-4 p-3 sm:p-4">
-                {profile.featuredMedia.map((media) => (
-                  <article key={`${media.sortOrder}:${media.embedUrl}`} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
-                    <div className="aspect-video bg-black">
-                      <iframe
-                        title={media.title}
-                        src={media.embedUrl}
-                        className="h-full w-full"
-                        loading="lazy"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        referrerPolicy="strict-origin-when-cross-origin"
-                        allowFullScreen
-                      />
-                    </div>
-                    <div className="flex items-start justify-between gap-4 px-4 py-3">
-                      <div>
-                        <h2 className="text-sm font-black text-white">{media.title}</h2>
-                        {media.description ? <p className="mt-1 text-xs leading-5 text-slate-400">{media.description}</p> : null}
-                      </div>
-                      <a href={media.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold text-red-200 hover:text-white">Open</a>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {(profile.booking.email || telephoneHref) ? (
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {profile.booking.email ? (
-                <a href={`mailto:${profile.booking.email}`} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/15">
-                  <Mail className="h-4 w-4" /> Book / contact
-                </a>
-              ) : null}
-              {telephoneHref ? (
-                <a href={telephoneHref} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-black text-white transition hover:border-white/25 hover:bg-white/[0.07]">
-                  <Phone className="h-4 w-4" /> Call
-                </a>
-              ) : null}
-            </div>
-          ) : null}
-          {profile.booking.verificationRequired ? (
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-left text-xs leading-5 text-amber-100/80">
-              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
-              <span>Direct booking contact unlocks after this performer claims and verifies the profile.</span>
-            </div>
-          ) : null}
-        </motion.section>
-
-        {profile.links.length ? (
-          <section className="mt-4 space-y-3" aria-label="Profile links">
-            {profile.links.map((link, index) => (
-              <motion.a
-                key={`${link.sortOrder}:${link.url}`}
-                href={link.url}
-                target="_blank"
-                rel="noreferrer"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: Math.min(index * 0.04, 0.24) }}
-                className="group flex min-h-20 items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-4 backdrop-blur transition hover:-translate-y-0.5 hover:border-cyan-300/35 hover:bg-white/[0.075]"
-              >
-                <span className="min-w-0">
-                  <span className="text-[9px] font-black uppercase tracking-[0.25em] text-cyan-300/80">{formatLinkKind(link.kind)}</span>
-                  <span className="mt-1 block text-sm font-black text-white sm:text-base">{link.label}</span>
-                  {link.description ? <span className="mt-1 block text-xs leading-5 text-slate-400">{link.description}</span> : null}
-                </span>
-                <ArrowUpRight className="h-5 w-5 shrink-0 text-slate-500 transition group-hover:text-cyan-200" />
-              </motion.a>
-            ))}
-          </section>
-        ) : null}
-
-        {socialLinks.length ? (
-          <section className="mt-5 flex flex-wrap justify-center gap-2" aria-label="Social links">
-            {socialLinks.map(([key, url]) => (
-              <a
-                key={key}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-slate-950/60 px-4 py-2 text-xs font-black text-slate-300 transition hover:border-fuchsia-300/35 hover:text-white"
-              >
-                {key === 'website' ? <Globe2 className="h-3.5 w-3.5" /> : null}
-                {SOCIAL_LABELS[key] || key}
-              </a>
-            ))}
-          </section>
-        ) : null}
-
-        <DiscoveryFindUsPrompt
-          routeFamily="performer-profile"
-          surface="public-profile"
-          entityKey={profile.handle || performerHandle}
-        />
-
-        <footer className="mt-10 text-center">
-          <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-slate-600">
-            <Sparkles className="h-3.5 w-3.5" /> sway to play
-          </div>
-          <a href="/discover" className="mt-3 block text-xs font-bold text-slate-400 transition hover:text-cyan-200">
-            Discover live rooms and shows
-          </a>
-          <a
-            href="/account/signup?intent=performer"
-            onClick={() => sendAcquisitionEvent('guest_to_performer_started', {
-              shell: 'patron', surface: 'public-profile', route_family: 'performer-profile',
-              has_route_context: true, has_session_context: false, build_commit: 'unknown'
+        {ownerLayout && arranging ? <section className="mb-7 rounded-2xl border border-cyan-200/30 bg-[#101821] p-4 sm:p-6" aria-label="Arrange your profile">
+          <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-display text-xl font-bold">Your page, your order.</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">Drag the handles or use the arrows. Your preview updates below. Save when it feels right.</p></div><button type="button" disabled={layoutSaving} onClick={() => { setDraftOrder(resolvePublicProfileSectionOrder({roles:profile.roles,primaryRole:profile.primaryRole})); setResetLayout(true); setLayoutMessage('Suggested layout previewed. Save to use it on your public page.'); }} className="min-h-11 text-xs font-semibold text-cyan-200 disabled:opacity-40">Use suggested layout</button></div>
+          <div className="my-5 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+            {draftOrder.map((id, index) => {
+              const Icon = PROFILE_SECTIONS[id].icon;
+              const label = PROFILE_SECTIONS[id].label;
+              return <div key={id} data-arrange-target={id} className={`min-w-0 rounded-xl border p-3 transition-colors ${dragging === id ? 'border-cyan-200 bg-cyan-200/10' : 'border-white/15 bg-[#0b111a]'}`}>
+                <div className="flex items-center justify-between gap-2"><Icon aria-hidden="true" className="h-4 w-4 text-cyan-200" /><button type="button" disabled={layoutSaving} aria-label={`Move ${label}`} className="-m-2 flex h-11 w-11 touch-none select-none items-center justify-center rounded-lg text-slate-300 active:cursor-grabbing disabled:opacity-40" onPointerDown={event => { if (layoutSaving || (event.pointerType === 'mouse' && event.button !== 0)) return; event.currentTarget.setPointerCapture(event.pointerId); dragId.current = id; setDragging(id); }} onPointerMove={event => { if (dragId.current !== id || layoutSaving) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-arrange-target]'); const targetId = target?.dataset.arrangeTarget as PublicProfileSectionId | undefined; if (targetId) moveSection(id, targetId); if (event.clientY < 70) window.scrollBy(0,-12); else if (event.clientY > innerHeight - 70) window.scrollBy(0,12); }} onPointerUp={() => { dragId.current = null; setDragging(null); }} onPointerCancel={() => { dragId.current = null; setDragging(null); }} onLostPointerCapture={() => { dragId.current = null; setDragging(null); }}><GripVertical aria-hidden="true" className="h-4 w-4" /></button></div>
+                <p className="mt-2 text-xs font-bold text-white sm:text-sm">{label}</p><p className="mt-1 min-h-8 text-[11px] leading-4 text-slate-400">{sections[id] ? 'Visible on your profile' : 'No public content yet'}</p>
+                <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-1"><span className="text-[10px] text-slate-500">{index+1}</span><div className="flex"><button type="button" aria-label={`Move ${label} earlier`} disabled={index===0 || layoutSaving} onClick={() => moveSection(id,draftOrder[index-1])} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowUp aria-hidden="true" className="h-3.5 w-3.5" /></button><button type="button" aria-label={`Move ${label} later`} disabled={index===draftOrder.length-1 || layoutSaving} onClick={() => moveSection(id,draftOrder[index+1])} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowDown aria-hidden="true" className="h-3.5 w-3.5" /></button></div></div>
+              </div>;
             })}
-            className="mt-3 block text-xs font-bold text-slate-500 transition hover:text-fuchsia-200"
-          >
-            Create your own free Sway page
-          </a>
+          </div>
+          <div className="flex flex-wrap items-center gap-3"><button type="button" onClick={saveLayout} disabled={!layoutDirty || layoutSaving || layoutConflict} className="min-h-12 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950 disabled:opacity-40">{layoutSaving ? 'Saving…' : 'Save layout'}</button><button type="button" disabled={layoutSaving} onClick={() => {setArranging(false);setResetLayout(false);setLayoutMessage('');setLayoutConflict(false);}} className="min-h-12 rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold disabled:opacity-40">Cancel</button>{layoutConflict ? <><button type="button" disabled={layoutSaving} onClick={() => reloadLayout(true)} className="min-h-12 px-2 text-sm font-semibold text-cyan-200">Keep my arrangement</button><button type="button" disabled={layoutSaving} onClick={() => reloadLayout()} className="min-h-12 px-2 text-sm font-semibold text-cyan-200">Reload saved layout</button></> : null}<span className="text-xs text-slate-400">{layoutDirty ? 'Unsaved changes' : 'No unsaved changes'}</span></div>
+        </section> : null}
+
+        <p role="status" aria-live="polite" className={layoutMessage ? 'mb-5 text-sm text-cyan-100' : 'sr-only'}>{layoutMessage}</p>
+        {arranging ? <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">Your profile preview</p> : null}
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 md:gap-5">
+          {visibleOrder.map(id => sections[id] ? <section key={id} data-profile-section={id} className={id === 'identity' ? 'overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#152130] to-[#0b101b] p-6 md:col-span-2 sm:p-9' : `min-w-0 rounded-2xl border border-white/10 p-5 sm:p-6 ${id==='live' ? 'bg-[#132934]' : 'bg-[#0d121b]'}`} aria-label={PROFILE_SECTIONS[id].label}>{sections[id]}</section> : null)}
+        </div>
+
+        <footer className="mt-10 border-t border-white/10 pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-4"><a href="/" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400"><Sparkles aria-hidden="true" className="h-3.5 w-3.5 text-cyan-200" />Made for the spotlight. Powered by Sway.</a><a href="/account/signup?intent=performer" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-slate-300">Create your own free Sway page<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
+          <details className="mt-3 max-w-xl text-xs text-slate-500"><summary className="w-fit cursor-pointer py-3 hover:text-slate-300">How did you discover Sway?</summary><DiscoveryFindUsPrompt routeFamily="performer-profile" surface="public-profile" entityKey={profile.handle || performerHandle} /></details>
         </footer>
       </main>
     </div>

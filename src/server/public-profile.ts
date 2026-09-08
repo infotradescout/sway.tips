@@ -77,6 +77,76 @@ export function labelForPublicPerformerPrimaryRole(roleId: string | null | undef
   return found?.label ?? null;
 }
 
+export const PUBLIC_PROFILE_SECTION_IDS = [
+  'identity', 'about', 'live', 'events', 'releases', 'media', 'links', 'booking', 'social'
+] as const;
+
+export type PublicProfileSectionId = typeof PUBLIC_PROFILE_SECTION_IDS[number];
+
+export type PublicProfileLayout = {
+  sectionOrder: PublicProfileSectionId[];
+  customized: boolean;
+  revision: number;
+};
+
+const PUBLIC_PROFILE_SECTION_ID_SET = new Set<string>(PUBLIC_PROFILE_SECTION_IDS);
+
+// A partial order remains compatible when a new section is added. An empty
+// array is not a reset: the owner API uses an explicit null for that operation.
+export function isPublicProfileSectionOrder(value: unknown): value is PublicProfileSectionId[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= PUBLIC_PROFILE_SECTION_IDS.length
+    && Array.from(value).every((section) => typeof section === 'string' && PUBLIC_PROFILE_SECTION_ID_SET.has(section))
+    && new Set(value).size === value.length;
+}
+
+export function resolvePublicProfileSectionOrder(input: {
+  roles?: unknown;
+  primaryRole?: unknown;
+  sectionOrder?: unknown;
+}): PublicProfileSectionId[] {
+  const primaryRole = normalizePublicProfileRoles(input.roles, input.primaryRole)[0];
+  const defaults: PublicProfileSectionId[] = primaryRole === 'musician' || primaryRole === 'producer'
+    ? ['identity', 'releases', 'links', 'media', 'live', 'events', 'about', 'booking', 'social']
+    : primaryRole === 'dj'
+      ? ['identity', 'live', 'media', 'events', 'booking', 'links', 'releases', 'about', 'social']
+      : ['comedian', 'host', 'speaker', 'dancer', 'magician'].includes(primaryRole)
+        ? ['identity', 'media', 'events', 'booking', 'live', 'about', 'links', 'releases', 'social']
+        : primaryRole === 'creator'
+          ? ['identity', 'media', 'links', 'about', 'events', 'live', 'releases', 'booking', 'social']
+          : [...PUBLIC_PROFILE_SECTION_IDS];
+  const savedOrder = isPublicProfileSectionOrder(input.sectionOrder) ? input.sectionOrder : null;
+  if (!savedOrder) return defaults;
+  return [...savedOrder, ...defaults.filter((section) => !savedOrder.includes(section))];
+}
+
+export function readPublicProfileLayout(
+  metadata: unknown,
+  roles?: unknown,
+  primaryRole?: unknown
+): PublicProfileLayout {
+  const profileMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {};
+  const storedLayout = profileMetadata.publicProfileLayout;
+  const layout = storedLayout && typeof storedLayout === 'object' && !Array.isArray(storedLayout)
+    ? storedLayout as Record<string, unknown>
+    : {};
+  const revision = typeof layout.revision === 'number' && Number.isSafeInteger(layout.revision) && layout.revision >= 0
+    ? layout.revision
+    : 0;
+  return {
+    sectionOrder: resolvePublicProfileSectionOrder({
+      roles: roles ?? profileMetadata.roles,
+      primaryRole: primaryRole ?? profileMetadata.primaryRole,
+      sectionOrder: layout.sectionOrder
+    }),
+    customized: isPublicProfileSectionOrder(layout.sectionOrder),
+    revision
+  };
+}
+
 export function resolvePublicProfileHeroName(input: {
   handle: string | null | undefined;
   stageName: string | null | undefined;
