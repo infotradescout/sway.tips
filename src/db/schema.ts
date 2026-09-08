@@ -238,6 +238,49 @@ export const users = pgTable('users', {
   emailIdx: uniqueIndex('users_email_idx').on(table.email)
 }));
 
+// Everyone participates automatically. Program recognition confers neither
+// signed financial terms nor rights to masters, live payments, or payouts.
+export const affiliateAccounts = pgTable('affiliate_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  code: text('code').notNull().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('affiliate_accounts_user_idx').on(table.userId),
+  codeIdx: uniqueIndex('affiliate_accounts_code_idx').on(table.code),
+  codeShape: check('affiliate_accounts_code_shape', sql`${table.code} ~ '^[a-f0-9]{32}$'`)
+}));
+
+export const affiliateReferrals = pgTable('affiliate_referrals', {
+  referredUserId: uuid('referred_user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  affiliateAccountId: uuid('affiliate_account_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({ accountIdx: index('affiliate_referrals_account_idx').on(table.affiliateAccountId) }));
+
+export const affiliateCommissionEvents = pgTable('affiliate_commission_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  paymentId: uuid('payment_id').notNull(),
+  affiliateAccountId: uuid('affiliate_account_id').notNull(),
+  referredUserId: uuid('referred_user_id').notNull(),
+  eventKind: text('event_kind').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  currency: text('currency').notNull(),
+  sourceAmountCents: integer('source_amount_cents').notNull(),
+  rateBps: integer('rate_bps').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  basis: text('basis').notNull().default('captured_platform_fee'),
+  policyVersion: text('policy_version').notNull().default('2026-09-08'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  paymentKindIdx: uniqueIndex('affiliate_commission_events_payment_kind_idx').on(table.paymentId, table.eventKind),
+  accountModeIdx: index('affiliate_commission_events_account_mode_idx').on(table.affiliateAccountId, table.paymentMode),
+  kind: check('affiliate_commission_events_kind', sql`${table.eventKind} in ('earned', 'reversed')`),
+  mode: check('affiliate_commission_events_mode', sql`${table.paymentMode} in ('test', 'live')`),
+  rate: check('affiliate_commission_events_rate', sql`${table.rateBps} in (1000, 2000)`),
+  amount: check('affiliate_commission_events_amount', sql`${table.sourceAmountCents} >= 0 and ((${table.eventKind} = 'earned' and ${table.amountCents} >= 0) or (${table.eventKind} = 'reversed' and ${table.amountCents} <= 0))`),
+  basis: check('affiliate_commission_events_basis', sql`${table.basis} = 'captured_platform_fee'`)
+}));
+
 // Append-only audit trail for every Pro Mode state transition. Mirrors the
 // performerPartnerEntitlementStatusEvents pattern: immutable once written
 // (see the 0022 migration trigger).
@@ -521,6 +564,24 @@ export const performerPayoutKycReviews = pgTable('performer_payout_kyc_reviews',
     'performer_payout_kyc_reviews_revoked_shape',
     sql`(${table.status} = 'revoked' and ${table.revokedAt} is not null) or (${table.status} = 'approved' and ${table.revokedAt} is null)`
   )
+}));
+
+// A performer grant follows that artist through the existing authenticated
+// claim flow. A user grant also supports friends who never activate Pro Mode.
+export const swayProgramMemberships = pgTable('sway_program_memberships', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  performerId: uuid('performer_id').references(() => performers.id, { onDelete: 'cascade' }),
+  isFriend: boolean('is_friend').notNull().default(false),
+  isPartner: boolean('is_partner').notNull().default(false),
+  isExclusive: boolean('is_exclusive').notNull().default(false),
+  reason: text('reason').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('sway_program_memberships_user_idx').on(table.userId),
+  performerIdx: uniqueIndex('sway_program_memberships_performer_idx').on(table.performerId),
+  target: check('sway_program_memberships_target', sql`(${table.userId} is null) <> (${table.performerId} is null)`),
+  friendPartner: check('sway_program_memberships_friend_partner', sql`not ${table.isFriend} or ${table.isPartner}`)
 }));
 
 export const performerPublicProfiles = pgTable('performer_public_profiles', {
