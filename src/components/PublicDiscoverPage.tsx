@@ -34,7 +34,22 @@ type PublicFeedResponse = {
   rooms?: PublicRoomDto[];
   events?: PublicEventDto[];
   releases?: PublicReleaseDto[];
+  performerDirectory?: {
+    performers: PublicPerformerDto[];
+    hasMore: boolean;
+  };
   error?: string;
+};
+
+type PublicPerformerDto = {
+  handle: string;
+  displayName: string;
+  performerPath: string;
+  headline: string | null;
+  bio: string | null;
+  city: string | null;
+  avatarUrl: string | null;
+  updatedAt: string | null;
 };
 
 type PublicReleaseDto = {
@@ -88,26 +103,41 @@ export default function PublicDiscoverPage() {
   const [rooms, setRooms] = useState<PublicRoomDto[]>([]);
   const [events, setEvents] = useState<PublicEventDto[]>([]);
   const [releases, setReleases] = useState<PublicReleaseDto[]>([]);
+  const [performers, setPerformers] = useState<PublicPerformerDto[]>([]);
+  const [hasMorePerformers, setHasMorePerformers] = useState(false);
+  const [performerPage, setPerformerPage] = useState(() => {
+    const offset = Number(new URLSearchParams(window.location.search).get('performerOffset'));
+    return Number.isSafeInteger(offset) && offset >= 0 ? Math.floor(Math.min(offset, 1_000_000) / 12) : 0;
+  });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadedSearch, setLoadedSearch] = useState<{ query: string; page: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [searchPhrase, setSearchPhrase] = useState('');
+  const [searchPhrase, setSearchPhrase] = useState(() => new URLSearchParams(window.location.search).get('q')?.slice(0, 160) || '');
+  const [searchQuery, setSearchQuery] = useState(searchPhrase);
+  const [retry, setRetry] = useState(0);
   const [releaseFilter, setReleaseFilter] = useState<ReleaseFilter>('all');
+  const normalizedSearchPhrase = searchQuery.trim().replace(/^@/, '').toLowerCase();
 
-  const loadFeed = async (signal?: AbortSignal) => {
+  const loadFeed = async (signal: AbortSignal) => {
     setStatus('loading');
     setMessage(null);
     try {
-      const response = await fetch('/api/public/feed', { cache: 'no-store', signal });
+      const params = new URLSearchParams({ q: normalizedSearchPhrase, performerOffset: String(performerPage * 12) });
+      const response = await fetch('/api/public/feed?' + params, { cache: 'no-store', signal });
       const data = await response.json().catch(() => null) as PublicFeedResponse | null;
+      if (signal.aborted) return;
       if (!response.ok || !data) {
         throw new Error(data?.error || 'Unable to load live rooms and upcoming shows.');
       }
       setRooms(Array.isArray(data.rooms) ? data.rooms : []);
       setEvents(Array.isArray(data.events) ? data.events : []);
       setReleases(Array.isArray(data.releases) ? data.releases : []);
+      setPerformers(Array.isArray(data.performerDirectory?.performers) ? data.performerDirectory.performers : []);
+      setHasMorePerformers(data.performerDirectory?.hasMore === true);
+      setLoadedSearch({ query: normalizedSearchPhrase, page: performerPage });
       setStatus('ready');
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Unable to load live rooms and upcoming shows.');
     }
@@ -115,21 +145,23 @@ export default function PublicDiscoverPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    document.title = 'Discover live rooms and shows on Sway';
     void loadFeed(controller.signal);
+    return () => controller.abort();
+  }, [normalizedSearchPhrase, performerPage, retry]);
+
+  useEffect(() => {
+    document.title = 'Discover performers, live rooms, and music on Sway';
     sendDiscoveryEvent('discovery_landing', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
       has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
       visibility_eligibility: 'unknown'
     });
-    return () => controller.abort();
   }, []);
 
   const orderedEvents = useMemo(() => [...events].sort((left, right) => (
     new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime()
   )), [events]);
 
-  const normalizedSearchPhrase = searchPhrase.trim().toLowerCase();
   const filteredRooms = useMemo(() => normalizedSearchPhrase
     ? rooms.filter((room) => [room.performerName, room.talentRole, room.profile?.city, room.profile?.headline]
       .some((value) => value?.toLowerCase().includes(normalizedSearchPhrase)))
@@ -157,15 +189,36 @@ export default function PublicDiscoverPage() {
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (!searchPhrase.trim() || filteredRooms.length || filteredEvents.length || filteredReleases.length) return;
+    setSearchQuery(searchPhrase);
+    setPerformerPage(0);
+    const url = new URL(window.location.href);
+    if (searchPhrase.trim()) url.searchParams.set('q', searchPhrase.trim());
+    else url.searchParams.delete('q');
+    url.searchParams.delete('performerOffset');
+    window.history.replaceState(null, '', url);
+  };
+
+  const changePerformerPage = (page: number) => {
+    setPerformerPage(page);
+    const url = new URL(window.location.href);
+    if (page > 0) url.searchParams.set('performerOffset', String(page * 12));
+    else url.searchParams.delete('performerOffset');
+    window.history.replaceState(null, '', url);
+  };
+
+  useEffect(() => {
+    if (status !== 'ready' || !normalizedSearchPhrase || performerPage !== 0
+      || loadedSearch?.query !== normalizedSearchPhrase || loadedSearch.page !== performerPage
+      || performers.length || hasMorePerformers || filteredRooms.length || filteredEvents.length || filteredReleases.length) return;
     sendDiscoveryEvent('internal_search_zero_result', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
       has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
-      action_kind: 'other', visibility_eligibility: 'unknown', search_phrase: searchPhrase.trim()
+      action_kind: 'other', visibility_eligibility: 'unknown', search_phrase: searchQuery.trim()
     });
-  };
+  }, [status, loadedSearch, normalizedSearchPhrase, searchQuery, performerPage, performers.length, hasMorePerformers, filteredRooms.length, filteredEvents.length, filteredReleases.length]);
 
-  const isEmpty = status === 'ready' && rooms.length === 0 && orderedEvents.length === 0 && releases.length === 0;
+  const isEmpty = status === 'ready' && !normalizedSearchPhrase && performerPage === 0 && !hasMorePerformers
+    && performers.length === 0 && rooms.length === 0 && orderedEvents.length === 0 && releases.length === 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#05060a] px-4 py-5 text-slate-100 sm:py-8">
@@ -197,21 +250,21 @@ export default function PublicDiscoverPage() {
             Live rooms, shows, and original music
           </h1>
           <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">
-            Enter a performer&apos;s active room, open a real upcoming event, or discover a rights-checked release.
+            Find a performer, enter their active room, open a real upcoming event, or discover a rights-checked release.
             Human-written songs stay credited to their writers, including when an original virtual artist performs them.
           </p>
         </section>
 
-        {status === 'ready' ? (
+        {(
           <form onSubmit={submitSearch} className="mt-7 flex max-w-2xl gap-2" role="search">
             <label className="sr-only" htmlFor="sway-discover-search">Search rooms, events, songs, lyrics, and songwriters</label>
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-500" aria-hidden="true" />
               <input id="sway-discover-search" value={searchPhrase} onChange={(event) => setSearchPhrase(event.target.value)} maxLength={160} placeholder="Search performers, songs, writers, lyrics, places, and shows" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-10 pr-3 text-sm text-white outline-none focus:border-cyan-300/50" />
             </div>
             <button className="min-h-11 rounded-xl bg-cyan-400 px-4 text-sm font-black text-slate-950">Search</button>
           </form>
-        ) : null}
+        )}
 
         {status === 'loading' ? (
           <div className="mt-12 flex min-h-48 items-center justify-center rounded-3xl border border-white/10 bg-slate-950/60">
@@ -228,7 +281,7 @@ export default function PublicDiscoverPage() {
             <p className="mt-2 text-sm leading-6 text-rose-100/80">{message}</p>
             <button
               type="button"
-              onClick={() => void loadFeed()}
+              onClick={() => setRetry((value) => value + 1)}
               className="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-4 text-sm font-black text-slate-950"
             >
               Try again
@@ -246,7 +299,7 @@ export default function PublicDiscoverPage() {
           </div>
         ) : null}
 
-        {status === 'ready' && Boolean(normalizedSearchPhrase) && filteredRooms.length === 0 && filteredEvents.length === 0 && filteredReleases.length === 0 && !isEmpty ? (
+        {status === 'ready' && Boolean(normalizedSearchPhrase) && performers.length === 0 && !hasMorePerformers && filteredRooms.length === 0 && filteredEvents.length === 0 && filteredReleases.length === 0 && !isEmpty ? (
           <div className="mt-10 rounded-3xl border border-dashed border-white/10 bg-slate-950/55 p-8 text-center">
             <Search className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
             <h2 className="mt-4 text-lg font-black text-white">No current matches</h2>
@@ -409,6 +462,52 @@ export default function PublicDiscoverPage() {
             ) : (
               <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-slate-950/55 p-6 text-center text-sm text-slate-400">No releases match this filter.</div>
             )}
+          </section>
+        ) : null}
+
+        {status === 'ready' && (performers.length > 0 || hasMorePerformers || performerPage > 0) ? (
+          <section className="mt-12" aria-labelledby="performers-heading">
+            <h2 id="performers-heading" className="text-2xl font-black text-white">Performers</h2>
+            <p className="mt-2 text-sm text-slate-400">Explore public performer pages between shows.</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {performers.map((performer) => (
+                <a key={performer.handle} href={performer.performerPath}
+                  aria-label={`View ${performer.displayName}`}
+                  onClick={() => sendDiscoveryEvent('discovery_primary_action', {
+                    shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
+                    has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
+                    entity_kind: 'performer', entity_key: performer.handle, action_kind: 'other',
+                    visibility_eligibility: 'eligible'
+                  })}
+                  className="min-w-0 rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4 transition hover:border-cyan-300/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
+                  <div className="flex items-start gap-3">
+                    <div className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-cyan-400/10 text-sm font-black text-cyan-100">
+                      <span>{initials(performer.displayName)}</span>
+                      {performer.avatarUrl ? <img src={performer.avatarUrl} alt="" loading="lazy"
+                        onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                        className="absolute inset-0 h-full w-full object-cover" /> : null}
+                    </div>
+                    <div className="min-w-0 flex-1 break-words">
+                      <h3 className="text-base font-black text-white">{performer.displayName}</h3>
+                      <p className="mt-1 text-xs text-cyan-200">@{performer.handle}</p>
+                      {performer.city ? <p className="mt-2 text-xs text-slate-400">{performer.city}</p> : null}
+                    </div>
+                  </div>
+                  {performer.headline || performer.bio ? <p className="mt-3 break-words text-sm leading-6 text-slate-400">{performer.headline || performer.bio}</p> : null}
+                  {performer.updatedAt ? <p className="mt-3 text-xs text-slate-500">Updated <time dateTime={performer.updatedAt}>{new Date(performer.updatedAt).toLocaleDateString()}</time></p> : null}
+                  <span className="mt-4 inline-flex items-center gap-2 text-sm font-black text-cyan-200">View performer <ArrowRight className="h-4 w-4" aria-hidden="true" /></span>
+                </a>
+              ))}
+            </div>
+            {hasMorePerformers || performerPage > 0 ? (
+              <nav aria-label="Performer pages" className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                <button type="button" disabled={performerPage === 0} onClick={() => changePerformerPage(performerPage - 1)}
+                  className="min-h-11 rounded-xl border border-white/15 px-4 text-sm font-bold disabled:opacity-40">Previous performers</button>
+                <span className="text-sm text-slate-400">Page {performerPage + 1}</span>
+                <button type="button" disabled={!hasMorePerformers} onClick={() => changePerformerPage(performerPage + 1)}
+                  className="min-h-11 rounded-xl border border-white/15 px-4 text-sm font-bold disabled:opacity-40">Next performers</button>
+              </nav>
+            ) : null}
           </section>
         ) : null}
 

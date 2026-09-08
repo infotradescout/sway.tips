@@ -39,6 +39,7 @@ const steps = [
   ['public-entry-browser', ['scripts/sway-public-entry-qa.mjs'], 300_000, process.execPath],
   ['lint', ['run', 'lint'], 180_000],
   ['build', ['run', 'build'], 300_000],
+  ['performer-discovery-integration-browser', ['run', 'test:integration:performer-discovery'], 300_000],
   ['visibility-request-behavior', ['scripts/sway-performer-visibility-request.behavior.test.mjs'], 180_000, process.execPath],
   ['visibility-recovery-browser', ['scripts/sway-performer-visibility-recovery.browser.test.mjs'], 300_000, process.execPath],
   ['visibility-durable-integration', ['run', 'test:integration:performer-visibility-control'], 300_000],
@@ -121,7 +122,7 @@ if (failed.length) {
   mkdirSync(publishDirectory, { recursive: true, force: true });
   writeFileSync(resolve(publishDirectory, 'index.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Validation</title><p>Isolated validation passed. This is not the Sway application or whole-product readiness approval. Public screenshots are anonymous, read-only observations.</p></html>\n');
   writeFileSync(resolve(publishDirectory, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
-  for (const name of ['public-product-audit', 'public-entry-qa']) {
+  for (const name of ['public-product-audit', 'public-entry-qa', 'performer-directory-proof']) {
     const source = resolve('tmp', name);
     if (existsSync(source)) cpSync(source, resolve(publishDirectory, name), { recursive: true });
   }

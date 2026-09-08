@@ -621,7 +621,7 @@ function isShellAllowed(shell: SwayShell): boolean {
 }
 
 type DiscoveryFacts = {
-  entityType: 'performer' | 'event' | 'release' | 'live_room';
+  entityType: 'performer' | 'event' | 'release' | 'live_room' | 'directory';
   entityName: string;
   heading: string;
   summary: string;
@@ -929,6 +929,66 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
   }
 }
 
+// Reuse the canonical public-profile resolver. An open room is not a
+// prerequisite for discovering a page its owner has already published.
+async function listPublicPerformerDirectory(rawQuery: unknown = '', rawOffset: unknown = 0) {
+  if (!businessDb) throw new Error('Public performer discovery requires a durable database connection.');
+  const query = typeof rawQuery === 'string' ? rawQuery.trim().replace(/^@/, '').slice(0, 160) : '';
+  const requestedOffset = Number(rawOffset);
+  const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
+    ? Math.floor(Math.min(requestedOffset, 1_000_000) / 12) * 12 : 0;
+  const limit = 12;
+  const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = await businessDb.select({ handle: performers.handle })
+    .from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(and(
+      eq(performers.visibilityState, 'public'),
+      eq(performers.isActive, true),
+      notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+      sql`nullif(trim(${performers.handle}), '') is not null`,
+      sql`nullif(trim(${performers.bio}), '') is not null`,
+      sql`nullif(trim(${performers.displayName}), '') is not null`,
+      query ? or(
+        ilike(performers.handle, pattern),
+        ilike(performers.displayName, pattern),
+        ilike(performerPublicProfiles.headline, pattern),
+        ilike(performerPublicProfiles.city, pattern),
+        ilike(performers.bio, pattern)
+      ) : undefined
+    ))
+    .orderBy(asc(performers.displayName), asc(performers.id))
+    .limit(limit + 1)
+    .offset(offset);
+  const resolutions = await Promise.all(rows.slice(0, limit).map((row) => (
+    resolvePublicPerformerDiscovery(row.handle)
+  )));
+  if (resolutions.some((resolution) => resolution.kind === 'unavailable')) {
+    throw new Error('Unable to confirm public performer visibility.');
+  }
+  return {
+    performers: resolutions.flatMap((resolution) => {
+      if (resolution.kind !== 'public' || !resolution.profile.handle) return [];
+      const profile = resolution.profile;
+      return [{
+        handle: profile.handle!,
+        displayName: profile.displayName,
+        performerPath: `/p/${encodeURIComponent(profile.handle!)}`,
+        headline: profile.headline,
+        bio: profile.bio?.slice(0, 280) ?? null,
+        city: profile.city,
+        avatarUrl: normalizePublicProfileUrl(profile.avatarUrl),
+        updatedAt: profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
+          ? profile.updatedAt.toISOString() : null
+      }];
+    }),
+    hasMore: rows.length > limit,
+    offset,
+    limit
+  };
+}
+
 function toPublicShareProfile(
   profile: PublicPerformerDiscoveryProfile,
   visibility: 'public' | 'unlisted'
@@ -1168,6 +1228,44 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
   const defaultMetadata = defaultShareMetadata(req);
 
   if (!businessDb) return defaultMetadata;
+
+  if (req.path === '/discover') {
+    const directory = await listPublicPerformerDirectory(req.query.q, req.query.performerOffset);
+    const hasSearch = typeof req.query.q === 'string' && Boolean(req.query.q.trim());
+    const directoryCanonical = !hasSearch && directory.offset > 0
+      ? `/discover?performerOffset=${directory.offset}` : '/discover';
+    const summary = 'Find public performer pages, explore their music and upcoming shows, or enter an active live room.';
+    const relatedLinks = directory.performers.map((performer) => ({
+      label: `${performer.displayName} (@${performer.handle})${performer.city ? ` · ${performer.city}` : ''}`,
+      href: canonicalPublicUrl(performer.performerPath)
+    }));
+    if (directory.hasMore) {
+      const next = new URLSearchParams({ performerOffset: String(directory.offset + directory.limit) });
+      if (typeof req.query.q === 'string') next.set('q', req.query.q.slice(0, 160));
+      relatedLinks.push({ label: 'More performers', href: canonicalPublicUrl(`/discover?${next}`) });
+    }
+    return defaultShareMetadata(req, {
+      title: 'Discover performers, live rooms, and music on Sway',
+      description: summary,
+      url: directoryCanonical,
+      robots: hasSearch ? 'noindex, nofollow' : undefined,
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        itemListElement: directory.performers.map((performer, index) => ({
+          '@type': 'ListItem', position: directory.offset + index + 1,
+          name: performer.displayName, url: canonicalPublicUrl(performer.performerPath)
+        }))
+      },
+      discoveryFacts: {
+        entityType: 'directory', entityName: 'Sway performers',
+        heading: 'Discover performers, live rooms, and music', summary,
+        categories: ['Performers', 'Live rooms', 'Shows', 'Music'],
+        primaryActionLabel: 'Explore performers', primaryActionHref: '/discover#performers-heading',
+        relatedLinks
+      }
+    });
+  }
 
   if (pathParts[0] === 'p' && pathParts[1]) {
     const normalizedHandle = normalizePerformerHandleLookup(pathParts[1]);
@@ -12021,7 +12119,7 @@ app.get('/api/public/feed', async (_req, res) => {
     }
 
     const gigIds = activeRooms.map((room) => room.gigId);
-    const [details, publicEvents, publicReleaseRows] = await Promise.all([
+    const [details, publicEvents, publicReleaseRows, performerDirectory] = await Promise.all([
       gigIds.length
         ? businessDb
             .select({
@@ -12061,7 +12159,8 @@ app.get('/api/public/feed', async (_req, res) => {
           inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
         ))
         .orderBy(desc(musicReleases.publishedAt), desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
-        .limit(releaseLimit)
+        .limit(releaseLimit),
+      listPublicPerformerDirectory(_req.query.q, _req.query.performerOffset)
     ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
@@ -12101,6 +12200,7 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
+      performerDirectory,
       events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket)),
       releases: publicReleases.map((release) => ({
         id: release.id,
