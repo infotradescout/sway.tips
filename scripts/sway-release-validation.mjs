@@ -41,6 +41,7 @@ const steps = [
   ['build', ['run', 'build'], 300_000],
   ['affiliate-program-owned-database', ['run', 'test:integration:affiliate-program'], 300_000],
   ['friend-publication-integration-browser', ['run', 'test:integration:friend-publication'], 300_000],
+  ['public-profile-layout-persistence-browser', ['run', 'test:profile-layout'], 300_000],
   ['performer-discovery-integration-browser', ['run', 'test:integration:performer-discovery'], 300_000],
   ['visibility-request-behavior', ['scripts/sway-performer-visibility-request.behavior.test.mjs'], 180_000, process.execPath],
   ['visibility-recovery-browser', ['scripts/sway-performer-visibility-recovery.browser.test.mjs'], 300_000, process.execPath],

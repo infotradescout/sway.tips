@@ -37,7 +37,7 @@ export default function DiscoveryFindUsPrompt({ routeFamily, surface, entityKey 
   return (
     <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 text-left">
       <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">How did you find us?</p>
-      <p className="mt-2 text-xs leading-5 text-slate-500">Optional. This never replaces a stronger recorded source like a ChatGPT or Google link.</p>
+      <p className="mt-2 text-xs leading-5 text-slate-400">Optional. Help us understand where people find Sway.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {OPTIONS.map((option) => (
           <button

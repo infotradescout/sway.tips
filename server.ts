@@ -117,6 +117,9 @@ import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
   mergePublicProfileMetadata,
+  isPublicProfileSectionOrder,
+  readPublicProfileLayout,
+  resolvePublicProfileSectionOrder,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
@@ -9672,6 +9675,130 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
   }
 });
 
+app.get('/api/talent/profile/layout', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Profile layout requires a durable database connection.' });
+  }
+  const handle = normalizePerformerHandleLookup(req.query.handle)?.toLowerCase();
+  if (!handle || Object.keys(req.query).some((key) => key !== 'handle')) {
+    return res.status(422).json({ error: 'A valid public profile handle is required.' });
+  }
+  try {
+    const [profile] = await businessDb
+      .select({ handle: performers.handle, metadata: performerPublicProfiles.metadata })
+      .from(performers)
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(and(
+        eq(performers.ownerUserId, talentAccess.actor.actorId),
+        sql`lower(${performers.handle}) = ${handle}`
+      ))
+      .limit(1);
+    if (!profile) return res.status(403).json({ error: 'Only the owner can arrange this public profile.' });
+    return res.json({ handle: profile.handle, layout: readPublicProfileLayout(profile.metadata) });
+  } catch (error) {
+    console.error('Profile layout lookup failed:', error);
+    return res.status(503).json({ error: 'Profile layout could not be loaded. Try again.' });
+  }
+});
+
+app.post('/api/talent/profile/layout', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Profile layout requires a durable database connection.' });
+  }
+  const handle = normalizePerformerHandleLookup(req.body?.handle)?.toLowerCase();
+  const expectedRevision = req.body?.expectedRevision;
+  const sectionOrder = req.body?.sectionOrder;
+  if (!handle || !req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+    || Object.keys(req.body).some((key) => !['handle', 'sectionOrder', 'expectedRevision'].includes(key))
+    || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER
+    || (sectionOrder !== null && !isPublicProfileSectionOrder(sectionOrder))) {
+    return res.status(422).json({ error: 'Provide a handle, current layout revision, and a unique list of valid sections, or null to reset.' });
+  }
+  try {
+    const result = await businessDb.transaction(async (tx) => {
+      // Lock the performer first even when its optional profile row does not yet
+      // exist. The full profile editor uses the same lock order before reading
+      // metadata, so concurrent content and layout saves preserve each other.
+      const [performer] = await tx
+        .select({ performerId: performers.id, handle: performers.handle })
+        .from(performers)
+        .where(and(
+          eq(performers.ownerUserId, talentAccess.actor.actorId),
+          sql`lower(${performers.handle}) = ${handle}`
+        ))
+        .for('update')
+        .limit(1);
+      if (!performer) return null;
+      const [profile] = await tx
+        .select({ metadata: performerPublicProfiles.metadata })
+        .from(performerPublicProfiles)
+        .where(eq(performerPublicProfiles.performerId, performer.performerId))
+        .for('update')
+        .limit(1);
+      const previous = readPublicProfileLayout(profile?.metadata);
+      if (previous.revision !== expectedRevision) {
+        return { conflict: true, handle: performer.handle, layout: previous };
+      }
+      const previousMetadata = profile?.metadata && typeof profile.metadata === 'object' && !Array.isArray(profile.metadata)
+        ? profile.metadata as Record<string, unknown>
+        : {};
+      const metadata = {
+        ...previousMetadata,
+        publicProfileLayout: {
+          sectionOrder: sectionOrder === null ? null : resolvePublicProfileSectionOrder({
+            roles: previousMetadata.roles,
+            primaryRole: previousMetadata.primaryRole,
+            sectionOrder
+          }),
+          revision: previous.revision + 1
+        }
+      };
+      const layout = readPublicProfileLayout(metadata);
+      await tx.insert(performerPublicProfiles)
+        .values({ performerId: performer.performerId, metadata, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: performerPublicProfiles.performerId,
+          set: { metadata, updatedAt: new Date() }
+        });
+      await writeAuditEvent(tx, {
+        actorId: talentAccess.actor.actorId,
+        actorType: 'performer',
+        entityType: 'performer',
+        entityId: performer.performerId,
+        eventType: 'performer_public_profile.layout_update',
+        previousStatus: previous.customized ? 'customized' : 'default',
+        nextStatus: layout.customized ? 'customized' : 'default',
+        metadata: {
+          operation: sectionOrder === null ? 'layout_reset' : 'layout_save',
+          previousRevision: previous.revision,
+          revision: layout.revision,
+          previousSectionOrder: previous.sectionOrder,
+          sectionOrder: layout.sectionOrder
+        }
+      });
+      return { conflict: false, handle: performer.handle, layout };
+    });
+    if (!result) return res.status(403).json({ error: 'Only the owner can arrange this public profile.' });
+    if (result.conflict) {
+      return res.status(409).json({ error: 'This layout changed in another tab. Reload it before saving again.', code: 'profile_layout_conflict', handle: result.handle, layout: result.layout });
+    }
+    return res.json({ handle: result.handle, layout: result.layout });
+  } catch (error) {
+    console.error('Profile layout save failed:', error);
+    return res.status(503).json({ error: 'The layout save could not be confirmed. Reload the saved layout before trying again.' });
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -10000,10 +10127,21 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const savedLinks = await businessDb.transaction(async (tx) => {
     const now = new Date();
+    const [lockedPerformer] = await tx
+      .select({ performerId: performers.id })
+      .from(performers)
+      .where(and(
+        eq(performers.id, performerOwner.performerId),
+        eq(performers.ownerUserId, talentAccess.actor.actorId)
+      ))
+      .for('update')
+      .limit(1);
+    if (!lockedPerformer) return null;
     const [existingProfile] = await tx
       .select({ metadata: performerPublicProfiles.metadata })
       .from(performerPublicProfiles)
       .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .for('update')
       .limit(1);
 
     const nextMetadata = mergePublicProfileMetadata(existingProfile?.metadata, {
@@ -10109,6 +10247,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
     return { links, metadata: nextMetadata };
   });
+
+  if (!savedLinks) return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
 
   return res.status(202).json({
     success: true,
@@ -12472,6 +12612,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         stageName,
         primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
         roles: resolvePublicRoles(effectiveMetadata),
+        layout: readPublicProfileLayout(effectiveMetadata),
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,
