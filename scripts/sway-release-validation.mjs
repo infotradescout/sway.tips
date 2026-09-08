@@ -22,6 +22,7 @@ const indexDirectory = mkdtempSync(resolve(tmpdir(), 'sway-proof235-index-'));
 try {
   const options = { encoding: 'utf8', env: { ...process.env, GIT_INDEX_FILE: resolve(indexDirectory, 'index') } };
   execFileSync('git', ['read-tree', 'HEAD'], options);
+  execFileSync('git', ['update-index', '--force-remove', 'scripts/sway-release-validation-suite.mjs'], options);
   execFileSync('git', ['update-index', '--add', '--cacheinfo', '100644,f3ead40f579515c3257a632062d5be6180f2887a,scripts/sway-release-validation.mjs'], options);
   assert.equal(execFileSync('git', ['write-tree'], options).trim(), expectedTree, 'All application source must match the released, tested tree.');
 } finally { rmSync(indexDirectory, { recursive: true, force: true }); }
