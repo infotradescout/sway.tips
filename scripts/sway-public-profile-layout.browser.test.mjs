@@ -74,7 +74,7 @@ async function settle(page) {
   if (await page.locator('iframe').count()) await page.frameLocator('iframe').getByText('Synthetic media fixture', { exact: true }).waitFor();
 }
 async function dragTile(page, from, to, touch) {
-  const grip = button(page, `Move ${labels[from]}`), target = page.locator(`[data-arrange-target="${to}"]`);
+  const grip = button(page, `Drag ${labels[from]}`), target = page.locator(`[data-arrange-target="${to}"]`);
   await grip.scrollIntoViewIfNeeded();
   const a = await grip.boundingBox(), b = await target.boundingBox();
   assert.ok(a && b, 'Both drag endpoints must be rendered');
@@ -142,13 +142,27 @@ async function run(name, viewport, role, configure, scenario) {
   });
   let record;
   try {
-    await page.goto(`${base}/p/${data.performer.handle}`, { waitUntil: 'domcontentloaded' });
+    // Bound cold Vite transformation separately from the existing 15-second
+    // interaction assertions. Production serves the already-built application.
+    await page.goto(`${base}/p/${data.performer.handle}`, { waitUntil: 'domcontentloaded', timeout: 90000 });
     if (state.publicStatus === 200) {
       await page.locator('[data-profile-section="identity"]').waitFor();
       await until(() => state.reads > 0, 'Ownership probe must run');
     } else await until(() => state.publicReads > 0, 'Public profile request must run');
     await scenario(page, state);
     await settle(page);
+    if (await page.locator('.sway-profile-page').count()) {
+      await page.waitForFunction(() => {
+        const artwork = document.querySelector('.sway-profile-backdrop img');
+        return artwork?.complete && artwork.naturalWidth > 0;
+      });
+      assert.equal(await page.getByRole('link', { name: 'Sway home', exact: true }).locator('img[src="/icon-192.png"]').count(), 1, 'Public profile uses the existing Sway mark');
+    }
+    for (const card of await page.locator('[data-event-card-layout="compact"]').all()) {
+      const thumbnail = await card.locator(':scope > div:first-child > :first-child').boundingBox();
+      assert.ok(thumbnail.width <= 80 && thumbnail.height <= 80, 'Missing event artwork must not consume the mobile viewport');
+      assert.equal(await card.getByRole('link', { name: 'Event details', exact: true }).count(), 1, 'Compact event keeps its real destination');
+    }
     assert.deepEqual(state.pageErrors, [], 'No browser runtime errors');
     assert.deepEqual(state.unexpected, [], 'No unexpected API/provider effects');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Profile must fit the viewport');
@@ -163,7 +177,7 @@ async function run(name, viewport, role, configure, scenario) {
   } finally { await context.close(); results.push(record); console.log('PROFILE_LAYOUT_BROWSER_RESULT', JSON.stringify(record)); }
 }
 try {
-  vite = await createServer({ root: process.cwd(), logLevel: 'error', server: { host: '127.0.0.1', port: 0, watch: null }, plugins: [{
+  vite = await createServer({ root: process.cwd(), publicDir: 'public', logLevel: 'error', server: { host: '127.0.0.1', port: 0, watch: null, hmr: false }, plugins: [{
     name: 'synthetic-profile-patron-entry', configureServer(server) {
       // The production server selects this same existing patron shell for /p/.
       // Vite alone has no server route selector, so map that bounded HTML entry.
@@ -201,6 +215,27 @@ try {
       await button(page, 'Cancel').click();
       await expectOrder(page, expected);
       assert.equal(state.writes.length, 1, 'Cancel cannot send a write');
+    });
+    await run('owner-preview-keeps-draft-and-controls', viewport, 'dj', () => {}, async (page, state) => {
+      await button(page, 'Arrange profile').click();
+      await button(page, 'Move Featured performances earlier').click();
+      const expected = [...defaults.dj]; [expected[1], expected[2]] = [expected[2], expected[1]];
+      assert.deepEqual(await tileOrder(page), expected);
+      assert.equal(await page.locator('button[aria-label^="Drag "]:not([tabindex="-1"])').count(), 0, 'Pointer grips do not create inert keyboard stops');
+      await button(page, 'Preview layout').click();
+      assert.equal(await button(page, 'Arrange sections').evaluate(node => document.activeElement === node), true, 'Preview toggle retains keyboard focus');
+      assert.equal(await page.locator('[data-arrange-target]').count(), 0);
+      await expectOrder(page, expected);
+      const saveBounds = await button(page, 'Save layout').boundingBox();
+      assert.ok(saveBounds.y >= 0 && saveBounds.y + saveBounds.height <= viewport.height, 'Save stays visible while inspecting the profile');
+      await button(page, 'Arrange sections').click();
+      assert.deepEqual(await tileOrder(page), expected, 'Preview roundtrip preserves unsaved order');
+      await button(page, 'Preview layout').click();
+      assert.equal(state.writes.length, 0, 'Preview is not a save');
+      await page.screenshot({ path: join(directory, `owner-profile-preview-${viewport.width}.png`) });
+      await button(page, 'Save layout').click(); await button(page, 'Arrange profile').waitFor();
+      await page.reload({ waitUntil: 'domcontentloaded' }); await expectOrder(page, expected);
+      assert.equal(state.writes.length, 1);
     });
     await run('owner-native-drag', viewport, 'dj', () => {}, async (page, state) => {
       await button(page, 'Arrange profile').click();
@@ -359,9 +394,9 @@ try {
 } finally {
   await browser?.close(); await vite?.close();
   const source = 'src/components/PerformerPublicProfilePage.tsx';
-  writeFileSync(join(directory, 'results.json'), JSON.stringify({ evidenceBoundary: 'Real patron UI with synthetic intercepted API and artwork; no server, DB, auth, external provider or production acceptance claim.', source, sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'), results }, null, 2));
+  writeFileSync(join(directory, 'results.json'), JSON.stringify({ evidenceBoundary: 'Real patron UI and bundled Sway brand assets with synthetic intercepted API and performer media; no server, DB, auth, external provider or production acceptance claim.', source, sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'), stylesSha256: createHash('sha256').update(readFileSync('src/index.css')).digest('hex'), results }, null, 2));
 }
 const failed = results.filter(result => !result.passed);
 console.log('PROFILE_LAYOUT_BROWSER_SUMMARY', JSON.stringify({ total: results.length, passed: results.length - failed.length, failed: failed.length, directory }));
-assert.equal(results.length, 36, 'Every profile browser scenario must run.');
+assert.equal(results.length, 38, 'Every profile browser scenario must run.');
 assert.equal(failed.length, 0, 'Public profile layout browser acceptance failed.');

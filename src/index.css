@@ -119,3 +119,96 @@ html.is-meta-in-app-browser {
   .sway-live-audience [data-sway-performer-audience-screen] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
   .sway-live-audience [data-sway-performer-audience-screen] > div:first-child { width: clamp(96px, 20vh, 176px); margin-inline: auto; }
 }
+
+/* Public profiles share Sway's artwork and live-room accent, with the performer
+   and their work in one reading order. The owner can move every section. */
+.sway-profile-page {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  overflow-wrap: anywhere;
+  background: #03020a;
+  color: #f8fafc;
+}
+.sway-profile-page ::selection { background: #a21caf; color: white; }
+.sway-profile-backdrop {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 780px;
+  opacity: .18;
+  mask-image: linear-gradient(black, black 38%, transparent);
+}
+.sway-profile-backdrop img { object-fit: contain; object-position: top center !important; }
+.sway-profile-content { position: relative; width: min(100%, 960px); margin-inline: auto; padding: 16px 24px 28px; }
+.sway-profile-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; }
+.sway-profile-section { min-width: 0; padding-block: 28px; border-bottom: 1px solid rgb(255 255 255 / .1); }
+.sway-profile-hero { padding-top: 12px; padding-bottom: 32px; }
+.sway-profile-identity { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+.sway-profile-portrait {
+  flex-shrink: 0;
+  width: 160px;
+  overflow: hidden;
+  border: 1px solid rgb(232 121 249 / .45);
+  border-radius: 24px;
+  box-shadow: 0 0 0 6px rgb(217 70 239 / .05), 0 12px 48px rgb(192 38 211 / .2);
+}
+.sway-profile-intro { min-width: 0; width: 100%; text-align: center; }
+.sway-profile-type { color: #e879f9; font-size: 10px; line-height: 1.7; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.sway-profile-name { margin-top: 8px; font-size: clamp(28px, 6vw, 52px); font-weight: 800; letter-spacing: -.05em; line-height: 1.1; }
+.sway-profile-headline { margin-top: 14px; color: #e2e8f0; font-size: 15px; line-height: 1.6; }
+.sway-profile-details { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 16px; margin-top: 14px; color: #94a3b8; font-size: 11px; }
+.sway-profile-primary {
+  display: inline-flex;
+  min-height: 48px;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border: 1px solid rgb(232 121 249 / .4);
+  border-radius: 12px;
+  padding: 12px 22px;
+  background: #a21caf;
+  box-shadow: 0 4px 24px rgb(192 38 211 / .24);
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+  transition: background .15s, box-shadow .15s;
+}
+.sway-profile-primary:hover { background: #86198f; box-shadow: 0 6px 30px rgb(192 38 211 / .35); }
+.sway-profile-page :is(a, button, input):focus-visible { outline: 2px solid #f0abfc; outline-offset: 4px; }
+.sway-profile-heading { margin-bottom: 16px; color: #f8fafc; font-size: 16px; line-height: 1.5; font-weight: 800; letter-spacing: -.025em; }
+.sway-profile-heading::before { display: block; width: 24px; height: 2px; margin-bottom: 10px; border-radius: 2px; background: #d946ef; content: ''; }
+.sway-profile-section [aria-label="Profile links"] > a { min-height: 60px; padding-block: 14px; }
+.sway-profile-section [aria-label="Profile links"] > a:first-child { padding-top: 0; }
+.sway-profile-section [aria-label="Profile links"] > a:last-child { padding-bottom: 0; }
+.sway-profile-live { border-bottom-color: rgb(217 70 239 / .35); }
+.sway-profile-footer { padding-top: 20px; }
+.sway-profile-arranger { margin-bottom: 24px; border: 1px solid rgb(232 121 249 / .25); border-radius: 16px; background: #100819; padding: 12px; }
+.sway-profile-arranger-preview { position: sticky; top: 8px; z-index: 10; box-shadow: 0 12px 32px rgb(0 0 0 / .4); }
+.sway-profile-arrangement-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.sway-profile-arrangement-tile { min-width: 0; border-width: 1px; border-radius: 12px; padding: 6px; }
+@media (max-width: 384px) { .sway-profile-arrangement-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 640px) {
+  .sway-profile-content { padding: 24px 40px 32px; }
+  .sway-profile-nav { padding-bottom: 28px; }
+  .sway-profile-hero { padding-top: 16px; padding-bottom: 40px; }
+  .sway-profile-identity { flex-direction: row; align-items: center; gap: 36px; }
+  .sway-profile-portrait { width: 216px; }
+  .sway-profile-intro { flex: 1; text-align: left; }
+  .sway-profile-details { justify-content: flex-start; }
+  .sway-profile-headline { font-size: 18px; }
+  .sway-profile-section:not(.sway-profile-hero):not(.sway-profile-live) { display: grid; grid-template-columns: 156px minmax(0, 1fr); column-gap: 32px; }
+  .sway-profile-section > .sway-profile-heading { grid-column: 1; grid-row: 1 / span 5; }
+  .sway-profile-section:not(.sway-profile-hero):not(.sway-profile-live) > :not(.sway-profile-heading) { min-width: 0; grid-column: 2; }
+}
+@media (max-width: 359px) {
+  .sway-profile-content { padding-inline: 16px; }
+  .sway-profile-nav > a > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sway-profile-primary { transition: none; }
+}
