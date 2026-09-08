@@ -117,12 +117,12 @@ try {
   assert.ok(repeat.status >= 400, 'used claim code cannot bind again');
   assert.deepEqual(await attribution(targets[0][1]), [{ user_id: referrerId }]);
   const callieClaim = await issue(targets[1]);
-  await proof.query("UPDATE performers SET stripe_connected_account_id = 'acct_disposable_claim_block' WHERE id = $1", [targets[1][0]]);
+  await proof.query("UPDATE performers SET onboarding_status = 'suspended' WHERE id = $1", [targets[1][0]]);
   const denied = await post('/api/talent/claim/accept', { token: callieClaim.token, email: 'callie-claimed@sway.test' });
-  assert.ok(denied.status >= 400, 'claim with payout identity is rejected');
+  assert.ok(denied.status >= 400, 'suspended performer claim is rejected');
   assert.deepEqual(await attribution(targets[1][1]), [], 'rejected claim rolls back referral');
   assert.equal((await proof.query('SELECT password_hash FROM users WHERE id = $1', [targets[1][1]])).rows[0].password_hash, null);
-  await proof.query('UPDATE performers SET stripe_connected_account_id = NULL WHERE id = $1', [targets[1][0]]);
+  await proof.query("UPDATE performers SET onboarding_status = 'created' WHERE id = $1", [targets[1][0]]);
   const callie = await post('/api/talent/claim/accept', { token: callieClaim.token, email: 'callie-claimed@sway.test' });
   assert.equal(callie.status, 200, await callie.text());
   assert.deepEqual(await attribution(targets[1][1]), [{ user_id: referrerId }]);
