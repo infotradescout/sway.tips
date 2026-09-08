@@ -362,11 +362,15 @@ async function main() {
     assert.match(trackedDiscoverHtml.body, /href="https:\/\/app\.sway\.tips\/p\/publicartist"/,
       'The initial HTML must include the real public profile link before JavaScript.');
     assert.doesNotMatch(trackedDiscoverHtml.body, /unlistedartist|draftartist|suspendedartist|restrictedartist|inactiveartist|previewonly/i);
-    for (const query of ['unlisted', 'draft', 'suspended', 'restricted', 'inactive', 'previewonly', '%', '_', "' OR 1=1 --"]) {
+    for (const query of ['unlisted', 'draft', 'suspended', 'restricted', 'inactive', 'previewonly', '%', "' OR 1=1 --"]) {
       const response = await request(port, `/api/public/feed?q=${encodeURIComponent(query)}`);
       assert.equal(response.status, 200);
       assert.deepEqual(JSON.parse(response.body).performerDirectory.performers, [], query);
     }
+    const literalUnderscore = await request(port, '/api/public/feed?q=_');
+    assert.deepEqual(JSON.parse(literalUnderscore.body).performerDirectory.performers.map(row => row.handle), ['publicartist'],
+      'The XSS biography contains literal underscores; this query must not act as a wildcard.');
+    assert.deepEqual(JSON.parse((await request(port, '/api/public/feed?q=%5C')).body).performerDirectory.performers, []);
     for (const query of ['@PUBLICARTIST', 'pEnSaCoLa', 'Canonical headline']) {
       const found = await request(port, `/api/public/feed?q=${encodeURIComponent(query)}`);
       assert.deepEqual(JSON.parse(found.body).performerDirectory.performers.map(row => row.handle), ['publicartist']);
@@ -404,7 +408,13 @@ async function main() {
         });
         const page = await context.newPage();
         const errors = [];
+        const zeroResultQueries = [];
         page.on('pageerror', error => errors.push(error.message));
+        page.on('request', request => {
+          if (new URL(request.url()).pathname !== '/api/analytics/shell' || request.method() !== 'POST') return;
+          const event = request.postDataJSON();
+          if (event?.event === 'internal_search_zero_result') zeroResultQueries.push(event.search_phrase);
+        });
         page.setDefaultTimeout(15_000);
         try {
           await page.goto(`${origin}/discover`, { waitUntil: 'domcontentloaded' });
@@ -430,12 +440,36 @@ async function main() {
           assert.equal(await directory.getByRole('link').count(), 1);
           assert.equal(await page.getByRole('heading', { name: 'No live rooms or upcoming shows right now', exact: true }).count(), 0);
           assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Discovery fits the viewport.');
+          await search.fill('no-such-performer-qa');
+          const emptySearchEvent = page.waitForRequest(request => {
+            if (new URL(request.url()).pathname !== '/api/analytics/shell' || request.method() !== 'POST') return false;
+            const event = request.postDataJSON();
+            return event?.event === 'internal_search_zero_result' && event.search_phrase === 'no-such-performer-qa';
+          });
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await emptySearchEvent;
+          await search.fill('publicartist');
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          await page.evaluate(() => new Promise(resolveRender => requestAnimationFrame(() => requestAnimationFrame(resolveRender))));
+          assert.deepEqual(zeroResultQueries, ['no-such-performer-qa'], 'A successful search after a miss must not emit a false zero-result event.');
           let releaseSlow;
           let sawSlow;
           let slowHandled;
+          let resolveSlowTerminal;
           const slowGate = new Promise(resolveGate => { releaseSlow = resolveGate; });
           const slowStarted = new Promise(resolveStarted => { sawSlow = resolveStarted; });
           const slowFinished = new Promise(resolveFinished => { slowHandled = resolveFinished; });
+          const slowTerminal = new Promise(resolveTerminal => { resolveSlowTerminal = resolveTerminal; });
+          const observeSlowTerminal = request => {
+            const url = new URL(request.url());
+            if (url.pathname !== '/api/public/feed' || url.searchParams.get('q') !== 'directory') return;
+            page.off('requestfinished', observeSlowTerminal);
+            page.off('requestfailed', observeSlowTerminal);
+            resolveSlowTerminal();
+          };
+          page.on('requestfinished', observeSlowTerminal);
+          page.on('requestfailed', observeSlowTerminal);
           await page.route('**/api/public/feed?**', async route => {
             if (new URL(route.request().url()).searchParams.get('q') === 'directory') {
               sawSlow();
@@ -452,6 +486,8 @@ async function main() {
           await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
           releaseSlow();
           await slowFinished;
+          await slowTerminal;
+          await page.evaluate(() => new Promise(resolveRender => requestAnimationFrame(() => requestAnimationFrame(resolveRender))));
           assert.equal(await directory.getByRole('link').count(), 1, 'An older response cannot replace the newer search.');
           const screenshotDirectory = resolve('tmp/performer-directory-proof');
           mkdirSync(screenshotDirectory, { recursive: true });

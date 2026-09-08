@@ -110,6 +110,7 @@ export default function PublicDiscoverPage() {
     return Number.isSafeInteger(offset) && offset >= 0 ? Math.floor(Math.min(offset, 1_000_000) / 12) : 0;
   });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadedSearch, setLoadedSearch] = useState<{ query: string; page: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [searchPhrase, setSearchPhrase] = useState(() => new URLSearchParams(window.location.search).get('q')?.slice(0, 160) || '');
   const [searchQuery, setSearchQuery] = useState(searchPhrase);
@@ -133,6 +134,7 @@ export default function PublicDiscoverPage() {
       setReleases(Array.isArray(data.releases) ? data.releases : []);
       setPerformers(Array.isArray(data.performerDirectory?.performers) ? data.performerDirectory.performers : []);
       setHasMorePerformers(data.performerDirectory?.hasMore === true);
+      setLoadedSearch({ query: normalizedSearchPhrase, page: performerPage });
       setStatus('ready');
     } catch (error) {
       if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
@@ -206,13 +208,14 @@ export default function PublicDiscoverPage() {
 
   useEffect(() => {
     if (status !== 'ready' || !normalizedSearchPhrase || performerPage !== 0
+      || loadedSearch?.query !== normalizedSearchPhrase || loadedSearch.page !== performerPage
       || performers.length || hasMorePerformers || filteredRooms.length || filteredEvents.length || filteredReleases.length) return;
     sendDiscoveryEvent('internal_search_zero_result', {
       shell: 'patron', surface: 'public-discover', route_family: 'public-discover',
       has_route_context: true, has_session_context: false, build_commit: 'client-runtime',
       action_kind: 'other', visibility_eligibility: 'unknown', search_phrase: searchQuery.trim()
     });
-  }, [status, normalizedSearchPhrase, searchQuery, performerPage, performers.length, hasMorePerformers, filteredRooms.length, filteredEvents.length, filteredReleases.length]);
+  }, [status, loadedSearch, normalizedSearchPhrase, searchQuery, performerPage, performers.length, hasMorePerformers, filteredRooms.length, filteredEvents.length, filteredReleases.length]);
 
   const isEmpty = status === 'ready' && !normalizedSearchPhrase && performerPage === 0 && !hasMorePerformers
     && performers.length === 0 && rooms.length === 0 && orderedEvents.length === 0 && releases.length === 0;
