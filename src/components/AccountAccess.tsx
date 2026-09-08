@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { ArrowRight, CheckCircle2, FolderOpen, LogOut, QrCode, Radio, ShieldCheck, Ticket, UserRound } from 'lucide-react';
 import AppBackdrop from './AppBackdrop';
+import AffiliateCard from './AffiliateCard';
 import {
   FILE_COLLABORATION_PATHS,
   normalizeSafeAccountNextPath,
@@ -491,6 +492,7 @@ export function AccountHome() {
         <button onClick={logout} className="rounded-xl border border-white/10 bg-slate-950 p-3 text-slate-300" aria-label="Log out"><LogOut className="h-4 w-4" /></button>
       </div>
       {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
+      {session?.account ? <AffiliateCard /> : null}
       {pendingClaim ? (
         <div className="mt-4 rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">Claim confirmation</p>

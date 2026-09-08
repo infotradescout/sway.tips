@@ -87,7 +87,9 @@
     "test:deploy-migration-gate": "node scripts/sway-deploy-migration-gate.contract.test.mjs",
     "test:release-gate": "npm run audit:release-gate",
     "test:live-pilot-readiness": "npm run test:sway-live-pilot-readiness",
-    "test:behavior:performer-account-reads": "node scripts/sway-performer-account-reads.behavior.test.mjs"
+    "test:behavior:performer-account-reads": "node scripts/sway-performer-account-reads.behavior.test.mjs",
+    "test:integration:affiliate-program": "node --import tsx scripts/sway-affiliate-program.integration.test.ts",
+    "test:integration:friend-publication": "node --import tsx scripts/sway-friend-publication.integration.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1092.0",

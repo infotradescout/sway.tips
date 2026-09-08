@@ -409,7 +409,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               ) : null}
               {profile.partner.active ? (
                 <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-amber-100">
-                  <BadgeCheck className="h-3.5 w-3.5" /> Sway Brand Partner
+                  <BadgeCheck className="h-3.5 w-3.5" /> {profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}
                 </span>
               ) : null}
             </div>
