@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -68,6 +69,7 @@ try {
     assert.equal(data.performer.displayName, name);
     assert.equal(data.performer.partner.active, true);
     assert.equal(data.performer.partner.kind, 'partner');
+    assert.equal(data.performer.claimState, 'pending', 'public recognition does not claim an unverified account');
     assert.ok(data.performer.bio.length > 80);
     assert.ok(data.performer.links.length >= 2);
     assert.ok(!('email' in data.performer) && !('ownerUserId' in data.performer) && !('metadata' in data.performer));
@@ -89,13 +91,49 @@ try {
   mkdirSync('tmp/friend-profile-proof', { recursive: true });
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const settleProfile = async () => {
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForFunction(() => {
+      const hero = document.querySelector('main > section');
+      const avatar = hero?.querySelector('img');
+      return hero && (!avatar || (avatar.complete && avatar.naturalWidth > 0))
+        && [...document.querySelectorAll('main [style*="opacity"]')].every((element) => Number(getComputedStyle(element).opacity) >= 0.99);
+    }, null, { timeout: 30_000 });
+  };
   for (const [, , , handle, name] of targets) {
     await page.goto(`${base}/p/${handle}`, { waitUntil: 'domcontentloaded' });
     await page.getByText('Sway Partner', { exact: true }).waitFor({ state: 'visible' });
     assert.ok((await page.locator('body').innerText()).includes(name));
+    await settleProfile();
+    console.log(`PROFILE_RENDER ${JSON.stringify({ handle, avatar: await page.locator('main > section img').count() ? 'loaded' : 'fallback' })}`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${handle} mobile overflow`);
     await page.screenshot({ path: `tmp/friend-profile-proof/${handle}-mobile.png`, fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await settleProfile();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${handle} desktop overflow`);
+    await page.screenshot({ path: `tmp/friend-profile-proof/${handle}-desktop.png`, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
   }
+  // Artist recognition must not leak between profiles sharing one account.
+  // Explicit account grants still apply, and the account keeps its 20% rate.
+  const siblingId = randomUUID();
+  await proof.query("INSERT INTO performers(id, owner_user_id, handle, display_name, bio, visibility_state, is_active) VALUES ($1, $2, 'coowned-proof', 'Co-owned proof artist', 'A separate local fixture artist with no recognition grant.', 'public', true)", [siblingId, targets[0][1]]);
+  const publicPartner = async (handle) => {
+    const response = await fetch(`${base}/api/public/performer/${handle}`);
+    assert.equal(response.status, 200);
+    return (await response.json()).performer.partner;
+  };
+  assert.equal((await publicPartner('coowned-proof')).active, false, 'performer Partner grant does not apply to another artist');
+  await proof.query('UPDATE sway_program_memberships SET is_exclusive = true WHERE performer_id = $1', [targets[0][0]]);
+  assert.equal((await publicPartner(targets[0][3])).kind, 'exclusive');
+  assert.equal((await publicPartner('coowned-proof')).kind, null, 'performer Exclusive grant does not apply to another artist');
+  assert.equal((await proof.query('SELECT sway_affiliate_rate_bps($1) AS rate', [targets[0][1]])).rows[0].rate, 2000);
+  await proof.query("INSERT INTO sway_program_memberships(user_id, is_partner, reason) VALUES ($1, true, 'explicit local account grant')", [targets[0][1]]);
+  assert.equal((await publicPartner('coowned-proof')).kind, 'partner', 'explicit account recognition applies to its artists');
+  assert.equal((await publicPartner(targets[0][3])).kind, 'exclusive');
+  await proof.query('DELETE FROM sway_program_memberships WHERE user_id = $1', [targets[0][1]]);
+  await proof.query('UPDATE sway_program_memberships SET is_exclusive = false WHERE performer_id = $1', [targets[0][0]]);
+  await proof.query('DELETE FROM performers WHERE id = $1', [siblingId]);
   // Exercise the real account and claim endpoints after publication, without
   // sending mail or touching an external account. All identities are local fixtures.
   const referrerId = targets[2][1];
@@ -113,6 +151,7 @@ try {
   const bubba = await post('/api/account/signup', { claimCode: bubbaClaim.token, displayName: targets[0][4], email: 'bubba-claimed@sway.test' });
   assert.equal(bubba.status, 200, await bubba.text());
   assert.deepEqual(await attribution(targets[0][1]), [{ user_id: referrerId }]);
+  assert.equal((await (await fetch(`${base}/api/public/performer/${targets[0][3]}`)).json()).performer.claimState, 'claimed', 'successful verified claim updates public claim state');
   const repeat = await post('/api/account/signup', { claimCode: bubbaClaim.token, displayName: targets[0][4], email: 'bubba-claimed@sway.test' });
   assert.ok(repeat.status >= 400, 'used claim code cannot bind again');
   assert.deepEqual(await attribution(targets[0][1]), [{ user_id: referrerId }]);
@@ -142,6 +181,20 @@ try {
   await page.getByRole('button', { name: 'Copy invite link', exact: true }).waitFor({ state: 'visible' });
   assert.ok((await page.locator('body').innerText()).includes('20% of eligible Sway platform fees'));
   assert.ok((await page.locator('body').innerText()).includes('Affiliate cash-out is not available yet.'));
+  await page.screenshot({ path: 'tmp/friend-profile-proof/affiliate-account-mobile.png', fullPage: true });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
+  for (const [button, label] of [['Copy invite link', 'Invite people to Sway affiliate link'], ['Copy profile link', 'Share your public profile affiliate link']]) {
+    const expected = await page.getByLabel(label, { exact: true }).inputValue();
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await page.getByText('Affiliate link copied.', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected, button);
+  }
+  await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('clipboard unavailable in fixture'); }; });
+  await page.getByRole('button', { name: 'Copy invite link', exact: true }).click();
+  await page.getByText('Select and copy the link below.', { exact: true }).waitFor();
+  const inviteInput = page.getByLabel('Invite people to Sway affiliate link', { exact: true });
+  await inviteInput.focus();
+  assert.equal(await inviteInput.evaluate((input) => input.selectionEnd - input.selectionStart), (await inviteInput.inputValue()).length, 'clipboard fallback selects the complete referral link');
   // An owner can subsequently unpublish; replay must never undo the choice.
   await proof.query("UPDATE performers SET visibility_state = 'unlisted' WHERE handle = 'bubbakhain'");
   await proof.query(migration);

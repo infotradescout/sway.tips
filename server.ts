@@ -132,7 +132,7 @@ import {
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
-import { bindAffiliateReferral, bindAffiliateReferralForFirstClaim, loadSwayProgramMembership, readAffiliateReferralCode, registerAffiliateRoutes } from "./src/server/affiliate-program";
+import { bindAffiliateReferral, bindAffiliateReferralForFirstClaim, loadSwayProgramMembershipForPerformer, readAffiliateReferralCode, registerAffiliateRoutes } from "./src/server/affiliate-program";
 import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
@@ -12429,7 +12429,7 @@ app.get('/api/public/performer/:handle', async (req, res) => {
       performerEventService
         ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
         : Promise.resolve([]),
-      loadSwayProgramMembership(businessDb, profile.ownerUserId)
+      loadSwayProgramMembershipForPerformer(businessDb, profile.performerId)
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);

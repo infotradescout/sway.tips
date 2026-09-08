@@ -48,6 +48,21 @@ export async function loadSwayProgramMembership(db: Executor, userId: string) {
   return result.rows[0] as { isFriend: boolean; isPartner: boolean; isExclusive: boolean; rateBps: number };
 }
 
+export async function loadSwayProgramMembershipForPerformer(db: Executor, performerId: string) {
+  // A public badge reflects this artist or an explicit account grant. The
+  // account's affiliate rate can aggregate its artists without transferring
+  // one artist's recognition to another artist owned by the same account.
+  const result = await db.execute(sql`
+    SELECT coalesce(bool_or(m.is_friend), false) AS "isFriend",
+      coalesce(bool_or(m.is_partner), false) AS "isPartner",
+      coalesce(bool_or(m.is_exclusive), false) AS "isExclusive"
+    FROM performers p LEFT JOIN sway_program_memberships m
+      ON m.performer_id = p.id OR m.user_id = p.owner_user_id
+    WHERE p.id = ${performerId}::uuid
+  `);
+  return result.rows[0] as { isFriend: boolean; isPartner: boolean; isExclusive: boolean };
+}
+
 export async function loadAffiliateOverview(db: Executor, userId: string) {
   // Repairs legacy identities idempotently; normal signup is enrolled by the
   // database trigger, including admin/invite/claim paths and every account role.

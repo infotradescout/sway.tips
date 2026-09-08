@@ -459,6 +459,7 @@ for (const term of [
 const shareProfileLookup = sliceBetween(server, 'async function resolvePublicPerformerDiscovery', 'async function findPublicShareProfile', 'share profile lookup');
 for (const term of [
   'visibilityState: performers.visibilityState',
+  'ownerEmailVerifiedAt: users.emailVerifiedAt',
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
   'nullif(trim(${performers.bio}), \'\') is not null',
   'profiles.length !== 1',
@@ -503,8 +504,11 @@ for (const term of [
   'normalizePublicProfileFeaturedMedia',
   'booking: publicBooking',
   'partnerState?.isEffective',
-  "claimState: 'claimed'"
+  'isPreview: false',
+  "claimState: profile.ownerEmailVerifiedAt ? 'claimed' : 'pending'"
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
+// Publishing a linked profile must not imply that its owner has claimed and verified the account.
+requireExcludes(publicPerformerRoute, "claimState: 'claimed'", 'Public performer claim state');
 for (const term of ['performerProfilePreviews', 'suspendedPerformer', 'curatedPreview', 'preview.claimedPerformerId']) {
   requireExcludes(publicPerformerRoute, term, 'Public performer route');
 }
@@ -512,6 +516,8 @@ requireExcludes(publicPerformerRoute, 'existingPerformer', 'Public performer rou
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
 for (const forbidden of [
   'performerId: profile.performerId',
+  'ownerUserId:',
+  'ownerEmailVerifiedAt:',
   'id: performerProfileLinks.id',
   'grantedAt:',
   'termsHash:',

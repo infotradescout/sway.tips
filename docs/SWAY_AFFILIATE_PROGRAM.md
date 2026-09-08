@@ -23,6 +23,8 @@ The account page supplies an invite link and, when the account owns a public pro
 
 `sway_program_memberships` recognizes either a user or a canonical performer. This permits friends who never enable Pro Mode, and artist recognition that follows the existing authorized account-claim ownership transaction. A friend must also be a Partner at the database boundary. Trusted admins can update these flags at `POST /api/admin/sway-membership` with one target, all three boolean flags, and a reason; before/after state and operator identity are audited. Ordinary account clients cannot set their commission rate or grant membership.
 
+Public artist badges use that specific performer's recognition and explicit account grants. A performer-scoped grant does not label another artist owned by the same account. The account's affiliate rate still considers all of its qualifying memberships.
+
 The initial named friends are Bubba Khain, Callie Hines, Corey Mack, Drew Maze, and canonical DJ3X. The old inactive DJ3X preview identity and all other performers are excluded. Existing effective Brand Partner contracts also qualify for the 20% affiliate rate, while retaining their own exact accepted terms. New recognition does not sign those contracts, grant music exclusivity, transfer master ownership, activate Pro Mode, complete KYC, or enable payments.
 
 ## Earnings and refunds
