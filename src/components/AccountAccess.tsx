@@ -234,35 +234,39 @@ export function AccountSignup() {
   const confirmPasswordId = useId();
 
   const validateClaim = useCallback(async (raw: string) => {
+    const seq = ++validateSeq.current;
     const trimmed = raw.trim();
     if (!trimmed) {
       setClaimValidation('idle');
       setClaimPreview(null);
       setClaimError(null);
-      return;
+      return false;
     }
-    const seq = ++validateSeq.current;
     setClaimValidation('loading');
+    setClaimPreview(null);
     setClaimError(null);
     try {
       const data = await accountJson('/api/account/claim/peek', { code: trimmed });
-      if (seq !== validateSeq.current) return;
+      if (seq !== validateSeq.current) return false;
       setClaimPreview({
         displayName: String(data.displayName || 'Performer'),
         handle: typeof data.handle === 'string' ? data.handle : null,
         enablesProMode: true
       });
       setClaimValidation('valid');
+      return true;
     } catch (error: any) {
-      if (seq !== validateSeq.current) return;
+      if (seq !== validateSeq.current) return false;
       setClaimPreview(null);
       setClaimValidation('invalid');
       setClaimError(error instanceof Error ? error.message : 'Code not recognized');
+      return false;
     }
   }, []);
 
   useEffect(() => {
     if (initialClaim) void validateClaim(initialClaim);
+    return () => { validateSeq.current += 1; };
   }, [initialClaim, validateClaim]);
 
   const loginHref = useMemo(() => {
@@ -289,18 +293,7 @@ export function AccountSignup() {
           return;
         }
         if (claimValidation !== 'valid') {
-          await validateClaim(trimmedClaim);
-          // Re-check via a fresh peek result stored in refs is awkward; block if still not valid after await.
-          // validateClaim updates state asynchronously for next paint — call peek inline for submit gate.
-          try {
-            await accountJson('/api/account/claim/peek', { code: trimmedClaim });
-          } catch (error) {
-            setClaimValidation('invalid');
-            setClaimError(error instanceof Error ? error.message : 'Code not recognized');
-            setMessage(error instanceof Error ? error.message : 'Remove the claim code or enter a valid one to continue.');
-            return;
-          }
-          setClaimValidation('valid');
+          if (!await validateClaim(trimmedClaim)) return;
         }
       }
       const data = await accountJson('/api/account/signup', {
@@ -353,16 +346,13 @@ export function AccountSignup() {
         <ClaimCodeField
           value={claimCode}
           onChange={(value) => {
+            // Every edit owns a new observation, including clearing the input
+            // while an earlier code is still being checked.
+            validateSeq.current += 1;
             setClaimCode(value);
-            if (!value.trim()) {
-              setClaimValidation('idle');
-              setClaimPreview(null);
-              setClaimError(null);
-            } else if (claimValidation === 'valid' || claimValidation === 'invalid') {
-              setClaimValidation('idle');
-              setClaimPreview(null);
-              setClaimError(null);
-            }
+            setClaimValidation('idle');
+            setClaimPreview(null);
+            setClaimError(null);
           }}
           validation={claimValidation}
           preview={claimPreview}
