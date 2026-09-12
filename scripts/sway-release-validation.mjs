@@ -1,3 +1,9 @@
+if (process.env.SWAY_PAYMENT_VALIDATION_CANDIDATE_SHA) {
+  const { runPaymentValidation } = await import('./sway-payment-release-validation.mjs');
+  await runPaymentValidation();
+  process.exit(process.exitCode || 0);
+}
+
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
