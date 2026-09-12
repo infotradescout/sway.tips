@@ -1,3 +1,8 @@
+if (process.env.SWAY_SOURCE_WORKSPACE_VALIDATION === 'true') {
+  await import('./sway-source-workspace-validation.mjs');
+  process.exit(process.exitCode || 0);
+}
+
 if (process.env.SWAY_PAYMENT_VALIDATION_CANDIDATE_SHA) {
   const { runPaymentValidation } = await import('./sway-payment-release-validation.mjs');
   await runPaymentValidation();
