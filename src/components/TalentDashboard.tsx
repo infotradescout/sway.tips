@@ -1452,7 +1452,7 @@ async function readPerformerPayoutBalance(): Promise<PerformerPayoutBalance> {
     providerFeeCents: data.providerFeeCents,
     payoutMarkupCents: data.payoutMarkupCents,
     withdrawalsEnabled: data.withdrawalsEnabled === true,
-    withdrawalRestriction: data.withdrawalRestriction === 'email_verification_required'
+    withdrawalRestriction: data?.withdrawalRestriction === 'email_verification_required'
       || data.withdrawalRestriction === 'account_restricted'
       || data.withdrawalRestriction === 'identity_verification_required'
       ? data.withdrawalRestriction
