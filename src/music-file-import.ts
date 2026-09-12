@@ -96,10 +96,13 @@ export async function importMusicFile(options: MusicFileImportOptions): Promise<
       || (options.performerId && data?.performerId !== options.performerId)) {
       throw new Error('Sway could not confirm the saved import. Refresh Sources before retrying; do not assume the tracks were saved.');
     }
-    status('success');
-    message(`${existing ? 'Updated' : 'Saved'} ${data.importedCount} tracks from ${parsed.sourceLabel}.${parsed.truncated ? ' Only the first 1,000 parsed tracks were imported.' : ''} Audio stays in your music app.`);
+    let savedMessage = `${existing ? 'Updated' : 'Saved'} ${data.importedCount} tracks from ${parsed.sourceLabel}.${parsed.truncated ? ' Only the first 1,000 parsed tracks were imported.' : ''} Audio stays in your music app.`;
+    // Do not re-enable the chooser while the dashboard still owns this import.
+    // Otherwise the next selected file can be silently rejected as in-flight.
     try { await onSaved(); }
-    catch { message(`Saved ${data.importedCount} tracks, but the page could not refresh. Reload Sources to check them.`); }
+    catch { savedMessage = `Saved ${data.importedCount} tracks, but the page could not refresh. Reload Sources to check them.`; }
+    status('success');
+    message(savedMessage);
   } catch (error) {
     status('error');
     message(error instanceof Error && !['TimeoutError', 'AbortError'].includes(error.name)
