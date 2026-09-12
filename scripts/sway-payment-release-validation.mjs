@@ -105,7 +105,7 @@ export async function runPaymentValidation() {
         const diagnostic=new Client({connectionString:dbUrl});
         try {
           await diagnostic.connect();
-          const rows=await diagnostic.query("select p.id, p.payment_status, p.refund_status, p.action_type, p.legacy_unlinked, p.amount_total, o.operation_type, o.status as operation_status, o.last_error from payments p left join live_room_payment_operations o on o.payment_id=p.id where (p.idempotency_key like 'legacy-connected-refund-%' or p.destination_account_id = 'acct_test_durability') order by p.created_at desc limit 5");
+          const rows=await diagnostic.query("select p.id, p.idempotency_key, p.payment_status, p.refund_status, p.action_type, p.legacy_unlinked, p.destination_account_id, p.amount_total, o.operation_type, o.status as operation_status, o.last_error from payments p left join live_room_payment_operations o on o.payment_id=p.id order by p.created_at desc, o.created_at desc limit 25");
           report.recoveryDiagnostic=rows.rows;
           console.log('SWAY_MONEY_RECOVERY_DIAGNOSTIC '+JSON.stringify(rows.rows));
         } catch(error) {report.recoveryDiagnosticError=scrub(error.message);}
