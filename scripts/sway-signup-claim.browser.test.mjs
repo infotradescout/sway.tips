@@ -4,7 +4,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 
 const vite = await createServer({
-  root: process.cwd(), logLevel: 'error',
+  root: process.cwd(), publicDir: 'public', logLevel: 'error',
   cacheDir: path.resolve('node_modules/.vite-signup-claim'),
   server: { host: '127.0.0.1', port: 0, watch: null }
 });
@@ -56,6 +56,22 @@ async function lookup(page, field, value, lookups) {
 
 try {
   for (viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
+  await test('terms-open-without-losing-signup-or-submitting', async (page, context) => {
+    const { signups } = await open(page, context);
+    await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Synthetic Account');
+    const terms = page.getByRole('link', { name: 'Sway Terms', exact: true });
+    assert.equal(await terms.getAttribute('href'), '/terms');
+    assert.equal(await terms.getAttribute('target'), '_blank');
+    await context.route('**/terms', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Terms route fixture</title><h1>Sway Terms</h1>' }));
+    const popupPromise = page.waitForEvent('popup');
+    await terms.click();
+    const popup = await popupPromise;
+    await popup.getByRole('heading', { name: 'Sway Terms' }).waitFor();
+    assert.equal(await page.getByRole('textbox', { name: 'Your name', exact: true }).inputValue(), 'Synthetic Account');
+    assert.equal(await page.getByRole('checkbox').isChecked(), false, 'Opening terms does not accept them');
+    assert.equal(signups.length, 0, 'Reading terms never submits the account');
+    await popup.close();
+  });
   for (const replacement of ['', 'second-code']) for (const status of [200, 400]) {
     await test(`edited-code-ignores-${status}-${replacement || 'cleared'}`, async (page, context) => {
       const { field, lookups } = await open(page, context);
