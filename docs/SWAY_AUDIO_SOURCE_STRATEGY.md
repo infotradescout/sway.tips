@@ -1,177 +1,125 @@
 # Sway Audio Source Strategy
 
-Date: 2026-07-07
+Updated: 2026-09-12
 
-## Decision
+## Governing decision for Sources and live playback control
 
-Sway should become the performer's live control hub, but it must not claim that Spotify, SoundCloud, or any third-party catalog will automatically play full tracks from inside Sway unless that provider explicitly permits the exact commercial venue/performance use.
+Thomas's current direction is: "We need full integrations where possible, remember playback happens through whatever source but sway is the external controller."
 
-The near-term product is:
+Sway is the external controller. The selected source/player authenticates its own playback entitlement, obtains and decodes audio, manages its device/output, and performs playback. Sway connects the performer's request/queue workflow to that player through a supported control interface and displays the player's confirmed state.
 
-- Sway manages the room, requests, tips, boosts, queue, overlay, and audience display.
-- Sway syncs or links to the performer's music library so requests can be matched to what the performer can actually play.
-- The performer plays audio from their existing lawful playback stack unless Sway owns a licensed playback path for that source.
+The intended loop is:
 
-The future paid product can be:
+`Connect source/account -> select playback app/device -> browse or sync available music -> approve a request -> send the supported source command -> observe source acknowledgement and actual playback state -> update Sway's display.`
 
-- a Sway audio console for performer-owned uploads, locally licensed files, or provider-approved catalogs
-- add-on deck/mixer/console controls
-- deeper integrations with DJ software, OBS, and approved music providers
+File import and deep links are fallback capabilities, NOT completed provider integrations. A provider logo, exported CSV, successful command POST, OAuth login alone, or green test suite does not prove a full working source connection.
 
-## Why Sway Cannot Promise Universal Built-In Playback
+This current instruction supersedes earlier advice to defer all deep integrations and the proposal to turn this Sources lane into a paid Sway audio console. It does not remove Self-Production, owned-audio work, or the separate Sway.DIO product defined in `SWAY_PRODUCT_STRUCTURE.md`. Request, Tip, Boost, payment/refund history, memberships and provider payout decisions are unchanged.
 
-### Spotify
+## Keep music origin separate from playback target
 
-Spotify's developer policy blocks the version where Sway becomes a monetized club playback source for Spotify tracks:
+A song's music service is not necessarily the application receiving the command.
 
-- Spotify says products targeted for use by businesses, including bars and restaurants, are not allowed because Spotify is for personal, non-commercial use.
-- Streaming Spotify content in a commercial Streaming SDA is restricted.
-- Spotify prohibits products that play one source to several simultaneous listeners, combine Spotify streams with other services, synchronize recordings with visual media, or segue/mix Spotify content.
+Example: a TIDAL track available through VirtualDJ is controlled through VirtualDJ's supported interface. TIDAL authentication/subscription and playback remain in that approved playback stack. This is not direct control of the standalone TIDAL app, not a new Sway streaming entitlement, and not a reason to fetch or relay TIDAL audio.
 
-Official source:
+The connection model must distinguish:
 
-- https://developer.spotify.com/policy
+- music origin and immutable external track identifier;
+- playback application/device and target deck where applicable;
+- account/performer ownership and authorized room;
+- connection identity, granted capabilities and their expiry;
+- queued command, source acceptance, source-observed result and observation time.
 
-Product implication:
+Do not infer playback ability from a generic `local_library` flag or a provider name. A device accepting MIDI has different capabilities from a native API adapter reporting exact loaded-track identity.
 
-- Sway may use Spotify metadata/search only when configured and compliant.
-- Sway must not sell or imply "Spotify plays from Sway" for club/performance rooms.
-- Spotify links/deep links can help the performer find or open a track in Spotify, but venue playback/licensing remains outside Sway unless Spotify grants a specific approved path.
+## Full integration acceptance
 
-### SoundCloud
+Implement the maximum supported capability for each integration, explicitly marking unsupported operations rather than pretending every player has DJ-style decks.
 
-SoundCloud is more flexible than Spotify, but not unlimited:
+1. Connection: actual OAuth/account authorization, native application permission or paired companion connection; protected credentials, expiry/refresh and disconnect/revocation.
+2. Music access: real authorized library/playlist browsing or synchronization; stable track IDs, paging, unavailable/private/removed tracks and useful recovery.
+3. Target selection: explicit player/device/deck; never silently redirect a command to another active device.
+4. Control: supported play, pause, resume, stop, cue, seek, next/previous, queue or track-loading operations. `Load` must not secretly play a song and then pause it when the source lacks a paused-load operation.
+5. Feedback: actual source status, current track, play/pause and position where the interface provides them; stale/offline state is visible and cannot be reported as confirmed playback.
+6. Operational proof: connect a real account/player, choose a track, execute from Sway, observe the original source performing playback, reload/reconnect, and repeat without duplicate or misdirected commands.
 
-- SoundCloud supports OAuth, uploads, search, widgets, and stream URLs.
-- Some commercial use is allowed, but SoundCloud restricts embedding or commercializing user content in third-party commercial services unless it fits approved cases.
-- Not all tracks are streamable off-platform. Tracks can be playable, preview-only, or blocked.
-- Attribution and links back to SoundCloud are required when displaying or streaming SoundCloud content.
+A control request being accepted is not proof of playback. An exact-track match is not established by blindly loading the first title-search result. A source confirmation must not automatically fulfill or charge an audience request unless the separately approved room/payment semantics explicitly require that transition.
 
-Official sources:
+## Integration routes and evidence
 
-- https://developers.soundcloud.com/docs/api/guide
-- https://developers.soundcloud.com/docs/api/terms-of-use
+The following distinguishes current repository behavior from primary-documentation research checked on 2026-09-12. A technically available interface is not evidence that Sway has implemented, obtained approval for, or production-verified that interface.
 
-Product implication:
+| Source / target | Integration route | Current boundary |
+| --- | --- | --- |
+| VirtualDJ | Official Network Control HTTP extension; exact-track load, transport and source-state feedback | Adapter and room-scoped bridge exist in Sway. Requires VirtualDJ 2023+ Pro and Network Control. Real booth verification remains distinct from simulated tests. |
+| Serato, rekordbox, Traktor, djay | Supported app/controller mappings; pursue native/partner interfaces where available | Sway currently has one-way generic Web MIDI transport, not verified exact-track load or bidirectional state for these apps. Do not label MIDI dispatch as confirmed playback. |
+| Apple Music | Native `SystemMusicPlayer` controls the Music app on supported Apple platforms; separately investigate desktop companion automation | Apple documents the native control route. It is not a browser API for remotely controlling an arbitrary Mac, iPhone or speaker. Sway does not yet have a complete native Apple Music connector. |
+| Spotify | OAuth plus Player API / Spotify Connect device selection and remote controls | The remote-control API exists and requires Premium for playback. Sway currently uses catalog/metadata paths. Spotify's commercial/business-use restrictions must be resolved for the intended Sway use; moving audio out of the browser does not by itself resolve those restrictions. No universal venue-control claim. |
+| TIDAL | Authorized library/account integration plus control of a supported DJ playback target; direct Connect requires its partner route | TIDAL documents Connect integrations for device partners. Do not claim an unrestricted public API controlling arbitrary TIDAL apps or hardware. |
+| SoundCloud | Authorized OAuth/library integration plus supported DJ playback target; provider player interfaces only within their supported context | OAuth, libraries and widget playback/control are documented. A widget API is not proof of remote control over the standalone SoundCloud app. Sway's commercial use needs the appropriate provider permission. |
+| YouTube / YouTube Music | Investigate supported account/catalog and player/partner interfaces, retaining the original player as playback owner | Do not substitute an embedded YouTube player and call it full remote control of YouTube Music. No direct Sway integration is established here. |
+| Amazon Music, Deezer, Bandcamp, Engine DJ and other sources | Investigate documented native/partner control routes; preserve source ownership; export/deep-link fallback only where necessary | No direct integration is established by this document or by the export importer. Lack of current implementation is not a claim of technical impossibility. |
+| Local / USB music | Existing DJ app or another explicitly paired supported player; metadata sync and source-owned playback | Imports do not upload or copy the audio. Exact private locations stay in the authorized booth path, not public audience payloads. |
 
-- SoundCloud login can be a real candidate for a first provider connector.
-- Sway should start with authenticated account linking, track availability, and creator/uploader-approved playback paths.
-- Sway must store track access state and fail closed when a SoundCloud track is blocked, preview-only, private without authorization, geo-blocked, or otherwise unavailable.
+Primary documentation:
 
-## Build Lanes
+- VirtualDJ Network Control: https://virtualdj.com/wiki/NetworkControlPlugin
+- VirtualDJ scripting: https://virtualdj.com/wiki/VDJScript
+- Apple SystemMusicPlayer: https://developer.apple.com/documentation/musickit/systemmusicplayer
+- Spotify Start/Resume Playback: https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback
+- Spotify Get Playback State: https://developer.spotify.com/documentation/web-api/reference/get-information-about-the-users-current-playback
+- Spotify Developer Policy: https://developer.spotify.com/policy
+- Spotify public/commercial use: https://support.spotify.com/us/article/spotify-public-commercial-use/
+- TIDAL authorization: https://developer.tidal.com/documentation/api-sdk/api-sdk-authorization
+- TIDAL Connect: https://developer.tidal.com/documentation/connect
+- SoundCloud API guide: https://developers.soundcloud.com/docs
+- SoundCloud public API usage: https://help.soundcloud.com/hc/en-us/articles/115003446727-SoundCloud-public-APIs
 
-### Lane 1: Library Availability
+## Reuse the existing execution and persistence owners
 
-Purpose:
+The current code already has:
 
-- Let performers connect whatever library/workflow they already use.
-- Sync track metadata and availability into Sway.
-- Let patrons request from library, setlist, or catalog scope.
+- reusable library sources, sync keys and `/api/library/sync`;
+- parsers and a booth-side library bridge;
+- `src/playback-control.ts` command and state contracts;
+- durable `playback_commands` and `playback_states`;
+- `src/server/playback-control-store.ts`;
+- authenticated room-scoped playback and bridge endpoints;
+- `scripts/sway-control-bridge.mjs` with local command outcomes;
+- `scripts/lib/virtualdj-network-control.mjs`;
+- `src/components/PerformerPlaybackController.tsx` with stale-state and room/source isolation;
+- generic browser MIDI transport;
+- a Windows VirtualDJ room connector plus the advanced Node bridge.
 
-Already present:
+Extend these owners rather than starting parallel queues, a second performer dashboard, or a new audio-relay service. New source adapters must fit the source/target separation and supported action model; do not funnel every app through an assumed VirtualDJ-only contract.
 
-- linked library sources
-- sync keys
-- `/api/library/sync`
-- local bridge parsing rekordbox XML, Traktor NML, VirtualDJ XML, M3U, CSV,
-  and audio folders
-- library/setlist/catalog search scope
-- exact local paths accepted only through the booth sync-key lane
-- VirtualDJ exact-path load and bidirectional transport/state through the
-  official Network Control extension
-- no-install, no-terminal Windows room connector for that VirtualDJ path;
-  advanced Node bridge remains available for localhost hardware endpoints
-- one-way generic Web MIDI transport for manually mapped DJ applications
+## UX requirements
 
-Not included:
+The Sources workspace should expose named choices and distinguish actions:
 
-- audio relay or decoding in Sway
-- waveform, EQ, gain, crossfader, or mixer controls
-- direct track loading/state for Serato, rekordbox, Traktor, or djay
-- Spotify or TIDAL playback control
+- `Connect account` or `Connect player` only for actual implemented connection flows;
+- `Choose playback device` for selectable targets;
+- `Control source` for available authorized controls;
+- `Import file` for exported metadata;
+- `Open in source` for a link, not remote control.
 
-### Lane 2: Provider Account Links
+Show account connection and playback-device readiness separately. Each connection should show its supported controls and current condition: connected, device offline, authorization expired, source unavailable, mapping only, file import only, or provider setup required. No green Connected badge derived merely from stored song rows.
 
-Purpose:
+The live dashboard should show Now playing, Up next, the approved queue, the selected source/player and confirmed status. Audience screens should not show provider credentials, private library locations or setup complexity.
 
-- Let performers connect provider accounts where allowed.
-- Import or search metadata.
-- Store external IDs, URLs, artwork, availability, and access status.
-- Expose open/deep-link actions for the performer.
+## Security and failure requirements
 
-First candidates:
+- No third-party audio proxy, DRM bypass, hidden embedded player, or source substitution in this lane.
+- OAuth grants belong to the performer; encrypt stored provider credentials, request minimal scopes, and implement refresh/disconnect and deletion semantics.
+- Native/booth permissions are explicit; no arbitrary script execution supplied by an audience request.
+- Bind commands and acknowledgements to the correct room, performer, source connection and target. Switching targets or revoking a connection invalidates old pending work.
+- Protect against expired commands, duplicate delivery, uncertain source responses and lost acknowledgements. Do not blindly replay a non-idempotent next/previous/queue command after a timeout.
+- No optimistic claim that the track played. Keep queued, accepted, confirmed and uncertain outcomes distinct.
+- Preserve source-specific restrictions and show the actual limiting condition; do not invent internal approval hurdles for work that is permitted.
+- Do not grant new payment, payout, licensing or publication authority from this integration request.
 
-- SoundCloud, because its API includes OAuth, track upload/playback concepts, and access states.
-- Spotify metadata/search only, unless a compliant commercial playback approval exists.
+## Current task status
 
-Required safeguards:
+`feat/music-sources-20260912` contains added file parsers and a source-import chooser. The chooser has not yet been wired into the existing Sources workspace, and those imports are not full account/player integrations. They remain useful fallback work, not the acceptance target.
 
-- provider token storage must be encrypted or otherwise protected
-- disconnect/revoke must delete provider personal data and tokens
-- each provider must have an explicit capability matrix: metadata, search, import, stream, upload, launch/deep-link
-- UI copy must say "open in provider" or "matched in provider" unless Sway can legally play the track
-
-### Lane 3: Sway Audio Console
-
-Purpose:
-
-- Paid performance console that can actually play audio when Sway has lawful audio rights.
-
-Allowed sources:
-
-- performer-owned uploads
-- local files routed through a local companion app
-- royalty-free/licensed catalogs Sway contracts for
-- provider tracks only where the provider's terms and approval permit that exact commercial playback use
-
-Required before shipping:
-
-- durable provider/source schema
-- token lifecycle and disconnect audit records
-- file/license provenance records for uploaded/local audio
-- playback audit records
-- failure states for missing license, expired token, blocked track, offline source, or unsupported venue use
-- copy that does not imply payout, licensing, or playback rights that Sway does not control
-
-## UX Direction
-
-The performer cockpit should eventually show:
-
-- Now playing
-- Up next
-- Pending requests
-- Approved queue
-- Source badge: Library, Setlist, Spotify metadata, SoundCloud, Local, Upload
-- Availability badge: playable in Sway, open in source, metadata only, blocked, expired auth
-- Action button based on capability: Play in Sway, Open in provider, Send to local companion, Mark playing
-
-The audience/projector screen should not expose provider complexity. It should show:
-
-- scan call-to-action
-- now playing
-- up next
-- request/tip/boost state
-
-## Non-Negotiables
-
-- No claim that Spotify plays from Sway in venue/commercial mode.
-- No generic "plays from Sway" claim for third-party catalogs.
-- No streaming provider token work without durable token lifecycle, disconnect, and audit behavior.
-- No paid audio console for provider playback until the provider's terms and approvals permit it.
-- No uploaded/local audio console without provenance and license/audit records.
-- No client-only provider authorization boundary.
-
-## Next Safe Slice
-
-Build a provider/source capability model before OAuth UI:
-
-- provider id
-- provider display name
-- capability flags
-- auth required
-- token storage status
-- disconnect status
-- source availability states
-- explicit UI labels for "playable in Sway" versus "open in provider"
-
-Then implement one provider connector at a time, starting with SoundCloud only if the app has API credentials and a compliant use case.
+This strategy update records the corrected product requirement and researched routes. It does not claim a new runtime adapter, account connection, release, provider authorization, or real-device test.
