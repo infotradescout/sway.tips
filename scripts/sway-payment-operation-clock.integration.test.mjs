@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createLiveRoomPaymentOperationStore } from '../src/server/live-room-payment-operation-store.ts';
 import { createPaymentWebhookService } from '../src/server/payment-webhook.ts';
 import { createDeterministicPaymentProvider } from './lib/deterministic-payment-provider.ts';
-import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
+import { startIsolatedClockDatabase } from './lib/isolated-clock-database.mjs';
 
 // Only the owned disposable database and deterministic provider are used.
 // No external provider requests, production records, or real money are involved.
@@ -21,7 +21,7 @@ async function withClockOffset(offsetMs, action) {
   finally { globalThis.Date = RealDate; }
 }
 
-const proof = await startEmbeddedPostgresProof('payment_operation_clock');
+const proof = await startIsolatedClockDatabase();
 const store = createLiveRoomPaymentOperationStore(proof.databaseUrl, 'test');
 const ownerId = randomUUID(), performerId = randomUUID(), gigId = randomUUID();
 const requestIds = new Map();
