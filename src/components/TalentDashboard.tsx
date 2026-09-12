@@ -54,7 +54,8 @@ import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
 import PerformerPlaybackController from './PerformerPlaybackController';
-import { parseDjLibraryFile } from '../dj-library-file-parser';
+import PerformerSourceImportChoices from './PerformerSourceImportChoices';
+import { importMusicFile } from '../music-file-import';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
@@ -831,13 +832,13 @@ function RequestLibraryWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-black text-white">Import your DJ library export</p>
-            <p className="mt-1 text-xs text-slate-400">rekordbox XML · Traktor NML · VirtualDJ XML · M3U · CSV</p>
+            <p className="mt-1 text-xs text-slate-400">Apple Music XML · rekordbox XML · Traktor NML · VirtualDJ XML · M3U · PLS · XSPF · CSV · TSV · TXT</p>
           </div>
           <label className={`inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-cyan-500 px-4 text-xs font-black uppercase text-slate-950 ${djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
             {djLibraryImportStatus === 'submitting' ? 'Importing…' : 'Choose export'}
             <input
               type="file"
-              accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl"
+              accept=".xml,.nml,.m3u,.m3u8,.pls,.xspf,.csv,.tsv,.txt,text/xml,text/csv,audio/x-mpegurl"
               className="sr-only"
               disabled={djLibraryImportStatus === 'submitting'}
               onChange={onDjLibraryFileImport}
@@ -1296,6 +1297,7 @@ function PerformerConnectionsWorkspace({
   const reusableSources = linkedSources.filter((source) => source.connectionStatus !== 'revoked');
   const reusableSourceTrackCount = reusableSources.reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
   const retainedExternalTrackCount = Math.max(0, externalTrackCount - reusableSourceTrackCount);
+  const savedMusicCount = catalogTrackCount + Math.max(externalTrackCount, reusableSourceTrackCount);
   const statusLoading = linkedSourcesStatus === 'loading' || requestLibraryStatus === 'loading';
   const statusError = linkedSourcesStatus === 'error' || requestLibraryStatus === 'error';
   const canClaimEmpty = !statusLoading && !statusError;
@@ -1313,7 +1315,7 @@ function PerformerConnectionsWorkspace({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-black text-white">Saved for every room</h3>
             <span className={`text-xs font-black ${statusError ? 'text-amber-300' : statusLoading ? 'text-slate-400' : 'text-emerald-300'}`}>
-              {statusLoading ? 'Checking…' : statusError ? 'Check needed' : `${catalogTrackCount + externalTrackCount} ${catalogTrackCount + externalTrackCount === 1 ? 'track' : 'tracks'}`}
+              {statusLoading ? 'Checking…' : statusError ? 'Check needed' : `${savedMusicCount} ${savedMusicCount === 1 ? 'track' : 'tracks'}`}
             </span>
           </div>
           {statusLoading ? (
@@ -1334,7 +1336,7 @@ function PerformerConnectionsWorkspace({
                     <p className="truncate text-sm font-black text-white">{source.sourceLabel}</p>
                     <p className="mt-1 text-xs text-slate-400">{source.trackCount} {source.trackCount === 1 ? 'track' : 'tracks'}{source.lastSyncedAt ? ` · updated ${new Date(source.lastSyncedAt).toLocaleDateString()}` : ''}</p>
                   </div>
-                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="Connected" />
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label={source.syncKeyPreview === 'file-import' ? 'Saved import' : 'Connected'} />
                 </div>
               ))}
               {catalogTrackCount > 0 ? (
@@ -1380,43 +1382,23 @@ function PerformerConnectionsWorkspace({
           ) : canClaimEmpty ? (
             <div className="mt-3 rounded-xl border border-dashed border-white/15 bg-slate-950 px-4 py-5 text-center">
               <p className="text-sm font-black text-white">No music added yet</p>
-              <p className="mt-1 text-xs text-slate-400">Start with the DJ library button below.</p>
+              <p className="mt-1 text-xs text-slate-400">Choose a music service, library, or song list below.</p>
             </div>
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Add music</p>
-          <h3 className="mt-1 text-base font-black text-white">Choose where your music is now</h3>
-
-          <label className={`mt-4 flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl bg-cyan-500 px-4 text-left text-slate-950 ${previewMode || djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
-            <span>
-              <span className="block text-sm font-black">{djLibraryImportStatus === 'submitting' ? 'Adding your library…' : 'DJ software library'}</span>
-              <span className="mt-0.5 block text-[11px] font-semibold">rekordbox, Traktor, VirtualDJ, M3U, or CSV</span>
-            </span>
-            <Upload className="h-5 w-5 shrink-0" />
-            <input type="file" accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl" className="sr-only" disabled={previewMode || djLibraryImportStatus === 'submitting'} onChange={onDjLibraryFileImport} />
-          </label>
-          {djLibraryImportMessage ? <p className={`mt-2 text-xs ${djLibraryImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{djLibraryImportMessage}</p> : null}
-
-          <details className="group mt-3 rounded-xl border border-white/10 bg-slate-900 p-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-white">
-              Spotify playlist
-              <span className="text-xs text-cyan-200"><span className="group-open:hidden">Add</span><span className="hidden group-open:inline">Close</span></span>
-            </summary>
-            <form className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onSpotifyPlaylistImport}>
-              <input type="text" value={spotifyPlaylistUrl} onChange={(event) => onSpotifyPlaylistUrlChange(event.target.value)} placeholder="Paste a Spotify playlist link" className="min-h-12 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-white" />
-              <button type="submit" disabled={previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()} className="min-h-12 rounded-xl bg-emerald-400 px-4 text-sm font-black text-slate-950 disabled:opacity-50">{spotifyImportStatus === 'submitting' ? 'Adding…' : 'Add playlist'}</button>
-            </form>
-            <p className="mt-2 text-xs text-slate-500">The song list becomes requestable. Playback still opens in Spotify.</p>
-            {spotifyImportMessage ? <p className={`mt-2 text-xs ${spotifyImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{spotifyImportMessage}</p> : null}
-          </details>
-
-          <button type="button" onClick={onOpenCatalog} className="mt-3 min-h-12 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-left text-sm font-black text-white">
-            Music uploaded to Sway
-            <span className="mt-1 block text-[11px] font-normal text-slate-400">Open your files and choose which tracks people may request.</span>
-          </button>
-        </section>
+        <PerformerSourceImportChoices
+          spotifyPlaylistUrl={spotifyPlaylistUrl}
+          spotifyImportStatus={spotifyImportStatus}
+          spotifyImportMessage={spotifyImportMessage}
+          djLibraryImportStatus={djLibraryImportStatus}
+          djLibraryImportMessage={djLibraryImportMessage}
+          previewMode={previewMode}
+          onSpotifyPlaylistUrlChange={onSpotifyPlaylistUrlChange}
+          onSpotifyPlaylistImport={onSpotifyPlaylistImport}
+          onDjLibraryFileImport={onDjLibraryFileImport}
+          onOpenCatalog={onOpenCatalog}
+        />
 
         <button type="button" onClick={onOpenAdvanced} className="min-h-11 w-full text-sm font-bold text-slate-400 underline decoration-white/20 underline-offset-4">Advanced: reusable booth computer helper</button>
       </div>
@@ -1615,6 +1597,15 @@ export default function TalentDashboard({
   const [spotifyImportMessage, setSpotifyImportMessage] = useState<string | null>(null);
   const [djLibraryImportStatus, setDjLibraryImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [djLibraryImportMessage, setDjLibraryImportMessage] = useState<string | null>(null);
+  const musicFileImportRef = useRef<symbol | null>(null);
+  const musicFileImportOwnerRef = useRef(performerProfile?.performer_id);
+  musicFileImportOwnerRef.current = performerProfile?.performer_id;
+  useEffect(() => {
+    musicFileImportRef.current = null;
+    setDjLibraryImportStatus('idle');
+    setDjLibraryImportMessage(null);
+    return () => { musicFileImportRef.current = null; };
+  }, [previewMode, performerProfile?.performer_id]);
   const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [requestLibraryStatus, setRequestLibraryStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
@@ -2044,32 +2035,25 @@ export default function TalentDashboard({
 
   const handleDjLibraryFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file || previewMode || djLibraryImportStatus === 'submitting') return;
-    setDjLibraryImportStatus('submitting');
-    setDjLibraryImportMessage(null);
+    if (!input.files?.[0] || previewMode || musicFileImportRef.current) return;
+    const token = Symbol('music-file-import');
+    const performerId = performerProfile?.performer_id;
+    musicFileImportRef.current = token;
     try {
-      const parsed = await parseDjLibraryFile(file);
-      const response = await fetch('/api/talent/library/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sourceKey: parsed.sourceKey,
-          sourceLabel: parsed.sourceLabel,
-          tracks: parsed.tracks
-        })
+      await importMusicFile({
+        input,
+        previewMode,
+        performerId,
+        isCurrent: () => musicFileImportRef.current === token && musicFileImportOwnerRef.current === performerId,
+        onStatus: setDjLibraryImportStatus,
+        onMessage: setDjLibraryImportMessage,
+        onSaved: async () => {
+          await refreshLinkedSources();
+          await refreshRequestLibrary();
+        }
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'DJ library import failed.');
-      setDjLibraryImportStatus('success');
-      setDjLibraryImportMessage(`Added ${data?.importedCount ?? parsed.tracks.length} tracks from ${parsed.sourceLabel}${parsed.truncated ? ' (first 1,000)' : ''}. This source is ready in every room.`);
-      await refreshLinkedSources();
-      await refreshRequestLibrary();
-    } catch (error) {
-      setDjLibraryImportStatus('error');
-      setDjLibraryImportMessage(error instanceof Error ? error.message : 'DJ library import failed.');
     } finally {
-      input.value = '';
+      if (musicFileImportRef.current === token) musicFileImportRef.current = null;
     }
   };
 
