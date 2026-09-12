@@ -1,6 +1,6 @@
-import { parseDjLibraryText as parseLegacyLibrary, type DjLibraryImportResult as LegacyResult } from './dj-library-legacy-parser';
-import { parseAdditionalMusicList } from './music-list-import';
-export type { DjLibraryImportTrack } from './dj-library-legacy-parser';
+import { parseDjLibraryText as parseLegacyLibrary, type DjLibraryImportResult as LegacyResult } from './dj-library-legacy-parser.ts';
+import { parseAdditionalMusicList } from './music-list-import.ts';
+export type { DjLibraryImportTrack } from './dj-library-legacy-parser.ts';
 
 export type DjLibraryImportResult = Omit<LegacyResult, 'format'> & {
   format: LegacyResult['format'] | 'apple_music_xml' | 'tsv' | 'text' | 'pls' | 'xspf';
