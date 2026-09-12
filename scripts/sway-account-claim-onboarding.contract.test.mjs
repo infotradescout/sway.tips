@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -100,3 +101,6 @@ if (failures.length) {
 }
 
 console.log('Account claim-code onboarding contract passed.');
+const behavior = spawnSync(process.execPath, ['scripts/sway-signup-claim.behavior.test.mjs'], { stdio: 'inherit' });
+if (behavior.error) throw behavior.error;
+if (behavior.status !== 0) process.exit(behavior.status || 1);

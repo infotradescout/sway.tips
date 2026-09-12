@@ -26,7 +26,7 @@ type ClaimPreview = {
   enablesProMode: true;
 };
 
-type ClaimValidationState = 'idle' | 'loading' | 'valid' | 'invalid';
+type ClaimValidationState = 'idle' | 'loading' | 'valid' | 'invalid' | 'unavailable';
 
 async function accountJson(path: string, body?: Record<string, unknown>) {
   const response = await fetch(path, body ? {
@@ -113,7 +113,7 @@ function ClaimCodeField(props: {
             <p className="mt-1 text-emerald-100/90">This account will claim that profile and activate Pro Mode.</p>
           </div>
         ) : null}
-        {props.validation === 'invalid' && props.error ? (
+        {(props.validation === 'invalid' || props.validation === 'unavailable') && props.error ? (
           <p className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-3 py-3 text-xs leading-5 text-rose-100">{props.error}</p>
         ) : null}
       </div>
@@ -228,41 +228,60 @@ export function AccountSignup() {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const validateSeq = useRef(0);
+  const pendingClaimCheck = useRef<{ code: string; seq: number; promise: Promise<boolean> } | null>(null);
   const displayNameId = useId();
   const emailId = useId();
   const passwordId = useId();
   const confirmPasswordId = useId();
 
-  const validateClaim = useCallback(async (raw: string) => {
+  const validateClaim = useCallback((raw: string): Promise<boolean> => {
     const trimmed = raw.trim();
+    const currentCheck = pendingClaimCheck.current;
+    // A button click blurs the field before submitting. Both actions can await
+    // the same check only while that exact input observation still owns it.
+    if (currentCheck?.code === trimmed && currentCheck.seq === validateSeq.current) {
+      return currentCheck.promise;
+    }
+    const seq = ++validateSeq.current;
     if (!trimmed) {
       setClaimValidation('idle');
       setClaimPreview(null);
       setClaimError(null);
-      return;
+      return Promise.resolve(false);
     }
-    const seq = ++validateSeq.current;
     setClaimValidation('loading');
+    setClaimPreview(null);
     setClaimError(null);
-    try {
-      const data = await accountJson('/api/account/claim/peek', { code: trimmed });
-      if (seq !== validateSeq.current) return;
-      setClaimPreview({
-        displayName: String(data.displayName || 'Performer'),
-        handle: typeof data.handle === 'string' ? data.handle : null,
-        enablesProMode: true
-      });
-      setClaimValidation('valid');
-    } catch (error: any) {
-      if (seq !== validateSeq.current) return;
-      setClaimPreview(null);
-      setClaimValidation('invalid');
-      setClaimError(error instanceof Error ? error.message : 'Code not recognized');
-    }
+    const promise = (async () => {
+      try {
+        const data = await accountJson('/api/account/claim/peek', { code: trimmed });
+        if (seq !== validateSeq.current) return false;
+        setClaimPreview({
+          displayName: String(data.displayName || 'Performer'),
+          handle: typeof data.handle === 'string' ? data.handle : null,
+          enablesProMode: true
+        });
+        setClaimValidation('valid');
+        return true;
+      } catch (error: any) {
+        if (seq !== validateSeq.current) return false;
+        const status = typeof error?.status === 'number' ? error.status : null;
+        const retryable = status === null || status === 408 || status === 429 || (status >= 500 && status <= 599);
+        setClaimPreview(null);
+        setClaimValidation(retryable ? 'unavailable' : 'invalid');
+        setClaimError(error instanceof Error ? error.message : 'Unable to check the claim code. Try again.');
+        return false;
+      } finally {
+        if (pendingClaimCheck.current?.seq === seq) pendingClaimCheck.current = null;
+      }
+    })();
+    pendingClaimCheck.current = { code: trimmed, seq, promise };
+    return promise;
   }, []);
 
   useEffect(() => {
     if (initialClaim) void validateClaim(initialClaim);
+    return () => { validateSeq.current += 1; };
   }, [initialClaim, validateClaim]);
 
   const loginHref = useMemo(() => {
@@ -289,18 +308,7 @@ export function AccountSignup() {
           return;
         }
         if (claimValidation !== 'valid') {
-          await validateClaim(trimmedClaim);
-          // Re-check via a fresh peek result stored in refs is awkward; block if still not valid after await.
-          // validateClaim updates state asynchronously for next paint — call peek inline for submit gate.
-          try {
-            await accountJson('/api/account/claim/peek', { code: trimmedClaim });
-          } catch (error) {
-            setClaimValidation('invalid');
-            setClaimError(error instanceof Error ? error.message : 'Code not recognized');
-            setMessage(error instanceof Error ? error.message : 'Remove the claim code or enter a valid one to continue.');
-            return;
-          }
-          setClaimValidation('valid');
+          if (!await validateClaim(trimmedClaim)) return;
         }
       }
       const data = await accountJson('/api/account/signup', {
@@ -353,16 +361,13 @@ export function AccountSignup() {
         <ClaimCodeField
           value={claimCode}
           onChange={(value) => {
+            // Every edit owns a new observation, including clearing the input
+            // while an earlier code is still being checked.
+            validateSeq.current += 1;
             setClaimCode(value);
-            if (!value.trim()) {
-              setClaimValidation('idle');
-              setClaimPreview(null);
-              setClaimError(null);
-            } else if (claimValidation === 'valid' || claimValidation === 'invalid') {
-              setClaimValidation('idle');
-              setClaimPreview(null);
-              setClaimError(null);
-            }
+            setClaimValidation('idle');
+            setClaimPreview(null);
+            setClaimError(null);
           }}
           validation={claimValidation}
           preview={claimPreview}
