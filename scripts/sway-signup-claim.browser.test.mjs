@@ -16,18 +16,19 @@ const browser = await chromium.launch({
   ...(process.env.SWAY_BROWSER_ARGS ? { args: JSON.parse(process.env.SWAY_BROWSER_ARGS) } : {})
 });
 const results = [];
+let viewport = { width: 390, height: 844 };
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 async function test(name, run) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
   await context.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   page.setDefaultNavigationTimeout(60000);
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
-  try { await run(page, context); assert.deepEqual(pageErrors, []); results.push({ name, status: 'PASS' }); }
-  catch (error) { results.push({ name, status: 'FAIL', error: error.message }); }
+  try { await run(page, context); assert.deepEqual(pageErrors, []); results.push({ name, width: viewport.width, status: 'PASS' }); }
+  catch (error) { results.push({ name, width: viewport.width, status: 'FAIL', error: error.message }); }
   finally { await context.close(); console.log(results.at(-1)); }
 }
 
@@ -54,6 +55,7 @@ async function lookup(page, field, value, lookups) {
 }
 
 try {
+  for (viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
   for (const replacement of ['', 'second-code']) for (const status of [200, 400]) {
     await test(`edited-code-ignores-${status}-${replacement || 'cleared'}`, async (page, context) => {
       const { field, lookups } = await open(page, context);
@@ -79,16 +81,17 @@ try {
     assert.equal(await page.getByText(/Previous Performer/).count(), 0);
   });
 
-  await test('submit-checks-current-code-once', async (page, context) => {
+  for (const submitMethod of ['Enter', 'click']) await test(`submit-${submitMethod}-checks-current-code-once`, async (page, context) => {
     const { field, lookups, signups } = await open(page, context);
     await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Synthetic Account');
     await page.getByRole('textbox', { name: 'Email', exact: true }).fill('synthetic@example.test');
     await page.getByLabel('Password', { exact: true }).fill('Synthetic123');
     await page.getByLabel('Confirm password', { exact: true }).fill('Synthetic123');
     await page.getByRole('checkbox').check();
-    // Submit by Enter without blurring the claim field first.
+    // Clicking the submit button also blurs the claim field before submitting.
     await field.fill('current-code');
-    await field.press('Enter');
+    if (submitMethod === 'Enter') await field.press('Enter');
+    else await page.getByRole('button', { name: 'Create account', exact: true }).click();
     await page.waitForTimeout(150);
     assert.equal(lookups.length, 1);
     await json(lookups[0], { displayName: 'Current Performer' });
@@ -98,6 +101,56 @@ try {
     assert.equal(signups.length, 1);
     assert.equal(signups[0].claimCode, 'current-code');
   });
+  await test('click-submit-stops-on-rejected-claim', async (page, context) => {
+    const { field, lookups, signups } = await open(page, context);
+    await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Synthetic Account');
+    await page.getByRole('textbox', { name: 'Email', exact: true }).fill('synthetic@example.test');
+    await page.getByLabel('Password', { exact: true }).fill('Synthetic123');
+    await page.getByLabel('Confirm password', { exact: true }).fill('Synthetic123');
+    await page.getByRole('checkbox').check();
+    await field.fill('invalid-code');
+    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await page.waitForTimeout(150);
+    assert.equal(lookups.length, 1);
+    await json(lookups[0], { error: 'Code rejected' }, 400);
+    await page.getByText('Code rejected', { exact: true }).waitFor();
+    assert.equal(signups.length, 0);
+    assert.equal(await field.isEnabled(), true, 'A failed check must release submission');
+    assert.equal(await field.getAttribute('aria-invalid'), 'true');
+    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await page.waitForTimeout(150);
+    assert.equal(lookups.length, 1, 'An invalid claim is not retried without a new input check');
+    assert.equal(signups.length, 0);
+  });
+  await test('click-submit-retries-temporary-claim-failure', async (page, context) => {
+    const { field, lookups, signups } = await open(page, context);
+    await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Synthetic Account');
+    await page.getByRole('textbox', { name: 'Email', exact: true }).fill('synthetic@example.test');
+    await page.getByLabel('Password', { exact: true }).fill('Synthetic123');
+    await page.getByLabel('Confirm password', { exact: true }).fill('Synthetic123');
+    await page.getByRole('checkbox').check();
+    await field.fill('current-code');
+    const button = page.getByRole('button', { name: 'Create account', exact: true });
+    await button.click();
+    await page.waitForTimeout(150);
+    assert.equal(lookups.length, 1);
+    await json(lookups[0], { error: 'Claim lookup temporarily unavailable' }, 503);
+    await page.getByText('Claim lookup temporarily unavailable', { exact: true }).waitFor();
+    assert.equal(await field.getAttribute('aria-invalid'), 'false', 'Temporary failure does not mean the code is invalid');
+    await page.waitForTimeout(150);
+    assert.equal(lookups.length, 1, 'A temporary failure must not trigger an automatic retry');
+    assert.equal(signups.length, 0);
+    // The button still has focus: retry without touching or blurring the field.
+    await button.click();
+    await page.waitForTimeout(150);
+    assert.equal(lookups.length, 2, 'An explicit retry must recheck after temporary failure');
+    assert.equal(signups.length, 0);
+    await json(lookups[1], { displayName: 'Current Performer' });
+    await page.getByText('Synthetic signup accepted', { exact: true }).waitFor();
+    assert.equal(signups.length, 1);
+    assert.equal(signups[0].claimCode, 'current-code');
+  });
+  }
 } finally {
   await browser.close();
   await vite.close();

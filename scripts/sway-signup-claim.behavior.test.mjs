@@ -62,7 +62,7 @@ async function test(name, run, search) {
   finally { await f.close(); console.log(results.at(-1)); }
 }
 
-for (const replacement of ['', 'second-code']) for (const status of [200, 400]) {
+for (const replacement of ['', 'second-code']) for (const status of [200, 400, 503]) {
   await test(`edited-code-ignores-${status}-${replacement || 'cleared'}`, async f => {
     await f.fill('claimCode', 'first-code'); await f.blur();
     assert.equal(f.lookups().length, 1);
@@ -96,7 +96,31 @@ await test('failed-submit-lookup-never-creates-account', async f => {
   assert.equal(f.lookups().length, 1, 'A rejected check must not be retried silently');
   assert.equal(f.signups().length, 0);
   assert.match(f.w.document.body.textContent, /Code rejected/);
+  assert.equal(f.input('claimCode').getAttribute('aria-invalid'), 'true');
+  await f.submit();
+  assert.equal(f.lookups().length, 1, 'Repeated submit does not recheck a definitively rejected claim');
+  assert.equal(f.signups().length, 0);
 });
+for (const status of [408, 429, 500, 503, 599, 'network']) {
+  await test(`explicit-submit-retries-temporary-failure-${status}`, async f => {
+    await f.ready(); await f.fill('claimCode', 'current-code'); await f.blur(); await f.submit();
+    assert.equal(f.lookups().length, 1);
+    if (status === 'network') await f.step(() => f.lookups()[0].reject(new f.w.TypeError('Claim check unavailable')));
+    else await f.answer(f.lookups()[0], { error: 'Claim check unavailable' }, status);
+    assert.equal(f.lookups().length, 1, 'Never retry automatically');
+    assert.equal(f.signups().length, 0);
+    assert.equal(f.input('claimCode').disabled, false);
+    assert.equal(f.input('claimCode').getAttribute('aria-invalid'), 'false');
+    assert.match(f.w.document.body.textContent, /Claim check unavailable/);
+    await f.submit();
+    assert.equal(f.lookups().length, 2, 'Explicit submit retries without an edit or blur');
+    assert.equal(f.signups().length, 0);
+    await f.answer(f.lookups()[1], { displayName: 'Current Performer' });
+    assert.equal(f.signups().length, 1);
+    assert.equal(JSON.parse(f.signups()[0].options.body).claimCode, 'current-code');
+    await f.answer(f.signups()[0], { message: 'Synthetic signup accepted' });
+  });
+}
 for (const replacement of ['', 'replacement-code']) {
   await test(`superseded-submit-stops-${replacement || 'cleared'}`, async f => {
     await f.ready(); await f.fill('claimCode', 'first-code'); await f.submit();
@@ -116,13 +140,34 @@ await test('previous-valid-code-does-not-validate-new-submit', async f => {
   await f.fill('claimCode', 'second-code'); await f.blur();
   await f.submit();
   assert.equal(f.signups().length, 0);
-  await f.answer(f.lookups()[1], { displayName: 'Outdated Background Check' });
-  assert.equal(f.signups().length, 0, 'Background check cannot bypass the current submit check');
-  assert.doesNotMatch(f.w.document.body.textContent, /Previous Performer|Outdated Background Check/);
-  await f.answer(f.lookups()[2], { displayName: 'Current Performer' });
+  assert.equal(f.lookups().length, 2, 'Submit waits for the current code check without duplicating it');
+  assert.doesNotMatch(f.w.document.body.textContent, /Previous Performer/);
+  await f.answer(f.lookups()[1], { displayName: 'Current Performer' });
   assert.equal(f.signups().length, 1);
   assert.equal(JSON.parse(f.signups()[0].options.body).claimCode, 'second-code');
   await f.answer(f.signups()[0], { message: 'Synthetic signup accepted' });
+});
+for (const status of [200, 400]) {
+  await test(`returning-to-same-code-ignores-old-${status}`, async f => {
+    await f.ready(); await f.fill('claimCode', 'first-code'); await f.blur();
+    await f.fill('claimCode', 'second-code');
+    await f.fill('claimCode', 'first-code'); await f.blur(); await f.submit();
+    assert.equal(f.lookups().length, 2, 'Editing away and back requires a fresh check');
+    await f.answer(f.lookups()[0], status === 200 ? { displayName: 'Previous Performer' } : { error: 'Previous code rejected' }, status);
+    assert.equal(f.signups().length, 0, 'An old check for the same string cannot authorize the new submission');
+    assert.doesNotMatch(f.w.document.body.textContent, /Previous Performer|Previous code rejected/);
+    await f.answer(f.lookups()[1], { displayName: 'Current Performer' });
+    assert.equal(f.signups().length, 1);
+    await f.answer(f.signups()[0], { message: 'Synthetic signup accepted' });
+  });
+}
+await test('failed-blur-check-stops-waiting-submit', async f => {
+  await f.ready(); await f.fill('claimCode', 'invalid-code'); await f.blur(); await f.submit();
+  assert.equal(f.lookups().length, 1);
+  await f.answer(f.lookups()[0], { error: 'Code rejected' }, 400);
+  assert.equal(f.signups().length, 0);
+  assert.equal(f.input('claimCode').disabled, false, 'A failed shared check releases submission');
+  assert.match(f.w.document.body.textContent, /Code rejected/);
 });
 await test('cleared-prefilled-code-ignores-initial-lookup', async f => {
   assert.equal(f.lookups().length, 1);
