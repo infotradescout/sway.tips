@@ -12,6 +12,8 @@ export async function runPaymentValidation() {
   assert.equal(process.env.SWAY_ISOLATED_VALIDATION, 'true');
   assert.equal(process.env.RENDER_SERVICE_ID, 'srv-daesln0u01pc73fso5kg');
   const candidate = process.env.SWAY_PAYMENT_VALIDATION_CANDIDATE_SHA;
+  const focused = process.env.SWAY_PAYMENT_VALIDATION_FOCUS === 'recovery';
+  assert(!process.env.SWAY_PAYMENT_VALIDATION_FOCUS || focused);
   assert.match(candidate || '', /^[a-f0-9]{40}$/);
   for (const key of ['SWAY_LIVE_ROOM_LIVE_MONEY_ENABLED', 'SWAY_NATIVE_TICKETS_ENABLED', 'SWAY_PAYPAL_PAYOUTS_TEST_EXECUTION_ENABLED', 'SWAY_PAYPAL_PAYOUTS_LIVE_EXECUTION_ENABLED', 'SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED']) assert.equal(process.env[key], 'false', key);
   const forbidden = Object.keys(process.env).filter(k => /DATABASE_URL$|(?:STRIPE|PAYPAL|EMAIL|R2|AWS|CLOUDFLARE).*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY)|PAYOUT_RECIPIENT_ENCRYPTION_KEY/.test(k) && process.env[k]?.trim());
@@ -24,7 +26,7 @@ export async function runPaymentValidation() {
   const repo = join(temp, 'candidate');
   const out = resolve('.validation-public');
   mkdirSync(out, {recursive:true});
-  const report = { candidate, launcher, startedAt:new Date().toISOString(), scope:'Exact candidate application and loopback-database tests; public GET-only deployment observation. No provider transfer or production write.', steps:[], production:[], passed:false, providerTransactionsExecuted:false, productionMutations:false };
+  const report = { candidate, launcher, startedAt:new Date().toISOString(), focused, scope:focused ? 'Focused native recovery diagnostic only; not full application approval' : 'Exact candidate application and loopback-database tests; public GET-only deployment observation. No provider transfer or production write.', steps:[], production:[], passed:false, providerTransactionsExecuted:false, productionMutations:false };
   let pg;
   const childEnv = {};
   for (const key of ['PATH','HOME','USER','SHELL','LANG','TMPDIR','PLAYWRIGHT_BROWSERS_PATH']) if(process.env[key]) childEnv[key]=process.env[key];
@@ -79,7 +81,7 @@ export async function runPaymentValidation() {
     await step('lint','npm',['run','lint']);
     await step('build','npm',['run','build']);
     await step('chromium','node',['node_modules/playwright/cli.js','install','chromium']);
-    for(const name of ['test:paypal-payout-readiness','test:paypal-payouts','test:payout-destinations','test:performer-withdrawals','test:payment-pricing'])await step(name,'npm',['run',name],{required:false});
+    if(!focused)for(const name of ['test:paypal-payout-readiness','test:paypal-payouts','test:payout-destinations','test:performer-withdrawals','test:payment-pricing'])await step(name,'npm',['run',name],{required:false});
     const deps=join(temp,'native-dependencies');mkdirSync(deps);
     await step('native-postgres-install','npm',['install','--prefix',deps,'--no-audit','--no-fund','--package-lock=false','embedded-postgres@18.4.0-beta.17'],{cwd:temp,timeout:600000});
     const requireDeps=createRequire(join(deps,'package.json'));
@@ -94,8 +96,23 @@ export async function runPaymentValidation() {
     console.log('SWAY_MONEY_NATIVE_DATABASE '+JSON.stringify(report.nativeDatabase));
     const dbUrl=`postgresql://postgres:${password}@127.0.0.1:25439/${dbName}`;
     const nativeEnv={SWAY_ALLOW_DISPOSABLE_DATABASE_RESET:'true',SWAY_REQUIRE_REAL_POSTGRES_PROOF:'true',SWAY_REAL_POSTGRES_PROOF_DATABASE_URL:dbUrl};
-    for(const name of ['test:performer-withdrawals','test:integration:withdrawal-refund-concurrency','test:integration:live-room-real-postgres-concurrency'])await step('native:'+name,'npm',['run',name],{env:nativeEnv,timeout:600000,required:false});
-    for(const name of ['test:integration:simulated-live-night-browser','test:browser:payment-modal-viewport','test:browser:profile-payout-options','test:contracts'])await step(name,'npm',['run',name],{timeout:name==='test:contracts'?1200000:600000,required:false});
+    const nativeTests=focused?['test:integration:live-room-real-postgres-concurrency']:['test:performer-withdrawals','test:integration:withdrawal-refund-concurrency','test:integration:live-room-real-postgres-concurrency'];
+    for(const name of nativeTests) {
+      const result=await step('native:'+name,'npm',['run',name],{env:nativeEnv,timeout:600000,required:false});
+      if(!result.passed) {
+        const requireCandidate=createRequire(join(repo,'package.json'));
+        const {Client}=requireCandidate('pg');
+        const diagnostic=new Client({connectionString:dbUrl});
+        try {
+          await diagnostic.connect();
+          const rows=await diagnostic.query("select p.id, p.payment_status, p.refund_status, p.action_type, p.legacy_unlinked, p.amount_total, o.operation_type, o.status as operation_status, o.last_error from payments p left join live_room_payment_operations o on o.payment_id=p.id where p.idempotency_key like 'legacy-connected-refund-%' order by p.created_at desc limit 5");
+          report.recoveryDiagnostic=rows.rows;
+          console.log('SWAY_MONEY_RECOVERY_DIAGNOSTIC '+JSON.stringify(rows.rows));
+        } catch(error) {report.recoveryDiagnosticError=scrub(error.message);}
+        finally {await diagnostic.end();}
+      }
+    }
+    if(!focused)for(const name of ['test:integration:simulated-live-night-browser','test:browser:payment-modal-viewport','test:browser:profile-payout-options','test:contracts'])await step(name,'npm',['run',name],{timeout:name==='test:contracts'?1200000:600000,required:false});
     // The existing browser suite emits screenshots/results here. Archive only
     // this known untracked proof directory; never hide a tracked source change.
     assert.equal(execFileSync('git',['diff','--name-only','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),'','Tests changed tracked source');
