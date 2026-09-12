@@ -1,73 +1,123 @@
 # Signup claim response ownership — September 12, 2026
 
-## Decision and business goal
+Decision: PR #240 passes bounded local acceptance and independent review. Merge
+and Render production deployment await a separate owner decision. Issue #223
+remains open.
 
-Implement a bounded continuation of issue #223's account journey: the performer
-shown beside a signup claim code must belong to the code currently entered.
-Previously, editing or clearing the input did not invalidate an in-flight lookup.
-Late success/error responses could describe the old code. Submission also ran a
-second lookup after waiting for the first, including after the first was rejected.
+Business goal: Keep claim feedback tied to the current input, avoid duplicate
+checks when creating an account, and let a user explicitly retry after a
+temporary connection or server failure.
 
-Every edit, empty validation, and component cleanup now invalidates older checks.
-New checks clear the previous preview. Validation returns an explicit result so
-submission stops after a failed or superseded check and does not repeat it.
-Server claim authorization and account creation remain the existing owners.
+## Behavior and demonstrated failures
 
-## Base and integration
+Editing, clearing, or unmounting invalidates previous claim checks. A late
+success or failure cannot describe an older code or continue an obsolete signup.
+Blur and submit share an in-flight check only when both its code and observation
+sequence still match. Changing away from a code and back requires a new check.
 
-- Base: main `181b46144391704d5baa6baf5fec065fec6b3b70`.
-- Local branch: `fix/signup-claim-response-ownership-20260912`.
-- Current unfinished PR #239 (`c74370b0cffeb3ef175f2aeeda17ee662fb76812`)
-  changes eight payment/clock files. PR #238 changes nine profile/browser/CSS
-  files. Their current changed-file lists do not overlap this repair.
-- This is a main-based account repair, independently combinable with those
-  candidates; it does not replace their canonical work or complete issue #223.
+A failed check stops signup. Definitive claim rejections remain invalid. Network
+failures, HTTP 408/429, and 5xx responses instead remain unavailable: they show
+feedback without declaring the code invalid. Clicking Create account again can
+explicitly retry without editing or refocusing the field. Nothing retries or
+creates an account automatically.
 
-## Validation
+The initial PR already repaired stale responses. Acceptance then demonstrated
+and corrected two further ordinary-browser defects:
 
-- `npm ci --no-audit --no-fund`: passed with lockfile dependencies.
-- `npm run lint`: passed.
-- `npm run build`: passed.
-- `node scripts/sway-account-claim-onboarding.contract.test.mjs`: passed,
-  including the newly wired actual-component response-ownership test.
-- Final component proof: **11/11 passed** using the actual AccountSignup,
-  installed React, JSDOM, and controlled HTTP responses. Covers edit/clear versus
-  late success/error, reordered checks, one-check submission, failed checks,
-  pending submission superseded by edit/clear, a previously valid code replaced
-  before submission, and a cleared URL-prefilled code. Superseded submissions
-  preserve the current input, release pending state, and send no signup request.
-- Baseline comparison on the unchanged base component: the original eight
-  scenarios produced **1/8 passed, 7 failures**. Three additional submission
-  challenges were added afterward and passed on the repaired source.
-- Full `npm run test:contracts`: **not passed**. The first invocation stopped
-  because this runtime exposed `process.execPath` as `node` and a pre-existing
-  child test intentionally supplies an environment without PATH. Re-running
-  with the installed Node executable addressed through its absolute path passed
-  that test and progressed until the existing refund-confirmation browser test
-  could not find Playwright Chromium. No product code or test guard was changed
-  to accommodate the runtime.
-- The six-case signup browser suite and fixture are prepared, **not executed**.
-  Playwright's browser download returned HTTP 502. A separately obtained
-  Chromium binary reported its version but exited with SIGTRAP on launch here.
-  JSDOM proof is not browser/layout, backend, real-account or production proof.
-- `git diff --check`: passed. Root independent diff review requested the three
-  additional submission challenges above; those are included and passed.
+- Clicking Create account with the claim field focused issued two lookups; the
+  seven-case reproduction passed 6/7 and failed the duplicate request assertion.
+- After HTTP 503, clicking the already-focused button could not retry. The
+  desktop/mobile reproduction passed 16/18, failing that scenario at both widths.
 
-## Handoff
+Server account creation and claim authorization retain their existing behavior.
 
-- Files inspected: `AGENTS.md`, `RELEASE_CONTROL.md`, governing product/doctrine
-  docs, `AccountAccess.tsx`, its account-claim contract, existing test harnesses,
-  issue #223 and current PR #238/#239 scope.
-- Files changed: `AccountAccess.tsx`, its existing onboarding contract, new
-  component/browser regression tests and browser fixture, this evidence packet.
-- Routes touched: client behavior on `/account/signup` and its existing aliases;
-  no route registration or API contract changed.
-- Schema, money, persistence, role/access, AI, moderation: unchanged.
-- App Store impact: no readiness claim or submission change.
-- Known risks: browser/full-contract completion remains unproved in this runtime.
-- Rollback: revert this bounded source/test commit; no migration or data rewrite.
-- Next required slice: run the prepared browser proof and complete contracts in
-  the existing isolated validation environment before release consideration.
-- Release state: local implementation only; no push, PR, merge, deployment,
-  customer account mutation, payout or provider operation.
-- Commit SHA and final working-tree status: supplied with the local handoff.
+## Candidate and validation
+
+- Original PR head: `6c6d2670e5c579a2e3ce57ee9cca7db8c731011f`.
+- Released main integrated without conflict:
+  `09d7a568a84057f776aee099fae2aced2cbeef71`.
+- Final validated runtime/test commit:
+  `a516f417b281c6533d71da010e12bb22a91b2b55`.
+- The subsequent acceptance commit rewrites only this evidence document.
+  Published runtime/test files match the validated commit exactly.
+- The ten files from the approved profile release, including its branding and
+  dj3x-only public partner rule, match released main. Canonical WIP was untouched.
+
+Passed with zero exit status:
+
+- Clean `npm ci` with the committed lockfile.
+- `npm run lint`, `npm run build`, and complete `npm run test:contracts` on the
+  final runtime commit. The complete gate includes the claim component proof;
+  no missing browser/runtime dependency, skipped failure, or Actions gate remains.
+- `node scripts/sway-signup-claim.behavior.test.mjs` — **22/22**, using the actual
+  component and installed React with controlled HTTP in JSDOM.
+- `node scripts/sway-signup-claim.browser.test.mjs` — **18/18**, using actual
+  Chromium, React, and synthetic API responses at 390x844 and 1440x1000. Covers
+  edit/clear and out-of-order replies, Enter and ordinary button submission,
+  rejected claims, explicit 503 retry, and no automatic retry or premature signup.
+- `git diff --check`.
+
+Component coverage additionally includes superseded pending submissions,
+edit-away/back to identical text, stale 503 feedback, HTTP 408/429/500/503/599,
+network rejection, and definitively rejected-code resubmission.
+
+Independent Objector review confirmed matching-code/sequence ownership and safe
+pending-reference cleanup. Its focused lifecycle checks passed StrictMode replay,
+unmount during a shared check, and explicit retry after temporary failure. Its
+final three adversarial checks also passed: stale network rejection cannot
+release a newer submit; an older 503 cannot own edit-away/back text; and a retry
+ending in 400 blocks further unchanged-code submission. The temporary retry
+finding was accepted and repaired; no blocker remains in this bounded diff.
+
+Reviewed git blobs, verified again against the committed candidate:
+
+- Component: `ab1d2605d1a509ae9410c1ff77860eb4d740b238`.
+- Component test: `2f3fdd974205c25fd08355054b2f36179b522671`.
+- Browser test: `829c29ade8b22355134dfe1e6bafb3a709c9cc7b`.
+
+Local reproduction and final logs are retained under
+`artifacts/signup-acceptance-20260912/`. These are browser/component proofs, not
+production account creation, email delivery, or a new server authorization proof.
+
+## Required handoff
+
+Files inspected: AccountSignup/ClaimCodeField, account JSON handling and existing
+claim contract, component/browser harnesses, released profile files, package
+scripts, AGENTS.md, release control and governing product/doctrine instructions.
+
+Files changed: `AccountAccess.tsx`, the existing account-claim contract, component
+and browser tests, their two browser-fixture files, and this evidence packet.
+
+Routes touched: Client behavior at `/account/signup` and its existing aliases;
+existing `/api/account/claim/peek` and `/api/account/signup` callers only.
+
+Schema touched: None.
+
+Money behavior touched: None.
+
+Persistence behavior touched: No backend change; obsolete submissions stop before
+account creation. Claim authorization remains server owned.
+
+Role/access behavior touched: None.
+
+AI behavior touched: None.
+
+Moderation behavior touched: None.
+
+App Store impact: No readiness or submission claim.
+
+Validation commands: Listed above; all required final-source gates passed.
+
+Known risks: HTTP is synthetic in these proofs. They do not demonstrate delivered
+verification email, real account creation, or the rest of issue #223.
+
+Rollback path: Revert this bounded account repair; no migration or data rewrite.
+
+Next required slice: Owner decision to merge and let Render deploy the verified
+signup/payment repairs, followed by release identity and smoke verification.
+
+Commit SHA: Validated runtime commit above; final published head is recorded in
+the PR receipt and differs only by this evidence document.
+
+Working tree status: Isolated acceptance checkout with generated local evidence
+excluded from implementation commits. Canonical WIP preserved.
