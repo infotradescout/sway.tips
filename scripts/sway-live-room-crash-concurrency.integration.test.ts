@@ -63,7 +63,9 @@ async function main() {
   const proof = await startEmbeddedPostgresProof('live_room_crash_concurrency');
   const fake = createDeterministicPaymentProvider();
   const idempotencyStore = createIdempotencyStore(proof.databaseUrl);
-  const paymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test' });
+  // New money uses platform settlement, not a legacy Connect binding. This
+  // explicit synthetic-performer allowance never enables real provider money.
+  const paymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test', testPlatformBalancePerformerIds: new Set([PERFORMER_ID]) });
   const businessStore = createBusinessStore(proof.databaseUrl, activeSession as never);
 
   async function reserveRequest(input: {
@@ -197,15 +199,18 @@ async function main() {
     const lostAuthorize = await reserveRequest({ label: 'lost-authorize' });
     fake.failOnce('authorize_after_commit');
     const firstAuthorization = await paymentService.authorizeAction(lostAuthorize.authorizationInput);
-    assert.equal(firstAuthorization.status, 'processing');
+    assert.equal(firstAuthorization.status, 'processing', JSON.stringify(firstAuthorization));
     assert.equal(fake.calls.uniqueAuthorizations, 1);
+    assert.equal(fake.calls.lastAuthorizeInput?.destinationAccountId, undefined);
+    assert.equal(fake.calls.lastAuthorizeInput?.applicationFeeAmountCents, undefined);
+    assert.equal(fake.calls.lastAuthorizeInput?.metadata?.sway_settlement_mode, 'platform_test_balance');
     await proof.query(`
       update live_room_payment_operations
       set available_at = now(), lease_owner = null, lease_expires_at = null,
           status = 'retryable_failed'
       where idempotency_key = $1
     `, [`authorize:${lostAuthorize.idempotencyKey}`]);
-    const restartedPaymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test' });
+    const restartedPaymentService = createPaymentService({ databaseUrl: proof.databaseUrl, provider: fake.provider, paymentMode: 'test', testPlatformBalancePerformerIds: new Set([PERFORMER_ID]) });
     const recovered = await restartedPaymentService.runDueOperations({ limit: 10 });
     assert.equal(recovered.claimed, 1);
     assert.equal(fake.calls.uniqueAuthorizations, 1, 'Restart must not create a second logical PaymentIntent.');
@@ -552,7 +557,7 @@ async function main() {
     assert.equal(fake.calls.capture - capturesBeforeLostAuthorization, 1);
 
     // A nonterminal refund cannot release the liability. The retry uses the
-    // same reverse operation and requires transfer/application-fee reversal.
+    // same reverse operation; platform charges must not reverse a transfer.
     fake.failOnce('refund_pending_once');
     const pendingRefund = await restartedPaymentService.voidOrRefund(recoveredPayment.rows[0].id);
     assert.equal(pendingRefund.status, 'pending');
@@ -567,8 +572,41 @@ async function main() {
     `, [recoveredPayment.rows[0].id]);
     assert.equal(refunded.rows[0].payment_status, 'refunded');
     assert.equal(refunded.rows[0].refund_status, 'refunded');
+    assert.equal(fake.calls.lastRefundInput?.reverseTransfer, false);
+    assert.equal(fake.calls.lastRefundInput?.refundApplicationFee, false);
+
+    // Preserve the historical connected-charge reversal contract separately.
+    // Seed an existing captured receipt; do not select Connect for new money.
+    const legacyPaymentId = randomUUID();
+    const legacyKey = `legacy-connected-refund-${randomUUID()}`;
+    const legacyIntent = await fake.provider.authorizePayment({
+      amountTotalCents: 550, currency: 'USD', idempotencyKey: legacyKey,
+      paymentMethod: 'pm_card_visa', confirm: true,
+      destinationAccountId: 'acct_test_durability', applicationFeeAmountCents: 50,
+      metadata: { sway_payment_id: legacyPaymentId }
+    });
+    const legacyCapture = await fake.provider.capturePayment({
+      processorPaymentIntentId: legacyIntent.processorPaymentIntentId,
+      idempotencyKey: `capture:${legacyKey}`
+    });
+    await proof.query(`
+      insert into payments (
+        id, gig_id, performer_id, payment_status, processor,
+        processor_payment_intent_id, processor_charge_id,
+        amount_subtotal, platform_fee, amount_total, currency,
+        refund_status, payment_mode, destination_account_id, idempotency_key
+      ) values ($1, $2, $3, 'captured', 'stripe', $4, $5,
+                500, 50, 550, 'USD', 'not_refunded', 'test', 'acct_test_durability', $6)
+    `, [legacyPaymentId, GIG_ID, PERFORMER_ID, legacyIntent.processorPaymentIntentId, legacyCapture.processorChargeId, legacyKey]);
+    const legacyRefund = await restartedPaymentService.voidOrRefund(legacyPaymentId);
+    assert.equal(legacyRefund.status, 'refunded');
     assert.equal(fake.calls.lastRefundInput?.reverseTransfer, true);
     assert.equal(fake.calls.lastRefundInput?.refundApplicationFee, true);
+    const legacyRefundTruth = await proof.query<{ payment_status: string; refund_status: string }>(`
+      select payment_status, refund_status from payments where id = $1
+    `, [legacyPaymentId]);
+    assert.equal(legacyRefundTruth.rows[0].payment_status, 'refunded');
+    assert.equal(legacyRefundTruth.rows[0].refund_status, 'refunded');
 
     // Crash between invisible business reservation and payment reservation:
     // the worker fences and terminalizes the orphan without ever contacting
@@ -664,6 +702,7 @@ async function main() {
              p.refund_status, i.first_response_status as response_status
       from requests r
       join payments p on p.request_id = r.id
+      join client_pending_actions c on c.idempotency_key = r.idempotency_key
       join idempotency_keys i on i.idempotency_key = r.idempotency_key
       where r.id = $1
     `, [expiryDuringCapture.requestId]);

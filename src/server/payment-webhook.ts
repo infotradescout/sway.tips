@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { and, asc, eq, inArray, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { liveRoomProcessorEvents, payments } from '../db/schema';
 import type { PaymentProviderAdapter, ProviderWebhookEnvelope } from './payment-provider';
@@ -35,7 +35,7 @@ function safeError(error: unknown) {
 
 function retryAt(attemptCount: number) {
   const seconds = Math.min(300, Math.max(2, 2 ** Math.min(attemptCount, 8)));
-  return new Date(Date.now() + seconds * 1_000);
+  return sql<Date>`statement_timestamp() + (${seconds} * interval '1 second')`;
 }
 
 function minimizedPayload(event: ProviderWebhookEnvelope): Record<string, unknown> {
@@ -116,8 +116,11 @@ export function createPaymentWebhookService({
   async function claimEvent(eventId?: string) {
     if (!db) return null;
     return db.transaction(async (tx) => {
-      const now = new Date();
-      const staleBefore = new Date(now.getTime() - EVENT_LEASE_MS);
+      // Receipt defaults, retry deadlines and processing leases share the
+      // database clock. App clock skew or millisecond truncation must not
+      // delay a due event, shorten backoff or steal another worker's lease.
+      const now = sql<Date>`statement_timestamp()`;
+      const staleBefore = sql<Date>`statement_timestamp() - (${EVENT_LEASE_MS} * interval '1 millisecond')`;
       const [row] = await tx
         .select()
         .from(liveRoomProcessorEvents)
