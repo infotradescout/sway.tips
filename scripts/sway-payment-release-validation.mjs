@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -96,8 +96,15 @@ export async function runPaymentValidation() {
     const nativeEnv={SWAY_ALLOW_DISPOSABLE_DATABASE_RESET:'true',SWAY_REQUIRE_REAL_POSTGRES_PROOF:'true',SWAY_REAL_POSTGRES_PROOF_DATABASE_URL:dbUrl};
     for(const name of ['test:performer-withdrawals','test:integration:withdrawal-refund-concurrency','test:integration:live-room-real-postgres-concurrency'])await step('native:'+name,'npm',['run',name],{env:nativeEnv,timeout:600000,required:false});
     for(const name of ['test:integration:simulated-live-night-browser','test:browser:payment-modal-viewport','test:browser:profile-payout-options','test:contracts'])await step(name,'npm',['run',name],{timeout:name==='test:contracts'?1200000:600000,required:false});
+    // The existing browser suite emits screenshots/results here. Archive only
+    // this known untracked proof directory; never hide a tracked source change.
+    assert.equal(execFileSync('git',['diff','--name-only','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),'','Tests changed tracked source');
+    const untracked=execFileSync('git',['ls-files','--others','--exclude-standard'],{cwd:repo,encoding:'utf8'}).trim().split('\n').filter(Boolean);
+    assert(untracked.every(name=>name.startsWith('tmp/public-entry-qa/')),'Unexpected untracked files: '+JSON.stringify(untracked));
+    report.generatedProofFiles=untracked;
+    if(existsSync(join(repo,'tmp/public-entry-qa')))renameSync(join(repo,'tmp/public-entry-qa'),join(out,'public-entry-qa'));
     report.sourceStatus=execFileSync('git',['status','--porcelain'],{cwd:repo,encoding:'utf8'}).trim();
-    assert.equal(report.sourceStatus,'','Tests changed tracked/unignored candidate content');
+    assert.equal(report.sourceStatus,'','Candidate must be clean after archiving generated proof');
     report.passed=report.steps.every(row=>row.passed);
   } catch(error) {
     report.error=scrub(error.stack||error);console.error('SWAY_MONEY_ERROR '+report.error);
