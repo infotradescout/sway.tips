@@ -4,6 +4,8 @@ import { join } from 'node:path';
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const dashboard = read('src/components/TalentDashboard.tsx');
+const choices = read('src/components/PerformerSourceImportChoices.tsx');
+const importer = read('src/music-file-import.ts');
 const accountHome = read('src/components/PerformerAccountHome.tsx');
 const shareKit = read('src/components/PerformerShareKit.tsx');
 const routing = read('src/performer-workspace-routing.ts');
@@ -40,9 +42,9 @@ for (const term of [
   'data-sway-linked-sources="true"',
   'Add each music source once. It stays on your account and is ready for every future room.',
   'Saved for every room',
-  'DJ software library',
-  'Spotify playlist',
-  'Music uploaded to Sway',
+  '<PerformerSourceImportChoices',
+  'await importMusicFile({',
+  'onDjLibraryFileImport={handleDjLibraryFileImport}',
   'Advanced: reusable booth computer helper',
   'musicStatus={musicReadinessStatus}',
   "const requestableTrackCount = catalogLibraryTracks.length + externalLibraryTracks.length",
@@ -70,6 +72,12 @@ for (const term of [
 ]) {
   if (!dashboard.includes(term)) failures.push(`Connections workspace missing term: ${term}`);
 }
+for (const term of ['Apple Music / iTunes', 'Serato', 'rekordbox', 'Traktor', 'VirtualDJ', 'Mixxx', 'Local / USB playlists', 'Song list / setlist', 'Spotify playlist', 'Music uploaded to Sway', 'onChange={props.onDjLibraryFileImport}', 'onSubmit={props.onSpotifyPlaylistImport}', 'onClick={props.onOpenCatalog}']) {
+  if (!choices.includes(term)) failures.push(`Actionable source choice missing: ${term}`);
+}
+for (const term of ["'/api/talent/library/import'", "'/api/talent/library/sources'", 'sourceKey: parsed.sourceKey', 'sourceLabel: parsed.sourceLabel', 'tracks: parsed.tracks', 'if (!confirm(', "data?.success !== true", "existing.syncKeyPreview !== 'file-import'"]) {
+  if (!importer.includes(term)) failures.push(`Confirmed file import missing: ${term}`);
+}
 
 for (const term of [
   'ref={roomToolsTriggerRef}',
@@ -90,7 +98,7 @@ const sourcesWorkspaceEnd = dashboard.indexOf('export default function TalentDas
 const sourcesWorkspace = sourcesWorkspaceStart >= 0 && sourcesWorkspaceEnd > sourcesWorkspaceStart
   ? dashboard.slice(sourcesWorkspaceStart, sourcesWorkspaceEnd)
   : '';
-
+if (!sourcesWorkspace.includes('<PerformerSourceImportChoices')) failures.push('The expanded chooser must be mounted in Sources, not left as an unused component.');
 for (const forbidden of ['PerformerShareKit', 'HardwareMappingPanel', 'Room tools', 'Current room only']) {
   if (sourcesWorkspace.includes(forbidden)) failures.push(`Account-level Sources screen must not contain room-only control: ${forbidden}`);
 }
