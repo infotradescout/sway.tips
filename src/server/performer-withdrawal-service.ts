@@ -16,7 +16,6 @@ import type { PerformerKycReviewStore } from './performer-kyc-review';
 import {
   PayPalPayoutsError,
   payPalSenderItemId,
-  type PayPalPayoutItem,
   type PayPalPayoutsAdapter,
   type PayPalPayoutWebhook
 } from './paypal-payouts';
@@ -177,11 +176,27 @@ export function createPerformerWithdrawalService(input: {
     return balanceSnapshot(earnings, withdrawn);
   }
 
-  async function applyProviderItem(item: PayPalPayoutItem, source: string) {
+  async function applyProviderBatch(
+    batch: Awaited<ReturnType<PayPalPayoutsAdapter['getBatch']>>,
+    expected: { payoutBatchId: string; senderItemId?: string | null },
+    source: string
+  ) {
+    const item = batch.item;
+    if (
+      batch.payoutBatchId !== expected.payoutBatchId
+      || (item && item.payoutBatchId !== batch.payoutBatchId)
+      || (item && expected.senderItemId && item.senderItemId !== expected.senderItemId)
+    ) return { kind: 'identity_conflict' } as const;
+    // PayPal can deny the whole batch before any item exists. Only that
+    // terminal batch outcome releases a reservation; batch SUCCESS does not
+    // establish that this recipient was paid.
+    if (!item && batch.batchStatus.trim().toUpperCase() !== 'DENIED') {
+      return { kind: 'item_pending' } as const;
+    }
     return db.transaction(async (tx) => {
-      const identityConditions = [eq(performerWithdrawals.providerSenderItemId, item.senderItemId)];
-      if (item.payoutItemId) identityConditions.push(eq(performerWithdrawals.providerItemId, item.payoutItemId));
-      identityConditions.push(eq(performerWithdrawals.providerPayoutId, item.payoutBatchId));
+      const identityConditions = [eq(performerWithdrawals.providerPayoutId, batch.payoutBatchId)];
+      if (item) identityConditions.push(eq(performerWithdrawals.providerSenderItemId, item.senderItemId));
+      if (item?.payoutItemId) identityConditions.push(eq(performerWithdrawals.providerItemId, item.payoutItemId));
       const [withdrawal] = await tx.select().from(performerWithdrawals)
         .where(and(
           eq(performerWithdrawals.paymentMode, provider.mode),
@@ -190,15 +205,19 @@ export function createPerformerWithdrawalService(input: {
         .for('update')
         .limit(1);
       if (!withdrawal) return { kind: 'not_found' } as const;
-      if (withdrawal.providerSenderItemId !== item.senderItemId) return { kind: 'identity_conflict' } as const;
-      if (withdrawal.providerPayoutId && withdrawal.providerPayoutId !== item.payoutBatchId) {
+      if (
+        (item && withdrawal.providerSenderItemId !== item.senderItemId)
+        || (expected.senderItemId && withdrawal.providerSenderItemId !== expected.senderItemId)
+      ) return { kind: 'identity_conflict' } as const;
+      if (withdrawal.providerPayoutId && withdrawal.providerPayoutId !== batch.payoutBatchId) {
         return { kind: 'identity_conflict' } as const;
       }
-      if (withdrawal.providerItemId && item.payoutItemId && withdrawal.providerItemId !== item.payoutItemId) {
+      if (withdrawal.providerItemId && item?.payoutItemId && withdrawal.providerItemId !== item.payoutItemId) {
         return { kind: 'identity_conflict' } as const;
       }
 
-      const nextStatus = statusFromPayPal(item.transactionStatus);
+      const providerStatus = item?.transactionStatus ?? batch.batchStatus;
+      const nextStatus = statusFromPayPal(providerStatus);
       if (withdrawal.status === 'returned' || withdrawal.status === 'failed') {
         return { kind: 'terminal_noop', withdrawal } as const;
       }
@@ -207,16 +226,16 @@ export function createPerformerWithdrawalService(input: {
       }
 
       const updatedAt = now();
-      const actualProviderFeeCents = item.actualProviderFeeCents ?? withdrawal.actualProviderFeeCents;
+      const actualProviderFeeCents = item?.actualProviderFeeCents ?? withdrawal.actualProviderFeeCents;
       const [updated] = await tx.update(performerWithdrawals).set({
         status: nextStatus,
-        providerPayoutId: item.payoutBatchId,
-        providerItemId: item.payoutItemId ?? withdrawal.providerItemId,
-        providerTransactionId: item.transactionId ?? withdrawal.providerTransactionId,
-        providerStatus: item.transactionStatus,
+        providerPayoutId: batch.payoutBatchId,
+        providerItemId: item?.payoutItemId ?? withdrawal.providerItemId,
+        providerTransactionId: item?.transactionId ?? withdrawal.providerTransactionId,
+        providerStatus,
         actualProviderFeeCents,
         failureCode: nextStatus === 'failed'
-          ? normalizedProviderFailureCode(item.errorName) ?? 'PAYPAL_PAYOUT_FAILED'
+          ? item ? normalizedProviderFailureCode(item.errorName) ?? 'PAYPAL_PAYOUT_FAILED' : 'PAYPAL_BATCH_DENIED'
           : null,
         leaseOwner: null,
         leaseExpiresAt: null,
@@ -243,7 +262,7 @@ export function createPerformerWithdrawalService(input: {
 
       if (
         withdrawal.status !== nextStatus
-        || withdrawal.providerStatus !== item.transactionStatus
+        || withdrawal.providerStatus !== providerStatus
         || withdrawal.actualProviderFeeCents !== actualProviderFeeCents
       ) {
         await writeAuditEvent(tx, {
@@ -256,9 +275,10 @@ export function createPerformerWithdrawalService(input: {
           nextStatus,
           metadata: {
             provider: 'paypal_payouts',
-            providerStatus: item.transactionStatus,
-            providerBatchId: item.payoutBatchId,
-            providerItemId: item.payoutItemId,
+            providerStatus,
+            providerOutcome: item ? 'item' : 'batch',
+            providerBatchId: batch.payoutBatchId,
+            providerItemId: item?.payoutItemId ?? null,
             quotedProviderFeeCents: withdrawal.providerFeeCents,
             actualProviderFeeCents,
             providerFeeVarianceCents,
@@ -390,8 +410,8 @@ export function createPerformerWithdrawalService(input: {
       }
 
       const batch = await provider.getBatch(created.payoutBatchId, created.senderItemId).catch(() => null);
-      if (batch?.item) {
-        const applied = await applyProviderItem(batch.item, 'submission_readback');
+      if (batch) {
+        const applied = await applyProviderBatch(batch, created, 'submission_readback');
         return { kind: 'submitted', withdrawal: 'withdrawal' in applied ? applied.withdrawal : submitted } as const;
       }
       return { kind: 'submitted', withdrawal: submitted } as const;
@@ -711,8 +731,8 @@ export function createPerformerWithdrawalService(input: {
       }
       try {
         const batch = await provider.getBatch(payoutBatchId, senderItemId ?? undefined);
-        if (!batch.item) throw new Error('paypal_payout_webhook_item_not_ready');
-        const applied = await applyProviderItem(batch.item, `webhook:${webhook.event.providerEventId}`);
+        const applied = await applyProviderBatch(batch, { payoutBatchId, senderItemId }, `webhook:${webhook.event.providerEventId}`);
+        if (applied.kind === 'item_pending') throw new Error('paypal_payout_webhook_item_not_ready');
         await db.update(payoutProcessorEvents).set({
           withdrawalId: 'withdrawal' in applied ? applied.withdrawal.id : null,
           status: applied.kind === 'not_found' ? 'ignored' : 'processed',
@@ -751,9 +771,11 @@ export function createPerformerWithdrawalService(input: {
       for (const row of providerRows) {
         try {
           const batch = await provider.getBatch(row.providerPayoutId!, row.providerSenderItemId ?? undefined);
-          results.push(batch.item
-            ? await applyProviderItem(batch.item, 'scheduled_reconciliation')
-            : { kind: 'item_pending', withdrawalId: row.id });
+          const applied = await applyProviderBatch(batch, {
+            payoutBatchId: row.providerPayoutId!,
+            senderItemId: row.providerSenderItemId
+          }, 'scheduled_reconciliation');
+          results.push(applied.kind === 'item_pending' ? { ...applied, withdrawalId: row.id } : applied);
         } catch (error) {
           results.push({
             kind: 'error',

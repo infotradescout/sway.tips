@@ -1424,6 +1424,42 @@ function PerformerConnectionsWorkspace({
   );
 }
 
+type PerformerPayoutBalance = {
+  pendingCents: number;
+  availableCents: number;
+  reservedCents: number;
+  deficitCents: number;
+  minimumWithdrawalCents: number;
+  providerFeeCents: number;
+  payoutMarkupCents: number;
+  withdrawalsEnabled: boolean;
+  withdrawalRestriction?: 'email_verification_required' | 'account_restricted' | 'identity_verification_required' | null;
+};
+
+async function readPerformerPayoutBalance(): Promise<PerformerPayoutBalance> {
+  const response = await fetch('/api/talent/payouts/balance', { cache: 'no-store' });
+  const data = await response.json().catch(() => null);
+  const amountFields = ['pendingCents', 'availableCents', 'reservedCents', 'deficitCents', 'minimumWithdrawalCents', 'providerFeeCents', 'payoutMarkupCents'];
+  if (!response.ok || !amountFields.every((field) => Number.isSafeInteger(data?.[field]) && data[field] >= 0)) {
+    throw new Error('The latest cash-out balance is unavailable.');
+  }
+  return {
+    pendingCents: data.pendingCents,
+    availableCents: data.availableCents,
+    reservedCents: data.reservedCents,
+    deficitCents: data.deficitCents,
+    minimumWithdrawalCents: data.minimumWithdrawalCents,
+    providerFeeCents: data.providerFeeCents,
+    payoutMarkupCents: data.payoutMarkupCents,
+    withdrawalsEnabled: data.withdrawalsEnabled === true,
+    withdrawalRestriction: data.withdrawalRestriction === 'email_verification_required'
+      || data.withdrawalRestriction === 'account_restricted'
+      || data.withdrawalRestriction === 'identity_verification_required'
+      ? data.withdrawalRestriction
+      : null
+  };
+}
+
 export default function TalentDashboard({
   session,
   requests,
@@ -1471,18 +1507,9 @@ export default function TalentDashboard({
   const [payoutDestinationCapabilities, setPayoutDestinationCapabilities] = useState<PayoutDestinationCapabilities>(() => ({
     ...NO_PAYOUT_DESTINATION_CAPABILITIES
   }));
-  const [payoutBalance, setPayoutBalance] = useState<{
-    pendingCents: number;
-    availableCents: number;
-    reservedCents: number;
-    deficitCents: number;
-    minimumWithdrawalCents: number;
-    providerFeeCents: number;
-    payoutMarkupCents: number;
-    withdrawalsEnabled: boolean;
-    withdrawalRestriction?: 'email_verification_required' | 'account_restricted' | 'identity_verification_required' | null;
-  } | null>(null);
-  const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [payoutBalance, setPayoutBalance] = useState<PerformerPayoutBalance | null>(null);
+  const [payoutBalanceIsCurrent, setPayoutBalanceIsCurrent] = useState(false);
+  const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'pending' | 'error'>('idle');
   const [cashOutMessage, setCashOutMessage] = useState<string | null>(null);
   const cashOutIdempotencyKeyRef = useRef<string | null>(null);
   const savedPayoutDestinationKind = normalizePayoutDestinationKind(performerProfile?.payout_destination_kind);
@@ -1553,25 +1580,11 @@ export default function TalentDashboard({
   useEffect(() => {
     if (previewMode || !performerProfile?.performer_id) return;
     let cancelled = false;
-    void fetch('/api/talent/payouts/balance', { cache: 'no-store' })
-      .then(async (response) => ({ response, data: await response.json().catch(() => null) }))
-      .then(({ response, data }) => {
-        if (cancelled || !response.ok) return;
-        setPayoutBalance({
-          pendingCents: Number(data?.pendingCents ?? 0),
-          availableCents: Number(data?.availableCents ?? 0),
-          reservedCents: Number(data?.reservedCents ?? 0),
-          deficitCents: Number(data?.deficitCents ?? 0),
-          minimumWithdrawalCents: Number(data?.minimumWithdrawalCents ?? 1000),
-          providerFeeCents: Number(data?.providerFeeCents ?? 25),
-          payoutMarkupCents: Number(data?.payoutMarkupCents ?? 0),
-          withdrawalsEnabled: data?.withdrawalsEnabled === true,
-          withdrawalRestriction: data?.withdrawalRestriction === 'email_verification_required'
-            || data?.withdrawalRestriction === 'account_restricted'
-            || data?.withdrawalRestriction === 'identity_verification_required'
-            ? data.withdrawalRestriction
-            : null
-        });
+    void readPerformerPayoutBalance()
+      .then((balance) => {
+        if (cancelled) return;
+        setPayoutBalance(balance);
+        setPayoutBalanceIsCurrent(true);
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
@@ -2130,11 +2143,23 @@ export default function TalentDashboard({
     }
   };
 
+  const refreshPayoutBalance = async () => {
+    try {
+      setPayoutBalance(await readPerformerPayoutBalance());
+      setPayoutBalanceIsCurrent(true);
+      return true;
+    } catch {
+      setPayoutBalanceIsCurrent(false);
+      return false;
+    }
+  };
+
   const handleCashOut = async () => {
     if (
       previewMode
       || cashOutStatus === 'submitting'
       || !payoutBalance
+      || !payoutBalanceIsCurrent
       || !savedRecipientDestinationKind
       || !savedRecipientPreview
       || !payoutBalance.withdrawalsEnabled
@@ -2152,6 +2177,10 @@ export default function TalentDashboard({
     }
     setCashOutStatus('submitting');
     setCashOutMessage(null);
+    setPayoutBalanceIsCurrent(false);
+    let outcomeStatus: 'success' | 'pending' | 'error' = 'error';
+    let outcomeMessage = 'Cash-out could not be confirmed.';
+    let confirmedStatus: string | null = null;
     try {
       const idempotencyKey = cashOutIdempotencyKeyRef.current ?? `withdrawal:${crypto.randomUUID()}`;
       cashOutIdempotencyKeyRef.current = idempotencyKey;
@@ -2176,22 +2205,55 @@ export default function TalentDashboard({
         }
         throw new Error(typeof data?.error === 'string' ? data.error : 'Cash-out could not be reserved.');
       }
+      const withdrawal = data?.withdrawal;
+      if (
+        typeof withdrawal?.id !== 'string'
+        || !['requested', 'submitting', 'processing', 'paid', 'held', 'unclaimed', 'failed', 'returned'].includes(withdrawal?.status)
+        || !Number.isSafeInteger(withdrawal?.netAmountCents)
+        || withdrawal.netAmountCents < 0
+        || !Number.isSafeInteger(withdrawal?.providerFeeCents)
+        || withdrawal.providerFeeCents < 0
+      ) throw new Error('Cash-out status could not be confirmed. Check your balance before trying again.');
       cashOutIdempotencyKeyRef.current = null;
-      const grossAmountCents = Number(data?.withdrawal?.grossAmountCents ?? 0);
-      const providerFeeCents = Number(data?.withdrawal?.providerFeeCents ?? 0);
-      const netAmountCents = Number(data?.withdrawal?.netAmountCents ?? 0);
-      setPayoutBalance((current) => current ? {
-        ...current,
-        availableCents: Math.max(0, current.availableCents - grossAmountCents),
-        reservedCents: current.reservedCents + grossAmountCents
-      } : current);
-      setCashOutStatus('success');
-      setCashOutMessage(
-        `${(netAmountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} is ${data?.withdrawal?.status === 'paid' ? 'paid' : 'being sent'} after PayPal's ${(providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} payout fee. Sway added $0.`
-      );
+      confirmedStatus = withdrawal.status;
+      const formatAmount = (cents: number) => (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      const netAmount = formatAmount(withdrawal.netAmountCents);
+      outcomeStatus = 'pending';
+      switch (confirmedStatus) {
+        case 'paid': {
+          outcomeStatus = 'success';
+          const actualFee = withdrawal.actualProviderFeeCents;
+          const feeMessage = Number.isSafeInteger(actualFee) && actualFee >= 0
+            ? `PayPal reported a ${formatAmount(actualFee)} payout fee.`
+            : `PayPal's quoted payout fee was ${formatAmount(withdrawal.providerFeeCents)}; the final fee is awaiting confirmation.`;
+          outcomeMessage = `${netAmount} was paid. ${feeMessage} Sway added $0.`;
+          break;
+        }
+        case 'failed':
+          outcomeStatus = 'error';
+          outcomeMessage = 'Cash-out failed. No payout was completed.';
+          break;
+        case 'returned':
+          outcomeStatus = 'error';
+          outcomeMessage = 'Cash-out was returned.';
+          break;
+        case 'held':
+          outcomeMessage = `${netAmount} cash-out is on hold for review. Payment is not confirmed; the amount remains reserved.`;
+          break;
+        case 'unclaimed':
+          outcomeMessage = `${netAmount} cash-out is unclaimed. Check the recipient account for PayPal or Venmo claim instructions. The amount remains reserved.`;
+          break;
+        default:
+          outcomeMessage = `${netAmount} cash-out is processing. Payment is not confirmed yet.`;
+      }
     } catch (error) {
-      setCashOutStatus('error');
-      setCashOutMessage(error instanceof Error ? error.message : 'Cash-out could not be reserved.');
+      outcomeMessage = error instanceof Error ? error.message : 'Cash-out could not be reserved.';
+    } finally {
+      const balanceRefreshed = await refreshPayoutBalance();
+      if (balanceRefreshed && confirmedStatus === 'failed') outcomeMessage += ' Your available balance has been refreshed.';
+      if (balanceRefreshed && confirmedStatus === 'returned') outcomeMessage += ' Your balance has been refreshed, including any retained PayPal fee.';
+      setCashOutStatus(outcomeStatus);
+      setCashOutMessage(outcomeMessage);
     }
   };
 
@@ -3374,19 +3436,19 @@ export default function TalentDashboard({
               {payoutBalance ? (
                 <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4" data-sway-cash-out="true">
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Available</span><span className="text-lg font-black text-white">{(payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
-                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Pending</span><span className="text-lg font-black text-white">{(payoutBalance.pendingCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
+                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Available</span><span className="text-lg font-black text-white">{payoutBalanceIsCurrent ? (payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : cashOutStatus === 'submitting' ? 'Checking…' : 'Unavailable'}</span></div>
+                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Pending</span><span className="text-lg font-black text-white">{payoutBalanceIsCurrent ? (payoutBalance.pendingCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : cashOutStatus === 'submitting' ? 'Checking…' : 'Unavailable'}</span></div>
                     <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Cash-out minimum</span><span className="text-lg font-black text-white">{(payoutBalance.minimumWithdrawalCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
                   </div>
                   <p className="mt-2 text-[10px] leading-5 text-emerald-100">
                     Your paid interactions accumulate here. PayPal’s quoted payout fee is {(payoutBalance.providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} once per cash-out. Sway payout markup: $0.
                   </p>
-                  {payoutBalance.availableCents >= payoutBalance.minimumWithdrawalCents ? (
+                  {payoutBalanceIsCurrent && payoutBalance.availableCents >= payoutBalance.minimumWithdrawalCents ? (
                     <p className="mt-1 text-[10px] text-slate-300">
                       Cash out {(payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} → receive about {(Math.max(0, payoutBalance.availableCents - payoutBalance.providerFeeCents) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}. PayPal’s actual fee is reconciled on completion.
                     </p>
                   ) : null}
-                  {payoutBalance.deficitCents > 0 ? (
+                  {payoutBalanceIsCurrent && payoutBalance.deficitCents > 0 ? (
                     <p className="mt-2 text-[10px] text-rose-300">Cash-out is paused because refunds or disputes created a {(payoutBalance.deficitCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} balance deficit.</p>
                   ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -3396,6 +3458,7 @@ export default function TalentDashboard({
                       disabled={
                         previewMode
                         || cashOutStatus === 'submitting'
+                        || !payoutBalanceIsCurrent
                         || !savedRecipientDestinationKind
                         || !savedRecipientPreview
                         || !payoutBalance.withdrawalsEnabled
@@ -3407,7 +3470,13 @@ export default function TalentDashboard({
                       {cashOutStatus === 'submitting' ? 'Sending safely...' : `Cash out to ${savedRecipientDestinationKind === 'venmo' ? 'Venmo' : 'PayPal'}`}
                     </button>
                   </div>
-                  {cashOutMessage ? <p className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
+                  {cashOutMessage ? <p role="status" className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : cashOutStatus === 'pending' ? 'text-amber-200' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
+                  {!payoutBalanceIsCurrent && cashOutStatus !== 'submitting' ? (
+                    <div className="mt-2 text-[10px] text-amber-200">
+                      <p>Latest balance is unavailable. Refresh it before another cash-out.</p>
+                      <button type="button" onClick={() => { void refreshPayoutBalance(); }} className="mt-2 min-h-9 rounded-lg border border-white/20 px-3 py-2 font-black text-white">Refresh balance</button>
+                    </div>
+                  ) : null}
                   {!payoutBalance.withdrawalsEnabled ? (
                     <p className="mt-2 text-[10px] text-amber-200">
                       {payoutBalance.withdrawalRestriction === 'email_verification_required'

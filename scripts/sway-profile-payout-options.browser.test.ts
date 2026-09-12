@@ -38,6 +38,10 @@ async function main() {
   let savedProfileBody: Record<string, unknown> | null = null;
   let savedPayoutBody: Record<string, unknown> | null = null;
   let cashOutBody: Record<string, unknown> | null = null;
+  let cashOutOutcomeStatus = 'processing';
+  let cashOutActualFeeCents: number | null = null;
+  let balanceReadCount = 0;
+  let failBalanceRead = false;
   let paymentConfigGate: Promise<void> | null = null;
   let paymentConfig = {
     mode: 'test',
@@ -60,6 +64,7 @@ async function main() {
     withdrawalRestriction: null as null | 'email_verification_required' | 'account_restricted',
     providerMode: 'test'
   };
+  let balanceAfterCashOut: typeof payoutBalance | null = null;
 
   try {
     const port = await reservePort();
@@ -90,10 +95,11 @@ async function main() {
         return;
       }
       if (path === '/api/talent/payouts/balance' && request.method() === 'GET') {
+        balanceReadCount += 1;
         await route.fulfill({
-          status: 200,
+          status: failBalanceRead ? 503 : 200,
           contentType: 'application/json',
-          body: JSON.stringify(payoutBalance)
+          body: JSON.stringify(failBalanceRead ? { error: 'Balance temporarily unavailable.' } : payoutBalance)
         });
         return;
       }
@@ -116,6 +122,7 @@ async function main() {
       if (path === '/api/talent/payouts/withdrawals' && request.method() === 'POST') {
         cashOutBody = request.postDataJSON() as Record<string, unknown>;
         const grossAmountCents = Number(cashOutBody.grossAmountCents);
+        if (balanceAfterCashOut) payoutBalance = balanceAfterCashOut;
         await route.fulfill({
           status: 201,
           contentType: 'application/json',
@@ -123,12 +130,12 @@ async function main() {
             replayed: false,
             withdrawal: {
               id: '55555555-5555-4555-8555-555555555551',
-              status: 'processing',
+              status: cashOutOutcomeStatus,
               destinationKind: cashOutBody.destinationKind,
               recipientPreview: 's***@example.test',
               grossAmountCents,
               providerFeeCents: 25,
-              actualProviderFeeCents: null,
+              actualProviderFeeCents: cashOutActualFeeCents,
               payoutMarkupCents: 0,
               netAmountCents: grossAmountCents - 25,
               currency: 'USD',
@@ -277,8 +284,9 @@ async function main() {
       assert.match(dialog.message(), /Re-enter the exact PayPal email/i);
       await dialog.accept('sandbox-recipient@example.test');
     });
+    balanceAfterCashOut = { ...payoutBalance, availableCents: 0, reservedCents: 2_500 };
     await payoutPage.getByRole('button', { name: 'Cash out to PayPal' }).click();
-    await payoutPage.getByText("$24.75 is being sent after PayPal's $0.25 payout fee. Sway added $0.", { exact: true }).waitFor({ state: 'visible' });
+    await payoutPage.getByText('$24.75 cash-out is processing. Payment is not confirmed yet.', { exact: true }).waitFor({ state: 'visible' });
     assert.equal(cashOutBody?.destinationKind, 'paypal');
     assert.equal(cashOutBody?.recipientType, 'email');
     assert.equal(cashOutBody?.recipientConfirmationValue, 'sandbox-recipient@example.test', 'Cash-out must require exact server-verified recipient re-entry.');
@@ -290,6 +298,65 @@ async function main() {
     const evidenceDirectory = join(process.cwd(), '.tmp');
     mkdirSync(evidenceDirectory, { recursive: true });
     await payoutPage.screenshot({ path: join(evidenceDirectory, 'payout-options-mobile.png'), fullPage: true });
+
+    const outcomeCases: Array<{
+      status: string;
+      availableCents: number;
+      reservedCents: number;
+      actualFeeCents: number | null;
+      message: string;
+      refreshFails?: boolean;
+    }> = [
+      { status: 'failed', availableCents: 1_500, reservedCents: 0, actualFeeCents: null, message: 'Cash-out failed. No payout was completed. Your available balance has been refreshed.' },
+      { status: 'returned', availableCents: 1_480, reservedCents: 20, actualFeeCents: 20, message: 'Cash-out was returned. Your balance has been refreshed, including any retained PayPal fee.' },
+      { status: 'held', availableCents: 0, reservedCents: 1_500, actualFeeCents: null, message: '$14.75 cash-out is on hold for review. Payment is not confirmed; the amount remains reserved.' },
+      { status: 'unclaimed', availableCents: 0, reservedCents: 1_500, actualFeeCents: null, message: '$14.75 cash-out is unclaimed. Check the recipient account for PayPal or Venmo claim instructions. The amount remains reserved.' },
+      { status: 'paid', availableCents: 5, reservedCents: 1_495, actualFeeCents: 20, message: '$14.75 was paid. PayPal reported a $0.20 payout fee. Sway added $0.' },
+      { status: 'requested', availableCents: 0, reservedCents: 1_500, actualFeeCents: null, message: '$14.75 cash-out is processing. Payment is not confirmed yet.' },
+      { status: 'submitting', availableCents: 0, reservedCents: 1_500, actualFeeCents: null, message: '$14.75 cash-out is processing. Payment is not confirmed yet.' },
+      { status: 'paid', availableCents: 0, reservedCents: 1_500, actualFeeCents: null, message: "$14.75 was paid. PayPal's quoted payout fee was $0.25; the final fee is awaiting confirmation. Sway added $0." },
+      { status: 'failed', availableCents: 1_500, reservedCents: 0, actualFeeCents: null, message: 'Cash-out failed. No payout was completed.', refreshFails: true }
+    ];
+    for (const outcome of outcomeCases) {
+      payoutBalance = { ...payoutBalance, availableCents: 1_500, reservedCents: 0, pendingCents: 500 };
+      balanceAfterCashOut = { ...payoutBalance, availableCents: outcome.availableCents, reservedCents: outcome.reservedCents, pendingCents: 700 };
+      cashOutOutcomeStatus = outcome.status;
+      cashOutActualFeeCents = outcome.actualFeeCents;
+      const outcomePage = await context.newPage();
+      outcomePage.on('pageerror', (error) => pageErrors.push(`cash-out ${outcome.status}: ${error.stack || error.message}`));
+      await outcomePage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+      await outcomePage.getByRole('radio', { name: /PayPal \(Sandbox\)/ }).check();
+      await outcomePage.getByLabel('PayPal email').fill('sandbox-recipient@example.test');
+      await outcomePage.getByRole('button', { name: 'Save payout destination' }).click();
+      await outcomePage.getByText('Saved: s***@example.test', { exact: true }).waitFor({ state: 'visible' });
+      const readsBeforeCashOut = balanceReadCount;
+      failBalanceRead = outcome.refreshFails === true;
+      outcomePage.once('dialog', (dialog) => dialog.accept('sandbox-recipient@example.test'));
+      await outcomePage.getByRole('button', { name: 'Cash out to PayPal' }).click();
+      await outcomePage.getByText(outcome.message, { exact: true }).waitFor({ state: 'visible' });
+      assert.equal(balanceReadCount, readsBeforeCashOut + 1, `${outcome.status}: cash-out must refresh the durable balance`);
+      const balancePanel = outcomePage.locator('[data-sway-cash-out="true"]');
+      if (outcome.refreshFails) {
+        assert.equal(await balancePanel.getByText('Available', { exact: true }).locator('..').locator('span').last().innerText(), 'Unavailable');
+        assert.equal(await balancePanel.getByText('Pending', { exact: true }).locator('..').locator('span').last().innerText(), 'Unavailable');
+        assert.equal(await outcomePage.getByRole('button', { name: 'Cash out to PayPal' }).isDisabled(), true, 'An unavailable balance must block another cash-out.');
+        assert.equal(await outcomePage.getByText('Latest balance is unavailable. Refresh it before another cash-out.', { exact: true }).isVisible(), true);
+        assert.equal(await balancePanel.getByText(/Cash out \$15\.00/).count(), 0, 'A failed balance read must hide the stale payout estimate.');
+        failBalanceRead = false;
+        const recoveryRead = outcomePage.waitForResponse((response) => response.url().endsWith('/api/talent/payouts/balance'));
+        await outcomePage.getByRole('button', { name: 'Refresh balance' }).click();
+        await recoveryRead;
+        await outcomePage.getByRole('button', { name: 'Refresh balance' }).waitFor({ state: 'hidden' });
+        assert.equal(balanceReadCount, readsBeforeCashOut + 2);
+        assert.equal(await outcomePage.getByRole('button', { name: 'Cash out to PayPal' }).isDisabled(), false, 'A fresh authoritative balance restores cash-out availability.');
+      }
+      assert.equal(await balancePanel.getByText('Available', { exact: true }).locator('..').locator('span').last().innerText(), (outcome.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }));
+      assert.equal(await balancePanel.getByText('Pending', { exact: true }).locator('..').locator('span').last().innerText(), '$7.00', 'The latest balance must include concurrent earnings changes rather than client-side arithmetic.');
+      assert.equal(await outcomePage.getByText(/is being sent/).count(), 0, 'Unpaid and returned outcomes must not imply a successful send.');
+      await assertHealthyPage(outcomePage, `cash-out ${outcome.status}`);
+      await outcomePage.close();
+    }
+    balanceAfterCashOut = null;
 
     paymentConfig = {
       ...paymentConfig,

@@ -28,12 +28,13 @@ type ClaimPreview = {
 
 type ClaimValidationState = 'idle' | 'loading' | 'valid' | 'invalid' | 'unavailable';
 
-async function accountJson(path: string, body?: Record<string, unknown>) {
+async function accountJson(path: string, body?: Record<string, unknown>, signal?: AbortSignal) {
   const response = await fetch(path, body ? {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  } : { cache: 'no-store' });
+    body: JSON.stringify(body),
+    signal
+  } : { cache: 'no-store', signal });
   const data = await response.json().catch(() => null);
   if (!response.ok) throw Object.assign(new Error(data?.error || 'That action failed.'), { status: response.status, code: data?.code });
   return data;
@@ -377,7 +378,7 @@ export function AccountSignup() {
         />
         <label className="flex gap-2 text-xs leading-5 text-slate-300">
           <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />
-          <span>I accept the Sway Terms.</span>
+          <span>I accept the <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-bold text-cyan-300 underline">Sway Terms</a>.</span>
         </label>
         <button type="submit" disabled={pending || !termsAccepted} aria-busy={pending} className="min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black disabled:opacity-60">{pending ? 'Creating…' : 'Create account'}</button>
       </form>
@@ -388,9 +389,9 @@ export function AccountSignup() {
 
 export function AccountHome() {
   const pendingClaim = readClaimFromLocation();
-  const performerIntent = new URLSearchParams(window.location.search).get('intent') === 'performer';
   const [session, setSession] = useState<AccountSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accountError, setAccountError] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [handle, setHandle] = useState('');
   const [message, setMessage] = useState('');
@@ -398,38 +399,99 @@ export function AccountHome() {
   const [claimPreview, setClaimPreview] = useState<ClaimPreview | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
+  const [claimLoading, setClaimLoading] = useState(false);
+  const [claimAttempt, setClaimAttempt] = useState(0);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const mounted = useRef(false);
+  const loadSeq = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
+  const mutationOwner = useRef<symbol | null>(null);
+  const accountBusy = pending || claimBusy || logoutBusy;
   const performerNameId = useId();
   const performerHandleId = useId();
 
-  const load = async () => {
+  const loginHref = useCallback(() => {
+    const params = new URLSearchParams();
+    const claim = readClaimFromLocation();
+    if (claim) params.set('claim', claim);
+    if (new URLSearchParams(window.location.search).get('intent') === 'performer') params.set('next', '/account?intent=performer');
+    return `/account/login${params.size ? `?${params.toString()}` : ''}`;
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      loadSeq.current += 1;
+      loadController.current?.abort();
+      mutationOwner.current = null;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const ownsRead = () => mounted.current && loadSeq.current === seq;
+    setLoading(true);
+    setSession(null);
+    setAccountError('');
+    const timeout = window.setTimeout(() => {
+      if (!ownsRead()) return;
+      loadSeq.current += 1;
+      controller.abort();
+      setAccountError('Your account is taking too long to load. Try again.');
+      setLoading(false);
+    }, 15_000);
     try {
-      const data = await accountJson('/api/account/session');
-      if (performerIntent && data.performer) {
+      const data = await accountJson('/api/account/session', undefined, controller.signal);
+      if (!ownsRead()) return false;
+      const nullableText = (value: unknown) => value === null || typeof value === 'string';
+      if (typeof data?.account?.id !== 'string' || !data.account.id
+        || !nullableText(data.account.displayName) || !nullableText(data.account.email)
+        || (data.performer !== null && (typeof data.performer?.id !== 'string' || !data.performer.id))
+        || !Number.isSafeInteger(data.pendingRightsReviewCount) || data.pendingRightsReviewCount < 0) {
+        throw new Error('Unable to load your account. Try again.');
+      }
+      if (new URLSearchParams(window.location.search).get('intent') === 'performer' && data.performer) {
         window.location.replace('/talent');
-        return;
+        return true;
       }
       setSession(data);
       setDisplayName(data.account?.displayName || '');
+      return true;
     } catch (error: any) {
+      if (!ownsRead()) return false;
       if (error?.status === 401) {
-        const loginParams = new URLSearchParams();
-        if (pendingClaim) loginParams.set('claim', pendingClaim);
-        if (performerIntent) loginParams.set('next', '/account?intent=performer');
-        const next = `/account/login${loginParams.size ? `?${loginParams.toString()}` : ''}`;
-        window.location.replace(next);
-      } else setMessage(error instanceof Error ? error.message : 'Unable to load account.');
+        setAccountError('Sign in to continue.');
+        window.location.replace(loginHref());
+      } else setAccountError(error instanceof Error ? error.message : 'Unable to load your account. Try again.');
+      return false;
     } finally {
-      setLoading(false);
+      window.clearTimeout(timeout);
+      if (ownsRead()) setLoading(false);
     }
-  };
-  useEffect(() => { void load(); }, []);
+  }, [loginHref]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!pendingClaim) return;
+    if (!pendingClaim || !session?.account.id) return;
     let cancelled = false;
+    const controller = new AbortController();
+    setClaimLoading(true);
+    setClaimPreview(null);
+    setClaimError(null);
+    const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      controller.abort();
+      setClaimLoading(false);
+      setClaimError('The claim check is taking too long. Try again.');
+    }, 15_000);
     void (async () => {
       try {
-        const data = await accountJson('/api/account/claim/peek', { code: pendingClaim });
+        const data = await accountJson('/api/account/claim/peek', { code: pendingClaim }, controller.signal);
         if (cancelled) return;
         setClaimPreview({
           displayName: String(data.displayName || 'Performer'),
@@ -441,51 +503,104 @@ export function AccountHome() {
         if (cancelled) return;
         setClaimPreview(null);
         setClaimError(error instanceof Error ? error.message : 'Code not recognized');
+      } finally {
+        window.clearTimeout(timeout);
+        if (!cancelled) setClaimLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [pendingClaim]);
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
+  }, [pendingClaim, claimAttempt, session?.account.id]);
+
+  const showActionFailure = (error: any, fallback: string, claim = false) => {
+    const text = error instanceof Error ? error.message : fallback;
+    if (error?.status === 401 || error?.status === 403) {
+      setSession(null);
+      setAccountError(text);
+      if (error.status === 401) window.location.replace(loginHref());
+    } else if (claim) setClaimError(text);
+    else setMessage(text);
+  };
 
   const activate = async (event: FormEvent) => {
     event.preventDefault();
+    if (!session || mutationOwner.current) return;
+    const owner = Symbol('activate');
+    mutationOwner.current = owner;
     setPending(true);
     setMessage('');
     try {
       const data = await accountJson('/api/account/pro-mode/activate', { displayName, handle });
+      if (!mounted.current || mutationOwner.current !== owner) return;
       window.location.assign(data.redirectPath || '/talent');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to activate Pro Mode.');
+      if (mounted.current && mutationOwner.current === owner) showActionFailure(error, 'Unable to activate Pro Mode.');
     } finally {
-      setPending(false);
+      if (mutationOwner.current === owner) {
+        mutationOwner.current = null;
+        if (mounted.current) setPending(false);
+      }
     }
   };
 
   const confirmClaim = async () => {
-    if (!pendingClaim) return;
+    if (!pendingClaim || !session || !claimPreview || mutationOwner.current) return;
+    const owner = Symbol('claim');
+    mutationOwner.current = owner;
     setClaimBusy(true);
+    setClaimError(null);
     setMessage('');
     try {
       const data = await accountJson('/api/account/claim/attach', { claimCode: pendingClaim });
+      if (!mounted.current || mutationOwner.current !== owner) return;
       setMessage(data.message || 'Profile claimed. Pro Mode is active on this account.');
       window.history.replaceState({}, '', '/account');
       setClaimPreview(null);
-      await load();
+      const loaded = await load();
+      if (!mounted.current || mutationOwner.current !== owner || !loaded) return;
       if (typeof data.redirectPath === 'string' && data.redirectPath !== '/account') {
         window.location.assign(data.redirectPath);
       }
     } catch (error) {
-      setClaimError(error instanceof Error ? error.message : 'Unable to claim this profile.');
+      if (mounted.current && mutationOwner.current === owner) showActionFailure(error, 'Unable to claim this profile.', true);
     } finally {
-      setClaimBusy(false);
+      if (mutationOwner.current === owner) {
+        mutationOwner.current = null;
+        if (mounted.current) setClaimBusy(false);
+      }
     }
   };
 
   const logout = async () => {
-    await accountJson('/api/account/logout', {});
-    window.location.assign('/');
+    if (!session || mutationOwner.current) return;
+    const owner = Symbol('logout');
+    mutationOwner.current = owner;
+    setLogoutBusy(true);
+    setMessage('');
+    try {
+      await accountJson('/api/account/logout', {});
+      if (!mounted.current || mutationOwner.current !== owner) return;
+      setSession(null);
+      setAccountError('Signed out.');
+      window.location.assign('/');
+    } catch (error) {
+      if (mounted.current && mutationOwner.current === owner) showActionFailure(error, 'Unable to sign out. Try again.');
+    } finally {
+      if (mutationOwner.current === owner) {
+        mutationOwner.current = null;
+        if (mounted.current) setLogoutBusy(false);
+      }
+    }
   };
 
   if (loading) return <AccessFrame><p className="text-sm text-slate-300">Loading your Sway account…</p></AccessFrame>;
+  if (!session) return (
+    <AccessFrame>
+      <h1 className="font-display text-2xl font-black">Your Sway account</h1>
+      <p role="alert" className="mt-3 text-sm leading-6 text-slate-300">{accountError || 'Unable to load your account. Try again.'}</p>
+      <button type="button" onClick={() => { void load(); }} className="mt-5 min-h-12 w-full rounded-xl bg-fuchsia-600 px-4 text-sm font-black">Retry loading account</button>
+      <a href={loginHref()} className="mt-4 block text-center text-sm font-bold text-cyan-300">Sign in</a>
+    </AccessFrame>
+  );
   return (
     <AccessFrame>
       <div className="flex items-start justify-between gap-3">
@@ -494,7 +609,7 @@ export function AccountHome() {
           <h1 className="mt-2 font-display text-2xl font-black">{session?.account.displayName || 'Account'}</h1>
           <p className="mt-1 text-xs text-slate-400">{session?.account.email}</p>
         </div>
-        <button onClick={logout} className="rounded-xl border border-white/10 bg-slate-950 p-3 text-slate-300" aria-label="Log out"><LogOut className="h-4 w-4" /></button>
+        <button onClick={() => { void logout(); }} disabled={accountBusy} aria-busy={logoutBusy} className="rounded-xl border border-white/10 bg-slate-950 p-3 text-slate-300 disabled:opacity-60" aria-label="Log out"><LogOut className="h-4 w-4" /></button>
       </div>
       {message ? <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-xs text-cyan-100">{message}</p> : null}
       {session?.account ? <AffiliateCard /> : null}
@@ -505,13 +620,14 @@ export function AccountHome() {
             <p className="mt-2 text-sm leading-6 text-cyan-50">
               Attach <span className="font-black">{claimPreview.displayName}</span> to this account and activate Pro Mode?
             </p>
+          ) : claimLoading ? <p className="mt-2 text-sm text-cyan-50/90">Checking claim code…</p> : null}
+          {claimError ? <p role="alert" className="mt-2 text-sm leading-6 text-rose-200">{claimError}</p> : null}
+          {claimError && !claimPreview ? (
+            <button type="button" disabled={accountBusy || claimLoading} onClick={() => setClaimAttempt(value => value + 1)} className="mt-3 min-h-11 w-full rounded-xl border border-cyan-400/30 px-4 text-sm font-black text-cyan-100 disabled:opacity-60">Retry claim check</button>
           ) : (
-            <p className="mt-2 text-sm text-cyan-50/90">{claimError || 'Checking claim code…'}</p>
-          )}
-          {claimError && claimPreview === null ? null : (
             <button
               type="button"
-              disabled={claimBusy || !claimPreview}
+              disabled={accountBusy || !claimPreview || claimLoading}
               onClick={() => { void confirmClaim(); }}
               className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60"
             >
@@ -535,14 +651,14 @@ export function AccountHome() {
             <p className="mt-2 text-xs leading-5 text-slate-400">Create your performer identity, run free rooms, share your QR, manage requests, and safely rehearse test-money flows from this same account.</p>
             <div className="mt-4 space-y-1.5">
               <label htmlFor={performerNameId} className="block text-xs font-bold text-slate-200">Performer name</label>
-              <input id={performerNameId} name="performer-name" autoComplete="name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+              <input id={performerNameId} name="performer-name" autoComplete="name" disabled={accountBusy} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
             </div>
             <div className="mt-3 space-y-1.5">
               <label htmlFor={performerHandleId} className="block text-xs font-bold text-slate-200">Public handle</label>
-              <input id={performerHandleId} name="performer-handle" autoComplete="username" required minLength={4} maxLength={30} pattern="[A-Za-z0-9_-]+" title="Use 4–30 letters, numbers, hyphens, or underscores." value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your-handle" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
+              <input id={performerHandleId} name="performer-handle" autoComplete="username" disabled={accountBusy} required minLength={4} maxLength={30} pattern="[A-Za-z0-9_-]+" title="Use 4–30 letters, numbers, hyphens, or underscores." value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your-handle" className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm" />
               <p className="text-[11px] text-slate-500">4–30 characters. Letters, numbers, hyphens, and underscores.</p>
             </div>
-            <button type="submit" disabled={pending} aria-busy={pending} className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60">{pending ? 'Activating…' : 'Activate Pro Mode'}</button>
+            <button type="submit" disabled={accountBusy} aria-busy={pending} className="mt-3 min-h-11 w-full rounded-xl bg-cyan-500 px-4 text-sm font-black text-slate-950 disabled:opacity-60">{pending ? 'Activating…' : 'Activate Pro Mode'}</button>
           </form>
         )}
       </div>
