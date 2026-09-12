@@ -42,8 +42,10 @@ export function resolvePayPalPayoutReadiness(input: {
     executionEnabled: enabled(env.SWAY_PAYPAL_PAYOUTS_LIVE_EXECUTION_ENABLED),
     paypalApproved: input.capabilities.paypal
       && env.SWAY_PAYPAL_PAYOUTS_LIVE_APPROVAL_VERSION?.trim() === PAYPAL_PAYOUTS_LIVE_APPROVAL_VERSION,
-    venmoApproved: input.capabilities.venmo
-      && env.SWAY_PAYPAL_VENMO_PAYOUTS_LIVE_APPROVAL_VERSION?.trim() === PAYPAL_VENMO_PAYOUTS_LIVE_APPROVAL_VERSION,
+    // Venmo is optional. Require its separate approval only when that
+    // destination is enabled; PayPal-only cash-out must remain possible.
+    venmoApproved: !input.capabilities.venmo
+      || env.SWAY_PAYPAL_VENMO_PAYOUTS_LIVE_APPROVAL_VERSION?.trim() === PAYPAL_VENMO_PAYOUTS_LIVE_APPROVAL_VERSION,
     fundingApproved: enabled(env.SWAY_PAYPAL_PAYOUTS_LIVE_FUNDING_CONFIRMED)
       && env.SWAY_PAYPAL_PAYOUTS_LIVE_FUNDING_VERSION?.trim() === PAYPAL_PAYOUTS_LIVE_FUNDING_VERSION,
     feeApproved: enabled(env.SWAY_PAYPAL_PAYOUTS_LIVE_FEE_CONFIRMED)
