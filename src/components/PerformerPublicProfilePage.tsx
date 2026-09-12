@@ -15,7 +15,6 @@ import {
   Play,
   Radio,
   Share2,
-  Sparkles,
   UserRound
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -29,9 +28,11 @@ import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel,
   resolvePublicProfileSectionOrder,
+  shouldShowPublicProfilePartnerBadge,
   type PublicProfileSectionId
 } from '../server/public-profile';
 import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
+import AppBackdrop from './AppBackdrop';
 import { PublicEventCard, type PublicEventDto } from './PublicEventPage';
 
 type PublicProfileLink = {
@@ -105,7 +106,7 @@ type PublicProfileRelease = {
 
 function releaseTagClass(tag: string) {
   if (tag === 'Human-written lyrics') return 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100';
-  if (tag === 'Original virtual artist') return 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100';
+  if (tag === 'Original virtual artist') return 'border-fuchsia-300/30 bg-cyan-400/10 text-fuchsia-100';
   if (tag === 'Rights checked') return 'border-violet-300/30 bg-violet-400/10 text-violet-100';
   return 'border-white/10 bg-white/[0.04] text-slate-300';
 }
@@ -190,6 +191,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [ownerLayout, setOwnerLayout] = useState<{ sectionOrder: PublicProfileSectionId[]; customized: boolean; revision: number } | null>(null);
   const [arranging, setArranging] = useState(false);
+  const [previewingLayout, setPreviewingLayout] = useState(false);
   const [draftOrder, setDraftOrder] = useState<PublicProfileSectionId[]>([]);
   const [resetLayout, setResetLayout] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
@@ -477,7 +479,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
               ? 'No public Sway page was found for this link.'
               : 'Sway could not load this page. Try again in a moment.'}
           </p>
-          {status === 'error' ? <button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="mt-6 mr-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-cyan-200 px-4 py-3 text-sm font-bold text-slate-950">Try again</button> : null}
+          {status === 'error' ? <button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="mt-6 mr-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white">Try again</button> : null}
           <a href="/" className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-white hover:border-fuchsia-400/40">
             Return to Sway
           </a>
@@ -518,28 +520,27 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
   });
 
   const sectionHeading = (id: PublicProfileSectionId, title = PROFILE_SECTIONS[id].label as string) => {
-    const Icon = PROFILE_SECTIONS[id].icon;
-    return <h2 className="mb-5 flex items-center gap-2.5 font-display text-lg font-bold tracking-tight text-white"><Icon aria-hidden="true" className="h-4 w-4 text-cyan-300" />{title}</h2>;
+    return <h2 className="sway-profile-heading">{title}</h2>;
   };
 
   const sections: Record<PublicProfileSectionId, ReactNode> = {
     identity: <>
-      <div className="flex flex-col-reverse gap-6 sm:flex-row sm:items-center sm:justify-between sm:gap-10">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">{pageKindLabel}</p>
-            {profile.partner.active ? <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/25 px-2.5 py-1 text-[10px] font-semibold text-amber-100"><BadgeCheck aria-hidden="true" className="h-3.5 w-3.5" />{profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}</span> : null}
-          </div>
-          <h1 className="mt-4 break-words font-display text-[clamp(2rem,5.5vw,4.5rem)] font-black leading-[1.05] tracking-[-0.055em] text-white">{publicHeroName}</h1>
-          {profile.headline ? <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-200 sm:text-xl">{profile.headline}</p> : null}
-          {profile.city ? <p className="mt-3 flex items-center gap-1.5 text-sm text-slate-400"><MapPin aria-hidden="true" className="h-3.5 w-3.5" />{profile.city}</p> : null}
-          {mainAction ? <a href={mainAction.url} target={mainAction.external ? '_blank' : undefined} rel={mainAction.external ? 'noreferrer' : undefined} onClick={activeRoom ? onRoomEntry : undefined} className="mt-6 inline-flex min-h-12 max-w-full items-center justify-between gap-4 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-200"><span>{mainAction.label}</span>{activeRoom ? <Radio aria-hidden="true" className="h-4 w-4 shrink-0" /> : <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />}</a> : null}
+      <div className="sway-profile-identity">
+        <div className="sway-profile-portrait">
+          {publicAvatarUrl && !avatarFailed ? <img src={publicAvatarUrl} alt={`${publicHeroName} profile`} onError={() => setAvatarFailed(true)} className="aspect-square h-full w-full object-cover" /> : <div className="flex aspect-square items-center justify-center bg-fuchsia-950 font-display text-5xl font-black text-fuchsia-100">{profileInitials(profile.handle || profile.displayName)}</div>}
         </div>
-        <div className="relative w-28 shrink-0 self-start sm:w-[30%] sm:max-w-64 sm:self-center">
-          {publicAvatarUrl && !avatarFailed ? <img src={publicAvatarUrl} alt={`${publicHeroName} profile`} onError={() => setAvatarFailed(true)} className="aspect-square w-full rounded-2xl border border-white/10 object-cover shadow-2xl sm:rounded-3xl" /> : <div className="flex aspect-square w-full items-center justify-center rounded-2xl border border-white/10 bg-cyan-200/10 font-display text-4xl font-black text-cyan-100">{profileInitials(profile.handle || profile.displayName)}</div>}
+        <div className="sway-profile-intro">
+          <p className="sway-profile-type">{pageKindLabel}</p>
+          <h1 className="sway-profile-name">{publicHeroName}</h1>
+          {profile.headline ? <p className="sway-profile-headline">{profile.headline}</p> : null}
+          <div className="sway-profile-details">
+            {profile.city ? <p className="inline-flex items-center gap-1.5"><MapPin aria-hidden="true" className="h-3.5 w-3.5" />{profile.city}</p> : null}
+            {shouldShowPublicProfilePartnerBadge(profile.handle, profile.partner.active) ? <span className="inline-flex items-center gap-1.5 text-fuchsia-200"><BadgeCheck aria-hidden="true" className="h-3.5 w-3.5" />{profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}</span> : null}
+          </div>
+          {mainAction ? <a href={mainAction.url} target={mainAction.external ? '_blank' : undefined} rel={mainAction.external ? 'noreferrer' : undefined} onClick={activeRoom ? onRoomEntry : undefined} className="sway-profile-primary mt-6"><span>{mainAction.label}</span>{activeRoom ? <Radio aria-hidden="true" className="h-4 w-4 shrink-0" /> : <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />}</a> : null}
         </div>
       </div>
-      {profile.isPreview ? <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-400"><p className="font-semibold text-cyan-200">Public page · unclaimed</p><span className="text-xs">{profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}</span><p className="mt-2">This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.</p></div> : null}
+      {profile.isPreview ? <div className="mt-6 border-t border-white/10 pt-4 text-sm text-slate-400"><p className="font-semibold text-fuchsia-200">Public page · unclaimed</p><span className="text-xs">{profile.claimState === 'pending' ? 'Claim invite in progress' : 'Unclaimed · still public'}</span><p className="mt-2">This page is public even before the performer claims it. Booking contact and tipping stay locked until the owner claims and verifies the account.</p></div> : null}
     </>,
     about: profile.bio || profile.specialties.length ? <>
       {sectionHeading('about')}
@@ -547,20 +548,20 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       {profile.specialties.length ? <ul className="mt-5 flex flex-wrap gap-x-3 gap-y-2 border-t border-white/10 pt-4 text-xs text-slate-400" aria-label="Specialties">{profile.specialties.map(specialty => <li key={specialty}>{specialty}</li>)}</ul> : null}
     </> : null,
     live: activeRoom ? <>
-      <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-cyan-200"><span className="h-2 w-2 rounded-full bg-cyan-200" />Live now</p>
+      <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fuchsia-200"><span className="h-2 w-2 rounded-full bg-fuchsia-600" />Live now</p>
       <h2 className="font-display text-2xl font-bold text-white">Be part of the show.</h2>
       <p className="mt-2 text-sm text-slate-300">{activeRoom.requestCount} {activeRoom.requestCount === 1 ? 'request' : 'requests'} in the room.</p>
-      <a href={activeRoom.routePath} onClick={onRoomEntry} className="mt-5 inline-flex min-h-12 items-center gap-3 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950">Join the {activeRoom.talentRole || pageKindLabel} room <ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a>
+      <a href={activeRoom.routePath} onClick={onRoomEntry} className="mt-5 inline-flex min-h-12 items-center gap-3 rounded-xl bg-fuchsia-600 px-5 py-3 text-sm font-bold text-white">Join the {activeRoom.talentRole || pageKindLabel} room <ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a>
     </> : null,
     events: events.length ? <>
       {sectionHeading('events')}
-      <div className="grid gap-4" aria-label="Upcoming shows">{events.map(event => <PublicEventCard key={event.id} event={event} showExternalPolicy />)}</div>
+      <div className="grid gap-4" aria-label="Upcoming shows">{events.map(event => <PublicEventCard key={event.id} event={event} showExternalPolicy compact />)}</div>
     </> : null,
     releases: releases.length ? <>
       {sectionHeading('releases', musicFirst ? 'Music and releases' : 'Releases')}
       <p className="-mt-3 mb-5 text-xs text-slate-400">Official release pages from this performer</p>
-      <div className="grid gap-4">{releases.map(release => <a key={release.id} href={release.releasePath} className="group rounded-xl border border-white/10 p-3 transition hover:border-cyan-200/40">
-        <span className="flex items-center gap-4">{release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <Disc3 aria-hidden="true" className="h-12 w-12 shrink-0 text-cyan-200" />}<span className="min-w-0"><span className="block break-words font-bold text-white">{release.title}</span><span className="mt-1 block text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-xs text-cyan-200">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span><ArrowUpRight aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-slate-400" /></span>
+      <div className="grid gap-4">{releases.map(release => <a key={release.id} href={release.releasePath} className="group rounded-xl border border-white/10 p-3 transition hover:border-fuchsia-200/40">
+        <span className="flex items-center gap-4">{release.artworkUrl ? <img src={release.artworkUrl} alt={`${release.title} artwork`} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" /> : <Disc3 aria-hidden="true" className="h-12 w-12 shrink-0 text-fuchsia-200" />}<span className="min-w-0"><span className="block break-words font-bold text-white">{release.title}</span><span className="mt-1 block text-xs text-slate-400">{release.primaryArtistName}</span><span className="mt-1 block text-xs text-fuchsia-200">{release.status === 'published' ? 'Out now' : release.scheduledReleaseAt ? `Coming ${new Date(release.scheduledReleaseAt).toLocaleDateString()}` : 'Release ready'}</span></span><ArrowUpRight aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-slate-400" /></span>
         <span className="mt-3 flex flex-wrap gap-1.5">{release.creationTags.map(tag => <span key={tag} className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${releaseTagClass(tag)}`}>{tag}</span>)}</span>
       </a>)}</div>
     </> : null,
@@ -568,65 +569,73 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
       {sectionHeading('media', role === 'dj' ? 'Sets & performances' : 'Featured performances')}
       <div className="space-y-6">{profile.featuredMedia.map(media => <article key={`${media.sortOrder}:${media.embedUrl}`}>
         <div className="aspect-video overflow-hidden rounded-xl bg-black"><iframe title={media.title} src={media.embedUrl} className="h-full w-full" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>
-        <div className="mt-3 flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="text-sm font-bold text-white">{media.title}</h3>{media.description ? <p className="mt-1 text-xs leading-5 text-slate-400">{media.description}</p> : null}</div><a href={media.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 text-xs font-bold text-cyan-200">Watch <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
+        <div className="mt-3 flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="text-sm font-bold text-white">{media.title}</h3>{media.description ? <p className="mt-1 text-xs leading-5 text-slate-400">{media.description}</p> : null}</div><a href={media.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 text-xs font-bold text-fuchsia-200">Watch <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
       </article>)}</div>
     </> : null,
     links: profile.links.some(link => link.url !== bookingLink?.url) ? <>
       {sectionHeading('links', musicFirst && musicLink ? 'Listen & explore' : 'Explore more')}
       <div className="divide-y divide-white/10" aria-label="Profile links">{profile.links.map(link => link.url === bookingLink?.url ? null : <a key={`${link.sortOrder}:${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="group flex min-h-20 items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
-        <span className="min-w-0">{link.kind !== 'other' ? <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-400">{formatLinkKind(link.kind)}</span> : null}<span className="block text-base font-semibold text-white group-hover:text-cyan-200">{link.label}</span>{link.description ? <span className="mt-1 block text-sm leading-6 text-slate-400">{link.description}</span> : null}</span><ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:text-cyan-200" />
+        <span className="min-w-0">{link.kind !== 'other' ? <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-400">{formatLinkKind(link.kind)}</span> : null}<span className="block text-base font-semibold text-white group-hover:text-fuchsia-200">{link.label}</span>{link.description ? <span className="mt-1 block text-sm leading-6 text-slate-400">{link.description}</span> : null}</span><ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:text-fuchsia-200" />
       </a>)}</div>
     </> : null,
     booking: profile.booking.email || telephoneHref || bookingLink || profile.booking.verificationRequired ? <>
       {sectionHeading('booking')}
-      <div className="flex flex-wrap gap-3">{profile.booking.email ? <a href={`mailto:${profile.booking.email}`} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-cyan-200 px-4 py-3 text-sm font-bold text-slate-950"><Mail aria-hidden="true" className="h-4 w-4" />Book / contact</a> : null}{telephoneHref ? <a href={telephoneHref} className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold"><Phone aria-hidden="true" className="h-4 w-4" />Call</a> : null}{bookingLink ? <a href={bookingLink.url} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-cyan-200">{bookingLink.label}<ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a> : null}</div>
+      <div className="flex flex-wrap gap-3">{profile.booking.email ? <a href={`mailto:${profile.booking.email}`} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold text-white"><Mail aria-hidden="true" className="h-4 w-4" />Book / contact</a> : null}{telephoneHref ? <a href={telephoneHref} className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold"><Phone aria-hidden="true" className="h-4 w-4" />Call</a> : null}{bookingLink ? <a href={bookingLink.url} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-fuchsia-200">{bookingLink.label}<ArrowUpRight aria-hidden="true" className="h-4 w-4" /></a> : null}</div>
       {profile.booking.verificationRequired ? <p className="mt-3 flex gap-2 text-xs leading-6 text-slate-400"><LockKeyhole aria-hidden="true" className="mt-1 h-3.5 w-3.5 shrink-0" />Direct booking contact unlocks after this performer claims and verifies the profile.</p> : null}
     </> : null,
     social: socialLinks.length ? <>
       {sectionHeading('social', 'Find me elsewhere')}
-      <div className="flex flex-wrap gap-2" aria-label="Social links">{socialLinks.map(([key, url]) => <a key={key} href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-slate-200 hover:border-cyan-200/50">{SOCIAL_LABELS[key] || key}<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" /></a>)}</div>
+      <div className="flex flex-wrap gap-2" aria-label="Social links">{socialLinks.map(([key, url]) => <a key={key} href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-slate-200 hover:border-fuchsia-200/50">{SOCIAL_LABELS[key] || key}<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" /></a>)}</div>
     </> : null
   };
 
   return (
-    <div className="min-h-screen bg-[#080b12] text-slate-100 [overflow-wrap:anywhere] selection:bg-cyan-200 selection:text-slate-950">
-      <main className="mx-auto w-full max-w-6xl px-4 pb-10 pt-5 sm:px-8 sm:pt-7">
-        <header className="mb-7 flex items-center justify-between gap-3 border-b border-white/10 pb-5">
-          <a href="/" aria-label="Sway home" className="font-display text-xl font-black tracking-[-0.06em] text-white">SWAY<span className="text-cyan-200">.</span></a>
-          <div className="flex items-center gap-2">
+    <div className="sway-profile-page">
+      <div className="sway-profile-backdrop"><AppBackdrop /></div>
+      <main className="sway-profile-content">
+        <header className="sway-profile-nav">
+          <a href="/" aria-label="Sway home" className="inline-flex min-h-11 shrink-0 items-center gap-2.5"><img src="/icon-192.png" alt="" width="44" height="44" className="h-11 w-11 rounded-xl" /><span className="hidden text-xs font-medium tracking-widest text-fuchsia-100 sm:inline">sway to play</span></a>
+          <div className="flex min-w-0 items-center gap-2">
             <a href="/discover" className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-slate-300 hover:text-white">Discover shows</a>
-            <button type="button" onClick={handleShare} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-200/50"><Share2 aria-hidden="true" className="h-3.5 w-3.5" />{shareMessage || 'Share'}</button>
+            <button type="button" onClick={handleShare} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-fuchsia-200/50"><Share2 aria-hidden="true" className="h-3.5 w-3.5" />{shareMessage || 'Share'}</button>
           </div>
         </header>
 
-        {shareFallback ? <label className="mb-5 block text-xs text-slate-300">Copy this profile link<input aria-label="Profile link to copy" readOnly value={profileUrl} ref={selectShareLink} className="mt-2 min-h-11 w-full rounded-xl border border-cyan-200/30 bg-slate-950 px-3 text-sm text-white" /></label> : null}
+        {shareFallback ? <label className="mb-5 block text-xs text-slate-300">Copy this profile link<input aria-label="Profile link to copy" readOnly value={profileUrl} ref={selectShareLink} className="mt-2 min-h-11 w-full rounded-xl border border-fuchsia-200/30 bg-slate-950 px-3 text-sm text-white" /></label> : null}
 
-        {ownerLayout && !arranging ? <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-200/20 bg-cyan-200/[0.04] px-4 py-3"><p className="text-xs text-slate-300">This is your public profile.</p><button type="button" onClick={() => { setDraftOrder(savedOrder); setResetLayout(false); setLayoutConflict(false); setLayoutMessage(''); setArranging(true); }} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-200/30 px-3 py-2 text-xs font-bold text-cyan-100"><LayoutGrid aria-hidden="true" className="h-4 w-4" />Arrange profile</button></div> : null}
+        {ownerLayout && !arranging ? <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-fuchsia-200/20 bg-fuchsia-500/[0.04] px-4 py-3"><p className="text-xs text-slate-300">This is your public profile.</p><button type="button" onClick={() => { setDraftOrder(savedOrder); setResetLayout(false); setLayoutConflict(false); setLayoutMessage(''); setPreviewingLayout(false); setArranging(true); }} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-fuchsia-200/30 px-3 py-2 text-xs font-bold text-fuchsia-100"><LayoutGrid aria-hidden="true" className="h-4 w-4" />Arrange profile</button></div> : null}
 
-        {ownerLayout && arranging ? <section className="mb-7 rounded-2xl border border-cyan-200/30 bg-[#101821] p-4 sm:p-6" aria-label="Arrange your profile">
-          <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-display text-xl font-bold">Your page, your order.</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">Drag the handles or use the arrows. Your preview updates below. Save when it feels right.</p></div><button type="button" disabled={layoutSaving} onClick={() => { setDraftOrder(resolvePublicProfileSectionOrder({roles:profile.roles,primaryRole:profile.primaryRole})); setResetLayout(true); setLayoutMessage('Suggested layout previewed. Save to use it on your public page.'); }} className="min-h-11 text-xs font-semibold text-cyan-200 disabled:opacity-40">Use suggested layout</button></div>
-          <div className="my-5 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+        {ownerLayout && arranging ? <section className={`sway-profile-arranger ${previewingLayout ? 'sway-profile-arranger-preview' : ''}`} aria-label="Arrange your profile">
+          <h2 className="font-display text-lg font-bold">{previewingLayout ? 'Your profile preview' : 'Your page, your order.'}</h2>
+          {!previewingLayout ? <p className="mt-1 text-xs leading-5 text-slate-300">Drag sections or use the arrows, then preview your page.</p> : null}
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button type="button" aria-pressed={previewingLayout} onClick={() => setPreviewingLayout(current => !current)} className="min-h-11 rounded-xl border border-fuchsia-300/30 px-2 py-2 text-[11px] font-bold text-fuchsia-100">{previewingLayout ? 'Arrange sections' : 'Preview layout'}</button>
+            <button type="button" onClick={saveLayout} disabled={!layoutDirty || layoutSaving || layoutConflict} className="min-h-11 rounded-xl bg-fuchsia-600 px-2 py-2 text-[11px] font-bold text-white disabled:opacity-40">{layoutSaving ? 'Saving…' : 'Save layout'}</button>
+            <button type="button" disabled={layoutSaving} onClick={() => {setArranging(false);setResetLayout(false);setLayoutMessage('');setLayoutConflict(false);}} className="min-h-11 rounded-xl border border-white/15 px-2 py-2 text-[11px] font-semibold disabled:opacity-40">Cancel</button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3"><span className="text-[10px] text-slate-400">{layoutDirty ? 'Unsaved changes' : 'No unsaved changes'}</span>{!previewingLayout ? <button type="button" disabled={layoutSaving} onClick={() => { setDraftOrder(resolvePublicProfileSectionOrder({roles:profile.roles,primaryRole:profile.primaryRole})); setResetLayout(true); setLayoutMessage('Suggested layout previewed. Save to use it on your public page.'); }} className="min-h-11 text-[11px] font-semibold text-fuchsia-200 disabled:opacity-40">Use suggested layout</button> : null}</div>
+          {layoutConflict ? <div className="flex flex-wrap gap-3"><button type="button" disabled={layoutSaving} onClick={() => reloadLayout(true)} className="min-h-11 text-xs font-semibold text-fuchsia-200">Keep my arrangement</button><button type="button" disabled={layoutSaving} onClick={() => reloadLayout()} className="min-h-11 text-xs font-semibold text-fuchsia-200">Reload saved layout</button></div> : null}
+          {!previewingLayout ? <div className="sway-profile-arrangement-grid">
             {draftOrder.map((id, index) => {
               const Icon = PROFILE_SECTIONS[id].icon;
               const label = PROFILE_SECTIONS[id].label;
-              return <div key={id} data-arrange-target={id} className={`min-w-0 rounded-xl border p-3 transition-colors ${dragging === id ? 'border-cyan-200 bg-cyan-200/10' : 'border-white/15 bg-[#0b111a]'}`}>
-                <div className="flex items-center justify-between gap-2"><Icon aria-hidden="true" className="h-4 w-4 text-cyan-200" /><button type="button" disabled={layoutSaving} aria-label={`Move ${label}`} className="-m-2 flex h-11 w-11 touch-none select-none items-center justify-center rounded-lg text-slate-300 active:cursor-grabbing disabled:opacity-40" onPointerDown={event => { if (layoutSaving || (event.pointerType === 'mouse' && event.button !== 0)) return; event.currentTarget.setPointerCapture(event.pointerId); dragId.current = id; setDragging(id); }} onPointerMove={event => { if (dragId.current !== id || layoutSaving) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-arrange-target]'); const targetId = target?.dataset.arrangeTarget as PublicProfileSectionId | undefined; if (targetId) moveSection(id, targetId); if (event.clientY < 70) window.scrollBy(0,-12); else if (event.clientY > innerHeight - 70) window.scrollBy(0,12); }} onPointerUp={() => { dragId.current = null; setDragging(null); }} onPointerCancel={() => { dragId.current = null; setDragging(null); }} onLostPointerCapture={() => { dragId.current = null; setDragging(null); }}><GripVertical aria-hidden="true" className="h-4 w-4" /></button></div>
-                <p className="mt-2 text-xs font-bold text-white sm:text-sm">{label}</p><p className="mt-1 min-h-8 text-[11px] leading-4 text-slate-400">{sections[id] ? 'Visible on your profile' : 'No public content yet'}</p>
-                <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-1"><span className="text-[10px] text-slate-500">{index+1}</span><div className="flex"><button type="button" aria-label={`Move ${label} earlier`} disabled={index===0 || layoutSaving} onClick={() => moveSection(id,draftOrder[index-1])} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowUp aria-hidden="true" className="h-3.5 w-3.5" /></button><button type="button" aria-label={`Move ${label} later`} disabled={index===draftOrder.length-1 || layoutSaving} onClick={() => moveSection(id,draftOrder[index+1])} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowDown aria-hidden="true" className="h-3.5 w-3.5" /></button></div></div>
+              return <div key={id} data-arrange-target={id} className={`sway-profile-arrangement-tile ${dragging === id ? 'border-fuchsia-200 bg-fuchsia-500/10' : 'border-white/15 bg-[#0b0712]'}`}>
+                <div className="flex items-center justify-between gap-1"><Icon aria-hidden="true" className="h-4 w-4 text-fuchsia-200" /><button type="button" tabIndex={-1} disabled={layoutSaving} aria-label={`Drag ${label}`} className="-my-1 flex h-11 w-11 shrink-0 touch-none select-none items-center justify-center rounded-lg text-slate-300 active:cursor-grabbing disabled:opacity-40" onPointerDown={event => { if (layoutSaving || (event.pointerType === 'mouse' && event.button !== 0)) return; event.currentTarget.setPointerCapture(event.pointerId); dragId.current = id; setDragging(id); }} onPointerMove={event => { if (dragId.current !== id || layoutSaving) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-arrange-target]'); const targetId = target?.dataset.arrangeTarget as PublicProfileSectionId | undefined; if (targetId) moveSection(id, targetId); if (event.clientY < 70) window.scrollBy(0,-12); else if (event.clientY > innerHeight - 70) window.scrollBy(0,12); }} onPointerUp={() => { dragId.current = null; setDragging(null); }} onPointerCancel={() => { dragId.current = null; setDragging(null); }} onLostPointerCapture={() => { dragId.current = null; setDragging(null); }}><GripVertical aria-hidden="true" className="h-4 w-4" /></button></div>
+                <p className="min-h-8 text-[11px] font-bold leading-4 text-white">{label}</p><p className="text-[10px] leading-4 text-slate-400">{sections[id] ? 'On your page' : 'Empty'}</p>
+                <div className="mt-1 flex justify-center border-t border-white/10"><button type="button" aria-label={`Move ${label} earlier`} disabled={index===0 || layoutSaving} onClick={() => moveSection(id,draftOrder[index-1])} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowUp aria-hidden="true" className="h-3.5 w-3.5" /></button><button type="button" aria-label={`Move ${label} later`} disabled={index===draftOrder.length-1 || layoutSaving} onClick={() => moveSection(id,draftOrder[index+1])} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/5 disabled:opacity-25"><ArrowDown aria-hidden="true" className="h-3.5 w-3.5" /></button></div>
               </div>;
             })}
-          </div>
-          <div className="flex flex-wrap items-center gap-3"><button type="button" onClick={saveLayout} disabled={!layoutDirty || layoutSaving || layoutConflict} className="min-h-12 rounded-xl bg-cyan-200 px-5 py-3 text-sm font-bold text-slate-950 disabled:opacity-40">{layoutSaving ? 'Saving…' : 'Save layout'}</button><button type="button" disabled={layoutSaving} onClick={() => {setArranging(false);setResetLayout(false);setLayoutMessage('');setLayoutConflict(false);}} className="min-h-12 rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold disabled:opacity-40">Cancel</button>{layoutConflict ? <><button type="button" disabled={layoutSaving} onClick={() => reloadLayout(true)} className="min-h-12 px-2 text-sm font-semibold text-cyan-200">Keep my arrangement</button><button type="button" disabled={layoutSaving} onClick={() => reloadLayout()} className="min-h-12 px-2 text-sm font-semibold text-cyan-200">Reload saved layout</button></> : null}<span className="text-xs text-slate-400">{layoutDirty ? 'Unsaved changes' : 'No unsaved changes'}</span></div>
+          </div> : null}
         </section> : null}
 
-        <p role="status" aria-live="polite" className={layoutMessage ? 'mb-5 text-sm text-cyan-100' : 'sr-only'}>{layoutMessage}</p>
+        <p role="status" aria-live="polite" className={layoutMessage ? 'mb-5 text-sm text-fuchsia-100' : 'sr-only'}>{layoutMessage}</p>
         {arranging ? <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">Your profile preview</p> : null}
-        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 md:gap-5">
-          {visibleOrder.map(id => sections[id] ? <section key={id} data-profile-section={id} className={id === 'identity' ? 'overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#152130] to-[#0b101b] p-6 md:col-span-2 sm:p-9' : `min-w-0 rounded-2xl border border-white/10 p-5 sm:p-6 ${id==='live' ? 'bg-[#132934]' : 'bg-[#0d121b]'}`} aria-label={PROFILE_SECTIONS[id].label}>{sections[id]}</section> : null)}
+        <div className="sway-profile-sections">
+          {visibleOrder.map(id => sections[id] ? <section key={id} data-profile-section={id} className={`sway-profile-section ${id === 'identity' ? 'sway-profile-hero' : ''} ${id === 'live' ? 'sway-profile-live' : ''}`} aria-label={PROFILE_SECTIONS[id].label}>{sections[id]}</section> : null)}
         </div>
 
-        <footer className="mt-10 border-t border-white/10 pt-6">
-          <div className="flex flex-wrap items-center justify-between gap-4"><a href="/" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400"><Sparkles aria-hidden="true" className="h-3.5 w-3.5 text-cyan-200" />Made for the spotlight. Powered by Sway.</a><a href="/account/signup?intent=performer" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-slate-300">Create your own free Sway page<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
+        <footer className="sway-profile-footer">
+          <div className="flex flex-wrap items-center justify-between gap-3"><a href="/" className="inline-flex min-h-11 items-center gap-2 text-xs font-medium text-slate-400"><img src="/icon-192.png" alt="" width="28" height="28" className="h-7 w-7 rounded-lg" />sway to play</a><a href="/account/signup?intent=performer" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-fuchsia-200">Create your own free Sway page<ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" /></a></div>
           <details className="mt-3 max-w-xl text-xs text-slate-500"><summary className="w-fit cursor-pointer py-3 hover:text-slate-300">How did you discover Sway?</summary><DiscoveryFindUsPrompt routeFamily="performer-profile" surface="public-profile" entityKey={profile.handle || performerHandle} /></details>
         </footer>
       </main>

@@ -5,10 +5,18 @@ import {
   isPublicProfileSectionOrder,
   mergePublicProfileMetadata,
   readPublicProfileLayout,
-  resolvePublicProfileSectionOrder
+  resolvePublicProfileSectionOrder,
+  shouldShowPublicProfilePartnerBadge
 } from '../src/server/public-profile';
 
 try {
+  for (const handle of ['dj3x', 'DJ3X', ' dj3x ']) {
+    assert.equal(shouldShowPublicProfilePartnerBadge(handle, true), true);
+    assert.equal(shouldShowPublicProfilePartnerBadge(handle, false), false);
+  }
+  for (const handle of ['bubbakhain', 'calliehines', 'coreymack', 'drewmaze', 'new-partner', 'dj3x-other', '', null, undefined]) {
+    assert.equal(shouldShowPublicProfilePartnerBadge(handle, true), false, `Public badge stays hidden for ${handle}`);
+  }
   const musicOrder = ['identity', 'releases', 'links', 'media', 'live', 'events', 'about', 'booking', 'social'];
   const djOrder = ['identity', 'live', 'media', 'events', 'booking', 'links', 'releases', 'about', 'social'];
   const stageOrder = ['identity', 'media', 'events', 'booking', 'live', 'about', 'links', 'releases', 'social'];

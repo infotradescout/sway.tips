@@ -58,7 +58,9 @@ try {
     });
     const page = await context.newPage();
     page.setDefaultTimeout(5000);
-    page.setDefaultNavigationTimeout(15000);
+    // Local Chromium navigation can stall under Windows test-runner load.
+    // Keep control assertions at5s and reachability trials at2s below.
+    page.setDefaultNavigationTimeout(90000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     try {

@@ -20,11 +20,17 @@ The profile header prioritizes an available live room, otherwise a saved destina
 
 ## Editing and recovery
 
-Only the authenticated owner of the exact profile handle sees Arrange profile. Pointer dragging works with mouse and touch. Named earlier/later buttons provide keyboard and alternative touch controls. The real profile preview updates immediately; visitors see the last saved arrangement until Save layout succeeds. Cancel discards the local draft. The browser warns before leaving with unsaved changes.
+Only the authenticated owner of the exact profile handle sees Arrange profile. Pointer dragging works with mouse and touch. Named earlier/later buttons provide keyboard and alternative touch controls; pointer-only grips do not add inert keyboard stops. The compact board shows three columns on ordinary phone widths and two on narrower screens. Preview layout hides the board while keeping Save and Cancel available above the actual page. Arrange sections returns to the same draft. The real profile preview updates immediately; visitors see the last saved arrangement until Save layout succeeds. Cancel discards the local draft. The browser warns before leaving with unsaved changes.
 
 Failed or unconfirmed saves retain the draft. A revision conflict offers two explicit choices: reload the current saved arrangement, or keep the local arrangement against the latest revision and press Save again. No conflict silently overwrites another device's changes. Expired/revoked owner access ends editing and returns to the last public layout.
 
+## Public presentation
+
+The profile reuses the existing neon S artwork and app icon, the shared typography, and fuchsia action colors. The saved portrait and handle lead a continuous page; section headings and dividers replace the previous equal-weight card grid. The backdrop is subdued to preserve text readability. Shows use the shared event card's compact option so missing artwork does not create a large empty panel; event dates, locations and destinations remain available. Type defaults and owner order still determine the reading sequence.
+
 ## Persistence and access contract
+
+Public partner tags are temporarily limited to the active `dj3x` profile under the owner's 2026-09-12 instruction. `shouldShowPublicProfilePartnerBadge` controls this presentation policy; all other profiles, including new partners, remain untagged until their completed profiles are reviewed and the policy is updated. This applies to Partner, Brand Partner and Exclusive labels. It does not change stored membership, private account displays, affiliate benefits, or payment eligibility. Filling arbitrary fields does not automatically lift the hold.
 
 Existing `performer_public_profiles.metadata.publicProfileLayout` stores the optional custom `sectionOrder` and monotonic `revision`; no new schema migration is required. A null order represents the type-based default. Unknown or duplicate section keys are rejected, partial valid orders append remaining sections deterministically, and unknown existing metadata is preserved.
 

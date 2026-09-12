@@ -160,6 +160,15 @@ export function resolvePublicProfileHeroName(input: {
   return displayName || 'Sway page';
 }
 
+// Public badge hold, 2026-09-12: only dj3x is approved while the other
+// partners finish their profiles. This does not change membership or benefits.
+export function shouldShowPublicProfilePartnerBadge(
+  handle: string | null | undefined,
+  partnerActive: boolean
+): boolean {
+  return partnerActive && handle?.trim().toLowerCase() === 'dj3x';
+}
+
 export function resolvePublicProfilePageKindLabel(input: {
   primaryRole: string | null | undefined;
   roles?: unknown;
