@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, ne, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lte, ne, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { createSwayDb } from '../db/client';
 import { liveRoomPaymentOperations, payments } from '../db/schema';
@@ -10,7 +10,7 @@ const LEASE_MS = 30_000;
 
 function retryAt(attemptCount: number) {
   const seconds = Math.min(300, Math.max(2, 2 ** Math.min(attemptCount, 8)));
-  return new Date(Date.now() + seconds * 1_000);
+  return sql<Date>`statement_timestamp() + (${seconds} * interval '1 second')`;
 }
 
 function safeError(error: unknown) {
@@ -79,7 +79,7 @@ export function createLiveRoomPaymentOperationStore(
         .set({
           status: 'retryable_failed',
           attemptCount: 0,
-          availableAt: new Date(),
+          availableAt: sql<Date>`statement_timestamp()`,
           leaseOwner: null,
           leaseExpiresAt: null,
           completedAt: null,
@@ -99,7 +99,11 @@ export function createLiveRoomPaymentOperationStore(
   async function claim(workerId: string, operationId?: string): Promise<OperationRow | null> {
     if (!db) return null;
     return db.transaction(async (tx) => {
-      const now = new Date();
+      // Database-created eligibility and lease timestamps must use the same
+      // clock and precision. An application Date can lag even on one host,
+      // leaving a new capture pending, or prematurely reclaim another owner.
+      // Each SQL statement evaluates this afresh, including after lock waits.
+      const now = sql<Date>`statement_timestamp()`;
       const candidates = await tx
         .select()
         .from(liveRoomPaymentOperations)
@@ -147,7 +151,7 @@ export function createLiveRoomPaymentOperationStore(
             status: 'leased',
             attemptCount: operation.attemptCount + 1,
             leaseOwner: leaseToken,
-            leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+            leaseExpiresAt: sql<Date>`statement_timestamp() + (${LEASE_MS} * interval '1 millisecond')`,
             lastAttemptAt: now,
             lastError: null,
             updatedAt: now
@@ -308,12 +312,17 @@ export function createLiveRoomPaymentOperationStore(
         .where(and(eq(payments.id, paymentId), eq(payments.paymentMode, paymentMode)))
         .for('update')
         .limit(1);
-      const now = new Date();
-      if (
-        operation.status === 'leased'
-        && operation.leaseExpiresAt
-        && operation.leaseExpiresAt > now
-      ) return { status: 'in_flight' as const };
+      const now = sql<Date>`statement_timestamp()`;
+      if (operation.status === 'leased') {
+        // Check at database precision after any payment-lock wait. A fast
+        // app clock must not let closeout steal an active provider operation.
+        const [lease] = await tx
+          .select({ active: sql<boolean>`${liveRoomPaymentOperations.leaseExpiresAt} > statement_timestamp()` })
+          .from(liveRoomPaymentOperations)
+          .where(eq(liveRoomPaymentOperations.id, operation.id))
+          .limit(1);
+        if (lease?.active) return { status: 'in_flight' as const };
+      }
       if (['awaiting_customer', 'succeeded'].includes(operation.status)) {
         return { status: 'provider_known' as const, operationId: operation.id };
       }
