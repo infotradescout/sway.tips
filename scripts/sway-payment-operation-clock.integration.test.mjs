@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { createLiveRoomPaymentOperationStore } from '../src/server/live-room-payment-operation-store.ts';
+import { createPaymentWebhookService } from '../src/server/payment-webhook.ts';
+import { createDeterministicPaymentProvider } from './lib/deterministic-payment-provider.ts';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
-// No provider is constructed. These tests operate only on the owned disposable
-// database accepted by the existing guard, never production data or money.
+// Only the owned disposable database and deterministic provider are used.
+// No external provider requests, production records, or real money are involved.
 const RealDate = globalThis.Date;
 async function withClockOffset(offsetMs, action) {
   class OffsetDate extends RealDate {
@@ -71,6 +73,34 @@ async function assertDatabaseLease(operation) {
   assert(result.rows[0].remaining > 25 && result.rows[0].remaining <= 30.1,
     'A lease must last 30 database seconds, independently of the app clock: ' + result.rows[0].remaining);
 }
+async function eventFixture({ type = 'customer.updated', dueSeconds = -120, processingSeconds = null } = {}) {
+  const event = {
+    providerEventId: 'evt_clock_' + randomUUID(), providerType: type,
+    livemode: false, processorPaymentIntentId: 'pi_clock_' + randomUUID(),
+    providerStatus: 'succeeded', amountCents: 600,
+    metadata: { sway_payment_id: randomUUID() }
+  };
+  const rawBody = JSON.stringify(event);
+  const payload = {
+    processorPaymentIntentId: event.processorPaymentIntentId,
+    processorChargeId: null, providerStatus: event.providerStatus,
+    amountCents: event.amountCents, amountRefundedCents: null,
+    fullyRefunded: null, metadata: event.metadata
+  };
+  const status = processingSeconds === null ? 'pending' : 'processing';
+  await proof.query(`
+    insert into live_room_processor_events (processor, processor_event_id,
+      event_type, payload_sha256, payload, livemode, status, next_attempt_at,
+      processing_started_at, processing_lease_owner)
+    values ('stripe', $1, $2, $3, $4::jsonb, false,
+      $5::live_room_processor_event_status,
+      statement_timestamp() + ($6 * interval '1 second'),
+      case when $5 = 'processing' then statement_timestamp() + ($7 * interval '1 second') else null end,
+      case when $5 = 'processing' then $8 else null end)
+  `, [event.providerEventId, type, createHash('sha256').update(rawBody).digest('hex'),
+    JSON.stringify(payload), status, dueSeconds, processingSeconds || 0, 'clock-lease-' + randomUUID()]);
+  return { event, rawBody, signatureHeader: 'deterministic-test-signature' };
+}
 try {
   await proof.query("insert into users (id, email, display_name) values ($1, $2, 'Clock Proof Owner')", [ownerId, 'clock-' + ownerId + '@example.test']);
   await proof.query("insert into performers (id, owner_user_id, handle, display_name, is_active) values ($1, $2, $3, 'Clock Proof Performer', true)", [performerId, ownerId, 'clock-' + performerId.slice(0, 8)]);
@@ -136,6 +166,50 @@ try {
     const operation = await fixture(); await due(operation);
     const claims = await Promise.all([store.claim('race-a', operation.id), store.claim('race-b', operation.id)]);
     assert.equal(claims.filter(Boolean).length, 1);
+  });
+
+  const fake = createDeterministicPaymentProvider();
+  const webhook = createPaymentWebhookService({ databaseUrl: proof.databaseUrl, provider: fake.provider });
+  await check('database-due verified webhook is processed with app clock behind', async () => {
+    const input = await eventFixture({ dueSeconds: 0 });
+    const result = await withClockOffset(-60_000, () => webhook.ingestWebhook(input));
+    assert.equal(result.status, 'ignored', 'A verified due event must not be left unclaimed');
+  });
+  await check('future webhook retry is not processed early with app clock ahead', async () => {
+    const input = await eventFixture({ dueSeconds: 30 });
+    const result = await withClockOffset(60_000, () => webhook.ingestWebhook(input));
+    assert.equal(result.status, 'not_claimed');
+  });
+  await check('active webhook lease is not stolen by an ahead app clock', async () => {
+    const input = await eventFixture({ processingSeconds: 0 });
+    const result = await withClockOffset(60_000, () => webhook.ingestWebhook(input));
+    assert.equal(result.status, 'not_claimed');
+  });
+  await check('expired webhook lease is recovered despite a behind app clock', async () => {
+    const input = await eventFixture({ processingSeconds: -31 });
+    const result = await withClockOffset(-60_000, () => webhook.ingestWebhook(input));
+    assert.equal(result.status, 'ignored');
+  });
+  await check('unresolved webhook retains database-based retry delay', async () => {
+    const input = await eventFixture({ type: 'payment_intent.succeeded' });
+    const result = await withClockOffset(-60_000, () => webhook.ingestWebhook(input));
+    assert.equal(result.status, 'accepted_pending');
+    const truth = await proof.query(`
+      select status, extract(epoch from (next_attempt_at - statement_timestamp()))::float8 as remaining
+      from live_room_processor_events where processor_event_id = $1
+    `, [input.event.providerEventId]);
+    assert.equal(truth.rows[0].status, 'retryable_failed');
+    assert(truth.rows[0].remaining > 0 && truth.rows[0].remaining <= 2.1, 'Webhook retry must not be backdated');
+    assert.equal((await webhook.ingestWebhook(input)).status, 'not_claimed');
+  });
+  await check('webhook signature and altered replay protections remain enforced', async () => {
+    const input = await eventFixture();
+    await assert.rejects(webhook.ingestWebhook({ ...input, signatureHeader: null }), /signature/i);
+    assert.equal((await webhook.ingestWebhook(input)).status, 'ignored');
+    assert.equal((await webhook.ingestWebhook(input)).status, 'duplicate');
+    await assert.rejects(webhook.ingestWebhook({
+      ...input, rawBody: JSON.stringify({ ...input.event, metadata: { changed: 'payload' } })
+    }), /different signed payload/i);
   });
   const failures = outcomes.filter(row => !row.passed);
   console.log('PAYMENT_CLOCK_SUMMARY ' + JSON.stringify({ database: proof.kind, cases: outcomes.length, failures: failures.length, outcomes }));
