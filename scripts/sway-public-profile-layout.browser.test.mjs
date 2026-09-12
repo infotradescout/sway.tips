@@ -181,12 +181,28 @@ try {
     name: 'synthetic-profile-patron-entry', configureServer(server) {
       // The production server selects this same existing patron shell for /p/.
       // Vite alone has no server route selector, so map that bounded HTML entry.
-      server.middlewares.use((request, _response, next) => { if (request.url?.startsWith('/p/layout-proof-')) request.url = '/shells/patron.html'; next(); });
+      server.middlewares.use((request, _response, next) => { if (request.url?.startsWith('/p/')) request.url = '/shells/patron.html'; next(); });
     }
   }] });
   await vite.listen(); const address = vite.httpServer.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
   browser = await chromium.launch({ headless: true });
   for (const viewport of viewports) {
+    for (const badgeCase of [
+      { handle: 'dj3x', active: true, kind: 'partner', visible: true },
+      { handle: 'dj3x', active: false, kind: 'partner', visible: false },
+      { handle: 'bubbakhain', active: true, kind: 'partner', visible: false },
+      { handle: 'calliehines', active: true, kind: 'exclusive', visible: false },
+      { handle: 'coreymack', active: true, kind: 'brand', visible: false }
+    ]) await run(`public-partner-${badgeCase.handle}-${badgeCase.active}-${badgeCase.kind}`, viewport, 'musician', state => {
+      state.owner = false;
+      state.data.performer.handle = badgeCase.handle;
+      state.data.performer.partner = { active: badgeCase.active, kind: badgeCase.kind, termsVersion: null };
+    }, async (page, state) => {
+      assert.equal(await page.getByText(/^Sway (Partner|Brand Partner|Exclusive)$/).count(), badgeCase.visible ? 1 : 0, 'Only the approved active partner shows a public tag');
+      assert.equal(state.data.performer.partner.active, badgeCase.active, 'Public badge policy does not alter membership');
+      assert.equal(state.writes.length, 0);
+      await expectOrder(page, defaults.musician, visibleKeys(state.data));
+    });
     for (const role of ['musician', 'comedian', 'dj']) await run(`public-${role}`, viewport, role, state => { state.owner = false; }, async (page, state) => {
       await expectOrder(page, defaults[role], visibleKeys(state.data));
       const action = page.locator('[data-profile-section="identity"] a');
@@ -394,9 +410,9 @@ try {
 } finally {
   await browser?.close(); await vite?.close();
   const source = 'src/components/PerformerPublicProfilePage.tsx';
-  writeFileSync(join(directory, 'results.json'), JSON.stringify({ evidenceBoundary: 'Real patron UI and bundled Sway brand assets with synthetic intercepted API and performer media; no server, DB, auth, external provider or production acceptance claim.', source, sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'), stylesSha256: createHash('sha256').update(readFileSync('src/index.css')).digest('hex'), results }, null, 2));
+  writeFileSync(join(directory, 'results.json'), JSON.stringify({ evidenceBoundary: 'Real patron UI and bundled Sway brand assets with synthetic intercepted API and performer media; no server, DB, auth, external provider or production acceptance claim.', source, sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'), stylesSha256: createHash('sha256').update(readFileSync('src/index.css')).digest('hex'), publicProfilePolicySha256: createHash('sha256').update(readFileSync('src/server/public-profile.ts')).digest('hex'), results }, null, 2));
 }
 const failed = results.filter(result => !result.passed);
 console.log('PROFILE_LAYOUT_BROWSER_SUMMARY', JSON.stringify({ total: results.length, passed: results.length - failed.length, failed: failed.length, directory }));
-assert.equal(results.length, 38, 'Every profile browser scenario must run.');
+assert.equal(results.length, 48, 'Every profile browser scenario must run.');
 assert.equal(failed.length, 0, 'Public profile layout browser acceptance failed.');

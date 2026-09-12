@@ -30,6 +30,8 @@ The profile reuses the existing neon S artwork and app icon, the shared typograp
 
 ## Persistence and access contract
 
+Public partner tags are temporarily limited to the active `dj3x` profile under the owner's 2026-09-12 instruction. `shouldShowPublicProfilePartnerBadge` controls this presentation policy; all other profiles, including new partners, remain untagged until their completed profiles are reviewed and the policy is updated. This applies to Partner, Brand Partner and Exclusive labels. It does not change stored membership, private account displays, affiliate benefits, or payment eligibility. Filling arbitrary fields does not automatically lift the hold.
+
 Existing `performer_public_profiles.metadata.publicProfileLayout` stores the optional custom `sectionOrder` and monotonic `revision`; no new schema migration is required. A null order represents the type-based default. Unknown or duplicate section keys are rejected, partial valid orders append remaining sections deterministically, and unknown existing metadata is preserved.
 
 - GET `/api/talent/profile/layout?handle=...` returns the owned handle and safe resolved layout.

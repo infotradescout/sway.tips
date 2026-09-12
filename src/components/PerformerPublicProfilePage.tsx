@@ -28,6 +28,7 @@ import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel,
   resolvePublicProfileSectionOrder,
+  shouldShowPublicProfilePartnerBadge,
   type PublicProfileSectionId
 } from '../server/public-profile';
 import DiscoveryFindUsPrompt from './DiscoveryFindUsPrompt';
@@ -534,7 +535,7 @@ export default function PerformerPublicProfilePage({ performerHandle }: { perfor
           {profile.headline ? <p className="sway-profile-headline">{profile.headline}</p> : null}
           <div className="sway-profile-details">
             {profile.city ? <p className="inline-flex items-center gap-1.5"><MapPin aria-hidden="true" className="h-3.5 w-3.5" />{profile.city}</p> : null}
-            {profile.partner.active ? <span className="inline-flex items-center gap-1.5 text-fuchsia-200"><BadgeCheck aria-hidden="true" className="h-3.5 w-3.5" />{profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}</span> : null}
+            {shouldShowPublicProfilePartnerBadge(profile.handle, profile.partner.active) ? <span className="inline-flex items-center gap-1.5 text-fuchsia-200"><BadgeCheck aria-hidden="true" className="h-3.5 w-3.5" />{profile.partner.kind === 'exclusive' ? 'Sway Exclusive' : profile.partner.kind === 'brand' ? 'Sway Brand Partner' : 'Sway Partner'}</span> : null}
           </div>
           {mainAction ? <a href={mainAction.url} target={mainAction.external ? '_blank' : undefined} rel={mainAction.external ? 'noreferrer' : undefined} onClick={activeRoom ? onRoomEntry : undefined} className="sway-profile-primary mt-6"><span>{mainAction.label}</span>{activeRoom ? <Radio aria-hidden="true" className="h-4 w-4 shrink-0" /> : <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />}</a> : null}
         </div>
