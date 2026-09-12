@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, rmSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -105,7 +105,7 @@ export async function runPaymentValidation() {
         const diagnostic=new Client({connectionString:dbUrl});
         try {
           await diagnostic.connect();
-          const rows=await diagnostic.query("select p.id, p.payment_status, p.refund_status, p.action_type, p.legacy_unlinked, p.amount_total, o.operation_type, o.status as operation_status, o.last_error from payments p left join live_room_payment_operations o on o.payment_id=p.id where p.idempotency_key like 'legacy-connected-refund-%' order by p.created_at desc limit 5");
+          const rows=await diagnostic.query("select p.id, p.payment_status, p.refund_status, p.action_type, p.legacy_unlinked, p.amount_total, o.operation_type, o.status as operation_status, o.last_error from payments p left join live_room_payment_operations o on o.payment_id=p.id where (p.idempotency_key like 'legacy-connected-refund-%' or p.destination_account_id = 'acct_test_durability') order by p.created_at desc limit 5");
           report.recoveryDiagnostic=rows.rows;
           console.log('SWAY_MONEY_RECOVERY_DIAGNOSTIC '+JSON.stringify(rows.rows));
         } catch(error) {report.recoveryDiagnosticError=scrub(error.message);}
@@ -119,7 +119,10 @@ export async function runPaymentValidation() {
     const untracked=execFileSync('git',['ls-files','--others','--exclude-standard'],{cwd:repo,encoding:'utf8'}).trim().split('\n').filter(Boolean);
     assert(untracked.every(name=>name.startsWith('tmp/public-entry-qa/')),'Unexpected untracked files: '+JSON.stringify(untracked));
     report.generatedProofFiles=untracked;
-    if(existsSync(join(repo,'tmp/public-entry-qa')))renameSync(join(repo,'tmp/public-entry-qa'),join(out,'public-entry-qa'));
+    if(existsSync(join(repo,'tmp/public-entry-qa'))) {
+      cpSync(join(repo,'tmp/public-entry-qa'),join(out,'public-entry-qa'),{recursive:true});
+      rmSync(join(repo,'tmp/public-entry-qa'),{recursive:true});
+    }
     report.sourceStatus=execFileSync('git',['status','--porcelain'],{cwd:repo,encoding:'utf8'}).trim();
     assert.equal(report.sourceStatus,'','Candidate must be clean after archiving generated proof');
     report.passed=report.steps.every(row=>row.passed);
