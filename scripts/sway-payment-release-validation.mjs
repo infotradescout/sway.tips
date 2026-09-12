@@ -96,6 +96,7 @@ export async function runPaymentValidation() {
     console.log('SWAY_MONEY_NATIVE_DATABASE '+JSON.stringify(report.nativeDatabase));
     const dbUrl=`postgresql://postgres:${password}@127.0.0.1:25439/${dbName}`;
     const nativeEnv={SWAY_ALLOW_DISPOSABLE_DATABASE_RESET:'true',SWAY_REQUIRE_REAL_POSTGRES_PROOF:'true',SWAY_REAL_POSTGRES_PROOF_DATABASE_URL:dbUrl};
+    if(existsSync(join(repo,'scripts/sway-payment-operation-clock.integration.test.mjs'))) await step('native:payment-operation-clock','node',['--import','tsx','scripts/sway-payment-operation-clock.integration.test.mjs'],{env:nativeEnv,required:false});
     const nativeTests=focused?['test:integration:live-room-real-postgres-concurrency']:['test:performer-withdrawals','test:integration:withdrawal-refund-concurrency','test:integration:live-room-real-postgres-concurrency'];
     for(const name of nativeTests) {
       const result=await step('native:'+name,'npm',['run',name],{env:nativeEnv,timeout:600000,required:false});
