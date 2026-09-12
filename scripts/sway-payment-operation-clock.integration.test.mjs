@@ -58,7 +58,7 @@ async function assertDatabaseLease(operation) {
 }
 try {
   await proof.query("insert into users (id, email, display_name) values ($1, $2, 'Clock Proof Owner')", [ownerId, 'clock-' + ownerId + '@example.test']);
-  await proof.query("insert into performers (id, owner_user_id, handle, display_name, is_active) values ($1, $2, $3, 'Clock Proof Performer', true)", [performerId, ownerId, 'clock-' + performerId]);
+  await proof.query("insert into performers (id, owner_user_id, handle, display_name, is_active) values ($1, $2, $3, 'Clock Proof Performer', true)", [performerId, ownerId, 'clock-' + performerId.slice(0, 8)]);
   await proof.query("insert into gig_sessions (id, performer_id, owner_actor_user_id, status, title) values ($1, $2, $3, 'active', 'Disposable clock proof')", [gigId, performerId, ownerId]);
 
   await check('new database-due operation is claimable with app clock behind', async () => {
