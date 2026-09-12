@@ -38,10 +38,13 @@ async function main() {
   let savedProfileBody: Record<string, unknown> | null = null;
   let savedPayoutBody: Record<string, unknown> | null = null;
   let cashOutBody: Record<string, unknown> | null = null;
+  let cashOutRequestCount = 0;
   let cashOutOutcomeStatus = 'processing';
   let cashOutActualFeeCents: number | null = null;
   let balanceReadCount = 0;
   let failBalanceRead = false;
+  let malformedBalanceRead = false;
+  let nextBalanceReadGate: { started: () => void; wait: Promise<void> } | null = null;
   let paymentConfigGate: Promise<void> | null = null;
   let paymentConfig = {
     mode: 'test',
@@ -70,8 +73,9 @@ async function main() {
     const port = await reservePort();
     vite = await createViteServer({
       root: process.cwd(),
+      publicDir: 'public',
       logLevel: 'silent',
-      server: { host: '127.0.0.1', port, strictPort: true }
+      server: { host: '127.0.0.1', port, strictPort: true, watch: null, hmr: false }
     });
     await vite.listen();
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -96,10 +100,18 @@ async function main() {
       }
       if (path === '/api/talent/payouts/balance' && request.method() === 'GET') {
         balanceReadCount += 1;
+        const status = failBalanceRead ? 503 : 200;
+        const body = JSON.stringify(failBalanceRead ? { error: 'Balance temporarily unavailable.' } : malformedBalanceRead ? { availableCents: 'unknown' } : payoutBalance);
+        const gate = nextBalanceReadGate;
+        nextBalanceReadGate = null;
+        if (gate) {
+          gate.started();
+          await gate.wait;
+        }
         await route.fulfill({
-          status: failBalanceRead ? 503 : 200,
+          status,
           contentType: 'application/json',
-          body: JSON.stringify(failBalanceRead ? { error: 'Balance temporarily unavailable.' } : payoutBalance)
+          body
         });
         return;
       }
@@ -120,6 +132,7 @@ async function main() {
         return;
       }
       if (path === '/api/talent/payouts/withdrawals' && request.method() === 'POST') {
+        cashOutRequestCount += 1;
         cashOutBody = request.postDataJSON() as Record<string, unknown>;
         const grossAmountCents = Number(cashOutBody.grossAmountCents);
         if (balanceAfterCashOut) payoutBalance = balanceAfterCashOut;
@@ -340,8 +353,14 @@ async function main() {
         assert.equal(await balancePanel.getByText('Available', { exact: true }).locator('..').locator('span').last().innerText(), 'Unavailable');
         assert.equal(await balancePanel.getByText('Pending', { exact: true }).locator('..').locator('span').last().innerText(), 'Unavailable');
         assert.equal(await outcomePage.getByRole('button', { name: 'Cash out to PayPal' }).isDisabled(), true, 'An unavailable balance must block another cash-out.');
-        assert.equal(await outcomePage.getByText('Latest balance is unavailable. Refresh it before another cash-out.', { exact: true }).isVisible(), true);
+        assert.equal(await outcomePage.getByText('Latest balance is unavailable. Refresh it before cashing out.', { exact: true }).isVisible(), true);
         assert.equal(await balancePanel.getByText(/Cash out \$15\.00/).count(), 0, 'A failed balance read must hide the stale payout estimate.');
+        for (const width of [390, 1440]) {
+          await outcomePage.setViewportSize({ width, height: width === 390 ? 844 : 960 });
+          await assertHealthyPage(outcomePage, `unavailable balance ${width}`);
+          assert.equal(await outcomePage.getByText(outcome.message, { exact: true }).isVisible(), true);
+          await outcomePage.screenshot({ path: join(evidenceDirectory, `cash-out-balance-unavailable-${width}.png`), fullPage: true });
+        }
         failBalanceRead = false;
         const recoveryRead = outcomePage.waitForResponse((response) => response.url().endsWith('/api/talent/payouts/balance'));
         await outcomePage.getByRole('button', { name: 'Refresh balance' }).click();
@@ -353,10 +372,101 @@ async function main() {
       assert.equal(await balancePanel.getByText('Available', { exact: true }).locator('..').locator('span').last().innerText(), (outcome.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }));
       assert.equal(await balancePanel.getByText('Pending', { exact: true }).locator('..').locator('span').last().innerText(), '$7.00', 'The latest balance must include concurrent earnings changes rather than client-side arithmetic.');
       assert.equal(await outcomePage.getByText(/is being sent/).count(), 0, 'Unpaid and returned outcomes must not imply a successful send.');
+      if (outcome.status === 'failed' && !outcome.refreshFails) {
+        for (const width of [390, 1440]) {
+          await outcomePage.setViewportSize({ width, height: width === 390 ? 844 : 960 });
+          await assertHealthyPage(outcomePage, `failed cash-out ${width}`);
+          assert.equal(await outcomePage.getByText(outcome.message, { exact: true }).isVisible(), true);
+          await outcomePage.screenshot({ path: join(evidenceDirectory, `cash-out-failed-${width}.png`), fullPage: true });
+        }
+      }
       await assertHealthyPage(outcomePage, `cash-out ${outcome.status}`);
       await outcomePage.close();
     }
     balanceAfterCashOut = null;
+
+    // Replay the independently demonstrated ordering: a balance retry started
+    // before a second cash-out resolves after that cash-out's current balance.
+    // Neither a stale success nor a stale failure may overwrite the new read.
+    for (const staleReadFails of [false, true]) {
+      payoutBalance = { ...payoutBalance, availableCents: 1_500, reservedCents: 0, pendingCents: 500 };
+      balanceAfterCashOut = null;
+      cashOutOutcomeStatus = 'failed';
+      cashOutActualFeeCents = null;
+      const orderPage = await context.newPage();
+      orderPage.on('pageerror', (error) => pageErrors.push(`cash-out read ordering: ${error.stack || error.message}`));
+      await orderPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+      await orderPage.getByRole('radio', { name: /PayPal \(Sandbox\)/ }).check();
+      await orderPage.getByLabel('PayPal email').fill('sandbox-recipient@example.test');
+      await orderPage.getByRole('button', { name: 'Save payout destination' }).click();
+      await orderPage.getByText('Saved: s***@example.test', { exact: true }).waitFor({ state: 'visible' });
+      failBalanceRead = true;
+      orderPage.once('dialog', (dialog) => dialog.accept('sandbox-recipient@example.test'));
+      await orderPage.getByRole('button', { name: 'Cash out to PayPal' }).click();
+      await orderPage.getByText('Cash-out failed. No payout was completed.', { exact: true }).waitFor({ state: 'visible' });
+
+      failBalanceRead = staleReadFails;
+      let releaseOldRead!: () => void;
+      let markOldReadStarted!: () => void;
+      const oldReadStarted = new Promise<void>((resolve) => { markOldReadStarted = resolve; });
+      nextBalanceReadGate = { started: markOldReadStarted, wait: new Promise<void>((resolve) => { releaseOldRead = resolve; }) };
+      const oldRequestPromise = orderPage.waitForRequest((request) => request.url().endsWith('/api/talent/payouts/balance'));
+      await orderPage.getByRole('button', { name: 'Refresh balance' }).click();
+      const oldRequest = await oldRequestPromise;
+      await oldReadStarted;
+      failBalanceRead = false;
+      await orderPage.getByRole('button', { name: 'Refresh balance' }).click();
+      await orderPage.getByRole('button', { name: 'Refresh balance' }).waitFor({ state: 'hidden' });
+
+      cashOutOutcomeStatus = 'processing';
+      balanceAfterCashOut = { ...payoutBalance, availableCents: 0, reservedCents: 1_500 };
+      orderPage.once('dialog', (dialog) => dialog.accept('sandbox-recipient@example.test'));
+      await orderPage.getByRole('button', { name: 'Cash out to PayPal' }).click();
+      await orderPage.getByText('$14.75 cash-out is processing. Payment is not confirmed yet.', { exact: true }).waitFor({ state: 'visible' });
+      const availableAmount = orderPage.locator('[data-sway-cash-out="true"]').getByText('Available', { exact: true }).locator('..').locator('span').last();
+      assert.equal(await availableAmount.innerText(), '$0.00');
+      const oldResponsePromise = orderPage.waitForResponse((response) => response.request() === oldRequest);
+      releaseOldRead();
+      const oldResponse = await oldResponsePromise;
+      await oldResponse.finished();
+      await orderPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      assert.equal(await availableAmount.innerText(), '$0.00', `A stale ${staleReadFails ? 'failed' : 'successful'} balance retry must not overwrite the completed cash-out read.`);
+      assert.equal(await orderPage.getByRole('button', { name: 'Cash out to PayPal' }).isDisabled(), true);
+      assert.equal(await orderPage.getByRole('button', { name: 'Refresh balance' }).count(), 0);
+      await assertHealthyPage(orderPage, `cash-out stale ${staleReadFails ? 'failure' : 'success'}`);
+      await orderPage.close();
+    }
+    balanceAfterCashOut = null;
+
+    for (const initialFailure of ['503', 'malformed']) {
+      payoutBalance = { ...payoutBalance, availableCents: 1_500, reservedCents: 0, pendingCents: 500 };
+      failBalanceRead = initialFailure === '503';
+      malformedBalanceRead = initialFailure === 'malformed';
+      const initialErrorPage = await context.newPage();
+      initialErrorPage.on('pageerror', (error) => pageErrors.push(`initial balance ${initialFailure}: ${error.stack || error.message}`));
+      const postsBeforeRead = cashOutRequestCount;
+      await initialErrorPage.goto(`${baseUrl}/scripts/browser-fixtures/sway-profile-payout-options.html?view=payout`, { waitUntil: 'networkidle' });
+      await initialErrorPage.getByText('Latest balance is unavailable. Refresh it before cashing out.', { exact: true }).waitFor({ state: 'visible' });
+      const initialBalancePanel = initialErrorPage.locator('[data-sway-cash-out="true"]');
+      assert.equal(await initialBalancePanel.getByText('Available', { exact: true }).count(), 0, 'A failed initial balance read must not invent an available amount.');
+      assert.equal(await initialErrorPage.getByRole('button', { name: 'Cash out to PayPal' }).count(), 0, 'Initial balance recovery must not offer an unverified withdrawal.');
+      if (initialFailure === '503') {
+        for (const width of [390, 1440]) {
+          await initialErrorPage.setViewportSize({ width, height: width === 390 ? 844 : 960 });
+          await assertHealthyPage(initialErrorPage, `initial unavailable balance ${width}`);
+          await initialErrorPage.screenshot({ path: join(evidenceDirectory, `cash-out-initial-balance-unavailable-${width}.png`), fullPage: true });
+        }
+      }
+      failBalanceRead = false;
+      malformedBalanceRead = false;
+      await initialErrorPage.getByRole('button', { name: 'Refresh balance' }).click();
+      await initialBalancePanel.getByText('Available', { exact: true }).waitFor({ state: 'visible' });
+      assert.equal(await initialBalancePanel.getByText('Available', { exact: true }).locator('..').locator('span').last().innerText(), '$15.00');
+      assert.equal(await initialErrorPage.getByRole('button', { name: 'Refresh balance' }).count(), 0);
+      assert.equal(cashOutRequestCount, postsBeforeRead, 'An initial balance retry must never submit a cash-out.');
+      await assertHealthyPage(initialErrorPage, `initial balance recovery ${initialFailure}`);
+      await initialErrorPage.close();
+    }
 
     paymentConfig = {
       ...paymentConfig,

@@ -173,11 +173,14 @@ function RoomHarness() {
 }
 
 createRoot(document.getElementById('root')!).render(
-  view === 'roles'
+  // Match TalentApp's inherited background and foreground in isolated proofs.
+  <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+  {view === 'roles'
     ? <main className="min-h-screen bg-slate-950 p-3"><PerformerPublicProfileEditor performerHandle="multi-talent-test" /></main>
     : view === 'sources' || view === 'sources_uploads' || view === 'sources_error'
       ? <SourcesHarness />
       : view === 'room'
         ? <RoomHarness />
-        : <PayoutHarness />
+        : <PayoutHarness />}
+  </div>
 );

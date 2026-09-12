@@ -1509,6 +1509,9 @@ export default function TalentDashboard({
   }));
   const [payoutBalance, setPayoutBalance] = useState<PerformerPayoutBalance | null>(null);
   const [payoutBalanceIsCurrent, setPayoutBalanceIsCurrent] = useState(false);
+  const [payoutBalanceReadError, setPayoutBalanceReadError] = useState(false);
+  const payoutBalanceReadGenerationRef = useRef(0);
+  const payoutAccountGenerationRef = useRef(0);
   const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'pending' | 'error'>('idle');
   const [cashOutMessage, setCashOutMessage] = useState<string | null>(null);
   const cashOutIdempotencyKeyRef = useRef<string | null>(null);
@@ -1578,16 +1581,29 @@ export default function TalentDashboard({
   }, [previewMode]);
 
   useEffect(() => {
-    if (previewMode || !performerProfile?.performer_id) return;
-    let cancelled = false;
-    void readPerformerPayoutBalance()
-      .then((balance) => {
-        if (cancelled) return;
-        setPayoutBalance(balance);
-        setPayoutBalanceIsCurrent(true);
-      })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
+    const generation = ++payoutBalanceReadGenerationRef.current;
+    payoutAccountGenerationRef.current += 1;
+    setPayoutBalance(null);
+    setPayoutBalanceIsCurrent(false);
+    setPayoutBalanceReadError(false);
+    setCashOutStatus('idle');
+    setCashOutMessage(null);
+    cashOutIdempotencyKeyRef.current = null;
+    if (!previewMode && performerProfile?.performer_id) {
+      void readPerformerPayoutBalance()
+        .then((balance) => {
+          if (generation !== payoutBalanceReadGenerationRef.current) return;
+          setPayoutBalance(balance);
+          setPayoutBalanceIsCurrent(true);
+        })
+        .catch(() => {
+          if (generation === payoutBalanceReadGenerationRef.current) setPayoutBalanceReadError(true);
+        });
+    }
+    return () => {
+      payoutBalanceReadGenerationRef.current += 1;
+      payoutAccountGenerationRef.current += 1;
+    };
   }, [previewMode, performerProfile?.performer_id]);
 
   const testModePlatformBalanceReady = testModePlatformBalanceEnabled
@@ -2144,12 +2160,18 @@ export default function TalentDashboard({
   };
 
   const refreshPayoutBalance = async () => {
+    const generation = ++payoutBalanceReadGenerationRef.current;
     try {
-      setPayoutBalance(await readPerformerPayoutBalance());
+      const balance = await readPerformerPayoutBalance();
+      if (generation !== payoutBalanceReadGenerationRef.current) return false;
+      setPayoutBalance(balance);
       setPayoutBalanceIsCurrent(true);
+      setPayoutBalanceReadError(false);
       return true;
     } catch {
+      if (generation !== payoutBalanceReadGenerationRef.current) return false;
       setPayoutBalanceIsCurrent(false);
+      setPayoutBalanceReadError(true);
       return false;
     }
   };
@@ -2177,6 +2199,10 @@ export default function TalentDashboard({
     }
     setCashOutStatus('submitting');
     setCashOutMessage(null);
+    // A retry that began before this cash-out cannot restore its old balance
+    // while the new withdrawal is being reserved or after it completes.
+    payoutBalanceReadGenerationRef.current += 1;
+    const accountGeneration = payoutAccountGenerationRef.current;
     setPayoutBalanceIsCurrent(false);
     let outcomeStatus: 'success' | 'pending' | 'error' = 'error';
     let outcomeMessage = 'Cash-out could not be confirmed.';
@@ -2196,6 +2222,7 @@ export default function TalentDashboard({
         })
       });
       const data = await response.json().catch(() => null);
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
       if (!response.ok) {
         // Keep the same identity after timeouts, rate limits, or server/provider
         // uncertainty. A fresh key after an ambiguous submission can create a
@@ -2249,7 +2276,9 @@ export default function TalentDashboard({
     } catch (error) {
       outcomeMessage = error instanceof Error ? error.message : 'Cash-out could not be reserved.';
     } finally {
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
       const balanceRefreshed = await refreshPayoutBalance();
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
       if (balanceRefreshed && confirmedStatus === 'failed') outcomeMessage += ' Your available balance has been refreshed.';
       if (balanceRefreshed && confirmedStatus === 'returned') outcomeMessage += ' Your balance has been refreshed, including any retained PayPal fee.';
       setCashOutStatus(outcomeStatus);
@@ -3473,7 +3502,7 @@ export default function TalentDashboard({
                   {cashOutMessage ? <p role="status" className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : cashOutStatus === 'pending' ? 'text-amber-200' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
                   {!payoutBalanceIsCurrent && cashOutStatus !== 'submitting' ? (
                     <div className="mt-2 text-[10px] text-amber-200">
-                      <p>Latest balance is unavailable. Refresh it before another cash-out.</p>
+                      <p>Latest balance is unavailable. Refresh it before cashing out.</p>
                       <button type="button" onClick={() => { void refreshPayoutBalance(); }} className="mt-2 min-h-9 rounded-lg border border-white/20 px-3 py-2 font-black text-white">Refresh balance</button>
                     </div>
                   ) : null}
@@ -3488,6 +3517,11 @@ export default function TalentDashboard({
                             : 'Cash-out remains locked until PayPal activates Sway Payouts and the matching release switch is enabled.'}
                     </p>
                   ) : null}
+                </div>
+              ) : payoutBalanceReadError ? (
+                <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4" data-sway-cash-out="true">
+                  <p role="status" className="text-[10px] text-amber-200">Latest balance is unavailable. Refresh it before cashing out.</p>
+                  <button type="button" onClick={() => { void refreshPayoutBalance(); }} className="mt-2 min-h-9 rounded-lg border border-white/20 px-3 py-2 text-[10px] font-black text-white">Refresh balance</button>
                 </div>
               ) : null}
               {hasAvailablePayoutDestination

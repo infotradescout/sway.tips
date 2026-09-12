@@ -678,7 +678,12 @@ try {
     assert.equal(balance.availableCents, 1_500, `${channel}: failed withdrawal must restore the full balance`);
     assert.equal(balance.reservedCents, 0);
     const audits = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.entityId, toAuditEntityUuid(withdrawal.id)));
-    assert.equal(audits.filter((event) => event.nextStatus === 'failed').length, 1, 'denial must have one durable transition audit');
+    const denialAudits = audits.filter((event) => event.nextStatus === 'failed');
+    assert.equal(denialAudits.length, 1, 'denial must have one durable transition audit');
+    const denialAudit = denialAudits[0].metadata as Record<string, unknown>;
+    assert.equal(denialAudit.performerDebitedFeeCents, 0, `${channel}: failed-withdrawal audit must match the ledger's zero fee debit`);
+    assert.equal(denialAudit.quotedProviderFeeCents, 25, 'the original quote remains audit evidence without becoming a debit');
+    assert.equal(denialAudit.actualProviderFeeCents, null, 'batch-only denial must not invent a provider fee');
     const replay = await batchService.requestWithdrawal(request);
     assert.ok(replay.kind === 'replay');
     assert.equal(replay.withdrawal.id, withdrawal.id);
@@ -701,8 +706,13 @@ try {
   for (const terminalStatus of ['paid', 'returned'] as const) {
     // These are existing durable terminal states, including the paid record's
     // provider IDs and fee evidence; a batch notification cannot undo them.
-    await db.update(schema.performerWithdrawals).set({ status: terminalStatus })
-      .where(eq(schema.performerWithdrawals.id, first.withdrawal.id));
+    providerStatus = terminalStatus === 'paid' ? 'SUCCESS' : 'RETURNED';
+    const terminalItemEvent = {
+      providerEventId: `WH-TERMINAL-ITEM-${terminalStatus}`,
+      eventType: terminalStatus === 'paid' ? 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED' : 'PAYMENT.PAYOUTS-ITEM.RETURNED',
+      resource: { payout_batch_id: firstPayoutId }
+    };
+    await service.ingestWebhook({ event: terminalItemEvent, rawBody: JSON.stringify(terminalItemEvent), paymentMode: 'test' });
     const [beforeTerminal] = await db.select().from(schema.performerWithdrawals)
       .where(eq(schema.performerWithdrawals.id, first.withdrawal.id));
     const lateEvent = {

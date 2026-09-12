@@ -282,7 +282,7 @@ export function createPerformerWithdrawalService(input: {
             quotedProviderFeeCents: withdrawal.providerFeeCents,
             actualProviderFeeCents,
             providerFeeVarianceCents,
-            performerDebitedFeeCents: actualProviderFeeCents === null
+            performerDebitedFeeCents: nextStatus === 'failed' ? 0 : actualProviderFeeCents === null
               ? withdrawal.providerFeeCents
               : Math.min(actualProviderFeeCents, withdrawal.providerFeeCents),
             futureWithdrawalsHeldForPositiveVariance: Boolean(
