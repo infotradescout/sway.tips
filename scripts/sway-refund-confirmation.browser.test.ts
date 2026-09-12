@@ -55,7 +55,9 @@ async function main() {
 
     const page = await context.newPage();
     page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
-    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-refund-confirmation.html`, { waitUntil: 'networkidle' });
+    // Allow a bounded cold development-server start without relaxing any
+    // focus, duplicate-submission or refund-confirmation assertion below.
+    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-refund-confirmation.html`, { waitUntil: 'networkidle', timeout: 90000 });
 
     const trigger = page.getByRole('button', { name: 'Remove Shoutout and reverse payment' }).filter({ visible: true });
     await trigger.waitFor({ state: 'visible' });
