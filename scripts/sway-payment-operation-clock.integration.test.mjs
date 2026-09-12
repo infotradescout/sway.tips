@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createLiveRoomPaymentOperationStore } from '../src/server/live-room-payment-operation-store.ts';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
@@ -22,23 +22,38 @@ async function withClockOffset(offsetMs, action) {
 const proof = await startEmbeddedPostgresProof('payment_operation_clock');
 const store = createLiveRoomPaymentOperationStore(proof.databaseUrl, 'test');
 const ownerId = randomUUID(), performerId = randomUUID(), gigId = randomUUID();
+const requestIds = new Map();
 const outcomes = [];
 async function check(name, action) {
   try { await action(); outcomes.push({ name, passed: true }); }
-  catch (error) { outcomes.push({ name, passed: false, error: String(error.stack || error) }); }
+  catch (error) { outcomes.push({ name, passed: false, error: String(error.cause?.message || error.message || error) }); }
   console.log('PAYMENT_CLOCK_CASE ' + JSON.stringify(outcomes.at(-1)));
 }
 async function fixture(type = 'capture', existingPaymentId) {
   const paymentId = existingPaymentId || randomUUID();
-  if (!existingPaymentId) await proof.query(`
-    insert into payments (id, gig_id, performer_id, payment_status, processor,
-      amount_subtotal, platform_fee, amount_total, currency, payment_mode,
-      destination_account_id, idempotency_key)
-    values ($1, $2, $3, 'authorized', 'stripe', 500, 100, 600, 'USD',
-      'test', 'sway_test_platform_balance', $4)
-  `, [paymentId, gigId, performerId, 'clock-payment-' + randomUUID()]);
+  if (!existingPaymentId) {
+    const requestId = randomUUID();
+    const key = 'clock-payment-' + randomUUID();
+    const fingerprint = createHash('sha256').update(key).digest('hex');
+    await proof.query(`
+      insert into requests (id, gig_id, client_request_id, idempotency_key,
+        intent_fingerprint, patron_device_id_hash, status, request_type,
+        amount_cents, currency, runtime_request_state, activated_at)
+      values ($1, $2, $3, $3, $4, $4, 'payment_pending', 'song', 500, 'USD', '{}'::jsonb, null)
+    `, [requestId, gigId, key, fingerprint]);
+    await proof.query(`
+      insert into payments (id, gig_id, performer_id, request_id, action_type,
+        legacy_unlinked, payment_status, processor, amount_subtotal,
+        platform_fee, amount_total, currency, payment_mode,
+        destination_account_id, idempotency_key)
+      values ($1, $2, $3, $4, 'request', false, 'authorized', 'stripe',
+        500, 100, 600, 'USD', 'test', 'sway_test_platform_balance', $5)
+    `, [paymentId, gigId, performerId, requestId, key]);
+    requestIds.set(paymentId, requestId);
+  }
+  const requestId = requestIds.get(paymentId); assert(requestId);
   const operation = await store.enqueue({
-    paymentId, gigId, performerId, operationType: type, processor: 'stripe',
+    paymentId, gigId, performerId, requestId, operationType: type, processor: 'stripe',
     idempotencyKey: 'clock-operation-' + randomUUID(),
     destinationAccountId: 'sway_test_platform_balance', requestPayload: {}
   });
