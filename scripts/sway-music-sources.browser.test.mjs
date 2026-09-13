@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
-const out = 'tmp/music-sources-proof';
+const out = `tmp/music-sources-proof/${process.env.SWAY_REAL_POSTGRES_PROOF_DATABASE_URL?.trim() ? 'native' : 'embedded'}`;
 mkdirSync(out, { recursive: true });
 const report = { startedAt: new Date().toISOString(), checks: [], passed: false, providerCalls: 0, productionWrites: false };
 let proof, browser, child, baseUrl, serverTail = '', currentStage = 'initialization';
@@ -211,10 +211,12 @@ try {
     console.error('SWAY_SOURCE_BROWSER_PAGE ' + JSON.stringify(report.page));
   }
   if (!browser) console.error(serverTail.replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '[OWNED_DATABASE]').slice(-4000));
-  process.exitCode = 1;
 } finally {
   await browser?.close(); await stopServer(); await proof?.close();
   report.finishedAt = new Date().toISOString();
   writeFileSync(`${out}/results.json`, JSON.stringify(report, null, 2));
   console.log('SWAY_SOURCE_BROWSER_SUMMARY ' + JSON.stringify(report));
 }
+// PGlite's WASM shutdown can reset process.exitCode. Apply the final result
+// after all cleanup so a failed browser journey cannot pass its hard gate.
+if (!report.passed) process.exitCode = 1;

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 // One direct hard gate also exposed as npm run test:music-sources.
 for (const script of [
+  'scripts/sway-music-sources-failure-exit.test.mjs',
   'scripts/sway-music-list-import.test.mjs',
   'scripts/sway-music-file-import.test.mjs',
   'scripts/sway-library-source-count.behavior.test.ts',
