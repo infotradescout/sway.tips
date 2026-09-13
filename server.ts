@@ -97,9 +97,11 @@ import {
 } from "./src/server/performer-password-auth";
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
+import { prepareSpotifyPlaylistSource, SpotifyPlaylistSourceConflict } from "./src/server/spotify-playlist-store";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
 import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS, persistedPayoutFailureCode } from "./src/server/performer-withdrawal-service";
+import { createPerformerPayoutReconciliationTick } from "./src/server/performer-payout-worker";
 import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
 import {
   normalizePayoutDestinationKind,
@@ -161,6 +163,7 @@ import {
 } from "./src/server/audio-upload-transport";
 import { createAudioFilePairingService } from "./src/server/audio-file-pairing-service";
 import { createAudioFileCollaborationService } from "./src/server/audio-file-collaboration-service";
+import { sendPrivateAudioListeningResponse } from "./src/server/audio-listening-response";
 import { AUDIO_PUBLISHING_RUNTIME_CAPABILITIES } from "./src/server/audio-publishing-contract";
 import {
   createPerformerEventService,
@@ -2909,6 +2912,13 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   replaceExisting?: boolean;
   allowLocalPaths?: boolean;
 }) {
+  // All four callers run in a transaction. Serialize every source writer in
+  // performer -> source/track order, including Spotify's earlier source guard.
+  // A generic file import must not hold track locks while waiting on a source
+  // held by an importer that is itself waiting on those same tracks.
+  const [lockedPerformer] = await executor.select({ id: performers.id })
+    .from(performers).where(eq(performers.id, input.performerId)).for('update').limit(1);
+  if (!lockedPerformer) throw new Error('The performer account is no longer available.');
   const normalizedTracks = input.rawTracks
     .slice(0, 1000)
     .map((track) => {
@@ -10385,6 +10395,7 @@ app.get('/api/talent/library/sources', async (req, res) => {
       syncKeyPreview: performerLibrarySources.syncKeyPreview,
       connectionStatus: performerLibrarySources.connectionStatus,
       lastSyncedAt: performerLibrarySources.lastSyncedAt,
+      updatedAt: performerLibrarySources.updatedAt,
       trackCount: sql<number>`(
         select count(*)::int
         from ${performerLibraryTracks}
@@ -10395,7 +10406,7 @@ app.get('/api/talent/library/sources', async (req, res) => {
     .from(performerLibrarySources)
     .where(eq(performerLibrarySources.performerId, performerOwner.performerId));
 
-  return res.json({ sources });
+  return res.json({ performerId: performerOwner.performerId, sources });
 });
 
 app.get('/api/talent/library/tracks', async (req, res) => {
@@ -10469,6 +10480,7 @@ app.get('/api/talent/music/source-capabilities', async (req, res) => {
 });
 
 app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -10481,6 +10493,9 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can import Spotify playlist metadata.' });
   }
+  if (req.body?.performerId !== performerOwner.performerId) {
+    return res.status(409).json({ error: 'Your performer account changed. Refresh Sources before importing.' });
+  }
 
   const playlistUrl = normalizeLibraryText(req.body?.playlistUrl, 512);
   if (!playlistUrl) {
@@ -10490,14 +10505,18 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   const imported = await importSpotifyPlaylist({
     playlistUrl,
     env: process.env,
-    limit: 100
+    limit: 1000
   });
 
-  if (!imported.configured) {
-    return res.status(503).json({ error: 'Spotify metadata import is not configured for this Sway environment.' });
-  }
-  if (!imported.playlistId) {
-    return res.status(422).json({ error: 'Enter a valid Spotify playlist URL, URI, or ID.' });
+  if (imported.status !== 'ready') {
+    const status = imported.status === 'rate_limited' ? 429
+      : ['invalid_playlist', 'no_importable_tracks', 'too_large'].includes(imported.status) ? 422
+        : imported.status === 'not_found' ? 404 : 503;
+    if (imported.retryAfterSeconds) res.setHeader('Retry-After', String(imported.retryAfterSeconds));
+    return res.status(status).json({
+      error: imported.error || 'Spotify could not provide the complete playlist. Your saved source was not changed.',
+      providerStatus: imported.status
+    });
   }
   if (!imported.tracks.length) {
     return res.status(422).json({ error: 'Sway could not import tracks from that Spotify playlist. Confirm the playlist is accessible to the configured Spotify app.' });
@@ -10505,64 +10524,47 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
 
   const sourceKey = `spotify-${imported.playlistId}`;
   const sourceLabel = imported.playlistName ? `Spotify: ${imported.playlistName}` : 'Spotify playlist';
-  const result = await businessDb.transaction(async (tx) => {
-    const upserted = await upsertPerformerLibraryTrackBatch(tx, {
-      performerId: performerOwner.performerId,
-      sourceKey,
-      sourceLabel,
-      rawTracks: imported.tracks.map((track) => ({
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? '',
-        artworkUrl: track.albumArt ?? '',
-        externalTrackId: track.externalTrackId,
-        metadata: {
-          sourceProvider: 'spotify',
-          spotifyUri: track.spotifyUri,
-          spotifyUrl: track.spotifyUrl,
-          playlistId: imported.playlistId
-        }
-      })),
-      replaceExisting: true
-    });
-
-    await tx
-      .insert(performerLibrarySources)
-      .values({
+  let result: Awaited<ReturnType<typeof upsertPerformerLibraryTrackBatch>>;
+  try {
+    result = await businessDb.transaction(async (tx) => {
+      await prepareSpotifyPlaylistSource(tx, {
+        actorId: talentAccess.actor.actorId!,
+        performerId: performerOwner.performerId,
+        sourceKey, sourceLabel,
+        expectedSource: req.body?.expectedSource,
+        generatedSyncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey())
+      });
+      return upsertPerformerLibraryTrackBatch(tx, {
         performerId: performerOwner.performerId,
         sourceKey,
         sourceLabel,
-        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
-        syncKeyPreview: 'spotify-import',
-        connectionStatus: 'active',
-        lastSyncedAt: new Date(),
-        metadata: {
-          sourceProvider: 'spotify',
-          playlistId: imported.playlistId,
-          importMode: 'metadata_only'
-        },
-        updatedAt: new Date()
-      })
-      .onConflictDoUpdate({
-        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
-        set: {
-          sourceLabel,
-          connectionStatus: 'active',
-          lastSyncedAt: new Date(),
+        rawTracks: imported.tracks.map((track) => ({
+          title: track.title,
+          artist: track.artist,
+          album: track.album ?? '',
+          artworkUrl: track.albumArt ?? '',
+          externalTrackId: track.externalTrackId,
           metadata: {
             sourceProvider: 'spotify',
-            playlistId: imported.playlistId,
-            importMode: 'metadata_only'
-          },
-          updatedAt: new Date()
-        }
+            spotifyUri: track.spotifyUri,
+            spotifyUrl: track.spotifyUrl,
+            playlistId: imported.playlistId
+          }
+        })),
+        replaceExisting: true
       });
-
-    return upserted;
-  });
+    });
+  } catch (error) {
+    if (error instanceof SpotifyPlaylistSourceConflict) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    console.error('[sway.sources] Spotify import persistence could not be confirmed.');
+    return res.status(503).json({ error: 'The saved import could not be confirmed. Refresh Sources before retrying this playlist.' });
+  }
 
   return res.status(202).json({
     success: true,
+    performerId: performerOwner.performerId,
     sourceKey,
     sourceLabel,
     playlistId: imported.playlistId,
@@ -11616,6 +11618,15 @@ app.get('/api/talent/audio/file-grants/:grantId/download', async (req, res) => {
       : 403;
     return res.status(status).json({ error: error instanceof Error ? error.message : 'File download denied.' });
   }
+});
+
+app.get('/api/talent/audio/file-grants/:grantId/listen', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireFileCollaborationRuntime(res) || !audioFileCollaborationService) return;
+  await sendPrivateAudioListeningResponse(req, res, audioFileCollaborationService, accountAccess.actor.actorId);
 });
 
 app.get('/api/talent/audio/file-grants/:grantId/reviews', async (req, res) => {
@@ -15993,6 +16004,15 @@ app.post("/api/music/search", (req, res) => {
 
     if (searchScope === 'catalog') {
       const catalog = await searchCatalog({ query, env: process.env });
+      if (catalog.configured && catalog.status !== 'ready') {
+        if (catalog.retryAfterSeconds) res.setHeader('Retry-After', String(catalog.retryAfterSeconds));
+        return res.status(catalog.status === 'rate_limited' ? 429 : 503).json({
+          error: 'Song search is temporarily unavailable. You can still submit a manual song request.',
+          providerStatus: catalog.status,
+          results: manualResults,
+          integrationMode: 'catalog_unavailable'
+        });
+      }
       if (catalog.configured) {
         return res.json({
           results: catalog.results.map((track) => ({
@@ -16195,22 +16215,17 @@ function startPerformerPayoutWorker() {
   const executionEnabled = paypalPayoutsProvider?.mode === 'test'
     ? paypalTestExecutionEnabled
     : paypalLiveExecutionEnabled;
-  if (!performerWithdrawalService || !executionEnabled) return;
-  let running = false;
-  const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      await performerWithdrawalService.reconcilePending(25);
-    } catch (error) {
+  if (!performerWithdrawalService) return;
+  const tick = createPerformerPayoutReconciliationTick({
+    service: performerWithdrawalService,
+    executionEnabled,
+    onError(error) {
       console.error(
         '[sway.payouts] PayPal reconciliation iteration failed:',
-        error instanceof Error ? error.message : error
+        persistedPayoutFailureCode(error, 'paypal_payout_reconciliation_failed')
       );
-    } finally {
-      running = false;
     }
-  };
+  });
   void tick();
   const timer = setInterval(() => void tick(), 30_000);
   timer.unref();

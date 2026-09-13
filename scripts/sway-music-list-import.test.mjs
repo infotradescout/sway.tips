@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { parseAdditionalMusicList as parse } from '../src/music-list-import.ts';
+import { parseDjLibraryText, parseDjLibraryFile } from '../src/dj-library-file-parser.ts';
+let cases=0;
+function check(name,fn){fn();cases++;console.log('PASS '+name);}
+check('Apple library scalar metadata, entities and millisecond duration',()=>{
+ const r=parse('Library.xml','<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist><dict><key>Tracks</key><dict><key>42</key><dict><key>Name</key><string>Original &amp; Live</string><key>Artist</key><string>Artist</string><key>Total Time</key><integer>180000</integer><key>Location</key><string>file:///Users/private/name.mp3</string></dict></dict><key>Playlists</key><array><dict><key>Name</key><string>Do not import playlist as a song</string></dict></array></dict></plist>');
+ assert.equal(r.format,'apple_music_xml');assert.equal(r.tracks.length,1);assert.equal(r.tracks[0].title,'Original & Live');assert.equal(r.tracks[0].metadata.durationSeconds,180);assert(!JSON.stringify(r).includes('/Users/'));
+});
+check('Apple incomplete dictionary rejected',()=>assert.throws(()=>parse('a.xml','<plist><key>Tracks</key><dict><key>1</key><dict><key>Name</key><string>A</string></dict>'),/incomplete/));
+check('Serato history CSV accepts song column',()=>{const r=parse('Serato.csv','song,artist,start time\nExample,Performer,12:01');assert.equal(r.tracks[0].title,'Example');assert.equal(r.tracks[0].artist,'Performer');});
+check('Common transferred playlist headers',()=>{const r=parse('Playlist.csv','Track Name,Artist Name(s),Album Name,Duration (ms)\nOne,A & B,Album,123000');assert.equal(r.tracks[0].metadata.durationSeconds,123);assert.equal(r.tracks[0].artist,'A & B');});
+check('Quoted comma/newline and escaped quote',()=>{const r=parse('p.csv','Title,Artist\r\n"One, two\nthree","A ""B"""');assert.equal(r.tracks[0].title,'One, two\nthree');assert.equal(r.tracks[0].artist,'A "B"');});
+check('Semicolon-delimited CSV',()=>assert.equal(parse('p.csv','Title;Artist\nOne;Two').tracks[0].artist,'Two'));
+check('TSV playlist',()=>assert.equal(parse('p.tsv','Name\tArtist\nOne\tTwo').tracks[0].title,'One'));
+check('Apple/Serato tabbed text',()=>assert.equal(parse('p.txt','Name\tArtist\nOne\tTwo').tracks[0].artist,'Two'));
+check('BOM removed',()=>assert.equal(parse('p.csv','\uFEFFTitle,Artist\nOne,Two').tracks[0].title,'One'));
+check('Plain performer setlist',()=>{const r=parse('set.txt','Band - First song\nOriginal second song');assert.equal(r.tracks[0].artist,'Band');assert.equal(r.tracks[1].title,'Original second song');});
+check('CR-only list',()=>assert.equal(parse('p.txt','First\rSecond').tracks.length,2));
+check('PLS indexed order, duration, path privacy',()=>{const r=parse('p.pls','[playlist]\nFile2=C:\\private\\Second.mp3\nTitle2=Band - Second\nLength2=60\nTitle1=Band - First\nFile1=C:\\private\\First.mp3');assert.equal(r.tracks[0].title,'First');assert.equal(r.tracks[1].metadata.durationSeconds,60);assert(!JSON.stringify(r).includes('private'));});
+check('XSPF song metadata',()=>{const r=parse('p.xspf','<playlist xmlns="http://xspf.org/ns/0/"><trackList><track><title>One &amp; Two</title><creator>A</creator><duration>90000</duration><location>file:///private/one.mp3</location></track></trackList></playlist>');assert.equal(r.tracks[0].title,'One & Two');assert.equal(r.tracks[0].metadata.durationSeconds,90);assert(!JSON.stringify(r).includes('/private'));});
+check('Exactly 1000 is not truncated',()=>assert.equal(parse('p.txt',Array.from({length:1000},(_,i)=>`Song ${i}`).join('\n')).truncated,false));
+check('1001 is explicitly truncated',()=>{const r=parse('p.txt',Array.from({length:1001},(_,i)=>`Song ${i}`).join('\n'));assert.equal(r.tracks.length,1000);assert.equal(r.truncated,true);});
+check('Unknown formats left to existing parsers',()=>assert.equal(parse('p.nml','<NML></NML>'),null));
+check('Unclosed quote rejected',()=>assert.throws(()=>parse('p.csv','Title,Artist\n"One,A'),/unclosed/));
+check('Missing title header rejected',()=>assert.throws(()=>parse('p.csv','URL,Artist\nhttps://example.test,A'),/Title/));
+check('Entity declarations rejected without network',()=>assert.throws(()=>parse('a.xml','<!ENTITY x SYSTEM "file:///etc/passwd"><plist>'),/entity/));
+check('HTML renamed as text rejected',()=>assert.throws(()=>parse('p.txt','<html>Example</html>'),/HTML/));
+check('Remote link not falsely imported as song',()=>assert.throws(()=>parse('p.txt','https://example.test/playlist'),/song titles/));
+check('Stable track IDs',()=>assert.equal(parse('p.csv','Title,Artist\nOne,A').tracks[0].externalTrackId,parse('p.csv','Title,Artist\nOne,A').tracks[0].externalTrackId));
+check('Empty list rejected',()=>assert.throws(()=>parse('p.txt','\n'),/No song/));
+check('Existing M3U entry retained',()=>assert.equal(parseDjLibraryText('legacy.m3u','#EXTM3U\n#EXTINF:60,Band - Example\nC:\\private\\example.mp3').tracks[0].title,'Example'));
+check('Public parser reaches Apple import',()=>assert.equal(parseDjLibraryText('a.xml','<plist><dict><key>Tracks</key><dict><key>1</key><dict><key>Name</key><string>One</string></dict></dict></dict></plist>').format,'apple_music_xml'));
+const utf16 = Buffer.concat([Buffer.from([0xff,0xfe]),Buffer.from('Name\tArtist\r\nOne\tTwo','utf16le')]);
+const imported = await parseDjLibraryFile(new File([utf16],'apple.txt'));
+assert.equal(imported.tracks[0].artist,'Two');cases++;console.log('PASS UTF-16 uploaded Apple text');
+console.log(JSON.stringify({passed:cases,failed:0,scope:'source export parser tests; no provider requests or production writes'}));

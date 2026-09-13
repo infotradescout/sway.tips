@@ -54,7 +54,9 @@ import PerformerAudioFiles from './PerformerAudioFiles';
 import PerformerFilePairing from './PerformerFilePairing';
 import PerformerReleaseDrafts from './PerformerReleaseDrafts';
 import PerformerPlaybackController from './PerformerPlaybackController';
-import { parseDjLibraryFile } from '../dj-library-file-parser';
+import PerformerSourceImportChoices from './PerformerSourceImportChoices';
+import { importMusicFile } from '../music-file-import';
+import { importSpotifyPlaylistFromBrowser } from '../spotify-playlist-import';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
@@ -831,13 +833,13 @@ function RequestLibraryWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-black text-white">Import your DJ library export</p>
-            <p className="mt-1 text-xs text-slate-400">rekordbox XML · Traktor NML · VirtualDJ XML · M3U · CSV</p>
+            <p className="mt-1 text-xs text-slate-400">Apple Music XML · rekordbox XML · Traktor NML · VirtualDJ XML · M3U · PLS · XSPF · CSV · TSV · TXT</p>
           </div>
           <label className={`inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-cyan-500 px-4 text-xs font-black uppercase text-slate-950 ${djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
             {djLibraryImportStatus === 'submitting' ? 'Importing…' : 'Choose export'}
             <input
               type="file"
-              accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl"
+              accept=".xml,.nml,.m3u,.m3u8,.pls,.xspf,.csv,.tsv,.txt,text/xml,text/csv,audio/x-mpegurl"
               className="sr-only"
               disabled={djLibraryImportStatus === 'submitting'}
               onChange={onDjLibraryFileImport}
@@ -1296,6 +1298,7 @@ function PerformerConnectionsWorkspace({
   const reusableSources = linkedSources.filter((source) => source.connectionStatus !== 'revoked');
   const reusableSourceTrackCount = reusableSources.reduce((sum, source) => sum + (Number(source.trackCount) || 0), 0);
   const retainedExternalTrackCount = Math.max(0, externalTrackCount - reusableSourceTrackCount);
+  const savedMusicCount = catalogTrackCount + Math.max(externalTrackCount, reusableSourceTrackCount);
   const statusLoading = linkedSourcesStatus === 'loading' || requestLibraryStatus === 'loading';
   const statusError = linkedSourcesStatus === 'error' || requestLibraryStatus === 'error';
   const canClaimEmpty = !statusLoading && !statusError;
@@ -1313,7 +1316,7 @@ function PerformerConnectionsWorkspace({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-black text-white">Saved for every room</h3>
             <span className={`text-xs font-black ${statusError ? 'text-amber-300' : statusLoading ? 'text-slate-400' : 'text-emerald-300'}`}>
-              {statusLoading ? 'Checking…' : statusError ? 'Check needed' : `${catalogTrackCount + externalTrackCount} ${catalogTrackCount + externalTrackCount === 1 ? 'track' : 'tracks'}`}
+              {statusLoading ? 'Checking…' : statusError ? 'Check needed' : `${savedMusicCount} ${savedMusicCount === 1 ? 'track' : 'tracks'}`}
             </span>
           </div>
           {statusLoading ? (
@@ -1334,7 +1337,7 @@ function PerformerConnectionsWorkspace({
                     <p className="truncate text-sm font-black text-white">{source.sourceLabel}</p>
                     <p className="mt-1 text-xs text-slate-400">{source.trackCount} {source.trackCount === 1 ? 'track' : 'tracks'}{source.lastSyncedAt ? ` · updated ${new Date(source.lastSyncedAt).toLocaleDateString()}` : ''}</p>
                   </div>
-                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="Connected" />
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label={source.syncKeyPreview === 'file-import' ? 'Saved import' : 'Connected'} />
                 </div>
               ))}
               {catalogTrackCount > 0 ? (
@@ -1380,48 +1383,64 @@ function PerformerConnectionsWorkspace({
           ) : canClaimEmpty ? (
             <div className="mt-3 rounded-xl border border-dashed border-white/15 bg-slate-950 px-4 py-5 text-center">
               <p className="text-sm font-black text-white">No music added yet</p>
-              <p className="mt-1 text-xs text-slate-400">Start with the DJ library button below.</p>
+              <p className="mt-1 text-xs text-slate-400">Choose a music service, library, or song list below.</p>
             </div>
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Add music</p>
-          <h3 className="mt-1 text-base font-black text-white">Choose where your music is now</h3>
-
-          <label className={`mt-4 flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl bg-cyan-500 px-4 text-left text-slate-950 ${previewMode || djLibraryImportStatus === 'submitting' ? 'pointer-events-none opacity-50' : ''}`}>
-            <span>
-              <span className="block text-sm font-black">{djLibraryImportStatus === 'submitting' ? 'Adding your library…' : 'DJ software library'}</span>
-              <span className="mt-0.5 block text-[11px] font-semibold">rekordbox, Traktor, VirtualDJ, M3U, or CSV</span>
-            </span>
-            <Upload className="h-5 w-5 shrink-0" />
-            <input type="file" accept=".xml,.nml,.m3u,.m3u8,.csv,text/xml,text/csv,audio/x-mpegurl" className="sr-only" disabled={previewMode || djLibraryImportStatus === 'submitting'} onChange={onDjLibraryFileImport} />
-          </label>
-          {djLibraryImportMessage ? <p className={`mt-2 text-xs ${djLibraryImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{djLibraryImportMessage}</p> : null}
-
-          <details className="group mt-3 rounded-xl border border-white/10 bg-slate-900 p-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-white">
-              Spotify playlist
-              <span className="text-xs text-cyan-200"><span className="group-open:hidden">Add</span><span className="hidden group-open:inline">Close</span></span>
-            </summary>
-            <form className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onSpotifyPlaylistImport}>
-              <input type="text" value={spotifyPlaylistUrl} onChange={(event) => onSpotifyPlaylistUrlChange(event.target.value)} placeholder="Paste a Spotify playlist link" className="min-h-12 rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-white" />
-              <button type="submit" disabled={previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()} className="min-h-12 rounded-xl bg-emerald-400 px-4 text-sm font-black text-slate-950 disabled:opacity-50">{spotifyImportStatus === 'submitting' ? 'Adding…' : 'Add playlist'}</button>
-            </form>
-            <p className="mt-2 text-xs text-slate-500">The song list becomes requestable. Playback still opens in Spotify.</p>
-            {spotifyImportMessage ? <p className={`mt-2 text-xs ${spotifyImportStatus === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}>{spotifyImportMessage}</p> : null}
-          </details>
-
-          <button type="button" onClick={onOpenCatalog} className="mt-3 min-h-12 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-left text-sm font-black text-white">
-            Music uploaded to Sway
-            <span className="mt-1 block text-[11px] font-normal text-slate-400">Open your files and choose which tracks people may request.</span>
-          </button>
-        </section>
+        <PerformerSourceImportChoices
+          spotifyPlaylistUrl={spotifyPlaylistUrl}
+          spotifyImportStatus={spotifyImportStatus}
+          spotifyImportMessage={spotifyImportMessage}
+          djLibraryImportStatus={djLibraryImportStatus}
+          djLibraryImportMessage={djLibraryImportMessage}
+          previewMode={previewMode}
+          onSpotifyPlaylistUrlChange={onSpotifyPlaylistUrlChange}
+          onSpotifyPlaylistImport={onSpotifyPlaylistImport}
+          onDjLibraryFileImport={onDjLibraryFileImport}
+          onOpenCatalog={onOpenCatalog}
+        />
 
         <button type="button" onClick={onOpenAdvanced} className="min-h-11 w-full text-sm font-bold text-slate-400 underline decoration-white/20 underline-offset-4">Advanced: reusable booth computer helper</button>
       </div>
     </section>
   );
+}
+
+type PerformerPayoutBalance = {
+  pendingCents: number;
+  availableCents: number;
+  reservedCents: number;
+  deficitCents: number;
+  minimumWithdrawalCents: number;
+  providerFeeCents: number;
+  payoutMarkupCents: number;
+  withdrawalsEnabled: boolean;
+  withdrawalRestriction?: 'email_verification_required' | 'account_restricted' | 'identity_verification_required' | null;
+};
+
+async function readPerformerPayoutBalance(): Promise<PerformerPayoutBalance> {
+  const response = await fetch('/api/talent/payouts/balance', { cache: 'no-store' });
+  const data = await response.json().catch(() => null);
+  const amountFields = ['pendingCents', 'availableCents', 'reservedCents', 'deficitCents', 'minimumWithdrawalCents', 'providerFeeCents', 'payoutMarkupCents'];
+  if (!response.ok || !amountFields.every((field) => Number.isSafeInteger(data?.[field]) && data[field] >= 0)) {
+    throw new Error('The latest cash-out balance is unavailable.');
+  }
+  return {
+    pendingCents: data.pendingCents,
+    availableCents: data.availableCents,
+    reservedCents: data.reservedCents,
+    deficitCents: data.deficitCents,
+    minimumWithdrawalCents: data.minimumWithdrawalCents,
+    providerFeeCents: data.providerFeeCents,
+    payoutMarkupCents: data.payoutMarkupCents,
+    withdrawalsEnabled: data.withdrawalsEnabled === true,
+    withdrawalRestriction: data?.withdrawalRestriction === 'email_verification_required'
+      || data.withdrawalRestriction === 'account_restricted'
+      || data.withdrawalRestriction === 'identity_verification_required'
+      ? data.withdrawalRestriction
+      : null
+  };
 }
 
 export default function TalentDashboard({
@@ -1471,18 +1490,12 @@ export default function TalentDashboard({
   const [payoutDestinationCapabilities, setPayoutDestinationCapabilities] = useState<PayoutDestinationCapabilities>(() => ({
     ...NO_PAYOUT_DESTINATION_CAPABILITIES
   }));
-  const [payoutBalance, setPayoutBalance] = useState<{
-    pendingCents: number;
-    availableCents: number;
-    reservedCents: number;
-    deficitCents: number;
-    minimumWithdrawalCents: number;
-    providerFeeCents: number;
-    payoutMarkupCents: number;
-    withdrawalsEnabled: boolean;
-    withdrawalRestriction?: 'email_verification_required' | 'account_restricted' | 'identity_verification_required' | null;
-  } | null>(null);
-  const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [payoutBalance, setPayoutBalance] = useState<PerformerPayoutBalance | null>(null);
+  const [payoutBalanceIsCurrent, setPayoutBalanceIsCurrent] = useState(false);
+  const [payoutBalanceReadError, setPayoutBalanceReadError] = useState(false);
+  const payoutBalanceReadGenerationRef = useRef(0);
+  const payoutAccountGenerationRef = useRef(0);
+  const [cashOutStatus, setCashOutStatus] = useState<'idle' | 'submitting' | 'success' | 'pending' | 'error'>('idle');
   const [cashOutMessage, setCashOutMessage] = useState<string | null>(null);
   const cashOutIdempotencyKeyRef = useRef<string | null>(null);
   const savedPayoutDestinationKind = normalizePayoutDestinationKind(performerProfile?.payout_destination_kind);
@@ -1551,30 +1564,29 @@ export default function TalentDashboard({
   }, [previewMode]);
 
   useEffect(() => {
-    if (previewMode || !performerProfile?.performer_id) return;
-    let cancelled = false;
-    void fetch('/api/talent/payouts/balance', { cache: 'no-store' })
-      .then(async (response) => ({ response, data: await response.json().catch(() => null) }))
-      .then(({ response, data }) => {
-        if (cancelled || !response.ok) return;
-        setPayoutBalance({
-          pendingCents: Number(data?.pendingCents ?? 0),
-          availableCents: Number(data?.availableCents ?? 0),
-          reservedCents: Number(data?.reservedCents ?? 0),
-          deficitCents: Number(data?.deficitCents ?? 0),
-          minimumWithdrawalCents: Number(data?.minimumWithdrawalCents ?? 1000),
-          providerFeeCents: Number(data?.providerFeeCents ?? 25),
-          payoutMarkupCents: Number(data?.payoutMarkupCents ?? 0),
-          withdrawalsEnabled: data?.withdrawalsEnabled === true,
-          withdrawalRestriction: data?.withdrawalRestriction === 'email_verification_required'
-            || data?.withdrawalRestriction === 'account_restricted'
-            || data?.withdrawalRestriction === 'identity_verification_required'
-            ? data.withdrawalRestriction
-            : null
+    const generation = ++payoutBalanceReadGenerationRef.current;
+    payoutAccountGenerationRef.current += 1;
+    setPayoutBalance(null);
+    setPayoutBalanceIsCurrent(false);
+    setPayoutBalanceReadError(false);
+    setCashOutStatus('idle');
+    setCashOutMessage(null);
+    cashOutIdempotencyKeyRef.current = null;
+    if (!previewMode && performerProfile?.performer_id) {
+      void readPerformerPayoutBalance()
+        .then((balance) => {
+          if (generation !== payoutBalanceReadGenerationRef.current) return;
+          setPayoutBalance(balance);
+          setPayoutBalanceIsCurrent(true);
+        })
+        .catch(() => {
+          if (generation === payoutBalanceReadGenerationRef.current) setPayoutBalanceReadError(true);
         });
-      })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
+    }
+    return () => {
+      payoutBalanceReadGenerationRef.current += 1;
+      payoutAccountGenerationRef.current += 1;
+    };
   }, [previewMode, performerProfile?.performer_id]);
 
   const testModePlatformBalanceReady = testModePlatformBalanceEnabled
@@ -1615,6 +1627,34 @@ export default function TalentDashboard({
   const [spotifyImportMessage, setSpotifyImportMessage] = useState<string | null>(null);
   const [djLibraryImportStatus, setDjLibraryImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [djLibraryImportMessage, setDjLibraryImportMessage] = useState<string | null>(null);
+  const musicFileImportRef = useRef<symbol | null>(null);
+  const spotifyImportRef = useRef<AbortController | null>(null);
+  const linkedSourcesReadRef = useRef(0);
+  const requestLibraryReadRef = useRef(0);
+  const musicCapabilityReadRef = useRef(0);
+  const musicFileImportOwnerRef = useRef(performerProfile?.performer_id);
+  musicFileImportOwnerRef.current = performerProfile?.performer_id;
+  useEffect(() => {
+    musicFileImportRef.current = null;
+    spotifyImportRef.current?.abort();
+    spotifyImportRef.current = null;
+    linkedSourcesReadRef.current += 1;
+    requestLibraryReadRef.current += 1;
+    musicCapabilityReadRef.current += 1;
+    setSpotifyImportStatus('idle');
+    setSpotifyImportMessage(null);
+    setSpotifyPlaylistUrl('');
+    setDjLibraryImportStatus('idle');
+    setDjLibraryImportMessage(null);
+    return () => {
+      musicFileImportRef.current = null;
+      spotifyImportRef.current?.abort();
+      spotifyImportRef.current = null;
+      linkedSourcesReadRef.current += 1;
+      requestLibraryReadRef.current += 1;
+      musicCapabilityReadRef.current += 1;
+    };
+  }, [previewMode, performerProfile?.performer_id]);
   const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [requestLibraryStatus, setRequestLibraryStatus] = useState<'loading' | 'ready' | 'error'>(previewMode ? 'ready' : 'loading');
@@ -1914,86 +1954,113 @@ export default function TalentDashboard({
   };
 
   const refreshLinkedSources = async () => {
+    const revision = ++linkedSourcesReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === linkedSourcesReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setLinkedSources([]);
       setLinkedSourcesStatus('ready');
       setLinkedSourcesError(null);
-      return;
+      return true;
     }
     setLinkedSourcesStatus('loading');
     try {
-      const response = await fetch('/api/talent/library/sources', { cache: 'no-store' });
+      const response = await fetch('/api/talent/library/sources', { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       const data = await response.json().catch(() => null);
+      if (!current()) return false;
       if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Could not check your saved sources.');
-      setLinkedSources(Array.isArray(data?.sources) ? data.sources : []);
+      if (!Array.isArray(data?.sources)) throw new Error('Your saved source list could not be confirmed.');
+      setLinkedSources(data.sources);
       setLinkedSourcesStatus('ready');
       setLinkedSourcesError(null);
+      return true;
     } catch (error) {
+      if (!current()) return false;
       console.warn('Unable to load linked library sources:', error);
       setLinkedSourcesStatus('error');
       setLinkedSourcesError(error instanceof Error ? error.message : 'Could not check your saved sources.');
+      return false;
     }
   };
 
   const refreshRequestLibrary = async () => {
+    const revision = ++requestLibraryReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === requestLibraryReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setCatalogLibraryTracks([]);
       setExternalLibraryTracks([]);
       setRequestLibraryStatus('ready');
       setRequestLibraryError(null);
-      return;
+      return true;
     }
     setRequestLibraryStatus('loading');
     try {
-      const response = await fetch('/api/talent/library/tracks', { cache: 'no-store' });
+      const response = await fetch('/api/talent/library/tracks', { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       const data = await response.json().catch(() => ({}));
+      if (!current()) return false;
       if (!response.ok) throw new Error(data?.error || 'Could not load your music.');
-      setCatalogLibraryTracks(Array.isArray(data?.catalog?.tracks) ? data.catalog.tracks : []);
-      setExternalLibraryTracks(Array.isArray(data?.external?.tracks) ? data.external.tracks : []);
+      if (!Array.isArray(data?.catalog?.tracks) || !Array.isArray(data?.external?.tracks)) throw new Error('Your saved music could not be confirmed.');
+      setCatalogLibraryTracks(data.catalog.tracks);
+      setExternalLibraryTracks(data.external.tracks);
       setRequestLibraryError(null);
       setRequestLibraryStatus('ready');
+      return true;
     } catch (error) {
+      if (!current()) return false;
       setRequestLibraryError(error instanceof Error ? error.message : 'Could not load your music.');
       setRequestLibraryStatus('error');
+      return false;
     }
   };
 
   useEffect(() => {
+    setLinkedSources([]);
+    setCatalogLibraryTracks([]);
+    setExternalLibraryTracks([]);
     void refreshLinkedSources();
     void refreshRequestLibrary();
-  }, [previewMode]);
+  }, [previewMode, performerProfile?.performer_id]);
 
   useEffect(() => {
     if (inactiveWorkspace === 'library') void refreshRequestLibrary();
   }, [inactiveWorkspace]);
 
   const refreshMusicSourceCapabilities = async () => {
+    const revision = ++musicCapabilityReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === musicCapabilityReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
       setMusicSourceCapabilityStatus('idle');
       setMusicSourceCapabilityError(null);
-      return;
+      return true;
     }
 
     setMusicSourceCapabilityStatus('loading');
     try {
-      const response = await fetch('/api/talent/music/source-capabilities');
+      const response = await fetch('/api/talent/music/source-capabilities', { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       if (!response.ok) throw new Error('Unable to load music source capabilities.');
       const data = await response.json().catch(() => null);
-      setMusicSourceCapabilities(Array.isArray(data?.providers) ? data.providers : DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+      if (!current()) return false;
+      if (!Array.isArray(data?.providers)) throw new Error('Source capabilities could not be confirmed.');
+      setMusicSourceCapabilities(data.providers);
       setMusicSourceCapabilityStatus('idle');
       setMusicSourceCapabilityError(null);
+      return true;
     } catch (error) {
+      if (!current()) return false;
       console.warn('Unable to load music source capabilities:', error);
       setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
       setMusicSourceCapabilityStatus('error');
       setMusicSourceCapabilityError('Using local source capability defaults until Sway can refresh provider status.');
+      return false;
     }
   };
 
   useEffect(() => {
     void refreshMusicSourceCapabilities();
-  }, [previewMode]);
+  }, [previewMode, performerProfile?.performer_id]);
 
   const linkedSourceCount = linkedSources.filter((source) => source.connectionStatus !== 'revoked').length;
   const linkedTrackCount = linkedSources
@@ -2014,62 +2081,48 @@ export default function TalentDashboard({
 
   const handleSpotifyPlaylistImport = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()) return;
-
-    setSpotifyImportStatus('submitting');
-    setSpotifyImportMessage(null);
+    if (previewMode || spotifyImportRef.current || !spotifyPlaylistUrl.trim()) return;
+    const controller = new AbortController();
+    const performerId = performerProfile?.performer_id;
+    spotifyImportRef.current = controller;
+    const current = () => spotifyImportRef.current === controller && musicFileImportOwnerRef.current === performerId;
     try {
-      const response = await fetch('/api/talent/music/spotify/import-playlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlistUrl: spotifyPlaylistUrl.trim() })
+      const saved = await importSpotifyPlaylistFromBrowser({
+        playlistUrl: spotifyPlaylistUrl, performerId, previewMode,
+        signal: controller.signal, isCurrent: current,
+        onStatus: setSpotifyImportStatus, onMessage: setSpotifyImportMessage,
+        onSaved: async () => {
+          const refreshed = await Promise.all([refreshLinkedSources(), refreshRequestLibrary(), refreshMusicSourceCapabilities()]);
+          return refreshed.every(Boolean);
+        }
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Spotify playlist import failed.');
-      }
-
-      setSpotifyImportStatus('success');
-      setSpotifyImportMessage(`Imported ${data?.importedCount ?? 0} Spotify metadata tracks into My Library.`);
-      setSpotifyPlaylistUrl('');
-      await refreshLinkedSources();
-      await refreshMusicSourceCapabilities();
-      await refreshRequestLibrary();
-    } catch (error) {
-      console.warn('Spotify playlist import failed:', error);
-      setSpotifyImportStatus('error');
-      setSpotifyImportMessage(error instanceof Error ? error.message : 'Spotify playlist import failed.');
+      if (saved && current()) setSpotifyPlaylistUrl('');
+    } finally {
+      if (spotifyImportRef.current === controller) spotifyImportRef.current = null;
     }
   };
 
   const handleDjLibraryFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file || previewMode || djLibraryImportStatus === 'submitting') return;
-    setDjLibraryImportStatus('submitting');
-    setDjLibraryImportMessage(null);
+    if (!input.files?.[0] || previewMode || musicFileImportRef.current) return;
+    const token = Symbol('music-file-import');
+    const performerId = performerProfile?.performer_id;
+    musicFileImportRef.current = token;
     try {
-      const parsed = await parseDjLibraryFile(file);
-      const response = await fetch('/api/talent/library/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sourceKey: parsed.sourceKey,
-          sourceLabel: parsed.sourceLabel,
-          tracks: parsed.tracks
-        })
+      await importMusicFile({
+        input,
+        previewMode,
+        performerId,
+        isCurrent: () => musicFileImportRef.current === token && musicFileImportOwnerRef.current === performerId,
+        onStatus: setDjLibraryImportStatus,
+        onMessage: setDjLibraryImportMessage,
+        onSaved: async () => {
+          await refreshLinkedSources();
+          await refreshRequestLibrary();
+        }
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'DJ library import failed.');
-      setDjLibraryImportStatus('success');
-      setDjLibraryImportMessage(`Added ${data?.importedCount ?? parsed.tracks.length} tracks from ${parsed.sourceLabel}${parsed.truncated ? ' (first 1,000)' : ''}. This source is ready in every room.`);
-      await refreshLinkedSources();
-      await refreshRequestLibrary();
-    } catch (error) {
-      setDjLibraryImportStatus('error');
-      setDjLibraryImportMessage(error instanceof Error ? error.message : 'DJ library import failed.');
     } finally {
-      input.value = '';
+      if (musicFileImportRef.current === token) musicFileImportRef.current = null;
     }
   };
 
@@ -2130,11 +2183,29 @@ export default function TalentDashboard({
     }
   };
 
+  const refreshPayoutBalance = async () => {
+    const generation = ++payoutBalanceReadGenerationRef.current;
+    try {
+      const balance = await readPerformerPayoutBalance();
+      if (generation !== payoutBalanceReadGenerationRef.current) return false;
+      setPayoutBalance(balance);
+      setPayoutBalanceIsCurrent(true);
+      setPayoutBalanceReadError(false);
+      return true;
+    } catch {
+      if (generation !== payoutBalanceReadGenerationRef.current) return false;
+      setPayoutBalanceIsCurrent(false);
+      setPayoutBalanceReadError(true);
+      return false;
+    }
+  };
+
   const handleCashOut = async () => {
     if (
       previewMode
       || cashOutStatus === 'submitting'
       || !payoutBalance
+      || !payoutBalanceIsCurrent
       || !savedRecipientDestinationKind
       || !savedRecipientPreview
       || !payoutBalance.withdrawalsEnabled
@@ -2152,6 +2223,14 @@ export default function TalentDashboard({
     }
     setCashOutStatus('submitting');
     setCashOutMessage(null);
+    // A retry that began before this cash-out cannot restore its old balance
+    // while the new withdrawal is being reserved or after it completes.
+    payoutBalanceReadGenerationRef.current += 1;
+    const accountGeneration = payoutAccountGenerationRef.current;
+    setPayoutBalanceIsCurrent(false);
+    let outcomeStatus: 'success' | 'pending' | 'error' = 'error';
+    let outcomeMessage = 'Cash-out could not be confirmed.';
+    let confirmedStatus: string | null = null;
     try {
       const idempotencyKey = cashOutIdempotencyKeyRef.current ?? `withdrawal:${crypto.randomUUID()}`;
       cashOutIdempotencyKeyRef.current = idempotencyKey;
@@ -2167,6 +2246,7 @@ export default function TalentDashboard({
         })
       });
       const data = await response.json().catch(() => null);
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
       if (!response.ok) {
         // Keep the same identity after timeouts, rate limits, or server/provider
         // uncertainty. A fresh key after an ambiguous submission can create a
@@ -2176,22 +2256,57 @@ export default function TalentDashboard({
         }
         throw new Error(typeof data?.error === 'string' ? data.error : 'Cash-out could not be reserved.');
       }
+      const withdrawal = data?.withdrawal;
+      if (
+        typeof withdrawal?.id !== 'string'
+        || !['requested', 'submitting', 'processing', 'paid', 'held', 'unclaimed', 'failed', 'returned'].includes(withdrawal?.status)
+        || !Number.isSafeInteger(withdrawal?.netAmountCents)
+        || withdrawal.netAmountCents < 0
+        || !Number.isSafeInteger(withdrawal?.providerFeeCents)
+        || withdrawal.providerFeeCents < 0
+      ) throw new Error('Cash-out status could not be confirmed. Check your balance before trying again.');
       cashOutIdempotencyKeyRef.current = null;
-      const grossAmountCents = Number(data?.withdrawal?.grossAmountCents ?? 0);
-      const providerFeeCents = Number(data?.withdrawal?.providerFeeCents ?? 0);
-      const netAmountCents = Number(data?.withdrawal?.netAmountCents ?? 0);
-      setPayoutBalance((current) => current ? {
-        ...current,
-        availableCents: Math.max(0, current.availableCents - grossAmountCents),
-        reservedCents: current.reservedCents + grossAmountCents
-      } : current);
-      setCashOutStatus('success');
-      setCashOutMessage(
-        `${(netAmountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} is ${data?.withdrawal?.status === 'paid' ? 'paid' : 'being sent'} after PayPal's ${(providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} payout fee. Sway added $0.`
-      );
+      confirmedStatus = withdrawal.status;
+      const formatAmount = (cents: number) => (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      const netAmount = formatAmount(withdrawal.netAmountCents);
+      outcomeStatus = 'pending';
+      switch (confirmedStatus) {
+        case 'paid': {
+          outcomeStatus = 'success';
+          const actualFee = withdrawal.actualProviderFeeCents;
+          const feeMessage = Number.isSafeInteger(actualFee) && actualFee >= 0
+            ? `PayPal reported a ${formatAmount(actualFee)} payout fee.`
+            : `PayPal's quoted payout fee was ${formatAmount(withdrawal.providerFeeCents)}; the final fee is awaiting confirmation.`;
+          outcomeMessage = `${netAmount} was paid. ${feeMessage} Sway added $0.`;
+          break;
+        }
+        case 'failed':
+          outcomeStatus = 'error';
+          outcomeMessage = 'Cash-out failed. No payout was completed.';
+          break;
+        case 'returned':
+          outcomeStatus = 'error';
+          outcomeMessage = 'Cash-out was returned.';
+          break;
+        case 'held':
+          outcomeMessage = `${netAmount} cash-out is on hold for review. Payment is not confirmed; the amount remains reserved.`;
+          break;
+        case 'unclaimed':
+          outcomeMessage = `${netAmount} cash-out is unclaimed. Check the recipient account for PayPal or Venmo claim instructions. The amount remains reserved.`;
+          break;
+        default:
+          outcomeMessage = `${netAmount} cash-out is processing. Payment is not confirmed yet.`;
+      }
     } catch (error) {
-      setCashOutStatus('error');
-      setCashOutMessage(error instanceof Error ? error.message : 'Cash-out could not be reserved.');
+      outcomeMessage = error instanceof Error ? error.message : 'Cash-out could not be reserved.';
+    } finally {
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
+      const balanceRefreshed = await refreshPayoutBalance();
+      if (accountGeneration !== payoutAccountGenerationRef.current) return;
+      if (balanceRefreshed && confirmedStatus === 'failed') outcomeMessage += ' Your available balance has been refreshed.';
+      if (balanceRefreshed && confirmedStatus === 'returned') outcomeMessage += ' Your balance has been refreshed, including any retained PayPal fee.';
+      setCashOutStatus(outcomeStatus);
+      setCashOutMessage(outcomeMessage);
     }
   };
 
@@ -3374,19 +3489,19 @@ export default function TalentDashboard({
               {payoutBalance ? (
                 <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4" data-sway-cash-out="true">
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Available</span><span className="text-lg font-black text-white">{(payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
-                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Pending</span><span className="text-lg font-black text-white">{(payoutBalance.pendingCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
+                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Available</span><span className="text-lg font-black text-white">{payoutBalanceIsCurrent ? (payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : cashOutStatus === 'submitting' ? 'Checking…' : 'Unavailable'}</span></div>
+                    <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Pending</span><span className="text-lg font-black text-white">{payoutBalanceIsCurrent ? (payoutBalance.pendingCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : cashOutStatus === 'submitting' ? 'Checking…' : 'Unavailable'}</span></div>
                     <div><span className="block text-[9px] font-black uppercase tracking-widest text-slate-500">Cash-out minimum</span><span className="text-lg font-black text-white">{(payoutBalance.minimumWithdrawalCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span></div>
                   </div>
                   <p className="mt-2 text-[10px] leading-5 text-emerald-100">
                     Your paid interactions accumulate here. PayPal’s quoted payout fee is {(payoutBalance.providerFeeCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} once per cash-out. Sway payout markup: $0.
                   </p>
-                  {payoutBalance.availableCents >= payoutBalance.minimumWithdrawalCents ? (
+                  {payoutBalanceIsCurrent && payoutBalance.availableCents >= payoutBalance.minimumWithdrawalCents ? (
                     <p className="mt-1 text-[10px] text-slate-300">
                       Cash out {(payoutBalance.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} → receive about {(Math.max(0, payoutBalance.availableCents - payoutBalance.providerFeeCents) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}. PayPal’s actual fee is reconciled on completion.
                     </p>
                   ) : null}
-                  {payoutBalance.deficitCents > 0 ? (
+                  {payoutBalanceIsCurrent && payoutBalance.deficitCents > 0 ? (
                     <p className="mt-2 text-[10px] text-rose-300">Cash-out is paused because refunds or disputes created a {(payoutBalance.deficitCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} balance deficit.</p>
                   ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -3396,6 +3511,7 @@ export default function TalentDashboard({
                       disabled={
                         previewMode
                         || cashOutStatus === 'submitting'
+                        || !payoutBalanceIsCurrent
                         || !savedRecipientDestinationKind
                         || !savedRecipientPreview
                         || !payoutBalance.withdrawalsEnabled
@@ -3407,7 +3523,13 @@ export default function TalentDashboard({
                       {cashOutStatus === 'submitting' ? 'Sending safely...' : `Cash out to ${savedRecipientDestinationKind === 'venmo' ? 'Venmo' : 'PayPal'}`}
                     </button>
                   </div>
-                  {cashOutMessage ? <p className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
+                  {cashOutMessage ? <p role="status" className={`mt-2 text-[10px] ${cashOutStatus === 'error' ? 'text-rose-300' : cashOutStatus === 'pending' ? 'text-amber-200' : 'text-emerald-200'}`}>{cashOutMessage}</p> : null}
+                  {!payoutBalanceIsCurrent && cashOutStatus !== 'submitting' ? (
+                    <div className="mt-2 text-[10px] text-amber-200">
+                      <p>Latest balance is unavailable. Refresh it before cashing out.</p>
+                      <button type="button" onClick={() => { void refreshPayoutBalance(); }} className="mt-2 min-h-9 rounded-lg border border-white/20 px-3 py-2 font-black text-white">Refresh balance</button>
+                    </div>
+                  ) : null}
                   {!payoutBalance.withdrawalsEnabled ? (
                     <p className="mt-2 text-[10px] text-amber-200">
                       {payoutBalance.withdrawalRestriction === 'email_verification_required'
@@ -3419,6 +3541,11 @@ export default function TalentDashboard({
                             : 'Cash-out remains locked until PayPal activates Sway Payouts and the matching release switch is enabled.'}
                     </p>
                   ) : null}
+                </div>
+              ) : payoutBalanceReadError ? (
+                <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4" data-sway-cash-out="true">
+                  <p role="status" className="text-[10px] text-amber-200">Latest balance is unavailable. Refresh it before cashing out.</p>
+                  <button type="button" onClick={() => { void refreshPayoutBalance(); }} className="mt-2 min-h-9 rounded-lg border border-white/20 px-3 py-2 text-[10px] font-black text-white">Refresh balance</button>
                 </div>
               ) : null}
               {hasAvailablePayoutDestination

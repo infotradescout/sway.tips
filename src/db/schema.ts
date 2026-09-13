@@ -1805,6 +1805,9 @@ export const performerWithdrawals = pgTable('performer_withdrawals', {
   lastError: text('last_error'),
   attemptCount: integer('attempt_count').notNull().default(0),
   lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  // Readback scheduling is separate from submission retries and financial
+  // updates, so failed provider reads can rotate fairly across restarts.
+  providerReadAttemptedAt: timestamp('provider_read_attempted_at', { withTimezone: true }),
   leaseOwner: text('lease_owner'),
   leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),
@@ -1813,6 +1816,9 @@ export const performerWithdrawals = pgTable('performer_withdrawals', {
 }, (table) => ({
   performerCreatedIdx: index('performer_withdrawals_performer_created_idx').on(table.performerId, table.createdAt),
   performerIdempotencyIdx: uniqueIndex('performer_withdrawals_performer_idempotency_idx').on(table.performerId, table.idempotencyKey),
+  pendingReadbackIdx: index('performer_withdrawals_pending_readback_idx')
+    .on(table.paymentMode, table.providerReadAttemptedAt.asc().nullsFirst(), table.id)
+    .where(sql`${table.status} in ('processing', 'unclaimed', 'held') and ${table.providerPayoutId} is not null`),
   providerPayoutIdx: uniqueIndex('performer_withdrawals_provider_payout_idx')
     .on(table.provider, table.providerPayoutId)
     .where(sql`${table.providerPayoutId} is not null`),

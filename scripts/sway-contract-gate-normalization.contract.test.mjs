@@ -1,8 +1,21 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
+
+// Node's native test runner and uncaught strict assertions are hard failures
+// too. Verify their exit behavior instead of requiring dead process.exit code
+// in every test that already relies on those supported mechanisms.
+const nativeFailureProofs = [
+  "import assert from 'node:assert/strict'; assert.fail('expected gate probe');",
+  "import test from 'node:test'; test('expected gate probe', () => { throw new Error('expected failure'); });"
+].map((code) => spawnSync(process.execPath, ['--input-type=module', '--eval', code], {
+  encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH }
+}));
+const nativeFailuresAreHard = nativeFailureProofs.every((result) => !result.error && result.status === 1);
+if (!nativeFailuresAreHard) failures.push('Native assertion/test failure probes must exit1.');
 
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const scripts = packageJson.scripts ?? {};
@@ -53,7 +66,9 @@ for (const scriptPath of hardScriptPaths) {
   }
 
   const source = readFileSync(absolutePath, 'utf8');
-  if (!/process\.exit\(\s*1\s*\)/.test(source)) {
+  const explicitFailureExit = /process\.exit\(\s*1\s*\)|process\.exitCode\s*=\s*1\b/.test(source);
+  const nativeFailureExit = nativeFailuresAreHard && /from\s+['"]node:(?:assert(?:\/strict)?|test)['"]/.test(source);
+  if (!explicitFailureExit && !nativeFailureExit) {
     failures.push(`${scriptPath} must exit nonzero on failure.`);
   }
   if (/process\.exit\(\s*0\s*\)/.test(source)) {

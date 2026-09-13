@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
-import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
-import type { SwayDb } from '../src/db/client';
+import { and, eq, inArray } from 'drizzle-orm';
+import { createSwayDb } from '../src/db/client';
 import * as schema from '../src/db/schema';
+import { toAuditEntityUuid } from '../src/server/audit-log';
 import { normalizePayoutRecipient } from '../src/payout-destination';
 import { createPayoutDestinationStore } from '../src/server/payout-destination-store';
 import { createPayoutRecipientCipher } from '../src/server/payout-recipient-crypto';
@@ -20,6 +17,7 @@ import {
   createPerformerWithdrawalService,
   persistedPayoutFailureCode
 } from '../src/server/performer-withdrawal-service';
+import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof';
 
 process.on('uncaughtException', (error) => {
   console.error(error);
@@ -34,6 +32,7 @@ process.on('unhandledRejection', (error) => {
 // process instead of accumulating independent PGlite lifecycles in one VM.
 // Any assertion, signal, nonzero exit or timeout still fails this parent gate.
 for (const script of [
+  './sway-performer-payout-worker.behavior.test.ts',
   './sway-payout-destination-capabilities.behavior.test.ts',
   './sway-payout-destination.behavior.test.ts',
   './sway-payment-pricing.behavior.test.ts',
@@ -55,29 +54,13 @@ for (const script of [
   console.log(`WITHDRAWAL_PREREQUISITE_PASS ${script}`);
 }
 
-const root = process.cwd();
-const database = new PGlite();
-const migrationFiles = readdirSync(join(root, 'drizzle'))
-  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
-  .sort();
+const proof = await startEmbeddedPostgresProof('performer_withdrawal');
+if (process.env.SWAY_REQUIRE_REAL_POSTGRES_PROOF === 'true') {
+  assert.equal(proof.kind, 'real-postgres', 'Strict withdrawal proof requires standalone PostgreSQL.');
+}
+const db = createSwayDb(proof.databaseUrl);
 
 try {
-  for (const migrationFile of migrationFiles) {
-    const statements = readFileSync(join(root, 'drizzle', migrationFile), 'utf8')
-      .split('--> statement-breakpoint')
-      .map((statement) => statement.trim())
-      .filter(Boolean);
-    await database.exec('BEGIN');
-    try {
-      for (const statement of statements) await database.exec(statement);
-      await database.exec('COMMIT');
-    } catch (error) {
-      await database.exec('ROLLBACK');
-      throw error;
-    }
-  }
-
-  const db = drizzle(database, { schema }) as unknown as SwayDb;
   const ownerUserId = '11000000-0000-4000-8000-000000000046';
   const performerId = '21000000-0000-4000-8000-000000000046';
   const gigId = '31000000-0000-4000-8000-000000000046';
@@ -467,6 +450,17 @@ try {
   assert.equal(providerBatchReads > readsBeforeIgnoredEvent, true);
   assert.equal(attempts, attemptsBeforePriorityProof, 'provider-truth reconciliation must run before requested backlog submission');
 
+  const readsBeforePausedReconciliation = providerBatchReads;
+  await retryService.reconcilePending(100, { allowSubmissions: false });
+  assert.ok(providerBatchReads > readsBeforePausedReconciliation,
+    'Pausing payout execution must still read the outcome of already-submitted payouts.');
+  assert.equal(attempts, attemptsBeforePriorityProof,
+    'A paused reconciliation must never submit or retry a requested payout.');
+  const [pausedBacklog] = await db.select().from(schema.performerWithdrawals)
+    .where(eq(schema.performerWithdrawals.idempotencyKey, 'withdrawal:test:requested-backlog'));
+  assert.equal(pausedBacklog.status, 'requested');
+  assert.equal(pausedBacklog.attemptCount, 0, 'The paused worker must leave the unsent backlog untouched.');
+
   const [wrongModeWithdrawal] = await db.insert(schema.performerWithdrawals).values({
     performerId,
     ownerUserId,
@@ -526,7 +520,7 @@ try {
     idempotencyKey: 'withdrawal:test:inactive-account'
   })).kind, 'account_restricted');
 
-  const createSafetyFixture = async (suffix: '048' | '049', email: string) => {
+  const createSafetyFixture = async (suffix: string, email: string) => {
     const safetyOwnerId = `11000000-0000-4000-8000-000000000${suffix}`;
     const safetyPerformerId = `21000000-0000-4000-8000-000000000${suffix}`;
     const safetyGigId = `31000000-0000-4000-8000-000000000${suffix}`;
@@ -607,6 +601,171 @@ try {
   if (deniedBalance.kind !== 'ok') throw new Error('missing denied balance');
   assert.equal(deniedBalance.availableCents, 1_500, 'an immediate batch denial must release the reservation');
 
+  // A denied batch may never have an item. Exercise every consumer of the
+  // authoritative batch readback against the durable balance and audit trail.
+  for (const [index, channel] of ['submission_readback', 'webhook', 'reconciliation'].entries()) {
+    const fixture = await createSafetyFixture(String(50 + index).padStart(3, '0'), `${channel}@example.test`);
+    let batchStatus = channel === 'submission_readback' ? 'DENIED' : 'PENDING';
+    let mismatchedBatch = false;
+    let createCalls = 0;
+    const batchProvider = {
+      ...provider,
+      async createPayout(payout: Parameters<PayPalPayoutsAdapter['createPayout']>[0]) {
+        createCalls += 1;
+        return {
+          payoutBatchId: `BATCH-ONLY-${payout.withdrawalId}`,
+          senderItemId: payPalSenderItemId(payout.withdrawalId),
+          batchStatus: 'PENDING'
+        };
+      },
+      async getBatch(payoutBatchId: string) {
+        return { payoutBatchId: mismatchedBatch ? 'UNRELATED-BATCH' : payoutBatchId, batchStatus, item: null };
+      }
+    } as PayPalPayoutsAdapter;
+    const batchService = createPerformerWithdrawalService({ db, destinationStore, provider: batchProvider });
+    const request = {
+      ownerUserId: fixture.safetyOwnerId,
+      paymentMode: 'test' as const,
+      idempotencyKey: `withdrawal:test:batch-only:${channel}`,
+      destinationKind: 'paypal' as const,
+      recipientConfirmation: fixture.safetyRecipient,
+      grossAmountCents: 1_000
+    };
+    const result = await batchService.requestWithdrawal(request);
+    assert.ok('withdrawal' in result && result.withdrawal);
+    const withdrawal = result.withdrawal;
+    assert.ok(withdrawal.providerPayoutId);
+    const webhook = {
+      event: {
+        providerEventId: `WH-BATCH-ONLY-${channel}`,
+        eventType: 'PAYMENT.PAYOUTSBATCH.DENIED',
+        resource: { batch_header: { payout_batch_id: withdrawal.providerPayoutId } }
+      },
+      rawBody: JSON.stringify({ id: `WH-BATCH-ONLY-${channel}`, event_type: 'PAYMENT.PAYOUTSBATCH.DENIED' }),
+      paymentMode: 'test' as const
+    };
+    if (channel !== 'submission_readback') {
+      assert.equal(withdrawal.status, 'processing');
+      const pendingBalance = await batchService.getOwnerBalance({ ownerUserId: fixture.safetyOwnerId, paymentMode: 'test' });
+      assert.ok(pendingBalance.kind === 'ok');
+      assert.equal(pendingBalance.availableCents, 500);
+      assert.equal(pendingBalance.reservedCents, 1_000);
+
+      // Batch success alone cannot prove payment to this recipient.
+      batchStatus = 'SUCCESS';
+      await batchService.reconcilePending(100);
+      const [withoutItem] = await db.select().from(schema.performerWithdrawals)
+        .where(eq(schema.performerWithdrawals.id, withdrawal.id));
+      assert.equal(withoutItem.status, 'processing');
+      assert.equal(withoutItem.paidAt, null);
+
+      batchStatus = 'DENIED';
+      mismatchedBatch = true;
+      await batchService.reconcilePending(100);
+      const [wrongBatch] = await db.select().from(schema.performerWithdrawals)
+        .where(eq(schema.performerWithdrawals.id, withdrawal.id));
+      assert.equal(wrongBatch.status, 'processing', 'a different batch identity must never release this reservation');
+      mismatchedBatch = false;
+      if (channel === 'webhook') {
+        await assert.rejects(batchService.ingestWebhook({ ...webhook, paymentMode: 'live' }), /webhook_mode_mismatch/);
+        assert.equal((await batchService.ingestWebhook(webhook)).kind, 'updated');
+        assert.equal((await batchService.ingestWebhook(webhook)).kind, 'duplicate');
+        const [event] = await db.select().from(schema.payoutProcessorEvents)
+          .where(eq(schema.payoutProcessorEvents.providerEventId, webhook.event.providerEventId));
+        assert.equal(event.status, 'processed');
+        assert.equal(event.withdrawalId, withdrawal.id);
+      } else {
+        await batchService.reconcilePending(100, { allowSubmissions: false });
+      }
+    }
+    const [denied] = await db.select().from(schema.performerWithdrawals)
+      .where(eq(schema.performerWithdrawals.id, withdrawal.id));
+    assert.equal(denied.status, 'failed', `${channel}: an authoritative DENIED batch without an item must fail the withdrawal`);
+    assert.equal(denied.failureCode, 'PAYPAL_BATCH_DENIED');
+    assert.equal(denied.providerItemId, null, 'batch denial must not invent an item');
+    assert.equal(denied.providerTransactionId, null);
+    assert.equal(denied.paidAt, null);
+    const balance = await batchService.getOwnerBalance({ ownerUserId: fixture.safetyOwnerId, paymentMode: 'test' });
+    assert.ok(balance.kind === 'ok');
+    assert.equal(balance.availableCents, 1_500, `${channel}: failed withdrawal must restore the full balance`);
+    assert.equal(balance.reservedCents, 0);
+    const audits = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.entityId, toAuditEntityUuid(withdrawal.id)));
+    const denialAudits = audits.filter((event) => event.nextStatus === 'failed');
+    assert.equal(denialAudits.length, 1, 'denial must have one durable transition audit');
+    const denialAudit = denialAudits[0].metadata as Record<string, unknown>;
+    assert.equal(denialAudit.performerDebitedFeeCents, 0, `${channel}: failed-withdrawal audit must match the ledger's zero fee debit`);
+    assert.equal(denialAudit.quotedProviderFeeCents, 25, 'the original quote remains audit evidence without becoming a debit');
+    assert.equal(denialAudit.actualProviderFeeCents, null, 'batch-only denial must not invent a provider fee');
+    const replay = await batchService.requestWithdrawal(request);
+    assert.ok(replay.kind === 'replay');
+    assert.equal(replay.withdrawal.id, withdrawal.id);
+    assert.equal(replay.withdrawal.status, 'failed');
+    assert.equal(createCalls, 1, 'replaying a denied withdrawal must never create a second provider payout');
+    assert.equal((await batchService.ingestWebhook({
+      ...webhook,
+      event: { ...webhook.event, providerEventId: `${webhook.event.providerEventId}-LATE` },
+      rawBody: `${webhook.rawBody} `
+    })).kind, 'terminal_noop', 'a later denial must not rewrite a terminal failure');
+  }
+
+  const terminalBatchProvider = {
+    ...provider,
+    async getBatch(payoutBatchId: string) {
+      return { payoutBatchId, batchStatus: 'DENIED', item: null };
+    }
+  } as PayPalPayoutsAdapter;
+  const terminalBatchService = createPerformerWithdrawalService({ db, destinationStore, provider: terminalBatchProvider });
+  for (const terminalStatus of ['paid', 'returned'] as const) {
+    // These are existing durable terminal states, including the paid record's
+    // provider IDs and fee evidence; a batch notification cannot undo them.
+    providerStatus = terminalStatus === 'paid' ? 'SUCCESS' : 'RETURNED';
+    const terminalItemEvent = {
+      providerEventId: `WH-TERMINAL-ITEM-${terminalStatus}`,
+      eventType: terminalStatus === 'paid' ? 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED' : 'PAYMENT.PAYOUTS-ITEM.RETURNED',
+      resource: { payout_batch_id: firstPayoutId }
+    };
+    await service.ingestWebhook({ event: terminalItemEvent, rawBody: JSON.stringify(terminalItemEvent), paymentMode: 'test' });
+    const [beforeTerminal] = await db.select().from(schema.performerWithdrawals)
+      .where(eq(schema.performerWithdrawals.id, first.withdrawal.id));
+    const lateEvent = {
+      providerEventId: `WH-LATE-BATCH-${terminalStatus}`,
+      eventType: 'PAYMENT.PAYOUTSBATCH.DENIED',
+      resource: { payout_batch_id: firstPayoutId }
+    };
+    assert.equal((await terminalBatchService.ingestWebhook({
+      event: lateEvent,
+      rawBody: JSON.stringify(lateEvent),
+      paymentMode: 'test'
+    })).kind, terminalStatus === 'paid' ? 'stale_noop' : 'terminal_noop');
+    const [afterTerminal] = await db.select().from(schema.performerWithdrawals)
+      .where(eq(schema.performerWithdrawals.id, first.withdrawal.id));
+    assert.deepEqual(afterTerminal, beforeTerminal, 'late batch denial must preserve terminal state, IDs, timestamps and fees');
+  }
+
+  const mismatchedSenderEvent = {
+    providerEventId: 'WH-BATCH-WRONG-SENDER',
+    eventType: 'PAYMENT.PAYOUTSBATCH.DENIED',
+    resource: { payout_batch_id: firstPayoutId, payout_item: { sender_item_id: 'wrong-sender' } }
+  };
+  assert.equal((await terminalBatchService.ingestWebhook({
+    event: mismatchedSenderEvent,
+    rawBody: JSON.stringify(mismatchedSenderEvent),
+    paymentMode: 'test'
+  })).kind, 'identity_conflict');
+  const foreignModeEvent = {
+    providerEventId: 'WH-BATCH-FOREIGN-MODE',
+    eventType: 'PAYMENT.PAYOUTSBATCH.DENIED',
+    resource: { payout_batch_id: firstPayoutId }
+  };
+  const liveBatchService = createPerformerWithdrawalService({
+    db, destinationStore, provider: { ...terminalBatchProvider, mode: 'live' } as PayPalPayoutsAdapter
+  });
+  assert.equal((await liveBatchService.ingestWebhook({
+    event: foreignModeEvent,
+    rawBody: JSON.stringify(foreignModeEvent),
+    paymentMode: 'live'
+  })).kind, 'not_found', 'a live-mode provider must never release a test-mode reservation');
+
   const rawErrorFixture = await createSafetyFixture('049', 'raw-error-recipient@example.test');
   const rawErrorProvider = {
     ...provider,
@@ -637,8 +796,102 @@ try {
     'PAYPAL_HTTP_422',
     'provider error names must match a strict code grammar before persistence or logging'
   );
+
+  // A provider outage for the oldest full page must not strand the next
+  // pending payout. This isolated fixture keeps other scenarios recently
+  // checked, while the new 26 rows have never had a scheduled readback.
+  await db.update(schema.performerWithdrawals).set({ providerReadAttemptedAt: new Date('2099-01-01T00:00:00.000Z') })
+    .where(and(eq(schema.performerWithdrawals.paymentMode, 'test'),
+      inArray(schema.performerWithdrawals.status, ['processing', 'unclaimed', 'held'])));
+  const fairFixture = await createSafetyFixture('055', 'fair-readback@example.test');
+  await db.update(schema.payments).set({ amountSubtotal: 26_000, amountTotal: 26_100 })
+    .where(eq(schema.payments.performerId, fairFixture.safetyPerformerId));
+  const [fairPreference] = await db.select().from(schema.performerPayoutPreferences)
+    .where(eq(schema.performerPayoutPreferences.performerId, fairFixture.safetyPerformerId));
+  const fairRows = await db.insert(schema.performerWithdrawals).values(Array.from({ length: 26 }, (_, index) => ({
+    id: `61000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    performerId: fairFixture.safetyPerformerId,
+    ownerUserId: fairFixture.safetyOwnerId,
+    idempotencyKey: `withdrawal:test:readback-fairness-${index + 1}`,
+    destinationKind: 'paypal', recipientType: 'email',
+    recipientFingerprint: fairPreference.recipientValueFingerprint,
+    recipientPreview: fairPreference.recipientValuePreview,
+    paymentMode: 'test', status: 'processing',
+    grossAmountCents: 1_000, providerFeeCents: 25, netAmountCents: 975,
+    providerPayoutId: `FAIR-BATCH-${index + 1}`,
+    providerSenderItemId: `fair-sender-${index + 1}`,
+    createdAt: new Date('2026-09-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-09-01T00:00:00.000Z')
+  }))).returning();
+  const fairByBatch = new Map(fairRows.map(row => [row.providerPayoutId, row]));
+  const fairReads: string[] = [];
+  let fairSends = 0;
+  const fairProvider = {
+    ...provider,
+    async createPayout() { fairSends += 1; throw new Error('Paused readback must never send a payout.'); },
+    async getBatch(payoutBatchId: string) {
+      const original = fairByBatch.get(payoutBatchId);
+      assert.ok(original, 'Readback remains in the isolated oldest pending set.');
+      const [scheduled] = await db.select().from(schema.performerWithdrawals)
+        .where(eq(schema.performerWithdrawals.id, original.id));
+      assert.ok(scheduled.providerReadAttemptedAt,
+        'The attempt must be durable before contacting PayPal, including if this process stops during the read.');
+      assert.ok(scheduled.providerReadAttemptedAt < new Date('2099-01-01T00:00:00.000Z'),
+        'Scheduling must use the database clock, independent of a skewed application-server clock.');
+      assert.deepEqual(scheduled.updatedAt, original.updatedAt, 'A probe must not change the financial update timestamp.');
+      assert.equal(scheduled.lastAttemptAt, null, 'A probe must not change the submission retry clock.');
+      assert.equal(scheduled.attemptCount, 0);
+      fairReads.push(payoutBatchId);
+      if (payoutBatchId !== 'FAIR-BATCH-26') throw new Error('Synthetic read failure for fair-readback@example.test');
+      return { payoutBatchId, batchStatus: 'DENIED', item: null };
+    }
+  } as PayPalPayoutsAdapter;
+  // Reconstruct the service for every tick so no in-memory cursor can make
+  // this pass. Correcting a skewed application clock must not strand rows
+  // scheduled by the previous instance.
+  const fairService = (applicationTime = '2026-09-13T12:00:00.000Z') => createPerformerWithdrawalService({
+    db, destinationStore, provider: fairProvider, now: () => new Date(applicationTime)
+  });
+  const auditCountBeforeFairness = (await db.select().from(schema.auditEvents)).length;
+  const failedFirstPage = await fairService('2099-01-01T00:00:00.000Z').reconcilePending(25, { allowSubmissions: false });
+  assert.equal(failedFirstPage.length, 25);
+  assert.equal(failedFirstPage.every(result => result.kind === 'error'), true);
+  assert.equal(fairReads.includes('FAIR-BATCH-26'), false);
+  assert.equal(JSON.stringify(failedFirstPage).includes('fair-readback@example.test'), false);
+  assert.equal((await db.select().from(schema.auditEvents)).length, auditCountBeforeFairness,
+    'Failed reads must not invent financial transition audits.');
+  const failedRowsAfterRead = await db.select().from(schema.performerWithdrawals)
+    .where(eq(schema.performerWithdrawals.performerId, fairFixture.safetyPerformerId));
+  for (const row of failedRowsAfterRead) {
+    const original = fairByBatch.get(row.providerPayoutId)!;
+    const { providerReadAttemptedAt: _beforeAttempt, ...originalFinancialRecord } = original;
+    const { providerReadAttemptedAt: _afterAttempt, ...currentFinancialRecord } = row;
+    assert.deepEqual(currentFinancialRecord, originalFinancialRecord,
+      'Scheduling a failed read must preserve status, reservations, provider evidence and submission state.');
+  }
+  await fairService().reconcilePending(25, { allowSubmissions: false });
+  assert.equal(fairReads[25], 'FAIR-BATCH-26', 'After service restart, the never-read batch must run before repeated failures.');
+  const [settledFairRow] = await db.select().from(schema.performerWithdrawals)
+    .where(eq(schema.performerWithdrawals.providerPayoutId, 'FAIR-BATCH-26'));
+  assert.equal(settledFairRow.status, 'failed');
+  assert.equal(settledFairRow.failureCode, 'PAYPAL_BATCH_DENIED');
+  assert.equal(settledFairRow.paidAt, null);
+  const fairBalance = await fairService().getOwnerBalance({ ownerUserId: fairFixture.safetyOwnerId, paymentMode: 'test' });
+  assert.ok(fairBalance.kind === 'ok');
+  assert.equal(fairBalance.reservedCents, 25_000, 'Read failures keep every uncertain payout reserved.');
+  assert.equal(fairBalance.availableCents, 1_000, 'Only the authoritative denied batch releases its reservation.');
+  await fairService().reconcilePending(25, { allowSubmissions: false });
+  for (let index = 1; index <= 25; index += 1) {
+    assert.ok(fairReads.filter(id => id === `FAIR-BATCH-${index}`).length >= 2,
+      'Repeated failures continue receiving fair retries after the application clock is corrected.');
+  }
+  const [terminalFairRow] = await db.select().from(schema.performerWithdrawals)
+    .where(eq(schema.performerWithdrawals.id, settledFairRow.id));
+  assert.deepEqual(terminalFairRow, settledFairRow, 'Further scheduling must not modify a terminal withdrawal.');
+  assert.equal((await db.select().from(schema.auditEvents)).length, auditCountBeforeFairness + 1);
+  assert.equal(fairSends, 0, 'Every fairness/recovery tick remains fenced against payout submission.');
 } finally {
-  await database.close();
+  await proof.close();
 }
 
-console.log(`PayPal/Venmo accumulated performer withdrawal behavior test passed (${migrationFiles.length} migrations).`);
+console.log(`PayPal/Venmo accumulated performer withdrawal behavior test passed (${proof.kind}; batch denial, terminal protection, identity, mode, audit, replay and durable readback fairness assertions).`);
