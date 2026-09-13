@@ -8,6 +8,42 @@ These rules are mandatory for Codex, Gemini/Objector, and Merlin/Orchestrator wo
 
 No task is complete because an agent says it is complete. No deployment is successful merely because it deployed. Independent evidence must support the requested outcome.
 
+## Selective Intelligence execution law
+
+Every run must optimize for verified forward progress per unit of context, reasoning, tool use, and validation cost.
+
+Before inspecting broadly, planning from scratch, or rerunning repository-wide validation, the agent must first locate and load the latest authoritative handoff/checkpoint, current branch/commit, and only the evidence needed for the assigned slice. An interrupted or resumed task continues from the first unproven state transition; it does not restart the audit, roadmap, repository map, or already-proven work.
+
+Rules:
+
+- Resume before rediscovering. Do not rebuild project understanding that is already present in authoritative checkpoints, governing docs, or verified handoffs.
+- Inspect the smallest relevant surface first. Expand only when the current evidence shows a dependency, ambiguity, or shared-owner impact.
+- Do not repeat a deep dive merely because a new session, agent, model, or Work task started.
+- Do not reread large files when exact relevant ranges, diffs, searches, or prior evidence are sufficient.
+- Do not rerun expensive repository-wide checks after every small edit. During implementation, run the narrowest tests that prove the changed behavior. Run the full required gate set at integration, merge/release readiness, or when a shared contract change invalidates broader evidence.
+- Parallelize independent slices only when ownership and integration boundaries are explicit; share authoritative project state instead of making each lane rediscover it.
+- If usage/capacity becomes constrained, preserve active implementation lanes and defer non-blocking audits, prose, duplicate reviews, and broad exploratory passes.
+- A run that is interrupted must leave a resumable checkpoint before yielding whenever repository write access remains available.
+
+Every resumable checkpoint/handoff must include:
+
+```text
+Objective:
+Base branch/commit:
+Current branch/commit:
+Verified completed work:
+Changed but unverified work:
+Files changed:
+Tests/evidence already run:
+Tests/evidence invalidated by later changes:
+Known blockers/risks:
+External side effects and retry safety:
+Next exact action:
+Actions that must NOT be repeated:
+```
+
+The next agent must treat this checkpoint as the starting index into evidence, not as permission to trust claims blindly. Verify only the minimum state necessary to continue safely.
+
 ## Release control (read before merging to main)
 
 - Authorized merge/push to `main` **is** the production release path when merge/deploy are separately authorized. See `RELEASE_CONTROL.md` minimum release contract (local/optional evidence).
@@ -81,7 +117,9 @@ Working tree status:
 
 ## Required Codex Gates
 
-Unless explicitly scoped as docs-only, Codex must run:
+During implementation, Codex must run the narrowest available validation that directly covers the changed behavior. Full-suite repetition after every bounded edit is prohibited unless the edit changes a shared contract or invalidates broad evidence.
+
+Before integration/merge/release readiness for non-docs-only work, Codex must run:
 
 ```text
 npm run lint
@@ -94,6 +132,8 @@ If `test:contracts` does not exist yet, Codex must state that clearly and may no
 `test:contracts` must exit nonzero on failure.
 
 `audit:contracts` may soft-exit and print diagnostics.
+
+A previously passing full gate does not need to be rerun during the same slice unless later changes could invalidate it. Record the exact command and commit/worktree state it proves.
 
 ## Gemini/Objector Rules
 
@@ -146,6 +186,8 @@ protect the corrected schema-first build order
 protect the ABC123 App Store roadmap
 prevent brand/scope drift
 ```
+
+Merlin must verify only the evidence necessary to arbitrate the current slice. It must not repeat the implementer's entire repository audit or test matrix when scoped evidence remains valid.
 
 ## Corrected Sway Build Order
 
