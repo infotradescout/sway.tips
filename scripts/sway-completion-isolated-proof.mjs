@@ -6,6 +6,13 @@ import { resolve } from 'node:path';
 
 // A separate build-only proof service. Never attach an application database,
 // provider credentials, production domains, or application runtime to this job.
+// Render exports Bash build helpers, including functions named for secret-file
+// copying. These are executable shell definitions, not application credentials.
+// None is needed by this shell:false runner. Discard the entire Bash function
+// namespace before any subprocess so inherited shell code cannot run there.
+for (const key of Object.keys(process.env)) {
+  if (/^BASH_FUNC_.+%%$/.test(key)) delete process.env[key];
+}
 assert.equal(process.env.SWAY_ISOLATED_VALIDATION, 'true', 'An explicitly isolated proof environment is required.');
 for (const key of [
   'SWAY_LIVE_ROOM_LIVE_MONEY_ENABLED',

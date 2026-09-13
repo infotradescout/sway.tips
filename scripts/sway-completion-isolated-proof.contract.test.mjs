@@ -40,7 +40,8 @@ const mode = JSON.parse(readFileSync('control.json', 'utf8')).mode;
 mkdirSync('node_modules/playwright', { recursive: true });
 const args = process.argv.slice(2);
 appendFileSync('node_modules/proof-events.jsonl', JSON.stringify({
-  command: args.join(' '), render: process.env.RENDER, service: process.env.RENDER_SERVICE_ID
+  command: args.join(' '), render: process.env.RENDER, service: process.env.RENDER_SERVICE_ID,
+  shellFunctions: Object.keys(process.env).filter(key => /^BASH_FUNC_.+%%$/.test(key))
 }) + '\\n');
 if (args[0] === 'ci') {
   writeFileSync('node_modules/playwright/cli.js',
@@ -116,7 +117,8 @@ try {
     'DATABASE_URL', 'SWAY_TEST_DATABASE_URL', 'POSTGRES_URL', 'PGHOST', 'PGDATABASE', 'PGUSER',
     'PGPASSWORD', 'PGSERVICE', 'PGSERVICEFILE', 'PGPASSFILE', 'PGOPTIONS',
     'STRIPE_SECRET_KEY', 'STRIPE_TEST_SECRET_KEY', 'STRIPE_CONNECT_WEBHOOK_SECRET',
-    'SWAY_AUDIO_R2_ACCESS_KEY_ID', 'RESEND_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'
+    'SWAY_AUDIO_R2_ACCESS_KEY_ID', 'RESEND_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+    'BASH_FUNC_STRIPE_SECRET_KEY'
   ]) {
     const secret = 'private-fixture-value-that-must-not-be-printed';
     const result = run(root, { ...baseEnv, [key]: secret });
@@ -140,7 +142,12 @@ try {
 
   for (const mode of ['failed-gate', 'untracked-source', 'ignored-config', 'unknown-output', 'pass']) {
     const test = fixture(mode);
-    const result = run(test.directory, test.env);
+    const result = run(test.directory, {
+      ...test.env,
+      'BASH_FUNC_copy_secret_files%%': '() { echo inherited-function-must-not-run; }',
+      'BASH_FUNC_remove_secret_files%%': '() { echo inherited-function-must-not-run; }',
+      'BASH_FUNC_unrelated_helper%%': '() { echo inherited-function-must-not-run; }'
+    });
     assert.ifError(result.error);
     assert.ok(existsSync(join(test.directory, 'node_modules/proof-events.jsonl')),
       'Fixture commands did not start: ' + result.stdout + result.stderr);
@@ -152,7 +159,9 @@ try {
     for (const event of events.filter(event => event.command !== 'chromium')) {
       assert.equal(event.render, 'true');
       assert.equal(event.service, 'srv-isolated-guard-fixture', 'Hosting markers must remain intact in children.');
+      assert.deepEqual(event.shellFunctions, [], 'Inherited executable shell definitions must not reach children.');
     }
+    assert.doesNotMatch(result.stdout + result.stderr, /inherited-function-must-not-run/);
     const receipt = join(test.directory, '.completion-proof-public/summary.json');
     if (mode === 'pass') {
       assert.equal(result.status, 0, result.stderr);
