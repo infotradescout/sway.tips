@@ -94,8 +94,10 @@ async function importFile(page, inputName, fileName, content, { consent = true, 
   const responsePromise = consent ? page.waitForResponse(response => response.url().endsWith('/api/talent/library/import') && response.request().method() === 'POST') : null;
   await page.getByLabel(inputName, { exact: true }).setInputFiles({ name: fileName, mimeType: 'text/plain', buffer: Buffer.from(content) });
   await confirmation;
-  if (responsePromise) { const response = await responsePromise; assert.equal(response.status(), 202); }
+  let receipt = null;
+  if (responsePromise) { const response = await responsePromise; assert.equal(response.status(), 202); receipt = await response.json(); }
   await page.locator('[data-sway-source-import-choices] [role="status"]').filter({ hasText: consent ? /^(Saved|Updated) / : /^Import canceled/ }).waitFor();
+  return receipt;
 }
 try {
   proof = await startEmbeddedPostgresProof('music_sources_browser');
@@ -114,11 +116,13 @@ try {
     assert.equal(await a.page.getByLabel(`Import ${name} file`, { exact: true }).getAttribute('data-sway-source-label'), name);
   }
   record('Eight named file choices are mounted in the real performer Sources page');
-  await importFile(a.page, 'Import Serato file', 'Friday.csv', 'song,artist\nFriday Original,Example Performer');
+  const firstImport = await importFile(a.page, 'Import Serato file', 'Friday.csv', 'song,artist\nFriday Original,Example Performer');
   await importFile(a.page, 'Import Serato file', 'Saturday.csv', 'song,artist\nSaturday Original,Example Performer');
   let sources = await api(a.context, '/api/talent/library/sources');
   assert.equal(sources.sources.length, 2); assert.notEqual(sources.sources[0].sourceKey, sources.sources[1].sourceKey);
-  const owner = (await api(a.context, '/api/talent/library/tracks')).performerId;
+  const owner = firstImport.performerId;
+  assert.match(owner, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(sources.sources.map(source => source.trackCount), [1, 1]);
   record('Two CSV exports save as separate sources through the actual API');
   await importFile(a.page, 'Import Serato file', 'Friday.csv', 'song,artist\nFriday Replacement,Example Performer', { consent: false, replace: true });
   let tracks = (await api(a.context, '/api/talent/library/tracks')).external.tracks;
@@ -158,6 +162,7 @@ try {
   assert.equal(uploads.length, beforeInvalid);
   assert.equal((await api(a.context, '/api/talent/library/sources')).sources.length, 12);
   record('Invalid file is rejected before POST and does not erase prior sources');
+  currentStage = 'reload saved Sources';
   await a.page.reload(); await chooser.waitFor();
   await a.page.locator('[data-sway-linked-sources]').getByText('12 tracks', { exact: true }).waitFor();
   await a.page.goto(baseUrl + '/talent/library');
@@ -197,7 +202,7 @@ try {
   // URLs, account cookies, passwords, or raw private application logs.
   const page = browser?.contexts()[0]?.pages()[0];
   if (page) {
-    report.page = await page.evaluate(() => ({ path: location.pathname, headings: [...document.querySelectorAll('h1,h2,h3')].map(x => x.textContent), alerts: [...document.querySelectorAll('[role=alert]')].map(x => x.textContent) })).catch(() => null);
+    report.page = await page.evaluate(() => ({ path: location.pathname, headings: [...document.querySelectorAll('h1,h2,h3')].map(x => x.textContent), alerts: [...document.querySelectorAll('[role=alert]')].map(x => x.textContent), savedMusic: document.querySelector('[data-sway-linked-sources]')?.textContent })).catch(() => null);
     await page.screenshot({ path: `${out}/failure.png`, fullPage: true }).catch(() => {});
     console.error('SWAY_SOURCE_BROWSER_PAGE ' + JSON.stringify(report.page));
   }

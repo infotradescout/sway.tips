@@ -10385,15 +10385,15 @@ app.get('/api/talent/library/sources', async (req, res) => {
       syncKeyPreview: performerLibrarySources.syncKeyPreview,
       connectionStatus: performerLibrarySources.connectionStatus,
       lastSyncedAt: performerLibrarySources.lastSyncedAt,
-      trackCount: sql<number>`(
-        select count(*)::int
-        from ${performerLibraryTracks}
-        where ${performerLibraryTracks.performerId} = ${performerLibrarySources.performerId}
-          and ${performerLibraryTracks.sourceKey} = ${performerLibrarySources.sourceKey}
-      )`
+      trackCount: sql<number>`count(${performerLibraryTracks.id})::int`
     })
     .from(performerLibrarySources)
-    .where(eq(performerLibrarySources.performerId, performerOwner.performerId));
+    .leftJoin(performerLibraryTracks, and(
+      eq(performerLibraryTracks.performerId, performerLibrarySources.performerId),
+      eq(performerLibraryTracks.sourceKey, performerLibrarySources.sourceKey)
+    ))
+    .where(eq(performerLibrarySources.performerId, performerOwner.performerId))
+    .groupBy(performerLibrarySources.id);
 
   return res.json({ sources });
 });
