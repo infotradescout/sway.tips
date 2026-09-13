@@ -95,7 +95,7 @@ for (const term of [
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
   'Open reusable booth helper',
   'Make a reusable booth helper',
-  'rekordbox, Traktor, VirtualDJ, M3U, or CSV',
+  '<PerformerSourceImportChoices',
   'Create private Windows helper',
   'Download Windows music helper',
   'data-sway-windows-library-helper-download="true"',
