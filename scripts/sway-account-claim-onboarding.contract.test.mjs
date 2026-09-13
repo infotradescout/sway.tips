@@ -43,7 +43,7 @@ for (const term of [
 
 const confirmIdx = account.indexOf('>Confirm password</label>');
 const claimFieldIdx = account.indexOf('<ClaimCodeField');
-const termsIdx = account.indexOf('I accept the Sway Terms.');
+const termsIdx = account.indexOf('I accept the <a href="/terms"');
 if (!(confirmIdx >= 0 && claimFieldIdx > confirmIdx && termsIdx > claimFieldIdx)) {
   failures.push('Claim code field must render below Confirm password and above Terms.');
 }
@@ -104,3 +104,9 @@ console.log('Account claim-code onboarding contract passed.');
 const behavior = spawnSync(process.execPath, ['scripts/sway-signup-claim.behavior.test.mjs'], { stdio: 'inherit' });
 if (behavior.error) throw behavior.error;
 if (behavior.status !== 0) process.exit(behavior.status || 1);
+
+for (const script of ['scripts/sway-signup-claim.browser.test.mjs', 'scripts/sway-account-home.browser.test.mjs']) {
+  const browser = spawnSync(process.execPath, [script], { stdio: 'inherit' });
+  if (browser.error) throw browser.error;
+  if (browser.status !== 0) process.exit(browser.status || 1);
+}
