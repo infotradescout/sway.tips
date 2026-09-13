@@ -250,7 +250,7 @@ const connectionListRoute = sourceBetween(
 const shareRoute = sourceBetween(
   server,
   "app.post('/api/talent/audio/pairing/connections/:connectionId/shares'",
-  "app.get('/api/talent/audio/files/shared-with-me'"
+  "app.post('/api/talent/audio/pairing/connections/:connectionId/candidate-revision-grants'"
 );
 if (!tokenRoute || !connectionListRoute || !shareRoute) {
   failures.push('Unable to locate all pairing authorization route blocks.');
@@ -273,6 +273,50 @@ requireIncludes(
   'Universal connection-list account scoping'
 );
 requireExcludes(connectionListRoute, 'accessControl.requireTalentAccess(req)', 'Universal connection-list authority');
+
+// Candidate routes have their own authority boundaries. Narrowing review-share
+// extraction must not silently remove coverage of the newly adjacent endpoints.
+const candidateGrantRoute = sourceBetween(server,
+  "app.post('/api/talent/audio/pairing/connections/:connectionId/candidate-revision-grants'",
+  "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads/preflight'");
+for (const term of ['accessControl.requireTalentAccess(req)', 'if (talentAccess.allowed === false)',
+  'requireCollaboratorRevisionRuntime(res)', 'audioFileCollaborationService.grantCandidateRevisionUpload({',
+  'grantedByUserId: talentAccess.actor.actorId']) {
+  requireIncludes(candidateGrantRoute, term, 'Creator candidate-request authority');
+}
+requireExcludes(candidateGrantRoute, 'accessControl.requireAuthenticatedAccountAccess(req)', 'Creator candidate-request authority');
+
+for (const [label, start, end, call, actorBinding] of [
+  ['Candidate preflight', "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads/preflight'", "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads'", 'audioPublishingService.preflightCollaboratorRevisionUpload({', 'actorUserId: accountAccess.actor.actorId'],
+  ['Candidate upload initiation', "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads'", 'const requireCandidateUploadPartAuthority:', 'audioPublishingService.initiateCollaboratorRevisionUpload({', 'actorUserId: accountAccess.actor.actorId'],
+  ['Candidate part authorization', 'const requireCandidateUploadPartAuthority:', 'const handleCandidateUploadPartParseError:', 'audioPublishingService.authorizeCollaboratorRevisionUploadPart({', 'actorUserId: accountAccess.actor.actorId'],
+  ['Candidate seal', "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads/:uploadSessionId/complete'", "app.get('/api/talent/audio/file-grants/:grantId/candidates/:candidateId/content'", 'audioPublishingService.completeAndSealCollaboratorRevision({', 'actorUserId: accountAccess.actor.actorId'],
+  ['Candidate listening', "app.get('/api/talent/audio/file-grants/:grantId/candidates/:candidateId/content'", "app.post('/api/talent/audio/candidates/:candidateId/decision'", 'audioFileCollaborationService.openCandidateRevision({', '}, accountAccess.actor.actorId)'],
+  ['Candidate owner decision', "app.post('/api/talent/audio/candidates/:candidateId/decision'", "app.post('/api/admin/performers/:performerId/private-collaboration-capability'", 'audioCandidateDecisionService.decideCandidate({', 'actorUserId: accountAccess.actor.actorId']
+]) {
+  const route = sourceBetween(server, start, end);
+  const auth = route.indexOf('accessControl.requireAuthenticatedAccountAccess(req)');
+  const deny = route.indexOf('if (accountAccess.allowed === false)');
+  const actor = route.indexOf('if (!accountAccess.actor.actorId)');
+  const action = route.indexOf(call);
+  if (auth < 0 || deny <= auth || actor <= deny || action <= actor) {
+    failures.push(`${label} must reject unauthenticated/missing actors before its scoped service call.`);
+  }
+  requireIncludes(route, 'requireCollaboratorRevisionRuntime(res)', `${label} feature gate`);
+  requireIncludes(route, actorBinding, `${label} authenticated actor binding`);
+  requireExcludes(route, 'accessControl.requireTalentAccess(req)', `${label} universal account authority`);
+  requireExcludes(route, 'actorUserId: req.body', `${label} caller cannot choose actor`);
+}
+const candidatePartRoute = sourceBetween(server,
+  "app.put(\n  '/api/talent/audio/file-grants/:grantId/candidate-uploads/:uploadSessionId/parts/:partNumber'",
+  "app.post('/api/talent/audio/file-grants/:grantId/candidate-uploads/:uploadSessionId/complete'");
+const partGuardIndex = candidatePartRoute.indexOf('requireCandidateUploadPartAuthority,');
+const partParserIndex = candidatePartRoute.indexOf('createAudioUploadPartBodyParser(),');
+const partWriterIndex = candidatePartRoute.indexOf('audioPublishingService.writeUploadPart({');
+if (partGuardIndex < 0 || partParserIndex <= partGuardIndex || partWriterIndex <= partParserIndex) {
+  failures.push('Candidate binary upload must authorize the account and exact grant before parsing bytes or writing a part.');
+}
+requireIncludes(candidatePartRoute, 'actorUserId: String(res.locals.candidateUploadActorId', 'Candidate part writer trusted actor binding');
 
 const permissionDescription = sourceBetween(
   inbox,

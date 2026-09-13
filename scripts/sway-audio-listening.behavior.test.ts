@@ -117,6 +117,7 @@ try {
   let queryCount = 0;
   let auditWrites = 0;
   const fakeDb = {
+    async execute() { return { rows: [] }; },
     select() {
       const query = { from() { return query; }, where() { return query; }, async limit() {
         queryCount += 1;

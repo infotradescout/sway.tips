@@ -332,3 +332,9 @@ export const AUDIO_PUBLISHING_RUNTIME_CAPABILITIES = {
   directSales: false,
   royaltyAccounting: false
 } as const;
+
+export const COLLABORATOR_REVISION_UPLOAD_ENV = 'SWAY_AUDIO_COLLABORATOR_REVISION_UPLOAD_ENABLED';
+
+export function resolveCollaboratorRevisionUploadEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return env[COLLABORATOR_REVISION_UPLOAD_ENV] === 'true';
+}

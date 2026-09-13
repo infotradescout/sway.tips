@@ -1,12 +1,21 @@
 import type { Request, Response } from 'express';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { AudioFileCollaborationService } from './audio-file-collaboration-service';
-import { AudioRangeNotSatisfiableError, audioContentRange } from './audio-byte-range';
+import { AudioRangeNotSatisfiableError, audioContentRange, type AudioByteRange } from './audio-byte-range';
+
+type PrivateListeningReader = {
+  listenToGrantedOriginal(input: {
+    grantId: string; userId: string; rangeHeader?: string; ifRange?: string;
+  }): Promise<{
+    version: { mimeType: string }; stream: Readable; byteSize: number;
+    range?: AudioByteRange; etag: string;
+  }>;
+};
 
 export async function sendPrivateAudioListeningResponse(
   req: Request,
   res: Response,
-  service: Pick<AudioFileCollaborationService, 'listenToGrantedOriginal'>,
+  service: PrivateListeningReader,
   userId: string
 ) {
   res.setHeader('Cache-Control', 'private, no-store');

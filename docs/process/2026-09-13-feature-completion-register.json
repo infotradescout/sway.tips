@@ -1,7 +1,7 @@
 {
   "asOf": "2026-09-13",
   "baselineRef": "7db08c3946da01c8831a24b61fe54903d6c87c84",
-  "targetRef": "working branch; unreleased",
+  "targetRef": "unreleased recovery and private-candidate review branches; see implementationBatches",
   "ratingRule": "Scores are evidence-based judgments. Engineering tests do not establish live operation or competitive leadership. No score is automatically promoted to10.",
   "completionStandard": [
     "Complete customer workflow with persisted outcomes and recovery",
@@ -171,7 +171,12 @@
       "baselineCompleteness": 8,
       "baselineCompetitiveness": 7,
       "baselineEvidence": "Implemented; fresh hardware run not performed",
-      "baselineReason": "Substantial external-controller path: exact trusted path or search fallback, load/play/pause/stop/cue/next/previous via Network Control."
+      "baselineReason": "Substantial external-controller path: exact trusted path or search fallback, load/play/pause/stop/cue/next/previous via Network Control.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Transport deadlines and ambiguous-result handling improved; physical exact-track execution remains unverified.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 19,
@@ -180,7 +185,12 @@
       "baselineCompleteness": 7,
       "baselineCompetitiveness": 7,
       "baselineEvidence": "Implemented",
-      "baselineReason": "Durable command claim/completion and low-rate title/artist/BPM/state feedback; stale state becomes disconnected."
+      "baselineReason": "Durable command claim/completion and low-rate title/artist/BPM/state feedback; stale state becomes disconnected.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Malformed state no longer becomes paused and only exact acknowledgement succeeds; physical feedback proof remains open.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 20,
@@ -252,7 +262,12 @@
       "baselineCompleteness": 4,
       "baselineCompetitiveness": 3,
       "baselineEvidence": "Implemented; compatibility risk",
-      "baselineReason": "App-token search uses older size assumptions; incompatible with the newer development-mode contract. Actual live app quota/migration status is unknown."
+      "baselineReason": "App-token search uses older size assumptions; incompatible with the newer development-mode contract. Actual live app quota/migration status is unknown.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Current bounded search request and truthful provider error outcomes implemented; actual app permissions remain open.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 28,
@@ -261,7 +276,12 @@
       "baselineCompleteness": 3,
       "baselineCompetitiveness": 2,
       "baselineEvidence": "Partial; compatibility risk",
-      "baselineReason": "App-only import reads the first playlist page using older fields. No pagination or full-playlist completeness check."
+      "baselineReason": "App-only import reads the first playlist page using older fields. No pagination or full-playlist completeness check.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Complete snapshot-consistent pagination, current-owner/source transaction and replacement consent implemented; provider and deployed browser proof remain open.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 29,
@@ -324,7 +344,12 @@
       "baselineCompleteness": 5,
       "baselineCompetitiveness": 4,
       "baselineEvidence": "Partial",
-      "baselineReason": "Library matching exists; consistent ready/search-only/unavailable/manual states across providers remain incomplete."
+      "baselineReason": "Library matching exists; consistent ready/search-only/unavailable/manual states across providers remain incomplete.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Spotify unavailable/rate-limited states now preserve manual fallback; this does not complete the readiness workflow across every provider.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 36,
@@ -432,7 +457,12 @@
       "baselineCompleteness": 6,
       "baselineCompetitiveness": 5,
       "baselineEvidence": "Implemented with specific recovery gap",
-      "baselineReason": "Durable operations exist. Turning execution off prevents the scheduled payout reconciler from starting after restart."
+      "baselineReason": "Durable operations exist. Turning execution off prevents the scheduled payout reconciler from starting after restart.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Existing payout batches can reconcile while submissions are paused, with durable read-attempt fairness. General payouts are not activated.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 48,
@@ -567,7 +597,12 @@
       "baselineCompleteness": 7,
       "baselineCompetitiveness": 6,
       "baselineEvidence": "Implemented",
-      "baselineReason": "Reservations, ordered parts, idempotent sealing and cleanup exist. Current large-file/mobile-resume behavior was not tested."
+      "baselineReason": "Reservations, ordered parts, idempotent sealing and cleanup exist. Current large-file/mobile-resume behavior was not tested.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Durable candidate multipart initiation, parts, completion, ambiguous provider outcomes and cleanup added; bounded-memory client hashing independently checked.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 63,
@@ -576,7 +611,12 @@
       "baselineCompleteness": 8,
       "baselineCompetitiveness": 7,
       "baselineEvidence": "Implemented; historical production proof",
-      "baselineReason": "Version identity, SHA-256 and exact-byte retrieval after restart have historical evidence."
+      "baselineReason": "Version identity, SHA-256 and exact-byte retrieval after restart have historical evidence.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Exact immutable owner-acceptance binding preserves the source and creates a separate verified private version.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 64,
@@ -585,7 +625,12 @@
       "baselineCompleteness": 6,
       "baselineCompetitiveness": 5,
       "baselineEvidence": "Historical 9/10 proof; one control unresolved",
-      "baselineReason": "The recorded owning-account/public-access check remains unresolved. This is not evidence that the bucket is publicly exposed."
+      "baselineReason": "The recorded owning-account/public-access check remains unresolved. This is not evidence that the bucket is publicly exposed.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Candidate quota reservations, provider operation records and cleanup recovery added; actual remote-storage proof remains open.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 65,
@@ -603,7 +648,12 @@
       "baselineCompleteness": 8,
       "baselineCompetitiveness": 7,
       "baselineEvidence": "Historical production proof",
-      "baselineReason": "Granular download/comment/approve grants target an immutable version."
+      "baselineReason": "Granular download/comment/approve grants target an immutable version.",
+      "implementationUpdate": {
+        "batch": "recovery-20260913",
+        "detail": "Selected-version original-download grants also permit private exact-version listening and seeking.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 67,
@@ -612,7 +662,12 @@
       "baselineCompleteness": 7,
       "baselineCompetitiveness": 6,
       "baselineEvidence": "Implemented",
-      "baselineReason": "Recipients can receive/review without needing the full performer workspace."
+      "baselineReason": "Recipients can receive/review without needing the full performer workspace.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Ordinary connected accounts can return private candidates; creators can play and review them. Account, request and lifecycle checks fence stale results; malformed responses fail explicitly. Native-browser proof remains separately recorded.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 68,
@@ -630,7 +685,12 @@
       "baselineCompleteness": 8,
       "baselineCompetitiveness": 7,
       "baselineEvidence": "Historical production proof",
-      "baselineReason": "Revocation and connection cascade remove access; recorded replay denial supports the narrow claim."
+      "baselineReason": "Revocation and connection cascade remove access; recorded replay denial supports the narrow claim.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Revocation invalidates candidate upload authority and queues durable unfinished-upload cleanup; completed sources are preserved.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 70,
@@ -639,7 +699,12 @@
       "baselineCompleteness": 0,
       "baselineCompetitiveness": 0,
       "baselineEvidence": "Absent from main sharing path; branch work exists",
-      "baselineReason": "The main sharing service sets canUploadNewVersion=false. Existing owner uploads do not complete collaborator revision return. PR203 remains unmerged."
+      "baselineReason": "The main sharing service sets canUploadNewVersion=false. Existing owner uploads do not complete collaborator revision return. PR203 remains unmerged.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "End-to-end implementation now includes request, quota preflight, upload, private playback, owner decision and immutable version promotion. Not deployed or rated complete.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 71,
@@ -927,7 +992,12 @@
       "baselineCompleteness": 7,
       "baselineCompetitiveness": 6,
       "baselineEvidence": "Implemented",
-      "baselineReason": "Ownership, persisted grants, admin/support separation and durable login limiting are real. No fresh penetration test was performed."
+      "baselineReason": "Ownership, persisted grants, admin/support separation and durable login limiting are real. No fresh penetration test was performed.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Current server and database authority protects candidate intake and owner disposition; this is scoped improvement, not a whole-account security attestation.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 103,
@@ -945,7 +1015,12 @@
       "baselineCompleteness": 6,
       "baselineCompetitiveness": 5,
       "baselineEvidence": "Implemented; narrow filtering",
-      "baselineReason": "Durable actions and block enforcement exist. Small local English lexicon; no wired AI moderation path established."
+      "baselineReason": "Durable actions and block enforcement exist. Small local English lexicon; no wired AI moderation path established.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Held or blocked candidates cannot be accepted or played. Later holds also restrict promoted-file aliases and release use; authorized immutable moderation events serialize with acceptance.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 105,
@@ -990,7 +1065,12 @@
       "baselineCompleteness": 7,
       "baselineCompetitiveness": 6,
       "baselineEvidence": "Substantial scoped evidence",
-      "baselineReason": "Repository has behavior, browser, concurrency and contract suites. This assessment did not rerun the full suite."
+      "baselineReason": "Repository has behavior, browser, concurrency and contract suites. This assessment did not rerun the full suite.",
+      "implementationUpdate": {
+        "batch": "private-candidates-20260913",
+        "detail": "Behavioral, HTTP and migrated-database proofs expanded. Local Chromium startup fails; exact hosted required-gate results are separately recorded and must not be inferred from focused test passes.",
+        "ratingStatus": "baseline scores retained; no deployed comparative re-rating"
+      }
     },
     {
       "id": 110,
@@ -1000,6 +1080,70 @@
       "baselineCompetitiveness": 3,
       "baselineEvidence": "Code observation",
       "baselineReason": "Large server and performer/audience components still concentrate unrelated responsibilities, increasing regression and integration costs."
+    }
+  ],
+  "implementationBatches": [
+    {
+      "id": "recovery-20260913",
+      "reviewUrl": "https://github.com/infotradescout/sway.tips/pull/243",
+      "status": "draft; not deployed",
+      "primaryFeatures": [
+        18,
+        19,
+        27,
+        28,
+        35,
+        47,
+        64,
+        66,
+        67,
+        109
+      ],
+      "changes": [
+        "Complete and transactional Spotify imports with explicit source replacement consent",
+        "Bounded provider and browser-workflow deadlines with truthful ambiguous outcomes",
+        "Paused-execution payout readback with durable fair scheduling",
+        "Exact granted-original private audio playback and range requests"
+      ],
+      "verification": "Focused provider, client, HTTP and migrated embedded-PostgreSQL tests pass. Lint and production build pass. Full contract gate fails at native Chromium launch.",
+      "remainingProof": [
+        "Native-browser workflows",
+        "Actual Spotify permission and quota behavior",
+        "Physical VirtualDJ deck behavior",
+        "Standalone PostgreSQL concurrency",
+        "Real object-store privacy and range behavior",
+        "Authorized deployed acceptance and competitive outcome comparison"
+      ]
+    },
+    {
+      "id": "private-candidates-20260913",
+      "status": "reviewed implementation; disabled by default; not deployed",
+      "primaryFeatures": [
+        62,
+        63,
+        64,
+        67,
+        69,
+        70,
+        102,
+        104,
+        109
+      ],
+      "changes": [
+        "One selected-source private revision request with current authorization, expiration and byte ceiling",
+        "Quota preflight before bounded-memory hashing, durable multipart/provider operations and cleanup receipts",
+        "Exact candidate playback and explicit immutable owner accept, reject or block decision",
+        "Accepted candidate becomes a separate private version with exact byte provenance; source preserved"
+      ],
+      "verification": "Candidate intake, owner decisions, capability issuance, migration upgrade, provider-operation recovery, process-kill recovery with local storage, storage quota, actual HTTP and component behavior pass locally. The candidate handoff records scope and commands. Final required-gate receipts are bound to exact revisions in the pull request and isolated proof output.",
+      "remainingProof": [
+        "Successful mandatory gate receipt for the exact proposed source revision",
+        "Standalone PostgreSQL concurrency and process-restart proof",
+        "Real R2 provider behavior and privacy",
+        "Native browser upload, cancellation, seeking and owner acceptance",
+        "Authorized capability configuration and deployed acceptance",
+        "Competitive workflow trial against file collaboration specialists"
+      ]
     }
   ]
 }
