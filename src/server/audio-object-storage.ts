@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import type { AudioByteRange } from './audio-byte-range';
 import { createLocalAudioObjectStore } from './audio-object-storage-local';
 import { createR2AudioObjectStore } from './audio-object-storage-r2';
 
@@ -44,7 +45,7 @@ export type AudioObjectStore = {
     expectedSha256: string;
     mimeType: string;
   }) => Promise<{ byteSize: number; sha256: string }>;
-  openOriginal: (identity: AudioObjectIdentity) => Promise<{
+  openOriginal: (identity: AudioObjectIdentity, range?: AudioByteRange) => Promise<{
     stream: Readable;
     byteSize: number;
   }>;

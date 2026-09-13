@@ -107,7 +107,9 @@ for (const env of [
   { RENDER_EXTERNAL_URL: 'https://proof-denial.example.test' }
 ]) {
   const child = spawnSync(process.execPath, ['--input-type=module', '--eval', inheritedEnvironmentProof], {
-    env,
+    // Some runtimes expose execPath as "node". Retain only executable lookup
+    // alongside the deliberately isolated production/Render guard fixture.
+    env: { PATH: process.env.PATH, ...env },
     encoding: 'utf8',
     timeout: 10_000
   });

@@ -750,7 +750,7 @@ export function createPerformerWithdrawalService(input: {
       }
     },
 
-    async reconcilePending(limit = 20) {
+    async reconcilePending(limit = 20, options: { allowSubmissions?: boolean } = {}) {
       const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
       const reconciliationTime = now();
       const retryBefore = new Date(reconciliationTime.getTime() - WITHDRAWAL_RETRY_DELAY_MS);
@@ -767,9 +767,27 @@ export function createPerformerWithdrawalService(input: {
         eq(performerWithdrawals.paymentMode, provider.mode),
         inArray(performerWithdrawals.status, ['processing', 'unclaimed', 'held']),
         isNotNull(performerWithdrawals.providerPayoutId)
-      )).orderBy(asc(performerWithdrawals.updatedAt)).limit(boundedLimit);
+      )).orderBy(
+        sql`${performerWithdrawals.providerReadAttemptedAt} asc nulls first`,
+        asc(performerWithdrawals.id)
+      ).limit(boundedLimit);
       for (const row of providerRows) {
         try {
+          // Persist scheduling before the external read: a failed response or
+          // restart must not let the same oldest batch monopolize every tick.
+          // Use the shared database clock so application-server clock skew
+          // cannot strand a row in the future. Do not reuse submission retry
+          // timestamps or financial updatedAt.
+          const [scheduled] = await db.update(performerWithdrawals).set({
+            providerReadAttemptedAt: sql`greatest(${performerWithdrawals.providerReadAttemptedAt}, clock_timestamp()) + interval '1 microsecond'`
+          }).where(and(
+            eq(performerWithdrawals.id, row.id),
+            eq(performerWithdrawals.paymentMode, provider.mode),
+            eq(performerWithdrawals.providerPayoutId, row.providerPayoutId!),
+            inArray(performerWithdrawals.status, ['processing', 'unclaimed', 'held'])
+          )).returning({ id: performerWithdrawals.id });
+          // A concurrent webhook may already have settled this withdrawal.
+          if (!scheduled) continue;
           const batch = await provider.getBatch(row.providerPayoutId!, row.providerSenderItemId ?? undefined);
           const applied = await applyProviderBatch(batch, {
             payoutBatchId: row.providerPayoutId!,
@@ -784,6 +802,11 @@ export function createPerformerWithdrawalService(input: {
           });
         }
       }
+
+      // Pausing new payouts must not strand money already sent to PayPal.
+      // Readback above can settle existing reservations, but disabled execution
+      // must never reach submission/retry paths for an uncertain new send.
+      if (options.allowSubmissions === false) return results;
 
       let remaining = boundedLimit - results.length;
       if (remaining <= 0) return results;

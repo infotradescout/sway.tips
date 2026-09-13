@@ -13,6 +13,7 @@ import {
   UploadPartCommand
 } from '@aws-sdk/client-s3';
 import type { AudioObjectIdentity, AudioObjectStore } from './audio-object-storage';
+import { assertAudioByteRange, audioContentRange } from './audio-byte-range';
 
 type R2Client = Pick<S3Client, 'send'>;
 
@@ -239,12 +240,23 @@ export function createR2AudioObjectStore(
       }
       return verified;
     },
-    async openOriginal(identity) {
+    async openOriginal(identity, range) {
       assertIdentity(identity, bucket);
-      const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: identity.storageKey }));
+      if (range) assertAudioByteRange(range);
+      const object = await client.send(new GetObjectCommand({
+        Bucket: bucket,
+        Key: identity.storageKey,
+        ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {})
+      }));
+      const stream = asNodeReadable(object.Body);
       const byteSize = Number(object.ContentLength);
-      if (!Number.isSafeInteger(byteSize) || byteSize < 0) throw new Error('R2 original is missing a valid content length.');
-      return { stream: asNodeReadable(object.Body), byteSize };
+      if (!Number.isSafeInteger(byteSize) || byteSize < 0
+        || (range && (object.ContentRange !== audioContentRange(range)
+          || byteSize !== range.end - range.start + 1))) {
+        stream.destroy();
+        throw new Error('R2 original response does not match the requested byte range or content length.');
+      }
+      return { stream, byteSize };
     }
   };
 }

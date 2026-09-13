@@ -96,6 +96,8 @@ export default function CollaboratorInbox({
   const [busy, setBusy] = useState(false);
   const [pendingGrantRevoke, setPendingGrantRevoke] = useState<string | null>(null);
   const [pendingConnectionRevoke, setPendingConnectionRevoke] = useState<string | null>(null);
+  const [listeningErrors, setListeningErrors] = useState<Record<string, boolean>>({});
+  const [listeningRevision, setListeningRevision] = useState(0);
 
   const redirectToLogin = useCallback(() => {
     const params = new URLSearchParams({ next: '/account/collaboration' });
@@ -126,6 +128,8 @@ export default function CollaboratorInbox({
       setConnections(nextConnections);
       setSharedWithMe(Array.isArray(incomingData.files) ? incomingData.files : []);
       setSharedByMe(Array.isArray(outgoingData.files) ? outgoingData.files : []);
+      setListeningErrors({});
+      setListeningRevision((current) => current + 1);
       onConnectionsLoaded?.(nextConnections);
     } catch (error) {
       if (error instanceof CollaborationRequestError && error.status === 401) {
@@ -307,6 +311,23 @@ export default function CollaboratorInbox({
               <p className="break-words text-sm font-bold text-white">{file.originalFilename}</p>
               <p className="mt-1 text-[11px] text-slate-400">{file.projectTitle} · from {counterpartyLabel(connection)} · {file.byteSize.toLocaleString()} bytes</p>
               <p className="mt-2 text-[11px] text-cyan-200">{describeCollaboratorFilePermissions(file)}</p>
+              {file.canDownloadOriginal && file.mimeType?.startsWith('audio/') ? (
+                <div className="mt-3 space-y-2">
+                  <audio
+                    key={`${file.grantId}:${listeningRevision}`}
+                    controls
+                    preload="none"
+                    src={`/api/talent/audio/file-grants/${encodeURIComponent(file.grantId)}/listen`}
+                    aria-label={`Listen to ${file.originalFilename}`}
+                    className="w-full"
+                    onError={() => setListeningErrors((current) => ({ ...current, [file.grantId]: true }))}
+                    onCanPlay={() => setListeningErrors((current) => ({ ...current, [file.grantId]: false }))}
+                  />
+                  {listeningErrors[file.grantId] ? (
+                    <p role="status" className="text-xs text-amber-200">Audio could not play. Refresh to check access, or download the source file to listen in a compatible player.</p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 {file.canDownloadOriginal ? (
                   <a href={`/api/talent/audio/file-grants/${file.grantId}/download`} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-cyan-500 px-3 text-xs font-black text-slate-950">

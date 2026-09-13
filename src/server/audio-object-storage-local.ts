@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync,
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { AudioObjectIdentity, AudioObjectStore } from './audio-object-storage';
+import { assertAudioByteRange } from './audio-byte-range';
 
 function assertSafeAbsoluteDir(dir: string, label: string) {
   if (!isAbsolute(dir)) throw new Error(`${label} must be an absolute path.`);
@@ -140,11 +141,20 @@ export function createLocalAudioObjectStore(env: NodeJS.ProcessEnv): AudioObject
       rmSync(dirname(partPath(root, identity, 1)), { recursive: true, force: true });
       return { byteSize: total, sha256 };
     },
-    async openOriginal(identity) {
+    async openOriginal(identity, range) {
       assertIdentity(identity, bucket);
       const target = objectPath(root, identity);
       if (!existsSync(target)) throw new Error('Original object not found.');
-      return { stream: createReadStream(target), byteSize: statSync(target).size };
+      const totalBytes = statSync(target).size;
+      if (range) {
+        assertAudioByteRange(range);
+        if (range.totalBytes !== totalBytes) throw new Error('Original object size no longer matches its sealed version.');
+        return {
+          stream: createReadStream(target, { start: range.start, end: range.end }),
+          byteSize: range.end - range.start + 1
+        };
+      }
+      return { stream: createReadStream(target), byteSize: totalBytes };
     }
   };
 }

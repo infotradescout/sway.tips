@@ -12,6 +12,7 @@ import {
 } from '../db/schema';
 import type { AudioObjectStore } from './audio-object-storage';
 import { parseAudioStorageProvider } from './audio-object-storage';
+import { resolveAudioByteRange } from './audio-byte-range';
 
 const REVIEW_EVENT_TYPES = [
   'comment',
@@ -341,6 +342,75 @@ export function createAudioFileCollaborationService(config: {
     return { version, ...object };
   }
 
+  async function listenToGrantedOriginal(input: {
+    grantId: string;
+    userId: string;
+    rangeHeader?: string;
+    ifRange?: string;
+  }) {
+    const grant = await requireActiveGrantForUser(input.grantId, input.userId);
+    // Listening sends original bytes, so it requires the same explicit authority
+    // as downloading them. The unused preview flag must not widen that grant.
+    if (grant.granteeUserId !== input.userId || !grant.canDownloadOriginal) {
+      throw Object.assign(new Error('Original download permission required.'), { status: 403 });
+    }
+    const [version] = await db.select().from(audioProjectAssetVersions)
+      .where(eq(audioProjectAssetVersions.id, grant.assetVersionId)).limit(1);
+    if (!version) throw Object.assign(new Error('Shared asset version not found.'), { status: 404 });
+    if (version.integrityStatus !== 'verified' || !version.originalPreserved
+      || !/^audio\/[a-z0-9.+-]+$/i.test(version.mimeType)) {
+      throw Object.assign(new Error('This shared file is not available for audio listening.'), { status: 415 });
+    }
+    const etag = `"sha256:${version.sha256}"`;
+    const range = resolveAudioByteRange(
+      input.ifRange && input.ifRange !== etag ? undefined : input.rangeHeader,
+      version.byteSize
+    );
+    const object = await store.openOriginal({
+      storageProvider: parseAudioStorageProvider(version.storageProvider),
+      storageBucket: version.storageBucket,
+      storageKey: version.storageKey
+    }, range);
+    // The storage socket can fail while the database is rechecking access.
+    // Retain this listener through handoff so errors are owned before pipeline
+    // attaches, and never return a stream that failed during authorization.
+    let streamFailure: Error | null = null;
+    object.stream.on('error', (error: Error) => { streamFailure = error; });
+    const assertReadable = () => {
+      if (streamFailure || object.stream.destroyed) {
+        throw new Error('Original audio stream ended before the listening response.', { cause: streamFailure });
+      }
+    };
+    try {
+      assertReadable();
+      const expectedSize = range ? range.end - range.start + 1 : version.byteSize;
+      if (object.byteSize !== expectedSize) {
+        throw new Error('Original object size no longer matches its sealed version.');
+      }
+      // A revoke while storage was opening must deny the response too. Every
+      // browser seek makes a fresh authenticated request through this boundary.
+      await requireActiveGrantForUser(input.grantId, input.userId);
+      assertReadable();
+      await writeAudit(db, {
+        actorId: input.userId,
+        entityType: 'audio_file_access_grant',
+        entityId: grant.id,
+        eventType: 'audio_file_access.listen',
+        metadata: {
+          versionId: version.id,
+          sha256: version.sha256,
+          rangeStart: range?.start ?? null,
+          rangeEnd: range?.end ?? null
+        }
+      });
+      assertReadable();
+      return { version, ...object, range, etag };
+    } catch (error) {
+      object.stream.destroy();
+      throw error;
+    }
+  }
+
   async function listReviewEvents(input: { grantId: string; userId: string }) {
     const grant = await requireActiveGrantForUser(input.grantId, input.userId);
     return db
@@ -474,6 +544,7 @@ export function createAudioFileCollaborationService(config: {
     listSharedWithMe,
     listSharedByMe,
     downloadGrantedOriginal,
+    listenToGrantedOriginal,
     listReviewEvents,
     addReviewEvent,
     revokeGrant

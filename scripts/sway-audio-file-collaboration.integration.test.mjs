@@ -111,13 +111,13 @@ try {
   const openedOriginalStreams = [];
   const countedStore = {
     ...localStore,
-    async openOriginal(identity) {
+    async openOriginal(identity, range) {
       openOriginalCount += 1;
       if (failNextOriginalOpen) {
         failNextOriginalOpen = false;
         throw new Error('forced object storage open failure');
       }
-      const object = await localStore.openOriginal(identity);
+      const object = await localStore.openOriginal(identity, range);
       openedOriginalStreams.push(object.stream);
       if (waitAfterOriginalOpen) await waitAfterOriginalOpen();
       return object;
@@ -1048,7 +1048,7 @@ try {
     1,
     'Final-track removal denial must leave the recording intact.'
   );
-  const collaborationDownloadBaseline = openOriginalCount;
+  let collaborationDownloadBaseline = openOriginalCount;
 
   const collaboration = createAudioFileCollaborationService({ db, store: countedStore });
   await assert.rejects(
@@ -1096,6 +1096,44 @@ try {
     /File grant access denied/
   );
   assert.equal(openOriginalCount, collaborationDownloadBaseline, 'Denied download must not reach object storage.');
+
+  for (const userId of [outsiderId, ownerId]) {
+    await assert.rejects(
+      collaboration.listenToGrantedOriginal({ grantId: shared.grant.id, userId, rangeHeader: 'bytes=0-15' }),
+      (error) => error.status === 403,
+      'Listening must use the existing recipient download permission, not pairing or grant ownership.'
+    );
+  }
+  await assert.rejects(
+    collaboration.listenToGrantedOriginal({ grantId: shared.grant.id, userId: reviewerId, rangeHeader: `bytes=${body.byteLength}-` }),
+    (error) => error.status === 416
+  );
+  assert.equal(openOriginalCount, collaborationDownloadBaseline, 'Denied listening and invalid ranges must not open storage.');
+  for (const [rangeHeader, start, end] of [
+    ['bytes=0-15', 0, 15],
+    ['bytes=-10', body.byteLength - 10, body.byteLength - 1],
+    ['bytes=20-', 20, body.byteLength - 1]
+  ]) {
+    const audio = await collaboration.listenToGrantedOriginal({ grantId: shared.grant.id, userId: reviewerId, rangeHeader });
+    assert.deepEqual(audio.range, { start, end, totalBytes: body.byteLength });
+    assert.deepEqual(await streamToBuffer(audio.stream), body.subarray(start, end + 1));
+    assert.equal(audio.etag, `"sha256:${sha256}"`);
+  }
+  const staleIfRange = await collaboration.listenToGrantedOriginal({
+    grantId: shared.grant.id, userId: reviewerId, rangeHeader: 'bytes=0-15', ifRange: '"different-version"'
+  });
+  assert.equal(staleIfRange.range, undefined, 'If-Range mismatch must return the complete original.');
+  assert.deepEqual(await streamToBuffer(staleIfRange.stream), body);
+  const artworkShare = await collaboration.shareVersion({
+    connectionId: connection.id, versionId: artworkVersion.id, grantedByUserId: ownerId
+  });
+  await assert.rejects(
+    collaboration.listenToGrantedOriginal({ grantId: artworkShare.grant.id, userId: reviewerId }),
+    (error) => error.status === 415,
+    'The listening endpoint must not serve shared images or rights documents inline.'
+  );
+  await collaboration.revokeGrant({ grantId: artworkShare.grant.id, userId: ownerId });
+  collaborationDownloadBaseline = openOriginalCount;
 
   const comment = await collaboration.addReviewEvent({
     grantId: shared.grant.id,
@@ -1148,6 +1186,11 @@ try {
     canComment: true,
     canApprove: false
   });
+  await assert.rejects(
+    collaboration.listenToGrantedOriginal({ grantId: secondShared.grant.id, userId: noAccessUserId }),
+    (error) => error.status === 403,
+    'A review-only grant must not acquire original-byte access through listening.'
+  );
   const secondGrantComment = await collaboration.addReviewEvent({
     grantId: secondShared.grant.id,
     userId: noAccessUserId,
@@ -1350,6 +1393,11 @@ try {
   assert.equal(openOriginalCount, collaborationDownloadBaseline + 1);
 
   await collaboration.revokeGrant({ grantId: shared.grant.id, userId: ownerId, reason: 'Proof complete.' });
+  await assert.rejects(
+    collaboration.listenToGrantedOriginal({ grantId: shared.grant.id, userId: reviewerId, rangeHeader: 'bytes=0-15' }),
+    (error) => error.status === 410,
+    'A browser seek after revocation must be denied before opening storage.'
+  );
   assert.equal((await collaboration.listSharedByMe({ userId: ownerId })).length, 0);
   await assert.rejects(
     collaboration.downloadGrantedOriginal({ grantId: shared.grant.id, userId: reviewerId }),
@@ -1396,6 +1444,7 @@ try {
   for (const eventType of [
     'audio_file_access.share',
     'audio_file_access.download',
+    'audio_file_access.listen',
     'audio_review.comment',
     'audio_review.approved',
     'audio_file_access.revoke',
@@ -1430,6 +1479,7 @@ try {
   for (const [eventType, expectedActorType] of [
     ['audio_file_access.share', 'performer'],
     ['audio_file_access.download', 'account'],
+    ['audio_file_access.listen', 'account'],
     ['audio_review.approved', 'account'],
     ['audio_review.resolved', 'account'],
     ['audio_file_access.revoke', 'account'],

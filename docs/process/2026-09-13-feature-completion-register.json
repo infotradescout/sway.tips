@@ -1,0 +1,1005 @@
+{
+  "asOf": "2026-09-13",
+  "baselineRef": "7db08c3946da01c8831a24b61fe54903d6c87c84",
+  "targetRef": "working branch; unreleased",
+  "ratingRule": "Scores are evidence-based judgments. Engineering tests do not establish live operation or competitive leadership. No score is automatically promoted to10.",
+  "completionStandard": [
+    "Complete customer workflow with persisted outcomes and recovery",
+    "Current source and provider contracts respected",
+    "Independent behavioral and applicable browser/real-database proof",
+    "Authorized deployed-build and provider/device evidence where relevant",
+    "Competitive comparison based on demonstrated outcomes, not feature labels"
+  ],
+  "features": [
+    {
+      "id": 1,
+      "area": "Live rooms and audience experience",
+      "feature": "QR, room links and code entry",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; historical room proof",
+      "baselineReason": "Low-friction room entry and QR sharing are solid, but established in mixody, Lime DJ and tip.dj."
+    },
+    {
+      "id": 2,
+      "area": "Live rooms and audience experience",
+      "feature": "Audience-to-performer account journey",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; end-to-end proof incomplete",
+      "baselineReason": "One account and Pro Mode exist. Current recovery repairs remain unmerged; no-account competitor guest flows set a demanding friction benchmark."
+    },
+    {
+      "id": 3,
+      "area": "Live rooms and audience experience",
+      "feature": "Room creation, ownership and restart",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; scoped recovery evidence",
+      "baselineReason": "Room setup, owned room selection, restart and closed-state handling exist. A full current live-night journey remains to be demonstrated."
+    },
+    {
+      "id": 4,
+      "area": "Live rooms and audience experience",
+      "feature": "Manual song requests and dedications",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; historical room proof",
+      "baselineReason": "A real usable fallback. Requests and dedications are common competitor baseline features."
+    },
+    {
+      "id": 5,
+      "area": "Live rooms and audience experience",
+      "feature": "Curated setlists and request search scope",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Host can constrain requests to setlist/library/catalog. Useful control, already offered through competitor repertoire workflows."
+    },
+    {
+      "id": 6,
+      "area": "Live rooms and audience experience",
+      "feature": "Manual, open-call and crowd-autopilot modes",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Autopilot automatically approves eligible moderated requests; it does not automatically mix music or prove playback."
+    },
+    {
+      "id": 7,
+      "area": "Live rooms and audience experience",
+      "feature": "Approve, deny, fulfill, hide and remove",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented; historical room proof",
+      "baselineReason": "Good host authority and payment-aware outcomes. Strong fit for performers who cannot guarantee every requested song."
+    },
+    {
+      "id": 8,
+      "area": "Live rooms and audience experience",
+      "feature": "Pause/resume and request-window presets",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Useful live-set controls; competitor request freezes and caps make this competitive baseline."
+    },
+    {
+      "id": 9,
+      "area": "Live rooms and audience experience",
+      "feature": "Tip and boost audience interface",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; payment constraints apply",
+      "baselineReason": "Requests, direct tips and boosts have distinct flows. Availability of general live earning is scored separately below."
+    },
+    {
+      "id": 10,
+      "area": "Live rooms and audience experience",
+      "feature": "Paid queue ranking and pooled support",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Approved queues sort by accumulated amount; multiple supporters can back an item. Paid priority already exists in mixody and TouchTunes."
+    },
+    {
+      "id": 11,
+      "area": "Live rooms and audience experience",
+      "feature": "Queue fairness and understandable priority",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Partial",
+      "baselineReason": "Amount-based ordering exists; no comparable proof of waiting-time fairness, requester interleaving or explicit priority guarantees."
+    },
+    {
+      "id": 12,
+      "area": "Live rooms and audience experience",
+      "feature": "Now-playing, queue and request outcome display",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented; source-dependent",
+      "baselineReason": "Room status is useful. Fulfilled/request status is not inherently evidence of the deck playing the same recording."
+    },
+    {
+      "id": 13,
+      "area": "Live rooms and audience experience",
+      "feature": "Lyrics lookup",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; provider-dependent",
+      "baselineReason": "Title/artist lookup route exists. Less complete than a demonstrated repertoire/lyrics/chords performance workflow."
+    },
+    {
+      "id": 14,
+      "area": "Live rooms and audience experience",
+      "feature": "Room closeout, history and recap",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; historical test-mode production proof",
+      "baselineReason": "Durable totals and terminal closeout have recorded evidence; test-volume reporting must remain distinct from payable earnings."
+    },
+    {
+      "id": 15,
+      "area": "Live rooms and audience experience",
+      "feature": "Lost-response and connection recovery",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented; scoped/historical proof",
+      "baselineReason": "Durable action identity, reconciliation and stale-response defenses are stronger engineering areas; full venue outage endurance remains unmeasured."
+    },
+    {
+      "id": 16,
+      "area": "Sources, playback control and booth integration",
+      "feature": "DJ library file import",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; broader UI in open PR",
+      "baselineReason": "rekordbox XML, Traktor NML, VirtualDJ XML, M3U/CSV and related library paths exist. Importing metadata is distinct from controlling that application."
+    },
+    {
+      "id": 17,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Trusted library sync and exact local paths",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Source keys and the booth bridge preserve trusted paths; browser imports intentionally strip executable paths."
+    },
+    {
+      "id": 18,
+      "area": "Sources, playback control and booth integration",
+      "feature": "VirtualDJ exact-track load and transport",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented; fresh hardware run not performed",
+      "baselineReason": "Substantial external-controller path: exact trusted path or search fallback, load/play/pause/stop/cue/next/previous via Network Control."
+    },
+    {
+      "id": 19,
+      "area": "Sources, playback control and booth integration",
+      "feature": "VirtualDJ acknowledgements and deck feedback",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Durable command claim/completion and low-rate title/artist/BPM/state feedback; stale state becomes disconnected."
+    },
+    {
+      "id": 20,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Windows no-terminal booth connection",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Generated room-scoped Windows connector reduces setup work; VirtualDJ Pro and its extension still required."
+    },
+    {
+      "id": 21,
+      "area": "Sources, playback control and booth integration",
+      "feature": "macOS/advanced booth connection",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; technical setup",
+      "baselineReason": "Advanced Node/repository setup is available, with more friction than a packaged supported desktop connector."
+    },
+    {
+      "id": 22,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Generic MIDI transport",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; one-way",
+      "baselineReason": "Can send mapped transport controls. Cannot identify/load the requested track or confirm deck execution."
+    },
+    {
+      "id": 23,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Deep Serato, rekordbox, Traktor and djay adapters",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "No direct adapters in main",
+      "baselineReason": "Exports and generic MIDI provide partial compatibility, not bidirectional native loading/state."
+    },
+    {
+      "id": 24,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Keyboard/WebMIDI room-control mappings",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Opt-in persistent learned controls fit the booth. This improves Sway operation independently of source playback depth."
+    },
+    {
+      "id": 25,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Stream Deck and Bitfocus Companion controls",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; manual setup",
+      "baselineReason": "Authenticated HTTP presets and bridge endpoints exist; no native self-installing vendor plugin."
+    },
+    {
+      "id": 26,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Branded/transparent OBS and room displays",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Browser Source URLs, now-playing/up-next/tips/boosts and QR output exist. Competitive baseline; scene automation is absent."
+    },
+    {
+      "id": 27,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Spotify catalog search",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Implemented; compatibility risk",
+      "baselineReason": "App-token search uses older size assumptions; incompatible with the newer development-mode contract. Actual live app quota/migration status is unknown."
+    },
+    {
+      "id": 28,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Spotify playlist import",
+      "baselineCompleteness": 3,
+      "baselineCompetitiveness": 2,
+      "baselineEvidence": "Partial; compatibility risk",
+      "baselineReason": "App-only import reads the first playlist page using older fields. No pagination or full-playlist completeness check."
+    },
+    {
+      "id": 29,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Spotify device playback control",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in main",
+      "baselineReason": "No Spotify user OAuth/Connect control adapter. Official APIs technically support source-owned remote playback."
+    },
+    {
+      "id": 30,
+      "area": "Sources, playback control and booth integration",
+      "feature": "YouTube source integration",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Search/open handoff only",
+      "baselineReason": "No implemented YouTube IFrame controller in the inspected main path; provider-hosted load/play/state APIs are available."
+    },
+    {
+      "id": 31,
+      "area": "Sources, playback control and booth integration",
+      "feature": "SoundCloud source integration",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Capability placeholder/handoff",
+      "baselineReason": "Catalog marks it not connected; no wired OAuth/playback controller. Official Widget API supports meaningful control."
+    },
+    {
+      "id": 32,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Apple Music source integration",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in main",
+      "baselineReason": "No MusicKit adapter found. MusicKit provider playback is technically available, but is not arbitrary-device remote control."
+    },
+    {
+      "id": 33,
+      "area": "Sources, playback control and booth integration",
+      "feature": "TIDAL source integration",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in main",
+      "baselineReason": "No direct connector. Catalog/playlist integration and official embeds are separate viable capabilities."
+    },
+    {
+      "id": 34,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Beatport source integration",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in main",
+      "baselineReason": "No partner adapter. Beatsource has migrated into Beatport and should not inflate the source count."
+    },
+    {
+      "id": 35,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Per-request source readiness and fallback UX",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Partial",
+      "baselineReason": "Library matching exists; consistent ready/search-only/unavailable/manual states across providers remain incomplete."
+    },
+    {
+      "id": 36,
+      "area": "Sources, playback control and booth integration",
+      "feature": "Signed desktop package and updates",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Unfinished packaging",
+      "baselineReason": "Windows room launcher exists; no signed installed companion with supported update lifecycle."
+    },
+    {
+      "id": 37,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Stripe incoming checkout",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; live pilot restrictions",
+      "baselineReason": "PaymentIntent and webhook paths exist; live incoming payments are restricted to exactly one configured performer."
+    },
+    {
+      "id": 38,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Authorization before performer acceptance",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented; historical/scoped proof",
+      "baselineReason": "Durable holds and performer-decision capture can make Sway stronger than basic tipping links."
+    },
+    {
+      "id": 39,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Voids, refunds and denial/removal recovery",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; provider outcome not freshly verified",
+      "baselineReason": "Records intended reversals and waits for provider confirmation rather than inventing a successful refund."
+    },
+    {
+      "id": 40,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Customer fee disclosure and net protection",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Integer-cent pricing and processing recovery exist; conversion impact and actual net economics are unmeasured."
+    },
+    {
+      "id": 41,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Pending/captured/available/reserved balances",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Durable separation of balances and test/live money is useful; no current financial-reporting/accounting-export proof."
+    },
+    {
+      "id": 42,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "PayPal performer withdrawal",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 2,
+      "baselineEvidence": "Implemented; hard-coded pilot limit",
+      "baselineReason": "Exactly one designated performer, one live withdrawal record and exactly $10 gross. General recurring cash-out is incomplete."
+    },
+    {
+      "id": 43,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Venmo performer withdrawal",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 2,
+      "baselineEvidence": "Implemented; same pilot limit",
+      "baselineReason": "Real destination model and provider path; optional Venmo approval is separated. Receipt by a real recipient was not verified."
+    },
+    {
+      "id": 44,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Other payout destinations",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in current release",
+      "baselineReason": "No implemented direct bank/debit-card/Cash App withdrawal. Optional expansion, not grounds to erase existing PayPal work."
+    },
+    {
+      "id": 45,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Encrypted and confirmed payout destinations",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Masked display, encrypted recipient storage, environment binding and change fencing are sound foundations."
+    },
+    {
+      "id": 46,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Aggregated withdrawals and fee quotation",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented; broad live use blocked",
+      "baselineReason": "Balance accumulation, minimum and quoted provider fee exist; ordinary repeated live withdrawal remains unavailable."
+    },
+    {
+      "id": 47,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Withdrawal webhooks/retries/reconciliation",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented with specific recovery gap",
+      "baselineReason": "Durable operations exist. Turning execution off prevents the scheduled payout reconciler from starting after restart."
+    },
+    {
+      "id": 48,
+      "area": "Payments, performer earnings and payouts",
+      "feature": "Payout identity/KYC review workflow",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Partial/manual",
+      "baselineReason": "Audited review records exist; no demonstrated automated identity-provider journey or broad recipient onboarding."
+    },
+    {
+      "id": 49,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Public performer profiles",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Live observed plus code",
+      "baselineReason": "A real public profile displayed identity, photo, biography, music links and socials. Useful beyond an active room."
+    },
+    {
+      "id": 50,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Profile layout and owner editor",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Performer-type layouts and section arrangement improve utility. Not yet evidence of website-builder-level flexibility."
+    },
+    {
+      "id": 51,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Music, social and featured-media links",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Live observed plus code",
+      "baselineReason": "Working public link presentation; outward links do not confer connected playback or destination analytics."
+    },
+    {
+      "id": 52,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Persistent performer discovery",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Live observed",
+      "baselineReason": "Five profiles were visible in the inspected directory, including between shows. That observation is not a total-user or market-share count."
+    },
+    {
+      "id": 53,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Cross-entity discovery search",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Live performer search observed",
+      "baselineReason": "Searching Callie returned the matching profile. Broader room/event/release/lyric search exists in code; relevance at scale is unproven."
+    },
+    {
+      "id": 54,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Technical SEO and public share metadata",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Implemented; organic outcomes unverified",
+      "baselineReason": "Canonical routes, robots/sitemap and public HTML exist. No Search Console or organic-conversion evidence was available."
+    },
+    {
+      "id": 55,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "QR signs, share cards and promotional kit",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Copy/download/print and public sharing tools are useful. djrequests and Lime DJ already make promotion a core feature."
+    },
+    {
+      "id": 56,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Public visual hierarchy and product wording",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Live observed on desktop only",
+      "baselineReason": "Readable pages and real imagery; discovery intro overemphasizes rights checks and synthetic-artist policy before the visitor's immediate task."
+    },
+    {
+      "id": 57,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Discovery telemetry and experiments",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; business results unverified",
+      "baselineReason": "Observatory and attribution code exist. Instrumentation is not proof of user acquisition or successful experiments."
+    },
+    {
+      "id": 58,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Automatic affiliate enrollment and referral links",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "All-account enrollment, stable links and first valid referral attribution are substantial. No cross-device attribution evidence."
+    },
+    {
+      "id": 59,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Affiliate commission ledger",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "10% standard/20% eligible partner rates apply to captured Sway platform fees, with immutable credit/reversal records."
+    },
+    {
+      "id": 60,
+      "area": "Profiles, discovery, growth and affiliates",
+      "feature": "Affiliate cash-out",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing",
+      "baselineReason": "Service explicitly reports payout not available. Recorded commissions are not a complete affiliate-income product."
+    },
+    {
+      "id": 61,
+      "area": "Private audio files and collaboration",
+      "feature": "Private audio projects",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Durable projects and permissions provide a useful foundation; BandLab covers a broader creation workflow."
+    },
+    {
+      "id": 62,
+      "area": "Private audio files and collaboration",
+      "feature": "Multipart upload and completion",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Reservations, ordered parts, idempotent sealing and cleanup exist. Current large-file/mobile-resume behavior was not tested."
+    },
+    {
+      "id": 63,
+      "area": "Private audio files and collaboration",
+      "feature": "Immutable masters and exact original downloads",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Implemented; historical production proof",
+      "baselineReason": "Version identity, SHA-256 and exact-byte retrieval after restart have historical evidence."
+    },
+    {
+      "id": 64,
+      "area": "Private audio files and collaboration",
+      "feature": "Storage ownership, privacy control and recovery",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Historical 9/10 proof; one control unresolved",
+      "baselineReason": "The recorded owning-account/public-access check remains unresolved. This is not evidence that the bucket is publicly exposed."
+    },
+    {
+      "id": 65,
+      "area": "Private audio files and collaboration",
+      "feature": "One-time private QR/account pairing",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Historical two-account production proof",
+      "baselineReason": "Pairing alone grants no files; replay protection and deliberate sharing are meaningful strengths."
+    },
+    {
+      "id": 66,
+      "area": "Private audio files and collaboration",
+      "feature": "Selected-version file sharing",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Historical production proof",
+      "baselineReason": "Granular download/comment/approve grants target an immutable version."
+    },
+    {
+      "id": 67,
+      "area": "Private audio files and collaboration",
+      "feature": "Collaborator inbox for ordinary accounts",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Recipients can receive/review without needing the full performer workspace."
+    },
+    {
+      "id": 68,
+      "area": "Private audio files and collaboration",
+      "feature": "Timecoded notes, changes requested and approval",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Review, approval withdrawal and owner resolution exist. This is review collaboration, not a collaborative DAW."
+    },
+    {
+      "id": 69,
+      "area": "Private audio files and collaboration",
+      "feature": "Grant and connection revocation",
+      "baselineCompleteness": 8,
+      "baselineCompetitiveness": 7,
+      "baselineEvidence": "Historical production proof",
+      "baselineReason": "Revocation and connection cascade remove access; recorded replay denial supports the narrow claim."
+    },
+    {
+      "id": 70,
+      "area": "Private audio files and collaboration",
+      "feature": "Collaborator returns a revised recording",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Absent from main sharing path; branch work exists",
+      "baselineReason": "The main sharing service sets canUploadNewVersion=false. Existing owner uploads do not complete collaborator revision return. PR203 remains unmerged."
+    },
+    {
+      "id": 71,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Release metadata, artwork and full credits",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Editable release/track metadata and optimistic revision protection; downstream delivery remains absent."
+    },
+    {
+      "id": 72,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Single/EP/album track assembly",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Track add/edit/reorder/remove and count validation exist; no store acceptance follows from assembly."
+    },
+    {
+      "id": 73,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "ISRC/UPC handling",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Partial",
+      "baselineReason": "Supplied identifiers are modeled/validated. Operational issuance and migration continuity are not demonstrated."
+    },
+    {
+      "id": 74,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Rights declarations and independent review",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Immutable declarations and separate reviewer evidence are substantial, with added workflow friction for solo creators."
+    },
+    {
+      "id": 75,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Human/synthetic authorship disclosure",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Writer/lyrics/composition/vocal/production disclosures and consent evidence. Market advantage is unmeasured."
+    },
+    {
+      "id": 76,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Public release pages and profile cards",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Rights-gated metadata/artwork/credit presentation; not public music listening or proof of store distribution."
+    },
+    {
+      "id": 77,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "True pre-save and automatic destination updates",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing provider actions",
+      "baselineReason": "Promotional page foundation exists, but not the working pre-save flow DistroKid HyperFollow supplies."
+    },
+    {
+      "id": 78,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Contracted external DSP delivery",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing in main",
+      "baselineReason": "No active real delivery provider. Open sandbox-engine PR142 is unfinished branch work, not delivery to stores."
+    },
+    {
+      "id": 79,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Store status, corrections and takedowns",
+      "baselineCompleteness": 2,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Schema/contracts in main",
+      "baselineReason": "Modeled states lack real provider execution. Sandbox branch claims additional lifecycle work but remains disabled."
+    },
+    {
+      "id": 80,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Safe catalog transfer and continuity",
+      "baselineCompleteness": 2,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Schema/contracts",
+      "baselineReason": "Parity, overlap and approval models do not establish executed store migration or royalty continuity."
+    },
+    {
+      "id": 81,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Royalty statement import and reconciliation",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing",
+      "baselineReason": "No separate operational distribution royalty ledger."
+    },
+    {
+      "id": 82,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Collaborator royalty splits and payouts",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing",
+      "baselineReason": "Live-room payments cannot substitute for distribution royalty shares, taxes and payout execution."
+    },
+    {
+      "id": 83,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Creator-to-creator signed deals",
+      "baselineCompleteness": 2,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Foundation only",
+      "baselineReason": "Terms/parties/evidence are modeled; complete execution ceremony is not enabled."
+    },
+    {
+      "id": 84,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Paid audio sales",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Economic plan; sales runtime not delivered",
+      "baselineReason": "No demonstrated buyer-to-audio-sale fulfillment path. Planned audio fees are separate from streaming economics."
+    },
+    {
+      "id": 85,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Sway.DIO listening and streaming",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Planned; no runtime delivered",
+      "baselineReason": "No demonstrated native listening product or current public streaming journey."
+    },
+    {
+      "id": 86,
+      "area": "Releases, distribution and Sway.DIO",
+      "feature": "Sway.DIO funding and artist revenue allocation",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Planned; no runtime delivered",
+      "baselineReason": "Subscriptions first, ads/sponsorship later and zero Sway streaming cut are proposed economics, not executed revenue allocation."
+    },
+    {
+      "id": 87,
+      "area": "Events and native ticketing",
+      "feature": "Performer event creation/editing",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Dates/timezone/doors/location/TBA/artwork/visibility and owned-event management exist."
+    },
+    {
+      "id": 88,
+      "area": "Events and native ticketing",
+      "feature": "Public/unlisted event pages and external ticket links",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Useful published pages and safe external RSVP/ticket handoff. External provider fulfills the purchase."
+    },
+    {
+      "id": 89,
+      "area": "Events and native ticketing",
+      "feature": "Cancellation and public availability changes",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Audited cancellation and CTA removal; does not itself refund an externally purchased ticket."
+    },
+    {
+      "id": 90,
+      "area": "Events and native ticketing",
+      "feature": "Native paid GA checkout",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 2,
+      "baselineEvidence": "Implemented; gated",
+      "baselineReason": "Substantial hosted checkout/order code exists. General production ticket sales remain unverified and gated."
+    },
+    {
+      "id": 91,
+      "area": "Events and native ticketing",
+      "feature": "Inventory reservations and issuance",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Transactional reservations and backend-confirmed issuance; current production crowd-sale proof absent."
+    },
+    {
+      "id": 92,
+      "area": "Events and native ticketing",
+      "feature": "Group purchases and ticket quantities",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Missing everyday workflow",
+      "baselineReason": "Quantity is hard-coded to one; one issued/pending ticket per verified account per event."
+    },
+    {
+      "id": 93,
+      "area": "Events and native ticketing",
+      "feature": "Buyer wallet and rotating QR pass",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; gated journey",
+      "baselineReason": "Ticket status and short-lived QR/manual codes exist. No Apple Wallet pass integration demonstrated."
+    },
+    {
+      "id": 94,
+      "area": "Events and native ticketing",
+      "feature": "Door scanning and manual admission",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Implemented; limited operations",
+      "baselineReason": "Online-only, performer-owner-authorized check-in. Offline staffed-door operation is an important competitor gap."
+    },
+    {
+      "id": 95,
+      "area": "Events and native ticketing",
+      "feature": "Performer transfer after admission",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; financial proof incomplete",
+      "baselineReason": "Seller funds transfer after check-in is distinct from transfer of a ticket to another attendee."
+    },
+    {
+      "id": 96,
+      "area": "Events and native ticketing",
+      "feature": "Unused-ticket and cancellation refunds",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; operations unverified",
+      "baselineReason": "Provider-confirmed full-refund workflow with no-show policy; complete production operation not proved."
+    },
+    {
+      "id": 97,
+      "area": "Events and native ticketing",
+      "feature": "Disputes and net-cash reconciliation",
+      "baselineCompleteness": 5,
+      "baselineCompetitiveness": 2,
+      "baselineEvidence": "Partial",
+      "baselineReason": "Processor events/retries exist; live fee/refund/dispute and post-transfer recovery policy evidence remains missing."
+    },
+    {
+      "id": 98,
+      "area": "Events and native ticketing",
+      "feature": "Attendee ticket transfer/resale",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Future scope; no runtime delivered",
+      "baselineReason": "Current v1 excludes it. Seller payout transfers must not be counted as ticket-holder transfers."
+    },
+    {
+      "id": 99,
+      "area": "Events and native ticketing",
+      "feature": "Credits and no-show forfeiture options",
+      "baselineCompleteness": 0,
+      "baselineCompetitiveness": 0,
+      "baselineEvidence": "Future scope; no runtime delivered",
+      "baselineReason": "Current lane is refund-only; later options remain plans."
+    },
+    {
+      "id": 100,
+      "area": "Events and native ticketing",
+      "feature": "Ticket price and fee presentation",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "10% mandatory service fee with eligible Brand Partner $1 cap. Not universally cheaper after all processing and operational costs."
+    },
+    {
+      "id": 101,
+      "area": "Accounts, moderation and operations",
+      "feature": "Password/email login, verification and recovery",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented; new branch repairs",
+      "baselineReason": "scrypt, email flows and persisted sessions exist; main lacks today's complete account-recovery repair."
+    },
+    {
+      "id": 102,
+      "area": "Accounts, moderation and operations",
+      "feature": "Server-owned account, role and room access",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented",
+      "baselineReason": "Ownership, persisted grants, admin/support separation and durable login limiting are real. No fresh penetration test was performed."
+    },
+    {
+      "id": 103,
+      "area": "Accounts, moderation and operations",
+      "feature": "Public/private data projection",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Implemented; historical proof",
+      "baselineReason": "Public room projection and receipt-scoped status protect private records; continued regression coverage matters."
+    },
+    {
+      "id": 104,
+      "area": "Accounts, moderation and operations",
+      "feature": "Moderation, reports and durable active blocks",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 5,
+      "baselineEvidence": "Implemented; narrow filtering",
+      "baselineReason": "Durable actions and block enforcement exist. Small local English lexicon; no wired AI moderation path established."
+    },
+    {
+      "id": 105,
+      "area": "Accounts, moderation and operations",
+      "feature": "Installable web app and offline fallback",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; install prompt live observed",
+      "baselineReason": "Manifest/service-worker fallback exist. Offline page availability is not offline queue, payment or playback operation."
+    },
+    {
+      "id": 106,
+      "area": "Accounts, moderation and operations",
+      "feature": "Native App Store distribution",
+      "baselineCompleteness": 1,
+      "baselineCompetitiveness": 1,
+      "baselineEvidence": "Roadmap/native bridge foundation",
+      "baselineReason": "No current reviewed/signed store release established by the evidence."
+    },
+    {
+      "id": 107,
+      "area": "Accounts, moderation and operations",
+      "feature": "Support and account-data deletion",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Partial/manual",
+      "baselineReason": "Support/legal surfaces and review intake exist; automated verified deletion is not delivered by the intake endpoint."
+    },
+    {
+      "id": 108,
+      "area": "Accounts, moderation and operations",
+      "feature": "Release health and operational diagnostics",
+      "baselineCompleteness": 6,
+      "baselineCompetitiveness": 4,
+      "baselineEvidence": "Implemented; production view limited",
+      "baselineReason": "Readiness/health logic and historical gates exist. Current live marker/API and provider state were not available to this audit."
+    },
+    {
+      "id": 109,
+      "area": "Accounts, moderation and operations",
+      "feature": "Test coverage and regression discipline",
+      "baselineCompleteness": 7,
+      "baselineCompetitiveness": 6,
+      "baselineEvidence": "Substantial scoped evidence",
+      "baselineReason": "Repository has behavior, browser, concurrency and contract suites. This assessment did not rerun the full suite."
+    },
+    {
+      "id": 110,
+      "area": "Accounts, moderation and operations",
+      "feature": "Maintainability and change isolation",
+      "baselineCompleteness": 4,
+      "baselineCompetitiveness": 3,
+      "baselineEvidence": "Code observation",
+      "baselineReason": "Large server and performer/audience components still concentrate unrelated responsibilities, increasing regression and integration costs."
+    }
+  ]
+}
