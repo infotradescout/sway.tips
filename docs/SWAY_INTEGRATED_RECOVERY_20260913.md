@@ -33,4 +33,8 @@ The second deployment finished `build_failed` at 2026-09-13 17:30:57 UTC. It pas
 
 ## Remaining release gates
 
-Publish the reviewed follow-up candidate after publication authorization, then rerun the existing isolated service with its exact SHA. Require the entire source browser journey (reload, Requests search, second account, server restart/database counts, and responsive layouts) and full application contracts to pass. Reconfirm the source tree and disposable-database/provider protections. Production remains unchanged pending normal review and release gates; no live-money or provider transaction is part of this verification.
+Publication was authorized on 2026-09-13. Published candidate `683bdbfbb297dcc40f49818f6c02b82f2109ad0d` has the exact reviewed local tree `7ade05f5dae32e5712847ee5e21c47bb1c34ca3f`. Environment merge triggered one isolated deployment, `dep-dajekebm8hqs7380eqg0`; no duplicate deploy was triggered.
+
+That run passed the corrected 12-track Sources reload against native PostgreSQL, then exposed a proof navigation mistake: the test requested `/talent/library`, while the canonical Requests route is `/talent/music`. The proof now clicks the actual Requests navigation button and asserts the canonical route before searching. Source-count, reload, persistence, search, account-isolation, restart, and viewport assertions remain strict. This is a test-only follow-up; product routes are unchanged.
+
+Rerun the existing isolated service with the exact follow-up SHA. Require the entire source browser journey (reload, Requests search, second account, server restart/database counts, and responsive layouts) and full application contracts to pass. Reconfirm the source tree and disposable-database/provider protections. Production remains unchanged pending normal review and release gates; no live-money or provider transaction is part of this verification.

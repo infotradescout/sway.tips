@@ -165,7 +165,11 @@ try {
   currentStage = 'reload saved Sources';
   await a.page.reload(); await chooser.waitFor();
   await a.page.locator('[data-sway-linked-sources]').getByText('12 tracks', { exact: true }).waitFor();
-  await a.page.goto(baseUrl + '/talent/library');
+  currentStage = 'search saved imports from Requests navigation';
+  await Promise.all([
+    a.page.waitForURL(url => url.pathname === '/talent/music'),
+    a.page.getByRole('navigation', { name: 'Performer sections' }).getByRole('button', { name: 'Requests', exact: true }).click()
+  ]);
   await a.page.getByLabel('Search request library').fill('Saturday Original');
   await a.page.getByText('Saturday Original', { exact: true }).waitFor();
   record('Saved imports survive reload and are found in the actual Requests library');
