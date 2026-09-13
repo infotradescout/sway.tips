@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { finalizeSourceValidation } from './lib/source-validation-finalization.mjs';
 
 assert.equal(process.env.RENDER_SERVICE_ID, 'srv-daesln0u01pc73fso5kg');
 assert.equal(process.env.SWAY_ISOLATED_VALIDATION, 'true');
@@ -55,6 +56,7 @@ try {
   const deps = join(temp, 'native-dependencies'); mkdirSync(deps);
   await run('native-postgres-install', 'npm', ['install','--prefix',deps,'--no-audit','--no-fund','--package-lock=false','embedded-postgres@18.4.0-beta.17'], { cwd: temp, timeout: 600000, required: true });
   const requireDeps = createRequire(join(deps,'package.json'));
+  await run('native-launcher-failure-regressions', 'node', ['scripts/sway-source-finalization.test.mjs', requireDeps.resolve('embedded-postgres')], { cwd: original, required: true });
   const { default: EmbeddedPostgres } = await import(pathToFileURL(requireDeps.resolve('embedded-postgres')).href);
   const password = randomBytes(18).toString('hex');
   pg = new EmbeddedPostgres({ databaseDir: join(temp,'pgdata'), user: 'postgres', password, port: 25439, persistent: false, onLog: () => {}, onError: message => console.error(scrub(message)) });
@@ -76,14 +78,5 @@ try {
 } catch (error) {
   report.error = scrub(error.stack || error); console.error('SWAY_SOURCE_ERROR ' + report.error);
 } finally {
-  for (const name of ['music-sources-proof','public-entry-qa']) {
-    if (existsSync(join(repo,'tmp',name))) cpSync(join(repo,'tmp',name), join(out,name), { recursive: true });
-  }
-  try { await pg?.stop(); } catch (error) { report.cleanupError = scrub(error.message); report.passed = false; }
-  report.finishedAt = new Date().toISOString();
-  writeFileSync(join(out,'source-evidence.json'), JSON.stringify(report,null,2));
-  writeFileSync(join(out,'index.html'), '<meta name="robots" content="noindex,nofollow"><h1>Sources validation: ' + (report.passed ? 'passed' : 'failed or incomplete') + '</h1><p>Owned test application only. Not Sway production or provider integration certification.</p><a href="source-evidence.json">Evidence</a>');
-  writeFileSync(join(out,'robots.txt'), 'User-agent: *\nDisallow: /\n');
-  console.log('SWAY_SOURCE_SUMMARY ' + JSON.stringify({ ...report, steps: report.steps.map(({ tail, ...row }) => row) }));
-  if (!report.passed) process.exitCode = 1;
+  await finalizeSourceValidation({ report, repo, out, pg });
 }
