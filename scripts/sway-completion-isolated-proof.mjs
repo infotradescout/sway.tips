@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // A separate build-only proof service. Never attach an application database,
@@ -63,6 +63,24 @@ function assertNoUnexpectedFiles() {
     .split('\0').filter(Boolean)
     .filter(path => !path.startsWith('node_modules/') && !path.startsWith('dist/') && !disposableFiles.has(path));
   assert.deepEqual(unexpected, [], 'Unreviewed files exist outside the exact disposable output paths.');
+}
+function cleanOwnedBrowserProofOutputs() {
+  // These directories are created only by mandatory browser/contract suites in
+  // this isolated checkout. Delete the exact owned output roots rather than
+  // weakening the final clean-source assertion with broad directory allowlists.
+  for (const path of [
+    'artifacts/account-home-browser',
+    'artifacts/readiness-223/room-start',
+    'tmp/public-entry-qa'
+  ]) rmSync(path, { recursive: true, force: true });
+  const readinessRoot = 'artifacts/readiness-223';
+  if (existsSync(readinessRoot)) {
+    for (const name of readdirSync(readinessRoot)) {
+      if (/^response-order-\d+$/.test(name)) {
+        rmSync(`${readinessRoot}/${name}`, { recursive: true, force: true });
+      }
+    }
+  }
 }
 assertNoUnexpectedFiles();
 const outputDirectory = resolve('.completion-proof-public');
@@ -149,6 +167,7 @@ if (installed && browserInstalled) {
 }
 
 // Tests may create disposable ignored output. They may not alter reviewed code.
+cleanOwnedBrowserProofOutputs();
 git('diff', '--exit-code', 'HEAD', '--');
 assertNoUnexpectedFiles();
 assert.equal(git('rev-parse', 'HEAD'), head);
