@@ -159,7 +159,9 @@ try {
   assert.equal((await api(a.context, '/api/talent/library/sources')).sources.length, 12);
   record('Invalid file is rejected before POST and does not erase prior sources');
   await a.page.reload(); await chooser.waitFor();
-  await a.page.locator('[data-sway-linked-sources]').getByText('12 tracks', { exact: true }).waitFor();
+  const linkedSources = a.page.locator('[data-sway-linked-sources]');
+  await linkedSources.getByText('Synced tracks', { exact: true }).waitFor();
+  await linkedSources.getByText('12', { exact: true }).waitFor();
   await a.page.goto(baseUrl + '/talent/library');
   await a.page.getByLabel('Search request library').fill('Saturday Original');
   await a.page.getByText('Saturday Original', { exact: true }).waitFor();
