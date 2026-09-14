@@ -59,7 +59,7 @@ for (const term of [
   "res.setHeader('Content-Disposition', `attachment; filename=",
   "res.setHeader('X-Content-Type-Options', 'nosniff')",
   "res.setHeader('X-Sway-Asset-Sha256'",
-  'opened.stream.pipe(res)'
+  'await pipeline(opened.stream, res)'
 ]) requireTerm(rightsDocumentRoute, term, 'Sealed rights evidence route');
 for (const term of [
   '/api/talent/audio/rights/${item.id}/document',

@@ -78,7 +78,7 @@ const connectionListRoute = sourceBetween(
 const shareRoute = sourceBetween(
   server,
   "app.post('/api/talent/audio/pairing/connections/:connectionId/shares'",
-  "app.get('/api/talent/audio/files/shared-with-me'"
+  "app.post('/api/talent/audio/pairing/connections/:connectionId/candidate-revision-grants'"
 );
 for (const [label, routeSource] of [
   ['Pairing token creation', tokenRoute],
@@ -117,7 +117,7 @@ for (const [label, source] of [
 
 const pairingClaim = sourceBetween(pairing, 'async function claimPairingToken', 'async function listConnections');
 const pairingRevoke = sourceBetween(pairing, 'async function revokeConnection', 'return {');
-const shareVersion = sourceBetween(service, 'async function shareVersion', 'async function listSharedWithMe');
+const shareVersion = sourceBetween(service, 'async function shareVersion', 'async function grantCandidateRevisionUpload');
 const accountAuditWriter = sourceBetween(service, 'async function writeAudit', 'export function createAudioFileCollaborationService');
 if ((pairingClaim.match(/actorType: 'account'/g) ?? []).length < 2) {
   failures.push('Generic-account pairing claims and denials must be audited as account actions.');
@@ -236,7 +236,7 @@ for (const term of [
 }
 for (const term of [
   'Shared with me',
-  'Shared by me',
+  'Shares I created or manage',
   'Download source file',
   'Request changes',
   'Approve',

@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, Upload } from 'lucide-react';
 import CollaboratorInbox, { type FileConnection } from './CollaboratorInbox';
+import type { CollaborationCapabilities } from './CollaboratorInbox';
 import { usePerformerCatalog } from '../use-performer-catalog';
 import { CatalogActionUnconfirmedError, requestCatalogAction } from '../catalog-action-request';
+import { sha256FileHex } from '../audio-upload-client';
 
-async function sha256Hex(file: File) {
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, '0')).join('');
-}
 function chunkFile(file: File, partSize: number) {
   const parts: Blob[] = [];
   for (let offset = 0; offset < file.size; offset += partSize) parts.push(file.slice(offset, Math.min(offset + partSize, file.size)));
@@ -24,6 +22,9 @@ function formatBytes(bytes: number) {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / (1024 ** unit)).toLocaleString(undefined, { maximumFractionDigits: unit === 0 ? 0 : 1 })} ${units[unit]}`;
+}
+function candidateRequestByteLimit(sourceByteSize: number) {
+  return Math.min(512 * 1024 * 1024, Math.max(16 * 1024 * 1024, sourceByteSize * 2));
 }
 const PAGE_SIZE = 30;
 type Action = { active: boolean; controller: AbortController };
@@ -42,6 +43,9 @@ export default function PerformerAudioFiles() {
   const [connections, setConnections] = useState<FileConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [collaborationRefreshKey, setCollaborationRefreshKey] = useState(0);
+  const [candidateUploadsEnabled, setCandidateUploadsEnabled] = useState(false);
+  const [candidateRequestProjectIds, setCandidateRequestProjectIds] = useState<string[]>([]);
+  const candidateRequestKeys = useRef(new Map<string, string>());
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const filesHeading = useRef<HTMLHeadingElement>(null);
@@ -78,6 +82,7 @@ export default function PerformerAudioFiles() {
     refreshRequiredRef.current = false; recoveryReadRequested.current = false;
     setRefreshRequired(false);
     setBusy(false); setShareToken(null); setStatus(null);
+    setCandidateUploadsEnabled(false); setCandidateRequestProjectIds([]); candidateRequestKeys.current.clear();
     setConnections([]); setSelectedConnectionId(''); setTitle('Masters'); setSearch(''); setPage(0);
   }, [catalog.accessDenied]);
   useEffect(() => {
@@ -176,7 +181,13 @@ export default function PerformerAudioFiles() {
         catch { throw new CatalogActionUnconfirmedError(); }
       }
       setStatus(`Preparing ${file.name}…`);
-      const expectedSha256 = await sha256Hex(file);
+      const expectedSha256 = await sha256FileHex(file, {
+        signal: action.controller.signal,
+        onProgress: (completedBytes, totalBytes) => {
+          ensureActive(action);
+          setStatus(`Preparing ${file.name}… ${Math.round(completedBytes / Math.max(1, totalBytes) * 100)}%`);
+        }
+      });
       ensureActive(action);
       const partSize = 5 * 1024 * 1024;
       const startData = await sendAction(`/api/talent/audio/projects/${encodeURIComponent(projectId)}/uploads`, {
@@ -233,10 +244,46 @@ export default function PerformerAudioFiles() {
     setCollaborationRefreshKey(current => current + 1);
     setStatus(data.reused ? 'This version is already shared with that connection.' : 'Selected version shared for download, review, and approval.');
   });
-  const handleConnectionsLoaded = useCallback((next: FileConnection[]) => {
+  const requestCandidateRevision = (version: { id: string; byteSize: number; mimeType: string }) => runAction('file', async action => {
+    if (!candidateUploadsEnabled || !candidateRequestProjectIds.includes(selectedProjectId) || !version.mimeType.startsWith('audio/')) return;
+    if (!reader.getSnapshot().versions.some(current => current.id === version.id)) return;
+    if (!connections.some(connection => connection.connectionId === selectedConnectionId)) throw new Error('Pair with another account before requesting a private candidate.');
+    const maxCandidateBytes = candidateRequestByteLimit(version.byteSize);
+    const requestKey = `${selectedConnectionId}:${version.id}:${maxCandidateBytes}`;
+    let idempotencyKey = candidateRequestKeys.current.get(requestKey);
+    if (!idempotencyKey) {
+      idempotencyKey = `candidate-grant:${version.id}:${crypto.randomUUID()}`;
+      candidateRequestKeys.current.set(requestKey, idempotencyKey);
+    }
+    let data: Record<string, any>;
+    try {
+      data = await sendAction(`/api/talent/audio/pairing/connections/${encodeURIComponent(selectedConnectionId)}/candidate-revision-grants`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ versionId: version.id, maxCandidateBytes, expiresInHours: 168, idempotencyKey })
+      }, 'Could not request a private candidate.', action);
+    } catch (error) {
+      // Keep the key after an ambiguous transport result. A definite rejection can
+      // end an expired/revoked request, allowing the next explicit request to renew it.
+      if (!(error instanceof CatalogActionUnconfirmedError)) candidateRequestKeys.current.delete(requestKey);
+      throw error;
+    }
+    if (!data.grant?.id || data.grant.maxCandidateBytes !== maxCandidateBytes) throw new CatalogActionUnconfirmedError('The candidate request could not be confirmed. Refresh Catalog and Collaborator Inbox before trying again.');
+    setCollaborationRefreshKey(current => current + 1);
+    setStatus(data.reused
+      ? `This connection already has a ${formatBytes(maxCandidateBytes)} candidate request for this source.`
+      : `One private candidate requested for seven days, up to ${formatBytes(maxCandidateBytes)}. You can review it in Collaborator Inbox.`);
+  });
+  const handleConnectionsLoaded = useCallback((next: FileConnection[], capabilities: CollaborationCapabilities) => {
     if (!reader.isActive()) return;
     setConnections(next);
+    setCandidateUploadsEnabled(capabilities.candidateUploads);
+    setCandidateRequestProjectIds(capabilities.candidateRequestProjectIds);
     setSelectedConnectionId(current => next.some(connection => connection.connectionId === current) ? current : next[0]?.connectionId || '');
+  }, [reader]);
+  const handleCandidateAccepted = useCallback(() => {
+    if (!reader.isActive()) return;
+    const projectId = reader.getSnapshot().projectId;
+    void Promise.all([reader.refreshAssets(projectId), reader.refreshStorageUsage()]);
   }, [reader]);
   const changePage = (next: number) => { setPage(next); filesHeading.current?.focus(); };
 
@@ -311,7 +358,11 @@ export default function PerformerAudioFiles() {
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" onClick={() => createShare(version.id)} disabled={busy || !filesReady} className="min-h-11 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-black text-cyan-100 disabled:opacity-50">Create one-time link</button>
                 <button type="button" onClick={() => shareWithConnection(version.id)} disabled={busy || !filesReady || !selectedConnectionId} className="min-h-11 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1.5 text-[11px] font-black text-fuchsia-100 disabled:opacity-50">Share with connection</button>
+                {candidateUploadsEnabled && candidateRequestProjectIds.includes(selectedProjectId) && version.mimeType.startsWith('audio/') ? (
+                  <button type="button" onClick={() => requestCandidateRevision(version)} disabled={busy || !filesReady || !selectedConnectionId} className="min-h-11 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-[11px] font-black text-violet-100 disabled:opacity-50">Request private candidate</button>
+                ) : null}
               </div>
+              {candidateUploadsEnabled && candidateRequestProjectIds.includes(selectedProjectId) && version.mimeType.startsWith('audio/') ? <p className="mt-2 text-[11px] leading-relaxed text-violet-200">Candidate request: one audio file up to {formatBytes(candidateRequestByteLimit(version.byteSize))}, valid for seven days. The connected account can return a private candidate for your review. Your original stays unchanged.</p> : null}
             </details>
           </article>;
         })}
@@ -328,7 +379,7 @@ export default function PerformerAudioFiles() {
             <option value="">Pair an account first</option>{connections.map(connection => <option key={connection.connectionId} value={connection.connectionId}>{connection.counterparty?.displayName || 'Connected account'}{connection.counterparty?.handle ? ` @${connection.counterparty.handle}` : ''}</option>)}
           </select>
         </div>
-        <CollaboratorInbox embedded refreshKey={collaborationRefreshKey} onConnectionsLoaded={handleConnectionsLoaded} />
+        <CollaboratorInbox embedded refreshKey={collaborationRefreshKey} onConnectionsLoaded={handleConnectionsLoaded} onCollaborationStateChange={setCandidateUploadsEnabled} onCandidateAccepted={handleCandidateAccepted} />
       </> : null}
     </section>
   );

@@ -40,7 +40,9 @@ Rollback: revert code to the prior reviewed branch; the nullable readback column
 
 ## Next implementation and external requirements
 
-An isolated collaborator-revision branch is being prepared. It must keep returned candidates private and separate from original masters, enforce selected-file grants and quotas, handle upload/provider failures durably, and provide explicit owner review and acceptance. A hidden backend alone does not finish that workflow.
+The second implementation batch adds selected-source candidate requests, quota preflight, bounded-memory file hashing, durable multipart/provider recovery, private candidate playback, and explicit owner acceptance, rejection or blocking. Acceptance creates a separate immutable private version. Inbox results are scoped to the current account and operation; backgrounding a mobile picker does not cancel a valid upload. Later moderation holds follow promoted-file aliases and release use. Provider unavailability no longer prevents durable connection revocation.
+
+The feature remains disabled by default and requires current administrator-issued performer enrollment plus selected-project authority. See `2026-09-13-private-candidate-return-handoff.md` for the implementation, migrations0053–0058, focused proof and rollback boundaries. `scripts/sway-completion-isolated-proof.mjs` runs locked dependencies, pinned Chromium, lint, production build and the unchanged mandatory contract command in a separate proof environment. It publishes only a sanitized exact-revision receipt when every required stage succeeds. Hosted results belong to the pinned source in that receipt; local focused passes do not substitute for it.
 
 The full audit still contains unimplemented and externally unverified capabilities. Contracted DSP delivery, royalty operations, Sway.DIO funding/listening, ordinary general payout activation, third-party OAuth/device permission, ticket operating expansion and signed native/desktop distribution cannot be represented as completed by this batch. Provider access, contracts, deployed acceptance and comparative outcomes remain necessary where applicable.
 

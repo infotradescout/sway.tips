@@ -870,6 +870,8 @@ try {
   );
   const publicRelease = await publishing.getPublicRelease({ releaseId });
   assert.equal(publicRelease?.status, 'ready');
+  assert.ok(publicRelease.recordings.every((recording) => !Object.hasOwn(recording, 'masterAssetVersionId')),
+    'The private version identifier used for candidate moderation must not enter the public recording projection.');
   assert.deepEqual(
     publicRelease?.recordings.map((recording) => [recording.recordingId, recording.trackNumber, recording.title]),
     [[thirdRecordingId, 1, 'Third Track Revised'], [secondRecordingId, 2, 'Second Track']],

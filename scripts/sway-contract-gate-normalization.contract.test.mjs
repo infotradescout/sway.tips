@@ -38,10 +38,32 @@ const hardCommands = testContracts
   .map((command) => command.trim())
   .filter(Boolean);
 
-const hardScriptPaths = hardCommands.map((command) => {
+const candidateDecisionScript = 'scripts/sway-audio-candidate-decisions.integration.test.mjs';
+const embeddedDecisionCommand = `node --import tsx ${candidateDecisionScript} --embedded-postgres`;
+function directHardScript(command) {
+  // This one reviewed fixture switch explicitly refuses inherited database URLs.
+  // Do not admit arbitrary arguments, shell prefixes, aliases or wrapper runners.
+  if (command === embeddedDecisionCommand) return candidateDecisionScript;
   const match = command.match(/^node(?:\s+--import\s+tsx)?\s+(scripts\/[^\s]+\.(?:mjs|ts))$/);
-  if (!match) failures.push(`test:contracts command is not a direct node script gate: ${command}`);
+  if (match?.[1] === candidateDecisionScript) return undefined;
   return match?.[1];
+}
+for (const [command, expected] of [
+  [embeddedDecisionCommand, candidateDecisionScript],
+  ['node scripts/contract-check.mjs', 'scripts/contract-check.mjs'],
+  [`node --import tsx ${candidateDecisionScript}`, undefined],
+  [`${embeddedDecisionCommand} --strict-real-postgres`, undefined],
+  ['node scripts/contract-check.mjs --embedded-postgres', undefined],
+  [`SWAY_DISPOSABLE_MIGRATION_PROOF=1 ${embeddedDecisionCommand}`, undefined],
+  ['npm run test:integration:audio-candidate-decisions', undefined],
+  [`${embeddedDecisionCommand}; true`, undefined]
+]) {
+  if (directHardScript(command) !== expected) failures.push(`Direct hard gate parser accepted an unsafe command or rejected an approved fixture: ${command}`);
+}
+const hardScriptPaths = hardCommands.map((command) => {
+  const scriptPath = directHardScript(command);
+  if (!scriptPath) failures.push(`test:contracts command is not a direct node script gate with approved fixture intent: ${command}`);
+  return scriptPath;
 }).filter(Boolean);
 
 const requiredHardScripts = [
