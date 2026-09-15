@@ -159,17 +159,11 @@ const installed = await run('locked-dependencies', npm, ['ci', '--include=dev', 
 const browserInstalled = installed && await run('pinned-chromium', process.execPath,
   ['node_modules/playwright/cli.js', 'install', 'chromium'], 300_000);
 if (installed && browserInstalled) {
-  // Fail the focused integration checks before spending another full-suite run.
-  // The complete mandatory gate is still required and is never substituted.
-  for (const [name, command, args, timeoutMs] of [
-    ['lint', npm, ['run', 'lint'], 180_000],
-    ['sources-preflight', process.execPath, ['scripts/sway-performer-connections.contract.test.mjs'], 300_000],
-    ['performer-account-preflight', process.execPath, ['scripts/sway-performer-account-reads.behavior.test.mjs'], 180_000],
-    ['production-build', npm, ['run', 'build'], 300_000],
-    ['mandatory-contracts', npm, ['run', 'test:contracts'], 1_200_000]
-  ]) {
-    if (!await run(name, command, args, timeoutMs)) break;
-  }
+  for (const [name, args, timeoutMs] of [
+    ['lint', ['run', 'lint'], 180_000],
+    ['production-build', ['run', 'build'], 300_000],
+    ['mandatory-contracts', ['run', 'test:contracts'], 1_200_000]
+  ]) await run(name, npm, args, timeoutMs);
 }
 
 // Tests may create disposable ignored output. They may not alter reviewed code.
@@ -178,7 +172,7 @@ git('diff', '--exit-code', 'HEAD', '--');
 assertNoUnexpectedFiles();
 assert.equal(git('rev-parse', 'HEAD'), head);
 assert.equal(git('rev-parse', 'HEAD^{tree}'), tree);
-const required = ['locked-dependencies', 'pinned-chromium', 'lint', 'sources-preflight', 'performer-account-preflight', 'production-build', 'mandatory-contracts'];
+const required = ['locked-dependencies', 'pinned-chromium', 'lint', 'production-build', 'mandatory-contracts'];
 const passed = required.length === results.length
   && required.every(name => results.some(result => result.name === name && result.passed));
 const summary = {
