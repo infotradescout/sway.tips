@@ -178,7 +178,7 @@ const wrapper = read('src/components/TalentDashboardWithSources.tsx');
 const shell = read('src/shells/TalentApp.tsx');
 const setup = read('src/components/PerformerSourcePlayerSetup.tsx');
 assert(choices.includes('<PerformerSourcePlayerSetup />'), 'Sources must mount the actual player setup.');
-assert(shell.includes("import TalentDashboard from '../components/TalentDashboardWithSources'"), 'The real performer shell must supply context.');
+assert(shell.includes('const TalentDashboard = withSourcePlayerContext(BaseTalentDashboard)'), 'The real performer shell must supply context while preserving the dashboard boundary.');
 for (const required of ['props.activeGigId === gigId', "props.session.status === 'active'", '!props.roomActionsBlocked', 'profile?.owner_user_id', 'onSelectRoom: props.onSelectGigId', '<TalentDashboard {...props} />']) assert(wrapper.includes(required), required);
 for (const required of ['context.accountId, context.performerId, context.gigId, context.ready, context.previewMode', 'lifetime.current !== scope', 'request.current?.abort()', 'busyRef.current', 'confirmReplacement', 'SourcePlayerAccessError', 'Date.parse(download.expiresAt) <= Date.now()', 'player connection is not confirmed yet', '<PerformerPlaybackController']) assert(setup.includes(required), required);
 for (const forbidden of ['localStorage', 'sessionStorage', 'document.cookie', "'/api/state'"]) assert(!setup.includes(forbidden), forbidden);

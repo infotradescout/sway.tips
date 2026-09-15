@@ -18,13 +18,13 @@ writeFileSync(join(directory, 'fixture.html'), `<!doctype html><html lang="en"><
 writeFileSync(join(directory, 'fixture.tsx'), `import React,{useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Choices from '/src/components/PerformerSourceImportChoices';
-import {SourcePlayerContext} from '/src/source-player-context';
+import {withSourcePlayerContext} from '/src/components/TalentDashboardWithSources';
 import '/src/index.css';
 const rooms=[{gigId:'${roomA}',performerName:'Fixture performer A'},{gigId:'${roomB}',performerName:'Fixture performer B'}];
-function Harness(){const [account,setAccount]=useState('account-a');const [room,setRoom]=useState('${roomA}');const [ready,setReady]=useState(true);const [preview,setPreview]=useState(false);const [url,setUrl]=useState('');
-return <main className="mx-auto max-w-3xl bg-slate-950 p-3 text-white"><nav className="mb-4 flex flex-wrap gap-3"><button onClick={()=>setAccount(a=>a==='account-a'?'account-b':'account-a')}>Switch fixture account</button><button onClick={()=>setRoom(r=>r==='${roomA}'?'${roomB}':'${roomA}')}>Switch fixture room</button><button onClick={()=>setReady(r=>!r)}>Toggle fixture ready</button><button onClick={()=>setPreview(r=>!r)}>Toggle fixture preview</button></nav>
-<SourcePlayerContext.Provider value={{accountId:account,performerId:account, gigId:room,ready:ready&&!preview,previewMode:preview,rooms:rooms as any,onSelectRoom:setRoom as any,approvedRequests:[]}}>
-<Choices spotifyPlaylistUrl={url} spotifyImportStatus="idle" spotifyImportMessage={null} djLibraryImportStatus="idle" djLibraryImportMessage={null} previewMode={preview} onSpotifyPlaylistUrlChange={setUrl} onSpotifyPlaylistImport={e=>{e.preventDefault();window.__sources.imports.push('spotify');}} onDjLibraryFileImport={e=>window.__sources.imports.push(e.currentTarget.getAttribute('data-sway-source-label'))} onOpenCatalog={()=>window.__sources.imports.push('uploads')}/></SourcePlayerContext.Provider></main>};
+const ScopedDashboard=withSourcePlayerContext(function FixtureDashboard(props:any){const [url,setUrl]=useState('');return <Choices spotifyPlaylistUrl={url} spotifyImportStatus="idle" spotifyImportMessage={null} djLibraryImportStatus="idle" djLibraryImportMessage={null} previewMode={props.previewMode} onSpotifyPlaylistUrlChange={setUrl} onSpotifyPlaylistImport={e=>{e.preventDefault();window.__sources.imports.push('spotify');}} onDjLibraryFileImport={e=>window.__sources.imports.push(e.currentTarget.getAttribute('data-sway-source-label'))} onOpenCatalog={()=>window.__sources.imports.push('uploads')}/>;});
+function Harness(){const [account,setAccount]=useState('account-a');const [room,setRoom]=useState('${roomA}');const [ready,setReady]=useState(true);const [preview,setPreview]=useState(false);
+const props={performerProfile:{owner_user_id:account,performer_id:account},activeGigId:room,selectedGigId:room,session:{status:'active'},requests:[],activeRooms:rooms,onSelectGigId:setRoom,previewMode:preview,roomActionsBlocked:!ready};
+return <main className="mx-auto max-w-3xl bg-slate-950 p-3 text-white"><nav className="mb-4 flex flex-wrap gap-3"><button onClick={()=>setAccount(a=>a==='account-a'?'account-b':'account-a')}>Switch fixture account</button><button onClick={()=>setRoom(r=>r==='${roomA}'?'${roomB}':'${roomA}')}>Switch fixture room</button><button onClick={()=>setReady(r=>!r)}>Toggle fixture ready</button><button onClick={()=>setPreview(r=>!r)}>Toggle fixture preview</button></nav><ScopedDashboard {...props as any}/></main>};
 createRoot(document.getElementById('root')!).render(<React.StrictMode><Harness/></React.StrictMode>);`);
 
 function installFixture({ template, options }) {
