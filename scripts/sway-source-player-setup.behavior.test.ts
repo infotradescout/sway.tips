@@ -48,7 +48,7 @@ try {
     await prepareSourcePlayer(room, new AbortController()); assert.equal(calls, 1);
   });
   for (const status of [401, 403]) await check(`access loss ${status}`, async () => {
-    globalThis.fetch = (async () => ({ status, ok: false })) as typeof fetch;
+    globalThis.fetch = async () => new Response(null, { status });
     await assert.rejects(prepareSourcePlayer(room, new AbortController()), SourcePlayerAccessError);
   });
   await check('failed request never retries itself', async () => {
