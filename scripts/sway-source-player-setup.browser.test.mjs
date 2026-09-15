@@ -21,9 +21,16 @@ import Choices from '/src/components/PerformerSourceImportChoices';
 import {withSourcePlayerContext} from '/src/components/TalentDashboardWithSources';
 import '/src/index.css';
 const rooms=[{gigId:'${roomA}',performerName:'Fixture performer A'},{gigId:'${roomB}',performerName:'Fixture performer B'}];
+const requests=[
+{id:'approved-low',title:'Lower approved pick',subtitle:'Fixture artist',status:'approved',amount:5,sourceTrackId:'track-low',externalTrackId:'external-low'},
+{id:'approved-top',title:'Top approved pick',subtitle:'Fixture artist',status:'approved',amount:20,sourceTrackId:'track-top',externalTrackId:'external-top'},
+{id:'hidden-high',title:'Hidden pick',status:'approved',amount:999,hidden:true},
+{id:'removed-high',title:'Removed pick',status:'approved',amount:999,removed:true},
+{id:'pending-high',title:'Pending pick',status:'hold',amount:999}
+];
 const ScopedDashboard=withSourcePlayerContext(function FixtureDashboard(props:any){const [url,setUrl]=useState('');return <Choices spotifyPlaylistUrl={url} spotifyImportStatus="idle" spotifyImportMessage={null} djLibraryImportStatus="idle" djLibraryImportMessage={null} previewMode={props.previewMode} onSpotifyPlaylistUrlChange={setUrl} onSpotifyPlaylistImport={e=>{e.preventDefault();window.__sources.imports.push('spotify');}} onDjLibraryFileImport={e=>window.__sources.imports.push(e.currentTarget.getAttribute('data-sway-source-label'))} onOpenCatalog={()=>window.__sources.imports.push('uploads')}/>;});
 function Harness(){const [account,setAccount]=useState('account-a');const [room,setRoom]=useState('${roomA}');const [ready,setReady]=useState(true);const [preview,setPreview]=useState(false);
-const props={performerProfile:{owner_user_id:account,performer_id:account},activeGigId:room,selectedGigId:room,session:{status:'active'},requests:[],activeRooms:rooms,onSelectGigId:setRoom,previewMode:preview,roomActionsBlocked:!ready};
+const props={performerProfile:{owner_user_id:account,performer_id:account},activeGigId:room,selectedGigId:room,session:{status:'active'},requests,activeRooms:rooms,onSelectGigId:setRoom,previewMode:preview,roomActionsBlocked:!ready};
 return <main className="mx-auto max-w-3xl bg-slate-950 p-3 text-white"><nav className="mb-4 flex flex-wrap gap-3"><button onClick={()=>setAccount(a=>a==='account-a'?'account-b':'account-a')}>Switch fixture account</button><button onClick={()=>setRoom(r=>r==='${roomA}'?'${roomB}':'${roomA}')}>Switch fixture room</button><button onClick={()=>setReady(r=>!r)}>Toggle fixture ready</button><button onClick={()=>setPreview(r=>!r)}>Toggle fixture preview</button></nav><ScopedDashboard {...props as any}/></main>};
 createRoot(document.getElementById('root')!).render(<React.StrictMode><Harness/></React.StrictMode>);`);
 
@@ -95,6 +102,12 @@ try {
       await page.getByRole('button', { name: 'Play deck 1', exact: true }).click();
       const commands = (await posts(page)).filter(call => call.path.endsWith('/commands'));
       assert.equal(commands.length, 1); assert.equal(commands[0].body.gig_id, roomA); assert.equal(commands[0].body.action, 'play');
+      await page.getByLabel('Target deck', { exact: true }).selectOption('2');
+      await page.getByRole('button', { name: 'Load top', exact: true }).click();
+      const loads = (await posts(page)).filter(call => call.path.endsWith('/commands') && call.body.action === 'load');
+      assert.equal(loads.length, 1); assert.equal(loads[0].body.gig_id, roomA);
+      assert.equal(loads[0].body.payload.deck, 2);
+      assert.deepEqual(loads[0].body.payload.track, { requestId: 'approved-top', sourceTrackId: 'track-top', externalTrackId: 'external-top', title: 'Top approved pick', artist: 'Fixture artist' });
       const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
       assert(!stored.includes('synthetic-room-only')); assert(!stored.includes('contentBase64'));
     });
