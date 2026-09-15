@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { LogOut, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import SplitViewShell from '../components/SplitViewShell';
-import TalentDashboard from '../components/TalentDashboard';
+import TalentDashboard from '../components/TalentDashboardWithSources';
 import type { PerformerRoomSetupData } from '../components/PerformerRoomSetup';
 import TalentInviteAcceptCard from '../components/TalentInviteAcceptCard';
 import PerformerRightsReviewQueue from '../components/PerformerRightsReviewQueue';
