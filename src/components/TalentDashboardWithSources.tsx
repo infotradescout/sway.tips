@@ -11,6 +11,11 @@ export function withSourcePlayerContext(TalentDashboard: typeof DashboardCompone
     const ready = Boolean(profile?.owner_user_id && profile.performer_id && gigId
       && props.activeGigId === gigId && props.session.status === 'active'
       && !props.previewMode && !props.roomActionsBlocked);
+    // Match TalentDashboard's liveLadderQueue visibility and ordering. Sources
+    // must not silently select a different request from the same live queue.
+    const approvedRequests = ready ? props.requests
+      .filter(request => request.status === 'approved' && !request.hidden && !request.removed)
+      .sort((a, b) => b.amount - a.amount) : [];
     return (
       <SourcePlayerContext.Provider value={{
         accountId: profile?.owner_user_id ?? null,
@@ -19,8 +24,7 @@ export function withSourcePlayerContext(TalentDashboard: typeof DashboardCompone
         ready,
         previewMode: Boolean(props.previewMode),
         rooms: props.activeRooms ?? [],
-        approvedRequests: ready ? props.requests.filter(request => request.status === 'approved'
-          && !request.hidden && !request.removed && !request.shadowBanned).sort((a, b) => b.amount - a.amount) : [],
+        approvedRequests,
         onSelectRoom: props.onSelectGigId
       }}>
         <TalentDashboard {...props} />
