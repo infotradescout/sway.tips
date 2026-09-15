@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import './sway-source-player-setup.contract.test.mjs';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
@@ -99,8 +100,11 @@ const sourcesWorkspace = sourcesWorkspaceStart >= 0 && sourcesWorkspaceEnd > sou
   ? dashboard.slice(sourcesWorkspaceStart, sourcesWorkspaceEnd)
   : '';
 if (!sourcesWorkspace.includes('<PerformerSourceImportChoices')) failures.push('The expanded chooser must be mounted in Sources, not left as an unused component.');
+// Saved libraries stay account-owned. The separately bounded player section
+// may use the shell's confirmed selected room; its runtime tests run above.
+// Do not copy the live room's unrelated sharing/mapping dialog into libraries.
 for (const forbidden of ['PerformerShareKit', 'HardwareMappingPanel', 'Room tools', 'Current room only']) {
-  if (sourcesWorkspace.includes(forbidden)) failures.push(`Account-level Sources screen must not contain room-only control: ${forbidden}`);
+  if (sourcesWorkspace.includes(forbidden)) failures.push(`Saved library workspace must not absorb unrelated room tools: ${forbidden}`);
 }
 
 const roomToolsButtonStart = dashboard.indexOf('data-sway-open-room-tools="true"');
