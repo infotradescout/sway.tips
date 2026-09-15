@@ -1,6 +1,7 @@
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import './sway-source-player-setup.contract.test.mjs';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
@@ -101,7 +102,7 @@ const sourcesWorkspace = sourcesWorkspaceStart >= 0 && sourcesWorkspaceEnd > sou
   : '';
 if (!sourcesWorkspace.includes('<PerformerSourceImportChoices')) failures.push('The expanded chooser must be mounted in Sources, not left as an unused component.');
 // Saved libraries stay account-owned. The separately bounded player section
-// may use the shell's confirmed selected room; its runtime tests run above.
+// may use the shell's confirmed selected room; its runtime tests run below.
 // Do not copy the live room's unrelated sharing/mapping dialog into libraries.
 for (const forbidden of ['PerformerShareKit', 'HardwareMappingPanel', 'Room tools', 'Current room only']) {
   if (sourcesWorkspace.includes(forbidden)) failures.push(`Saved library workspace must not absorb unrelated room tools: ${forbidden}`);
@@ -171,4 +172,24 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Player setup belongs to this already-registered Sources contract. No second
+// hard-contract entry or optional helper can leave its behavioral proof out.
+const wrapper = read('src/components/TalentDashboardWithSources.tsx');
+const shell = read('src/shells/TalentApp.tsx');
+const setup = read('src/components/PerformerSourcePlayerSetup.tsx');
+assert(choices.includes('<PerformerSourcePlayerSetup />'), 'Sources must mount the actual player setup.');
+assert(shell.includes("import TalentDashboard from '../components/TalentDashboardWithSources'"), 'The real performer shell must supply context.');
+for (const required of ['props.activeGigId === gigId', "props.session.status === 'active'", '!props.roomActionsBlocked', 'profile?.owner_user_id', 'onSelectRoom: props.onSelectGigId', '<TalentDashboard {...props} />']) assert(wrapper.includes(required), required);
+for (const required of ['context.accountId, context.performerId, context.gigId, context.ready, context.previewMode', 'lifetime.current !== scope', 'request.current?.abort()', 'busyRef.current', 'confirmReplacement', 'SourcePlayerAccessError', 'Date.parse(download.expiresAt) <= Date.now()', 'player connection is not confirmed yet', '<PerformerPlaybackController']) assert(setup.includes(required), required);
+for (const forbidden of ['localStorage', 'sessionStorage', 'document.cookie', "'/api/state'"]) assert(!setup.includes(forbidden), forbidden);
+for (const args of [
+  ['--import', 'tsx', 'scripts/sway-source-player-setup.behavior.test.ts'],
+  ['scripts/sway-source-player-setup.browser.test.mjs']
+]) {
+  const result = spawnSync(process.execPath, args, { stdio: 'inherit', timeout: 300_000, shell: false });
+  assert.equal(result.error, undefined, String(result.error));
+  assert.equal(result.signal, null, 'Sources verification was interrupted.');
+  assert.equal(result.status, 0, `Sources verification failed: ${args.join(' ')}`);
+}
+console.log('SOURCE_PLAYER_SETUP_CONTRACT_PASS');
 console.log('Performer Connections contract passed.');
