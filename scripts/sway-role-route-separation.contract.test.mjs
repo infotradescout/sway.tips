@@ -5,6 +5,7 @@ const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
 const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 const roomRestart = readFileSync(join(root, 'src/components/PerformerRoomRestart.tsx'), 'utf8');
+const sourcesComposition = readFileSync(join(root, 'src/components/TalentDashboardWithSources.tsx'), 'utf8');
 
 const failures = [];
 
@@ -53,7 +54,9 @@ for (const forbidden of [
 }
 
 for (const required of [
-  "import TalentDashboard from '../components/TalentDashboard'",
+  "import BaseTalentDashboard from '../components/TalentDashboard'",
+  "import { withSourcePlayerContext } from '../components/TalentDashboardWithSources'",
+  'const TalentDashboard = withSourcePlayerContext(BaseTalentDashboard)',
   "import PerformerRoomRestart from '../components/PerformerRoomRestart'",
   "pathname === '/talent/login'",
   "pathname === '/talent/signup'",
@@ -65,6 +68,18 @@ for (const required of [
   '<PerformerRoomRestart'
 ]) {
   if (!talentApp.includes(required)) failures.push(`Canonical TalentApp missing performer runtime behavior: ${required}`);
+}
+
+// Sources adds context around the existing dashboard, not a replacement role
+// shell. Check the original import, composition and forwarding independently.
+for (const required of [
+  'export function withSourcePlayerContext(TalentDashboard:',
+  '<TalentDashboard {...props} />',
+  'onSelectRoom: props.onSelectGigId',
+  'props.activeGigId === gigId',
+  '!props.roomActionsBlocked'
+]) {
+  if (!sourcesComposition.includes(required)) failures.push(`Sources composition must preserve canonical performer behavior: ${required}`);
 }
 
 // The recap moved into a performer-owned restart component; it was not removed.

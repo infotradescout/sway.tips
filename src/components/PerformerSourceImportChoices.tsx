@@ -1,5 +1,6 @@
 import { useId, type ChangeEvent, type FormEvent } from 'react';
 import { Upload, Music2 } from 'lucide-react';
+import PerformerSourcePlayerSetup from './PerformerSourcePlayerSetup';
 
 type ImportStatus = 'idle' | 'submitting' | 'success' | 'error';
 export type PerformerSourceImportChoicesProps = {
@@ -30,6 +31,8 @@ export default function PerformerSourceImportChoices(props: PerformerSourceImpor
   const helpId = useId();
   const fileBusy = props.previewMode || props.djLibraryImportStatus === 'submitting';
   return (
+    <>
+    <PerformerSourcePlayerSetup />
     <section data-sway-source-import-choices="true" className="rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
       <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300">Add music</p>
       <h3 className="mt-1 text-base font-black text-white">Choose where your music is now</h3>
@@ -77,5 +80,6 @@ export default function PerformerSourceImportChoices(props: PerformerSourceImpor
         <Music2 className="h-5 w-5 shrink-0" aria-hidden="true" /><span>Music uploaded to Sway<span className="mt-1 block text-xs font-normal text-white/85">Open your audio files and choose which tracks people may request.</span></span>
       </button>
     </section>
+    </>
   );
 }
