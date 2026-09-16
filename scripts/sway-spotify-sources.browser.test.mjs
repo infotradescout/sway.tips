@@ -1,7 +1,7 @@
 // Auth scaffolding retained from the existing Sources journey; actual provider network is intercepted only by a test preload.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { mkdirSync, writeFileSync, readFileSync, mkdtempSync, rmSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -129,19 +129,102 @@ async function importFile(page, inputName, fileName, content, { consent = true, 
     } catch (error) { await dialog.dismiss().catch(() => {}); reject(error); }
   }));
   const responsePromise = consent ? page.waitForResponse(response => response.url().endsWith('/api/talent/library/import') && response.request().method() === 'POST') : null;
-  await page.getByLabel(inputName, { exact: true }).setInputFiles({ name: fileName, mimeType: 'text/plain', buffer: Buffer.from(content) });
+  const picker=page.locator('[data-sway-file-source-picker]');
+  if(await picker.getAttribute('open')===null)await picker.locator(':scope > summary').click();
+  const chooserPromise=page.waitForEvent('filechooser');
+  await page.getByLabel(inputName,{exact:true}).locator('..').click();
+  await (await chooserPromise).setFiles({ name: fileName, mimeType: 'text/plain', buffer: Buffer.from(content) });
   await confirmation;
   let receipt = null;
   if (responsePromise) { const response = await responsePromise; assert.equal(response.status(), 202); receipt = await response.json(); }
   await page.locator('[data-sway-source-import-choices] [role="status"]').filter({ hasText: consent ? /^(Saved|Updated) / : /^Import canceled/ }).waitFor();
   return receipt;
 }
+async function combinedScreen(page, stage, widths = [1440,390,320]) {
+  const workspace=page.locator('[data-sway-performer-connections-workspace]');
+  const picker=page.locator('[data-sway-file-source-picker]');
+  const playback=page.locator('[data-sway-source-player-setup]');
+  for(const width of widths) {
+    await page.setViewportSize({width,height:width>1000?1000:844});await page.evaluate(()=>scrollTo(0,0));
+    await page.getByText('Sway Performer',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('heading',{name:"Tonight's Live Room",exact:true}).count(),0,'Account Sources must not present itself as the live-room screen');
+    assert.equal(await page.getByRole('button',{name:'Log out',exact:true}).count(),1);
+    const nav=page.getByRole('navigation',{name:'Performer sections'});assert.equal(await nav.getByRole('button').count(),8);
+    assert.equal(await nav.getByRole('button',{name:'Sources',exact:true}).getAttribute('aria-current'),'page');
+    const saved=await page.locator('[data-sway-linked-sources]').boundingBox();
+    const add=await page.locator('[data-sway-source-import-choices]').boundingBox();const player=await playback.boundingBox();
+    assert(saved && add && player);
+    if(width>=960)assert(player.x>=saved.x+saved.width-1,'Player belongs in the side column');
+    else assert(add.y>=saved.y+saved.height-1 && player.y>=add.y+add.height-1,'Mobile order is saved music, imports, playback');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    await page.screenshot({path:out+'/combined-'+stage+'-'+width+'.png',fullPage:true});
+    if(stage==='empty') {
+      if(await picker.getAttribute('open')!==null)await picker.locator(':scope > summary').click();
+      await picker.locator(':scope > summary').focus();await page.keyboard.press('Enter');
+      assert.notEqual(await picker.getAttribute('open'),null);
+      for(const name of ['Apple Music / iTunes','Serato','rekordbox','Traktor','VirtualDJ','Mixxx','Local / USB playlists','Song list / setlist']) {
+        const label=page.getByLabel('Import '+name+' file',{exact:true}).locator('..');assert(await label.isVisible());assert((await label.boundingBox()).height>=44);
+      }
+      await picker.locator(':scope > summary').click();
+      await page.locator('[data-sway-spotify-source-picker] > summary').click();
+      await page.getByLabel('Spotify playlist link',{exact:true}).waitFor();
+      await page.locator('[data-sway-spotify-source-picker] > summary').click();
+      assert(await page.getByRole('button',{name:'Set up VirtualDJ connection',exact:true}).isDisabled());
+      assert.equal(await workspace.getByRole('link',{name:'Open Live Room',exact:true}).count(),1);
+    }
+  }
+}
+async function connectRoomFromSources(a) {
+  currentStage='Sources to actual free room and playback preparation';
+  let bridgePosts=0,commandPosts=0;
+  const observe=r=>{if(r.method()!=='POST')return;if(r.url().endsWith('/api/talent/control-bridge/token'))bridgePosts++;if(r.url().endsWith('/api/talent/playback/commands'))commandPosts++;};
+  a.page.on('request',observe);
+  const before=JSON.stringify(await sourceFor(a.context));
+  await a.page.getByRole('link',{name:'Open Live Room',exact:true}).click();
+  const setup=a.page.locator('[data-sway-performer-room-setup]');await setup.waitFor();
+  await setup.getByRole('button',{name:/^Free requests/}).click();
+  await setup.getByRole('button',{name:'Next',exact:true}).click();
+  await setup.getByRole('button',{name:/^Open requests/}).click();
+  await setup.getByRole('button',{name:'Next',exact:true}).click();
+  await setup.getByText('Free requests and upvotes · money actions off',{exact:true}).waitFor();
+  await setup.getByRole('button',{name:'Next',exact:true}).click();
+  await setup.getByRole('heading',{name:'Ready to go live'}).waitFor();
+  const started=a.page.waitForResponse(r=>r.url().endsWith('/api/session/start')&&r.request().method()==='POST');
+  await setup.getByRole('button',{name:'Create room',exact:true}).click();assert((await started).ok());
+  const cockpit=a.page.locator('[data-sway-performer-live-cockpit]');await cockpit.waitFor();
+  const style=await cockpit.evaluate(el=>{const s=getComputedStyle(el);return {maxWidth:s.maxWidth,padding:s.padding};});
+  assert.equal(style.maxWidth,'none','Sources CSS must not constrain the live cockpit');
+  await a.page.goto(baseUrl+'/talent/connections');await a.page.locator('[data-sway-source-import-choices]').waitFor();
+  const prepare=a.page.getByRole('button',{name:'Set up VirtualDJ connection',exact:true});
+  await a.page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Set up VirtualDJ connection'&&!b.disabled));
+  await prepare.click();assert.equal(bridgePosts,0);
+  await a.page.getByRole('group',{name:'Confirm booth replacement'}).getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(bridgePosts,0);
+  await prepare.click();
+  const responsePromise=a.page.waitForResponse(r=>r.url().endsWith('/api/talent/control-bridge/token')&&r.request().method()==='POST');
+  await a.page.getByRole('button',{name:'Confirm and prepare room file',exact:true}).click();
+  const response=await responsePromise;assert.equal(response.status(),200);const receipt=await response.json();
+  await a.page.getByText('Room file prepared — player connection is not confirmed yet.',{exact:true}).waitFor();
+  assert.equal(bridgePosts,1);
+  assert.equal(await a.page.getByLabel('Room for source playback').inputValue(),receipt.gigId);
+  const nextDownload=a.page.waitForEvent('download');await a.page.getByRole('button',{name:'Download Windows room file',exact:true}).click();const downloaded=await nextDownload;
+  assert.equal(downloaded.suggestedFilename(),receipt.windowsLauncher.filename);
+  assert.equal(createHash('sha256').update(readFileSync(await downloaded.path())).digest('hex'),receipt.windowsLauncher.sha256);
+  await a.page.getByRole('button',{name:'Open playback controls',exact:true}).click();
+  const play=a.page.getByRole('button',{name:'Play deck 1',exact:true});await play.waitFor();assert(await play.isDisabled(),'No device observation means no actionable playback');
+  assert.equal(commandPosts,0);assert.equal(JSON.stringify(await sourceFor(a.context)),before);
+  await combinedScreen(a.page,'room-prepared',[1440,390,320]);
+  a.page.off('request',observe);
+  record('Sources opens a real free room, preserves library, confirms one room file, and refuses unobserved playback');
+}
+
 try {
   configure();
   proof=await startEmbeddedPostgresProof('spotify_sources_browser'); report.databaseKind=proof.kind;
   const listenPort=await port(); await startServer(listenPort);
   browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage']});
   const a=await newAccount('Spotify owner');
+  await combinedScreen(a.page,'empty');
+  record('Combined TalentApp header, keyboard import choices and library-first layouts work at desktop and mobile sizes');
   let postCount=0; a.page.on('request',r=>{if(r.url().endsWith('/api/talent/music/spotify/import-playlist')&&r.method()==='POST')postCount++;});
   await submit(a.page);
   let state=await sourceFor(a.context); const owner=state.performerId;
@@ -179,6 +262,7 @@ try {
   assert.equal(state.source.trackCount,3);assert(Date.parse(state.source.updatedAt)>Date.parse(JSON.parse(beforeCancel).source.updatedAt));
   assert.deepEqual(state.sources.find(s=>s.id===other.id),other);
   record('Confirmed replacement changes only the selected source and advances its version');
+  await combinedScreen(a.page,'saved');
   const concurrentExpected=expectation(state.source);
   const concurrent=await Promise.all([post(a.context,owner,concurrentExpected),post(a.context,owner,concurrentExpected)]);
   assert.deepEqual(concurrent.map(r=>r.status()).sort(),[202,409]);
@@ -227,6 +311,7 @@ try {
   assert.deepEqual((await sourceFor(a.context)).source,afterRevoke.source);
   assert.equal((await sourceFor(b.context)).sources.length,0);
   record('Saved source state and account isolation survive process restart');
+  await connectRoomFromSources(a);
   for(const width of [1440,390,320]){
     await a.page.setViewportSize({width,height:width===1440?1000:844});
     assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);

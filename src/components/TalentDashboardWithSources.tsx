@@ -21,7 +21,9 @@ export function withSourcePlayerContext(TalentDashboard: typeof DashboardCompone
         rooms: props.activeRooms ?? [], approvedRequests,
         onSelectRoom: props.onSelectGigId
       }}>
-        <TalentDashboard {...props} />
+        <div className="sway-performer-workspace">
+          <TalentDashboard {...props} />
+        </div>
       </SourcePlayerContext.Provider>
     );
   }
