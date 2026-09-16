@@ -13,7 +13,10 @@ function escapeVdjString(value) {
 }
 
 function parseVdjBoolean(value) {
-  return /^(?:true|yes|on|1)$/i.test(String(value ?? '').trim());
+  const normalized = String(value ?? '').trim();
+  if (/^(?:true|yes|on|1)$/i.test(normalized)) return true;
+  if (/^(?:false|no|off|0)$/i.test(normalized)) return false;
+  return null;
 }
 
 function parseNumber(value) {
@@ -51,22 +54,34 @@ export class VirtualDjNetworkControl {
 
   async request(endpoint, script) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        // Cancellation is best effort: a stalled transport or response body
+        // must not hold the bridge's single execution loop indefinitely.
+        reject(new Error(endpoint === 'execute'
+          ? 'VirtualDJ command response timed out. The command may have reached your deck. Check playback before sending another command.'
+          : 'VirtualDJ playback status timed out.'));
+        controller.abort();
+      }, this.requestTimeoutMs);
+    });
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'text/plain; charset=utf-8',
-          ...(this.password ? { authorization: `Bearer ${this.password}` } : {})
-        },
-        body: script,
-        signal: controller.signal
-      });
-      const body = await response.text();
-      if (!response.ok) {
-        throw new Error(`VirtualDJ ${endpoint} rejected the request (${response.status}): ${body || 'no response body'}`);
-      }
-      return body.trim();
+      return await Promise.race([deadline, (async () => {
+        const response = await this.fetchImpl(`${this.baseUrl}/${endpoint}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'text/plain; charset=utf-8',
+            ...(this.password ? { authorization: `Bearer ${this.password}` } : {})
+          },
+          body: script,
+          signal: controller.signal
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          throw new Error(`VirtualDJ ${endpoint} rejected the request (${response.status}): ${body || 'no response body'}`);
+        }
+        return body.trim();
+      })()]);
     } finally {
       clearTimeout(timeout);
     }
@@ -78,7 +93,9 @@ export class VirtualDjNetworkControl {
 
   async execute(script) {
     const result = await this.request('execute', script);
-    if (!parseVdjBoolean(result)) throw new Error(`VirtualDJ returned ${result || 'false'} for: ${script}`);
+    // Network Control documents exactly true/false for /execute. Query-style
+    // values such as 1 or on are not an execution acknowledgement.
+    if (result !== 'true') throw new Error(`VirtualDJ returned ${result || 'false'} for: ${script}`);
     return result;
   }
 
@@ -94,6 +111,8 @@ export class VirtualDjNetworkControl {
       this.query(`deck ${targetDeck} get_position`),
       this.query(`deck ${targetDeck} get_bpm`)
     ]);
+    const playingValue = parseVdjBoolean(playing);
+    if (playingValue === null) throw new Error('VirtualDJ returned an unreadable playback state.');
     const bpmValue = parseNumber(bpm);
     return {
       sourceKey: 'virtualdj',
@@ -103,7 +122,7 @@ export class VirtualDjNetworkControl {
       trackTitle: trimText(title, 200),
       trackArtist: trimText(artist, 200),
       trackPath: trimText(filePath),
-      playing: parseVdjBoolean(playing),
+      playing: playingValue,
       positionMs: null,
       durationMs: null,
       bpmTimes100: bpmValue === null ? null : Math.max(0, Math.round(bpmValue * 100)),
@@ -175,4 +194,3 @@ export const VIRTUALDJ_NETWORK_CONTROL_REQUIREMENTS = {
   extension: 'Network Control',
   officialDocumentation: 'https://virtualdj.com/wiki/NetworkControlPlugin.html'
 };
-
