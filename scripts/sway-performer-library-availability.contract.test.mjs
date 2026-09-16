@@ -95,7 +95,7 @@ for (const term of [
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
   'Open reusable booth helper',
   'Make a reusable booth helper',
-  'rekordbox, Traktor, VirtualDJ, M3U, or CSV',
+  '<PerformerSourceImportChoices',
   'Create private Windows helper',
   'Download Windows music helper',
   'data-sway-windows-library-helper-download="true"',
@@ -141,4 +141,7 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Preserve the static ownership checks above and require actual importer,
+// authenticated source-count and browser/persistence behavior in the same gate.
+await import('./sway-music-sources.acceptance.test.mjs');
 console.log('Performer library availability contract passed.');
