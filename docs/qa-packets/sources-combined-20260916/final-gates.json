@@ -1,0 +1,36 @@
+{
+  "head": "7faaca0b65afb75bb1dc51444916fe070daf0127",
+  "tree": "7050d3b417fb88d990f68914f2b3de70f25d2841",
+  "startedAt": "2026-09-16T18:38:23.528Z",
+  "steps": [
+    {
+      "name": "lint",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 61738,
+      "passed": true
+    },
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 18852,
+      "passed": true
+    },
+    {
+      "name": "test:contracts",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 838448,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "productionWrites": false,
+  "realProviderCalls": false,
+  "sourceUnchanged": true,
+  "finishedAt": "2026-09-16T18:53:42.741Z"
+}

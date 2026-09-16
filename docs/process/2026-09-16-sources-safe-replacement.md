@@ -1,3 +1,5 @@
+> Superseded for continuation by docs/process/2026-09-16-sources-combined-release.md at runtime 7faaca0. This earlier packet is historical; the Sources design and functionality are now combined.
+
 # Sources safe replacement and complete external-library reads
 
 ## Objective / user job

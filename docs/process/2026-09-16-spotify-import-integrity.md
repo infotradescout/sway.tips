@@ -1,4 +1,4 @@
-> Superseded for continuation by `docs/process/2026-09-16-sources-safe-replacement.md` at runtime candidate `6cd434f`. This earlier receipt remains historical; its 100-item ceiling and unported-guard notes no longer describe the current branch.
+> Superseded for continuation by docs/process/2026-09-16-sources-combined-release.md at runtime 7faaca0. This earlier packet is historical; the Sources design and functionality are now combined.
 
 # Spotify import integrity — verified continuation checkpoint
 
