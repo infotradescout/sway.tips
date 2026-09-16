@@ -1,0 +1,110 @@
+{
+  "observedAt": "2026-09-16T20:34:24.818Z",
+  "deployedCommit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "accountHandle": "edgewize",
+  "access": {
+    "status": "authenticated_existing_browser_session",
+    "browser": "User regular Chrome on TSCommandCenter",
+    "method": "Ordinary browser navigation and native Windows UI Automation. No cookie/password extraction or session fabrication.",
+    "previousFreshQaWindow": "Still unauthenticated; its state did not describe the already-signed-in regular Chrome window."
+  },
+  "checks": [
+    {
+      "name": "Existing Sources tab refreshed into deployed interface",
+      "result": "pass"
+    },
+    {
+      "name": "Home identifies the signed-in performer as @edgewize",
+      "result": "pass"
+    },
+    {
+      "name": "Invalid non-Spotify playlist URL rejected",
+      "result": "pass",
+      "message": "Enter a Spotify playlist URL, URI, or ID."
+    },
+    {
+      "name": "Formatted playlist request reaches real production importer",
+      "result": "blocked_not_configured",
+      "observedAt": "2026-09-16T20:26:28.1457001Z",
+      "account": "edgewize",
+      "url": "https://app.sway.tips/talent/connections",
+      "stage": "authenticated-production-spotify-import",
+      "reference": "https://open.spotify.com/playlist/0000000000000000000000",
+      "actualMessage": "Spotify catalog credentials are not configured.",
+      "tracksBefore": 0,
+      "tracksAfter": 0,
+      "scope": "Actual signed-in production UI; no mocked fetch, no cookie extraction, no successful import."
+    },
+    {
+      "name": "Sources library unchanged after failed attempts",
+      "result": "pass",
+      "beforeTracks": 0,
+      "afterTracks": 0
+    },
+    {
+      "name": "Native song-list file chooser opens",
+      "result": "opened_then_canceled",
+      "details": "No file selected or uploaded. Subsequent chooser inspection was blocked by tool safety; the dialog was closed normally."
+    },
+    {
+      "name": "Spotify developer sign-in checked using connected work email",
+      "result": "account_not_linked",
+      "observedAt": "2026-09-16T20:32:08.3198010Z",
+      "service": "Spotify developer account",
+      "testedEmail": "contact@thetradescout.com",
+      "actualMessage": "Email isn't linked to a Spotify account",
+      "newAccountCreated": false,
+      "passwordChanged": false
+    }
+  ],
+  "health": {
+    "ok": true,
+    "service": "sway.tips",
+    "status": "ok",
+    "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+    "branch": "main",
+    "buildTimestamp": "2026-09-16T19:19:49.463Z",
+    "nodeEnv": "production",
+    "database": {
+      "configured": true,
+      "reachable": true
+    },
+    "migrations": {
+      "status": "compatible",
+      "compatible": true,
+      "expectedCount": 52,
+      "appliedCount": 52,
+      "missingCount": 0,
+      "driftedCount": 17,
+      "latestExpectedTag": "0051_friend_public_profiles"
+    },
+    "releaseActive": true
+  },
+  "unverified": [
+    "Successful production playlist import",
+    "Successful production file import/replacement/persistence",
+    "Spotify API authorization and permissions",
+    "Physical source/player execution and feedback"
+  ],
+  "unchanged": [
+    "Saved library tracks",
+    "Customer accounts",
+    "Live rooms",
+    "Provider settings",
+    "Payment settings",
+    "Production code"
+  ],
+  "sideEffects": [
+    "Refreshed and navigated the existing authorized Sway browser tab.",
+    "Submitted invalid and formatted-placeholder Spotify references; both failed without adding tracks.",
+    "Opened then canceled the native file chooser.",
+    "Opened the official Spotify developer sign-in in an additional Chrome tab and checked the known connected work email; no account created.",
+    "Requested one ordinary sign-in email for an earlier dedicated QA alias; HTTP 202 was enumeration-safe and no fresh email was retrieved. No password reset occurred."
+  ],
+  "screenshot": {
+    "path": "signed-in-spotify-configuration-error.jpg",
+    "sha256": "8ff9753d09e637a833914a22d9498509e479ec606d67c7bcb1c4d6bd512c3c20",
+    "scope": "Actual authenticated production browser, inspected visually; unrelated tab strip excluded."
+  },
+  "next": "Use the correct owner-authorized Spotify developer account and existing app to supply approved server credentials. Complete real provider acceptance separately; do not treat an import button or a passing deployment as a configured provider."
+}

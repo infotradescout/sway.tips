@@ -1,26 +1,34 @@
-# Sources real-account and device acceptance — continuation
+# Sources authenticated production acceptance
 
 ## Objective
-Verify the deployed Sources workflow with legitimate production sign-in and an actual player, without modifying customer libraries or active performances.
+Verify the actual signed-in Sources workflow and real provider/player readiness for deployed 80127f127bc1ec1b3ea7a32b89eea244f5953a1f.
 
 ## Base branch/commit
-Production main: 80127f127bc1ec1b3ea7a32b89eea244f5953a1f. Release evidence: 9162de537019e061f4fdbdada024d3c9fb64769c on evidence/sources-release-248-20260916.
+Production main: 80127f127bc1ec1b3ea7a32b89eea244f5953a1f. Prior evidence head: 3ea7fba9f5f37adf57885d75ee6efd5f894e4042.
+
+## Current branch
+Evidence-only branch: evidence/sources-release-248-20260916. No product code changes or release in this continuation.
 
 ## Verified completed work
-The production release remains active at the expected SHA. The connected Gmail account is user-controlled and contains earlier Sway QA verification emails; those historical messages are not current login sessions. Only TSCommandCenter is connected. Checked conventional VirtualDJ/Spotify/Serato install paths, installed-app records for VirtualDJ/rekordbox/Serato/Spotify/Mixxx/Traktor/djay, and running player processes; no matching player was found. This is scoped device inspection, not a search of every disk or other computers.
-A dedicated visible Playwright browser was opened normally to production Sources. The page reached /account/login. A Sources API read using that browser context returned 401, so authenticated acceptance has not started. No personal-browser cookie database was accessed, no session was fabricated, and no password was reset.
+The earlier fresh QA window returned 401, but the user's regular Chrome already had a legitimate Sway session. Native browser navigation and UI Automation refreshed Sources and reached the current interface without extracting cookies/passwords, resetting an account, or fabricating a session. Home identifies @edgewize. Sources shows 0 saved tracks and no active room selected for playback.
+An invalid non-Spotify URL produced the expected input error. A correctly formatted placeholder Spotify playlist URL reached the actual production importer and returned: Spotify catalog credentials are not configured. The library remains at 0 tracks. This is an observed server-configuration failure, not missing Sway sign-in. No successful Spotify/provider call is claimed.
+The actual native song-list chooser opened, then was canceled without selecting or uploading a file after tool safety blocked further chooser inspection. No upload or replacement pass is claimed.
+The official Spotify developer dashboard required provider sign-in. The normal Spotify email step reported that contact@thetradescout.com is not linked to a Spotify account. No new provider account, paid subscription, or developer app was created.
 
 ## Changed but unverified work
-No runtime edits. Authenticated production imports/replacement, real Spotify permissions, and physical playback remain NOT VERIFIED. A proposed automated signup command was blocked by tool safety before execution; no account was created. Do not retry that blocked command or bypass the safety check.
+Only this checkpoint, a sanitized acceptance record, and a real screenshot. Successful production file/playlist imports and replacements, real Spotify authorization, and physical-player feedback remain unverified.
 
-## Tests/evidence already run
-Reused the deployed-release checkpoint without repeating full gates. Fresh dedicated-browser preflight observed expected live SHA, releaseActive=true, /account/login, and private Sources HTTP 401. VirtualDJ's official Network Control documentation states VirtualDJ 2023 or later plus a Pro license and the Network Control extension are required; no such working player was observed here.
+## Evidence already run
+See docs/qa-packets/sources-authenticated-20260916/acceptance.json and its screenshot. Final public health returned the expected commit, releaseActive=true, reachable DB and compatible migrations. Original 15 pre-release signed-in tests used simulated Spotify responses and are not substituted for these failed real-provider checks.
+
+## Evidence invalidated / corrected
+The earlier claim that Sway sign-in required user action was too broad: it applied only to the isolated fresh browser. The already-authenticated regular Chrome session was usable. That access obstacle is resolved. The new observed blocker is server Spotify configuration, plus the lack of an authenticated appropriate Spotify developer account.
 
 ## External side effects and retry safety
-Only a dedicated local browser/profile and this evidence document were created. No production account/library/room/provider/payment mutation or playback command was made. The browser remains open on TSCommandCenter; REPL process 108100 owns qaContext and qaPage. Profile directory: C:\Users\flavo\AppData\Local\Temp\sway-user-authorized-qa-1h5pIH. Do not publish or read its cookie storage; use the ordinary browser context after user sign-in.
+No saved tracks, existing customer data, live rooms, payment/provider settings, or production code were changed. One ordinary login-email request was made for an old dedicated QA alias, with no fresh email retrieved; a further request was blocked before execution and not retried. Main remains unchanged. Do not reuse or expose browser cookies. Final ordinary Chrome retains the existing Sway tab and the additional Spotify sign-in tab. Native UI controller was PowerShell process 118800, regular Chrome process 17556; recheck process identity before resuming.
 
 ## Next exact action
-User signs in to the dedicated QA window. Recheck /api/talent/library/sources and performer ownership through that same normal browser session; inspect active rooms and avoid all customer/live-performance mutations. Perform isolated import/cancel/replacement/reload cleanup checks only on an authorized test account. Physical acceptance additionally requires an actual connected playback computer running a supported player; do not install paid software, bypass licensing, execute a room file against a live performance, or substitute a fake provider/player for acceptance.
+Use the correct authorized Spotify developer account and existing application, verify approved access mode and available credentials, then configure only the intended source connection under the required provider/release authorization. Finish successful import/replacement with isolated data and a verified cleanup path; do not populate a private user's empty library with unremovable QA tracks. Physical-player verification still requires an actual available supported player and must not be simulated.
 
 ## Actions that must NOT be repeated
-Do not merge/deploy #248 again, rerun unchanged full gates, reset existing QA passwords to force access, extract personal browser credentials, bypass tool safety, or label this pending stage a pass. The Sources release is live; real-account/device acceptance is still pending.
+Do not ask for another Sway sign-in, recreate the fresh QA browser, retry blocked signup/recovery/chooser commands through an alternate route, extract personal browser credentials, reset existing passwords, replay #248 deployment, or claim Spotify imports work because their code is deployed.
