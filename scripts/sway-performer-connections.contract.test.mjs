@@ -183,6 +183,8 @@ for (const required of ['props.activeGigId === gigId', "props.session.status ===
 for (const required of ['context.accountId, context.performerId, context.gigId, context.ready, context.previewMode', 'lifetime.current !== scope', 'request.current?.abort()', 'busyRef.current', 'confirmReplacement', 'SourcePlayerAccessError', 'Date.parse(download.expiresAt) <= Date.now()', 'player connection is not confirmed yet', '<PerformerPlaybackController']) assert(setup.includes(required), required);
 for (const forbidden of ['localStorage', 'sessionStorage', 'document.cookie', "'/api/state'"]) assert(!setup.includes(forbidden), forbidden);
 for (const args of [
+  ['--import', 'tsx', 'scripts/sway-spotify-catalog.behavior.test.ts'],
+  ['--import', 'tsx', 'scripts/sway-spotify-current-route.behavior.test.mjs'],
   ['--import', 'tsx', 'scripts/sway-source-player-setup.behavior.test.ts'],
   ['scripts/sway-source-player-setup.browser.test.mjs']
 ]) {
