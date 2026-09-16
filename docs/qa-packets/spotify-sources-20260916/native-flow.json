@@ -1,0 +1,39 @@
+{
+  "scope": "Actual signed-in React/HTTP/database flow on owned standalone PostgreSQL 18.4 for Windows. Spotify network simulated; no production writes.",
+  "base": "fe3c95a3c81e31d674ce68cc745163cbac0fcd01",
+  "report": {
+    "startedAt": "2026-09-16T17:56:16.820Z",
+    "checks": [
+      "251-track playlist saves through signed-in React UI, actual HTTP routes and database",
+      "Canceled replacement sends no POST and preserves both saved sources",
+      "Rate limit displays retry guidance and leaves saved playlist and source version unchanged",
+      "Later-page failure and changed provider snapshot cannot partially replace saved tracks",
+      "Oversized playlist is explicitly rejected, never silently truncated",
+      "Confirmed replacement changes only the selected source and advances its version",
+      "Two simultaneous replacements with one observed version yield one success and one conflict",
+      "A real stale browser preflight cannot overwrite a newer saved playlist",
+      "Foreign performer and copied source receipts cannot cross account boundaries",
+      "Ownership changed during provider loading is rejected inside the write transaction",
+      "Revocation advances source version even with clock skew and rejects a stale restore",
+      "Saved source state and account isolation survive process restart",
+      "Desktop and mobile Sources journeys have no page errors or horizontal overflow"
+    ],
+    "passed": true,
+    "providerCalls": 0,
+    "productionWrites": false,
+    "databaseKind": "real-postgres",
+    "simulatedProviderRequests": 21,
+    "finishedAt": "2026-09-16T17:57:18.088Z"
+  },
+  "files": {
+    "server.ts": "35dbd4a3ad0b9645ee2419dac30d866e61a084dfe30c6f71f60500f6a299cf2a",
+    "src/components/TalentDashboard.tsx": "4853a5fe8e10fc40665aeadb086d8938db0a7a77ec6cdd8f44818df49dd3f1a1",
+    "src/server/spotify-playlist-store.ts": "b8b31c0d08c0688b4921f5e694e777a5288d0a4980f831fad65d507b90b32510",
+    "src/server/spotify-catalog-provider.ts": "46e19628fe39a0758ca2c6eee8ee81c973bece24deaf9dede1dd33a4443e314d",
+    "src/server/spotify-catalog.ts": "2af62565a7f030e4604eeee45c895bb60e11acc8b828e20ee501e88fca61d715",
+    "src/spotify-playlist-import.ts": "e3d5463c684bea762fa99fb3c36c7e9c4b83052ce2ca035b9fe6d383df0da288",
+    "src/request-library-read.ts": "28b0c3fb38d21bc44ad50326b2547b54e44de66cf89cb744bb3720599afe0371",
+    "scripts/sway-spotify-sources.browser.test.mjs": "f0afe47213b5b57a126032a7ebce499263c68f295bb2548ae03d06cd91fc23dc",
+    "scripts/fixtures/spotify-source-provider.mjs": "dc615ab7af9a2553897db2fb5d759aeb9dafb2f2c01b0611cbd98428b8cafb1a"
+  }
+}
