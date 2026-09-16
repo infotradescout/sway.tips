@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { importSpotifyPlaylist, searchCatalog } from '../src/server/spotify-catalog.ts';
+import { importSpotifyPlaylist, searchSpotifyCatalog as searchCatalog, searchCatalog as legacySearchCatalog, isCatalogSearchConfigured } from '../src/server/spotify-catalog.ts';
 
 const PLAYLIST_ID = '37i9dQZF1DXcBWIGoYBM5M';
 const TRACK_ID = '4uLU6hMCjMI75M1A2tKUQC';
@@ -275,6 +275,27 @@ test('Spotify catalog behavior at the mocked provider boundary', async (t) => {
       const provider = mockProvider([token(), { url: (url) => assert.equal(url.pathname, '/v1/search'), response: json({ tracks: { items: [] } }) }]);
       const result = await searchCatalog({ query: 'no matches', env: env() });
       assert.equal(result.status, 'ready'); assert.deepEqual(result.results, []); provider.done();
+    });
+    await t.test('legacy HTTP search retains library fallback on token rejection without changing credential configuration', async () => {
+      const credentials = env();
+      const provider = mockProvider([{ url: tokenUrl, response: json({}, 400) }]);
+      const result = await legacySearchCatalog({ query: 'track', env: credentials });
+      assert.equal(result.configured, false, 'The existing HTTP caller must fall through to the library.');
+      assert.deepEqual(result.results, []);
+      assert.equal(isCatalogSearchConfigured(credentials), true, 'Provider failure must not erase actual configuration truth.');
+      provider.done();
+    });
+    await t.test('legacy HTTP search retains library fallback on rate limits and unreadable results', async () => {
+      for (const response of [json({}, 429), json({ tracks: {} })]) {
+        const provider = mockProvider([token(), { url: (url) => assert.equal(url.pathname, '/v1/search'), response }]);
+        const result = await legacySearchCatalog({ query: 'track', env: env() });
+        assert.equal(result.configured, false); assert.deepEqual(result.results, []); provider.done();
+      }
+    });
+    await t.test('legacy HTTP search does not mistake a valid empty catalog for a failed provider', async () => {
+      const provider = mockProvider([token(), { url: (url) => assert.equal(url.pathname, '/v1/search'), response: json({ tracks: { items: [] } }) }]);
+      const result = await legacySearchCatalog({ query: 'no matches', env: env() });
+      assert.equal(result.configured, true); assert.deepEqual(result.results, []); provider.done();
     });
   } finally { globalThis.fetch = realFetch; }
 });
