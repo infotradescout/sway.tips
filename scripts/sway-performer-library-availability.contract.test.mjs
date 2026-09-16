@@ -141,4 +141,7 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Preserve the static ownership checks above and require actual importer,
+// authenticated source-count and browser/persistence behavior in the same gate.
+await import('./sway-music-sources.acceptance.test.mjs');
 console.log('Performer library availability contract passed.');

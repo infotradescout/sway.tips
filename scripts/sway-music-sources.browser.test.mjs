@@ -177,6 +177,12 @@ try {
   assert.equal((await api(b.context, '/api/talent/library/sources')).sources.length, 0);
   assert.equal((await api(b.context, '/api/talent/library/tracks')).external.tracks.length, 0);
   record('A separately signed-up performer cannot read the first performer sources');
+  currentStage = 'restart and restore persisted Sources';
+  // Retain both authenticated browser contexts, but stop their development
+  // documents before restarting the HTTP process. A competing reload of the
+  // old Requests URL must not race this test's explicit Sources navigation.
+  // This verifies persisted restart/re-entry, not an open-tab outage reconnect.
+  await a.page.goto('about:blank'); await b.page.goto('about:blank');
   await stopServer(); await startServer(listenPort);
   await a.page.goto(baseUrl + '/talent/connections'); await chooser.waitFor();
   sources = await api(a.context, '/api/talent/library/sources'); assert.equal(sources.sources.length, 12);
