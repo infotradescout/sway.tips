@@ -15,7 +15,8 @@ const server = read('server.ts');
 const capabilities = read('src/server/music-source-capabilities.ts');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const patronView = read('src/components/PatronView.tsx');
-const spotifyCatalog = read('src/server/spotify-catalog.ts');
+const spotifyCatalogEntry = read('src/server/spotify-catalog.ts');
+const spotifyCatalog = read('src/server/spotify-catalog-provider.ts');
 const types = read('src/types.ts');
 const packageJson = read('package.json');
 
@@ -71,6 +72,19 @@ for (const term of [
   'spotifyUrl: typeof (row.metadata as any)?.spotifyUrl'
 ]) {
   if (!server.includes(term)) failures.push(`Server missing music source capability route behavior: ${term}`);
+}
+
+// The HTTP entry remains stable; provider implementation now lives behind a
+// compatibility boundary. Assert both, rather than deleting old safety checks
+// or placing implementation-shaped comments into the entrypoint to fool them.
+for (const term of [
+  "from './spotify-catalog-provider'",
+  'importSpotifyPlaylist,',
+  'isCatalogSearchConfigured,',
+  'searchCatalog as searchSpotifyCatalog',
+  "configured: result.configured && result.status === 'ready'"
+]) {
+  if (!spotifyCatalogEntry.includes(term)) failures.push(`Spotify catalog entrypoint missing provider wiring: ${term}`);
 }
 
 for (const term of [
@@ -132,7 +146,7 @@ for (const forbidden of [
   'SoundCloud plays from Sway',
   'Sway controls Spotify playback'
 ]) {
-  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden)) {
+  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden) || spotifyCatalogEntry.includes(forbidden) || spotifyCatalog.includes(forbidden)) {
     failures.push(`Music source capability slice must not add raw token storage or playback enablement: ${forbidden}`);
   }
 }
