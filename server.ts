@@ -97,6 +97,7 @@ import {
 } from "./src/server/performer-password-auth";
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
+import { prepareSpotifyPlaylistSource, SpotifyPlaylistSourceConflict } from "./src/server/spotify-playlist-store";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
 import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
 import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS, persistedPayoutFailureCode } from "./src/server/performer-withdrawal-service";
@@ -2901,6 +2902,10 @@ function hashLibrarySyncKey(syncKey: string) {
   return createHash('sha256').update(syncKey, 'utf8').digest('hex');
 }
 
+function nextLibrarySourceVersion() {
+  return sql<Date>`greatest(date_trunc('milliseconds', clock_timestamp()), ${performerLibrarySources.updatedAt} + interval '1 millisecond')`;
+}
+
 async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   performerId: string;
   sourceKey: string;
@@ -2909,6 +2914,10 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   replaceExisting?: boolean;
   allowLocalPaths?: boolean;
 }) {
+  // All source track writers acquire the performer lock before source/track locks.
+  const [lockedPerformer] = await executor.select({ id: performers.id })
+    .from(performers).where(eq(performers.id, input.performerId)).for('update').limit(1);
+  if (!lockedPerformer) throw new Error('The performer account is no longer available.');
   const normalizedTracks = input.rawTracks
     .slice(0, 1000)
     .map((track) => {
@@ -10349,7 +10358,7 @@ app.post('/api/talent/library/import', async (req, res) => {
           connectionStatus: 'active',
           lastSyncedAt: new Date(),
           metadata: { importMode: 'browser_file' },
-          updatedAt: new Date()
+          updatedAt: nextLibrarySourceVersion()
         }
       });
   });
@@ -10385,6 +10394,7 @@ app.get('/api/talent/library/sources', async (req, res) => {
       syncKeyPreview: performerLibrarySources.syncKeyPreview,
       connectionStatus: performerLibrarySources.connectionStatus,
       lastSyncedAt: performerLibrarySources.lastSyncedAt,
+      updatedAt: performerLibrarySources.updatedAt,
       trackCount: sql<number>`count(${performerLibraryTracks.id})::int`
     })
     .from(performerLibrarySources)
@@ -10395,7 +10405,7 @@ app.get('/api/talent/library/sources', async (req, res) => {
     .where(eq(performerLibrarySources.performerId, performerOwner.performerId))
     .groupBy(performerLibrarySources.id);
 
-  return res.json({ sources });
+  return res.json({ performerId: performerOwner.performerId, sources });
 });
 
 app.get('/api/talent/library/tracks', async (req, res) => {
@@ -10413,6 +10423,22 @@ app.get('/api/talent/library/tracks', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can view this library.' });
   }
 
+  const rawOffset = req.query.offset ?? '0';
+  const expectedVersion = req.query.version;
+  if (typeof rawOffset !== 'string' || !/^\d{1,7}$/.test(rawOffset) || Number(rawOffset) > 1_000_000
+    || (expectedVersion !== undefined && (typeof expectedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(expectedVersion)))) {
+    return res.status(422).json({ error: 'Refresh your library before loading another page.' });
+  }
+  const offset = Number(rawOffset);
+  if (offset > 0 && !expectedVersion) return res.status(409).json({ error: 'Refresh your library before loading another page.' });
+  const libraryVersion = async () => {
+    const rows = await businessDb!.select({ id: performerLibrarySources.id, updatedAt: performerLibrarySources.updatedAt })
+      .from(performerLibrarySources).where(eq(performerLibrarySources.performerId, performerOwner.performerId))
+      .orderBy(performerLibrarySources.id);
+    return createHash('sha256').update(JSON.stringify(rows.map(row => [row.id, row.updatedAt.toISOString()]))).digest('hex');
+  };
+  const version = await libraryVersion();
+  if (expectedVersion && expectedVersion !== version) return res.status(409).json({ error: 'Your music changed while loading. Refresh Sources to load the current library.' });
   const [libraryRows, catalogRows] = await Promise.all([
     businessDb
       .select({
@@ -10426,12 +10452,15 @@ app.get('/api/talent/library/tracks', async (req, res) => {
       })
       .from(performerLibraryTracks)
       .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
-      .orderBy(desc(performerLibraryTracks.updatedAt))
-      .limit(100),
+      .orderBy(performerLibraryTracks.id)
+      .limit(101)
+      .offset(offset),
     loadRequestableCatalogTracks(businessDb, { performerId: performerOwner.performerId, limit: 100 })
   ]);
 
+  if (await libraryVersion() !== version) return res.status(409).json({ error: 'Your music changed while loading. Refresh Sources to load the current library.' });
   return res.json({
+    performerId: performerOwner.performerId,
     catalog: {
       category: 'sway_catalog',
       label: 'Catalog audio',
@@ -10450,7 +10479,8 @@ app.get('/api/talent/library/tracks', async (req, res) => {
       category: 'external_request_music',
       label: 'External request music',
       playbackBoundary: 'external_source_required',
-      tracks: libraryRows.map((row) => ({ ...row, sourceKey: 'external' }))
+      tracks: libraryRows.slice(0, 100).map((row) => ({ ...row, sourceKey: 'external' })),
+      pagination: { offset, limit: 100, version, hasMore: libraryRows.length > 100, nextOffset: libraryRows.length > 100 ? offset + 100 : null }
     }
   });
 });
@@ -10469,6 +10499,7 @@ app.get('/api/talent/music/source-capabilities', async (req, res) => {
 });
 
 app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -10481,6 +10512,9 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can import Spotify playlist metadata.' });
   }
+  if (req.body?.performerId !== performerOwner.performerId) {
+    return res.status(409).json({ error: 'Your performer account changed. Refresh Sources before importing.' });
+  }
 
   const playlistUrl = normalizeLibraryText(req.body?.playlistUrl, 512);
   if (!playlistUrl) {
@@ -10490,14 +10524,19 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   const imported = await importSpotifyPlaylist({
     playlistUrl,
     env: process.env,
-    limit: 100
+    limit: 1000
   });
 
-  if (!imported.configured) {
-    return res.status(503).json({ error: 'Spotify metadata import is not configured for this Sway environment.' });
-  }
-  if (!imported.playlistId) {
-    return res.status(422).json({ error: 'Enter a valid Spotify playlist URL, URI, or ID.' });
+  if (imported.status !== 'ready') {
+    const status = imported.status === 'rate_limited' ? 429
+      : ['invalid_playlist', 'no_importable_tracks', 'too_large'].includes(imported.status) ? 422
+        : imported.status === 'not_found' ? 404 : 503;
+    if (imported.retryAfterSeconds) res.setHeader('Retry-After', String(imported.retryAfterSeconds));
+    return res.status(status).json({
+      error: imported.error || 'Spotify could not provide the complete playlist. Your saved source was not changed.',
+      providerStatus: imported.status,
+      ...(imported.retryAfterSeconds ? { retryAfterSeconds: imported.retryAfterSeconds } : {})
+    });
   }
   if (!imported.tracks.length) {
     return res.status(422).json({ error: 'Sway could not import tracks from that Spotify playlist. Confirm the playlist is accessible to the configured Spotify app.' });
@@ -10505,64 +10544,47 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
 
   const sourceKey = `spotify-${imported.playlistId}`;
   const sourceLabel = imported.playlistName ? `Spotify: ${imported.playlistName}` : 'Spotify playlist';
-  const result = await businessDb.transaction(async (tx) => {
-    const upserted = await upsertPerformerLibraryTrackBatch(tx, {
-      performerId: performerOwner.performerId,
-      sourceKey,
-      sourceLabel,
-      rawTracks: imported.tracks.map((track) => ({
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? '',
-        artworkUrl: track.albumArt ?? '',
-        externalTrackId: track.externalTrackId,
-        metadata: {
-          sourceProvider: 'spotify',
-          spotifyUri: track.spotifyUri,
-          spotifyUrl: track.spotifyUrl,
-          playlistId: imported.playlistId
-        }
-      })),
-      replaceExisting: true
-    });
-
-    await tx
-      .insert(performerLibrarySources)
-      .values({
+  let result: Awaited<ReturnType<typeof upsertPerformerLibraryTrackBatch>>;
+  try {
+    result = await businessDb.transaction(async (tx) => {
+      await prepareSpotifyPlaylistSource(tx, {
+        actorId: talentAccess.actor.actorId!,
+        performerId: performerOwner.performerId,
+        sourceKey, sourceLabel,
+        expectedSource: req.body?.expectedSource,
+        generatedSyncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey())
+      });
+      return upsertPerformerLibraryTrackBatch(tx, {
         performerId: performerOwner.performerId,
         sourceKey,
         sourceLabel,
-        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
-        syncKeyPreview: 'spotify-import',
-        connectionStatus: 'active',
-        lastSyncedAt: new Date(),
-        metadata: {
-          sourceProvider: 'spotify',
-          playlistId: imported.playlistId,
-          importMode: 'metadata_only'
-        },
-        updatedAt: new Date()
-      })
-      .onConflictDoUpdate({
-        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
-        set: {
-          sourceLabel,
-          connectionStatus: 'active',
-          lastSyncedAt: new Date(),
+        rawTracks: imported.tracks.map((track) => ({
+          title: track.title,
+          artist: track.artist,
+          album: track.album ?? '',
+          artworkUrl: track.albumArt ?? '',
+          externalTrackId: track.externalTrackId,
           metadata: {
             sourceProvider: 'spotify',
-            playlistId: imported.playlistId,
-            importMode: 'metadata_only'
-          },
-          updatedAt: new Date()
-        }
+            spotifyUri: track.spotifyUri,
+            spotifyUrl: track.spotifyUrl,
+            playlistId: imported.playlistId
+          }
+        })),
+        replaceExisting: true
       });
-
-    return upserted;
-  });
+    });
+  } catch (error) {
+    if (error instanceof SpotifyPlaylistSourceConflict) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    console.error('[sway.sources] Spotify import persistence could not be confirmed.');
+    return res.status(503).json({ error: 'The saved import could not be confirmed. Refresh Sources before retrying this playlist.' });
+  }
 
   return res.status(202).json({
     success: true,
+    performerId: performerOwner.performerId,
     sourceKey,
     sourceLabel,
     playlistId: imported.playlistId,
@@ -10688,7 +10710,7 @@ app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) =>
       syncKeyHash: nextSyncKeyHash,
       syncKeyPreview: nextSyncKeyPreview,
       connectionStatus: 'active',
-      updatedAt: new Date()
+      updatedAt: nextLibrarySourceVersion()
     })
     .where(and(
       eq(performerLibrarySources.id, sourceId),
@@ -10736,7 +10758,7 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
     .update(performerLibrarySources)
     .set({
       connectionStatus: 'revoked',
-      updatedAt: new Date()
+      updatedAt: nextLibrarySourceVersion()
     })
     .where(and(
       eq(performerLibrarySources.id, sourceId),
@@ -11970,7 +11992,7 @@ app.post('/api/library/import-file',
         });
         await tx
           .update(performerLibrarySources)
-          .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
+          .set({ lastSyncedAt: new Date(), updatedAt: nextLibrarySourceVersion() })
           .where(eq(performerLibrarySources.id, sourceRow.id));
         return imported;
       });
@@ -12047,7 +12069,7 @@ app.post('/api/library/sync', async (req, res) => {
         .update(performerLibrarySources)
         .set({
           lastSyncedAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: nextLibrarySourceVersion()
         })
         .where(eq(performerLibrarySources.id, sourceRow.id));
 

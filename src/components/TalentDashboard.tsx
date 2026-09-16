@@ -56,6 +56,8 @@ import PerformerReleaseDrafts from './PerformerReleaseDrafts';
 import PerformerPlaybackController from './PerformerPlaybackController';
 import PerformerSourceImportChoices from './PerformerSourceImportChoices';
 import { importMusicFile } from '../music-file-import';
+import { readRequestLibrary } from '../request-library-read';
+import { importSpotifyPlaylistFromBrowser } from '../spotify-playlist-import';
 import {
   resolvePublicProfileHeroName,
   resolvePublicProfilePageKindLabel
@@ -1598,13 +1600,32 @@ export default function TalentDashboard({
   const [djLibraryImportStatus, setDjLibraryImportStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [djLibraryImportMessage, setDjLibraryImportMessage] = useState<string | null>(null);
   const musicFileImportRef = useRef<symbol | null>(null);
+  const spotifyImportRef = useRef<AbortController | null>(null);
+  const linkedSourcesReadRef = useRef(0);
+  const requestLibraryReadRef = useRef(0);
+  const musicCapabilityReadRef = useRef(0);
   const musicFileImportOwnerRef = useRef(performerProfile?.performer_id);
   musicFileImportOwnerRef.current = performerProfile?.performer_id;
   useEffect(() => {
     musicFileImportRef.current = null;
+    spotifyImportRef.current?.abort();
+    spotifyImportRef.current = null;
+    linkedSourcesReadRef.current += 1;
+    requestLibraryReadRef.current += 1;
+    musicCapabilityReadRef.current += 1;
+    setSpotifyImportStatus('idle');
+    setSpotifyImportMessage(null);
+    setSpotifyPlaylistUrl('');
     setDjLibraryImportStatus('idle');
     setDjLibraryImportMessage(null);
-    return () => { musicFileImportRef.current = null; };
+    return () => {
+      musicFileImportRef.current = null;
+      spotifyImportRef.current?.abort();
+      spotifyImportRef.current = null;
+      linkedSourcesReadRef.current += 1;
+      requestLibraryReadRef.current += 1;
+      musicCapabilityReadRef.current += 1;
+    };
   }, [previewMode, performerProfile?.performer_id]);
   const [catalogLibraryTracks, setCatalogLibraryTracks] = useState<RequestLibraryTrack[]>([]);
   const [externalLibraryTracks, setExternalLibraryTracks] = useState<RequestLibraryTrack[]>([]);
@@ -1905,86 +1926,112 @@ export default function TalentDashboard({
   };
 
   const refreshLinkedSources = async () => {
+    const revision = ++linkedSourcesReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === linkedSourcesReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setLinkedSources([]);
       setLinkedSourcesStatus('ready');
       setLinkedSourcesError(null);
-      return;
+      return true;
     }
     setLinkedSourcesStatus('loading');
     try {
-      const response = await fetch('/api/talent/library/sources', { cache: 'no-store' });
+      const response = await fetch('/api/talent/library/sources', { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       const data = await response.json().catch(() => null);
+      if (!current()) return false;
       if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Could not check your saved sources.');
-      setLinkedSources(Array.isArray(data?.sources) ? data.sources : []);
+      if (!Array.isArray(data?.sources) || data.performerId !== owner) throw new Error('Your saved source list could not be confirmed.');
+      setLinkedSources(data.sources);
       setLinkedSourcesStatus('ready');
       setLinkedSourcesError(null);
+      return true;
     } catch (error) {
+      if (!current()) return false;
       console.warn('Unable to load linked library sources:', error);
       setLinkedSourcesStatus('error');
       setLinkedSourcesError(error instanceof Error ? error.message : 'Could not check your saved sources.');
+      return false;
     }
   };
 
   const refreshRequestLibrary = async () => {
+    const revision = ++requestLibraryReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === requestLibraryReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setCatalogLibraryTracks([]);
       setExternalLibraryTracks([]);
       setRequestLibraryStatus('ready');
       setRequestLibraryError(null);
-      return;
+      return true;
     }
     setRequestLibraryStatus('loading');
     try {
-      const response = await fetch('/api/talent/library/tracks', { cache: 'no-store' });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || 'Could not load your music.');
-      setCatalogLibraryTracks(Array.isArray(data?.catalog?.tracks) ? data.catalog.tracks : []);
-      setExternalLibraryTracks(Array.isArray(data?.external?.tracks) ? data.external.tracks : []);
+      if (!owner) throw new Error('Your performer account could not be confirmed.');
+      const data = await readRequestLibrary({ performerId: owner });
+      if (!current()) return false;
+      if (!Array.isArray(data?.catalog?.tracks) || !Array.isArray(data?.external?.tracks)) throw new Error('Your saved music could not be confirmed.');
+      setCatalogLibraryTracks(data.catalog.tracks);
+      setExternalLibraryTracks(data.external.tracks);
       setRequestLibraryError(null);
       setRequestLibraryStatus('ready');
+      return true;
     } catch (error) {
+      if (!current()) return false;
       setRequestLibraryError(error instanceof Error ? error.message : 'Could not load your music.');
       setRequestLibraryStatus('error');
+      return false;
     }
   };
 
   useEffect(() => {
+    setLinkedSources([]);
+    setCatalogLibraryTracks([]);
+    setExternalLibraryTracks([]);
     void refreshLinkedSources();
     void refreshRequestLibrary();
-  }, [previewMode]);
+  }, [previewMode, performerProfile?.performer_id]);
 
   useEffect(() => {
     if (inactiveWorkspace === 'library') void refreshRequestLibrary();
   }, [inactiveWorkspace]);
 
   const refreshMusicSourceCapabilities = async () => {
+    const revision = ++musicCapabilityReadRef.current;
+    const owner = performerProfile?.performer_id;
+    const current = () => revision === musicCapabilityReadRef.current && owner === musicFileImportOwnerRef.current;
     if (previewMode) {
       setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
       setMusicSourceCapabilityStatus('idle');
       setMusicSourceCapabilityError(null);
-      return;
+      return true;
     }
 
     setMusicSourceCapabilityStatus('loading');
     try {
-      const response = await fetch('/api/talent/music/source-capabilities');
+      const response = await fetch('/api/talent/music/source-capabilities', { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
       if (!response.ok) throw new Error('Unable to load music source capabilities.');
       const data = await response.json().catch(() => null);
-      setMusicSourceCapabilities(Array.isArray(data?.providers) ? data.providers : DEFAULT_MUSIC_SOURCE_CAPABILITIES);
+      if (!current()) return false;
+      if (!Array.isArray(data?.providers)) throw new Error('Source capabilities could not be confirmed.');
+      setMusicSourceCapabilities(data.providers);
       setMusicSourceCapabilityStatus('idle');
       setMusicSourceCapabilityError(null);
+      return true;
     } catch (error) {
+      if (!current()) return false;
       console.warn('Unable to load music source capabilities:', error);
       setMusicSourceCapabilities(DEFAULT_MUSIC_SOURCE_CAPABILITIES);
       setMusicSourceCapabilityStatus('error');
       setMusicSourceCapabilityError('Using local source capability defaults until Sway can refresh provider status.');
+      return false;
     }
   };
 
   useEffect(() => {
     void refreshMusicSourceCapabilities();
-  }, [previewMode]);
+  }, [previewMode, performerProfile?.performer_id]);
 
   const linkedSourceCount = linkedSources.filter((source) => source.connectionStatus !== 'revoked').length;
   const linkedTrackCount = linkedSources
@@ -2005,31 +2052,24 @@ export default function TalentDashboard({
 
   const handleSpotifyPlaylistImport = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (previewMode || spotifyImportStatus === 'submitting' || !spotifyPlaylistUrl.trim()) return;
-
-    setSpotifyImportStatus('submitting');
-    setSpotifyImportMessage(null);
+    if (previewMode || spotifyImportRef.current || !spotifyPlaylistUrl.trim()) return;
+    const controller = new AbortController();
+    const performerId = performerProfile?.performer_id;
+    spotifyImportRef.current = controller;
+    const current = () => spotifyImportRef.current === controller && musicFileImportOwnerRef.current === performerId;
     try {
-      const response = await fetch('/api/talent/music/spotify/import-playlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlistUrl: spotifyPlaylistUrl.trim() })
+      const saved = await importSpotifyPlaylistFromBrowser({
+        playlistUrl: spotifyPlaylistUrl, performerId, previewMode,
+        signal: controller.signal, isCurrent: current,
+        onStatus: setSpotifyImportStatus, onMessage: setSpotifyImportMessage,
+        onSaved: async () => {
+          const refreshed = await Promise.all([refreshLinkedSources(), refreshRequestLibrary(), refreshMusicSourceCapabilities()]);
+          return refreshed.every(Boolean);
+        }
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Spotify playlist import failed.');
-      }
-
-      setSpotifyImportStatus('success');
-      setSpotifyImportMessage(`Imported ${data?.importedCount ?? 0} Spotify metadata tracks into My Library.`);
-      setSpotifyPlaylistUrl('');
-      await refreshLinkedSources();
-      await refreshMusicSourceCapabilities();
-      await refreshRequestLibrary();
-    } catch (error) {
-      console.warn('Spotify playlist import failed:', error);
-      setSpotifyImportStatus('error');
-      setSpotifyImportMessage(error instanceof Error ? error.message : 'Spotify playlist import failed.');
+      if (saved && current()) setSpotifyPlaylistUrl('');
+    } finally {
+      if (spotifyImportRef.current === controller) spotifyImportRef.current = null;
     }
   };
 

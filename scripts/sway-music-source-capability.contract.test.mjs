@@ -15,7 +15,9 @@ const server = read('server.ts');
 const capabilities = read('src/server/music-source-capabilities.ts');
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const patronView = read('src/components/PatronView.tsx');
-const spotifyCatalog = read('src/server/spotify-catalog.ts');
+const spotifyImport = read('src/spotify-playlist-import.ts');
+const spotifyCatalogEntry = read('src/server/spotify-catalog.ts');
+const spotifyCatalog = read('src/server/spotify-catalog-provider.ts');
 const types = read('src/types.ts');
 const packageJson = read('package.json');
 
@@ -73,6 +75,19 @@ for (const term of [
   if (!server.includes(term)) failures.push(`Server missing music source capability route behavior: ${term}`);
 }
 
+// The HTTP entry remains stable; provider implementation now lives behind a
+// compatibility boundary. Assert both, rather than deleting old safety checks
+// or placing implementation-shaped comments into the entrypoint to fool them.
+for (const term of [
+  "from './spotify-catalog-provider'",
+  'importSpotifyPlaylist,',
+  'isCatalogSearchConfigured,',
+  'searchCatalog as searchSpotifyCatalog',
+  "configured: result.configured && result.status === 'ready'"
+]) {
+  if (!spotifyCatalogEntry.includes(term)) failures.push(`Spotify catalog entrypoint missing provider wiring: ${term}`);
+}
+
 for (const term of [
   'export async function importSpotifyPlaylist',
   'resolveSpotifyPlaylistId',
@@ -86,8 +101,8 @@ for (const term of [
 for (const term of [
   'data-sway-music-sources-panel="true"',
   'data-sway-spotify-playlist-import="true"',
-  "fetch('/api/talent/music/source-capabilities')",
-  "fetch('/api/talent/music/spotify/import-playlist'",
+  "fetch('/api/talent/music/source-capabilities',",
+  'importSpotifyPlaylistFromBrowser({',
   'Music Sources',
   'Synced tracks',
   'Spotify playlist import',
@@ -103,6 +118,10 @@ for (const term of [
   '<SpotifyOpenLink request={request} />'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing music sources panel term: ${term}`);
+}
+
+for (const term of ["fetcher('/api/talent/music/spotify/import-playlist'", "fetcher('/api/talent/library/sources'", 'data.performerId !== options.performerId', 'data.playlistId !== playlistId', 'data.sourceKey !== sourceKey']) {
+  if (!spotifyImport.includes(term)) failures.push(`Spotify import owner missing behavior: ${term}`);
 }
 
 for (const term of [
@@ -132,7 +151,7 @@ for (const forbidden of [
   'SoundCloud plays from Sway',
   'Sway controls Spotify playback'
 ]) {
-  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden)) {
+  if (schema.includes(forbidden) || migration.includes(forbidden) || capabilities.includes(forbidden) || talentDashboard.includes(forbidden) || server.includes(forbidden) || spotifyCatalogEntry.includes(forbidden) || spotifyCatalog.includes(forbidden) || spotifyImport.includes(forbidden)) {
     failures.push(`Music source capability slice must not add raw token storage or playback enablement: ${forbidden}`);
   }
 }

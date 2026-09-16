@@ -1,0 +1,111 @@
+{
+  "candidate": "1f381c890219a3808018e7485360460b30a37c18",
+  "observedAt": "2026-09-16T18:15:10.340Z",
+  "scope": "Agent visual inspection of actual React component fixture images. Synthetic state; outer TalentApp brand header excluded; not signed-in production, independent human acceptance, or integrated #247+#248 proof.",
+  "coldRun": {
+    "scope": "Actual Sources components with synthetic state; not signed-in production or physical playback.",
+    "cssSha256": "aca558f5559b99e4ead79d3e89814b075c817b2ac92d9cd8adb4004565a8e7fb",
+    "passed": false,
+    "results": [
+      {
+        "width": 1440,
+        "status": "FAIL",
+        "error": "TimeoutError: page.goto: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:5173/tmp/music-sources-proof/design/fixture.html\", waiting until \"load\"\u001b[22m\n",
+        "errors": [],
+        "unexpected": []
+      },
+      {
+        "width": 1024,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 390,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 320,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      }
+    ]
+  },
+  "unchangedRetry": {
+    "scope": "Actual Sources components with synthetic state; not signed-in production or physical playback.",
+    "cssSha256": "aca558f5559b99e4ead79d3e89814b075c817b2ac92d9cd8adb4004565a8e7fb",
+    "passed": true,
+    "results": [
+      {
+        "width": 1440,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 390,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 320,
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      }
+    ]
+  },
+  "images": {
+    "empty-390.png": "8e443771fc1d134c24b96eea17c7ad1b9b17064ffcc77e4c8821a99edd6028ca",
+    "saved-1024.png": "61036d534ca8510b0c4cd0836e438248cb5861d04458a80fc0cd7836b0260964",
+    "empty-1440.png": "cb82e25c20b32458fd12b37d866299188d1f7c4195001207b3f3ce07da697779"
+  },
+  "findings": [
+    "Empty mobile: saved music precedes the three add-music actions, and playback setup follows them; text and controls remain readable with no observed overlaps.",
+    "Desktop empty: music occupies the primary column and player setup the side column; navigation and heading are visually distinct.",
+    "Populated 1024px: all twelve source labels, including a long name, remain readable; adding another source still requires scrolling past the list.",
+    "The unchanged first Windows run hit a 15-second first-page load timeout at 1440px; four other widths passed. An unchanged warm retry passed all five widths. Cold-load reliability is not established by the retry."
+  ],
+  "productAcceptance": "Not owner premium-design acceptance; the full application and physical-player journey are not covered.",
+  "integrationStatus": "Design branch unchanged and not included in the functional candidate."
+}

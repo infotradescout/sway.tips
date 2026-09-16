@@ -1,0 +1,118 @@
+{
+  "candidate": "7faaca0b65afb75bb1dc51444916fe070daf0127",
+  "tree": "7050d3b417fb88d990f68914f2b3de70f25d2841",
+  "functionalBase": "7d88edfa39445ef541b1806534524e3a404bb77a",
+  "designSource": "1f381c890219a3808018e7485360460b30a37c18",
+  "scope": "Combined application on owned disposable accounts/PostgreSQL. Provider responses simulated. No production deploy, real Spotify authorization, or physical player execution.",
+  "native": {
+    "startedAt": "2026-09-16T18:38:20.920Z",
+    "checks": [
+      "Combined TalentApp header, keyboard import choices and library-first layouts work at desktop and mobile sizes",
+      "251-track playlist saves through signed-in React UI, actual HTTP routes and database",
+      "Canceled replacement sends no POST and preserves both saved sources",
+      "Rate limit displays retry guidance and leaves saved playlist and source version unchanged",
+      "Later-page failure and changed provider snapshot cannot partially replace saved tracks",
+      "Oversized playlist is explicitly rejected, never silently truncated",
+      "Confirmed replacement changes only the selected source and advances its version",
+      "Two simultaneous replacements with one observed version yield one success and one conflict",
+      "A real stale browser preflight cannot overwrite a newer saved playlist",
+      "Foreign performer and copied source receipts cannot cross account boundaries",
+      "Ownership changed during provider loading is rejected inside the write transaction",
+      "Revocation advances source version even with clock skew and rejects a stale restore",
+      "Saved source state and account isolation survive process restart",
+      "Sources opens a real free room, preserves library, confirms one room file, and refuses unobserved playback",
+      "Desktop and mobile Sources journeys have no page errors or horizontal overflow"
+    ],
+    "passed": true,
+    "providerCalls": 0,
+    "productionWrites": false,
+    "databaseKind": "real-postgres",
+    "simulatedProviderRequests": 21,
+    "finishedAt": "2026-09-16T18:40:00.666Z"
+  },
+  "design": {
+    "scope": "Production-built Sources components with synthetic state; not signed-in production or physical playback.",
+    "assetMode": "production-built",
+    "buildDurationMs": 4425,
+    "cssSha256": "aca558f5559b99e4ead79d3e89814b075c817b2ac92d9cd8adb4004565a8e7fb",
+    "passed": true,
+    "results": [
+      {
+        "width": 1440,
+        "readyMs": 205,
+        "assetMode": "production-built",
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "readyMs": 160,
+        "assetMode": "production-built",
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "readyMs": 170,
+        "assetMode": "production-built",
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 390,
+        "readyMs": 164,
+        "assetMode": "production-built",
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      },
+      {
+        "width": 320,
+        "readyMs": 162,
+        "assetMode": "production-built",
+        "status": "PASS",
+        "filePickerActions": 8,
+        "keyboardDisclosure": true,
+        "liveCockpitExcluded": true,
+        "overflow": false
+      }
+    ]
+  },
+  "sourceHashes": {
+    "scripts/sway-performer-connections.contract.test.mjs": "68547fbd8a87b8f301c62db4c0c374a838b6430ac88e69c826e75a633dfd554f",
+    "scripts/sway-sources-workspace-design.browser.test.mjs": "d2e1e2f18425c2c70b6ac346a1c4c1e980f34bba5031798dfba408b6ed1db783",
+    "scripts/sway-spotify-sources.browser.test.mjs": "2e0eb6186b9d3cfdbb438571dad125e0c922e0af6018ed0816db3681082acb3f",
+    "src/components/PerformerSourceImportChoices.tsx": "56d6463edc8d2c68843318d66e24596981cd3238bc3e7e4b2fd5681fe2413b9b",
+    "src/components/PerformerSourcePlayerSetup.tsx": "5446f4ba3b8905c6b774fab9d5069de16d78958bf59703e1e63dc837ee9ecadd",
+    "src/components/TalentDashboardWithSources.tsx": "7f7e6ec9aa0a20b4208356a2c871398e8c4ce4462af72e32be6857be60cdeced",
+    "src/performer-workspace.css": "aca558f5559b99e4ead79d3e89814b075c817b2ac92d9cd8adb4004565a8e7fb",
+    "src/shells/TalentApp.tsx": "fbd1c4f199cc4cc501ad68462a5075a399705578547e18afc58dedcaabb90546"
+  },
+  "visualReview": {
+    "scope": "Agent visual inspection of full actual TalentApp screenshots; not independent human approval.",
+    "screenshots": [
+      "combined-saved-1440.png",
+      "combined-room-prepared-320.png"
+    ],
+    "findings": [
+      "Desktop library and playback columns, expanded imports and notices remain readable.",
+      "Narrow mobile room selection, download and offline controls wrap without page overflow.",
+      "Active-room heading previously mislabeled the account Sources screen; fixed and covered in empty/saved/active-room checks."
+    ],
+    "hashes": {
+      "combined-saved-1440.png": "46b46fc5a9b7e4b16810f033e1f3a9c91adf800b8fa7246a6688699a6837b8a8",
+      "combined-room-prepared-320.png": "8e7fcfe384a866298812e1bd850ce9ec00b2163b50a3993102f7cdc8a02ff4bb"
+    }
+  }
+}

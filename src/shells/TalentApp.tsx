@@ -740,8 +740,8 @@ export default function TalentApp() {
               ? 'Choose what you want to manage'
               : 'Requests, room link, earnings, and controls'}
             secondaryLabel={LIVE_ROOM_LANGUAGE.roomStatus}
-            showHeader={session.status !== 'inactive'}
-            showPrimaryLabel={session.status !== 'inactive'}
+            showHeader={session.status !== 'inactive' && requestedWorkspace !== 'connections'}
+            showPrimaryLabel={session.status !== 'inactive' && requestedWorkspace !== 'connections'}
             isEmpty={false}
             emptyState={
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-8 text-center">
