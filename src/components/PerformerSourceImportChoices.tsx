@@ -60,15 +60,6 @@ export default function PerformerSourceImportChoices(props: PerformerSourceImpor
                   </div>
                 ))}
               </div>
-              <details className="sway-source-disclosure">
-                <summary>Other music services and DJ apps</summary>
-                <p>TIDAL, SoundCloud, YouTube Music, Amazon Music, Deezer, Bandcamp, Engine DJ, djay, or another source: use a CSV, TSV, or text song list exported by your service or a library-transfer tool.</p>
-                <p>This is file import only. These services are not directly connected here. A web link, login, native database, or protected audio file cannot be imported as a song list.</p>
-                <label className="sway-source-file-label sway-source-button sway-source-button--wide">
-                  Import exported song list <Upload aria-hidden="true" />
-                  <input aria-label="Import song list from another service" aria-describedby={helpId} type="file" accept=".csv,.tsv,.txt" disabled={fileBusy} onChange={props.onDjLibraryFileImport} className="sway-source-file-input" />
-                </label>
-              </details>
             </div>
           </details>
 
@@ -96,6 +87,15 @@ export default function PerformerSourceImportChoices(props: PerformerSourceImpor
         {props.djLibraryImportStatus === 'submitting' ? <p role="status" className="sway-source-feedback">Adding your song list…</p> : null}
         {props.djLibraryImportMessage ? <p role={props.djLibraryImportStatus === 'error' ? 'alert' : 'status'} className="sway-source-feedback">{props.djLibraryImportMessage}</p> : null}
         {props.spotifyImportMessage ? <p role={props.spotifyImportStatus === 'error' ? 'alert' : 'status'} className="sway-source-feedback">{props.spotifyImportMessage}</p> : null}
+        <details className="sway-source-disclosure">
+          <summary>Other music services and DJ apps</summary>
+          <p>TIDAL, SoundCloud, YouTube Music, Amazon Music, Deezer, Bandcamp, Engine DJ, djay, or another source: use a CSV, TSV, or text song list exported by your service or a library-transfer tool.</p>
+          <p>This is file import only. These services are not directly connected here. A web link, login, native database, or protected audio file cannot be imported as a song list.</p>
+          <label className="sway-source-file-label sway-source-button sway-source-button--wide">
+            Import exported song list <Upload aria-hidden="true" />
+            <input aria-label="Import song list from another service" aria-describedby={helpId} type="file" accept=".csv,.tsv,.txt" disabled={fileBusy} onChange={props.onDjLibraryFileImport} className="sway-source-file-input" />
+          </label>
+        </details>
         <p id={helpId} className="sway-source-footnote">File imports add song information, not audio. They do not connect a streaming account or give playback permission.</p>
       </section>
       <PerformerSourcePlayerSetup />

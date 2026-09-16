@@ -1,7 +1,6 @@
 import type { ComponentProps } from 'react';
 import type DashboardComponent from './TalentDashboard';
 import { SourcePlayerContext } from '../source-player-context';
-import '../performer-workspace.css';
 
 // The existing shell remains the sole owner of account and room selection.
 export function withSourcePlayerContext(TalentDashboard: typeof DashboardComponent) {

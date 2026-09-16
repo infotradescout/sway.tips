@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 // Expose the real private workspace to this fixture without changing the
 // production export graph. State and imports here are synthetic; the normal
 // database-backed Sources suite continues to prove persistence separately.
-const directory = join('tmp', 'sources-workspace-design-proof');
+const directory = join('tmp', 'music-sources-proof', 'design');
 mkdirSync(directory, { recursive: true });
 writeFileSync(join(directory, 'fixture.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sway Sources component proof</title><body class="bg-slate-950 text-white"><div id="root"></div><script type="module" src="/' + directory + '/fixture.tsx"></script></body></html>');
 writeFileSync(join(directory, 'fixture.tsx'), `import React,{useState} from 'react';
@@ -63,7 +63,34 @@ try {
       const player = await page.locator('[data-sway-source-player-setup]').boundingBox();
       if (width >= 960) assert(player.x >= saved.x + saved.width, 'Player is beside, not above, the library');
       else assert(player.y > saved.y + saved.height, 'Library comes first on mobile');
-      await page.locator('#talent_dashboard_panel').screenshot({ path: join(directory, 'empty-' + width + '.png') });
+      const screenshot = await page.locator('#talent_dashboard_panel').screenshot({ path: join(directory, 'empty-' + width + '.png') });
+      // Readable, bounded previews of the real browser output for the reviewer.
+      // Original PNGs remain in the owned proof directory; no user data exists.
+      if (width === 1440 || width === 390) {
+        const dataUrl = await page.evaluate(async ({ base64, maxWidth }) => {
+          const image = new Image(); image.src = 'data:image/png;base64,' + base64;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          const scale = Math.min(1, maxWidth / image.width);
+          canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
+          canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+          return canvas.toDataURL('image/webp', 0.68);
+        }, { base64: screenshot.toString('base64'), maxWidth: width === 1440 ? 900 : 390 });
+        const preview = Buffer.from(dataUrl.split(',')[1], 'base64');
+        writeFileSync(join(directory, 'empty-' + width + '.webp'), preview);
+        console.log('SWAY_DESIGN_IMAGE_' + width, JSON.stringify({ sourceSha256: createHash('sha256').update(screenshot).digest('hex'), previewSha256: createHash('sha256').update(preview).digest('hex'), bytes: preview.length, base64: preview.toString('base64') }));
+      }
+      // The shared dashboard id also names the fullscreen live cockpit.
+      // Prove that this presentation layer does not touch its sizing/padding.
+      const liveStyle = await page.evaluate(() => {
+        const el = document.createElement('div'); el.id = 'talent_dashboard_panel';
+        el.dataset.swayPerformerLiveCockpit = 'true';
+        document.querySelector('.sway-performer-workspace').appendChild(el);
+        const style = getComputedStyle(el);
+        const value = { padding: style.padding, maxWidth: style.maxWidth, gap: style.gap };
+        el.remove(); return value;
+      });
+      assert.deepEqual(liveStyle, { padding: '0px', maxWidth: 'none', gap: 'normal' }, 'New CSS must exclude the live cockpit');
       const picker = page.locator('[data-sway-file-source-picker]');
       assert.equal(await picker.getAttribute('open'), null);
       await picker.locator(':scope > summary').focus();
@@ -107,7 +134,7 @@ try {
       assert(await page.getByRole('button', { name: 'Set up VirtualDJ connection', exact: true }).isDisabled());
       assert.equal(await page.locator('input[data-sway-source-label]:disabled').count(), 8);
       assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
-      results.push({ width, status: 'PASS', filePickerActions: sources.length, keyboardDisclosure: true, overflow: false });
+      results.push({ width, status: 'PASS', filePickerActions: sources.length, keyboardDisclosure: true, liveCockpitExcluded: true, overflow: false });
     } catch (error) {
       results.push({ width, status: 'FAIL', error: String(error), errors, unexpected });
       await page.screenshot({ path: join(directory, 'failure-' + width + '.png'), fullPage: true }).catch(() => {});
