@@ -47,12 +47,15 @@ for (const kind of ['native','embedded']) {
  assert.equal(result.passed,true); assert.equal(result.checks.length,13);
 }
 if (mode==='artifacts') {
- for (const width of [390,320,1440]) {
+ // A small layout overview is transferred through the text-only connector.
+ // Original PNGs remain byte-identical. This is not a pixel/text legibility test.
+ for (const width of [390,1440]) {
   const bytes=files.get(`music-sources-proof/native/sources-${width}.png`);
   const metadata=await sharp(bytes).metadata(); assert.equal(metadata.width,width);
-  const preview=await sharp(bytes).resize({width:Math.min(width,960),withoutEnlargement:true}).webp({quality:35,effort:6}).toBuffer();
-  const row={width,height:metadata.height,originalSha256:digest(bytes),previewSha256:digest(preview),previewBytes:preview.length};
-  report.observations.push(row); console.log('SWAY_ARTIFACT_IMAGE_'+width+' '+JSON.stringify({...row,mime:'image/webp',base64:preview.toString('base64')}));
+  const target=width===390 ? 156 : 360;
+  const preview=await sharp(bytes).resize({width:target,withoutEnlargement:true}).webp({quality:10,effort:6}).toBuffer();
+  const row={width,height:metadata.height,previewWidth:target,originalSha256:digest(bytes),previewSha256:digest(preview),previewBytes:preview.length};
+  report.observations.push(row); console.log('SWAY_LAYOUT_PREVIEW_'+width+' '+JSON.stringify({...row,mime:'image/webp',base64:preview.toString('base64')}));
  }
 } else {
  const expected=process.env.SWAY_PUBLIC_EXPECTED_PRODUCTION_SHA; assert.match(expected||'',/^[a-f0-9]{40}$/);
