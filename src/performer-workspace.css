@@ -1,0 +1,180 @@
+/* Performer-only visual foundation. No patron, payment or live-room selectors. */
+.sway-performer-workspace {
+  display: contents;
+  --sw-surface: #111520;
+  --sw-raised: #191d2a;
+  --sw-line: #2b3040;
+  --sw-text: #f3f4f8;
+  --sw-muted: #a6adbf;
+  --sw-accent: #e7a4f5;
+  --sw-action: #9133b4;
+  color: var(--sw-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.sway-performer-workspace #talent_dashboard_panel { max-width: 1184px; padding: 12px 16px 40px; gap: 32px; }
+.sway-performer-workspace [data-sway-performer-app-navigation] {
+  position: relative; top: auto; max-width: none; margin: 0; padding: 0 0 12px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--sw-line);
+  border-radius: 0; box-shadow: none; backdrop-filter: none; gap: 4px;
+}
+.sway-performer-workspace [data-sway-performer-app-navigation] button {
+  min-height: 48px; padding: 10px 8px; border: 1px solid transparent; border-radius: 10px;
+  font-size: 13px; font-weight: 550; text-transform: none; letter-spacing: 0;
+  color: var(--sw-muted); box-shadow: none; background: transparent; gap: 8px;
+}
+.sway-performer-workspace [data-sway-performer-app-navigation] button:hover { color: var(--sw-text); background: var(--sw-raised); }
+.sway-performer-workspace [data-sway-performer-app-navigation] button[aria-current="page"] {
+  color: #f0c8fa; background: #2e1c3b; border-color: #583469;
+}
+.sway-performer-workspace [data-sway-performer-app-navigation] button:focus-visible { outline: 2px solid #dda3f0; outline-offset: 3px; }
+.sway-performer-workspace [data-sway-performer-connections-workspace] {
+  max-width: none; margin: 0; border: 0; border-radius: 0; overflow: visible;
+  background: transparent; box-shadow: none;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > header {
+  border: 0; padding: 0 0 30px; background: transparent;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > header > p:first-child {
+  color: var(--sw-accent); font-size: 11px; font-weight: 650; letter-spacing: .16em;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > header h2 {
+  margin-top: 10px; font-family: inherit; font-size: clamp(30px, 3.1vw, 40px);
+  font-weight: 600; line-height: 1.15; letter-spacing: -.035em;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > header > p:last-child {
+  max-width: 580px; margin-top: 12px; color: var(--sw-muted); font-size: 14px; line-height: 1.7;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > div {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 0;
+}
+.sway-performer-workspace [data-sway-performer-connections-workspace] > div > * { margin: 0; min-width: 0; }
+.sway-performer-workspace [data-sway-linked-sources] {
+  padding: 24px; border: 1px solid var(--sw-line); border-radius: 16px; background: var(--sw-surface);
+}
+.sway-performer-workspace [data-sway-linked-sources] > div:first-child { gap: 16px; align-items: center; }
+.sway-performer-workspace [data-sway-linked-sources] h3 { font-size: 16px; font-weight: 600; letter-spacing: -.015em; }
+.sway-performer-workspace [data-sway-linked-sources] > div:first-child > span {
+  padding: 5px 9px; border: 1px solid var(--sw-line); border-radius: 7px;
+  color: var(--sw-muted); font-size: 12px; font-weight: 550; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.sway-performer-workspace [data-sway-linked-sources] > .divide-y { padding: 0; border: 0; border-radius: 0; background: transparent; margin-top: 20px; }
+.sway-performer-workspace [data-sway-linked-sources] > .divide-y > div { padding: 16px 0; gap: 12px; border-color: var(--sw-line); }
+.sway-performer-workspace [data-sway-linked-sources] > .divide-y p:first-child {
+  font-weight: 550; font-size: 14px; white-space: normal; overflow-wrap: anywhere;
+}
+.sway-performer-workspace [data-sway-linked-sources] > .divide-y p + p { color: var(--sw-muted); font-size: 12px; line-height: 1.6; }
+.sway-performer-workspace [data-sway-linked-sources] svg[aria-label="Saved import"] { color: var(--sw-muted); }
+.sway-performer-workspace [data-sway-linked-sources] > .border-dashed {
+  border: 0; border-radius: 0; padding: 36px 12px 18px; background: transparent;
+}
+.sway-performer-workspace [data-sway-linked-sources] > .border-dashed::before {
+  content: ""; display: block; width: 56px; height: 56px; margin: 0 auto 20px;
+  border-radius: 50%; border: 1px solid #444154;
+  background: repeating-radial-gradient(circle, #282334 0 3px, #181925 4px 6px);
+  box-shadow: inset 0 0 0 18px #191923, inset 0 0 0 23px #604173;
+}
+.sway-performer-workspace [data-sway-linked-sources] > .border-dashed p:first-child { font-size: 18px; font-weight: 550; }
+.sway-performer-workspace [data-sway-linked-sources] > .border-dashed p + p { margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--sw-muted); }
+/* Explicit Source components use the same tokens in isolated browser fixtures. */
+.sway-source-panel {
+  --sw-surface: #111520; --sw-raised: #191d2a; --sw-line: #2b3040; --sw-text: #f3f4f8; --sw-muted: #a6adbf;
+  --sw-accent: #e7a4f5; --sw-action: #9133b4;
+  min-width: 0; padding: 24px; border: 1px solid var(--sw-line); border-radius: 16px;
+  background: var(--sw-surface); color: var(--sw-text); font-family: inherit;
+}
+.sway-source-panel h3, .sway-source-panel h4, .sway-source-panel p { margin: 0; }
+.sway-source-kicker { color: var(--sw-accent); font-size: 11px; font-weight: 650; line-height: 1.5; letter-spacing: .14em; text-transform: uppercase; }
+.sway-source-panel h3 { margin-top: 8px; font-size: 21px; font-weight: 600; line-height: 1.3; letter-spacing: -.025em; }
+.sway-source-description { margin-top: 10px !important; color: var(--sw-muted); font-size: 13px; line-height: 1.7; }
+.sway-source-actions { margin-top: 22px; }
+.sway-source-action {
+  display: flex; align-items: center; gap: 14px; min-height: 76px; width: 100%; padding: 16px 0;
+  background: transparent; border: 0; color: var(--sw-text); text-align: left; list-style: none; cursor: pointer;
+}
+.sway-source-action::-webkit-details-marker, .sway-source-disclosure > summary::-webkit-details-marker { display: none; }
+.sway-source-action > span:not(.sway-source-icon):not(.sway-source-action-label) { flex: 1; min-width: 0; }
+.sway-source-action strong { display: block; font-size: 14px; line-height: 1.5; font-weight: 550; }
+.sway-source-action small { display: block; margin-top: 3px; color: var(--sw-muted); font-size: 12px; line-height: 1.5; }
+.sway-source-action-label { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--sw-accent); }
+.sway-source-action > svg { flex-shrink: 0; width: 16px; height: 16px; color: var(--sw-muted); transition: transform 160ms ease; }
+.sway-source-actions > * + * { border-top: 1px solid var(--sw-line); }
+.sway-source-icon { display: grid; place-items: center; flex-shrink: 0; width: 42px; height: 42px; border: 1px solid var(--sw-line); border-radius: 12px; background: var(--sw-raised); color: #c7b4dc; }
+.sway-source-icon svg { width: 20px; height: 20px; }
+.sway-source-action:hover strong { color: var(--sw-accent); }
+.sway-source-panel :is(button, summary, input, select, textarea, a):focus-visible,
+.sway-source-file-label:focus-within { outline: 2px solid #dda3f0; outline-offset: 4px; }
+.sway-source-panel :is(button, input, select):disabled { opacity: .5; cursor: not-allowed; }
+.sway-source-panel details[open] > .sway-source-action > svg { transform: rotate(180deg); }
+.sway-source-picker-content { padding: 8px 0 20px; }
+.sway-source-file-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 18px; }
+.sway-source-file-option { min-width: 0; padding: 14px; background: var(--sw-raised); border: 1px solid var(--sw-line); border-radius: 10px; }
+.sway-source-file-label { position: relative; display: flex; gap: 12px; justify-content: space-between; min-height: 64px; cursor: pointer; border-radius: 4px; }
+.sway-source-file-label > span { min-width: 0; }
+.sway-source-file-label strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.5; }
+.sway-source-file-label small { display: block; margin-top: 5px; color: var(--sw-muted); font-size: 12px; line-height: 1.6; }
+.sway-source-file-label > svg { width: 16px; height: 16px; margin-top: 3px; flex-shrink: 0; color: var(--sw-accent); }
+.sway-source-file-label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.sway-source-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sway-source-disclosure { margin-top: 16px; color: var(--sw-muted); font-size: 12px; line-height: 1.75; }
+.sway-source-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 8px 0; color: #ccd0dd; font-size: 12px; font-weight: 550; cursor: pointer; list-style: none; }
+.sway-source-disclosure > summary::after { content: "+"; flex-shrink: 0; font-size: 18px; font-weight: 400; }
+.sway-source-disclosure[open] > summary::after { content: "−"; }
+.sway-source-disclosure p + p { margin-top: 10px; }
+.sway-source-file-option .sway-source-disclosure { margin-top: 6px; }
+.sway-source-panel a { color: #bcd8f0; text-underline-offset: 4px; text-decoration: underline; }
+.sway-source-footnote { margin-top: 20px !important; padding-top: 16px; border-top: 1px solid var(--sw-line); color: var(--sw-muted); font-size: 12px; line-height: 1.7; }
+.sway-source-form { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 12px; }
+.sway-source-field { flex: 1; min-width: 160px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #454c60; border-radius: 8px; background: #0c101a; color: var(--sw-text); font-size: 14px; }
+.sway-source-field::placeholder { color: var(--sw-muted); }
+.sway-source-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 11px 16px; border: 1px solid var(--sw-line); border-radius: 9px; background: var(--sw-raised); color: var(--sw-text); font-size: 13px; font-weight: 600; line-height: 1.5; cursor: pointer; transition: background 160ms ease, border-color 160ms ease; }
+.sway-source-button:not(:disabled):hover { background: #272638; border-color: #646077; }
+.sway-source-button--primary { background: var(--sw-action); border-color: #a845ce; color: white; }
+.sway-source-button--primary:not(:disabled):hover { background: #a03ec4; border-color: #bb6ed7; }
+.sway-source-button--wide { width: 100%; margin-top: 16px; }
+.sway-source-button svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sway-source-feedback { margin-top: 14px !important; padding: 12px 14px; border-radius: 8px; background: #17242a; color: #bce0e3; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.sway-source-feedback[role="alert"] { background: #30241c; color: #f2d5af; }
+.sway-player-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.sway-player-name { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
+.sway-player-name h4 { font-size: 16px; font-weight: 600; letter-spacing: -.015em; }
+.sway-player-name p { margin-top: 3px; color: var(--sw-muted); font-size: 12px; }
+.sway-player-room { display: block; margin-top: 20px; color: var(--sw-muted); font-size: 12px; font-weight: 550; }
+.sway-player-room select { display: block; margin-top: 8px; min-width: 0; }
+.sway-player-availability { margin-top: 20px; padding: 14px; border-radius: 10px; background: var(--sw-raised); color: var(--sw-muted); font-size: 12px; line-height: 1.7; }
+.sway-player-availability a { display: inline-flex; align-items: center; min-height: 44px; margin-top: 4px; font-weight: 600; }
+.sway-player-confirm { margin-top: 16px; padding: 16px; border: 1px solid #78513c; border-radius: 10px; background: #2a211b; color: #f2d5af; font-size: 13px; line-height: 1.7; }
+.sway-player-confirm > div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.sway-player-download { margin-top: 16px; color: var(--sw-muted); font-size: 13px; line-height: 1.7; }
+.sway-player-download > [role="status"] { color: #bce0e3; font-weight: 550; }
+.sway-player-download > p + p { margin-top: 8px; }
+.sway-player-extras { margin-top: 20px; padding-top: 4px; border-top: 1px solid var(--sw-line); }
+.sway-player-extras .sway-source-disclosure { margin-top: 0; }
+.sway-player-controls { margin-top: 20px; min-width: 0; }
+.sway-performer-workspace [data-sway-performer-connections-workspace] > div > button {
+  width: fit-content; padding: 4px 0; font-size: 12px; font-weight: 500; color: var(--sw-muted);
+}
+@media (min-width: 640px) { .sway-source-file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 960px) {
+  .sway-performer-workspace [data-sway-performer-connections-workspace] > div { grid-template-columns: minmax(0, 1fr) 336px; align-items: start; gap: 24px; }
+  .sway-performer-workspace [data-sway-linked-sources] { grid-column: 1; grid-row: 1; }
+  .sway-performer-workspace [data-sway-source-import-choices] { grid-column: 1; grid-row: 2; }
+  .sway-performer-workspace [data-sway-source-player-setup] { grid-column: 2; grid-row: 1 / span 3; }
+  .sway-performer-workspace [data-sway-performer-connections-workspace] > div > button { grid-column: 1; grid-row: 3; }
+}
+@media (max-width: 639px) {
+  .sway-performer-workspace #talent_dashboard_panel { padding: 8px 0 28px; gap: 24px; }
+  .sway-performer-workspace [data-sway-performer-app-navigation] { gap: 4px; padding-bottom: 12px; }
+  .sway-performer-workspace [data-sway-performer-app-navigation] button { padding: 8px 4px; font-size: 11px; gap: 5px; }
+  .sway-performer-workspace [data-sway-performer-connections-workspace] > header { padding-bottom: 24px; }
+  .sway-source-panel, .sway-performer-workspace [data-sway-linked-sources] { padding: 20px 16px; border-radius: 14px; }
+  .sway-source-action { gap: 10px; }
+  .sway-source-icon { width: 36px; height: 36px; border-radius: 10px; }
+  .sway-source-action-label { display: none; }
+  .sway-source-form { flex-direction: column; }
+  .sway-source-panel h3 { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .sway-source-panel *, .sway-performer-workspace [data-sway-performer-app-navigation] button { transition: none; } }
+@media (forced-colors: active) {
+  .sway-source-panel, .sway-source-button, .sway-source-field { border: 1px solid CanvasText; }
+  .sway-performer-workspace [data-sway-performer-app-navigation] button[aria-current="page"] { outline: 2px solid Highlight; }
+}

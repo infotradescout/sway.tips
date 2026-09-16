@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react';
 import type DashboardComponent from './TalentDashboard';
 import { SourcePlayerContext } from '../source-player-context';
+import '../performer-workspace.css';
 
 // The existing shell remains the sole owner of account and room selection.
 export function withSourcePlayerContext(TalentDashboard: typeof DashboardComponent) {
@@ -21,7 +22,9 @@ export function withSourcePlayerContext(TalentDashboard: typeof DashboardCompone
         rooms: props.activeRooms ?? [], approvedRequests,
         onSelectRoom: props.onSelectGigId
       }}>
-        <TalentDashboard {...props} />
+        <div className="sway-performer-workspace">
+          <TalentDashboard {...props} />
+        </div>
       </SourcePlayerContext.Provider>
     );
   }

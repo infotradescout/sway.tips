@@ -184,7 +184,8 @@ for (const required of ['context.accountId, context.performerId, context.gigId, 
 for (const forbidden of ['localStorage', 'sessionStorage', 'document.cookie', "'/api/state'"]) assert(!setup.includes(forbidden), forbidden);
 for (const args of [
   ['--import', 'tsx', 'scripts/sway-source-player-setup.behavior.test.ts'],
-  ['scripts/sway-source-player-setup.browser.test.mjs']
+  ['scripts/sway-source-player-setup.browser.test.mjs'],
+  ['scripts/sway-sources-workspace-design.browser.test.mjs']
 ]) {
   const result = spawnSync(process.execPath, args, { stdio: 'inherit', timeout: 300_000, shell: false });
   assert.equal(result.error, undefined, String(result.error));
