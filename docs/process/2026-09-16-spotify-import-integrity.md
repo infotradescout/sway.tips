@@ -1,3 +1,5 @@
+> Superseded for continuation by `docs/process/2026-09-16-sources-safe-replacement.md` at runtime candidate `6cd434f`. This earlier receipt remains historical; its 100-item ceiling and unported-guard notes no longer describe the current branch.
+
 # Spotify import integrity — verified continuation checkpoint
 
 ## Objective
