@@ -19,20 +19,36 @@ const mode = process.env.SWAY_PUBLIC_OBSERVATION_MODE;
 assert(['artifacts','production'].includes(mode));
 const artifactBase = 'https://sway-release-proof.onrender.com';
 const hosts = ['https://sway.tips','https://www.sway.tips','https://app.sway.tips'];
+const privatePaths = ['/api/talent/library/sources','/api/talent/library/tracks'];
 const artifactPaths = ['index.html','robots.txt','source-evidence.json', ...['native','embedded'].flatMap(kind => ['results.json','sources-1440.png','sources-390.png','sources-320.png'].map(name => `music-sources-proof/${kind}/${name}`))];
-const allowed = new Set([...artifactPaths.map(path => `${artifactBase}/${path}`), ...hosts.flatMap(host => ['/api/build-marker','/api/release-health'].map(path => host + path))]);
+const allowed = new Set([...artifactPaths.map(path => `${artifactBase}/${path}`), ...hosts.flatMap(host => ['/api/build-marker','/api/release-health',...privatePaths].map(path => host + path))]);
+const redirects = [];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
-async function read(url) {
-  assert(allowed.has(url), 'Unlisted read');
+async function readResponse(url, expectedStatuses = [200]) {
   const signal = AbortSignal.timeout(20000);
-  const response = await fetch(url, {method:'GET', redirect:'error', signal, headers:{'cache-control':'no-cache'}});
-  assert.equal(response.status, 200, `GET failed: ${url}`);
-  const reader = response.body.getReader(); let size=0; const parts=[];
-  try { while (true) { const {done,value}=await reader.read(); if(done) break; size+=value.length; assert(size<=3000000,'Oversized public artifact'); parts.push(Buffer.from(value)); } }
-  finally { await reader.cancel().catch(()=>{}); }
-  return Buffer.concat(parts);
+  const visited = new Set(); let current = url;
+  for (let hop = 0; hop < 3; hop++) {
+    assert(allowed.has(current) && !visited.has(current), 'Unlisted or looping read');
+    visited.add(current);
+    const response = await fetch(current, {method:'GET', redirect:'manual', signal, headers:{'cache-control':'no-cache','accept':'application/json,image/png,text/html'}});
+    if ([301,302,303,307,308].includes(response.status)) {
+      const location = response.headers.get('location');
+      await response.body?.cancel(); assert(location, 'Redirect lacks a destination');
+      const next = new URL(location, current).href;
+      assert(allowed.has(next), `Unlisted redirect from ${current}`);
+      assert.equal(new URL(next).pathname,new URL(current).pathname,'Redirect changed the requested endpoint');
+      redirects.push({from:current,to:next,status:response.status}); current=next; continue;
+    }
+    assert(expectedStatuses.includes(response.status), `Unexpected GET status ${response.status}: ${current}`);
+    const reader = response.body.getReader(); let size=0; const parts=[];
+    try { while (true) { const {done,value}=await reader.read(); if(done) break; size+=value.length; assert(size<=3000000,'Oversized public response'); parts.push(Buffer.from(value)); } }
+    finally { await reader.cancel().catch(()=>{}); }
+    return {bytes:Buffer.concat(parts),status:response.status,resolvedUrl:current};
+  }
+  throw new Error('Too many canonical redirects');
 }
-const report={schemaVersion:1,mode,observer:head,observedAt:new Date().toISOString(),testsRun:false,productionMutations:false,providerCalls:false,observations:[]};
+const read = async url => (await readResponse(url)).bytes;
+const report={schemaVersion:1,mode,observer:head,observedAt:new Date().toISOString(),testsRun:false,productionMutations:false,providerCalls:false,redirects,observations:[]};
 // Retain the exact existing receipt and its complete Sources artifact bundle;
 // do not replace acceptance with an observation or regenerate candidate tests.
 const files = new Map();
@@ -60,11 +76,20 @@ if (mode==='artifacts') {
 } else {
  const expected=process.env.SWAY_PUBLIC_EXPECTED_PRODUCTION_SHA; assert.match(expected||'',/^[a-f0-9]{40}$/);
  for (const host of hosts) {
-  const marker=JSON.parse((await read(host+'/api/build-marker')).toString('utf8'));
-  const health=JSON.parse((await read(host+'/api/release-health')).toString('utf8'));
+  const markerReply=await readResponse(host+'/api/build-marker');
+  const healthReply=await readResponse(host+'/api/release-health');
+  const marker=JSON.parse(markerReply.bytes.toString('utf8'));
+  const health=JSON.parse(healthReply.bytes.toString('utf8'));
   assert.equal(marker.commit,expected); assert.equal(health.commit,expected);
   assert.equal(health.releaseActive,true); assert.equal(health.database.reachable,true); assert.equal(health.migrations.compatible,true);
-  report.observations.push({host,commit:marker.commit,releaseActive:health.releaseActive,databaseReachable:health.database.reachable,migrationsCompatible:health.migrations.compatible});
+  const row={host,commit:marker.commit,releaseActive:health.releaseActive,databaseReachable:health.database.reachable,migrationsCompatible:health.migrations.compatible,markerUrl:markerReply.resolvedUrl,healthUrl:healthReply.resolvedUrl};
+  report.observations.push(row); console.log('SWAY_PRODUCTION_HOST_CONFIRMED '+JSON.stringify(row));
+ }
+ for (const path of privatePaths) {
+  const response=await readResponse('https://app.sway.tips'+path,[401,403]);
+  // Record only denial status, never response data or user/session material.
+  const row={path,status:response.status,unauthenticatedAccessDenied:true};
+  report.observations.push(row); console.log('SWAY_SOURCES_SIGNED_OUT_SMOKE '+JSON.stringify(row));
  }
 }
 assert.equal(digest(await read(artifactBase+'/source-evidence.json')),report.receiptSha256,'Receipt changed during observation');
