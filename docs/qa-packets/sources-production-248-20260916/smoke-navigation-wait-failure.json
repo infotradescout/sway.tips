@@ -1,0 +1,59 @@
+{
+  "expected": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "startedAt": "2026-09-16T19:28:14.187Z",
+  "scope": "Read-only production signed-out API, deployed asset and browser entry checks. No authenticated user mutation, account creation, provider request or player command.",
+  "checks": [
+    {
+      "name": "Exact healthy production identity before smoke",
+      "passed": true,
+      "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f"
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/library/sources",
+      "status": 401
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/library/tracks",
+      "status": 401
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/music/source-capabilities",
+      "status": 401
+    },
+    {
+      "name": "Server login redirect preserves Sources destination",
+      "passed": true,
+      "status": 302,
+      "destination": "/talent/login?redirect=%2Ftalent%2Fconnections"
+    },
+    {
+      "name": "Deployed performer bundle contains combined Sources code",
+      "passed": true,
+      "path": "/assets/talent-DuULNNEE.js",
+      "sha256": "6c6d7cd85271462d332f9f7df097019c0416696c2d70a23aee3698725e7c1617",
+      "checks": [
+        "Bring your music with you.",
+        "data-sway-file-source-picker",
+        "expectedSource",
+        "Your library changed while loading",
+        "Room file prepared"
+      ],
+      "scope": "Published code presence, not authenticated production workflow proof or byte equivalence with local JS entry."
+    },
+    {
+      "name": "Deployed Sources stylesheet matches validated build",
+      "passed": true,
+      "path": "/assets/talent-DvYEwq54.css",
+      "sha256": "73e4025f2d3e1a21faf2b88f155eaa3a02dd4bd4af3b882eb81993fe87021c11"
+    }
+  ],
+  "passed": false,
+  "error": "page.waitForURL: net::ERR_ABORTED; maybe frame was detached?\n=========================== logs ===========================\nwaiting for navigation until \"load\"\n============================================================\n    at C:\\Users\\flavo\\AppData\\Local\\Temp\\sway-sources-flow-20260916\\[eval1]:20:103",
+  "finishedAt": "2026-09-16T19:28:16.314Z"
+}

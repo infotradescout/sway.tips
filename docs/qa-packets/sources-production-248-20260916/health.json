@@ -1,0 +1,138 @@
+{
+  "expected": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "passed": true,
+  "results": [
+    {
+      "host": "app.sway.tips",
+      "endpoint": "/api/build-marker",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/build-marker?sway_release_check=1789586417394",
+      "observedAt": "2026-09-16T19:20:17.932Z",
+      "data": {
+        "service": "sway.tips",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production"
+      }
+    },
+    {
+      "host": "app.sway.tips",
+      "endpoint": "/api/release-health",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/release-health?sway_release_check=1789586417934",
+      "observedAt": "2026-09-16T19:20:18.084Z",
+      "data": {
+        "ok": true,
+        "service": "sway.tips",
+        "status": "ok",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production",
+        "database": {
+          "configured": true,
+          "reachable": true
+        },
+        "migrations": {
+          "status": "compatible",
+          "compatible": true,
+          "expectedCount": 52,
+          "appliedCount": 52,
+          "missingCount": 0,
+          "driftedCount": 17,
+          "latestExpectedTag": "0051_friend_public_profiles"
+        },
+        "releaseActive": true
+      }
+    },
+    {
+      "host": "sway.tips",
+      "endpoint": "/api/build-marker",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/build-marker?sway_release_check=1789586418084",
+      "observedAt": "2026-09-16T19:20:18.537Z",
+      "data": {
+        "service": "sway.tips",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production"
+      }
+    },
+    {
+      "host": "sway.tips",
+      "endpoint": "/api/release-health",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/release-health?sway_release_check=1789586418537",
+      "observedAt": "2026-09-16T19:20:18.702Z",
+      "data": {
+        "ok": true,
+        "service": "sway.tips",
+        "status": "ok",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production",
+        "database": {
+          "configured": true,
+          "reachable": true
+        },
+        "migrations": {
+          "status": "compatible",
+          "compatible": true,
+          "expectedCount": 52,
+          "appliedCount": 52,
+          "missingCount": 0,
+          "driftedCount": 17,
+          "latestExpectedTag": "0051_friend_public_profiles"
+        },
+        "releaseActive": true
+      }
+    },
+    {
+      "host": "www.sway.tips",
+      "endpoint": "/api/build-marker",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/build-marker?sway_release_check=1789586418702",
+      "observedAt": "2026-09-16T19:20:19.162Z",
+      "data": {
+        "service": "sway.tips",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production"
+      }
+    },
+    {
+      "host": "www.sway.tips",
+      "endpoint": "/api/release-health",
+      "status": 200,
+      "finalUrl": "https://app.sway.tips/api/release-health?sway_release_check=1789586419163",
+      "observedAt": "2026-09-16T19:20:19.381Z",
+      "data": {
+        "ok": true,
+        "service": "sway.tips",
+        "status": "ok",
+        "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+        "branch": "main",
+        "buildTimestamp": "2026-09-16T19:19:49.463Z",
+        "nodeEnv": "production",
+        "database": {
+          "configured": true,
+          "reachable": true
+        },
+        "migrations": {
+          "status": "compatible",
+          "compatible": true,
+          "expectedCount": 52,
+          "appliedCount": 52,
+          "missingCount": 0,
+          "driftedCount": 17,
+          "latestExpectedTag": "0051_friend_public_profiles"
+        },
+        "releaseActive": true
+      }
+    }
+  ]
+}

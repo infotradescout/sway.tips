@@ -1,0 +1,33 @@
+{
+  "expected": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "startedAt": "2026-09-16T19:21:47.629Z",
+  "scope": "Production signed-out HTTP/browser/asset checks. No signed-in user action, provider call, account creation or playback command.",
+  "checks": [
+    {
+      "name": "Exact healthy production identity before smoke",
+      "passed": true,
+      "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f"
+    },
+    {
+      "name": "Anonymous access denied",
+      "passed": true,
+      "path": "/api/talent/library/sources",
+      "status": 401
+    },
+    {
+      "name": "Anonymous access denied",
+      "passed": true,
+      "path": "/api/talent/library/tracks",
+      "status": 401
+    },
+    {
+      "name": "Anonymous access denied",
+      "passed": true,
+      "path": "/api/talent/music/source-capabilities",
+      "status": 401
+    }
+  ],
+  "passed": false,
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n302 !== 401\n\n    at file:///C:/Users/flavo/AppData/Local/Temp/sway-sources-flow-20260916/[eval1]:11:69\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+  "finishedAt": "2026-09-16T19:21:48.353Z"
+}

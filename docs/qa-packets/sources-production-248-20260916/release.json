@@ -1,0 +1,76 @@
+{
+  "status": "merged_and_deployed",
+  "pr": 248,
+  "authorization": "Thomas explicitly answered yes to merging PR #248 to main and deploying this Sources update.",
+  "approvedHead": "7d8792c291870f118841a4718489a8f61525cbe0",
+  "testedRuntime": "7faaca0b65afb75bb1dc51444916fe070daf0127",
+  "mergeCommit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "mergedTreeMatchesApprovedHead": true,
+  "deploy": {
+    "service": "srv-d8iarnldt1ts73f4ia6g",
+    "id": "dep-dalen5psrm7s73crsm20",
+    "trigger": "new_commit",
+    "status": "live",
+    "finishedAt": "2026-09-16T19:19:53.938617Z",
+    "buildTimestamp": "2026-09-16T19:19:49.463Z"
+  },
+  "health": {
+    "hostnames": [
+      "app.sway.tips",
+      "sway.tips",
+      "www.sway.tips"
+    ],
+    "checks": 6,
+    "passed": true,
+    "releaseActive": true,
+    "databaseReachable": true,
+    "migrationsCompatible": true,
+    "expectedCount": 52,
+    "appliedCount": 52,
+    "missingCount": 0,
+    "preExistingDriftedCount": 17
+  },
+  "smoke": {
+    "checks": 11,
+    "passed": true,
+    "finishedAt": "2026-09-16T19:29:11.535Z",
+    "scope": "Production read-only signed-out entry/API/deployed asset smoke. Previously completed HTTP and asset checks reused with their observation time; browser checks below use final visible form and return URL, not an intermediate redirect load event.",
+    "viewports": [
+      1440,
+      390,
+      320
+    ]
+  },
+  "logs": {
+    "service": "srv-d8iarnldt1ts73f4ia6g",
+    "startTime": "2026-09-16T19:18:48Z",
+    "endTime": "2026-09-16T19:30:00Z",
+    "filter": "error level",
+    "entries": 0,
+    "completeResult": true
+  },
+  "unchangedConfiguration": [
+    "payment",
+    "provider",
+    "Render environment",
+    "auto-deploy",
+    "health-check path"
+  ],
+  "rollback": {
+    "commit": "a1ea2ac3613bb5410879410fdc87d6ab93ac2e95",
+    "previousDeploy": "dep-dalb1fss728c739debf0",
+    "method": "Coordinated code revert or roll-forward. No destructive database reset."
+  },
+  "limitations": [
+    "Production smoke was signed out and read only. Authenticated production import/replacement and physical-player execution were not performed.",
+    "The 15 signed-in application checks passed before release on disposable standalone PostgreSQL with simulated Spotify responses.",
+    "The published production JS bundle was inspected for the deployed feature code; byte equivalence to the differently built local JS entry is not claimed. The Sources stylesheet did match byte-for-byte.",
+    "The initial smoke attempts contained verifier assumptions about redirect status, a server-only error string, and an intermediate navigation load event. Their failed records are retained; application code and access checks were not weakened."
+  ],
+  "visualInspection": {
+    "file": "sources-login-390.png",
+    "scope": "Actual production signed-out mobile login. Empty fields, visible submit/recovery links, no overlap observed; not a signed-in Sources view.",
+    "sha256": "6c0be3b5a843e7e7c4db2457d6461cebeffc14e928c42b54558aaec7793c0d7a"
+  },
+  "evidenceBranch": "evidence/sources-release-248-20260916"
+}

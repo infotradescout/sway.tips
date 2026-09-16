@@ -1,0 +1,39 @@
+{
+  "expected": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f",
+  "startedAt": "2026-09-16T19:27:10.790Z",
+  "scope": "Read-only production signed-out API, deployed asset and browser entry checks. No authenticated user mutation, account creation, provider request or player command.",
+  "checks": [
+    {
+      "name": "Exact healthy production identity before smoke",
+      "passed": true,
+      "commit": "80127f127bc1ec1b3ea7a32b89eea244f5953a1f"
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/library/sources",
+      "status": 401
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/library/tracks",
+      "status": 401
+    },
+    {
+      "name": "Unauthenticated private API denies access",
+      "passed": true,
+      "path": "/api/talent/music/source-capabilities",
+      "status": 401
+    },
+    {
+      "name": "Server login redirect preserves Sources destination",
+      "passed": true,
+      "status": 302,
+      "destination": "/talent/login?redirect=%2Ftalent%2Fconnections"
+    }
+  ],
+  "passed": false,
+  "error": "AssertionError [ERR_ASSERTION]: Deployed Sources code missing Your music changed while loading\n    at file:///C:/Users/flavo/AppData/Local/Temp/sway-sources-flow-20260916/[eval1]:12:254\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+  "finishedAt": "2026-09-16T19:27:11.587Z"
+}
