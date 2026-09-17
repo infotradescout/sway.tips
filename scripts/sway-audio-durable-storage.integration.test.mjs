@@ -22,7 +22,8 @@ function read(relativePath) {
 }
 
 const dispatcher = read('src/server/audio-object-storage.ts');
-const r2Source = read('src/server/audio-object-storage-r2.ts');
+const s3Source = read('src/server/audio-object-storage-s3.ts');
+const neonSource = read('src/server/audio-object-storage-neon.ts');
 const service = read('src/server/audio-publishing-service.ts');
 const uploadTransport = read('src/server/audio-upload-transport.ts');
 const server = read('server.ts');
@@ -36,8 +37,8 @@ const productionFixtureGenerator = read('scripts/sway-generate-audio-proof-fixtu
 const packageJson = read('package.json');
 
 for (const term of [
-  "export type AudioStorageProvider = 'local_private_fs' | 'r2'",
-  "Production audio storage requires SWAY_AUDIO_STORAGE_PROVIDER=r2.",
+  "export type AudioStorageProvider = 'local_private_fs' | 'r2' | 'neon'",
+  "Production audio storage requires SWAY_AUDIO_STORAGE_PROVIDER=r2 or neon;",
   'beginUpload:',
   'abortUpload:',
   'discardUpload?:',
@@ -56,9 +57,13 @@ for (const term of [
   "storageKey = `masters/",
   "return `staging/",
   "'sway-sha256': expectedSha256",
-  'R2 sealed master integrity mismatch'
+  'sealed master integrity mismatch'
 ]) {
-  if (!r2Source.includes(term)) failures.push(`R2 adapter is missing required private-master control: ${term}`);
+  if (!s3Source.includes(term)) failures.push(`Shared S3 adapter is missing required private-master control: ${term}`);
+}
+
+for (const term of ['forcePathStyle: true', "requestChecksumCalculation: 'WHEN_REQUIRED'", "multipartTarget: 'master'"]) {
+  if (!neonSource.includes(term)) failures.push(`Neon adapter is missing required S3 compatibility control: ${term}`);
 }
 
 for (const term of [
@@ -244,6 +249,9 @@ class InMemoryR2Client {
       return { ETag: '"completed"' };
     }
     if (name === 'AbortMultipartUploadCommand') {
+      if (!this.uploads.has(input.UploadId)) {
+        throw Object.assign(new Error('Multipart upload not found.'), { name: 'NoSuchUpload', $metadata: { httpStatusCode: 404 } });
+      }
       this.uploads.delete(input.UploadId);
       return {};
     }
@@ -497,15 +505,140 @@ async function runBehaviorProof() {
       false,
       'Failed-upload discard must remove completed staging bytes.'
     );
+
+    await runNeonBehaviorProof({ createConfiguredAudioObjectStore, r2Env, legacyClient: client, legacyIdentity: identity, original });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
 }
 
+async function runNeonBehaviorProof({ createConfiguredAudioObjectStore, r2Env, legacyClient, legacyIdentity, original }) {
+  const neonEnv = {
+    ...r2Env,
+    SWAY_AUDIO_STORAGE_PROVIDER: 'neon',
+    SWAY_AUDIO_STORAGE_READ_PROVIDERS: 'r2',
+    // Deliberately use the same bucket and key in two providers to prove that
+    // a collision cannot substitute another backend's bytes.
+    SWAY_AUDIO_NEON_BUCKET: r2Env.SWAY_AUDIO_R2_BUCKET,
+    AWS_ENDPOINT_URL_S3: 'https://br-fixture.storage.c-2.us-east-2.aws.neon.tech',
+    AWS_REGION: 'us-east-2',
+    AWS_ACCESS_KEY_ID: 'synthetic-neon-access-key',
+    AWS_SECRET_ACCESS_KEY: 'synthetic-neon-secret-key'
+  };
+  const client = new InMemoryR2Client();
+  const dependencies = { neon: { client }, r2: { client: legacyClient } };
+  const store = createConfiguredAudioObjectStore(neonEnv, dependencies);
+  assert.equal(store.provider, 'neon');
+  assert.equal(store.durability, 'object_storage');
+  const previousR2Commands = legacyClient.commands.length;
+  await store.verifyReady();
+  assert.equal(client.commands[0].name, 'HeadBucketCommand');
+  assert.equal(legacyClient.commands[previousR2Commands].name, 'HeadBucketCommand', 'Startup must verify every configured backend.');
+
+  for (const name of ['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SWAY_AUDIO_NEON_BUCKET']) {
+    assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, [name]: '' }, dependencies), new RegExp(`requires ${name}`));
+  }
+  for (const endpoint of ['invalid', 'http://storage.example', 'https://user:secret@storage.example', 'https://storage.example/bucket', 'https://storage.example/?secret=x', 'https://storage.example/#fragment']) {
+    assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, AWS_ENDPOINT_URL_S3: endpoint }, dependencies), /HTTPS storage endpoint origin/);
+  }
+  for (const bucket of ['UPPERCASE', 'a', '../outside', 'bucket/other']) {
+    assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, SWAY_AUDIO_NEON_BUCKET: bucket }, dependencies), /valid private bucket name/);
+  }
+  assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, AWS_REGION: 'bad/region' }, dependencies), /valid storage region/);
+  assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, SWAY_AUDIO_STORAGE_READ_PROVIDERS: 'unknown' }, dependencies), /Unsupported/);
+  assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, SWAY_AUDIO_R2_SECRET_ACCESS_KEY: '' }, dependencies), /requires SWAY_AUDIO_R2_SECRET_ACCESS_KEY/);
+  assert.throws(() => createConfiguredAudioObjectStore({ ...neonEnv, SWAY_AUDIO_STORAGE_READ_PROVIDERS: 'local_private_fs' }, dependencies), /development-only/);
+
+  client.objects.set(legacyIdentity.storageKey, Buffer.from('wrong-provider-decoy'));
+  const restarted = createConfiguredAudioObjectStore(neonEnv, dependencies);
+  const legacyOpened = await restarted.openOriginal(legacyIdentity);
+  assert.deepEqual(await streamToBuffer(legacyOpened.stream), original, 'Existing R2 bytes remain readable when new writes use Neon.');
+
+  const identity = await store.beginUpload({ projectId: 'preview', uploadSessionId: 'neon-1', filename: 'master.wav', mimeType: 'audio/wav' });
+  assert.equal(identity.storageProvider, 'neon');
+  assert.equal(identity.storageBucket, neonEnv.SWAY_AUDIO_NEON_BUCKET);
+  assert.match(identity.storageKey, /^masters\/projects\/preview\/uploads\/neon-1\//);
+  const chunks = [original.subarray(0, 5 * 1024 * 1024), original.subarray(5 * 1024 * 1024)];
+  const parts = [];
+  for (const [index, body] of chunks.entries()) {
+    const uploaded = await store.writePart({ identity, partNumber: index + 1, body });
+    assert.equal(uploaded.checksum, createHash('sha256').update(body).digest('hex'));
+    parts.push({ partNumber: index + 1, etag: uploaded.etag });
+  }
+  const expected = { byteSize: original.byteLength, sha256: createHash('sha256').update(original).digest('hex') };
+  const assembly = { identity, parts, expectedByteSize: expected.byteSize, expectedSha256: expected.sha256, mimeType: 'audio/wav' };
+  assert.deepEqual(await store.assembleParts(assembly), expected);
+  assert.deepEqual(await restarted.assembleParts(assembly), expected, 'Retry after completion must retain the verified Neon master.');
+  assert.equal(client.commands.some(({ name }) => name === 'CopyObjectCommand'), false, 'Neon must use documented multipart operations without CopyObject.');
+  assert.equal(client.commands.some(({ name }) => name === 'DeleteObjectCommand'), false, 'Successful Neon sealing must never delete its direct multipart target.');
+  const opened = await restarted.openOriginal(identity);
+  assert.equal(opened.byteSize, original.byteLength);
+  assert.deepEqual(await streamToBuffer(opened.stream), original);
+  assert.equal('url' in opened, false, 'Private originals remain server-mediated streams, never anonymous or presigned object URLs.');
+  assert.equal(client.commands.some(({ input }) => input.ACL), false, 'Uploads must never opt into a public ACL.');
+
+  const oldProvider = createConfiguredAudioObjectStore(r2Env, { r2: { client: legacyClient } });
+  const inFlightR2 = await oldProvider.beginUpload({ projectId: 'legacy', uploadSessionId: 'resume-r2', filename: 'old.wav', mimeType: 'audio/wav' });
+  const beforeLegacyMutations = [client.commands.length, legacyClient.commands.length];
+  for (const operation of [
+    () => store.writePart({ identity: inFlightR2, partNumber: 1, body: Buffer.from('denied') }),
+    () => store.assembleParts({ ...assembly, identity: inFlightR2 }),
+    () => store.abortUpload(inFlightR2),
+    () => store.discardUpload(inFlightR2),
+    () => store.discardUpload(legacyIdentity)
+  ]) await assert.rejects(operation, /read-only access/);
+  assert.deepEqual([client.commands.length, legacyClient.commands.length], beforeLegacyMutations,
+    'A preview must reject legacy upload writes, aborts, and object deletes before either transport.');
+  assert.equal(legacyClient.uploads.has(inFlightR2.providerUploadId), true, 'Pending production R2 uploads must survive preview cleanup attempts.');
+  assert.deepEqual(legacyClient.objects.get(legacyIdentity.storageKey), original, 'Readable legacy R2 masters must survive preview deletion attempts.');
+  await oldProvider.abortUpload(inFlightR2);
+
+  const wrongIdentities = [
+    { ...identity, storageProvider: 'unknown' },
+    { ...identity, storageBucket: 'different-bucket' },
+    { ...identity, storageKey: 'masters/../outside' }
+  ];
+  for (const wrong of wrongIdentities) {
+    const counts = [client.commands.length, legacyClient.commands.length];
+    for (const operation of [
+      () => store.openOriginal(wrong),
+      () => store.writePart({ identity: wrong, partNumber: 1, body: Buffer.from('denied') }),
+      () => store.assembleParts({ ...assembly, identity: wrong }),
+      () => store.abortUpload(wrong),
+      () => store.discardUpload(wrong)
+    ]) await assert.rejects(operation, /identity|storage key is invalid/);
+    assert.deepEqual([client.commands.length, legacyClient.commands.length], counts, 'Rejected identities must not issue any provider request.');
+  }
+  const neonOnly = createConfiguredAudioObjectStore({ ...neonEnv, SWAY_AUDIO_STORAGE_READ_PROVIDERS: '' }, dependencies);
+  await assert.rejects(neonOnly.openOriginal(legacyIdentity), /does not match configured Neon store/);
+
+  const providerDown = new Error('Synthetic legacy backend unavailable');
+  const unavailable = createConfiguredAudioObjectStore(neonEnv, { ...dependencies, r2: { client: { async send() { throw providerDown; } } } });
+  await assert.rejects(unavailable.verifyReady(), (error) => error === providerDown);
+  const beforeFailure = client.commands.length;
+  await assert.rejects(unavailable.openOriginal(legacyIdentity), (error) => error === providerDown);
+  await assert.rejects(store.openOriginal({ ...legacyIdentity, storageKey: 'masters/missing' }), /Object not found/);
+  assert.equal(client.commands.length, beforeFailure, 'Unavailable or missing R2 objects must not fall back to Neon.');
+
+  const orphan = await store.beginUpload({ projectId: 'preview', uploadSessionId: 'abort-neon', filename: 'orphan.wav', mimeType: 'audio/wav' });
+  await store.abortUpload(orphan);
+  assert.equal(client.uploads.has(orphan.providerUploadId), false);
+  const failed = await store.beginUpload({ projectId: 'preview', uploadSessionId: 'bad-neon', filename: 'failed.wav', mimeType: 'audio/wav' });
+  const body = Buffer.from('integrity failure fixture');
+  const part = await store.writePart({ identity: failed, partNumber: 1, body });
+  await assert.rejects(store.assembleParts({ identity: failed, parts: [{ partNumber: 1, etag: part.etag }], expectedByteSize: body.byteLength, expectedSha256: '0'.repeat(64), mimeType: 'audio/wav' }), /integrity mismatch/);
+  const beforeCleanupR2 = legacyClient.commands.length;
+  await store.discardUpload(failed);
+  assert.equal(client.objects.has(failed.storageKey), false, 'Failed integrity must clean up the unsealed Neon object.');
+  assert.equal(client.uploads.has(failed.providerUploadId), false);
+  assert.equal(legacyClient.commands.length, beforeCleanupR2, 'Neon cleanup must not delete R2 bytes.');
+  assert.equal(client.objects.has(identity.storageKey), true, 'Cleanup must preserve other sealed Neon masters.');
+}
+
 try {
   await runBehaviorProof();
 } catch (error) {
-  failures.push(`Durable R2 storage behavior proof failed: ${error instanceof Error ? error.stack : error}`);
+  failures.push(`Durable audio storage behavior proof failed: ${error instanceof Error ? error.stack : error}`);
 }
 
 if (failures.length) {
@@ -514,4 +647,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('Sway durable audio storage integration passed: private R2 multipart staging, exact sealing, restart-safe retrieval, cleanup, and denial are proven deterministically.');
+console.log('Sway durable audio storage integration passed: R2 and Neon multipart sealing, restart-safe retrieval, cleanup, persisted-provider routing, and fail-closed denial are proven deterministically. No live provider claim.');
