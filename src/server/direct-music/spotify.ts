@@ -242,13 +242,14 @@ export class SpotifyDirectProvider {
     const data = await this.api(token, "/me");
     if (
       !object(data) ||
-      typeof data.id !== "string" ||
-      !data.id ||
-      data.id.length > 256
+      typeof data.account_id !== "string" ||
+      !data.account_id.trim() ||
+      data.account_id.length > 256
     )
       return invalid();
-    // GET /me no longer guarantees product, email or country in 2026 Development Mode.
-    return { id: data.id, label: text(data.display_name) || data.id };
+    // Spotify added immutable account_id in May 2026. Public id may change;
+    // never fall back to it for durable account linking. Display name is presentation only.
+    return { id: data.account_id, label: text(data.display_name) || data.account_id };
   }
   async devices(token: string): Promise<MusicDevice[]> {
     const data = await this.api(token, "/me/player/devices");

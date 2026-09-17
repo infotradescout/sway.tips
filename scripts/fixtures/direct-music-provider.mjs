@@ -89,7 +89,8 @@ globalThis.fetch = async (input, init = {}) => {
   if (config.fail === "rate") return json({}, 429, { "Retry-After": "2" });
   if (url.pathname === "/v1/me")
     return json({
-      id: "fixture-listener",
+      id: "fixture-public-user",
+      account_id: "fixture-listener",
       display_name: "Connected fixture listener",
     });
   if (url.pathname === "/v1/me/player/devices")

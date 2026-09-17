@@ -52,7 +52,8 @@ let tokens = 0,
   actions = 0,
   mode = "normal",
   label = "Original playlist",
-  profileId = "spotify-test-owner";
+  profileId = "spotify-test-owner",
+  publicProfileId = "mutable-public-owner";
 let player = {
   device: { id: "test-laptop" },
   is_playing: false,
@@ -137,7 +138,7 @@ const provider = new SpotifyDirectProvider((async (input, init) => {
   if (mode === "revoked") return json({}, 401);
   if (url.pathname === "/v1/me") {
     if (onProfile) await onProfile();
-    return json({ id: profileId, display_name: "Connected test listener" });
+    return json({ id: publicProfileId, account_id: profileId, display_name: "Connected test listener" });
   }
   if (url.pathname === "/v1/me/player/devices") return json(deviceList());
   if (url.pathname === "/v1/me/player" && method === "GET")
@@ -334,6 +335,9 @@ try {
         const c = await current(),
           secret = await row();
         assert(c.id && c.revision && c.status === "connected");
+        const [identity] = await db.select().from(connections).where(eq(connections.id, c.id));
+        assert.equal(identity.externalAccountId, profileId);
+        assert.notEqual(identity.externalAccountId, publicProfileId);
         assert.equal(c.selectedDeviceId, null);
         assert(!secret.sealedTokens.includes("synthetic-access"));
         assert.equal((await db.select().from(attempts)).length, 0);
@@ -650,7 +654,11 @@ try {
           "reconnect_required",
         );
         assert.equal(calls.length, before);
+        publicProfileId = "renamed-public-owner";
         await connect({ id: c.id, revision: c.revision });
+        const [identity] = await db.select().from(connections).where(eq(connections.id, c.id));
+        assert.equal(identity.externalAccountId, profileId);
+        assert.notEqual(identity.externalAccountId, publicProfileId);
         const fresh = await current();
         assert.equal(fresh.id, c.id);
         assert.notEqual(fresh.revision, c.revision);

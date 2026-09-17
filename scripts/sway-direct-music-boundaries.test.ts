@@ -56,6 +56,28 @@ const rejectCode = (work: () => Promise<unknown>, code: string) =>
   assert.rejects(work, (error: any) => error.code === code);
 
 test("Direct music provider boundary rejects ambiguous or unsafe responses", async (t) => {
+  await t.test("immutable account identity survives public ID changes and omission", async () => {
+    let response: Record<string, unknown> = {
+      id: "mutable-public-id", account_id: "stable-account-id", display_name: "Listener",
+    };
+    const p = new SpotifyDirectProvider(fetcher(() => json(response)));
+    assert.deepEqual(await p.profile("token"), { id: "stable-account-id", label: "Listener" });
+    response.id = "renamed-public-id";
+    assert.equal((await p.profile("token")).id, "stable-account-id");
+    delete response.id;
+    response.display_name = null;
+    assert.deepEqual(await p.profile("token"), { id: "stable-account-id", label: "stable-account-id" });
+    response = { id: "mutable-public-id", account_id: "other-account-id" };
+    assert.equal((await p.profile("token")).id, "other-account-id");
+  });
+  await t.test("missing or malformed immutable identity never falls back to public ID", async () => {
+    for (const account_id of [undefined, null, "", "   ", 42, {}, "x".repeat(257)]) {
+      const p = new SpotifyDirectProvider(fetcher(() => json({
+        id: "valid-but-mutable-public-id", account_id, display_name: "Listener",
+      })));
+      await rejectCode(() => p.profile("token"), "invalid_provider_response");
+    }
+  });
   await t.test(
     "token shape, expiry, refresh identity and granted scopes are verified",
     async () => {

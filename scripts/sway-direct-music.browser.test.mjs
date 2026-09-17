@@ -367,6 +367,11 @@ try {
   );
   assert.equal(stored.rows.length, 1);
   assert(!stored.rows[0].sealed_tokens.includes("fixture-token"));
+  const identity = await proof.query(
+    "select external_account_id from performer_music_source_connections where id=$1",
+    [saved.id],
+  );
+  assert.equal(identity.rows[0].external_account_id, "fixture-listener");
   record(
     "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
   );
