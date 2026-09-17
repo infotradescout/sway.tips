@@ -38,3 +38,6 @@ To withdraw direct use, turn approval off while retaining the disconnect route s
 - Player API: https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback
 - PKCE: https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow
 - Current API migration: https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide
+
+## September 17 continuation
+Verification and resume checkpoint: `docs/process/2026-09-17-direct-music-continuation.md`. Exact-runtime receipts: `docs/qa-packets/direct-music-20260917/`. Spotify account linking now requires immutable `/me.account_id`, introduced in May 2026; public `id` is never a fallback, and display name is presentation-only. This pre-release fix does not migrate production data. Primary source: https://developer.spotify.com/documentation/web-api/reference/get-current-users-profile .
