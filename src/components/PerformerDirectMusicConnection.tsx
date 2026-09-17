@@ -133,11 +133,22 @@ function DirectConnection({
       setNotice(null);
     }
   };
+  const readPlayback = async (c: MusicConnection) => {
+    try {
+      return await client.current!.playback(c);
+    } catch (error) {
+      if (live() && currentConnection.current?.revision === c.revision) {
+        setPlayback(null);
+        setReadFailed(true);
+      }
+      throw error;
+    }
+  };
   const readPlayers = async (c: MusicConnection) => {
     const found = await client.current!.devices(c);
     if (!live() || currentConnection.current?.revision !== c.revision) return;
     setDevices(found);
-    const state = await client.current!.playback(c);
+    const state = await readPlayback(c);
     if (!live() || currentConnection.current?.revision !== c.revision) return;
     observe(state);
     setReadFailed(false);
@@ -210,7 +221,7 @@ function DirectConnection({
       let wait = 5000;
       try {
         if (document.visibilityState !== "hidden") {
-          const state = await client.current!.playback(c);
+          const state = await readPlayback(c);
           if (!disposed && live()) {
             observe(state);
             setReadFailed(false);
@@ -358,7 +369,7 @@ function DirectConnection({
         }
         throw e;
       }
-      const state = await client.current!.playback(connection);
+      const state = await readPlayback(connection);
       if (live()) {
         observe(state);
         setReadFailed(false);

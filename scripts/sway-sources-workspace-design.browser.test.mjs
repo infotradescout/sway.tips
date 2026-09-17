@@ -54,6 +54,12 @@ try {
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
       if (['fonts.googleapis.com','fonts.gstatic.com'].includes(url.hostname)) return route.abort();
+      // This existing presentation fixture has no application server. Supply only
+      // the new read-only account overview; unexpected requests still fail below.
+      if (url.origin === origin && url.pathname === '/api/talent/direct-music' && route.request().method() === 'GET') {
+        assert.equal(url.searchParams.get('performerId'), 'fixture-performer');
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ performerId: 'fixture-performer', provider: 'spotify', availability: 'approval_required', connections: [] }) });
+      }
       if (url.origin !== origin || url.pathname.startsWith('/api/')) { unexpected.push(url.pathname); return route.abort(); }
       return route.continue();
     });

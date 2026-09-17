@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -465,5 +466,37 @@ test("Direct music browser client validates identity and never replays unknown c
         AbortSignal.timeout = original;
       }
     },
+  );
+});
+
+test("Direct music migration preserves unrelated schema and supplies the current generated snapshot", () => {
+  const previous = JSON.parse(
+    readFileSync("drizzle/meta/0051_snapshot.json", "utf8"),
+  );
+  const current = JSON.parse(
+    readFileSync("drizzle/meta/0052_snapshot.json", "utf8"),
+  );
+  assert.equal(current.prevId, previous.id);
+  for (const name of Object.keys(previous.tables))
+    assert.deepEqual(current.tables[name], previous.tables[name]);
+  assert.deepEqual(
+    Object.keys(current.tables)
+      .filter((name) => !previous.tables[name])
+      .sort(),
+    [
+      "public.direct_music_commands",
+      "public.direct_music_credentials",
+      "public.direct_music_oauth_attempts",
+    ],
+  );
+  const sql = readFileSync(
+    "drizzle/0052_direct_music_authorization.sql",
+    "utf8",
+  );
+  assert(!/DROP|TRUNCATE|DELETE FROM/.test(sql));
+  assert(
+    !/ALTER TABLE "(?:sway_program_memberships|affiliate_commission_events)"/.test(
+      sql,
+    ),
   );
 });
