@@ -577,6 +577,48 @@ try {
   );
   await a.page.goto("about:blank");
   await b.page.goto("about:blank");
+  // With the actual operator signed in and a working provider fixture, public
+  // or foreign-account requests must not inherit authority from supplied fields.
+  const controllerBefore = commands().length;
+  const receiptsBefore = (await proof.query("select count(*)::int as total from direct_music_commands")).rows[0].total;
+  const operatorBoundaryChecks = [];
+  for (const action of ["play", "resume", "pause", "next", "previous", "queue", "transfer"]) {
+    const data = {
+      performerId: owner, revision: saved.revision, commandId: randomUUID(),
+      action, deviceId: "fixture-laptop", uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+      // These deliberately forged claims are not server-side authority.
+      role: "performer", approved: true, paymentStatus: "paid",
+    };
+    const endpoint = baseUrl + "/api/talent/direct-music/" + saved.id + "/commands";
+    const anonymous = await fetch(endpoint, {
+      method: "POST", headers: { Origin: baseUrl, "Content-Type": "application/json" },
+      body: JSON.stringify(data), redirect: "manual",
+    });
+    assert.equal(anonymous.status, 401, "anonymous " + action);
+    await anonymous.arrayBuffer();
+    const foreignCommand = await b.context.request.post(endpoint, {
+      headers: { Origin: baseUrl }, data,
+    });
+    assert.equal(foreignCommand.status(), 403, "foreign account " + action);
+    operatorBoundaryChecks.push({ action, anonymous: 401, foreignAccount: 403 });
+  }
+  const foreignTarget = await b.context.request.post(
+    baseUrl + "/api/talent/direct-music/" + saved.id + "/target",
+    { headers: { Origin: baseUrl }, data: {
+      performerId: owner, revision: saved.revision, deviceId: "fixture-laptop",
+    } },
+  );
+  assert.equal(foreignTarget.status(), 403);
+  assert.equal(commands().length, controllerBefore, "No unauthorized external commands");
+  assert.equal((await proof.query("select count(*)::int as total from direct_music_commands")).rows[0].total,
+    receiptsBefore, "No unauthorized command reservation");
+  report.operatorBoundary = {
+    checks: operatorBoundaryChecks, foreignTarget: 403,
+    externalCommandDelta: commands().length - controllerBefore,
+    commandReceiptDelta: 0, realProviderCalls: 0,
+    scope: "Actual application sessions/HTTP/database; provider simulated. Forged approval/payment fields are not real paid-request or webhook tests.",
+  };
+  record("Only the authenticated connection owner can operate the player; anonymous and foreign-account commands never reach the source");
   await stopServer();
   await startServer(listenPort);
   await a.page.goto(baseUrl + "/talent/connections");

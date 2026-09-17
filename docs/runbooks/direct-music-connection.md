@@ -5,6 +5,9 @@ A performer connects a third-party account, browses its authorized music without
 
 This candidate implements one direct provider adapter: Spotify. Existing manual imports are retained for compatibility below the direct connection panel and do not count as direct integrations. Apple Music, TIDAL, SoundCloud and other services are not implemented by this candidate.
 
+## Operator authority and product scope
+The DJ/performer operates the controller; audience Request, Tip and Boost do not grant playback permission. Current approval and Play are distinct transitions, and client approval/payment claims cannot authorize a command. The no-room controller and the separate production/publishing lane remain part of Sway. See `docs/SWAY_PRODUCT_STRUCTURE.md`, operator-controlled performance clarification. Provider restrictions are qualified per integration and use; they do not freeze independent work.
+
 ## Operator prerequisites — never a customer setup chore
 Before enabling real use, establish provider acceptance of Sway's exact commercial/live-event use, confirm required account eligibility and devices, and complete the corresponding data/privacy review. An application key, a Premium subscription, a user checkbox, or a synthetic OAuth test is not that approval.
 
