@@ -580,6 +580,14 @@ try {
       exact: true,
     })
     .waitFor();
+  // Account metadata and available devices load independently. Confirm the
+  // saved target first, then require the asynchronously populated selector.
+  assert.equal((await api(a.context, '/api/talent/direct-music?performerId=' + owner)).connections[0].selectedDeviceId, 'fixture-laptop');
+  await a.page.waitForFunction(() => {
+    const selector = document.querySelector('[data-sway-direct-music] select');
+    return selector instanceof HTMLSelectElement && selector.value === 'fixture-laptop'
+      && [...selector.options].some(option => option.value === 'fixture-laptop' && !option.disabled);
+  }, {}, { timeout: 15000 });
   assert.equal(
     await panel(a.page).getByLabel("Playback destination").inputValue(),
     "fixture-laptop",
