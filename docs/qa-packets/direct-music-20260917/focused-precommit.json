@@ -1,0 +1,21 @@
+{
+  "base": "9a7188fa5709b7feacbe75d53685f09aac7f737e",
+  "trackedWorktreeModified": true,
+  "startedAt": "2026-09-17T15:36:57.102Z",
+  "steps": [
+    {
+      "name": "integration",
+      "exitCode": 0,
+      "durationMs": 14235
+    },
+    {
+      "name": "lint",
+      "exitCode": 0,
+      "durationMs": 32377
+    }
+  ],
+  "productionWrites": false,
+  "realProviderCalls": 0,
+  "finishedAt": "2026-09-17T15:37:43.720Z",
+  "passed": true
+}
