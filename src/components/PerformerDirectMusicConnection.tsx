@@ -72,12 +72,20 @@ function DirectConnection({
   currentConnection.current = connection;
   currentView.current = view;
   const live = () => !lifetime.current.signal.aborted;
-  const observe = (state: MusicPlayback) =>
+  const matchesConnection = (c: MusicConnection) =>
+    live() &&
+    currentConnection.current?.id === c.id &&
+    currentConnection.current?.revision === c.revision;
+  const canObserve = (c: MusicConnection) =>
+    matchesConnection(c) && currentConnection.current?.status === "connected";
+  const observe = (c: MusicConnection, state: MusicPlayback) => {
+    if (!canObserve(c)) return;
     setPlayback((old) =>
       !old || Date.parse(state.observedAt) >= Date.parse(old.observedAt)
         ? state
         : old,
     );
+  };
   const callbackError = useRef<string | null>(null);
 
   const report = (e: unknown) => {
@@ -95,6 +103,13 @@ function DirectConnection({
           "reconnect_required",
         ].includes(e.code)
       ) {
+        // Invalidate in-flight reads before React renders the revoked connection.
+        listSequence.current += 1;
+        if (currentConnection.current)
+          currentConnection.current = {
+            ...currentConnection.current,
+            status: "reconnect_required",
+          };
         setPlayback(null);
         setDevices([]);
         setItems(null);
@@ -114,13 +129,14 @@ function DirectConnection({
   };
   const run = async (work: () => Promise<void>) => {
     if (preview || busyRef.current || !live() || !client.current) return;
+    const expectedConnection = currentConnection.current;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
       await work();
     } catch (e) {
-      report(e);
+      if (!expectedConnection || matchesConnection(expectedConnection)) report(e);
     } finally {
       busyRef.current = false;
       if (live()) setBusy(false);
@@ -129,6 +145,27 @@ function DirectConnection({
   const refresh = async () => {
     const result = await client.current!.overview();
     if (live()) {
+      const next = result.connections[0] ?? null;
+      const previous = currentConnection.current;
+      if (
+        previous?.id !== next?.id ||
+        previous?.revision !== next?.revision ||
+        previous?.status !== next?.status ||
+        result.availability !== "available"
+      ) {
+        // A reconnect is a new authorization, not permission to reuse old observations.
+        listSequence.current += 1;
+        setPlayback(null);
+        setDevices([]);
+        setItems(null);
+        currentView.current = startView;
+        setView(startView);
+        setQuery("");
+        setReadFailed(false);
+        setCommandUnknown(false);
+      }
+      // Retire old async work immediately, including before the next React render.
+      currentConnection.current = next;
       setOverview(result);
       setNotice(null);
     }
@@ -137,7 +174,7 @@ function DirectConnection({
     try {
       return await client.current!.playback(c);
     } catch (error) {
-      if (live() && currentConnection.current?.revision === c.revision) {
+      if (canObserve(c)) {
         setPlayback(null);
         setReadFailed(true);
       }
@@ -146,30 +183,30 @@ function DirectConnection({
   };
   const readPlayers = async (c: MusicConnection) => {
     const found = await client.current!.devices(c);
-    if (!live() || currentConnection.current?.revision !== c.revision) return;
+    if (!canObserve(c)) return;
     setDevices(found);
     const state = await readPlayback(c);
-    if (!live() || currentConnection.current?.revision !== c.revision) return;
-    observe(state);
+    if (!canObserve(c)) return;
+    observe(c, state);
     setReadFailed(false);
     setCommandUnknown(false);
     setNotice("Player state refreshed. No command was repeated.");
   };
   const readLibrary = async (c: MusicConnection, v: View) => {
     const seq = ++listSequence.current;
-    const result = await client.current!.browse(
-      c,
-      v.kind,
-      v.offset,
-      v.query,
-      v.playlistId,
-    );
-    if (
-      live() &&
-      seq === listSequence.current &&
-      currentConnection.current?.revision === c.revision
-    )
-      setItems(result);
+    try {
+      const result = await client.current!.browse(
+        c,
+        v.kind,
+        v.offset,
+        v.query,
+        v.playlistId,
+      );
+      if (canObserve(c) && seq === listSequence.current) setItems(result);
+    } catch (e) {
+      // A late old-account failure must not revoke a newly connected account.
+      if (canObserve(c) && seq === listSequence.current) throw e;
+    }
   };
   useEffect(() => {
     const controller = new AbortController();
@@ -222,15 +259,14 @@ function DirectConnection({
       try {
         if (document.visibilityState !== "hidden") {
           const state = await readPlayback(c);
-          if (!disposed && live()) {
-            observe(state);
+          if (!disposed && canObserve(c)) {
+            observe(c, state);
             setReadFailed(false);
             setClock(Date.now());
           }
           if (
             !disposed &&
-            live() &&
-            currentConnection.current?.revision === c.revision &&
+            canObserve(c) &&
             Date.now() - libraryAt >= 30000
           ) {
             await readLibrary(c, currentView.current);
@@ -238,7 +274,7 @@ function DirectConnection({
           }
         }
       } catch (e) {
-        if (!disposed && live()) {
+        if (!disposed && canObserve(c)) {
           setReadFailed(true);
           setPlayback(null);
           report(e);
@@ -251,9 +287,14 @@ function DirectConnection({
     void client
       .current!.devices(c)
       .then((found) => {
-        if (!disposed && live()) setDevices(found);
+        if (!disposed && canObserve(c)) setDevices(found);
       })
-      .catch(report);
+      .catch((e) => {
+        if (!disposed && canObserve(c)) {
+          setDevices([]);
+          report(e);
+        }
+      });
     void tick();
     return () => {
       disposed = true;
@@ -293,7 +334,8 @@ function DirectConnection({
       )
         return;
       const url = await client.current!.connect(connection);
-      if (live()) window.location.assign(url);
+      if (live() && (!connection || matchesConnection(connection)))
+        window.location.assign(url);
     });
   const disconnect = () =>
     run(async () => {
@@ -307,7 +349,12 @@ function DirectConnection({
       )
         return;
       await client.current!.disconnect(connection);
-      if (live()) {
+      if (matchesConnection(connection)) {
+        currentConnection.current = null;
+        listSequence.current += 1;
+        setView(startView);
+        setQuery("");
+        setCommandUnknown(false);
         setOverview((old) => (old ? { ...old, connections: [] } : old));
         setPlayback(null);
         setDevices([]);
@@ -319,7 +366,7 @@ function DirectConnection({
     run(async () => {
       if (!connection) return;
       await client.current!.target(connection, deviceId);
-      if (live()) {
+      if (canObserve(connection)) {
         setOverview((old) =>
           old
             ? {
@@ -336,7 +383,7 @@ function DirectConnection({
     });
   const command = (action: MusicCommandAction, uri?: string) =>
     run(async () => {
-      if (!connection?.selectedDeviceId || commandUnknown) return;
+      if (!connection?.selectedDeviceId || !canControl || !canObserve(connection)) return;
       const id = crypto.randomUUID();
       try {
         const result = await client.current!.command(
@@ -346,7 +393,7 @@ function DirectConnection({
           connection.selectedDeviceId,
           uri,
         );
-        if (live()) {
+        if (canObserve(connection)) {
           setNotice(result.message);
           setCommandUnknown(
             result.status === "uncertain" || result.status === "in_flight",
@@ -354,7 +401,7 @@ function DirectConnection({
           if (result.status === "rejected") setError(result.message);
         }
       } catch (e) {
-        if (live()) {
+        if (canObserve(connection)) {
           setCommandUnknown(
             !(e instanceof DirectMusicClientError) ||
               [
@@ -369,9 +416,10 @@ function DirectConnection({
         }
         throw e;
       }
+      if (!canObserve(connection)) return;
       const state = await readPlayback(connection);
-      if (live()) {
-        observe(state);
+      if (canObserve(connection)) {
+        observe(connection, state);
         setReadFailed(false);
       }
     });

@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { startEmbeddedPostgresProof } from "./lib/embedded-postgres-proof.ts";
 const out =
+  process.env.SWAY_DIRECT_MUSIC_PROOF_OUTPUT ||
   "tmp/direct-music-proof/" +
   (process.env.SWAY_REAL_POSTGRES_PROOF_DATABASE_URL ? "native" : "embedded");
 mkdirSync(out, { recursive: true });
@@ -647,6 +648,103 @@ try {
   record(
     "Authenticated connection and selected device survive actual server restart and browser reload",
   );
+  // Keep this tab open while the same owner deliberately reconnects in another tab.
+  // Replacement-account reads are held to expose any reuse of the previous snapshot.
+  currentStage = "cross-tab reconnect snapshot isolation";
+  await root.getByRole("button", { name: "Saved songs", exact: true }).click();
+  await root.getByRole("button", { name: "Play Fixture first song", exact: true }).waitFor();
+  await root.locator("[data-sway-direct-playback]").waitFor();
+  const reconnectCommands = commands().length;
+  let releaseReconnectReads;
+  const reconnectReads = new Promise(resolve => { releaseReconnectReads = resolve; });
+  const readPattern = "**/api/talent/direct-music/*/read?**";
+  await a.page.route(readPattern, async route => {
+    await reconnectReads;
+    await route.continue();
+  });
+  const reconnectPage = await a.context.newPage();
+  try {
+    await reconnectPage.goto(baseUrl + "/talent/connections");
+    await connect(reconnectPage, { reconnect: true });
+    await panel(reconnectPage).getByLabel("Playback destination").selectOption("fixture-laptop");
+    await panel(reconnectPage).getByRole("status").filter({ hasText: "Playback destination selected" }).waitFor();
+    const replacement = (await api(a.context, "/api/talent/direct-music?performerId=" + owner)).connections[0];
+    assert.notEqual(replacement.revision, saved.revision);
+    const refreshed = a.page.waitForResponse(r => {
+      const url = new URL(r.url());
+      return url.pathname === "/api/talent/direct-music" && r.request().method() === "GET";
+    });
+    await root.getByRole("button", { name: "Refresh connection", exact: true }).click();
+    assert.equal((await refreshed).status(), 200);
+    await a.page.waitForFunction(() => {
+      const buttons = [...document.querySelectorAll('[data-sway-direct-music] button')];
+      return buttons.some(button => button.textContent === 'Refresh connection' && !button.disabled);
+    });
+    assert.equal(await root.locator("[data-sway-direct-playback]").count(), 0,
+      "A refreshed connection must not display playback observed under the previous authorization");
+    assert.equal(await root.getByRole("button", { name: "Play Fixture first song", exact: true }).count(), 0,
+      "Previous-account library rows must disappear before replacement reads complete");
+    assert.equal(await root.locator('option[value="fixture-laptop"]').count(), 0,
+      "Previous-account devices must not authorize replacement-account controls");
+    assert.equal(await root.getByRole("button", { name: "Next", exact: true }).isEnabled(), false);
+    assert.equal(commands().length, reconnectCommands, "Reconnect and selection must not dispatch playback");
+    await root.screenshot({ path: out + "/reconnect-awaiting-current-reads.png" });
+    saved = replacement;
+  } finally {
+    releaseReconnectReads();
+    await a.page.unrouteAll({ behavior: "wait" });
+    await reconnectPage.close();
+  }
+  await root.getByRole("button", { name: "Provider renamed this playlist", exact: true }).waitFor();
+  await root.locator("[data-sway-direct-playback]").waitFor();
+  assert.equal(commands().length, reconnectCommands);
+  record("Cross-tab reconnect clears previous playback, library and devices until current authorization reads succeed, without autoplay");
+  // An old search response may arrive after a replacement connection is healthy.
+  // Exercise the real server revision rejection, not an invented browser error.
+  currentStage = "late old-authorization library failure";
+  const oldRevision = saved.revision;
+  let startOldRead, releaseOldRead;
+  const oldReadStarted = new Promise(resolve => { startOldRead = resolve; });
+  const oldReadGate = new Promise(resolve => { releaseOldRead = resolve; });
+  await a.page.route(readPattern, async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("revision") === oldRevision && url.searchParams.get("kind") === "search") {
+      startOldRead();
+      await oldReadGate;
+    }
+    await route.continue();
+  });
+  const latePage = await a.context.newPage();
+  try {
+    await root.getByLabel("Search connected Spotify music").fill("old account search");
+    await root.getByRole("button", { name: "Search", exact: true }).click();
+    await Promise.race([oldReadStarted, delay(10000).then(() => { throw new Error("Old search was not dispatched"); })]);
+    await latePage.goto(baseUrl + "/talent/connections");
+    await connect(latePage, { reconnect: true });
+    const latest = (await api(a.context, "/api/talent/direct-music?performerId=" + owner)).connections[0];
+    assert.notEqual(latest.revision, oldRevision);
+    await root.getByRole("button", { name: "Refresh connection", exact: true }).click();
+    await root.getByRole("button", { name: "Provider renamed this playlist", exact: true }).waitFor();
+    const oldResponse = a.page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.searchParams.get("revision") === oldRevision && url.searchParams.get("kind") === "search";
+    });
+    releaseOldRead();
+    const rejected = await oldResponse;
+    assert.equal(rejected.status(), 409);
+    await rejected.finished();
+    await a.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await root.getByText("Connected fixture listener ? Account connected", { exact: true }).count(), 1,
+      "An obsolete search failure must not revoke the replacement connection");
+    assert.equal(await root.getByRole("button", { name: "Provider renamed this playlist", exact: true }).count(), 1);
+    assert.equal(commands().length, reconnectCommands);
+    saved = latest;
+    record("Late old-authorization search rejection cannot revoke or overwrite the reconnected account");
+  } finally {
+    releaseOldRead();
+    await a.page.unrouteAll({ behavior: "wait" });
+    await latePage.close();
+  }
   a.page.once("dialog", (dialog) => dialog.dismiss());
   await panel(a.page)
     .getByRole("button", { name: "Disconnect", exact: true })
