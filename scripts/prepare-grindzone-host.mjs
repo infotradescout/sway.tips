@@ -2,7 +2,7 @@
 import {execFileSync} from 'node:child_process';
 import {existsSync,mkdirSync} from 'node:fs';
 import path from 'node:path';
-export const sourceSha='2687e475d628c2be2d0abf66df96dcd5c6fd9ca9';
+export const sourceSha='58ceb46de0ab10463dcdd7187985d91d8b4bf45a';
 if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const target=path.resolve('node_modules/.grindzone-phone',sourceSha);
   const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL'].includes(key)));
