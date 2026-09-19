@@ -734,7 +734,7 @@ try {
     assert.equal(rejected.status(), 409);
     await rejected.finished();
     await a.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assert.equal(await root.getByText("Connected fixture listener ? Account connected", { exact: true }).count(), 1,
+    assert.equal(await root.getByText("Connected fixture listener \u00b7 Account connected", { exact: true }).count(), 1,
       "An obsolete search failure must not revoke the replacement connection");
     assert.equal(await root.getByRole("button", { name: "Provider renamed this playlist", exact: true }).count(), 1);
     assert.equal(commands().length, reconnectCommands);

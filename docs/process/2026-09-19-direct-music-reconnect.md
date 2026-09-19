@@ -1,3 +1,17 @@
+# Latest continuation: reconnect browser suite completed
+
+Objective and scope: Sway only, existing PR249 branch `implement/direct-music-control-20260916`. Resume base `988a7f44cde9b95e69898fa82f6e2646c09bbb76`; no other-project work.
+The exact corrupted fixture label has been corrected using the existing Unicode escape spelling. No assertion was removed or relaxed. The earlier tool block and failed attempts remain recorded below.
+Executed: the complete direct-music browser suite passed all 18 named checkpoints with exit 0, including late old-authorization HTTP409 handling, reconnect snapshot isolation, disconnect cleanup and approval-off behavior. The run used actual local Sway sessions and embedded PostgreSQL with simulated provider consent/API responses; not a real provider or physical-audio test.
+Exact proof: `docs/qa-packets/direct-music-reconnect-20260919/browser-completed.json`; started 2026-09-19T22:38:59.917Z, finished 2026-09-19T22:41:12.182Z. Runtime and test hashes are verified against this worktree. The original `results.json` below is historical failed evidence, not the current browser outcome.
+Files changed in this continuation: one test-label correction, the new browser receipt, and this resumption update. Runtime is unchanged from the previous repair.
+Next exact action: run the unchanged `npm run validate` against the commit containing this update, with an isolated environment and separate evidence output. Preserve prior untracked proof folders before generated checks. Do not re-audit or substitute older full-gate receipts.
+Release posture: draft; no merge, deploy, provider activation, real playback, production database changes or money movement. Real provider approval/account/device acceptance remains separate.
+
+---
+
+# Historical checkpoint retained verbatim
+
 # Sway direct-music reconnect continuation
 
 Objective: Continue Sway only; prevent a replaced provider authorization from inheriting the old account's playback, devices or library. Sway remains the performer's external controller, not an audience jukebox.
