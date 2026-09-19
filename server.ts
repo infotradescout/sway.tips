@@ -1,3 +1,5 @@
+import { createServer as createHttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -16378,7 +16380,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // Shared compute only: GrindZone keeps separate pairing and no Sway database access.
+  let phoneHost: any = null;
+  if (process.env.GRINDZONE_PHONE_ENABLED === 'true') {
+    const entry = pathToFileURL(path.join(process.cwd(), 'node_modules/.grindzone-phone', '2687e475d628c2be2d0abf66df96dcd5c6fd9ca9', 'cloud/shared-host.mjs')).href;
+    const phoneModule = await import(entry);
+    phoneHost = await phoneModule.startSharedPhone({publicBase: process.env.GRINDZONE_PHONE_BASE, key: process.env.GRINDZONE_PHONE_KEY});
+  }
+  const httpServer = createHttpServer(phoneHost ? phoneHost.wrap(app) : app);
+  phoneHost?.attach(httpServer);
+  httpServer.once('error', () => { void phoneHost?.close(); });
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }
