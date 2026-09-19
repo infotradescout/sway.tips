@@ -1,3 +1,21 @@
+# Current resume point: Sway reconnect local validation passed
+
+Objective: Complete the direct-music reconnect repair on Sway only; preserve performer-controlled playback through the original source.
+Base branch/commit: `implement/direct-music-control-20260916` at `988a7f44cde9b95e69898fa82f6e2646c09bbb76`.
+Current tested source: `58a6fc0dc984176427c6261490732b16ca1544f0` (PR249). The commit adding this header changes only evidence/checkpoint documentation; runtime, tests and dependency hashes must remain equal to the tested candidate.
+Verified completed work: Corrected the corrupted test label without changing its assertion. Reconnect state isolation and late old-authorization responses pass; all 18 complete direct-music browser checkpoints passed, including disconnect and approval-off cases. The full unchanged `npm run validate` passed all 128 top-level contract commands, lint, build and payment-pricing, 2026-09-19T22:42:30.179Z through 2026-09-19T22:58:42.966Z.
+Conditional proof: The full gate retains its explicit active-room-registry database skip. The same-source registry supplement passed separately with zero skips, no timeout, no cleanup errors, and confirmed database/listener shutdown.
+Files changed in the final checkpoint: this document, the QA README and `docs/qa-packets/direct-music-reconnect-20260919/full-validation.json`. The preceding test-label commit and focused browser receipt remain preserved.
+Tests/evidence: `full-validation.json` is authoritative for the current local gate. It includes exact source/tree, runtime/test/dependency and log hashes, browser results and registry supplement. Historical failed `results.json` remains untouched.
+Changed but unverified: No remaining failing local gate for this reconnect candidate. Genuine provider approval/grant, physical device/audio behavior, standalone database contention and production acceptance remain unproved.
+External side effects: task branch push and PR evidence only. All execution used local synthetic accounts/providers and owned embedded databases. No other-project edits, cloud provisioning, real provider requests, actual audio, customer writes, live money, production migration, main merge or deployment. Existing generated proof folders were copied before the full gate and retained under the continuation evidence directory.
+Next exact action: Continue the existing direct-account/original-player acceptance boundary when an approved real provider/account/device is available; preserve the separate merge/deploy HOLD. Do not restart the audit or rerun the same expensive full gate without invalidating changes. There is no remaining blocked label correction.
+Rollback: Revert only the runtime/test slice if needed; no production schema rollback is involved. Evidence-only checkpoints do not alter execution.
+
+---
+
+# Earlier continuation history
+
 # Latest continuation: reconnect browser suite completed
 
 Objective and scope: Sway only, existing PR249 branch `implement/direct-music-control-20260916`. Resume base `988a7f44cde9b95e69898fa82f6e2646c09bbb76`; no other-project work.
