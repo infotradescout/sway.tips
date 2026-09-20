@@ -1,55 +1,57 @@
-# Sway PR249 — actual continuation, September 20, 2026
+# Sway PR249 — current execution boundary, September 20, 2026
 
-## Decision
+## Objective
 
-The original-player completion criterion is NOT met. A preserved, tested merge candidate exists, and its original registry database contract passed without skips. The candidate was not published because the existing proof runner's ordinary Git push had no write credentials. PR249's remote head remains `b354e1a6a842d39d8601f49323f56d2603348a1f`; GitHub still reports the draft conflicted. Do not call the PR reconciled or shipped until its ref actually changes.
+A deliberate authorized operator command must control the intended original player, and reconnect or uncertain delivery must not replay that command. This product acceptance is still unverified. Do not confuse a merge, fixture or HTTP acknowledgement with original-player observation.
 
-## Exact completed candidate
+## Current product branch and exact source
 
-- Candidate: `5620355f858455d5ee51c6be139c92972c8e2046`.
-- Tree: `ecc87d5ace437ab390c7bae6018eacce0dd02c0a`.
-- First parent: `b354e1a6a842d39d8601f49323f56d2603348a1f` (Sway task branch).
-- Second parent: `e15db1518ef2b1823442d18479d71af4ee0ca95a` (main with shared-host GrindZone).
-- GrindZone relay pin retained: `58ceb46de0ab10463dcdd7187985d91d8b4bf45a`.
-- Changed from Sway: only `package.json`, `public/sw.js`, `scripts/grindzone-host.contract.test.mjs`, `scripts/prepare-grindzone-host.mjs`, and `server.ts`.
+Repository: `infotradescout/sway.tips`.
+PR249 branch: `implement/direct-music-control-20260916`.
+Published and remote-verified head: `7c9f17217a38e952794b2d4c315a567aeee0dfbf`.
+Complete tree: `ecc87d5ace437ab390c7bae6018eacce0dd02c0a`.
+Real parents: `b354e1a6a842d39d8601f49323f56d2603348a1f` and `e15db1518ef2b1823442d18479d71af4ee0ca95a`.
+Observed PR state: open, draft, **mergeable=true**. Publication and conflict resolution are completed. Main is still `e15db1518ef2b1823442d18479d71af4ee0ca95a`; no production deployment occurred.
 
-The merge was actually executed in a new owned worktree. Its only conflict was `server.ts`. The resolution retains the direct-music route import and adds main's two shared-host imports and listener wrapper. Reversing the shared-host additions reproduces Sway's complete server byte-for-byte. Existing Sway scripts and dependencies are retained, the preparation step is additive, and the other shared-host files match main exactly. Both parents are retained.
+## Verified completed work
 
-Executed on that exact candidate: locked dependency installation; the changed shared-host contract; merged server compilation; the existing unmodified `node scripts/sway-active-room-registry.contract.test.mjs` against a fresh, owned, native PostgreSQL 18.4 process. Registry exit 0, no signal, no timeout, zero skips. Missing/stale revisions reject without changing durable state; valid revision close passes. Source remained unchanged. Database stop and loopback-listener shutdown were verified. This is not separate-process contention or a real room test.
+The previously tested merge candidate `5620355f858455d5ee51c6be139c92972c8e2046` had not been uploaded by the ordinary Render Git transport. This continuation reconstructed its complete tree through isolated GitHub helper objects, verified exact tree equality, and created a separate real two-parent commit through the authorized GitHub connector. The existing task branch was non-force fast-forwarded and reread through GitHub; PR249 is now conflict-free. No Render write credential was needed or copied.
+
+The published source tree is exactly the previously executed source tree, not an approximate reimplementation. Only commit metadata differs. Both Sway and shared-host GrindZone code remain, including relay pin `58ceb46de0ab10463dcdd7187985d91d8b4bf45a`, shared HTTP/WebSocket startup, asset preparation and service-worker exclusion. No synthetic helper ancestry entered the real publication. Auxiliary PR252 was closed without merging; its helper branches must never be built or deployed.
+
+Original registry receipt remains in `observed-result.json`: exit 0, zero skips, no signal or timeout against newly owned native PostgreSQL; rejected missing/stale revisions preserve durable state, and current-revision close passes. Changed shared-host contract and server compilation also passed. Database stop/listener closure were observed. Those executions retain their original candidate identity. `publication.json` binds their complete source tree to the now-published content without claiming a new run.
 
 Registry log SHA256: `b0de61a584b63880e2b9254b99e046928ce0b976426fa1392850f128151c6d8c`.
 
-## Publication and native boundaries
+## Native coverage and unverified work
 
-The ordinary non-force push to `implement/direct-music-control-20260916` failed, exit 128: `fatal: could not read Username for 'https://github.com': terminal prompts disabled`. No credential was discovered, changed, requested or copied. No remote ref changed. Do not repeat this unauthenticated push blindly.
+A connected GitHub comparison from native-repair source `564fb16899d21043709d2023a8bd2dfeb43bd1d1` to published head `7c9f1721` shows only two evidence documents and the five shared-host files changed. The Windows generator, native tests, library launcher and dependency lock remain unchanged. Historical 14 generated-PowerShell checks and the two-process crash/restart case therefore remain evidence for unchanged native source, but are not a new-checkout execution receipt.
 
-The earlier scoped GitHub Actions attempt (run `35520680820`) failed before executing any steps. Windows and publication jobs were skipped. No native result was produced, and no billing cause was established. The auxiliary workflow added for that attempt was subsequently removed; its history remains. It is not an additional release gate.
+Still unverified: the full downloaded CMD startup/prompt sequence, intended original-player/device state, deliberate operator command through actual Sway, and no-replay behavior at that real player after uncertain delivery/reconnect. No actual player command or provider grant was issued in this continuation.
 
-No actual original-player command was issued. No new proof of the downloaded CMD startup/prompt journey, installed VirtualDJ extension, physical deck, audible playback, actual provider grant, or real-player reconnect was obtained. Earlier native/synthetic receipts remain historical and do not become exact-merged-candidate native acceptance merely because their source files were retained.
+No permitted non-Desktop-Commander Windows/player execution route was available to this turn. Do not infer that the user's computer is offline or that no player exists. Tool-route availability is not player availability. Do not revive the empty Actions attempt or introduce Actions/billing as a release gate. Do not install an unrequested player or provision another proof service to manufacture acceptance.
 
-## Evidence and exact reconstruction
+## Evidence and files changed
 
-`observed-result.json` beside this file preserves the observed summary, source and log hashes, runtime scope, limitations, failed publication, and exact reconstruction identity. It does not pretend to be a downloaded original full log.
+Authoritative current records on `automation/sway-pr249-supplement-20260920`:
+- `maintenance/sway-pr249-20260920/publication.json` — actual remote publication, exact-tree binding and remaining boundaries.
+- `maintenance/sway-pr249-20260920/observed-result.json` — preserved earlier executed registry/merge result and failed Render push; its unpublished status is historical, superseded only for publication.
+- This file — current resume index.
 
-Existing isolated evidence service: `srv-daesln0u01pc73fso5kg`, workspace `tea-d191jph5pdvs73drglkg`. Executed launcher: `da657c98b8c43e8dce818e14884f86500a5b95e3`. Deploy `dep-dao05if40ujc73ddqn20` published evidence at `2026-09-20T15:59:54.576779Z`; it did NOT deploy the Sway application.
+The product publication changes only the five previously tested shared-host files relative to Sway's former head: `package.json`, `public/sw.js`, `scripts/grindzone-host.contract.test.mjs`, `scripts/prepare-grindzone-host.mjs`, and `server.ts`. No new runtime, test, dependency or schema edit was added in the publication continuation.
 
-Runner output:
-- `https://sway-release-proof.onrender.com/pr249-supplement.json`
-- `https://sway-release-proof.onrender.com/merge/candidate.bundle`
-- `https://sway-release-proof.onrender.com/exact-candidate-registry.log`
+Existing preserved static evidence remains on `sway-release-proof.onrender.com`: `/pr249-supplement.json`, `/merge/candidate.bundle`, `/exact-candidate-registry.log`, and the untouched prior `/source-evidence.json`. The service was not redeployed or changed in this continuation. These original runtime artifacts were not downloaded here; do not claim otherwise.
 
-The runner wrote these artifacts and the provider marked their static deployment live. This chat's web/download tools could not retrieve them. Preserve the bundle and full logs before replacing that proof output. The prior `source-evidence.json` was copied byte-for-byte and retains SHA256 `b879b9fb397b919d407d2d8885e83a423a7c9e120e17439b61ee274aea2ed9a8`; it still describes the earlier candidate, not this merge.
+## External side effects and retry safety
 
-The exact candidate is also reconstructible from public source without relying on that static bundle. Use a new owned clone/worktree, not a reset of an existing checkout. Read `maintenance/sway-pr249-20260920/reconcile.py` from exact helper commit `906cfb91a00646d9cafb0bfd70f5442a64079bf5`, SHA256 `6987738f5ad126f21a280a64ad4f2d2238cfb958f20a9d89fed008090a2a7361`. Use LF checkout and set BOTH `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` to `1789919974 +0000` before invoking it. It must produce tree `ecc87d5ace437ab390c7bae6018eacce0dd02c0a` and commit `5620355f858455d5ee51c6be139c92972c8e2046`. The commit object identity was independently reconstructed and SHA-1 verified locally; no remote publication is implied. Ref-advancement checks must remain enforced.
+Only GitHub object/auxiliary-ref creation, one closed helper PR, the non-force update of the existing task branch, and evidence/PR updates. No main update, production deployment, new service, Render environment change, database operation, provider activation, live money or Desktop Commander use.
 
-## Next exact execution
+The original tested full tree is now stored in GitHub and reachable from the real product commit. There is no need to reconstruct it again or retry the failed Render Git push. Any further product edits must first inspect the actual current branch ref and preserve concurrent work.
 
-1. Import or reconstruct this exact tested candidate in an authorized write-capable Git session. Verify both parents, tree and candidate hash, and recheck current task/main refs. Publish only a non-force fast-forward to the existing task branch. Preserve newer work if either ref advanced. Do not merge main or deploy production.
-2. On an authorized Windows execution target, run the actual native generated-booth checks against this exact candidate and cover the outer downloaded CMD startup/prompt journey. Keep real generated functions separate from synthetic transport limitations. Do not call a Linux source check or an empty Actions job native acceptance.
-3. Use the authorized operator/booth connection to observe a deliberate command affecting the intended original player. Then verify reconnect/uncertain-delivery behavior: stable command identity, no automatic replay, no duplicate dispatch, no later command slipping through unresolved ambiguity, and explicit operator review permitting a genuinely new command without reviving the old one. Record actual player/deck identity and observed state separately from an HTTP acknowledgement.
+## Next exact action
 
-## Do not repeat or expand
+Use a permitted authorized Windows booth/original-player execution connection to check out the published candidate, execute the native launcher and outer downloaded CMD journey, and observe a deliberate operator-originated command through Sway controlling the selected original player. Keep observed deck/device state separate from command acceptance. For uncertain delivery, retain the original command ID and ledger, reconnect without redispatching it, keep later claims blocked until deliberate review, and verify that review permits a genuinely new command without reviving the old one.
 
-Do not repeat unchanged hosted gates, create another proof service, use Desktop Commander, re-audit unrelated projects, replace the corrected GrindZone pin, discard old receipts, replay unknown commands, weaken an assertion, activate providers/money, run production migrations, merge main, or deploy Sway production.
+## Actions that must not be repeated
 
-The existing Render service is idle after the scoped run. Its auxiliary branch is `audit/readiness-223-room-recovery`, with `SWAY_PR249_SCOPED_SUPPLEMENT=true`, `SWAY_PR249_PUBLISH_CANDIDATE=true`, and `SWAY_VALIDATION_EXPECTED_SHA=da657c98b8c43e8dce818e14884f86500a5b95e3`. Auto-deploy is off. Do not redeploy it blindly: this explicit mode would repeat the completed scoped checks. Any future authorized use must preserve its artifacts, select the needed mode and exact launcher, and avoid a duplicate manual trigger after an environment update.
+Do not repeat merge reconstruction, publication, completed registry verification or unchanged full hosted gates. Do not create another proof service, use Desktop Commander under the current restriction, replay unknown commands, erase old ledgers/receipts, replace the GrindZone pin, weaken assertions, introduce Actions billing checks, activate providers/money, merge main or deploy production. The task remains at real-player/native execution access, not another repository audit or planning checkpoint.
