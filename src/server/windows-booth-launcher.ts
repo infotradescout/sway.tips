@@ -93,7 +93,10 @@ function ConvertTo-VirtualDjText([object]$Value) {
 }
 
 function Test-SwayTrue([object]$Value) {
-  return ([string]$Value).Trim() -match '^(true|yes|on|1)$'
+  $normalized = ([string]$Value).Trim()
+  if ($normalized -match '^(true|yes|on|1)$') { return $true }
+  if ($normalized -match '^(false|no|off|0)$') { return $false }
+  throw 'VirtualDJ returned an unreadable playback state. Controls remain unavailable.'
 }
 
 function Invoke-SwayRequest([string]$Route, [string]$Method = 'GET', [object]$Body = $null) {
@@ -103,6 +106,7 @@ function Invoke-SwayRequest([string]$Route, [string]$Method = 'GET', [object]$Bo
     Method = $Method
     Headers = $headers
     TimeoutSec = 12
+    MaximumRedirection = 0
     UseBasicParsing = $true
   }
   if ($null -ne $Body) {
@@ -126,6 +130,7 @@ function Invoke-VirtualDjRequest([string]$Endpoint, [string]$Script) {
     ContentType = 'text/plain; charset=utf-8'
     Body = $Script
     TimeoutSec = 5
+    MaximumRedirection = 0
     UseBasicParsing = $true
   }
   $response = Invoke-WebRequest @parameters
@@ -134,7 +139,7 @@ function Invoke-VirtualDjRequest([string]$Endpoint, [string]$Script) {
 
 function Invoke-VirtualDjExecute([string]$Script) {
   $result = Invoke-VirtualDjRequest 'execute' $Script
-  if (-not (Test-SwayTrue $result)) {
+  if ($result -cne 'true') {
     throw "VirtualDJ rejected: $Script"
   }
   return $result
@@ -219,19 +224,192 @@ function Read-VirtualDjState {
 
 function ConvertTo-LedgerTable([object]$Value) {
   $table = @{}
-  if ($null -eq $Value) { return $table }
-  foreach ($property in $Value.PSObject.Properties) { $table[$property.Name] = $property.Value }
+  if ($Value -is [System.Collections.IDictionary]) {
+    foreach ($key in $Value.Keys) { $table[[string]$key] = $Value[$key] }
+  } elseif ($Value -is [System.Management.Automation.PSCustomObject]) {
+    foreach ($property in $Value.PSObject.Properties) { $table[$property.Name] = $property.Value }
+  } else { throw 'Invalid booth ledger object. Preserve the file; do not reset it.' }
   return $table
 }
 
+function Test-SwayCommandId([string]$Value) {
+  $parsed = [Guid]::Empty
+  return [Guid]::TryParseExact($Value, 'D', [ref]$parsed)
+}
+
+function Initialize-SwayLedger {
+  $script:Ledger = @{}
+  $script:PendingCompletionIds = @()
+  if (Test-Path -LiteralPath $LedgerPath) {
+    try {
+      if ((Get-Item -LiteralPath $LedgerPath).Length -gt 4194304) { throw 'Ledger is too large.' }
+      $stored = [IO.File]::ReadAllText($LedgerPath) | ConvertFrom-Json
+      $legacy = $null -eq $stored.PSObject.Properties['version']
+      if ($legacy) {
+        $script:Ledger = ConvertTo-LedgerTable $stored
+        $script:PendingCompletionIds = @($Ledger.Keys)
+      } else {
+        if ($stored.version -ne 1 -or $stored.gigId -cne $GigId -or $stored.sourceKey -cne $SourceKey -or
+            -not (Test-SwayCommandId $stored.bridgeInstanceId) -or -not ($stored.pendingCompletionIds -is [array])) {
+          throw 'Invalid booth ledger identity or structure.'
+        }
+        $script:BridgeInstanceId = [string]$stored.bridgeInstanceId
+        $script:Ledger = ConvertTo-LedgerTable $stored.outcomes
+        $script:PendingCompletionIds = @($stored.pendingCompletionIds)
+      }
+      foreach ($id in @($Ledger.Keys)) {
+        $entry = ConvertTo-LedgerTable $Ledger[$id]
+        $date = [DateTimeOffset]::MinValue
+        $timestamp = if ($legacy) { $entry.completedAt } else { $entry.finishedAt }
+        if (-not (Test-SwayCommandId $id) -or -not ($entry.success -is [bool]) -or
+            -not ($timestamp -is [string]) -or -not [DateTimeOffset]::TryParse($timestamp, [ref]$date) -or
+            -not ($null -eq $entry.error -or $entry.error -is [string])) { throw 'Invalid execution outcome.' }
+        $entry.result = ConvertTo-LedgerTable $entry.result
+        if ($legacy) {
+          $entry.finishedAt = $timestamp
+          $entry.Remove('completedAt')
+          if (-not $entry.success) { $entry.result.executionStatus = 'unknown' }
+        }
+        if ($entry.success -and $entry.result.executionStatus -eq 'unknown') { throw 'Contradictory execution outcome.' }
+        if (-not $entry.success -and $entry.result.executionStatus -ne 'unknown') { throw 'Unclassified failed outcome.' }
+        if ($entry.ContainsKey('reviewedAt') -and
+            (-not ($entry.reviewedAt -is [string]) -or -not [DateTimeOffset]::TryParse($entry.reviewedAt, [ref]$date))) {
+          throw 'Invalid operator review receipt.'
+        }
+        $script:Ledger[$id] = $entry
+      }
+      foreach ($id in $PendingCompletionIds) {
+        if (-not ($id -is [string]) -or -not $Ledger.ContainsKey($id)) { throw 'Pending completion has no outcome.' }
+      }
+    } catch {
+      throw 'Cannot safely resume the booth ledger. Preserve it and check the original player; no commands were dispatched.'
+    }
+  }
+  Save-Ledger
+}
+
 function Save-Ledger {
-  $entries = @($Ledger.GetEnumerator() | Sort-Object { [string]$_.Value.completedAt } -Descending | Select-Object -First 250)
-  $bounded = @{}
-  foreach ($entry in $entries) { $bounded[[string]$entry.Key] = $entry.Value }
-  $script:Ledger = $bounded
-  $temporaryPath = "$LedgerPath.tmp"
-  ($Ledger | ConvertTo-Json -Depth 12 -Compress) | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
-  Move-Item -LiteralPath $temporaryPath -Destination $LedgerPath -Force
+  $retained = @{}
+  $recent = @($Ledger.GetEnumerator() | Where-Object {
+    $PendingCompletionIds -notcontains [string]$_.Key -and $_.Value.result.executionStatus -ne 'unknown'
+  } | Sort-Object { [string]$_.Value.finishedAt } -Descending | Select-Object -First 250)
+  foreach ($entry in $recent) { $retained[[string]$entry.Key] = $entry.Value }
+  foreach ($id in $Ledger.Keys) {
+    if ($PendingCompletionIds -contains $id -or $Ledger[$id].result.executionStatus -eq 'unknown') { $retained[$id] = $Ledger[$id] }
+  }
+  $record = [ordered]@{version=1;gigId=$GigId;sourceKey=$SourceKey;bridgeInstanceId=$BridgeInstanceId;
+    outcomes=$retained;pendingCompletionIds=@($PendingCompletionIds | Select-Object -Unique)}
+  $json = $record | ConvertTo-Json -Depth 14 -Compress
+  $encoder = [Text.UTF8Encoding]::new($false)
+  $bytes = $encoder.GetBytes($json)
+  if ($bytes.Length -gt 4194304) { throw 'Booth ledger is full; preserved outcomes must be reviewed before more commands.' }
+  [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LedgerPath))
+  $temporaryPath = $LedgerPath + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+  try {
+    $stream = [IO.FileStream]::new($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write,
+      [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
+    try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    if ([IO.File]::Exists($LedgerPath)) { [IO.File]::Replace($temporaryPath,$LedgerPath,[NullString]::Value) }
+    else { [IO.File]::Move($temporaryPath,$LedgerPath) }
+    $script:Ledger = $retained
+  } finally { if ([IO.File]::Exists($temporaryPath)) { [IO.File]::Delete($temporaryPath) } }
+}
+
+function Invoke-SwayClaimedOnce([object]$Command) {
+  $commandId = [string]$Command.id
+  if (-not (Test-SwayCommandId $commandId)) { throw 'A durable Sway command identity is required.' }
+  if ($Ledger.ContainsKey($commandId)) {
+    if ($PendingCompletionIds -notcontains $commandId) {
+      $script:PendingCompletionIds += $commandId
+      Save-Ledger
+    }
+    return $Ledger[$commandId]
+  }
+  $entry = @{success=$false;result=@{executionStatus='unknown'};
+    error='Player dispatch is unconfirmed. Check VirtualDJ; this command will not be replayed.';
+    finishedAt=[DateTimeOffset]::UtcNow.ToString('o')}
+  $script:Ledger[$commandId] = $entry
+  $script:PendingCompletionIds += $commandId
+  # A failed durable reservation prevents all player I/O.
+  Save-Ledger
+  try {
+    $result = Invoke-VirtualDjCommand $Command
+    $finishedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    $result.executedAt = $finishedAt
+    $entry = @{success=$true;result=$result;error=$null;finishedAt=$finishedAt}
+    Write-Host "VirtualDJ acknowledged $($Command.action). Playback is checked separately." -ForegroundColor Green
+  } catch {
+    $entry = @{success=$false;result=@{executionStatus='unknown'};
+      error='Player did not confirm the command. Check VirtualDJ; this command will not be replayed.';
+      finishedAt=[DateTimeOffset]::UtcNow.ToString('o')}
+    Write-Host $entry.error -ForegroundColor Yellow
+  }
+  $script:Ledger[$commandId] = $entry
+  Save-Ledger
+  return $entry
+}
+
+function Test-SwayReviewRequired {
+  foreach ($entry in $Ledger.Values) {
+    if ($entry.result.executionStatus -eq 'unknown' -and -not $entry.reviewedAt) { return $true }
+  }
+  return $false
+}
+
+function Confirm-SwayRecovery {
+  if (-not (Test-SwayReviewRequired)) { return $true }
+  $observed = Read-VirtualDjState
+  $stateLabel = if ($observed.playing) { 'playing' } else { 'paused' }
+  Write-Host "VirtualDJ currently reports $stateLabel. A previous command outcome remains unknown." -ForegroundColor Yellow
+  Write-Host 'Check the original deck before continuing. The previous command will never be repeated.' -ForegroundColor Yellow
+  $answer = Read-Host 'Type CONTINUE to accept new commands, or anything else to stop'
+  if ($answer -cne 'CONTINUE') { return $false }
+  foreach ($entry in $Ledger.Values) {
+    if ($entry.result.executionStatus -eq 'unknown' -and -not $entry.reviewedAt) {
+      $entry.reviewedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+  }
+  Save-Ledger
+  return $true
+}
+
+function Flush-SwayCompletions {
+  foreach ($commandId in @($PendingCompletionIds)) {
+    $before = @($PendingCompletionIds)
+    try {
+      Complete-SwayCommand $commandId $Ledger[$commandId]
+      $script:PendingCompletionIds = @($PendingCompletionIds | Where-Object { $_ -ne $commandId })
+      Save-Ledger
+    } catch {
+      $script:PendingCompletionIds = $before
+      Write-Host 'Command result will retry; no new player commands will be claimed.' -ForegroundColor Yellow
+      return $false
+    }
+  }
+  return $true
+}
+
+function Invoke-SwayBridgeTick {
+  $completionsReady = Flush-SwayCompletions
+  if ($completionsReady -and -not (Test-SwayReviewRequired)) {
+    $claim = Invoke-SwayRequest '/api/talent/playback/bridge/claim' 'POST' @{
+      gig_id=$GigId;sourceKey=$SourceKey;bridgeInstanceId=$BridgeInstanceId
+    }
+    foreach ($command in @($claim.commands)) {
+      $entry = Invoke-SwayClaimedOnce $command
+      if ($entry.result.executionStatus -eq 'unknown') { break }
+    }
+    [void](Flush-SwayCompletions)
+  }
+  if ($null -eq $nextStateAt -or [DateTimeOffset]::UtcNow -ge $nextStateAt) {
+    try { $state = Read-VirtualDjState } catch {
+      $state = @{sourceKey=$SourceKey;transport='virtualdj_network_control_http_windows_companion';
+        bridgeInstanceId=$BridgeInstanceId;connectionStatus='disconnected';deck=$Deck;
+        observedAt=[DateTimeOffset]::UtcNow.ToString('o');metadata=@{error='Player state could not be confirmed.'}}
+    }
+    [void](Invoke-SwayRequest '/api/talent/playback/bridge/state' 'POST' @{gig_id=$GigId;state=$state})
+    $script:nextStateAt = [DateTimeOffset]::UtcNow.AddSeconds(2)
+  }
 }
 
 function Complete-SwayCommand([string]$CommandId, [object]$Entry) {
@@ -275,6 +453,7 @@ $VirtualDjUrl = "http://127.0.0.1:$port"
 Write-SwayHeading 'Checking VirtualDJ'
 try {
   $clock = Invoke-VirtualDjRequest 'query' 'get_clock'
+  [void](Read-VirtualDjState)
   Write-Host "VirtualDJ answered at $VirtualDjUrl." -ForegroundColor Green
 } catch {
   Write-Host 'Sway could not reach VirtualDJ Network Control on this computer.' -ForegroundColor Red
@@ -286,49 +465,22 @@ $ledgerDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData
 [void](New-Item -ItemType Directory -Path $ledgerDirectory -Force)
 $LedgerPath = Join-Path $ledgerDirectory "booth-ledger-$GigId.json"
 $Ledger = @{}
-if (Test-Path -LiteralPath $LedgerPath) {
-  try { $Ledger = ConvertTo-LedgerTable ((Get-Content -LiteralPath $LedgerPath -Raw) | ConvertFrom-Json) } catch { $Ledger = @{} }
-}
+$PendingCompletionIds = @()
+Initialize-SwayLedger
 
 Write-SwayHeading 'Connected'
-Write-Host 'Leave this window open during the room. Sway now controls VirtualDJ.' -ForegroundColor Green
+Write-Host 'Leave this window open during the room. Waiting for your Sway commands; no music was started by setup.' -ForegroundColor Green
 Write-Host 'Press Ctrl+C to disconnect.' -ForegroundColor DarkGray
 $nextStateAt = [DateTimeOffset]::MinValue
 $lastCloudWarning = $null
 
 while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
   try {
-    $claim = Invoke-SwayRequest '/api/talent/playback/bridge/claim' 'POST' @{
-      gig_id = $GigId
-      sourceKey = $SourceKey
-      bridgeInstanceId = $BridgeInstanceId
+    if ((Test-SwayReviewRequired) -and -not (Confirm-SwayRecovery)) {
+      Write-Host 'Sway Booth stopped. Previous command outcomes were preserved.' -ForegroundColor Yellow
+      break
     }
-    foreach ($command in @($claim.commands)) {
-      $commandId = [string]$command.id
-      if ([string]::IsNullOrWhiteSpace($commandId)) { continue }
-      $entry = $Ledger[$commandId]
-      if ($null -eq $entry) {
-        try {
-          $result = Invoke-VirtualDjCommand $command
-          $entry = @{ success = $true; result = $result; error = $null; completedAt = [DateTimeOffset]::UtcNow.ToString('o') }
-          Write-Host "Confirmed $($command.action) on deck $($result.deck)." -ForegroundColor Green
-        } catch {
-          $message = $_.Exception.Message
-          if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
-          $entry = @{ success = $false; result = @{}; error = $message; completedAt = [DateTimeOffset]::UtcNow.ToString('o') }
-          Write-Host "VirtualDJ could not run $($command.action): $message" -ForegroundColor Red
-        }
-        $Ledger[$commandId] = $entry
-        Save-Ledger
-      }
-      try { Complete-SwayCommand $commandId $entry } catch { Write-Host 'Command result will retry.' -ForegroundColor Yellow }
-    }
-
-    if ([DateTimeOffset]::UtcNow -ge $nextStateAt) {
-      $state = Read-VirtualDjState
-      [void](Invoke-SwayRequest '/api/talent/playback/bridge/state' 'POST' @{ gig_id = $GigId; state = $state })
-      $nextStateAt = [DateTimeOffset]::UtcNow.AddSeconds(2)
-    }
+    Invoke-SwayBridgeTick
     $lastCloudWarning = $null
   } catch {
     $message = $_.Exception.Message
@@ -341,7 +493,9 @@ while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
   Start-Sleep -Milliseconds 750
 }
 
-Write-Host 'This room connection expired. Open Room Tools in Sway and download a fresh room file.' -ForegroundColor Yellow
+if ([DateTimeOffset]::UtcNow -ge $ExpiresAt) {
+  Write-Host 'This room connection expired. Open Room Tools in Sway and download a fresh room file.' -ForegroundColor Yellow
+}
 `.trimStart();
 }
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { buildWindowsBoothLauncher } from '../src/server/windows-booth-launcher';
 import { buildWindowsLibrarySyncLauncher } from '../src/server/windows-library-sync-launcher';
 
@@ -55,10 +56,25 @@ for (const term of [
   assert.ok(decoded.includes(term), `launcher missing ${term}`);
 }
 
-const persistOutcomeAt = decoded.indexOf('$Ledger[$commandId] = $entry\r\n        Save-Ledger');
-const acknowledgeAt = decoded.indexOf('try { Complete-SwayCommand $commandId $entry }', persistOutcomeAt);
-assert.ok(persistOutcomeAt > 0, 'launcher must persist each execution outcome');
-assert.ok(acknowledgeAt > persistOutcomeAt, 'launcher must persist before cloud acknowledgement');
+const commandBody = decoded.slice(decoded.indexOf('function Invoke-SwayClaimedOnce'), decoded.indexOf('function Test-SwayReviewRequired'));
+const reserveAt = commandBody.indexOf("executionStatus='unknown'");
+const persistReservationAt = commandBody.indexOf('Save-Ledger', reserveAt);
+const dispatchAt = commandBody.indexOf('Invoke-VirtualDjCommand $Command');
+const persistOutcomeAt = commandBody.indexOf('Save-Ledger', dispatchAt);
+assert.ok(reserveAt > 0 && persistReservationAt > reserveAt && dispatchAt > persistReservationAt,
+  'unknown outcome must be persisted before player dispatch');
+assert.ok(persistOutcomeAt > dispatchAt, 'confirmed/unknown outcome must be persisted after dispatch');
+assert.ok(commandBody.indexOf('return $Ledger[$commandId]') < reserveAt, 'existing command identities must never dispatch again');
+for (const term of [
+  'function Initialize-SwayLedger', 'Cannot safely resume the booth ledger.',
+  '[IO.FileOptions]::WriteThrough', '$stream.Flush($true)', '[NullString]::Value',
+  'pendingCompletionIds=@(', 'bridgeInstanceId=$BridgeInstanceId',
+  "if ($result -cne 'true')", 'unreadable playback state',
+  '$completionsReady -and -not (Test-SwayReviewRequired)',
+  "if ($entry.result.executionStatus -eq 'unknown') { break }",
+  "if ($answer -cne 'CONTINUE') { return $false }", 'MaximumRedirection = 0'
+]) assert.ok(decoded.includes(term), 'Windows booth missing recovery protection: ' + term);
+assert.ok(!decoded.includes('catch { $Ledger = @{} }'), 'corrupt evidence cannot silently reset');
 assert.ok(!decoded.includes('--allow-remote'));
 assert.ok(!decoded.includes('0.0.0.0'));
 assert.ok(!decoded.includes('multipart/form-data'));
@@ -137,4 +153,13 @@ assert.throws(
   /valid private sync key/
 );
 
+if (process.platform === 'win32') {
+  const native = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-windows-booth-recovery.native.test.mjs'],
+    {cwd:process.cwd(),encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:8*1024*1024});
+  if (native.stdout) process.stdout.write(native.stdout);
+  if (native.stderr) process.stderr.write(native.stderr);
+  assert.ok(!native.error && !native.signal && native.status === 0, 'Native generated Windows booth behavior failed.');
+} else {
+  console.log('Windows booth native runtime proof skipped: a Windows PowerShell runner is required. Portable source checks still ran.');
+}
 console.log('Sway Windows booth launcher tests passed.');

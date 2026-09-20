@@ -1,0 +1,74 @@
+{
+  "project": "sway.tips",
+  "baseCommit": "b4eea99596269023848e8e231143372973ac42fa",
+  "branch": "implement/direct-music-control-20260916",
+  "recordedAt": "2026-09-19T22:22:21.435Z",
+  "state": "draft_partial_verification",
+  "releaseApproved": false,
+  "productionWrites": false,
+  "runtimeAndTestSha256": {
+    "src/components/PerformerDirectMusicConnection.tsx": "5e198c0a7b84464761b2af8625fd380d7d61f352d75ffe8dce9e093d6f42f148",
+    "scripts/sway-direct-music.browser.test.mjs": "87438fbade5e1275d89165c5b39b2ddb7020853eb4b58c455f737dcb444366af"
+  },
+  "baselineRegression": {
+    "passed": false,
+    "startedAt": "2026-09-19T22:12:05.367Z",
+    "finishedAt": "2026-09-19T22:13:45.320Z",
+    "failure": "Previous-authorization playback remained visible after cross-tab reconnect"
+  },
+  "afterRepair": {
+    "passed": false,
+    "startedAt": "2026-09-19T22:16:43.459Z",
+    "finishedAt": "2026-09-19T22:18:20.443Z",
+    "database": "embedded-postgres",
+    "completedCheckpoints": 15,
+    "checks": [
+      "Direct account connection appears before file imports and requires no live room or CSV",
+      "Provider consent cancellation returns useful feedback without attaching an account",
+      "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
+      "Selecting a currently available player persists the target without starting audio; restricted devices stay disabled",
+      "Accepted Play command does not fabricate Playing before a separately observed provider response",
+      "Play, pause, resume, queue and next use the selected external player and display only reported track/state",
+      "Provider playlist edit appears automatically without uploading files or overwriting a saved request list",
+      "Search and saved songs are read from the connected account",
+      "Lost command outcome disables controls until manual verification and never automatically resends",
+      "Unavailable playback feedback removes control permission and supports explicit recovery",
+      "Connected account, music browsing and player controls fit desktop and narrow mobile screens",
+      "A separate real account and a cross-origin mutation cannot use another account’s connection",
+      "Only the authenticated connection owner can operate the player; anonymous and foreign-account commands never reach the source",
+      "Authenticated connection and selected device survive actual server restart and browser reload",
+      "Cross-tab reconnect clears previous playback, library and devices until current authorization reads succeed, without autoplay"
+    ],
+    "newReconnectRegressionPassed": true,
+    "lateOldSearchRegressionPassed": false,
+    "failure": "Added test label contains a question mark instead of the rendered middle dot; character-correction request was tool-blocked",
+    "laterDisconnectAndApprovalCasesReached": false,
+    "realProviderCalls": 0,
+    "actualAudioPlayback": false
+  },
+  "focusedBoundaryTests": {
+    "tests": 23,
+    "passed": 23,
+    "failed": 0,
+    "skipped": 0
+  },
+  "typescript": {
+    "command": "node node_modules/typescript/bin/tsc --noEmit",
+    "exitCode": 0
+  },
+  "build": {
+    "command": "npm.cmd run build",
+    "exitCode": 0
+  },
+  "fullContractGate": "not passed for this candidate; browser test remains failing",
+  "preservedLogSha256": {
+    "red.log": "e207ae4a9acba07cc5cf019b8c413c85fcfabe4ecf10495ae4156018015c5f57",
+    "red-confirmed.log": "00d2795d1b338863c0bcdc1fb4da8b6b3ea4aeaf10e99c3581a278af4f3a33d5",
+    "green.log": "cc03733c1353cc5e8db1501665a28a303b53389c24cf489c0d642c21a18ab8b9",
+    "boundaries.log": "9057dc202d35b17b1a0ba16873e2965e03fce15f015ae988805ff1f5760fc1de",
+    "typescript.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "build.log": "1080792d67a6d823ae14eaa55bd7f79047819a6689f18926ac996cb9e9bcf475"
+  },
+  "scope": "Actual local application sessions and embedded PostgreSQL, simulated provider consent/API replies; no physical-player or production proof",
+  "next": "Resolve blocked test-character correction through permitted tool boundary and rerun browser suite; keep draft/no deployment"
+}

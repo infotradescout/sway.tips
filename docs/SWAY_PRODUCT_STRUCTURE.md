@@ -13,6 +13,22 @@ Sway gives independent performers two connected systems:
 
 **Sway.DIO economic model (decision D):** all three funding sources — listener subscriptions, advertising, and sponsorships — **staged**. Private beta / first earnable streams are **subscription-funded Sway Exclusives only** (clear funding source). Later, advertising-funded and sponsor-funded listening may be added without changing the zero streaming-cut rule. Forever: **100%** of streaming income attributable to qualifying Sway Exclusive artists goes to them; Sway takes **$0** streaming cut. For now only Sway Exclusives qualify to earn from streams. Sway Exclusive ≠ ownership: exclusive home / distributor / business partner for specific releases; artist keeps the master. Sway earns from Live Rooms (requests/tips/boosts), event/ticket fees, Self-Production services, file storage/collaboration, distribution services, and promotion/optional tools — not music streaming income. Competitive offer: Keep ownership. Release through Sway. Stream on Sway.DIO. Receive 100% of stream money. Sway makes money helping the career grow, not taking music income. Binding summary for this dual-lane lock lives in this document only (no hard dependency on a separate DIO economic-model file in this PR).
 
+## Operator-controlled performance and production/publishing (owner clarification, 2026-09-17)
+
+Sway is controller and publishing/production software, not a visitor-operated jukebox. Audience Request, Tip and Boost are inputs to a performer-controlled workflow; they are not authority to operate the player's transport or select its destination.
+
+The DJ/performer connects an authorized source, browses music, selects the target and controls playback through Sway. This direct controller must work without a live room, audience, CSV or file-export chore. In the third-party controller path, the original source/player handles audio; this does not prohibit creation, editing, rendering or publishing of authorized original work in Self-Production.
+
+A DJ accepting a request or deliberately pressing Play is the operator, not the visitor. Authority depends on the authenticated actor, not the number of buttons. Current request approval and playback remain separate state transitions. A future explicitly labeled Accept & Play action would still need operator authorization and its own verification; this clarification does not claim that combined action or the request-to-provider handoff is implemented.
+
+Server boundaries: audience requests, tips, boosts, payment events and client-supplied approval/role fields must not grant playback authority. The server authenticates the operator, checks the performer/account and connection, and binds an explicit command to the selected device. Command acceptance is not evidence that audio played. Player/provider observations remain separate from request status.
+
+Self-Production remains the separate creator-owned workflow for files/projects, collaboration, versions, credits/rights, releases, catalogs, publishing/distribution and the planned Sway.DIO destination. Do not reduce Sway to a request dashboard, a background-music service or an external distribution wrapper.
+
+Qualification is per provider, capability and actual intended use. Operator-mediated requests must be described as such, not substituted with automatic visitor-selected playback. Separately check API authorization, source subscription/player eligibility, applicable music rights and the actual commercial use. Published permissions may establish eligibility where applicable; seek additional written authorization only where required or unresolved. Do not infer blanket permission from the controller label.
+
+A restriction or pending approval for one provider is not a reason to stop unrelated controller integrations, rights-cleared original-content work or Self-Production. Preserve existing release authorization and provider-specific activation controls; do not reinterpret them as a product-wide development freeze. This clarification supersedes older audience-only/no-direct-controller planning language, without representing unfinished capabilities as shipped.
+
 ## Hierarchy
 
 ```text
