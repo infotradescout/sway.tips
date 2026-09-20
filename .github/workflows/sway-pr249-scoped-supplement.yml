@@ -1,0 +1,226 @@
+# One bounded auxiliary-branch operation; not a release gate or a proof service.
+# Does not run validate, the full contract chain, browsers, provider calls or deploys.
+name: Sway PR249 scoped merge and native supplement
+on:
+  push:
+    branches: [automation/sway-pr249-supplement-20260920]
+    paths:
+      - .github/workflows/sway-pr249-scoped-supplement.yml
+      - maintenance/sway-pr249-20260920/**
+permissions:
+  contents: read
+concurrency:
+  group: sway-pr249-scoped-supplement-20260920
+  cancel-in-progress: false
+jobs:
+  merge_registry:
+    if: github.repository == 'infotradescout/sway.tips'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      candidate: ${{ steps.merge.outputs.candidate }}
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: control
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - name: Prepare exact two-parent merge without changing remote refs
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 control/maintenance/sway-pr249-20260920/reconcile.py "$GITHUB_WORKSPACE/control" "$RUNNER_TEMP/sway-pr249-candidate" "$RUNNER_TEMP/sway-pr249-evidence"
+      - name: Install existing locked dependencies
+        working-directory: ${{ runner.temp }}/sway-pr249-candidate
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Verify changed shared-host boundary and compile server only
+        working-directory: ${{ runner.temp }}/sway-pr249-candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/grindzone-host.contract.test.mjs 2>&1 | tee "$RUNNER_TEMP/sway-pr249-evidence/shared-host.log"
+          node node_modules/esbuild/bin/esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile="$RUNNER_TEMP/sway-pr249-server.cjs" 2>&1 | tee "$RUNNER_TEMP/sway-pr249-evidence/server-compile.log"
+          git diff --exit-code HEAD --
+      - name: Start a new owned loopback PostgreSQL process on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          initdb=$(find /usr/lib/postgresql -type f -name initdb | sort -V | tail -1)
+          test -n "$initdb"
+          pgbin=$(dirname "$initdb")
+          echo "SWAY_REGISTRY_PGBIN=$pgbin" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/sway-pr249-socket"
+          "$pgbin/initdb" -D "$RUNNER_TEMP/sway-pr249-pgdata" -U sway --auth=trust --no-locale > "$RUNNER_TEMP/sway-pr249-evidence/initdb.log" 2>&1
+          "$pgbin/pg_ctl" -D "$RUNNER_TEMP/sway-pr249-pgdata" -l "$RUNNER_TEMP/sway-pr249-evidence/postgres.log" -o "-h 127.0.0.1 -p 55439 -k $RUNNER_TEMP/sway-pr249-socket" -w -t 30 start
+          "$pgbin/createdb" -h 127.0.0.1 -p 55439 -U sway sway_pr249_registry_proof
+      - name: Execute guarded exact-candidate registry supplement with zero skips
+        working-directory: ${{ runner.temp }}/sway-pr249-candidate
+        env:
+          DATABASE_URL: postgres://sway@127.0.0.1:55439/sway_pr249_registry_proof
+          SWAY_ALLOW_DISPOSABLE_DATABASE_RESET: 'true'
+          EXPECTED_CANDIDATE: ${{ steps.merge.outputs.candidate }}
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess, time
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'sway-pr249-evidence'
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert source == os.environ['EXPECTED_CANDIDATE']
+          started = time.time()
+          try:
+              p = subprocess.run(['node', 'scripts/sway-active-room-registry.contract.test.mjs'], capture_output=True, text=True, timeout=180)
+              log = p.stdout + p.stderr
+              code, timed_out = p.returncode, False
+          except subprocess.TimeoutExpired as e:
+              log = str(e.stdout or '') + str(e.stderr or '')
+              code, timed_out = None, True
+          (out / 'registry.log').write_text(log, encoding='utf-8')
+          passed = code == 0 and not timed_out and 'skipped' not in log.lower()
+          receipt = {'source':source,'status':'passed' if passed else 'failed','exitCode':code,'timeout':timed_out,'zeroSkips':'skipped' not in log.lower(),'elapsedSeconds':time.time()-started,'logSha256':hashlib.sha256(log.encode()).hexdigest(),'scope':'existing registry contract against owned loopback PostgreSQL; not standalone contention or original-player acceptance'}
+          (out / 'registry.json').write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
+          print(log)
+          print(json.dumps(receipt))
+          assert passed, 'Registry supplement failed or skipped'
+          subprocess.run(['git','diff','--exit-code','HEAD','--'],check=True)
+      - name: Stop owned database and verify it no longer accepts connections
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f "$RUNNER_TEMP/sway-pr249-pgdata/postmaster.pid"; then
+            "$SWAY_REGISTRY_PGBIN/pg_ctl" -D "$RUNNER_TEMP/sway-pr249-pgdata" -m fast -w -t 30 stop
+            if "$SWAY_REGISTRY_PGBIN/pg_isready" -h 127.0.0.1 -p 55439; then
+              echo 'Owned database listener remained available after shutdown' >&2
+              exit 1
+            fi
+            printf '%s\n' '{"ownedPostgresStopped":true,"listenerClosed":true}' > "$RUNNER_TEMP/sway-pr249-evidence/cleanup.json"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sway-pr249-merge-registry
+          path: ${{ runner.temp }}/sway-pr249-evidence
+          if-no-files-found: error
+          retention-days: 14
+  windows_native:
+    needs: merge_registry
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_CANDIDATE: ${{ needs.merge_registry.outputs.candidate }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: sway-pr249-merge-registry
+          path: ${{ runner.temp }}/sway-pr249-input
+      - name: Checkout exactly the source tested by registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin b354e1a6a842d39d8601f49323f56d2603348a1f e15db1518ef2b1823442d18479d71af4ee0ca95a
+          git bundle verify "$RUNNER_TEMP/sway-pr249-input/candidate.bundle"
+          git fetch "$RUNNER_TEMP/sway-pr249-input/candidate.bundle" sway-pr249-exact-candidate
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANDIDATE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - name: Install existing locked dependencies
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Execute actual Windows PowerShell recovery and process-restart cases
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, re, subprocess, time
+          assert os.name == 'nt', 'A Linux or simulated native pass is forbidden'
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'sway-pr249-native'
+          out.mkdir()
+          source = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert source == os.environ['EXPECTED_CANDIDATE']
+          started = time.time()
+          try:
+              p = subprocess.run(['node','--import','tsx','scripts/sway-windows-booth-launcher.test.ts'],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=150)
+              log = p.stdout + p.stderr
+              code, timed_out = p.returncode, False
+          except subprocess.TimeoutExpired as e:
+              log = str(e.stdout or '') + str(e.stderr or '')
+              code, timed_out = None, True
+          (out/'native.log').write_text(log,encoding='utf-8')
+          summaries = re.findall(r'^WINDOWS_BOOTH_NATIVE_SUMMARY (.+)$',log,re.M)
+          restarts = re.findall(r'^WINDOWS_BOOTH_PROCESS_RESTART_PASS (.+)$',log,re.M)
+          summary = json.loads(summaries[0]) if len(summaries)==1 else None
+          restart = json.loads(restarts[0]) if len(restarts)==1 else None
+          passed = code==0 and not timed_out and summary is not None and restart is not None and summary.get('passed') is True and len(summary.get('checks',[]))==14 and restart.get('dispatchCount')==1 and restart.get('firstExit')==73 and restart.get('restartExit')==0
+          receipt = {'source':source,'status':'passed' if passed else 'failed','exitCode':code,'timeout':timed_out,'elapsedSeconds':time.time()-started,'logSha256':hashlib.sha256(log.encode()).hexdigest(),'native':summary,'restart':restart,'physicalPlayer':False,'downloadedCmdStartup':'not_executed','realProviderCalls':0}
+          (out/'native.json').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
+          print(log)
+          print(json.dumps(receipt))
+          assert passed, 'Native Windows supplement failed, skipped, or omitted required evidence'
+          subprocess.run(['git','diff','--exit-code','HEAD','--'],check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sway-pr249-native
+          path: ${{ runner.temp }}/sway-pr249-native
+          if-no-files-found: error
+          retention-days: 14
+  publish_candidate:
+    needs: [merge_registry, windows_native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      EXPECTED_CANDIDATE: ${{ needs.merge_registry.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: sway-pr249-merge-registry
+          path: ${{ runner.temp }}/sway-pr249-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: sway-pr249-native
+          path: ${{ runner.temp }}/sway-pr249-native
+      - name: Fast-forward the existing task branch only after both exact-source supplements
+        shell: python
+        run: |
+          import json, os, pathlib, subprocess
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          source=os.environ['EXPECTED_CANDIDATE']
+          merge=json.loads((root/'sway-pr249-input/merge.json').read_text())
+          registry=json.loads((root/'sway-pr249-input/registry.json').read_text())
+          cleanup=json.loads((root/'sway-pr249-input/cleanup.json').read_text())
+          native=json.loads((root/'sway-pr249-native/native.json').read_text())
+          assert merge['source']==registry['source']==native['source']==source
+          assert registry['status']==native['status']=='passed'
+          assert cleanup=={'ownedPostgresStopped':True,'listenerClosed':True}
+          branch='implement/direct-music-control-20260916'
+          def git(*args):
+              return subprocess.check_output(['git',*args],text=True).strip()
+          refs=dict(line.split()[::-1] for line in git('ls-remote','origin','refs/heads/main','refs/heads/'+branch).splitlines())
+          assert refs.get('refs/heads/main')=='e15db1518ef2b1823442d18479d71af4ee0ca95a','Main advanced; do not overwrite newer shared-host work'
+          assert refs.get('refs/heads/'+branch)=='b354e1a6a842d39d8601f49323f56d2603348a1f','Task branch advanced; preserve newer work'
+          git('fetch','origin','b354e1a6a842d39d8601f49323f56d2603348a1f','e15db1518ef2b1823442d18479d71af4ee0ca95a')
+          git('fetch',str(root/'sway-pr249-input/candidate.bundle'),'sway-pr249-exact-candidate')
+          assert git('rev-parse','FETCH_HEAD')==source
+          git('push','origin',source+':refs/heads/'+branch)
+          assert git('ls-remote','origin','refs/heads/'+branch).split()[0]==source
+          receipt={'source':source,'status':'published_to_existing_draft_branch','registry':'passed','windowsNative':'passed','realPlayerAcceptance':'not_executed','downloadedCmdStartup':'not_executed','mainChanged':False,'deploymentTriggered':False,'newServiceCreated':False,'unchangedFullGatesRepeated':False}
+          print(json.dumps(receipt))
+          (root/'sway-pr249-publication.json').write_text(json.dumps(receipt,indent=2)+'\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sway-pr249-publication
+          path: ${{ runner.temp }}/sway-pr249-publication.json
+          if-no-files-found: error
+          retention-days: 14
