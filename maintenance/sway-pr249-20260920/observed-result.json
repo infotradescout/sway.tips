@@ -1,0 +1,127 @@
+{
+  "receiptKind": "Observed summary of connected Render and GitHub tool results; not a replacement for the original full logs",
+  "date": "2026-09-20",
+  "repository": "infotradescout/sway.tips",
+  "pullRequest": 249,
+  "completionCriterionMet": false,
+  "candidate": "5620355f858455d5ee51c6be139c92972c8e2046",
+  "tree": "ecc87d5ace437ab390c7bae6018eacce0dd02c0a",
+  "parents": [
+    "b354e1a6a842d39d8601f49323f56d2603348a1f",
+    "e15db1518ef2b1823442d18479d71af4ee0ca95a"
+  ],
+  "productBranch": "implement/direct-music-control-20260916",
+  "observedRemoteHeadAfterExecution": "b354e1a6a842d39d8601f49323f56d2603348a1f",
+  "remotePrStillConflicted": true,
+  "merge": {
+    "status": "resolved_in_tested_candidate_not_published",
+    "scope": "Exactly five shared-host changes added to the Sway candidate; both Git parents retained",
+    "changedFiles": [
+      "package.json",
+      "public/sw.js",
+      "scripts/grindzone-host.contract.test.mjs",
+      "scripts/prepare-grindzone-host.mjs",
+      "server.ts"
+    ],
+    "grindzoneRelayPin": "58ceb46de0ab10463dcdd7187985d91d8b4bf45a",
+    "serverPreservation": "Removing the two shared-host additions reproduces the complete Sway server byte-for-byte",
+    "packagePreservation": "Existing Sway scripts and dependencies retained; build adds the shared-host preparation step",
+    "otherSharedHostFiles": "Exact main-branch bytes retained",
+    "logSha256": "e367eef5b18c4768bc01ce5d0eb44d2de3a90d481b17b92faa28cce971bbcc87",
+    "fileSha256": {
+      "package.json": "c8ea13c2b632233b3769b819e22fb4a52cde835423628ad4529c0e20f223e1db",
+      "public/sw.js": "d377265c95f7ff8ae792c815b0bc24214bb596b52faa208c160992a4789827bc",
+      "scripts/grindzone-host.contract.test.mjs": "9ad9ad0758d474b14fdccab53a0a55756870b79d926034c3a9719ee0a5c7c376",
+      "scripts/prepare-grindzone-host.mjs": "38cf9dc7759f59e7ab27c023a60948cd2f3ee119c5991da24b715cc7bb14e512",
+      "server.ts": "4e46e4b5e8a19caca24e06375d953e38307f0630d98e0ff5e6f98ff65b2e7220"
+    }
+  },
+  "focusedChecks": {
+    "sharedHostContract": {"exitCode": 0, "signal": null, "timeout": false, "logSha256": "db350614faa18b4d0315c104cac62f344422131f07da594e8d1424b0ab18277f"},
+    "serverCompile": {"exitCode": 0, "signal": null, "timeout": false},
+    "registry": {
+      "command": "node scripts/sway-active-room-registry.contract.test.mjs",
+      "candidate": "5620355f858455d5ee51c6be139c92972c8e2046",
+      "exitCode": 0,
+      "signal": null,
+      "timeout": false,
+      "zeroSkips": true,
+      "durationMs": 10701,
+      "logSha256": "b0de61a584b63880e2b9254b99e046928ce0b976426fa1392850f128151c6d8c",
+      "database": "Newly owned native PostgreSQL 18.4 process, loopback port 25439, generated disposable proof database",
+      "verified": ["isolated room state", "missing revision rejects", "stale revision rejects", "rejected writes preserve durable state", "current-revision close"],
+      "doesNotProve": ["standalone multi-process contention", "real customer room", "original-player control"]
+    },
+    "trackedSourceUnchanged": true,
+    "databaseStopped": true,
+    "listenerClosed": true,
+    "fullHostedGatesRepeated": false
+  },
+  "publication": {
+    "status": "not_published",
+    "exitCode": 128,
+    "error": "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "logSha256": "2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60",
+    "forcePushAttempted": false,
+    "mainChanged": false
+  },
+  "nativeWindows": {
+    "status": "not_executed_on_this_candidate",
+    "actionsRun": 35520680820,
+    "mergeRegistryJob": 106104103104,
+    "executedSteps": 0,
+    "nativeJob": 106104186465,
+    "nativeJobConclusion": "skipped",
+    "publicationJobConclusion": "skipped",
+    "note": "The auxiliary workflow was removed after the zero-step attempt; its history is retained. This is not a native test failure or pass. No billing cause is asserted."
+  },
+  "realPlayer": {
+    "actualCommandsIssued": 0,
+    "deliberateOperatorCommandObserved": false,
+    "downloadedCmdStartupObserved": false,
+    "installedVirtualDjObserved": false,
+    "audiblePlaybackObserved": false,
+    "liveProviderGrantObserved": false,
+    "replayPreventionOnRealPlayerAccepted": false
+  },
+  "execution": {
+    "workspace": "tea-d191jph5pdvs73drglkg",
+    "service": "srv-daesln0u01pc73fso5kg",
+    "serviceName": "sway-release-proof",
+    "newServiceCreated": false,
+    "launcher": "da657c98b8c43e8dce818e14884f86500a5b95e3",
+    "deploy": "dep-dao05if40ujc73ddqn20",
+    "startedAt": "2026-09-20T15:59:31.527Z",
+    "finishedAt": "2026-09-20T15:59:52.957Z",
+    "evidenceDeploymentLiveAt": "2026-09-20T15:59:54.576779Z",
+    "productionChanged": false,
+    "desktopCommanderUsed": false,
+    "providerActivationPerformed": false,
+    "moneyMovementPerformed": false
+  },
+  "artifacts": {
+    "scopedReceipt": "https://sway-release-proof.onrender.com/pr249-supplement.json",
+    "candidateBundle": "https://sway-release-proof.onrender.com/merge/candidate.bundle",
+    "registryLog": "https://sway-release-proof.onrender.com/exact-candidate-registry.log",
+    "previousHostedReceipt": "https://sway-release-proof.onrender.com/source-evidence.json",
+    "previousHostedReceiptSha256": "b879b9fb397b919d407d2d8885e83a423a7c9e120e17439b61ee274aea2ed9a8",
+    "note": "Runner artifact writes and provider deployment are observed. This chat's web/download tools could not retrieve the public files. Preserve these artifacts before reusing the proof output."
+  },
+  "deterministicReconstruction": {
+    "helperCommit": "906cfb91a00646d9cafb0bfd70f5442a64079bf5",
+    "helperPath": "maintenance/sway-pr249-20260920/reconcile.py",
+    "helperSha256": "6987738f5ad126f21a280a64ad4f2d2238cfb958f20a9d89fed008090a2a7361",
+    "gitAuthorDate": "1789919974 +0000",
+    "gitCommitterDate": "1789919974 +0000",
+    "authorAndCommitter": "Sway scoped continuation <263459961+infotradescout@users.noreply.github.com>",
+    "message": "Reconcile PR249 with shared-host GrindZone without replacing either runtime [skip ci]",
+    "commitObjectHashVerifiedLocally": true,
+    "note": "Use a new owned clone/worktree, LF checkout, and the fixed metadata to reconstruct the exact tested commit. Verify both expected tree and commit before publication. The committed helper refuses advanced remote refs rather than overwriting newer work."
+  },
+  "remaining": [
+    "Publish the exact tested candidate through an authorized write-capable Git transport without altering main",
+    "Execute native Windows generated-booth and downloaded-CMD startup coverage on that exact candidate",
+    "Observe a deliberate authorized operator command controlling the intended original player",
+    "Observe reconnect/uncertain-delivery handling without replay, duplicate dispatch or revival of old command IDs"
+  ]
+}
