@@ -1,0 +1,78 @@
+{
+  "objective": "Deliberate operator control of the intended original player without replay after reconnect or uncertain delivery",
+  "completionCriterionMet": false,
+  "publication": {
+    "status": "published_and_remote_verified",
+    "repository": "infotradescout/sway.tips",
+    "pullRequest": 249,
+    "branch": "implement/direct-music-control-20260916",
+    "previousHead": "b354e1a6a842d39d8601f49323f56d2603348a1f",
+    "publishedHead": "7c9f17217a38e952794b2d4c315a567aeee0dfbf",
+    "tree": "ecc87d5ace437ab390c7bae6018eacce0dd02c0a",
+    "parents": ["b354e1a6a842d39d8601f49323f56d2603348a1f", "e15db1518ef2b1823442d18479d71af4ee0ca95a"],
+    "force": false,
+    "mergeable": true,
+    "draft": true,
+    "mainChanged": false,
+    "productionDeployed": false,
+    "transport": "Authorized GitHub connector create_commit and non-force update_ref; no Render Git credentials copied or provisioned"
+  },
+  "exactContentBinding": {
+    "previouslyExecutedCandidate": "5620355f858455d5ee51c6be139c92972c8e2046",
+    "previouslyExecutedTree": "ecc87d5ace437ab390c7bae6018eacce0dd02c0a",
+    "publishedTree": "ecc87d5ace437ab390c7bae6018eacce0dd02c0a",
+    "completeTreeEqual": true,
+    "commitMetadataEqual": false,
+    "newTestExecutionClaimed": false,
+    "registryReceipt": "observed-result.json",
+    "registryLogSha256": "b0de61a584b63880e2b9254b99e046928ce0b976426fa1392850f128151c6d8c",
+    "meaning": "The published source files are exactly the already-tested merge/registry source. The original receipt keeps its original commit identity. This is content-equivalence reuse, not a new run."
+  },
+  "sharedHostPreservation": {
+    "mainSource": "e15db1518ef2b1823442d18479d71af4ee0ca95a",
+    "relayPin": "58ceb46de0ab10463dcdd7187985d91d8b4bf45a",
+    "preserved": ["direct-music route import", "all existing Sway runtime code", "shared HTTP server and WebSocket attachment", "GrindZone asset preparation", "GrindZone service-worker exclusion", "existing package scripts and dependencies"]
+  },
+  "nativeEvidenceScope": {
+    "historicalSource": "564fb16899d21043709d2023a8bd2dfeb43bd1d1",
+    "comparisonHead": "7c9f17217a38e952794b2d4c315a567aeee0dfbf",
+    "comparisonStatus": "ahead",
+    "changedFiles": ["docs/process/2026-09-20-no-dc-continuation.md", "docs/qa-packets/windows-booth-recovery-20260920/hosted-validation.json", "package.json", "public/sw.js", "scripts/grindzone-host.contract.test.mjs", "scripts/prepare-grindzone-host.mjs", "server.ts"],
+    "nativeGeneratorChanged": false,
+    "nativeTestsChanged": false,
+    "dependencyLockChanged": false,
+    "previousEvidence": "Historical 14 generated-PowerShell checks and two-process crash/restart case described in PR249 comment 5747167848 remain bounded historical evidence for unchanged native source.",
+    "newNativeRun": false,
+    "outerDownloadedCmdAcceptance": "unverified",
+    "realOriginalPlayerAcceptance": "unverified",
+    "limitation": "A source comparison is not execution of the new checkout, not full CMD startup coverage, and not observation of an installed player."
+  },
+  "reconstruction": {
+    "helperPullRequest": 252,
+    "helperStatus": "closed_without_merge",
+    "computedMergeObject": "83c87bf3cbfdab090d9d32857dd2e7521da73633",
+    "computedTree": "ecc87d5ace437ab390c7bae6018eacce0dd02c0a",
+    "syntheticHistoryInProductParents": false,
+    "method": "Isolated helper prefix/suffix ancestor and GitHub's computed merge object recovered the already-tested complete tree. The published commit was separately created with only the real two source parents. Helper trees are not runtime candidates and must not be built or deployed."
+  },
+  "externalEffectsThisContinuation": {
+    "githubObjectsAndAuxiliaryBranches": true,
+    "existingDraftBranchUpdated": true,
+    "helperPrClosedWithoutMerge": true,
+    "cloudServicesCreated": 0,
+    "renderDeployments": 0,
+    "unchangedHostedGatesRepeated": 0,
+    "nativeTestsExecuted": 0,
+    "originalPlayerCommandsIssued": 0,
+    "providerGrantsCreated": 0,
+    "productionDatabaseWrites": 0,
+    "moneyMovement": 0,
+    "desktopCommanderUsed": false
+  },
+  "remainingBoundary": {
+    "required": "Permitted Windows booth/original-player execution access and an actual authorized operator session",
+    "availableInThisContinuation": false,
+    "next": "Execute native outer CMD startup and an operator-originated command through Sway to the selected original player; observe target state independently, preserve uncertainty, reconnect without redispatch, and verify explicit review permits only a genuinely new command.",
+    "doNotRepeat": ["merge reconstruction", "unauthenticated Render Git push", "completed registry supplement", "unchanged full hosted gates", "zero-step Actions attempts", "provider-independent fixtures as a substitute for real playback"]
+  }
+}
