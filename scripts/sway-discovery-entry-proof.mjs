@@ -30,13 +30,21 @@ try{
  await run('baseline-checkout','git',['checkout','--detach',base],baseline);
  fs.symlinkSync(path.join(checkout,'node_modules'),path.join(baseline,'node_modules'),'dir');
  fs.copyFileSync(path.join(checkout,'scripts/sway-discovery-entry.browser.test.mjs'),path.join(baseline,'scripts/sway-discovery-entry.browser.test.mjs'));
+ // The identical full-entry test executes against an otherwise unchanged base.
+ // DOMException does not reliably carry a stack in Chromium; tie the failure
+ // to storage denial plus the one reviewed runtime-module difference instead.
+ assert.equal(await run('baseline-campaign-identity','git',['hash-object','src/shells/campaignAttribution.ts'],baseline),'dce6c1fec85030c44a3f56d2aa2f491d5e3bb06f');
+ assert.equal(await run('candidate-campaign-identity','git',['hash-object','src/shells/campaignAttribution.ts']),'2f6f065b450aaa5ca5aefa794e73e188ae1a60b4');
  await run('negative-campaign-baseline',process.execPath,['scripts/sway-discovery-entry.browser.test.mjs'],baseline,1);
  const old=JSON.parse(fs.readFileSync(path.join(baseline,'tmp/public-entry-qa/discovery-entry/results.json'),'utf8'));
- assert.equal(old.results.length,8);
- assert(old.results.filter(r=>r.storage==='available').every(r=>r.passed),'Control must still render with available storage');
- assert(old.results.filter(r=>['getters-denied','methods-denied'].includes(r.storage)).every(r=>!r.passed&&r.pageErrors.some(e=>e.includes('captureCampaignCode'))),'Negative control must reproduce campaign capture failure in the full entry');
- assert(old.results.filter(r=>r.storage==='write-quota').every(r=>!r.passed),'Original campaign writes must reproduce quota failure');
  report.campaignBaseline=old;
+ assert.equal(old.results.length,8);
+ const controls=old.results.filter(r=>r.storage==='available');
+ const denied=old.results.filter(r=>['getters-denied','methods-denied'].includes(r.storage));
+ const quota=old.results.filter(r=>r.storage==='write-quota');
+ assert.equal(controls.length,2);assert(controls.every(r=>r.passed),'Both unchanged controls must still render');
+ assert.equal(denied.length,4);assert(denied.every(r=>!r.passed&&r.pageErrors.some(e=>e.includes('Diagnostic storage denial'))),'All denied-storage baseline entries must reproduce their storage exception');
+ assert.equal(quota.length,2);assert(quota.every(r=>!r.passed&&r.dismissalSurvivesQuota&&r.error.includes('Diagnostic quota limit')),'Original campaign writes must reproduce quota failure after successful install dismissal');
  await run('lint','npm',['run','lint']);await run('build','npm',['run','build']);await run('full-contracts','npm',['run','test:contracts']);
  await run('tracked-clean','git',['diff','--exit-code','HEAD','--']);
  const generated=(await run('generated','git',['ls-files','--others','--exclude-standard'])).split('\n').filter(Boolean);assert(generated.every(p=>p.startsWith('tmp/public-entry-qa/')||p.startsWith('tmp/music-sources-proof/')),'Unexpected generated file');report.generatedCount=generated.length;
