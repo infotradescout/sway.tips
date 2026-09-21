@@ -4,10 +4,14 @@ import { createHash } from 'node:crypto';
 import express from 'express';
 import { createAccessControl, routeFamilyGuard } from '../src/server/access-control';
 
-// The older PR moved stale authorization into a core file. This reconciliation
-// keeps current main's authorization in place, with only this bounded addition.
+// Keep current main authorization intact. The bounded additions classify only
+// analytics requests and reject document scanner paths; they grant no access.
 const source = readFileSync('src/server/access-control.ts', 'utf8');
 const addedImport = "import { applyTrafficTruthToTelemetryRequest, shouldHard404ScannerRequest } from './traffic-truth-request';\n";
+const addedHydration = `    // server.ts runs hydration after JSON parsing for every request, including
+    // APIs that intentionally bypass the document-only routeFamilyGuard.
+    applyTrafficTruthToTelemetryRequest(req);
+`;
 const addedBlock = `    // Traffic classification is analytics-only; original authorization follows unchanged.
     applyTrafficTruthToTelemetryRequest(req);
     if (shouldHard404ScannerRequest(req)) {
@@ -21,23 +25,41 @@ const addedBlock = `    // Traffic classification is analytics-only; original au
     }
 `;
 assert.equal(source.split(addedImport).length, 2, 'One traffic import only');
-assert.equal(source.split(addedBlock).length, 2, 'One bounded traffic guard addition only');
-const original = source.replace(addedImport, '').replace(addedBlock, '');
+assert.equal(source.split(addedHydration).length, 2, 'One global hydration addition only');
+assert.equal(source.split(addedBlock).length, 2, 'One document guard addition only');
+const original = source.replace(addedImport, '').replace(addedHydration, '').replace(addedBlock, '');
 function blob(value: string) {
   const bytes = Buffer.from(value);
   return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
-assert.ok([original, original.replace(/\n$/, '')].some(text => blob(text) === 'eb4d58e74ff555b4ccaa2f2bb2c01064695cf96a'), 'All current main authorization logic must remain exact, apart from an optional final newline');
+assert.ok([original, original.replace(/\n$/, '')].some(text => blob(text) === 'eb4d58e74ff555b4ccaa2f2bb2c01064695cf96a'), 'Current main authorization must remain exact apart from a final newline');
+
+// The real server intentionally bypasses routeFamilyGuard for /api. A fixture
+// that routed analytics through that document guard alone would give false proof.
+const serverSource = readFileSync('server.ts', 'utf8');
+const jsonIndex = serverSource.indexOf('app.use(express.json(');
+const hydrationIndex = serverSource.indexOf('await accessControl.hydrateRequestActor(req);');
+const analyticsIndex = serverSource.indexOf('app.post("/api/analytics/shell"');
+assert.ok(jsonIndex >= 0 && hydrationIndex > jsonIndex && analyticsIndex > hydrationIndex, 'Real JSON parsing and global hydration must precede analytics registration');
+assert.match(serverSource, /if \(req\.path\.startsWith\('\/api'\) \|\| req\.path\.startsWith\('\/assets'\) \|\| req\.path\.startsWith\('\/shells'\)\) \{\s*next\(\);\s*return;\s*\}\s*routeFamilyGuard\(accessControl\)\(req, res, next\)/);
 
 const app = express();
+const access = createAccessControl({ isProduction: true });
 app.use(express.json());
+app.use(async (req, _res, next) => {
+  try { await access.hydrateRequestActor(req); next(); }
+  catch (error) { next(error); }
+});
 app.use((req, _res, next) => {
-  // This fixture assigns route families server-side, not from untrusted hints.
   req.headers['x-sway-shell'] = req.path.startsWith('/admin') ? 'admin' : req.path.startsWith('/talent') ? 'talent' : 'patron';
   next();
 });
-const access = createAccessControl({ isProduction: true });
-app.use(routeFamilyGuard(access));
+let analyticsDocumentGuardCalls = 0;
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/assets') || req.path.startsWith('/shells')) return next();
+  if (req.path === '/api/analytics/shell') analyticsDocumentGuardCalls++;
+  void routeFamilyGuard(access)(req, res, next).catch(next);
+});
 app.post('/api/analytics/shell', (req, res) => res.json(req.body));
 app.post('/api/rooms/example/action', (req, res) => res.json(req.body));
 app.get('*', (_req, res) => res.type('text').send('downstream public fixture'));
@@ -77,7 +99,7 @@ try {
     const body = await response.json(); assert.equal(body.attribution_channel, expected);
     assert.equal(body.journey_id, 'local-fixture'); assert.equal(body.event, 'discovery_landing'); cases++;
   }
-  // QA classification cannot bypass the real current authorization decision.
+  assert.equal(analyticsDocumentGuardCalls, 0, 'Analytics classification must not depend on the bypassed document guard');
   const denied = await request('/admin', { headers: { accept: 'application/json', 'x-sway-traffic-class': 'human_candidate', 'user-agent': ua } });
   assert.equal(denied.status, 401); cases++;
   const talent = await request('/talent/dashboard', { headers: { accept: 'text/html', 'user-agent': ua } });
@@ -87,7 +109,7 @@ try {
   const payload = { attribution_channel: 'original', untouched: true };
   const unrelated = await request('/api/rooms/example/action', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'Googlebot/2.1' }, body: JSON.stringify(payload) });
   assert.deepEqual(await unrelated.json(), payload); cases++;
-  console.log(`Sway traffic-truth HTTP integration passed: ${cases} cases; current authorization parity verified. Synthetic loopback requests only, no database or provider mutation.`);
+  console.log(`Sway traffic-truth HTTP integration passed: ${cases} cases; current authorization parity and production middleware ordering verified. Synthetic loopback requests only; no database/provider mutation or production traffic claim.`);
 } finally {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }
