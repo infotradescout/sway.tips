@@ -1,5 +1,7 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -25,10 +27,14 @@ const hardCommands = testContracts
   .map((command) => command.trim())
   .filter(Boolean);
 
+// Native node:test files report failures through Node's runner, not an authored
+// process.exit call. Require an explicit --test invocation for that exception.
+const nativeHardScriptPaths = new Set();
 const hardScriptPaths = hardCommands.map((command) => {
-  const match = command.match(/^node(?:\s+--import\s+tsx)?\s+(scripts\/[^\s]+\.(?:mjs|ts))$/);
+  const match = command.match(/^node(?:\s+(--import\s+tsx|--test))?\s+(scripts\/[^\s]+\.(?:mjs|ts))$/);
   if (!match) failures.push(`test:contracts command is not a direct node script gate: ${command}`);
-  return match?.[1];
+  if (match?.[1] === '--test') nativeHardScriptPaths.add(match[2]);
+  return match?.[2];
 }).filter(Boolean);
 
 const requiredHardScripts = [
@@ -53,12 +59,35 @@ for (const scriptPath of hardScriptPaths) {
   }
 
   const source = readFileSync(absolutePath, 'utf8');
-  if (!/process\.exit\(\s*1\s*\)/.test(source)) {
+  const nativeRunner = nativeHardScriptPaths.has(scriptPath)
+    && /\bfrom\s*['"]node:test['"]/.test(source);
+  if (!/process\.exit\(\s*1\s*\)/.test(source) && !nativeRunner) {
     failures.push(`${scriptPath} must exit nonzero on failure.`);
   }
   if (/process\.exit\(\s*0\s*\)/.test(source)) {
     failures.push(`${scriptPath} must not soft-exit inside test:contracts.`);
   }
+}
+
+// Execute the actual CLI so native support cannot silently soft-pass assertions,
+// rejected async tests, or missing imports on the installed runtime.
+if (nativeHardScriptPaths.size) {
+  const fixture = mkdtempSync(join(tmpdir(), 'sway-contract-exit-'));
+  try {
+    for (const [name, body, expectedExit] of [
+      ['pass', "test('control', () => assert.equal(1, 1));", 0],
+      ['assertion', "test('must fail', () => assert.equal(1, 2));", 1],
+      ['async', "test('must reject', async () => { throw new Error('intentional fixture'); });", 1],
+      ['import', "await import('./intentionally-missing.mjs');", 1],
+    ]) {
+      const file = join(fixture, name + '.mjs');
+      writeFileSync(file, "import test from 'node:test';\nimport assert from 'node:assert/strict';\n" + body);
+      const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', file], { encoding: 'utf8', timeout: 15000 });
+      if (result.status !== expectedExit || !/# tests [1-9]\d*/.test(result.stdout || '')) {
+        failures.push(`Native contract runner did not preserve ${name} exit behavior: ${result.status}`);
+      }
+    }
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 }
 
 const auditSource = readFileSync(join(root, 'scripts/contract-audit.mjs'), 'utf8');
