@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
-import {mkdirSync,existsSync,readFileSync} from 'node:fs';
+import {mkdirSync,existsSync,readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import sharp from 'sharp';
 import {runNative as runCore} from './sway-mixxx-native-core.mjs';
-
-// Actual first-run dialog interaction on a newly owned virtual display. No
-// desktop connection, user account, existing library or product code is changed.
 export async function runNative(options){
  const {root,out,env,receipt}=options;const fb=join(root,'display');mkdirSync(fb);
  let display=177;while(existsSync('/tmp/.X11-unix/X'+display)||existsSync('/tmp/.X'+display+'-lock'))display++;
@@ -24,16 +21,26 @@ export async function runNative(options){
   await sharp(rgb,{raw:{width:w,height,channels:3}}).png().toFile(join(out,name));
  }
  try{
-  for(let i=0;i<40&&!existsSync('/tmp/.X11-unix/X'+display);i++){assert(!closed,'Owned display failed');await sleep(100)}
-  assert(existsSync('/tmp/.X11-unix/X'+display),'Owned display unavailable');
+  for(let i=0;i<40&&!existsSync('/tmp/.X11-unix/X'+display);i++){assert(!closed,'Owned display failed');await sleep(100)}assert(existsSync('/tmp/.X11-unix/X'+display),'Owned display unavailable');
   timer=setInterval(()=>{
    if(handled)return;
    let ids;try{ids=execFileSync('xdotool',['search','--onlyvisible','--name','^Choose music library directory$'],{env,encoding:'utf8',timeout:1000}).trim().split('\n').filter(Boolean)}catch{return}
-   if(ids.length!==1){dialogError='Ambiguous first-run dialog';handled=true;return}
-   handled=true;
-   try{execFileSync('xdotool',['key','--window',ids[0],'Escape'],{env,timeout:1000});receipt.firstRunDialog={title:'Choose music library directory',action:'Cancel on owned display; positional generated tracks are loaded separately'};console.log('SWAY_MIXXX_FIRST_RUN_DIALOG '+JSON.stringify(receipt.firstRunDialog));}catch(e){dialogError=e.message}
+   if(ids.length!==1){dialogError='Ambiguous first-run dialog';handled=true;return}handled=true;
+   try{
+    execFileSync('xdotool',['key','--window',ids[0],'Escape'],{env,timeout:1000});
+    // Closing the target dialog can swallow its release event. Release on the
+    // owned display too; no held key may leak into the following player test.
+    execFileSync('xdotool',['keyup','Escape'],{env,timeout:1000});
+    receipt.firstRunDialog={title:'Choose music library directory',action:'Cancel on owned display; release key; generated tracks load separately'};console.log('SWAY_MIXXX_FIRST_RUN_DIALOG '+JSON.stringify(receipt.firstRunDialog));
+   }catch(e){dialogError=e.message}
   },500);
-  await runCore({...options,run:async(name,...args)=>{const result=await options.run(name,...args);if(name==='audio-playing')await capture('mixxx-actual-player-playing.png');if(name==='audio-paused')await capture('mixxx-actual-player-paused.png');return result;}});
+  await runCore({...options,run:async(name,...args)=>{
+   const result=await options.run(name,...args);
+   if(name==='audio-playing'||name==='audio-paused'){
+    const state=name.slice(6);await capture('mixxx-actual-player-'+state+'.png');
+    const data=readFileSync(join(out,'mixxx-'+state+'.f32')),wave=Buffer.alloc(44);wave.write('RIFF');wave.writeUInt32LE(data.length+36,4);wave.write('WAVEfmt ',8);wave.writeUInt32LE(16,16);wave.writeUInt16LE(3,20);wave.writeUInt16LE(2,22);wave.writeUInt32LE(48000,24);wave.writeUInt32LE(48000*8,28);wave.writeUInt16LE(8,32);wave.writeUInt16LE(32,34);wave.write('data',36);wave.writeUInt32LE(data.length,40);writeFileSync(join(out,'mixxx-actual-'+state+'.wav'),Buffer.concat([wave,data]));
+   }return result;
+  }});
   assert.equal(dialogError,undefined);assert(handled,'Expected initial music-directory dialog was not observed');
  }finally{
   clearInterval(timer);try{await capture('mixxx-actual-desktop-final.png')}catch(e){receipt.captureError=e.message}
