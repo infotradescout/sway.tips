@@ -1,5 +1,7 @@
-// Explicit isolated modes never run production or repeat other evidence gates.
-if (process.env.SWAY_DISCOVERY_ATTRIBUTION_CONTRACT_RESUME === 'true') {
+// Explicit isolated modes never change production or repeat other evidence gates.
+if (process.env.SWAY_ATTRIBUTION_DEPLOYED_SHA) {
+  await import('./sway-discovery-attribution-production.mjs');
+} else if (process.env.SWAY_DISCOVERY_ATTRIBUTION_CONTRACT_RESUME === 'true') {
   await import('./sway-discovery-attribution-contract-resume.mjs');
 } else if (process.env.SWAY_DISCOVERY_ATTRIBUTION_PROOF === 'true') {
   await import('./sway-discovery-attribution-proof.mjs');
