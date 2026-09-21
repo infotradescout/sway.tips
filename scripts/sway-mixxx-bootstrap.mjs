@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFileSync, spawn} from 'node:child_process';
-import {mkdirSync,writeFileSync,mkdtempSync,readFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdirSync,writeFileSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
@@ -13,15 +13,13 @@ const root=mkdtempSync(join(tmpdir(),'sway-real-mixxx-')),out=resolve('.validati
 const env={PATH:process.env.PATH,HOME:join(root,'home'),LANG:'C.UTF-8',LC_ALL:'C.UTF-8',CI:'true',QT_QPA_PLATFORM:'offscreen',GIT_TERMINAL_PROMPT:'0'};mkdirSync(env.HOME);
 const receipt={launcher,startedAt:new Date().toISOString(),status:'preparation',originalPlayerAcceptance:false,paidAccounts:0,productionChanges:false,steps:[]};
 const sha=b=>createHash('sha256').update(b).digest('hex');
-async function run(name,command,args,{timeout=120000,required=true}={}){let log='';const child=spawn(command,args,{cwd:root,env,detached:true,stdio:['ignore','pipe','pipe']});const consume=b=>{log+=b;process.stdout.write(b)};child.stdout.on('data',consume);child.stderr.on('data',consume);let timedOut=false;const timer=setTimeout(()=>{timedOut=true;try{process.kill(-child.pid,'SIGKILL')}catch{}},timeout);const r=await new Promise(done=>{child.on('error',e=>done({code:null,error:e.message}));child.on('close',(code,signal)=>done({code,signal}))});clearTimeout(timer);writeFileSync(join(out,'mixxx-'+name+'.log'),log);receipt.steps.push({name,...r,timedOut,logSha256:sha(log)});console.log('SWAY_MIXXX_STEP '+JSON.stringify(receipt.steps.at(-1)));if(required&&(r.code!==0||timedOut))throw Error(name+' failed');return log;}
+async function run(name,command,args,{timeout=120000,required=true,expectedExitCodes=[0]}={}){let log='';const child=spawn(command,args,{cwd:root,env,detached:true,stdio:['ignore','pipe','pipe']});const consume=b=>{log+=b;process.stdout.write(b)};child.stdout.on('data',consume);child.stderr.on('data',consume);let timedOut=false;const timer=setTimeout(()=>{timedOut=true;try{process.kill(-child.pid,'SIGKILL')}catch{}},timeout);const r=await new Promise(done=>{child.on('error',e=>done({code:null,error:e.message}));child.on('close',(code,signal)=>done({code,signal}))});clearTimeout(timer);writeFileSync(join(out,'mixxx-'+name+'.log'),log);const passed=expectedExitCodes.includes(r.code)&&!r.signal&&!r.error&&!timedOut;receipt.steps.push({name,...r,timedOut,expectedExitCodes,passed,logSha256:sha(log)});console.log('SWAY_MIXXX_STEP '+JSON.stringify(receipt.steps.at(-1)));if(required&&!passed)throw Error(name+' failed');return log;}
 try{
  const base='https://sway-release-proof.onrender.com/';
  const paths=['source-evidence.json','pr249-supplement.json','merge/candidate.bundle','merge/merge.json','merge/merge.log'];
  const response=await fetch(base+'pr249-supplement.json',{signal:AbortSignal.timeout(20000)});assert(response.ok);const prior=await response.json();
  for(const row of prior.steps||[])if(/^[a-z0-9-]+$/.test(row.name))paths.push(row.name+'.log');
  receipt.preserved=[];for(const p of new Set(paths)){const r=await fetch(base+p,{signal:AbortSignal.timeout(20000)});assert(r.ok,'Preserve previous artifact '+p);const b=Buffer.from(await r.arrayBuffer());mkdirSync(join(out,p,'..'),{recursive:true});writeFileSync(join(out,p),b);receipt.preserved.push({path:p,sha256:sha(b)});}
- // Native build image has no apt lists. Create signed, task-owned indexes and
- // download/extract packages as an unprivileged user; never apt install the host.
  assert.match(readFileSync('/etc/os-release','utf8'),/VERSION_CODENAME=bookworm/);
  for(const d of ['lists/partial','cache/archives/partial','aptlog'])mkdirSync(join(root,d),{recursive:true});
  writeFileSync(join(root,'sources.list'),'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://deb.debian.org/debian bookworm main\ndeb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://deb.debian.org/debian-security bookworm-security main\n');
@@ -47,8 +45,8 @@ print('MIXXX_PACKAGES '+json.dumps(result))
  writeFileSync(join(root,'uris.txt'),uris);writeFileSync(join(root,'download.py'),py);await run('download','python3',[join(root,'download.py')],{timeout:360000});
  const deps=join(root,'deps');env.PATH=join(deps,'usr/bin')+':'+env.PATH;env.LD_LIBRARY_PATH=[join(deps,'usr/lib/x86_64-linux-gnu'),join(deps,'lib/x86_64-linux-gnu')].join(':');env.QT_PLUGIN_PATH=join(deps,'usr/lib/x86_64-linux-gnu/qt5/plugins');
  receipt.packages=JSON.parse(readFileSync(join(root,'package-receipt.json'),'utf8'));
- // Mixxx 2.3 prints its version in --help; --version is not a supported option.
- const help=await run('version-and-help',join(deps,'usr/bin/mixxx'),['--help'],{timeout:20000});
+ // Stock 2.3 exits 2 after printing help; accept that only for this identity read.
+ const help=await run('version-and-help',join(deps,'usr/bin/mixxx'),['--help'],{timeout:20000,expectedExitCodes:[2]});
  assert.match(help,/Mixxx v2\.3\.3/);receipt.mixxxVersion='2.3.3';
  receipt.status='real_binary_prepared_not_playback_acceptance';
  if(process.env.SWAY_MIXXX_EXECUTE_NATIVE==='true'){
