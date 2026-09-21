@@ -82,7 +82,7 @@ try {
       const privateTouchStored = local.getItem('sway.discovery.firstTouch') !== null;
       win.location.pathname = '/discover'; win.location.search = '?utm_source=google';
       for (const event of ['discovery_landing', 'discovery_primary_action']) {
-        sendDiscoveryEvent(event, { shell: 'patron', surface: 'public-discover', route_family: 'public-discover', has_route_context: true, has_session_context: false, build_commit: 'owned-ingestion-fixture' });
+        sendDiscoveryEvent(event, { shell: 'patron', surface: 'public-discover', route_family: 'public-discover', has_route_context: true, has_session_context: false, build_commit: 'owned-ingestion-fixture', ...(event === 'discovery_primary_action' ? { action_kind: 'other' } : {}) });
       }
       await Promise.all(pending.splice(0));
       assert.equal(emitted.length, 3);
