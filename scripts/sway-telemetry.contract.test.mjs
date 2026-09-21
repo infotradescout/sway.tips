@@ -133,4 +133,10 @@ if (failures.length) {
   process.exit(1);
 }
 
+await import('./sway-discovery-entry.browser.test.mjs');
+const ingestion = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-discovery-entry-ingestion.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 180000 });
+if (ingestion.status !== 0) {
+  console.error('Real public-entry ingestion regression failed:', ingestion.error || ingestion.status);
+  process.exit(1);
+}
 console.log('Sway telemetry contract passed.');
