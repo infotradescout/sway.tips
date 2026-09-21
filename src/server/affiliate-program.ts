@@ -2,10 +2,11 @@ import type { Express, Request } from 'express';
 import { sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import type { AccessControl } from './access-control';
+import { runDiscoveryTraffic } from './discovery-traffic';
 
 type Executor = Pick<SwayDb, 'execute'>;
 const CODE = /^[a-f0-9]{32}$/;
-const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][0-9a-f]{3}-[a-f0-9]{12}$/i;
 const COOKIE = 'sway_affiliate_ref';
 const ORIGIN = 'https://app.sway.tips';
 export const AFFILIATE_POLICY_VERSION = '2026-09-08';
@@ -115,6 +116,11 @@ export function registerAffiliateRoutes(input: { app: Express; db: SwayDb | null
   // account relationship begins at signup. Clean profiles do not silently
   // replace the sharer with the profile owner.
   app.use(async (req, res, next) => {
+    // This acquisition ingress runs after JSON parsing and before public APIs.
+    // Passive analytics context is independent of affiliate eligibility and fees.
+    if (req.method === 'POST' && /^\/api\/analytics\/shell\/?$/.test(req.path)) {
+      return runDiscoveryTraffic(req, next);
+    }
     const code = req.query.ref;
     if (!db || req.method !== 'GET' || req.path.startsWith('/api/') || typeof code !== 'string'
       || !CODE.test(code)) return next();
