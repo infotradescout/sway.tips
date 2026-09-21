@@ -133,6 +133,11 @@ if (failures.length) {
   process.exit(1);
 }
 
+const quality = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-acquisition-quality.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 180000 });
+if (quality.status !== 0) {
+  console.error('Actual acquisition-quality ingestion/report regression failed:', quality.error || quality.status);
+  process.exit(1);
+}
 await import('./sway-discovery-entry.browser.test.mjs');
 const ingestion = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-discovery-entry-ingestion.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 180000 });
 if (ingestion.status !== 0) {
