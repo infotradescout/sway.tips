@@ -29,7 +29,7 @@ test('tab session survives reload but separate tabs and denied-storage pages rot
  browser({denied:true});const page=a.getOrCreateDiscoveryJourneyId();browser({denied:true});assert.notEqual(a.getOrCreateDiscoveryJourneyId(),page);
 });
 test('malformed persisted touch is ignored and replaced without throwing',()=>{
- for(const invalid of ['not-json','null','[]','"google"','{"channel":"__proto__","landingPath":"/","capturedAt":"2026-01-01"}','{"channel":"google","landingPath":"//evil.example","capturedAt":"2026-01-01"}']){
+ for(const invalid of ['not-json','null','[]','"google"','{"channel":{"toString":null},"landingPath":"/","capturedAt":"2026-01-01"}','{"channel":"__proto__","landingPath":"/","capturedAt":"2026-01-01"}','{"channel":"google","landingPath":"//evil.example","capturedAt":"2026-01-01"}']){
   const local=storage();local.setItem('sway.discovery.firstTouch',invalid);browser({local});assert.equal(a.captureDiscoveryAttribution().channel,'direct');
  }
 });
