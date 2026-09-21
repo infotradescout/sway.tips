@@ -16,8 +16,17 @@ export function captureCampaignCode(): string | null {
   if (typeof window === 'undefined') return null;
   const fromQuery = new URLSearchParams(window.location.search).get('camp');
   if (fromQuery) {
-    window.sessionStorage.setItem(CAMPAIGN_CODE_STORAGE_KEY, fromQuery);
+    try {
+      window.sessionStorage.setItem(CAMPAIGN_CODE_STORAGE_KEY, fromQuery);
+    } catch {
+      // The current link remains an unverified hint; storage is optional.
+    }
     return fromQuery;
   }
-  return window.sessionStorage.getItem(CAMPAIGN_CODE_STORAGE_KEY);
+  try {
+    return window.sessionStorage.getItem(CAMPAIGN_CODE_STORAGE_KEY);
+  } catch {
+    // A missing campaign hint must not prevent public pages from rendering.
+    return null;
+  }
 }
