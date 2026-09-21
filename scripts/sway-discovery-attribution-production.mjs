@@ -49,6 +49,7 @@ try{
    assert.match(landing.journey_id,/^[0-9a-f-]{36}$/);assert.equal(search.journey_id,landing.journey_id);
    assert.equal(landing.entry_path,'/discover');assert.equal(search.entry_path,'/discover');assert.deepEqual(errors,[]);
    row.channelLabels=[landing.attribution_channel??null,search.attribution_channel??null];
+   assert.deepEqual(row.channelLabels,['google','google'],'Both actual directory events must carry the existing captured source');
    row.joinedEvents=2;row.entryPath='/discover';row.errors=errors;row.blockedWrites=blocked;
    row.horizontalOverflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);assert.equal(row.horizontalOverflow,false);
    row.interceptedAnalytics=payloads.length;row.passed=true;
@@ -57,7 +58,7 @@ try{
   finally{console.log('ATTRIBUTION_PRODUCTION_PAGE '+JSON.stringify(row));await context.close();}
  }
  report.healthAfter=await health();assert.equal(report.pages.length,4);assert(report.pages.every(p=>p.passed));report.result='pass';
- report.scope='Actual deployed public directory in four fresh browser contexts. Deliberate search and emitted payload continuity verified. Analytics POSTs intercepted locally and all other writes blocked; database ingestion, bot classification and organic acquisition NOT established.';
+ report.scope='Actual deployed public directory in four fresh browser contexts. Deliberate search and emitted payload continuity/source verified. Analytics POSTs intercepted locally and all other writes blocked; database ingestion, bot classification and organic acquisition NOT established.';
 }catch(error){report.error=String(error.stack||error);console.error('ATTRIBUTION_PRODUCTION_FAILURE '+report.error);process.exitCode=1;}
 finally{
  await browser?.close();report.finishedAt=new Date().toISOString();fs.writeFileSync(path.join(output,'attribution-production.json'),JSON.stringify(report,null,2));
