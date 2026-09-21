@@ -16,3 +16,15 @@ test('disabled shared-phone feature performs no build or disk writes',async()=>{
  try{process.chdir(dir);delete process.env.GRINDZONE_PHONE_ENABLED;const module=await import(script.href+'?disabled-test');assert.match(module.sourceSha,/^[a-f0-9]{40}$/);assert.equal(module.sourceSha,module.downloadSourceSha);assert.deepEqual(readdirSync(dir),[]);}
  finally{process.chdir(cwd);if(previous===undefined)delete process.env.GRINDZONE_PHONE_ENABLED;else process.env.GRINDZONE_PHONE_ENABLED=previous;rmSync(dir,{recursive:true,force:true});}
 });
+test('saved-game workflow runs before packaging and includes public-network verification',()=>{
+ const source=readFileSync(script,'utf8');
+ const local="run(target,process.execPath,['tools/verify-save-data.mjs',hostRoot,'local',evidence]);";
+ const live="run(target,process.execPath,['tools/verify-save-data.mjs',hostRoot,'live',evidence]);";
+ assert.equal(source.split(local).length,2);assert.equal(source.split(live).length,2);
+ assert.ok(source.indexOf(local)<source.indexOf("const download=path.join(target,'downloads')"));
+ assert.ok(source.indexOf(live)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
+ assert.match(source,/\['phone','zones','discovery','cache','studio','save-data'\]/);
+ assert.match(source,/Required local acceptance report missing/);
+ assert.match(source,/result\.passed!==true\|\|result\.source!==downloadSourceSha/);
+ assert.doesNotMatch(source,/writeFileSync\([^\n]*stat-definitions\.json/);
+});
