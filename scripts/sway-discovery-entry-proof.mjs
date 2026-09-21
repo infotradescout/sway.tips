@@ -3,7 +3,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-const candidate='ea7477a2686d9b9a0991056f5520cc5d8728531c',base='8ac9e03c242212f43fdfe882bbf70ad0a02cece8';
+const candidate='e7207426ef30f0cdd05475d5680f3176528ff97f',base='8ac9e03c242212f43fdfe882bbf70ad0a02cece8';
 const beforePrivateRouteCorrection='21f1dbd4a7b1cf9b6c45b9ba538f4de5bc538092';
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'sway-discovery-entry-')),checkout=path.join(temp,'candidate'),baseline=path.join(temp,'baseline'),output=path.resolve('.validation-public');
 fs.mkdirSync(output,{recursive:true});
