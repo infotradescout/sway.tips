@@ -489,6 +489,9 @@ export function createAccessControl({
   }
 
   async function hydrateRequestActor(req: Request) {
+    // server.ts runs hydration after JSON parsing for every request, including
+    // APIs that intentionally bypass the document-only routeFamilyGuard.
+    applyTrafficTruthToTelemetryRequest(req);
     if (hasResolvedActor(req)) {
       return resolveActor(req);
     }
@@ -563,8 +566,7 @@ export function createAccessControl({
           req,
           actor,
           fallbackPolicy ?? createFallbackAccessPolicy(),
-          fallbackVerificationConfig ?? createFallbackVerificationConfig(),
-          { allowSupport: false }
+          fallbackVerificationConfig ?? createFallbackVerificationConfig()
         );
       }
       if (await hasAdminRole(db, actor.actorId)) {
