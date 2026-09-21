@@ -66,12 +66,10 @@ export function runDiscoveryTraffic<T>(req: RequestSignals, next: () => T): T {
   return context.run(classifyDiscoveryRequest(req), next);
 }
 
-/** Separate metadata dimension: never overload the source field or infer a durable conversion. */
+/** Separate metadata dimension; non-request writes and durable outcome contracts stay unchanged. */
 export function withDiscoveryTrafficEvidence(metadata: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...metadata,
-    traffic_quality: context.getStore() ?? evidence('unclassified', 'request_evidence_unavailable')
-  };
+  const observed = context.getStore();
+  return observed ? { ...metadata, traffic_quality: observed } : metadata;
 }
 
 export function readDiscoveryTrafficClass(metadata: unknown): DiscoveryTrafficClass | 'legacy_unclassified' {
