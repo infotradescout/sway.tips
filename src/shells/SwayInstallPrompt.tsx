@@ -59,7 +59,12 @@ export default function SwayInstallPrompt() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem(INSTALL_DISMISS_KEY) === '1';
+    try {
+      return window.localStorage.getItem(INSTALL_DISMISS_KEY) === '1';
+    } catch {
+      // An optional install prompt must not stop any application shell loading.
+      return true;
+    }
   });
   const [standalone, setStandalone] = useState(() => isStandaloneMode());
   const [settled, setSettled] = useState(false);
@@ -90,8 +95,12 @@ export default function SwayInstallPrompt() {
   if (!canPromptInstall && !showIosHelp) return null;
 
   const dismiss = () => {
-    window.localStorage.setItem(INSTALL_DISMISS_KEY, '1');
     setDismissed(true);
+    try {
+      window.localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+    } catch {
+      // Keep dismissal effective for this page even when persistence is denied.
+    }
   };
 
   const install = async () => {
