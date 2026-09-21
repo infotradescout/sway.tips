@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-const candidate = '940337b312352c38578f13b839d2dab4eb0c61f5';
+const candidate = '757f92edc45cc7b8b4a17ea161d465697a221c3e';
+const metadataCandidate = '940337b312352c38578f13b839d2dab4eb0c61f5';
 const base = '8186649c586a570a9c4efbd8ed2b8307fde58501';
 const output = resolve('.validation-public');
 const temporary = mkdtempSync(join(tmpdir(), 'sway-public-information-'));
@@ -36,6 +37,14 @@ try {
     .replace('<title>${title}</title><meta name="description" content="${description}"><link rel="canonical" href="https://app.sway.tips${path}">', '${buildPublicInformationMetadata(path, title, description, content)}');
   assert.equal(current, expected, 'Visible copy, styles and route behavior must remain byte-identical');
   report.visibleContentPreserved = true;
+  const changed = run('registration-only-delta','git',['diff','--name-only',metadataCandidate,candidate]).split('\n').sort();
+  assert.deepEqual(changed, ['package.json','scripts/sway-contract-gate-normalization.contract.test.mjs']);
+  const before = JSON.parse(run('previous-package','git',['show',metadataCandidate + ':package.json']));
+  const after = JSON.parse(readFileSync(join(checkout,'package.json'),'utf8'));
+  const nativePrefix = 'node --test scripts/grindzone-download.contract.test.mjs && node --test scripts/grindzone-host.contract.test.mjs && ';
+  assert.equal(after.scripts['test:contracts'], nativePrefix + before.scripts['test:contracts']);
+  after.scripts['test:contracts'] = before.scripts['test:contracts'];
+  assert.deepEqual(after, before, 'Other scripts/dependencies must remain unchanged');
   if (process.env.SWAY_PUBLIC_INFO_DISCOVERY_OBSERVE) {
     const expectedCommit = process.env.SWAY_PUBLIC_INFO_DISCOVERY_OBSERVE;
     assert.match(expectedCommit, /^[a-f0-9]{40}$/);
@@ -54,12 +63,21 @@ try {
   } else {
     run('npm-ci','npm',['ci','--include=dev','--no-audit','--no-fund']);
     run('metadata-tests',process.execPath,['--test','scripts/sway-public-information-metadata.test.cjs']);
+    run('native-registration',process.execPath,['scripts/sway-contract-gate-normalization.contract.test.mjs']);
     run('lint','npm',['run','lint']);
     run('build','npm',['run','build']);
     run('browser-install',process.execPath,['node_modules/playwright/cli.js','install','chromium']);
     run('contracts','npm',['run','test:contracts']);
+    // Keep generated browser evidence outside the clean source boundary. Only
+    // the known output directory in this owned disposable checkout may move.
+    const untracked = run('generated-artifacts','git',['ls-files','--others','--exclude-standard']).split('\n').filter(Boolean);
+    assert(untracked.every(file => file.startsWith('tmp/public-entry-qa/')), 'Unexpected untracked output: ' + untracked.join(', '));
+    if (existsSync(join(checkout,'tmp/public-entry-qa'))) {
+      cpSync(join(checkout,'tmp/public-entry-qa'), join(output,'public-entry-qa'), { recursive:true });
+      rmSync(join(checkout,'tmp/public-entry-qa'), { recursive:true });
+    }
     assert.equal(run('final-clean','git',['status','--porcelain']), '');
-    report.scope = 'Exact-source npm ci, lint, production build and existing full contracts, including real Express/Chromium public pages. No production database or provider credentials.';
+    report.scope = 'Exact-source npm ci, lint, production build and full contracts, including native shared-host checks and real Express/Chromium public pages. No production database or provider credentials.';
   }
   report.result = 'pass';
 } catch (error) { report.error = String(error.stack || error); console.error('INFORMATION_FAILURE ' + report.error); process.exitCode = 1; }
