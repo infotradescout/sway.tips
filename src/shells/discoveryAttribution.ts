@@ -47,6 +47,7 @@ function writeJson(storage: Storage | null, key: string, value: unknown) {
 function readTouch(storage: Storage | null, key: string): DiscoveryTouch | null {
   const value = readJson<DiscoveryTouch>(storage, key);
   if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.channel !== 'string'
     || !Object.prototype.hasOwnProperty.call(CHANNEL_STRENGTH, value.channel)
     || typeof value.landingPath !== 'string' || !value.landingPath.startsWith('/')
     || value.landingPath.startsWith('//') || typeof value.capturedAt !== 'string'
