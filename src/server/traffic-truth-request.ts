@@ -78,9 +78,23 @@ export function classifyTrafficRequest(
 }
 
 export function shouldHard404ScannerRequest(
-  req: Pick<Request, 'path' | 'originalUrl'>
+  req: Pick<Request, 'path' | 'originalUrl'> & Partial<Pick<Request, 'headers' | 'method'>>,
+  env: TrafficTruthEnvironment = process.env
 ) {
-  return isScannerTrafficPath(req.path || req.originalUrl || '/');
+  const requestPath = normalizeTrafficPath(req.path || req.originalUrl || '/');
+  const host = req.headers ? readHeader({ headers: req.headers }, 'host')?.toLowerCase() || '' : '';
+  // The real local app uses Vite in development/test. Its source modules are
+  // legitimate assets, not public production files. Never enable this exception
+  // for a production process, a remote host, writes, secrets, or traversal.
+  const localDevelopmentModule =
+    (env.NODE_ENV === 'development' || env.NODE_ENV === 'test')
+    && /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)
+    && (req.method === 'GET' || req.method === 'HEAD')
+    && /^\/(?:src|node_modules)\//.test(requestPath)
+    && /\.(?:[cm]?js|jsx|tsx?|css|json|map|svg)$/.test(requestPath)
+    && !/(?:^|\/)\.\.(?:\/|$)/.test(requestPath);
+  if (localDevelopmentModule) return false;
+  return isScannerTrafficPath(requestPath);
 }
 
 export function applyTrafficTruthToTelemetryRequest(
