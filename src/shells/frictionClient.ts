@@ -1,4 +1,5 @@
 import {
+  captureDiscoveryAttribution,
   getDiscoveryEntryPath,
   getOrCreateDiscoveryJourneyId
 } from './discoveryAttribution';
@@ -121,6 +122,7 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
     if (!hasOnlyAllowedPayloadKeys(payload)) return;
     if (!isValidPayload(payload)) return;
 
+    const attributionChannel = payload.attribution_channel || captureDiscoveryAttribution().channel;
     void fetch('/api/analytics/shell', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -134,7 +136,7 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
         build_commit: payload.build_commit,
         journey_id: getOrCreateDiscoveryJourneyId(),
         entry_path: getDiscoveryEntryPath(),
-        ...(payload.attribution_channel ? { attribution_channel: payload.attribution_channel } : {}),
+        attribution_channel: attributionChannel,
         ...(payload.entity_kind ? { entity_kind: payload.entity_kind } : {}),
         ...(payload.entity_key ? { entity_key: payload.entity_key } : {}),
         ...(payload.action_kind ? { action_kind: payload.action_kind } : {}),
