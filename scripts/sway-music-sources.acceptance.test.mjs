@@ -9,6 +9,9 @@ for (const script of [
   'scripts/sway-library-source-count.behavior.test.ts',
   'scripts/sway-virtualdj-network-control.behavior.test.mjs',
   'scripts/sway-mixxx-mapping.test.mjs',
+  'scripts/sway-native-player-adapters.test.mjs',
+  'scripts/sway-native-player-host.test.mjs',
+  'scripts/sway-native-player.browser.test.mjs',
   'scripts/sway-music-sources.browser.test.mjs'
 ]) {
   const result = spawnSync(process.execPath, ['--import', 'tsx', script], { stdio: 'inherit', timeout: 300000 });
