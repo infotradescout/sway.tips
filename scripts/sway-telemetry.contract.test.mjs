@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const server = readFileSync(join(root, 'server.ts'), 'utf8');
@@ -117,6 +118,14 @@ requireIncludes(
   'node scripts/sway-telemetry.contract.test.mjs',
   'test:contracts must include the shell telemetry contract.'
 );
+
+if (!failures.length) {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', '--test-reporter=tap', 'scripts/sway-discovery-attribution.test.mjs'], { cwd: root, encoding: 'utf8', timeout: 30000 });
+  console.log(result.stdout || '');
+  if (result.status !== 0 || !/^# pass 9\s*$/m.test(result.stdout || '') || !/^# fail 0\s*$/m.test(result.stdout || '')) {
+    failures.push('Discovery attribution regression failed: ' + (result.error || result.stderr || result.status));
+  }
+}
 
 if (failures.length) {
   console.error('Sway telemetry contract failed:');
