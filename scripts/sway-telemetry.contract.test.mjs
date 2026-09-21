@@ -133,4 +133,5 @@ if (failures.length) {
   process.exit(1);
 }
 
+await import('./sway-discovery-entry.browser.test.mjs');
 console.log('Sway telemetry contract passed.');
