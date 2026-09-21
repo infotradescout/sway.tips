@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { auditEvents } from '../db/schema';
+import { withDiscoveryTrafficEvidence } from './discovery-traffic';
 
 export type AuditWriteInput = {
   actorId: string | null;
@@ -26,6 +27,8 @@ export async function writeAuditEvent(executor: any, input: AuditWriteInput) {
     eventType: input.eventType,
     previousStatus: input.previousStatus ?? null,
     nextStatus: input.nextStatus ?? null,
-    metadata: input.metadata ?? {}
+    metadata: input.entityType === 'shell_friction'
+      ? withDiscoveryTrafficEvidence(input.metadata ?? {})
+      : input.metadata ?? {}
   });
 }
