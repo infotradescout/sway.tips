@@ -47,7 +47,7 @@ try {
   child.stderr.on('data', data => { serverLog = (serverLog + data).slice(-20000); });
   let ready = false;
   for (let attempt = 0; attempt < 150; attempt++) {
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null || child.signalCode !== null) break;
     try {
       const response = await originalFetch(origin + '/api/build-marker', { signal: AbortSignal.timeout(1000) });
       if (response.ok && (response.headers.get('content-type') || '').includes('json')) { ready = true; break; }
@@ -116,10 +116,12 @@ try {
 } catch (error) { report.error = String(error.stack || error); process.exitCode = 1; }
 finally {
   globalThis.fetch = originalFetch; restoreGlobal('window', previousWindow); restoreGlobal('document', previousDocument);
-  if (child && child.exitCode === null) {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise(resolve => child.once('exit', resolve));
     child.kill('SIGTERM');
-    for (let attempt = 0; attempt < 50 && child.exitCode === null; attempt++) await delay(100);
-    if (child.exitCode === null) { child.kill('SIGKILL'); await new Promise(resolve => child.once('exit', resolve)); }
+    for (let attempt = 0; attempt < 50 && child.exitCode === null && child.signalCode === null; attempt++) await delay(100);
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
   }
   await database?.close();
   report.finishedAt = new Date().toISOString();
