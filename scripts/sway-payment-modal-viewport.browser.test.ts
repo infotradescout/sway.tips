@@ -163,7 +163,9 @@ async function main() {
 
     const page = await context.newPage();
     page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
-    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-payment-modal-viewport.html`, { waitUntil: 'domcontentloaded' });
+    // Development-server boot is not the interaction deadline. Keep the
+    // dialog assertions below unchanged while bounding cold Windows startup.
+    await page.goto(`${baseUrl}/scripts/browser-fixtures/sway-payment-modal-viewport.html`, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
     await page.getByRole('button', { name: 'Request', exact: true }).first().click();
     await page.getByLabel('Your Name / Group').fill('Viewport QA');

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { and, asc, eq, inArray, lte, ne, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { createSwayDb } from '../db/client';
 import { liveRoomProcessorEvents, payments } from '../db/schema';
 import type { PaymentProviderAdapter, ProviderWebhookEnvelope } from './payment-provider';
@@ -35,7 +35,7 @@ function safeError(error: unknown) {
 
 function retryAt(attemptCount: number) {
   const seconds = Math.min(300, Math.max(2, 2 ** Math.min(attemptCount, 8)));
-  return new Date(Date.now() + seconds * 1_000);
+  return sql<Date>`statement_timestamp() + (${seconds} * interval '1 second')`;
 }
 
 function minimizedPayload(event: ProviderWebhookEnvelope): Record<string, unknown> {
@@ -68,29 +68,18 @@ function recordString(value: unknown) {
 export function createPaymentWebhookService({
   databaseUrl,
   provider,
-  hooks,
-  expectedLivemode = false
+  hooks
 }: {
   databaseUrl?: string;
   provider: PaymentProviderAdapter;
   hooks?: {
     afterClaim?: (event: typeof liveRoomProcessorEvents.$inferSelect) => Promise<void>;
   };
-  /** Must match STRIPE_SECRET_KEY mode: false for sk_test_, true for sk_live_. */
-  expectedLivemode?: boolean;
 }) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
-  const service = createPaymentService({ databaseUrl, provider });
-
-  function assertLivemodeMatch(livemode: boolean, context: string) {
-    if (livemode !== expectedLivemode) {
-      throw new Error(
-        livemode
-          ? `${context}: live-mode Stripe event received while Sway is configured for test keys.`
-          : `${context}: test-mode Stripe event received while Sway is configured for live keys.`
-      );
-    }
-  }
+  const paymentMode = provider.mode;
+  const expectedLivemode = paymentMode === 'live';
+  const service = createPaymentService({ databaseUrl, provider, paymentMode });
 
   async function receiveVerifiedEvent(rawBody: string, event: ProviderWebhookEnvelope) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
@@ -127,8 +116,11 @@ export function createPaymentWebhookService({
   async function claimEvent(eventId?: string) {
     if (!db) return null;
     return db.transaction(async (tx) => {
-      const now = new Date();
-      const staleBefore = new Date(now.getTime() - EVENT_LEASE_MS);
+      // Receipt defaults, retry deadlines and processing leases share the
+      // database clock. App clock skew or millisecond truncation must not
+      // delay a due event, shorten backoff or steal another worker's lease.
+      const now = sql<Date>`statement_timestamp()`;
+      const staleBefore = sql<Date>`statement_timestamp() - (${EVENT_LEASE_MS} * interval '1 millisecond')`;
       const [row] = await tx
         .select()
         .from(liveRoomProcessorEvents)
@@ -214,7 +206,10 @@ export function createPaymentWebhookService({
 
   async function processClaimedEvent(event: typeof liveRoomProcessorEvents.$inferSelect) {
     if (!db) throw new Error('Durable webhook inbox is unavailable.');
-    assertLivemodeMatch(event.livemode, 'processClaimedEvent');
+    if (event.livemode !== expectedLivemode) {
+      await markProcessed(event, { status: 'ignored' });
+      return { status: 'ignored' as const, reason: 'opposite_payment_mode' as const };
+    }
     const mappedState = mapProviderEventToPaymentState(event.eventType);
     if (!mappedState) {
       await markProcessed(event, { status: 'ignored' });
@@ -278,14 +273,15 @@ export function createPaymentWebhookService({
         || amountRefundedCents < payment.amountTotal
       ) === false;
       if (payment.paymentStatus !== 'refunded') {
-        await db
-          .update(payments)
-          .set({ refundStatus: 'pending', updatedAt: new Date() })
-          .where(and(
-            eq(payments.id, paymentId),
-            ne(payments.paymentStatus, 'refunded'),
-            ne(payments.refundStatus, 'refunded')
-          ));
+        const pending = await service.markRefundPending({
+          paymentId,
+          processor: provider.processor,
+          actorType: 'provider_webhook',
+          source: `verified_webhook:${event.processorEventId}`
+        });
+        if (pending.status === 'missing' || pending.status === 'unavailable') {
+          throw new Error(`Payment refund fence ${pending.status}.`);
+        }
 
         // Reconcile every refund from current provider truth, including a full
         // refund delivered before its capture predecessor. For partial refunds,
@@ -382,15 +378,6 @@ export function createPaymentWebhookService({
     }
     const providerEvent = await provider.parseWebhookEvent(input);
     const received = await receiveVerifiedEvent(input.rawBody, providerEvent);
-    try {
-      assertLivemodeMatch(received.row.livemode, 'ingestWebhook');
-    } catch (error) {
-      const claimed = await claimEvent(received.row.id);
-      if (claimed) {
-        await markFailed(claimed, error, { terminal: true });
-      }
-      throw error;
-    }
     if (['processed', 'ignored'].includes(received.row.status)) {
       return { status: 'duplicate' as const };
     }

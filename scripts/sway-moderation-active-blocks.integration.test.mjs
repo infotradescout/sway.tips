@@ -48,8 +48,15 @@ async function applyMigrations(client, options = {}) {
   for (const filename of migrationFiles) {
     const sql = readFileSync(join(migrationDir, filename), 'utf8');
     const statements = splitStatements(sql);
-    for (const statement of statements) {
-      await client.query(statement);
+    await client.query('BEGIN');
+    try {
+      for (const statement of statements) {
+        await client.query(statement);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
   }
 }
@@ -163,15 +170,16 @@ async function main() {
 
   try {
     await proveUpgradeFromLegacyDuplicateRows(databaseUrl);
-    if (!embeddedProof) {
-      const adminClient = new Client({ connectionString: databaseUrl });
-      await adminClient.connect();
-      try {
-        await resetDatabase(adminClient);
-        await applyMigrations(adminClient);
-      } finally {
-        await adminClient.end();
-      }
+    // The legacy-upgrade proof intentionally stops at 0035. Rebuild the
+    // disposable schema through the current migration head before exercising
+    // current application stores, including any columns added after 0035.
+    const adminClient = new Client({ connectionString: databaseUrl });
+    await adminClient.connect();
+    try {
+      await resetDatabase(adminClient);
+      await applyMigrations(adminClient);
+    } finally {
+      await adminClient.end();
     }
 
     const firstService = createModerationService(databaseUrl);

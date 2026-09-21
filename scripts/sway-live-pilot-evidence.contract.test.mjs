@@ -95,7 +95,7 @@ requireIncludes('Live pilot readiness checklist', checklist, [
 requireIncludes('package.json', packageJson, [
   '"test:sway-live-pilot-evidence": "node scripts/sway-live-pilot-evidence.contract.test.mjs"',
   'node scripts/sway-live-pilot-evidence.contract.test.mjs',
-  '"validate": "npm run lint && npm run build && npm run test:contracts"'
+  '"validate": "npm run lint && npm run build && npm run test:payment-pricing && npm run test:contracts"'
 ]);
 
 if (failures.length) {

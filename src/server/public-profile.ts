@@ -47,11 +47,104 @@ export function normalizePublicProfilePrimaryRole(value: unknown): PublicPerform
     : null;
 }
 
+export function normalizePublicProfileRoles(
+  value: unknown,
+  fallbackPrimaryRole?: unknown
+): PublicPerformerPrimaryRoleId[] {
+  const roles: PublicPerformerPrimaryRoleId[] = [];
+  const seen = new Set<PublicPerformerPrimaryRoleId>();
+  const candidates = Array.isArray(value) ? value : [];
+
+  for (const candidate of candidates) {
+    const role = normalizePublicProfilePrimaryRole(candidate);
+    if (!role || seen.has(role)) continue;
+    seen.add(role);
+    roles.push(role);
+  }
+
+  if (!roles.length) {
+    const fallback = normalizePublicProfilePrimaryRole(fallbackPrimaryRole);
+    if (fallback) roles.push(fallback);
+  }
+
+  return roles;
+}
+
 export function labelForPublicPerformerPrimaryRole(roleId: string | null | undefined) {
   const normalizedRoleId = normalizePublicProfilePrimaryRole(roleId);
   if (!normalizedRoleId) return null;
   const found = PUBLIC_PERFORMER_PRIMARY_ROLES.find((role) => role.id === normalizedRoleId);
   return found?.label ?? null;
+}
+
+export const PUBLIC_PROFILE_SECTION_IDS = [
+  'identity', 'about', 'live', 'events', 'releases', 'media', 'links', 'booking', 'social'
+] as const;
+
+export type PublicProfileSectionId = typeof PUBLIC_PROFILE_SECTION_IDS[number];
+
+export type PublicProfileLayout = {
+  sectionOrder: PublicProfileSectionId[];
+  customized: boolean;
+  revision: number;
+};
+
+const PUBLIC_PROFILE_SECTION_ID_SET = new Set<string>(PUBLIC_PROFILE_SECTION_IDS);
+
+// A partial order remains compatible when a new section is added. An empty
+// array is not a reset: the owner API uses an explicit null for that operation.
+export function isPublicProfileSectionOrder(value: unknown): value is PublicProfileSectionId[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= PUBLIC_PROFILE_SECTION_IDS.length
+    && Array.from(value).every((section) => typeof section === 'string' && PUBLIC_PROFILE_SECTION_ID_SET.has(section))
+    && new Set(value).size === value.length;
+}
+
+export function resolvePublicProfileSectionOrder(input: {
+  roles?: unknown;
+  primaryRole?: unknown;
+  sectionOrder?: unknown;
+}): PublicProfileSectionId[] {
+  const primaryRole = normalizePublicProfileRoles(input.roles, input.primaryRole)[0];
+  const defaults: PublicProfileSectionId[] = primaryRole === 'musician' || primaryRole === 'producer'
+    ? ['identity', 'releases', 'links', 'media', 'live', 'events', 'about', 'booking', 'social']
+    : primaryRole === 'dj'
+      ? ['identity', 'live', 'media', 'events', 'booking', 'links', 'releases', 'about', 'social']
+      : ['comedian', 'host', 'speaker', 'dancer', 'magician'].includes(primaryRole)
+        ? ['identity', 'media', 'events', 'booking', 'live', 'about', 'links', 'releases', 'social']
+        : primaryRole === 'creator'
+          ? ['identity', 'media', 'links', 'about', 'events', 'live', 'releases', 'booking', 'social']
+          : [...PUBLIC_PROFILE_SECTION_IDS];
+  const savedOrder = isPublicProfileSectionOrder(input.sectionOrder) ? input.sectionOrder : null;
+  if (!savedOrder) return defaults;
+  return [...savedOrder, ...defaults.filter((section) => !savedOrder.includes(section))];
+}
+
+export function readPublicProfileLayout(
+  metadata: unknown,
+  roles?: unknown,
+  primaryRole?: unknown
+): PublicProfileLayout {
+  const profileMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {};
+  const storedLayout = profileMetadata.publicProfileLayout;
+  const layout = storedLayout && typeof storedLayout === 'object' && !Array.isArray(storedLayout)
+    ? storedLayout as Record<string, unknown>
+    : {};
+  const revision = typeof layout.revision === 'number' && Number.isSafeInteger(layout.revision) && layout.revision >= 0
+    ? layout.revision
+    : 0;
+  return {
+    sectionOrder: resolvePublicProfileSectionOrder({
+      roles: roles ?? profileMetadata.roles,
+      primaryRole: primaryRole ?? profileMetadata.primaryRole,
+      sectionOrder: layout.sectionOrder
+    }),
+    customized: isPublicProfileSectionOrder(layout.sectionOrder),
+    revision
+  };
 }
 
 export function resolvePublicProfileHeroName(input: {
@@ -67,11 +160,25 @@ export function resolvePublicProfileHeroName(input: {
   return displayName || 'Sway page';
 }
 
+// Public badge hold, 2026-09-12: only dj3x is approved while the other
+// partners finish their profiles. This does not change membership or benefits.
+export function shouldShowPublicProfilePartnerBadge(
+  handle: string | null | undefined,
+  partnerActive: boolean
+): boolean {
+  return partnerActive && handle?.trim().toLowerCase() === 'dj3x';
+}
+
 export function resolvePublicProfilePageKindLabel(input: {
   primaryRole: string | null | undefined;
+  roles?: unknown;
   specialties?: string[] | null;
   isPreview?: boolean;
 }) {
+  const roleLabels = normalizePublicProfileRoles(input.roles, input.primaryRole)
+    .map((role) => labelForPublicPerformerPrimaryRole(role))
+    .filter((label): label is NonNullable<typeof label> => Boolean(label));
+  if (roleLabels.length) return roleLabels.join(' · ');
   const roleLabel = labelForPublicPerformerPrimaryRole(input.primaryRole);
   if (roleLabel) return roleLabel;
   const specialty = Array.isArray(input.specialties)
@@ -87,7 +194,7 @@ export function resolvePublicProfilePageKindLabel(input: {
 
 export function mergePublicProfileMetadata(
   existing: unknown,
-  updates: { stageName?: string | null; primaryRole?: string | null }
+  updates: { stageName?: string | null; primaryRole?: string | null; roles?: unknown }
 ) {
   const merged = existing && typeof existing === 'object' && !Array.isArray(existing)
     ? { ...(existing as Record<string, unknown>) }
@@ -97,9 +204,24 @@ export function mergePublicProfileMetadata(
     if (updates.stageName) merged.stageName = updates.stageName;
     else delete merged.stageName;
   }
-  if (updates.primaryRole !== undefined) {
-    if (updates.primaryRole) merged.primaryRole = updates.primaryRole;
-    else delete merged.primaryRole;
+  if (updates.roles !== undefined) {
+    const roles = normalizePublicProfileRoles(updates.roles, updates.primaryRole);
+    if (roles.length) {
+      merged.roles = roles;
+      merged.primaryRole = roles[0];
+    } else {
+      delete merged.roles;
+      delete merged.primaryRole;
+    }
+  } else if (updates.primaryRole !== undefined) {
+    const primaryRole = normalizePublicProfilePrimaryRole(updates.primaryRole);
+    if (primaryRole) {
+      merged.roles = [primaryRole];
+      merged.primaryRole = primaryRole;
+    } else {
+      delete merged.roles;
+      delete merged.primaryRole;
+    }
   }
 
   return Object.keys(merged).length ? merged : null;

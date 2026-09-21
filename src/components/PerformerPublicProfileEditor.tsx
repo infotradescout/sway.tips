@@ -2,13 +2,15 @@ import {
   ArrowDown,
   ArrowUp,
   BadgeCheck,
+  Eye,
+  EyeOff,
   ExternalLink,
   Link2,
   Plus,
   Save,
   Trash2
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { PUBLIC_PERFORMER_PRIMARY_ROLES } from '../server/public-profile';
 import { PerformerVisibilityControl } from './PerformerVisibilityControl';
 
@@ -22,7 +24,7 @@ type LinkDraft = {
 };
 
 type ProfileForm = {
-  primaryRole: string;
+  roles: string[];
   stageName: string;
   headline: string;
   specialties: string;
@@ -41,7 +43,7 @@ type ProfileForm = {
 };
 
 const EMPTY_FORM: ProfileForm = {
-  primaryRole: '',
+  roles: [],
   stageName: '',
   headline: '',
   specialties: '',
@@ -86,16 +88,40 @@ function fieldLabel() {
   return 'text-[9px] font-black uppercase tracking-[0.2em] text-slate-500';
 }
 
-export default function PerformerPublicProfileEditor({
-  performerHandle,
-  previewMode = false
-}: {
+type ProfileEditorProps = {
   performerHandle?: string | null;
   previewMode?: boolean;
-}) {
+};
+
+type ProfileEditorScope = {
+  active: boolean;
+  controller: AbortController;
+  saving: boolean;
+  accepting: boolean;
+};
+
+export default function PerformerPublicProfileEditor(props: ProfileEditorProps) {
+  // A performer or live/preview transition must discard the entire previous draft,
+  // including its visibility control and any unsubmitted terms confirmation.
+  return <ScopedPerformerPublicProfileEditor
+    key={JSON.stringify([props.performerHandle ?? null, props.previewMode === true])}
+    {...props}
+  />;
+}
+
+function ScopedPerformerPublicProfileEditor({
+  performerHandle,
+  previewMode = false
+}: ProfileEditorProps) {
   const [form, setForm] = useState<ProfileForm>(EMPTY_FORM);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const operationScope = useRef<ProfileEditorScope | null>(null);
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'success' | 'error'>(previewMode ? 'idle' : 'loading');
   const [message, setMessage] = useState<string | null>(null);
+  const [showOwnerPreview, setShowOwnerPreview] = useState(() => (
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === '1'
+  ));
   const [partner, setPartner] = useState<{
     granted: boolean;
     active: boolean;
@@ -119,25 +145,72 @@ export default function PerformerPublicProfileEditor({
   const [partnerAcceptanceStatus, setPartnerAcceptanceStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [partnerAcceptanceMessage, setPartnerAcceptanceMessage] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    const scope: ProfileEditorScope = {
+      active: true, controller: new AbortController(), saving: false, accepting: false
+    };
+    operationScope.current = scope;
+    return () => {
+      scope.active = false;
+      scope.controller.abort();
+      if (operationScope.current === scope) operationScope.current = null;
+    };
+  }, [loadAttempt]);
+
+  const isCurrentScope = (scope: ProfileEditorScope | null): scope is ProfileEditorScope => (
+    scope !== null && scope.active && operationScope.current === scope
+  );
+
+  const revokeProfileAccess = (scope: ProfileEditorScope) => {
+    if (!isCurrentScope(scope)) return;
+    scope.active = false;
+    scope.controller.abort();
+    setProfileLoaded(false);
+    setForm(EMPTY_FORM);
+    setPartner({
+      granted: false, active: false, accepted: false, suspended: false,
+      acceptanceRequired: false, termsVersion: null, termsHash: null, termsText: null
+    });
+    setPartnerAcceptanceConfirmed(false);
+    setPartnerAcceptanceStatus('idle');
+    setPartnerAcceptanceMessage(null);
+    setShowOwnerPreview(false);
+    setStatus('error');
+    setMessage('Your access changed. Reload your profile before editing.');
+  };
+
   useEffect(() => {
     if (previewMode) return;
+    const scope = operationScope.current;
+    if (!isCurrentScope(scope)) return;
     let cancelled = false;
     const controller = new AbortController();
 
     const load = async () => {
+      setProfileLoaded(false);
       setStatus('loading');
       setMessage(null);
       try {
         const response = await fetch('/api/talent/profile/public', { cache: 'no-store', signal: controller.signal });
+        if (cancelled || !isCurrentScope(scope)) return;
+        if (response.status === 401 || response.status === 403) {
+          revokeProfileAccess(scope);
+          return;
+        }
         const data = await response.json().catch(() => null);
-        if (cancelled) return;
+        if (cancelled || !isCurrentScope(scope)) return;
         if (!response.ok || !data?.profile) {
           throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to load your public page.');
         }
 
         const profile = data.profile;
+        const roles = Array.isArray(profile.roles)
+          ? profile.roles.filter((role: unknown): role is string => typeof role === 'string')
+          : text(profile.primaryRole)
+            ? [text(profile.primaryRole)]
+            : [];
         setForm({
-          primaryRole: text(profile.primaryRole),
+          roles,
           stageName: text(profile.stageName),
           headline: text(profile.headline),
           specialties: Array.isArray(profile.specialties) ? profile.specialties.join(', ') : '',
@@ -173,9 +246,10 @@ export default function PerformerPublicProfileEditor({
           termsHash: text(profile.partner?.termsHash) || null,
           termsText: text(profile.partner?.termsText) || null
         });
+        setProfileLoaded(true);
         setStatus('idle');
       } catch (error) {
-        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
+        if (cancelled || !isCurrentScope(scope) || (error instanceof DOMException && error.name === 'AbortError')) return;
         setStatus('error');
         setMessage(error instanceof Error ? error.message : 'Unable to load your public page.');
       }
@@ -186,7 +260,7 @@ export default function PerformerPublicProfileEditor({
       cancelled = true;
       controller.abort();
     };
-  }, [previewMode]);
+  }, [previewMode, loadAttempt]);
 
   const specialties = useMemo(() => form.specialties
     .split(',')
@@ -233,16 +307,25 @@ export default function PerformerPublicProfileEditor({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (previewMode || status === 'saving') return;
+    const scope = operationScope.current;
+    if (previewMode || !profileLoaded || !isCurrentScope(scope) || scope.saving) return;
+    if (!form.roles.length) {
+      setStatus('error');
+      setMessage('Choose at least one performer role.');
+      return;
+    }
+    scope.saving = true;
     setStatus('saving');
     setMessage(null);
 
     try {
       const response = await fetch('/api/talent/profile/public', {
         method: 'POST',
+        signal: scope.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          primaryRole: form.primaryRole || null,
+          roles: form.roles,
+          primaryRole: form.roles[0] || null,
           stageName: form.stageName,
           headline: form.headline,
           specialties,
@@ -270,32 +353,49 @@ export default function PerformerPublicProfileEditor({
           }))
         })
       });
+      if (!isCurrentScope(scope)) return;
+      if (response.status === 401 || response.status === 403) {
+        revokeProfileAccess(scope);
+        return;
+      }
       const data = await response.json().catch(() => null);
+      if (!isCurrentScope(scope)) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to save your public page.');
       }
       setStatus('success');
       setMessage('Public page saved.');
+      window.dispatchEvent(new Event('sway:performer-profile-updated'));
     } catch (error) {
+      if (!isCurrentScope(scope)) return;
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Unable to save your public page.');
+    } finally {
+      scope.saving = false;
     }
   };
 
   const handleAcceptPartnerTerms = async () => {
+    const scope = operationScope.current;
     if (
       previewMode
+      || !profileLoaded
+      || !isCurrentScope(scope)
+      || scope.accepting
+      || !partner.acceptanceRequired
       || partnerAcceptanceStatus === 'submitting'
       || !partnerAcceptanceConfirmed
       || !partner.termsVersion
       || !partner.termsHash
     ) return;
 
+    scope.accepting = true;
     setPartnerAcceptanceStatus('submitting');
     setPartnerAcceptanceMessage(null);
     try {
       const response = await fetch('/api/talent/partner/terms/accept', {
         method: 'POST',
+        signal: scope.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accepted: true,
@@ -303,7 +403,13 @@ export default function PerformerPublicProfileEditor({
           termsHash: partner.termsHash
         })
       });
+      if (!isCurrentScope(scope)) return;
+      if (response.status === 401 || response.status === 403) {
+        revokeProfileAccess(scope);
+        return;
+      }
       const data = await response.json().catch(() => null);
+      if (!isCurrentScope(scope)) return;
       if (!response.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to record Brand Partner acceptance.');
       }
@@ -317,8 +423,11 @@ export default function PerformerPublicProfileEditor({
       setPartnerAcceptanceStatus('idle');
       setPartnerAcceptanceMessage('Brand Partner terms accepted. Your immutable receipt is recorded.');
     } catch (error) {
+      if (!isCurrentScope(scope)) return;
       setPartnerAcceptanceStatus('error');
       setPartnerAcceptanceMessage(error instanceof Error ? error.message : 'Unable to record Brand Partner acceptance.');
+    } finally {
+      scope.accepting = false;
     }
   };
 
@@ -326,7 +435,7 @@ export default function PerformerPublicProfileEditor({
     <section
       id="sway-public-profile-editor"
       data-sway-public-profile-editor="true"
-      className="mx-auto w-full max-w-3xl scroll-mt-24 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10"
+      className="mx-auto w-full max-w-6xl scroll-mt-24 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-900/80 shadow-xl shadow-cyan-950/10"
     >
       <div className="border-b border-white/10 bg-gradient-to-r from-cyan-500/10 via-fuchsia-500/10 to-transparent p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -350,17 +459,53 @@ export default function PerformerPublicProfileEditor({
             ) : null}
           </div>
           {performerHandle ? (
-            <a
-              href={`/p/${encodeURIComponent(performerHandle)}`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => setShowOwnerPreview((current) => !current)}
               className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 py-2 text-xs font-black text-white transition hover:border-cyan-300/40"
             >
-              View page <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+              {showOwnerPreview ? 'Hide private preview' : 'Preview your page'}
+              {showOwnerPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </button>
           ) : null}
         </div>
       </div>
+
+      {showOwnerPreview ? (
+        <section data-sway-owner-profile-preview="true" className="border-b border-cyan-300/20 bg-slate-950 p-5 sm:p-8">
+          <div className="mx-auto max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-fuchsia-950/40 shadow-2xl">
+            <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-center">
+              <div className="flex aspect-square items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-400/20 to-fuchsia-500/20 text-5xl font-black text-white">
+                {form.avatarUrl ? <img src={form.avatarUrl} alt="" className="h-full w-full object-cover" /> : (form.stageName || performerHandle || 'S').slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Private owner preview</p>
+                <h2 className="mt-3 break-words font-display text-3xl font-black text-white sm:text-5xl">{form.stageName || performerHandle || 'Your performer name'}</h2>
+                <p className="mt-2 text-sm font-bold text-fuchsia-200">@{performerHandle}</p>
+                {form.headline ? <p className="mt-4 max-w-3xl text-lg leading-7 text-slate-200">{form.headline}</p> : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {form.city ? <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200">{form.city}</span> : null}
+                  {specialties.map((specialty) => <span key={specialty} className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{specialty}</span>)}
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-6 border-t border-white/10 p-6 sm:p-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white">About</h3>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-300">{form.bio || 'Add your story, sound, experience, and what makes your shows worth following.'}</p>
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white">Booking and links</h3>
+                {(form.bookingEmail || form.bookingPhone) ? <p className="text-sm leading-6 text-slate-300">{form.bookingEmail || form.bookingPhone}</p> : <p className="text-sm text-slate-500">Add verified booking contact details.</p>}
+                {form.links.filter((link) => link.isActive && link.label).slice(0, 4).map((link) => (
+                  <div key={link.key} className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white">{link.label}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <p className="mx-auto mt-4 max-w-5xl text-center text-xs leading-5 text-slate-400">Only you can see this preview while the page is private. Publishing remains a separate choice below.</p>
+        </section>
+      ) : null}
 
       {partner.acceptanceRequired && partner.termsVersion && partner.termsHash && partner.termsText ? (
         <div className="border-b border-amber-300/15 bg-amber-300/[0.04] p-4 sm:p-6">
@@ -397,26 +542,41 @@ export default function PerformerPublicProfileEditor({
         <div className="border-b border-emerald-500/20 bg-emerald-500/5 px-5 py-3 text-xs text-emerald-100">{partnerAcceptanceMessage}</div>
       ) : null}
 
-      <PerformerVisibilityControl previewMode={previewMode} />
+      {profileLoaded || previewMode ? <PerformerVisibilityControl previewMode={previewMode} /> : null}
 
       <form className="space-y-6 p-4 sm:p-6" onSubmit={handleSubmit}>
-        <fieldset disabled={previewMode || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
+        <fieldset disabled={previewMode || !profileLoaded || status === 'loading' || status === 'saving'} className="space-y-6 disabled:opacity-70">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className={fieldLabel()}>What kind of performer are you?</span>
-              <select
-                className={fieldClass()}
-                required
-                value={form.primaryRole}
-                onChange={(event) => setForm((current) => ({ ...current, primaryRole: event.target.value }))}
-              >
-                <option value="">Choose one</option>
-                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => (
-                  <option key={role.id} value={role.id}>{role.label}</option>
-                ))}
-              </select>
-              <span className="block text-[11px] leading-5 text-slate-500">This appears at the top of your public page instead of a generic “performer” label.</span>
-            </label>
+            <div className="space-y-2 sm:col-span-2" role="group" aria-labelledby="performer-role-label" aria-describedby="performer-role-help">
+              <span id="performer-role-label" className={fieldLabel()}>What kind of performer are you?</span>
+              <p id="performer-role-help" className="text-[11px] leading-5 text-slate-500">Select all that apply. Every selected role appears on your public page.</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {PUBLIC_PERFORMER_PRIMARY_ROLES.map((role) => {
+                  const checked = form.roles.includes(role.id);
+                  return (
+                    <label
+                      key={role.id}
+                      className={`flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold transition ${checked ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-slate-950 text-slate-300 hover:border-cyan-400/40'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        name="performerRoles"
+                        value={role.id}
+                        checked={checked}
+                        onChange={(event) => setForm((current) => ({
+                          ...current,
+                          roles: event.target.checked
+                            ? [...current.roles, role.id]
+                            : current.roles.filter((selectedRole) => selectedRole !== role.id)
+                        }))}
+                        className="h-4 w-4 shrink-0 accent-cyan-400"
+                      />
+                      <span>{role.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <label className="space-y-1.5 sm:col-span-2">
               <span className={fieldLabel()}>Stage name — optional</span>
               <input className={fieldClass()} maxLength={80} value={form.stageName} onChange={(event) => setForm((current) => ({ ...current, stageName: event.target.value }))} placeholder="Only if different from your @handle" />
@@ -537,7 +697,17 @@ export default function PerformerPublicProfileEditor({
           </div>
         ) : null}
 
-        <button type="submit" disabled={previewMode || status === 'loading' || status === 'saving'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-fuchsia-950/30 transition hover:from-cyan-400 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60">
+        {!previewMode && !profileLoaded && status === 'error' ? (
+          <button
+            type="button"
+            onClick={() => { setStatus('loading'); setLoadAttempt((attempt) => attempt + 1); }}
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-cyan-300/25 px-4 py-2 text-sm font-bold text-cyan-100"
+          >
+            Reload profile
+          </button>
+        ) : null}
+
+        <button type="submit" disabled={previewMode || !profileLoaded || status === 'loading' || status === 'saving'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-fuchsia-950/30 transition hover:from-cyan-400 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60">
           <Save className="h-4 w-4" />
           {status === 'loading' ? 'Loading page...' : status === 'saving' ? 'Saving page...' : 'Save public page'}
         </button>

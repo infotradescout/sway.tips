@@ -35,6 +35,9 @@ type AdminAccount = {
   payoutsEnabled: boolean | null;
   chargesEnabled: boolean | null;
   payoutHoldReason: string | null;
+  payoutKycStatus: string | null;
+  payoutKycProcessApprovalVersion: string;
+  payoutKycReviewedAt: string | null;
   partnerKind: string | null;
   partnerEntitlementId: string | null;
   partnerTermsVersion: string | null;
@@ -160,7 +163,8 @@ function CreateAccountPanel({ onClose, onCreated }: { onClose: () => void; onCre
         </div>
         <div className="space-y-1">
           <label className={labelClass()}>Handle</label>
-          <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} required />
+          <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} minLength={4} maxLength={30} pattern="[A-Za-z0-9_-]+" title="Use 4–30 letters, numbers, hyphens, or underscores." required />
+          <p className="text-[11px] text-slate-500">4–30 characters. Letters, numbers, hyphens, and underscores.</p>
         </div>
         <div className="space-y-1">
           <label className={labelClass()}>Email — optional</label>
@@ -237,6 +241,11 @@ function EditAccountPanel({
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
+  const [kycEvidenceReference, setKycEvidenceReference] = useState('');
+  const [kycReviewBusy, setKycReviewBusy] = useState(false);
+  const [kycReviewError, setKycReviewError] = useState<string | null>(null);
+  const [kycReviewMessage, setKycReviewMessage] = useState<string | null>(null);
+
   const [generatingClaimLink, setGeneratingClaimLink] = useState(false);
   const [claimLinkError, setClaimLinkError] = useState<string | null>(null);
   const [claimLink, setClaimLink] = useState<string | null>(null);
@@ -246,10 +255,26 @@ function EditAccountPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
   const deleteConfirmTarget = account.email ?? account.handle ?? account.id;
+  const originalHandle = account.handle ?? '';
+  const handleChanged = handle.trim().toLowerCase() !== originalHandle.trim().toLowerCase();
+  const handleRenameError = account.performerId && handleChanged
+    ? handle.trim().length < 4
+      ? 'Handle must be at least 4 characters.'
+      : handle.trim().length > 30
+        ? 'Handle must be 30 characters or fewer.'
+        : !/^[A-Za-z0-9_-]+$/.test(handle.trim())
+          ? 'Use only letters, numbers, hyphens, and underscores.'
+          : null
+    : null;
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
+    if (handleRenameError) {
+      setError(handleRenameError);
+      setMessage(null);
+      return;
+    }
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -261,7 +286,7 @@ function EditAccountPanel({
       emailVerified
     };
     if (account.performerId) {
-      body.handle = handle;
+      if (handleChanged) body.handle = handle.trim();
       body.isActive = isActive;
       body.onboardingStatus = onboardingStatus;
       body.payoutHoldReason = payoutHoldReason;
@@ -347,6 +372,33 @@ function EditAccountPanel({
     }
   };
 
+  const handlePayoutKycReview = async (action: 'approve' | 'revoke') => {
+    if (kycReviewBusy || !account.performerId) return;
+    setKycReviewBusy(true);
+    setKycReviewError(null);
+    setKycReviewMessage(null);
+    try {
+      const response = await fetch(`/api/admin/accounts/${account.id}/payout-kyc-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, evidenceReference: kycEvidenceReference })
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not update payout identity review.');
+      }
+      setKycEvidenceReference('');
+      setKycReviewMessage(action === 'approve'
+        ? 'Current payout identity review approved.'
+        : 'Current payout identity review revoked.');
+      onSaved();
+    } catch (reviewError) {
+      setKycReviewError(reviewError instanceof Error ? reviewError.message : 'Could not update payout identity review.');
+    } finally {
+      setKycReviewBusy(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (deleting || deleteConfirmText !== deleteConfirmTarget) return;
     setDeleting(true);
@@ -405,7 +457,18 @@ function EditAccountPanel({
           <>
             <div className="space-y-1">
               <label className={labelClass()}>Handle</label>
-              <input className={inputClass()} value={handle} onChange={(event) => setHandle(event.target.value)} />
+              <input
+                className={inputClass()}
+                value={handle}
+                onChange={(event) => setHandle(event.target.value)}
+                minLength={handleChanged ? 4 : undefined}
+                maxLength={handleChanged ? 30 : undefined}
+                pattern={handleChanged ? '[A-Za-z0-9_-]+' : undefined}
+                aria-invalid={handleRenameError ? true : undefined}
+              />
+              <p className={`text-[11px] ${handleRenameError ? 'text-rose-300' : 'text-slate-500'}`}>
+                {handleRenameError ?? 'New handles must be 4–30 characters. Existing legacy handles can stay unchanged.'}
+              </p>
             </div>
             <div className="flex items-end gap-2 pb-2">
               <input id="edit-active" type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="h-4 w-4" />
@@ -429,7 +492,7 @@ function EditAccountPanel({
               />
             </div>
             <div className="sm:col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
-              Payment/Stripe status (charges, payouts, KYC) is driven by Stripe and is intentionally not editable here to avoid drifting from the real account state.
+              Historical Stripe account fields are read-only. Performer withdrawals use the separate, versioned PayPal/Venmo identity review below.
             </div>
             <div className="sm:col-span-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4">
               <label className={`flex min-h-11 items-center gap-3 text-sm font-bold text-amber-100 ${account.partnerTermsVersion ? 'cursor-default' : 'cursor-pointer'}`}>
@@ -493,6 +556,50 @@ function EditAccountPanel({
           </button>
         </div>
       </form>
+
+      {account.performerId ? (
+        <div className="mt-5 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-cyan-100">
+            <BadgeCheck className="h-4 w-4" />
+            PayPal/Venmo payout identity review
+          </div>
+          <p className="mt-2 text-xs leading-5 text-cyan-100/70">
+            Current process: <span className="font-mono">{account.payoutKycProcessApprovalVersion}</span>. Status: <strong>{account.payoutKycStatus ?? 'not reviewed'}</strong>
+            {account.payoutKycReviewedAt ? ` (${new Date(account.payoutKycReviewedAt).toLocaleString()})` : ''}.
+          </p>
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            Store only an opaque case or provider reference here. Never enter a Social Security number, tax ID, document image, birth date, or raw identity data.
+          </p>
+          {kycReviewError ? <StatusBanner tone="rose" message={kycReviewError} /> : null}
+          {kycReviewMessage ? <StatusBanner tone="emerald" message={kycReviewMessage} /> : null}
+          <input
+            className={`${inputClass()} mt-3`}
+            value={kycEvidenceReference}
+            onChange={(event) => setKycEvidenceReference(event.target.value)}
+            placeholder="Opaque review reference"
+            minLength={8}
+            maxLength={200}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handlePayoutKycReview('approve')}
+              disabled={kycReviewBusy || kycEvidenceReference.trim().length < 8}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-cyan-600 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {kycReviewBusy ? 'Saving…' : 'Approve current review'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePayoutKycReview('revoke')}
+              disabled={kycReviewBusy || account.payoutKycStatus !== 'approved'}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-400/30 px-4 py-2 text-sm font-black text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Revoke approval
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-5 rounded-xl border border-white/10 bg-slate-950/70 p-4">
         <div className="flex items-center gap-2 text-sm font-bold text-white">

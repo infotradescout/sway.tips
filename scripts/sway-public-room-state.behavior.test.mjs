@@ -308,7 +308,16 @@ for (const term of [
 assert.equal(patronViewSource.includes('const latestRequest = [...requests]'), false, 'Patron status must not use the newest global request.');
 assert.equal(patronViewSource.includes('patronRequestStatus.status'), true, 'PatronView must render receipt-scoped status.');
 assert.equal(patronAppSource.includes("postJson('/api/patron/request-status'"), true, 'PatronApp must poll the opaque receipt endpoint.');
-assert.equal(controlBridgeSource.includes('...authHeaders'), true, 'Control bridge state reads must carry performer authorization.');
+assert.equal(
+  controlBridgeSource.includes('authorization: `Bearer ${authToken}`'),
+  true,
+  'Control bridge cloud reads must carry the scoped bridge bearer token.'
+);
+assert.equal(
+  controlBridgeSource.includes('`/api/talent/control-bridge/state/${encodeURIComponent(gigId)}`'),
+  true,
+  'Control bridge state reads must use the room-scoped performer route.'
+);
 assert.equal(
   packageJson.scripts?.['test:contracts']?.includes('node scripts/sway-public-room-state.behavior.test.mjs'),
   true,

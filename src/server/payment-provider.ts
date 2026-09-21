@@ -74,6 +74,8 @@ export type ProviderRefundInput = {
 
 export type PaymentProviderAdapter = {
   readonly processor: string;
+  /** Derived from the server secret key, never from a browser/publishable key. */
+  readonly mode: 'test' | 'live';
   verifyWebhookSignature: (input: ProviderSignatureVerificationInput) => Promise<boolean>;
   parseWebhookEvent: (input: { rawBody: string; signatureHeader: string | null }) => Promise<ProviderWebhookEnvelope>;
   authorizePayment: (input: ProviderAuthorizeInput) => Promise<ProviderAuthorizeResult>;
@@ -123,9 +125,11 @@ export function createStripeProviderAdapter(config: {
 }): PaymentProviderAdapter {
   const stripe = new Stripe(config.secretKey, { apiVersion: STRIPE_API_VERSION });
   const processor = config.processor ?? 'stripe';
+  const mode = config.secretKey.startsWith('sk_live_') ? 'live' as const : 'test' as const;
 
   return {
     processor,
+    mode,
 
     async verifyWebhookSignature(input) {
       if (!input.signatureHeader) return false;

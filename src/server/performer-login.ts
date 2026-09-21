@@ -5,6 +5,7 @@ import { performerLoginChallenges } from '../db/schema';
 
 export const PERFORMER_LOGIN_SUCCESS_COPY = 'If this email is on an approved Sway performer account, we sent a link.';
 export const PERFORMER_SIGNUP_SUCCESS_COPY = 'Check your email to verify your Sway performer account.';
+export const PERFORMER_HANDLE_REQUIREMENTS_COPY = 'Handle must be 4–30 characters using only letters, numbers, hyphens, or underscores.';
 export const PERFORMER_LOGIN_LINK_TTL_MS = 15 * 60 * 1000;
 // Claim codes are handed to an admin to relay to the artist outside of Sway
 // (text, DM, printed sheet) rather than clicked within minutes of issuance
@@ -74,7 +75,7 @@ export function normalizePerformerLoginEmail(rawValue: unknown) {
   return normalized;
 }
 
-export function normalizePerformerHandle(rawValue: unknown) {
+export function normalizePerformerHandleLookup(rawValue: unknown) {
   if (typeof rawValue !== 'string') return null;
 
   const trimmed = rawValue.trim();
@@ -84,6 +85,12 @@ export function normalizePerformerHandle(rawValue: unknown) {
   if (RESERVED_PERFORMER_HANDLES.has(trimmed.toLowerCase())) return null;
 
   return trimmed;
+}
+
+export function normalizePerformerHandle(rawValue: unknown) {
+  const normalized = normalizePerformerHandleLookup(rawValue);
+  if (!normalized || normalized.length < 4 || normalized.length > 30) return null;
+  return normalized;
 }
 
 export function normalizePerformerDisplayName(rawValue: unknown) {

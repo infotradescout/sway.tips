@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { startEmbeddedPostgresProof } from './lib/embedded-postgres-proof.ts';
 
 const root = process.cwd();
@@ -10,8 +13,11 @@ const DRAFT_PERFORMER = '20000000-0000-4000-8000-000000000003';
 const SUSPENDED_PERFORMER = '20000000-0000-4000-8000-000000000004';
 const RESTRICTED_PERFORMER = '20000000-0000-4000-8000-000000000005';
 const INACTIVE_PERFORMER = '20000000-0000-4000-8000-000000000006';
-const MALFORMED_PERFORMER = '20000000-0000-4000-8000-000000000007';
 const DEFAULT_DRAFT_PERFORMER = '20000000-0000-4000-8000-000000000008';
+const LEGACY_SHORT_PERFORMER = '20000000-0000-4000-8000-000000000009';
+const LEGACY_LONG_PERFORMER = '20000000-0000-4000-8000-000000000010';
+const LEGACY_LONG_HANDLE = `legacy-${'x'.repeat(24)}`;
+const LEGACY_SHORT_CANONICAL = 'legacy-short-artist';
 const PREVIEW_ONLY_ID = '30000000-0000-4000-8000-000000000001';
 const JSON_LD_XSS_PAYLOAD = '</script><script>window.__swayJsonLdXss = true</script>';
 const OWNER_IDS = [
@@ -21,7 +27,9 @@ const OWNER_IDS = [
   '10000000-0000-4000-8000-000000000004',
   '10000000-0000-4000-8000-000000000005',
   '10000000-0000-4000-8000-000000000006',
-  '10000000-0000-4000-8000-000000000007'
+  '10000000-0000-4000-8000-000000000007',
+  '10000000-0000-4000-8000-000000000008',
+  '10000000-0000-4000-8000-000000000009'
 ];
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -36,7 +44,9 @@ async function seedDatabase(query) {
       ('${OWNER_IDS[3]}', 'suspended@sway.test', 'Suspended Artist Owner', 'performer', NOW()),
       ('${OWNER_IDS[4]}', 'restricted@sway.test', 'Restricted Artist Owner', 'performer', NOW()),
       ('${OWNER_IDS[5]}', 'inactive@sway.test', 'Inactive Artist Owner', 'performer', NOW()),
-      ('${OWNER_IDS[6]}', 'malformed@sway.test', 'Malformed Artist Owner', 'performer', NOW())
+      ('${OWNER_IDS[6]}', 'malformed@sway.test', 'Malformed Artist Owner', 'performer', NOW()),
+      ('${OWNER_IDS[7]}', 'legacy-short@sway.test', 'Legacy Short Owner', 'performer', NOW()),
+      ('${OWNER_IDS[8]}', 'legacy-long@sway.test', 'Legacy Long Owner', 'performer', NOW())
   `);
 
   await query(`
@@ -48,8 +58,7 @@ async function seedDatabase(query) {
       ('${DRAFT_PERFORMER}', '${OWNER_IDS[2]}', 'DraftArtist', 'Draft Artist', 'Draft biography', true, 'profile_started', 'draft'),
       ('${SUSPENDED_PERFORMER}', '${OWNER_IDS[3]}', 'SuspendedArtist', 'Suspended Artist', 'Suspended biography', true, 'suspended', 'public'),
       ('${RESTRICTED_PERFORMER}', '${OWNER_IDS[4]}', 'RestrictedArtist', 'Restricted Artist', 'Restricted biography', true, 'restricted', 'public'),
-      ('${INACTIVE_PERFORMER}', '${OWNER_IDS[5]}', 'InactiveArtist', 'Inactive Artist', 'Inactive biography', false, 'gig_ready', 'public'),
-      ('${MALFORMED_PERFORMER}', '${OWNER_IDS[6]}', 'bad.handle', 'Malformed Artist', 'Malformed biography', true, 'gig_ready', 'public')
+      ('${INACTIVE_PERFORMER}', '${OWNER_IDS[5]}', 'InactiveArtist', 'Inactive Artist', 'Inactive biography', false, 'gig_ready', 'public')
   `);
 
   await query(`
@@ -64,6 +73,40 @@ async function seedDatabase(query) {
     VALUES
       ('${PUBLIC_PERFORMER}', 'Canonical headline', '["songwriter","live"]'::jsonb, 'Pensacola', 'https://cdn.test/public.png', '{"canonicalMarker":"yes"}'::jsonb),
       ('${UNLISTED_PERFORMER}', 'Unlisted headline', '["producer"]'::jsonb, 'Mobile', 'https://cdn.test/unlisted.png', '{"canonicalMarker":"unlisted"}'::jsonb)
+  `);
+
+  await query(`
+    INSERT INTO performer_handle_claims (normalized_handle, performer_id, claim_kind)
+    VALUES
+      ('publicartist-old', '${PUBLIC_PERFORMER}', 'redirect'),
+      ('publicartist-future', '${PUBLIC_PERFORMER}', 'reservation')
+  `);
+
+  // Recreate the post-migration shape for pre-policy accounts. New writes may
+  // not set legacy_exception, so the disposable fixture bypasses the guards
+  // only while inserting the exact state that 0043's locked backfill creates.
+  await query(`
+    ALTER TABLE performers DISABLE TRIGGER performers_handle_claim_sync;
+    ALTER TABLE performer_handle_claims DISABLE TRIGGER performer_handle_claims_identity_guard;
+
+    INSERT INTO performers
+      (id, owner_user_id, handle, display_name, bio, is_active, onboarding_status, visibility_state)
+    VALUES
+      ('${LEGACY_SHORT_PERFORMER}', '${OWNER_IDS[7]}', '3X', 'Legacy Short Artist', 'Legacy short biography', true, 'gig_ready', 'public'),
+      ('${LEGACY_LONG_PERFORMER}', '${OWNER_IDS[8]}', '${LEGACY_LONG_HANDLE}', 'Legacy Long Artist', 'Legacy long biography', true, 'gig_ready', 'public');
+
+    INSERT INTO performer_handle_claims
+      (normalized_handle, performer_id, claim_kind, legacy_exception)
+    VALUES
+      ('3x', '${LEGACY_SHORT_PERFORMER}', 'canonical', true),
+      ('${LEGACY_LONG_HANDLE}', '${LEGACY_LONG_PERFORMER}', 'canonical', true);
+
+    ALTER TABLE performer_handle_claims ENABLE TRIGGER performer_handle_claims_identity_guard;
+    ALTER TABLE performers ENABLE TRIGGER performers_handle_claim_sync;
+
+    UPDATE performers
+       SET handle = '${LEGACY_SHORT_CANONICAL}'
+     WHERE id = '${LEGACY_SHORT_PERFORMER}';
   `);
 
   await query(`
@@ -121,8 +164,8 @@ async function waitForServer(port, child, getOutput) {
   throw new Error(`${lastError}\n${getOutput()}`);
 }
 
-async function request(port, path) {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`);
+async function request(port, path, redirect = 'follow') {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, { redirect });
   return { status: response.status, headers: response.headers, body: await response.text() };
 }
 
@@ -147,6 +190,36 @@ async function main() {
     assert.match(publicApi.body, /Public Artist/);
     assert.doesNotMatch(publicApi.body, /PREVIEW_ONLY_MARKER/);
 
+    const legacyShortApi = await request(port, '/api/public/performer/3x');
+    assert.equal(legacyShortApi.status, 200, 'a grandfathered short redirect must remain reachable');
+    assert.equal(legacyShortApi.headers.get('content-location'), `/api/public/performer/${LEGACY_SHORT_CANONICAL}`);
+    assert.equal(JSON.parse(legacyShortApi.body).performer.handle, LEGACY_SHORT_CANONICAL);
+
+    const legacyLongApi = await request(port, `/api/public/performer/${LEGACY_LONG_HANDLE}`);
+    assert.equal(legacyLongApi.status, 200, 'a grandfathered 31-character canonical handle must remain reachable');
+    assert.equal(JSON.parse(legacyLongApi.body).performer.handle, LEGACY_LONG_HANDLE);
+
+    const aliasApi = await request(port, '/api/public/performer/publicartist-old');
+    assert.equal(aliasApi.status, 200, 'historical API links must continue resolving');
+    assert.equal(aliasApi.headers.get('content-location'), '/api/public/performer/publicartist');
+    assert.equal(JSON.parse(aliasApi.body).performer.handle, 'publicartist');
+
+    const aliasShareCard = await request(port, '/api/public/performer/publicartist-old/share-card.png');
+    assert.equal(aliasShareCard.status, 200, 'historical share-card links must continue rendering');
+    assert.match(aliasShareCard.headers.get('content-type') ?? '', /^image\/png/i);
+    assert.equal(
+      aliasShareCard.headers.get('content-location'),
+      '/api/public/performer/publicartist/share-card.png'
+    );
+
+    const reservedShareCard = await request(port, '/api/public/performer/publicartist-future/share-card.png');
+    assert.equal(reservedShareCard.status, 404);
+    assert.match(
+      reservedShareCard.headers.get('cache-control') ?? '',
+      /no-store/i,
+      'a future share-card reservation must not be negatively cached before promotion'
+    );
+
     const unlistedApi = await request(port, '/api/public/performer/unlistedartist');
     assert.equal(unlistedApi.status, 200);
 
@@ -158,7 +231,7 @@ async function main() {
       'restrictedartist',
       'inactiveartist',
       'previewonly',
-      'bad.handle',
+      'publicartist-future',
       'admin'
     ]) {
       const blocked = await request(port, `/api/public/performer/${blockedHandle}`);
@@ -186,6 +259,57 @@ async function main() {
     );
     assert.doesNotMatch(trackedPublicHtml.body, /utm_source=organic/);
 
+    const aliasHtml = await request(
+      port,
+      '/p/publicartist-old?utm_source=historical-link',
+      'manual'
+    );
+    assert.equal(aliasHtml.status, 308, 'historical profile links must permanently redirect');
+    assert.equal(
+      aliasHtml.headers.get('location'),
+      '/p/publicartist?utm_source=historical-link',
+      'canonical redirects must preserve attribution query parameters'
+    );
+
+    const legacyShortHtml = await request(port, '/p/3X?utm_source=grandfathered', 'manual');
+    assert.equal(legacyShortHtml.status, 308, 'a grandfathered short redirect must remain permanent');
+    assert.equal(
+      legacyShortHtml.headers.get('location'),
+      `/p/${LEGACY_SHORT_CANONICAL}?utm_source=grandfathered`
+    );
+
+    const legacyLongHtml = await request(port, `/p/${LEGACY_LONG_HANDLE}`);
+    assert.equal(legacyLongHtml.status, 200, 'a grandfathered long canonical page must remain reachable');
+    assert.match(legacyLongHtml.body, /Legacy Long Artist/);
+
+    const legacyAliasHtml = await request(
+      port,
+      '/publicartist-old?utm_source=legacy-short-link',
+      'manual'
+    );
+    assert.equal(legacyAliasHtml.status, 308, 'legacy short profile links must permanently redirect');
+    assert.equal(
+      legacyAliasHtml.headers.get('location'),
+      '/p/publicartist?utm_source=legacy-short-link',
+      'legacy short redirects must preserve attribution query parameters'
+    );
+
+    const reservedShortHtml = await request(port, '/publicartist-future', 'manual');
+    assert.notEqual(
+      reservedShortHtml.status,
+      308,
+      'a future canonical reservation must not publish a backward permanent redirect'
+    );
+    assert.equal(reservedShortHtml.headers.get('location'), null);
+
+    const reservedProfileHtml = await request(port, '/p/publicartist-future');
+    assert.equal(reservedProfileHtml.status, 404);
+    assert.match(
+      reservedProfileHtml.headers.get('cache-control') ?? '',
+      /no-store/i,
+      'a future profile reservation must not be negatively cached before promotion'
+    );
+
     const trackedDiscoverHtml = await request(port, '/discover?utm_source=organic');
     assert.equal(trackedDiscoverHtml.status, 200);
     assert.match(
@@ -202,7 +326,7 @@ async function main() {
 
     const missingHtml = await request(port, '/p/nonexistentartist');
     assert.equal(missingHtml.status, 404);
-    for (const blockedHandle of ['draftartist', 'suspendedartist', 'restrictedartist', 'inactiveartist', 'previewonly', 'admin']) {
+    for (const blockedHandle of ['draftartist', 'suspendedartist', 'restrictedartist', 'inactiveartist', 'previewonly', 'publicartist-future', 'admin']) {
       const blocked = await request(port, `/p/${blockedHandle}`);
       assert.equal(blocked.status, 404, blockedHandle);
       assert.equal(blocked.body, missingHtml.body, `${blockedHandle} HTML must be indistinguishable from missing`);
@@ -211,6 +335,9 @@ async function main() {
     const sitemap = await request(port, '/sitemap.xml');
     assert.equal(sitemap.status, 200);
     assert.match(sitemap.body, /\/p\/publicartist/);
+    assert.match(sitemap.body, new RegExp(`/p/${LEGACY_SHORT_CANONICAL}`));
+    assert.match(sitemap.body, new RegExp(`/p/${LEGACY_LONG_HANDLE}`));
+    assert.doesNotMatch(sitemap.body, /\/p\/3x(?:<|\/)/, 'historical short redirects must not be canonical sitemap entries');
     assert.doesNotMatch(sitemap.body, /unlistedartist|draftartist|suspendedartist|previewonly/);
 
     const robots = await request(port, '/robots.txt');
@@ -219,13 +346,172 @@ async function main() {
     assert.equal(llms.status, 200);
     assert.doesNotMatch(llms.body, /publicartist|unlistedartist|previewonly/i);
 
+    // A published profile must be discoverable even with no live room or event.
+    const feed = await request(port, '/api/public/feed');
+    assert.equal(feed.status, 200);
+    assert.match(feed.headers.get('cache-control') ?? '', /no-store/i);
+    const firstDirectory = JSON.parse(feed.body);
+    assert.equal(firstDirectory.rooms.length, 0);
+    assert.equal(firstDirectory.events.length, 0);
+    assert.deepEqual(firstDirectory.performerDirectory.performers.map((row) => row.handle).sort(),
+      [LEGACY_LONG_HANDLE, LEGACY_SHORT_CANONICAL, 'publicartist'].sort());
+    for (const row of firstDirectory.performerDirectory.performers) {
+      assert.deepEqual(Object.keys(row).sort(), ['handle', 'displayName', 'performerPath', 'headline', 'bio', 'city', 'avatarUrl', 'updatedAt'].sort(),
+        'Directory DTO must not leak owner, contact, payment, or arbitrary metadata.');
+    }
+    assert.match(trackedDiscoverHtml.body, /href="https:\/\/app\.sway\.tips\/p\/publicartist"/,
+      'The initial HTML must include the real public profile link before JavaScript.');
+    assert.doesNotMatch(trackedDiscoverHtml.body, /unlistedartist|draftartist|suspendedartist|restrictedartist|inactiveartist|previewonly/i);
+    for (const query of ['unlisted', 'draft', 'suspended', 'restricted', 'inactive', 'previewonly', '%', "' OR 1=1 --"]) {
+      const response = await request(port, `/api/public/feed?q=${encodeURIComponent(query)}`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(JSON.parse(response.body).performerDirectory.performers, [], query);
+    }
+    const literalUnderscore = await request(port, '/api/public/feed?q=_');
+    assert.deepEqual(JSON.parse(literalUnderscore.body).performerDirectory.performers.map(row => row.handle), ['publicartist'],
+      'The XSS biography contains literal underscores; this query must not act as a wildcard.');
+    assert.deepEqual(JSON.parse((await request(port, '/api/public/feed?q=%5C')).body).performerDirectory.performers, []);
+    for (const query of ['@PUBLICARTIST', 'pEnSaCoLa', 'Canonical headline']) {
+      const found = await request(port, `/api/public/feed?q=${encodeURIComponent(query)}`);
+      assert.deepEqual(JSON.parse(found.body).performerDirectory.performers.map(row => row.handle), ['publicartist']);
+    }
+
+    // Exercise a result beyond the first page rather than truncating the directory.
+    await proof.query(`INSERT INTO performers (id, owner_user_id, handle, display_name, bio, is_active, onboarding_status, visibility_state)
+      SELECT ('20000000-0000-4000-8001-' || lpad(n::text, 12, '0'))::uuid, '${OWNER_IDS[0]}',
+        'directory-entry-' || lpad(n::text, 2, '0'), 'Directory Entry ' || lpad(n::text, 2, '0'),
+        'A public performer for pagination proof.', true, 'gig_ready', 'public'
+      FROM generate_series(1, 14) n`);
+    const pageOne = JSON.parse((await request(port, '/api/public/feed')).body).performerDirectory;
+    const pageTwo = JSON.parse((await request(port, '/api/public/feed?performerOffset=12')).body).performerDirectory;
+    assert.equal(pageOne.performers.length, 12);
+    assert.equal(pageOne.hasMore, true);
+    assert.equal(pageTwo.performers.length, 5);
+    assert.equal(pageTwo.hasMore, false);
+    assert.equal(new Set([...pageOne.performers, ...pageTwo.performers].map(row => row.handle)).size, 17);
+    const paginatedHtml = await request(port, '/discover?performerOffset=13&utm_source=qa');
+    assert.match(paginatedHtml.body, /<link rel="canonical" href="https:\/\/app\.sway\.tips\/discover\?performerOffset=12" \/>/);
+    assert.doesNotMatch(paginatedHtml.body, /utm_source=qa/);
+    for (const offset of ['1', '-1', 'invalid', '1.5']) {
+      assert.deepEqual(JSON.parse((await request(port, `/api/public/feed?performerOffset=${offset}`)).body).performerDirectory, pageOne);
+    }
+    assert.deepEqual(JSON.parse((await request(port, '/api/public/feed?q=dIrEcToRy%20EnTrY%2014')).body).performerDirectory.performers.map(row => row.handle), ['directory-entry-14']);
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      for (const viewport of [{ width: 320, height: 568 }, { width: 1366, height: 768 }]) {
+        const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
+        const origin = `http://127.0.0.1:${port}`;
+        await context.route('**/*', route => {
+          const url = new URL(route.request().url());
+          return url.origin === origin ? route.continue() : route.abort();
+        });
+        const page = await context.newPage();
+        const errors = [];
+        const zeroResultQueries = [];
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('request', request => {
+          if (new URL(request.url()).pathname !== '/api/analytics/shell' || request.method() !== 'POST') return;
+          const event = request.postDataJSON();
+          if (event?.event === 'internal_search_zero_result') zeroResultQueries.push(event.search_phrase);
+        });
+        page.setDefaultTimeout(15_000);
+        try {
+          await page.goto(`${origin}/discover`, { waitUntil: 'domcontentloaded' });
+          const directory = page.getByRole('region', { name: 'Performers', exact: true });
+          await directory.waitFor({ state: 'visible' });
+          const dismiss = page.getByRole('button', { name: 'Dismiss install prompt', exact: true });
+          if (await dismiss.isVisible()) await dismiss.click();
+          assert.equal(await directory.getByRole('link').count(), 12);
+          await page.getByRole('button', { name: 'Next performers', exact: true }).click();
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          assert.equal(await directory.getByRole('link').count(), 5);
+          assert.equal(await page.getByRole('button', { name: 'Next performers', exact: true }).isEnabled(), false);
+          assert.match(page.url(), /performerOffset=12/);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          assert.equal(await directory.getByRole('link').count(), 5, 'Refresh preserves the selected performer page.');
+          const search = page.getByRole('textbox', { name: 'Search rooms, events, songs, lyrics, and songwriters', exact: true });
+          await search.fill('@PUBLICARTIST');
+          const searchResponse = page.waitForResponse(response => response.url().includes('/api/public/feed?') && response.url().includes('q=publicartist'));
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await searchResponse;
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          assert.equal(await directory.getByRole('link').count(), 1);
+          assert.equal(await page.getByRole('heading', { name: 'No live rooms or upcoming shows right now', exact: true }).count(), 0);
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Discovery fits the viewport.');
+          await search.fill('no-such-performer-qa');
+          const emptySearchEvent = page.waitForRequest(request => {
+            if (new URL(request.url()).pathname !== '/api/analytics/shell' || request.method() !== 'POST') return false;
+            const event = request.postDataJSON();
+            return event?.event === 'internal_search_zero_result' && event.search_phrase === 'no-such-performer-qa';
+          });
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await emptySearchEvent;
+          await search.fill('publicartist');
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          await page.evaluate(() => new Promise(resolveRender => requestAnimationFrame(() => requestAnimationFrame(resolveRender))));
+          assert.deepEqual(zeroResultQueries, ['no-such-performer-qa'], 'A successful search after a miss must not emit a false zero-result event.');
+          let releaseSlow;
+          let sawSlow;
+          let slowHandled;
+          let resolveSlowTerminal;
+          const slowGate = new Promise(resolveGate => { releaseSlow = resolveGate; });
+          const slowStarted = new Promise(resolveStarted => { sawSlow = resolveStarted; });
+          const slowFinished = new Promise(resolveFinished => { slowHandled = resolveFinished; });
+          const slowTerminal = new Promise(resolveTerminal => { resolveSlowTerminal = resolveTerminal; });
+          const observeSlowTerminal = request => {
+            const url = new URL(request.url());
+            if (url.pathname !== '/api/public/feed' || url.searchParams.get('q') !== 'directory') return;
+            page.off('requestfinished', observeSlowTerminal);
+            page.off('requestfailed', observeSlowTerminal);
+            resolveSlowTerminal();
+          };
+          page.on('requestfinished', observeSlowTerminal);
+          page.on('requestfailed', observeSlowTerminal);
+          await page.route('**/api/public/feed?**', async route => {
+            if (new URL(route.request().url()).searchParams.get('q') === 'directory') {
+              sawSlow();
+              await slowGate;
+              try { await route.continue(); } catch { /* Expected if the browser cancelled the old request. */ }
+              finally { slowHandled(); }
+            } else await route.continue();
+          });
+          await search.fill('directory');
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await slowStarted;
+          await search.fill('publicartist');
+          await page.getByRole('button', { name: 'Search', exact: true }).click();
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).waitFor({ state: 'visible' });
+          releaseSlow();
+          await slowFinished;
+          await slowTerminal;
+          await page.evaluate(() => new Promise(resolveRender => requestAnimationFrame(() => requestAnimationFrame(resolveRender))));
+          assert.equal(await directory.getByRole('link').count(), 1, 'An older response cannot replace the newer search.');
+          const screenshotDirectory = resolve('tmp/performer-directory-proof');
+          mkdirSync(screenshotDirectory, { recursive: true });
+          await page.screenshot({ path: resolve(screenshotDirectory, `${viewport.width}x${viewport.height}.png`), fullPage: true });
+          await page.getByRole('link', { name: 'View Public Artist', exact: true }).click();
+          await page.waitForURL('**/p/publicartist');
+          assert.deepEqual(errors, [], 'No uncaught browser exceptions.');
+          console.log(`PASS performer directory browser ${viewport.width}x${viewport.height}`);
+        } finally { await context.close(); }
+      }
+    } finally { await browser.close(); }
+
+    // Publication changes must remove the profile from the next server read.
+    await proof.query(`UPDATE performers SET visibility_state='unlisted' WHERE id='${PUBLIC_PERFORMER}'`);
+    assert.deepEqual(JSON.parse((await request(port, '/api/public/feed?q=publicartist')).body).performerDirectory.performers, []);
+    assert.doesNotMatch((await request(port, '/discover?q=publicartist')).body, /href="https:\/\/app\.sway\.tips\/p\/publicartist"/);
+
     await stopServer(databaseServer.child);
     databaseServer = undefined;
 
     const unavailablePort = 48500 + Math.floor(Math.random() * 400);
     unavailableServer = startServer(unavailablePort);
     await waitForServer(unavailablePort, unavailableServer.child, unavailableServer.getOutput);
-    for (const path of ['/api/public/performer/publicartist', '/p/publicartist', '/sitemap.xml']) {
+    for (const path of ['/api/public/performer/publicartist', '/p/publicartist', '/sitemap.xml', '/api/public/feed']) {
       const unavailable = await request(unavailablePort, path);
       assert.equal(unavailable.status, 503, path);
     }

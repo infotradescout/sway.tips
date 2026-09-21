@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -7,6 +8,7 @@ const read = (relativePath) => readFileSync(join(root, relativePath), 'utf8');
 const server = read('server.ts');
 const control = read('src/server/performer-visibility-control.ts');
 const component = read('src/components/PerformerVisibilityControl.tsx');
+const request = read('src/performer-visibility-request.ts');
 const editor = read('src/components/PerformerPublicProfileEditor.tsx');
 const packageJson = JSON.parse(read('package.json'));
 const failures = [];
@@ -23,7 +25,9 @@ for (const state of ["'draft'", "'unlisted'", "'public'"]) {
   requireIncludes(control, state, 'Visibility parser state set');
 }
 requireIncludes(control, 'parsePerformerVisibilityState', 'Visibility parser export');
-requireIncludes(component, '/api/talent/profile/visibility', 'Visibility UI mutation route');
+requireIncludes(component, 'requestPerformerVisibility', 'Visibility UI uses the bounded owner request');
+requireIncludes(request, '/api/talent/profile/visibility', 'Visibility UI mutation route');
+requireIncludes(request, '/api/talent/profile/public', 'Visibility recovery is an owner profile read');
 for (const label of ['Draft', 'Unlisted', 'Public']) {
   requireIncludes(component, label, `Visibility UI label ${label}`);
 }
@@ -66,4 +70,6 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Existing authorization, audit, and content/publication separation assertions stay mandatory.
+execFileSync(process.execPath, ['scripts/sway-performer-visibility-request.behavior.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 30_000 });
 console.log('Sway performer visibility control contract passed.');

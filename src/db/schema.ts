@@ -11,6 +11,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -237,6 +238,49 @@ export const users = pgTable('users', {
   emailIdx: uniqueIndex('users_email_idx').on(table.email)
 }));
 
+// Everyone participates automatically. Program recognition confers neither
+// signed financial terms nor rights to masters, live payments, or payouts.
+export const affiliateAccounts = pgTable('affiliate_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  code: text('code').notNull().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('affiliate_accounts_user_idx').on(table.userId),
+  codeIdx: uniqueIndex('affiliate_accounts_code_idx').on(table.code),
+  codeShape: check('affiliate_accounts_code_shape', sql`${table.code} ~ '^[a-f0-9]{32}$'`)
+}));
+
+export const affiliateReferrals = pgTable('affiliate_referrals', {
+  referredUserId: uuid('referred_user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  affiliateAccountId: uuid('affiliate_account_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({ accountIdx: index('affiliate_referrals_account_idx').on(table.affiliateAccountId) }));
+
+export const affiliateCommissionEvents = pgTable('affiliate_commission_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  paymentId: uuid('payment_id').notNull(),
+  affiliateAccountId: uuid('affiliate_account_id').notNull(),
+  referredUserId: uuid('referred_user_id').notNull(),
+  eventKind: text('event_kind').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  currency: text('currency').notNull(),
+  sourceAmountCents: integer('source_amount_cents').notNull(),
+  rateBps: integer('rate_bps').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  basis: text('basis').notNull().default('captured_platform_fee'),
+  policyVersion: text('policy_version').notNull().default('2026-09-08'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  paymentKindIdx: uniqueIndex('affiliate_commission_events_payment_kind_idx').on(table.paymentId, table.eventKind),
+  accountModeIdx: index('affiliate_commission_events_account_mode_idx').on(table.affiliateAccountId, table.paymentMode),
+  kind: check('affiliate_commission_events_kind', sql`${table.eventKind} in ('earned', 'reversed')`),
+  mode: check('affiliate_commission_events_mode', sql`${table.paymentMode} in ('test', 'live')`),
+  rate: check('affiliate_commission_events_rate', sql`${table.rateBps} in (1000, 2000)`),
+  amount: check('affiliate_commission_events_amount', sql`${table.sourceAmountCents} >= 0 and ((${table.eventKind} = 'earned' and ${table.amountCents} >= 0) or (${table.eventKind} = 'reversed' and ${table.amountCents} <= 0))`),
+  basis: check('affiliate_commission_events_basis', sql`${table.basis} = 'captured_platform_fee'`)
+}));
+
 // Append-only audit trail for every Pro Mode state transition. Mirrors the
 // performerPartnerEntitlementStatusEvents pattern: immutable once written
 // (see the 0022 migration trigger).
@@ -286,12 +330,48 @@ export const performers = pgTable('performers', {
   ...timestamps
 }, (table) => ({
   handleIdx: uniqueIndex('idx_performers_handle').on(table.handle).where(sql`${table.handle} is not null`),
-  handleLowerIdx: uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`).where(sql`${table.handle} is not null`),
+  handleLowerLookupIdx: index('idx_performers_handle_lower_lookup')
+    .on(sql`lower(${table.handle})`)
+    .where(sql`${table.handle} is not null`),
   stripeConnectedAccountUnique: uniqueIndex('performers_stripe_connected_account_id_unique')
     .on(table.stripeConnectedAccountId)
     .where(sql`${table.stripeConnectedAccountId} is not null`),
   handleNotReserved: check('performers_handle_not_reserved', sql`${table.handle} is null or lower(${table.handle}) not in ('admin', 'api', 'app', 'assets', 'auth', 'billing', 'contact', 'discover', 'g', 'help', 'login', 'logout', 'overlay', 'p', 'privacy', 'profile', 'public', 'room', 'settings', 'shells', 'signup', 'support', 'sway', 'talent', 'terms', 'www')`),
   ownerIdx: index('performers_owner_user_id_idx').on(table.ownerUserId)
+}));
+
+// One durable namespace owns every canonical, historical, and reserved public
+// performer handle. Database triggers keep canonical claims synchronized with
+// performer inserts and renames so old and new runtimes share the invariant.
+export const performerHandleClaims = pgTable('performer_handle_claims', {
+  normalizedHandle: text('normalized_handle').notNull(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id, { onDelete: 'cascade' }),
+  claimKind: text('claim_kind').notNull(),
+  legacyException: boolean('legacy_exception').notNull().default(false),
+  ...timestamps
+}, (table) => ({
+  // Keep the legacy constraint name so old runtimes still classify conflicts
+  // from the new authoritative namespace as ordinary handle-taken errors.
+  normalizedHandlePk: primaryKey({
+    name: 'idx_performers_handle_lower',
+    columns: [table.normalizedHandle]
+  }),
+  performerIdx: index('performer_handle_claims_performer_idx').on(table.performerId),
+  canonicalPerformerIdx: uniqueIndex('performer_handle_claims_canonical_performer_idx')
+    .on(table.performerId)
+    .where(sql`${table.claimKind} = 'canonical'`),
+  lowercaseHandle: check(
+    'performer_handle_claims_lowercase_handle',
+    sql`${table.normalizedHandle} = lower(${table.normalizedHandle})`
+  ),
+  validHandle: check(
+    'performer_handle_claims_valid_handle',
+    sql`${table.normalizedHandle} ~ '^[a-z0-9_-]{4,30}$' or (${table.legacyException} = true and ${table.normalizedHandle} ~ '^[a-z0-9_-]{1,64}$' and ${table.claimKind} in ('canonical', 'redirect'))`
+  ),
+  claimKindAllowed: check(
+    'performer_handle_claims_kind_allowed',
+    sql`${table.claimKind} in ('canonical', 'redirect', 'reservation')`
+  )
 }));
 
 // Durable outbox/lease for Stripe recipient provisioning. The provider call
@@ -334,6 +414,174 @@ export const stripeConnectOnboardingOperations = pgTable('stripe_connect_onboard
     'stripe_connect_onboarding_operations_bound_account_required',
     sql`${table.status} <> 'bound' or ${table.stripeAccountId} is not null`
   )
+}));
+
+// Runtime Stripe mode is part of the recipient identity. The original
+// performers.* Connect columns and stripe_connect_onboarding_operations table
+// remain as an immutable compatibility lane for historical test-mode data.
+// New code reads and writes this mode-qualified binding instead, so changing
+// Stripe credentials can never reinterpret a test account as a live account.
+export const performerStripeConnectBindings = pgTable('performer_stripe_connect_bindings', {
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull(),
+  stripeAccountId: text('stripe_account_id').notNull(),
+  paymentAccountStatus: paymentAccountStatusEnum('payment_account_status').notNull().default('not_started'),
+  chargesEnabled: boolean('charges_enabled').notNull().default(false),
+  payoutsEnabled: boolean('payouts_enabled').notNull().default(false),
+  statusCheckedAt: timestamp('status_checked_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  pk: primaryKey({ columns: [table.performerId, table.paymentMode] }),
+  accountModeIdx: uniqueIndex('performer_stripe_connect_bindings_account_mode_idx')
+    .on(table.paymentMode, table.stripeAccountId),
+  performerIdx: index('performer_stripe_connect_bindings_performer_idx').on(table.performerId),
+  paymentModeAllowed: check(
+    'performer_stripe_connect_bindings_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  )
+}));
+
+// Mode-qualified successor to stripe_connect_onboarding_operations. The
+// legacy table is deliberately retained so a rolling pre-migration process
+// can finish a test operation without losing its historic operation key.
+export const stripeConnectModeOnboardingOperations = pgTable('stripe_connect_mode_onboarding_operations', {
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  operationKey: text('operation_key').notNull(),
+  status: text('status').notNull().default('pending'),
+  stripeAccountId: text('stripe_account_id'),
+  leaseToken: uuid('lease_token'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastError: text('last_error'),
+  ...timestamps
+}, (table) => ({
+  pk: primaryKey({ columns: [table.performerId, table.paymentMode] }),
+  operationKeyIdx: uniqueIndex('stripe_connect_mode_onboarding_operations_key_idx').on(table.operationKey),
+  accountModeIdx: uniqueIndex('stripe_connect_mode_onboarding_operations_account_mode_idx')
+    .on(table.paymentMode, table.stripeAccountId)
+    .where(sql`${table.stripeAccountId} is not null`),
+  paymentModeAllowed: check(
+    'stripe_connect_mode_onboarding_operations_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  ),
+  statusAllowed: check(
+    'stripe_connect_mode_onboarding_operations_status_allowed',
+    sql`${table.status} in ('pending', 'provisioning', 'bound')`
+  ),
+  attemptCountValid: check(
+    'stripe_connect_mode_onboarding_operations_attempt_count_valid',
+    sql`${table.attemptCount} >= 0`
+  ),
+  leaseConsistent: check(
+    'stripe_connect_mode_onboarding_operations_lease_consistent',
+    sql`(
+      (${table.status} = 'provisioning' and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+      or
+      (${table.status} <> 'provisioning' and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)
+    )`
+  ),
+  boundAccountRequired: check(
+    'stripe_connect_mode_onboarding_operations_bound_account_required',
+    sql`${table.status} <> 'bound' or ${table.stripeAccountId} is not null`
+  )
+}));
+
+// PayPal/Venmo recipient identifiers are encrypted before persistence. Only a
+// masked preview and a keyed fingerprint are available to ordinary reads and
+// audit records; decryption is isolated to the server-side payout adapter.
+export const performerPayoutPreferences = pgTable('performer_payout_preferences', {
+  performerId: uuid('performer_id').primaryKey().references(() => performers.id),
+  paymentMode: text('payment_mode').notNull().default('test'),
+  destinationKind: text('destination_kind').notNull(),
+  recipientType: text('recipient_type').notNull(),
+  recipientValueEncrypted: text('recipient_value_encrypted').notNull(),
+  recipientValueFingerprint: text('recipient_value_fingerprint').notNull(),
+  recipientValuePreview: text('recipient_value_preview').notNull(),
+  provider: text('provider').notNull().default('paypal_payouts'),
+  privacyDeletionRequestedAt: timestamp('privacy_deletion_requested_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  destinationKindAllowed: check(
+    'performer_payout_preferences_destination_kind_allowed',
+    sql`${table.destinationKind} in ('paypal', 'venmo')`
+  ),
+  paymentModeAllowed: check(
+    'performer_payout_preferences_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  ),
+  recipientTypeAllowed: check(
+    'performer_payout_preferences_recipient_type_allowed',
+    sql`(${table.destinationKind} = 'paypal' and ${table.recipientType} = 'email')
+      or (${table.destinationKind} = 'venmo' and ${table.recipientType} in ('email', 'phone', 'user_handle'))`
+  ),
+  fingerprintValid: check(
+    'performer_payout_preferences_fingerprint_valid',
+    sql`${table.recipientValueFingerprint} ~ '^[0-9a-f]{64}$'`
+  ),
+  encryptedValueValid: check(
+    'performer_payout_preferences_encrypted_value_valid',
+    sql`length(${table.recipientValueEncrypted}) >= 32 and ${table.recipientValueEncrypted} like 'v1.%'`
+  ),
+  previewValid: check(
+    'performer_payout_preferences_preview_valid',
+    sql`length(trim(${table.recipientValuePreview})) between 3 and 320`
+  ),
+  providerAllowed: check(
+    'performer_payout_preferences_provider_allowed',
+    sql`${table.provider} = 'paypal_payouts'`
+  )
+}));
+
+// Sway stores only an opaque reference to the external identity/tax/sanctions
+// evidence. Identity documents and tax data stay with the approved reviewer;
+// a payout requires an approved row for the exact current process version.
+export const performerPayoutKycReviews = pgTable('performer_payout_kyc_reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  processApprovalVersion: text('process_approval_version').notNull(),
+  status: text('status').notNull(),
+  evidenceReference: text('evidence_reference').notNull(),
+  reviewerUserId: uuid('reviewer_user_id').notNull().references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  performerProcessIdx: uniqueIndex('performer_payout_kyc_reviews_performer_process_idx')
+    .on(table.performerId, table.processApprovalVersion),
+  currentLookupIdx: index('performer_payout_kyc_reviews_current_lookup_idx')
+    .on(table.performerId, table.status, table.processApprovalVersion),
+  statusAllowed: check(
+    'performer_payout_kyc_reviews_status_allowed',
+    sql`${table.status} in ('approved', 'revoked')`
+  ),
+  evidenceReferenceValid: check(
+    'performer_payout_kyc_reviews_evidence_reference_valid',
+    sql`length(trim(${table.evidenceReference})) between 8 and 200`
+  ),
+  revokedShape: check(
+    'performer_payout_kyc_reviews_revoked_shape',
+    sql`(${table.status} = 'revoked' and ${table.revokedAt} is not null) or (${table.status} = 'approved' and ${table.revokedAt} is null)`
+  )
+}));
+
+// A performer grant follows that artist through the existing authenticated
+// claim flow. A user grant also supports friends who never activate Pro Mode.
+export const swayProgramMemberships = pgTable('sway_program_memberships', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  performerId: uuid('performer_id').references(() => performers.id, { onDelete: 'cascade' }),
+  isFriend: boolean('is_friend').notNull().default(false),
+  isPartner: boolean('is_partner').notNull().default(false),
+  isExclusive: boolean('is_exclusive').notNull().default(false),
+  reason: text('reason').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  userIdx: uniqueIndex('sway_program_memberships_user_idx').on(table.userId),
+  performerIdx: uniqueIndex('sway_program_memberships_performer_idx').on(table.performerId),
+  target: check('sway_program_memberships_target', sql`(${table.userId} is null) <> (${table.performerId} is null)`),
+  friendPartner: check('sway_program_memberships_friend_partner', sql`not ${table.isFriend} or ${table.isPartner}`)
 }));
 
 export const performerPublicProfiles = pgTable('performer_public_profiles', {
@@ -1059,6 +1307,9 @@ export const performerSessions = pgTable('performer_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
   tokenHash: text('token_hash').notNull(),
+  sessionType: text('session_type').notNull().default('browser'),
+  gigId: uuid('gig_id').references(() => gigSessions.id),
+  metadata: jsonb('metadata'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
@@ -1066,7 +1317,19 @@ export const performerSessions = pgTable('performer_sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   tokenHashIdx: uniqueIndex('performer_sessions_token_hash_idx').on(table.tokenHash),
-  actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt)
+  actorExpiresIdx: index('performer_sessions_actor_expires_idx').on(table.actorUserId, table.expiresAt),
+  actorTypeGigIdx: index('performer_sessions_actor_type_gig_idx').on(
+    table.actorUserId,
+    table.sessionType,
+    table.gigId,
+    table.expiresAt
+  ),
+  sessionTypeValid: check('performer_sessions_session_type_valid', sql`
+    ${table.sessionType} in ('browser', 'control_bridge')
+  `),
+  bridgeGigScopeValid: check('performer_sessions_bridge_gig_scope_valid', sql`
+    (${table.sessionType} = 'browser') or (${table.sessionType} = 'control_bridge' and ${table.gigId} is not null)
+  `)
 }));
 
 export const performerLoginChallenges = pgTable('performer_login_challenges', {
@@ -1156,6 +1419,76 @@ export const performerMusicSourceConnections = pgTable('performer_music_source_c
     table.providerKey,
     table.connectionStatus
   )
+}));
+
+export const playbackCommands = pgTable('playback_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  gigId: uuid('gig_id').notNull().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  actorUserId: uuid('actor_user_id').references(() => users.id),
+  clientCommandId: text('client_command_id').notNull(),
+  sourceKey: text('source_key').notNull(),
+  action: text('action').notNull(),
+  payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  status: text('status').notNull().default('queued'),
+  claimedBy: text('claimed_by'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  failedAt: timestamp('failed_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  result: jsonb('result'),
+  errorText: text('error_text'),
+  ...timestamps
+}, (table) => ({
+  gigClientCommandIdx: uniqueIndex('playback_commands_gig_client_command_idx').on(
+    table.gigId,
+    table.clientCommandId
+  ),
+  claimQueueIdx: index('playback_commands_claim_queue_idx').on(
+    table.gigId,
+    table.sourceKey,
+    table.status,
+    table.createdAt
+  ),
+  statusValid: check('playback_commands_status_valid', sql`
+    ${table.status} in ('queued', 'claimed', 'succeeded', 'failed', 'expired')
+  `),
+  actionValid: check('playback_commands_action_valid', sql`
+    ${table.action} in ('load', 'play', 'pause', 'stop', 'cue', 'next', 'previous')
+  `),
+  sourceKeyValid: check('playback_commands_source_key_valid', sql`length(trim(${table.sourceKey})) > 0`),
+  clientCommandIdValid: check('playback_commands_client_command_id_valid', sql`length(trim(${table.clientCommandId})) > 0`)
+}));
+
+export const playbackStates = pgTable('playback_states', {
+  gigId: uuid('gig_id').primaryKey().references(() => gigSessions.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  sourceKey: text('source_key').notNull(),
+  transport: text('transport').notNull(),
+  bridgeInstanceId: text('bridge_instance_id').notNull(),
+  connectionStatus: text('connection_status').notNull().default('connected'),
+  deck: integer('deck'),
+  trackTitle: text('track_title'),
+  trackArtist: text('track_artist'),
+  trackPath: text('track_path'),
+  externalTrackId: text('external_track_id'),
+  playing: boolean('playing'),
+  positionMs: integer('position_ms'),
+  durationMs: integer('duration_ms'),
+  bpmTimes100: integer('bpm_times_100'),
+  revision: integer('revision').notNull().default(0),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  metadata: jsonb('metadata'),
+  ...timestamps
+}, (table) => ({
+  performerObservedIdx: index('playback_states_performer_observed_idx').on(table.performerId, table.observedAt),
+  connectionStatusValid: check('playback_states_connection_status_valid', sql`
+    ${table.connectionStatus} in ('connected', 'degraded', 'disconnected')
+  `),
+  deckValid: check('playback_states_deck_valid', sql`${table.deck} is null or (${table.deck} >= 1 and ${table.deck} <= 8)`),
+  positionValid: check('playback_states_position_valid', sql`${table.positionMs} is null or ${table.positionMs} >= 0`),
+  durationValid: check('playback_states_duration_valid', sql`${table.durationMs} is null or ${table.durationMs} >= 0`)
 }));
 
 export const performerSetlistTracks = pgTable('performer_setlist_tracks', {
@@ -1257,6 +1590,9 @@ export const payments = pgTable('payments', {
   actionType: text('action_type'),
   idempotencyKey: text('idempotency_key'),
   destinationAccountId: text('destination_account_id'),
+  // Provider environment snapshot. Existing/pre-migration rows are explicitly
+  // test; live workers must never claim or reconcile them.
+  paymentMode: text('payment_mode').notNull().default('test'),
   // Expand/contract rollout bridge. Migration 0028 defaults this true so the
   // still-running pre-0028 server remains write-compatible while Render applies
   // the migration. New code always writes false and must satisfy the binding
@@ -1267,9 +1603,13 @@ export const payments = pgTable('payments', {
   processorPaymentIntentId: text('processor_payment_intent_id'),
   processorChargeId: text('processor_charge_id'),
   amountSubtotal: integer('amount_subtotal').notNull(),
-  // Sway's actual commission collected (== Stripe application_fee_amount), regardless of
-  // whether it was added to the patron's charge or deducted from the performer's payout.
+  // Sway's customer-paid platform fee. New platform-balance payments do not use
+  // Stripe Connect application fees and never deduct this from performer earnings.
   platformFee: integer('platform_fee').notNull().default(0),
+  // Customer-paid pass-through amount that grosses up the card charge for the
+  // configured incoming-processor cost. It is neither performer earnings nor a
+  // Sway payout fee.
+  processorFeeRecovery: integer('processor_fee_recovery').notNull().default(0),
   amountTotal: integer('amount_total').notNull(),
   currency: text('currency').notNull().default('USD'),
   attributionSource: attributionSourceEnum('attribution_source').notNull().default('creator_direct'),
@@ -1305,6 +1645,15 @@ export const payments = pgTable('payments', {
         or (${table.actionType} = 'boost' and ${table.requestId} is null and ${table.requestBoostId} is not null)
       )
     )
+  `),
+  paymentModeAllowed: check('payments_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  processorFeeRecoveryValid: check(
+    'payments_processor_fee_recovery_valid',
+    sql`${table.processorFeeRecovery} >= 0`
+  ),
+  newMoneyAmountShape: check('payments_new_money_amount_shape', sql`
+    ${table.legacyUnlinked}
+    or ${table.amountTotal} = ${table.amountSubtotal} + ${table.platformFee} + ${table.processorFeeRecovery}
   `)
 }));
 
@@ -1320,6 +1669,7 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   processor: text('processor').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   destinationAccountId: text('destination_account_id').notNull(),
+  paymentMode: text('payment_mode').notNull().default('test'),
   requestPayload: jsonb('request_payload').notNull(),
   processorObjectId: text('processor_object_id'),
   resultPayload: jsonb('result_payload'),
@@ -1356,7 +1706,11 @@ export const liveRoomPaymentOperations = pgTable('live_room_payment_operations',
   completionCoherent: check('live_room_payment_operations_completion_coherent', sql`
     (${table.status} in ('succeeded', 'terminal_failed') and ${table.completedAt} is not null)
     or (${table.status} not in ('succeeded', 'terminal_failed') and ${table.completedAt} is null)
-  `)
+  `),
+  paymentModeAllowed: check(
+    'live_room_payment_operations_payment_mode_allowed',
+    sql`${table.paymentMode} in ('test', 'live')`
+  )
 }));
 
 export const liveRoomProcessorEvents = pgTable('live_room_processor_events', {
@@ -1419,6 +1773,96 @@ export const payouts = pgTable('payouts', {
   ...timestamps
 }, (table) => ({
   performerStatusIdx: index('payouts_performer_status_idx').on(table.performerId, table.payoutStatus)
+}));
+
+// One withdrawal debits the performer's accumulated captured earnings. The
+// gross amount is removed from the Sway balance once; the provider fee and net
+// delivery amount are immutable quote snapshots for reconciliation.
+export const performerWithdrawals = pgTable('performer_withdrawals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  idempotencyKey: text('idempotency_key').notNull(),
+  destinationKind: text('destination_kind').notNull(),
+  recipientType: text('recipient_type').notNull(),
+  recipientFingerprint: text('recipient_fingerprint').notNull(),
+  recipientPreview: text('recipient_preview').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  deliverySpeed: text('delivery_speed').notNull().default('provider'),
+  status: text('status').notNull().default('requested'),
+  grossAmountCents: integer('gross_amount_cents').notNull(),
+  providerFeeCents: integer('provider_fee_cents').notNull(),
+  netAmountCents: integer('net_amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  provider: text('provider').notNull().default('paypal_payouts'),
+  providerPayoutId: text('provider_payout_id'),
+  providerSenderItemId: text('provider_sender_item_id'),
+  providerItemId: text('provider_item_id'),
+  providerTransactionId: text('provider_transaction_id'),
+  providerStatus: text('provider_status'),
+  actualProviderFeeCents: integer('actual_provider_fee_cents'),
+  failureCode: text('failure_code'),
+  lastError: text('last_error'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  returnedAt: timestamp('returned_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => ({
+  performerCreatedIdx: index('performer_withdrawals_performer_created_idx').on(table.performerId, table.createdAt),
+  performerIdempotencyIdx: uniqueIndex('performer_withdrawals_performer_idempotency_idx').on(table.performerId, table.idempotencyKey),
+  providerPayoutIdx: uniqueIndex('performer_withdrawals_provider_payout_idx')
+    .on(table.provider, table.providerPayoutId)
+    .where(sql`${table.providerPayoutId} is not null`),
+  providerItemIdx: uniqueIndex('performer_withdrawals_provider_item_idx')
+    .on(table.provider, table.providerItemId)
+    .where(sql`${table.providerItemId} is not null`),
+  senderItemIdx: uniqueIndex('performer_withdrawals_provider_sender_item_idx')
+    .on(table.provider, table.providerSenderItemId)
+    .where(sql`${table.providerSenderItemId} is not null`),
+  destinationAllowed: check('performer_withdrawals_destination_allowed', sql`${table.destinationKind} in ('paypal', 'venmo')`),
+  recipientTypeAllowed: check('performer_withdrawals_recipient_type_allowed', sql`(${table.destinationKind} = 'paypal' and ${table.recipientType} = 'email') or (${table.destinationKind} = 'venmo' and ${table.recipientType} in ('email', 'phone', 'user_handle'))`),
+  recipientFingerprintValid: check('performer_withdrawals_recipient_fingerprint_valid', sql`${table.recipientFingerprint} ~ '^[0-9a-f]{64}$'`),
+  paymentModeAllowed: check('performer_withdrawals_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  speedAllowed: check('performer_withdrawals_speed_allowed', sql`${table.deliverySpeed} = 'provider'`),
+  statusAllowed: check('performer_withdrawals_status_allowed', sql`${table.status} in ('requested', 'submitting', 'processing', 'unclaimed', 'held', 'paid', 'failed', 'returned', 'canceled')`),
+  positiveGross: check('performer_withdrawals_positive_gross', sql`${table.grossAmountCents} > 0`),
+  nonnegativeFee: check('performer_withdrawals_nonnegative_fee', sql`${table.providerFeeCents} >= 0`),
+  actualFeeValid: check('performer_withdrawals_actual_fee_valid', sql`${table.actualProviderFeeCents} is null or ${table.actualProviderFeeCents} >= 0`),
+  amountEquation: check('performer_withdrawals_amount_equation', sql`${table.netAmountCents} > 0 and ${table.netAmountCents} + ${table.providerFeeCents} = ${table.grossAmountCents}`),
+  currencyUsd: check('performer_withdrawals_currency_usd', sql`${table.currency} = 'USD'`),
+  providerAllowed: check('performer_withdrawals_provider_allowed', sql`${table.provider} = 'paypal_payouts'`),
+  leaseShape: check('performer_withdrawals_lease_shape', sql`(${table.status} = 'submitting' and ${table.leaseOwner} is not null and ${table.leaseExpiresAt} is not null) or (${table.status} <> 'submitting' and ${table.leaseOwner} is null and ${table.leaseExpiresAt} is null)`),
+  attemptCountValid: check('performer_withdrawals_attempt_count_valid', sql`${table.attemptCount} >= 0`),
+  paidShape: check('performer_withdrawals_paid_shape', sql`(${table.status} = 'paid' and ${table.paidAt} is not null and ${table.providerPayoutId} is not null) or (${table.status} <> 'paid' and ${table.paidAt} is null)`),
+  returnedShape: check('performer_withdrawals_returned_shape', sql`(${table.status} = 'returned' and ${table.returnedAt} is not null) or (${table.status} <> 'returned' and ${table.returnedAt} is null)`)
+}));
+
+export const payoutProcessorEvents = pgTable('payout_processor_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: text('provider').notNull(),
+  providerEventId: text('provider_event_id').notNull(),
+  eventType: text('event_type').notNull(),
+  withdrawalId: uuid('withdrawal_id').references(() => performerWithdrawals.id),
+  payloadSha256: text('payload_sha256').notNull(),
+  payload: jsonb('payload').notNull(),
+  paymentMode: text('payment_mode').notNull(),
+  status: text('status').notNull().default('pending'),
+  lastError: text('last_error'),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  providerEventIdx: uniqueIndex('payout_processor_events_provider_event_idx').on(table.provider, table.providerEventId),
+  withdrawalIdx: index('payout_processor_events_withdrawal_idx').on(table.withdrawalId, table.createdAt),
+  statusIdx: index('payout_processor_events_status_idx').on(table.status, table.createdAt),
+  providerAllowed: check('payout_processor_events_provider_allowed', sql`${table.provider} = 'paypal_payouts'`),
+  paymentModeAllowed: check('payout_processor_events_payment_mode_allowed', sql`${table.paymentMode} in ('test', 'live')`),
+  statusAllowed: check('payout_processor_events_status_allowed', sql`${table.status} in ('pending', 'processed', 'ignored', 'failed')`),
+  payloadHashValid: check('payout_processor_events_payload_hash_valid', sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`),
+  payloadValid: check('payout_processor_events_payload_valid', sql`jsonb_typeof(${table.payload}) = 'object'`),
+  processedShape: check('payout_processor_events_processed_shape', sql`(${table.status} in ('processed', 'ignored') and ${table.processedAt} is not null) or (${table.status} not in ('processed', 'ignored') and ${table.processedAt} is null)`)
 }));
 
 export const moderationEvents = pgTable('moderation_events', {
@@ -2007,6 +2451,11 @@ export const musicRecordings = pgTable('music_recordings', {
   isExplicit: boolean('is_explicit').notNull().default(false),
   languageCode: text('language_code'),
   originalReleaseDate: date('original_release_date'),
+  lyricsAuthorship: text('lyrics_authorship').notNull().default('not_declared'),
+  compositionAuthorship: text('composition_authorship').notNull().default('not_declared'),
+  vocalPerformance: text('vocal_performance').notNull().default('not_declared'),
+  productionMethod: text('production_method').notNull().default('not_declared'),
+  lyricsExcerpt: text('lyrics_excerpt'),
   rightsStatus: text('rights_status').notNull().default('draft'),
   metadata: jsonb('metadata'),
   ...timestamps
@@ -2016,6 +2465,11 @@ export const musicRecordings = pgTable('music_recordings', {
   performerUpdatedIdx: index('music_recordings_performer_updated_idx').on(table.performerId, table.updatedAt),
   isrcValid: check('music_recordings_isrc_valid', sql`${table.isrc} is null or ${table.isrc} ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'`),
   durationValid: check('music_recordings_duration_valid', sql`${table.durationMs} is null or ${table.durationMs} > 0`),
+  lyricsAuthorshipAllowed: check('music_recordings_lyrics_authorship_allowed', sql`${table.lyricsAuthorship} in ('not_declared', 'human', 'human_ai_assisted', 'generated', 'instrumental')`),
+  compositionAuthorshipAllowed: check('music_recordings_composition_authorship_allowed', sql`${table.compositionAuthorship} in ('not_declared', 'human', 'human_ai_assisted', 'generated')`),
+  vocalPerformanceAllowed: check('music_recordings_vocal_performance_allowed', sql`${table.vocalPerformance} in ('not_declared', 'human', 'virtual_original', 'licensed_replica', 'mixed', 'instrumental')`),
+  productionMethodAllowed: check('music_recordings_production_method_allowed', sql`${table.productionMethod} in ('not_declared', 'human', 'ai_assisted', 'generated', 'mixed')`),
+  lyricsExcerptValid: check('music_recordings_lyrics_excerpt_valid', sql`${table.lyricsExcerpt} is null or (char_length(trim(${table.lyricsExcerpt})) between 1 and 500)`),
   rightsStatusAllowed: check('music_recordings_rights_status_allowed', sql`${table.rightsStatus} in ('draft', 'declared', 'under_review', 'cleared', 'blocked')`),
   projectPerformerFk: foreignKey({
     columns: [table.projectId, table.performerId],
@@ -2159,6 +2613,42 @@ export const musicRightsDeclarationEvents = pgTable('music_rights_declaration_ev
     foreignColumns: [musicRightsDeclarations.id, musicRightsDeclarations.declarationSha256],
     name: 'music_rights_declaration_events_declaration_sha_fk'
   })
+}));
+
+export const musicReleaseReports = pgTable('music_release_reports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  releaseId: uuid('release_id').notNull().references(() => musicReleases.id),
+  reporterUserId: uuid('reporter_user_id').notNull().references(() => users.id),
+  reason: text('reason').notNull(),
+  details: text('details').notNull(),
+  status: text('status').notNull().default('pending'),
+  ...timestamps
+}, (table) => ({
+  releaseCreatedIdx: index('music_release_reports_release_created_idx').on(table.releaseId, table.createdAt),
+  statusCreatedIdx: index('music_release_reports_status_created_idx').on(table.status, table.createdAt),
+  activeIdentityIdx: uniqueIndex('music_release_reports_active_identity_idx')
+    .on(table.releaseId, table.reporterUserId, table.reason)
+    .where(sql`${table.status} in ('pending', 'escalated')`),
+  reasonAllowed: check('music_release_reports_reason_allowed', sql`${table.reason} in ('copied_lyrics', 'unauthorized_voice', 'unlicensed_sample', 'missing_commercial_rights', 'incorrect_creation_credit', 'spam_or_duplicate', 'fake_engagement', 'impersonation')`),
+  statusAllowed: check('music_release_reports_status_allowed', sql`${table.status} in ('pending', 'dismissed', 'escalated', 'resolved')`),
+  detailsValid: check('music_release_reports_details_valid', sql`char_length(trim(${table.details})) between 40 and 2000`)
+}));
+
+export const musicReleaseReportEvents = pgTable('music_release_report_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reportId: uuid('report_id').notNull().references(() => musicReleaseReports.id),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  eventType: text('event_type').notNull(),
+  note: text('note').notNull(),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  reportCreatedIdx: index('music_release_report_events_report_created_idx').on(table.reportId, table.createdAt),
+  singleSubmittedIdx: uniqueIndex('music_release_report_events_single_submitted_idx')
+    .on(table.reportId)
+    .where(sql`${table.eventType} = 'submitted'`),
+  eventTypeAllowed: check('music_release_report_events_type_allowed', sql`${table.eventType} in ('submitted', 'dismissed', 'escalated', 'resolved')`),
+  noteValid: check('music_release_report_events_note_valid', sql`char_length(trim(${table.note})) between 1 and 2000`)
 }));
 
 export const musicReleaseStorageManifests = pgTable('music_release_storage_manifests', {

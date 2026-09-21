@@ -3,11 +3,13 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
+const playbackController = readFileSync(join(root, 'src/components/PerformerPlaybackController.tsx'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
 for (const term of [
   "const HARDWARE_BINDING_STORAGE_KEY = 'sway.performer.hardwareBindings.v1'",
+  "const HARDWARE_LISTENING_STORAGE_KEY = 'sway.performer.hardwareListening.v1'",
   "type HardwareActionId",
   "'toggle_requests'",
   "'fulfill_top'",
@@ -18,8 +20,12 @@ for (const term of [
   'data-sway-hardware-mapping-panel="true"',
   'data-sway-enable-hardware-controls="true"',
   'data-sway-hardware-controls-enabled="true"',
-  "if (session.status === 'inactive' || !hardwareControlsEnabled) return;",
-  'Keyboard and MIDI actions only listen while this panel is open.',
+  'data-sway-performer-connections-workspace="true"',
+  "if (!hardwareControlsActive && !hardwareLearnTarget) return;",
+  'On for this room while this dashboard stays open.',
+  "const hardwareControlsActive = roomHasControlContext && hardwareControlsEnabled && !roomActionsBlocked;",
+  "if (!roomHasControlContext && hardwareControlsEnabled)",
+  'Open only if you use advanced booth controls.',
   'navigator as any).requestMIDIAccess',
   'resolveMidiBinding',
   "window.addEventListener('keydown'",
@@ -30,12 +36,26 @@ for (const term of [
   "onTriage(topPending.id, 'deny')",
   'onHide(topApproved.id)',
   "window.open(topApproved.spotifyUrl, '_blank', 'noopener,noreferrer')",
+  "'playback_load_top'",
+  "'playback_play'",
+  "window.dispatchEvent(new CustomEvent('sway:playback-action'",
   'window.localStorage.setItem(HARDWARE_BINDING_STORAGE_KEY',
-  'Local bridge token',
+  'window.localStorage.setItem(HARDWARE_LISTENING_STORAGE_KEY',
+  'Booth connection',
   'onIssueBridgeToken'
 ]) {
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent hardware mapping missing term: ${term}`);
+  }
+}
+
+for (const term of [
+  "window.addEventListener('sway:playback-action'",
+  'sendPlaybackMidiAction',
+  'MIDI · one-way'
+]) {
+  if (!playbackController.includes(term)) {
+    failures.push(`Playback hardware mapping missing term: ${term}`);
   }
 }
 
@@ -48,6 +68,15 @@ for (const forbidden of [
 ]) {
   if (talentDashboard.includes(forbidden)) {
     failures.push(`Hardware mapping must stay local/truthful in this slice: ${forbidden}`);
+  }
+}
+
+for (const removedFailureMode of [
+  'Keyboard and MIDI actions only listen while this panel is open.',
+  'aria-label="Advanced key controls"'
+]) {
+  if (talentDashboard.includes(removedFailureMode)) {
+    failures.push(`Hardware setup must not block or disable the live console: ${removedFailureMode}`);
   }
 }
 

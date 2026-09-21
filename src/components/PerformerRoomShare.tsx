@@ -27,9 +27,12 @@ export async function copyRoomLink(value: string) {
   textArea.style.position = 'absolute';
   textArea.style.left = '-9999px';
   document.body.appendChild(textArea);
-  textArea.select();
-  document.execCommand('copy');
-  document.body.removeChild(textArea);
+  try {
+    textArea.select();
+    if (!document.execCommand('copy')) throw new Error('Clipboard is unavailable.');
+  } finally {
+    document.body.removeChild(textArea);
+  }
 }
 
 export function PerformerRoomQr({ activeGigId, size }: { activeGigId: string | null; size: number }) {
@@ -65,6 +68,12 @@ export default function PerformerRoomShare({ activeGigId }: { activeGigId: strin
   const roomLink = resolveLiveRoomLink(activeGigId);
   const overlayLink = resolveLiveOverlayLink(activeGigId);
   const [copied, setCopied] = useState<'room' | 'overlay' | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCopied(null);
+    setCopyError(null);
+  }, [activeGigId]);
 
   useEffect(() => {
     if (!copied) return;
@@ -74,24 +83,30 @@ export default function PerformerRoomShare({ activeGigId }: { activeGigId: strin
 
   const handleCopy = async (kind: 'room' | 'overlay', value: string | null) => {
     if (!value) return;
-    await copyRoomLink(value);
-    setCopied(kind);
+    try {
+      await copyRoomLink(value);
+      setCopied(kind);
+      setCopyError(null);
+    } catch {
+      setCopied(null);
+      setCopyError('Copy failed. Select the link and copy it manually.');
+    }
   };
 
   return (
     <section
       data-sway-performer-room-share="true"
-      className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-900/90 p-3"
+      className="grid min-w-0 gap-3 rounded-2xl border border-cyan-500/20 bg-slate-900/90 p-3"
     >
       <div className="min-w-0">
         <h3 className="font-display text-xs font-black uppercase tracking-widest text-white">Share Room</h3>
-        <p className="mt-1 truncate text-[11px] text-slate-400">
+        <p className="mt-1 text-[11px] text-slate-400">
           {roomLink ? 'Show the code, copy the link, or open the room.' : 'Start a room to generate links.'}
         </p>
       </div>
 
-      <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 overflow-hidden rounded-xl border border-white/10 bg-slate-950 p-3">
-        <div className="rounded-xl bg-white p-2">
+      <div className="grid min-w-0 gap-3 rounded-xl border border-white/10 bg-slate-950 p-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+        <div className="justify-self-center rounded-xl bg-white p-2">
           <div className="flex h-28 w-28 items-center justify-center bg-white text-slate-900">
             <PerformerRoomQr activeGigId={activeGigId} size={112} />
           </div>
@@ -99,29 +114,30 @@ export default function PerformerRoomShare({ activeGigId }: { activeGigId: strin
         <div className="min-w-0 space-y-2">
           <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
             <p className="text-[9px] font-black uppercase tracking-widest text-cyan-300">{LIVE_ROOM_LANGUAGE.audienceRoom}</p>
-            <p className="mt-1 truncate font-mono text-xs font-bold text-white">{roomLink ?? 'No live room yet'}</p>
+            <p className="mt-1 select-text break-all font-mono text-xs font-bold text-white">{roomLink ?? 'No live room yet'}</p>
           </div>
           <div className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
             <p className="text-[9px] font-black uppercase tracking-widest text-fuchsia-300">{LIVE_ROOM_LANGUAGE.roomScreen}</p>
-            <p className="mt-1 truncate font-mono text-xs font-bold text-white">{overlayLink ?? 'No screen link yet'}</p>
+            <p className="mt-1 select-text break-all font-mono text-xs font-bold text-white">{overlayLink ?? 'No screen link yet'}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 landscape:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <button type="button" onClick={() => handleCopy('room', roomLink)} disabled={!roomLink} className="min-h-10 rounded-xl bg-fuchsia-600 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500">
           {copied === 'room' ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomLink}
         </button>
-        <a href={roomLink ?? undefined} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${roomLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
+        <a href={roomLink ?? undefined} aria-disabled={!roomLink} tabIndex={roomLink ? undefined : -1} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-center text-xs font-black ${roomLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
           {LIVE_ROOM_LANGUAGE.openRoom}
         </a>
         <button type="button" onClick={() => handleCopy('overlay', overlayLink)} disabled={!overlayLink} className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-black text-cyan-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500">
           {copied === 'overlay' ? 'Copied' : LIVE_ROOM_LANGUAGE.copyRoomScreen}
         </button>
-        <a href={overlayLink ?? undefined} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-black ${overlayLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
+        <a href={overlayLink ?? undefined} aria-disabled={!overlayLink} tabIndex={overlayLink ? undefined : -1} target="_blank" rel="noreferrer" className={`flex min-h-10 items-center justify-center rounded-xl px-3 text-center text-xs font-black ${overlayLink ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'pointer-events-none border border-white/10 bg-slate-800 text-slate-500'}`}>
           {LIVE_ROOM_LANGUAGE.openRoomScreen}
         </a>
       </div>
+      {copyError ? <p role="alert" className="text-xs text-rose-200">{copyError}</p> : null}
     </section>
   );
 }

@@ -90,6 +90,9 @@ export default function AdminApp() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto flex max-w-6xl justify-end gap-4 px-4 pt-4 text-right">
+        <a href="/admin/release-reports" className="text-xs font-bold text-amber-300 hover:text-amber-200">
+          Release reports
+        </a>
         <a href="/admin/discovery-observatory" className="text-xs font-bold text-cyan-300 hover:text-cyan-200">
           Discovery Observatory
         </a>

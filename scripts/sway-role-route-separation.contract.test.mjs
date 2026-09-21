@@ -4,6 +4,8 @@ import { join } from 'node:path';
 const root = process.cwd();
 const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
 const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
+const roomRestart = readFileSync(join(root, 'src/components/PerformerRoomRestart.tsx'), 'utf8');
+const sourcesComposition = readFileSync(join(root, 'src/components/TalentDashboardWithSources.tsx'), 'utf8');
 
 const failures = [];
 
@@ -52,7 +54,10 @@ for (const forbidden of [
 }
 
 for (const required of [
-  "import TalentDashboard from '../components/TalentDashboard'",
+  "import BaseTalentDashboard from '../components/TalentDashboard'",
+  "import { withSourcePlayerContext } from '../components/TalentDashboardWithSources'",
+  'const TalentDashboard = withSourcePlayerContext(BaseTalentDashboard)',
+  "import PerformerRoomRestart from '../components/PerformerRoomRestart'",
   "pathname === '/talent/login'",
   "pathname === '/talent/signup'",
   'handleStartSession',
@@ -60,9 +65,36 @@ for (const required of [
   'handleCloseout',
   'handleTriageRequest',
   'handleFulfillRequest',
-  '<VictoryScreen'
+  '<PerformerRoomRestart'
 ]) {
   if (!talentApp.includes(required)) failures.push(`Canonical TalentApp missing performer runtime behavior: ${required}`);
+}
+
+// Sources adds context around the existing dashboard, not a replacement role
+// shell. Check the original import, composition and forwarding independently.
+for (const required of [
+  'export function withSourcePlayerContext(TalentDashboard:',
+  '<TalentDashboard {...props} />',
+  'onSelectRoom: props.onSelectGigId',
+  'props.activeGigId === gigId',
+  '!props.roomActionsBlocked'
+]) {
+  if (!sourcesComposition.includes(required)) failures.push(`Sources composition must preserve canonical performer behavior: ${required}`);
+}
+
+// The recap moved into a performer-owned restart component; it was not removed.
+// Check both layers so replacing the recap with an empty wrapper cannot pass.
+for (const required of [
+  "import VictoryScreen from './VictoryScreen'",
+  '<VictoryScreen session={session} requests={requests}',
+  '<PerformerRoomSetup',
+  'onStartSession={startNextRoom}'
+]) {
+  if (!roomRestart.includes(required)) failures.push(`Performer restart must preserve recap and reviewed setup: ${required}`);
+}
+const restartBlock = /<PerformerRoomRestart\b[\s\S]*?\/>/.exec(talentApp)?.[0] ?? '';
+if (!restartBlock.includes('onStartSession={handleStartSession}')) {
+  failures.push('Performer restart must use the canonical guarded room-start handler.');
 }
 
 if (failures.length) {

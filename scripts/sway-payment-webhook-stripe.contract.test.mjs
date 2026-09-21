@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const providerSource = readFileSync(join(root, 'src/server/payment-provider.ts'), 'utf8');
@@ -46,6 +47,42 @@ for (const term of requiredWebhookTerms) {
   }
 }
 
+// The provider adapter's secret-key-derived mode is authoritative. A valid
+// event from the opposite Stripe mode is still written to the durable inbox,
+// then terminally ignored so Stripe receives a 2xx without cross-mode state
+// mutation. Reusing the event id with altered signed bytes remains an error.
+const requiredModeIsolationTerms = [
+  'const paymentMode = provider.mode',
+  "const expectedLivemode = paymentMode === 'live'",
+  'const received = await receiveVerifiedEvent(input.rawBody, providerEvent)',
+  'event.livemode !== expectedLivemode',
+  "await markProcessed(event, { status: 'ignored' })",
+  "reason: 'opposite_payment_mode'",
+  'existing.payloadSha256 !== hash || existing.eventType !== event.providerType',
+  'Processor event id was reused with a different signed payload.'
+];
+
+for (const term of requiredModeIsolationTerms) {
+  if (!webhookSource.includes(term)) {
+    failures.push(`Webhook mode isolation missing required durable behavior: ${term}`);
+  }
+}
+
+const durableReceiveIndex = webhookSource.indexOf(
+  'const received = await receiveVerifiedEvent(input.rawBody, providerEvent)'
+);
+const processReceivedIndex = webhookSource.indexOf('return processEvent(received.row.id)', durableReceiveIndex);
+if (durableReceiveIndex < 0 || processReceivedIndex < durableReceiveIndex) {
+  failures.push('Webhook processing must durably receive the signed event before mode filtering or transition work.');
+}
+
+const processClaimedStart = webhookSource.indexOf('async function processClaimedEvent');
+const mappedStateIndex = webhookSource.indexOf('const mappedState = mapProviderEventToPaymentState', processClaimedStart);
+const oppositeModeIndex = webhookSource.indexOf('event.livemode !== expectedLivemode', processClaimedStart);
+if (processClaimedStart < 0 || oppositeModeIndex < processClaimedStart || mappedStateIndex < oppositeModeIndex) {
+  failures.push('Opposite-mode events must be ignored before payment identity resolution or lifecycle mutation.');
+}
+
 const requiredReplayTerms = [
   'duplicate_event',
   'noop_current_state',
@@ -82,6 +119,10 @@ const webhookRouteSource = webhookRouteStart >= 0 && webhookRouteEnd > webhookRo
 
 if (!webhookRouteSource) {
   failures.push('Server webhook route source could not be isolated for signature guard checks.');
+}
+
+if (!/paymentWebhookService\.ingestWebhook\([\s\S]*return res\.json\(\{ received: true, result \}\)/.test(webhookRouteSource)) {
+  failures.push('Durably ignored payment webhooks must return the normal 200 JSON acknowledgement path.');
 }
 
 const requiredSignatureGuardPatterns = [
@@ -130,6 +171,15 @@ if (failures.length) {
   console.error('Stripe webhook verification contract failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
+}
+
+// Exercise actual scheduler behavior, not only source terms. The existing
+// disposable-database guard owns setup; no real provider is contacted.
+const clockProof = spawnSync(process.execPath, [
+  '--import', 'tsx', join(root, 'scripts/sway-payment-operation-clock.integration.test.mjs')
+], { cwd: root, env: process.env, stdio: 'inherit', timeout: 120_000 });
+if (clockProof.error || clockProof.status !== 0) {
+  throw new Error('Payment/webhook clock behavior failed.', { cause: clockProof.error });
 }
 
 console.log('Stripe webhook verification contract passed.');

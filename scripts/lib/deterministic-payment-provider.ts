@@ -64,6 +64,7 @@ export function createDeterministicPaymentProvider() {
 
   const provider: PaymentProviderAdapter = {
     processor: 'stripe',
+    mode: 'test',
 
     async verifyWebhookSignature({ signatureHeader }) {
       return signatureHeader === 'deterministic-test-signature';

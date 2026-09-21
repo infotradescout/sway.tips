@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -17,6 +18,8 @@ const policy = read('src/server/audio-storage-policy.ts');
 const service = read('src/server/audio-publishing-service.ts');
 const server = read('server.ts');
 const surface = read('src/components/PerformerAudioFiles.tsx');
+const catalogHook = read('src/use-performer-catalog.ts');
+const catalogReads = read('src/performer-catalog-reads.ts');
 const product = read('docs/SWAY_PRODUCT_STRUCTURE.md');
 const foundation = read('docs/SWAY_AUDIO_PUBLISHING_FOUNDATION.md');
 const runbook = read('docs/runbooks/audio-master-vault.md');
@@ -153,8 +156,20 @@ for (const term of [
   if (!server.includes(term)) failures.push(`Server storage boundary is missing: ${term}`);
 }
 
+// The component now reaches the same endpoint through a subscribed, bounded
+// reader. Verify every link instead of requiring the old inline fetch shape.
+for (const [label, source, term] of [
+  ['Catalog surface', surface, 'usePerformerCatalog()'],
+  ['Catalog hook import', catalogHook, "from './performer-catalog-reads'"],
+  ['Catalog hook reader', catalogHook, 'createCatalogReader()'],
+  ['Catalog hook subscription', catalogHook, 'useSyncExternalStore(reader.subscribe, reader.getSnapshot'],
+  ['Catalog hook lifecycle', catalogHook, 'reader.start()'],
+  ['Catalog storage endpoint', catalogReads, "readCatalogJson('/api/talent/audio/storage-usage'"],
+  ['Catalog storage validation', catalogReads, 'parseCatalogStorage(await readCatalogJson(']
+]) {
+  if (!source.includes(term)) failures.push(`${label} is missing: ${term}`);
+}
 for (const term of [
-  "fetch('/api/talent/audio/storage-usage'",
   'Release count is unlimited.',
   'working storage',
   'releaseProtectedBytes',
@@ -200,5 +215,11 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
-
+const recovery = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-performer-catalog-reads.behavior.test.mjs'], {
+  cwd: root, stdio: 'inherit', timeout: 30_000
+});
+if (recovery.status !== 0 || recovery.error) {
+  console.error('Catalog recovery behavior failed inside the audio-storage hard gate.', recovery.error?.message || recovery.signal || recovery.status);
+  process.exit(1);
+}
 console.log('Audio storage policy contract passed.');

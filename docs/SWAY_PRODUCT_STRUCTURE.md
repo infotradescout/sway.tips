@@ -82,6 +82,10 @@ Broader than distribution. Path from original file to independent creator busine
 
 External distribution (including any DistroKid-class DSP cutover work) is **one outlet** inside Self-Production — not the definition of Sway, and not the definition of Self-Production.
 
+Songwriter authorship remains a first-class public credit when a creator uses an original virtual performer or
+generative production. The governing disclosure, rights, discovery, and community-moderation rules are recorded in
+`docs/SONGWRITER_FIRST_SYNTHETIC_MUSIC_POLICY_V1.md`.
+
 ### Working-storage and release-count boundary
 
 Sway is a release workspace, not a general-purpose cloud drive. The number of releases a creator may prepare or publish is **not numerically capped**. Storage abuse is controlled separately through a configurable per-performer working-storage pool (default: 5 GiB): active multipart reservations plus sealed files that are not named in an immutable, validated release-package manifest consume that pool.
@@ -138,5 +142,6 @@ This economic lock does **not** authorize Sway.DIO launch, streaming/royalty run
 - Gap ledger (capability detail): `docs/SWAY_COMPLETE_PRODUCT_GAP.md`
 - Release chain: `RELEASE_CONTROL.md`
 - Agent rules: `AGENTS.md`
+- Songwriter-first synthetic music policy: `docs/SONGWRITER_FIRST_SYNTHETIC_MUSIC_POLICY_V1.md`
 
 A fuller Sway.DIO economic-model document may exist later as a Self-Production artifact; this dual-lane PR does **not** ship or depend on `docs/SWAY_DIO_ECONOMIC_MODEL.md`.

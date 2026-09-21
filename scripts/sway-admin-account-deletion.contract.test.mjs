@@ -26,9 +26,11 @@ for (const term of [
   'isActive: false',
   "onboardingStatus: 'suspended'",
   'performerSessionStore.revokeActiveSessionsForActorUser',
+  'payoutRecipientPrivacyService?.requestDeletion',
   "eventType: 'admin_account.delete'",
-  'targetEmail: existingAccount.email',
-  'targetHandle: existingAccount.handle'
+  'targetHadEmail: Boolean(existingAccount.email)',
+  'targetHadHandle: Boolean(existingAccount.handle)',
+  'rawIdentityDataStoredInAudit: false'
 ]) {
   if (!routeSource.includes(term)) failures.push(`Admin account deletion route missing invariant: ${term}`);
 }
@@ -43,6 +45,15 @@ for (const forbidden of [
   /delete\(gigSessions\)/
 ]) {
   if (forbidden.test(routeSource)) failures.push(`Admin account deletion route must not hard-delete retained records: ${forbidden}`);
+}
+
+for (const forbiddenAuditField of [
+  'targetEmail: existingAccount.email',
+  'targetHandle: existingAccount.handle'
+]) {
+  if (routeSource.includes(forbiddenAuditField)) {
+    failures.push(`Admin account deletion audit must not retain scrubbed identity: ${forbiddenAuditField}`);
+  }
 }
 
 for (const term of [

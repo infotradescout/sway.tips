@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, ne, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lte, ne, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { createSwayDb } from '../db/client';
 import { liveRoomPaymentOperations, payments } from '../db/schema';
@@ -10,14 +10,17 @@ const LEASE_MS = 30_000;
 
 function retryAt(attemptCount: number) {
   const seconds = Math.min(300, Math.max(2, 2 ** Math.min(attemptCount, 8)));
-  return new Date(Date.now() + seconds * 1_000);
+  return sql<Date>`statement_timestamp() + (${seconds} * interval '1 second')`;
 }
 
 function safeError(error: unknown) {
   return error instanceof Error ? error.message.slice(0, 1_000) : 'unknown_operation_error';
 }
 
-export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
+export function createLiveRoomPaymentOperationStore(
+  databaseUrl: string | undefined,
+  paymentMode: 'test' | 'live'
+) {
   const db = databaseUrl ? createSwayDb(databaseUrl) : null;
 
   async function enqueue(input: {
@@ -43,6 +46,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         requestBoostId: input.requestBoostId ?? null,
         operationType: input.operationType,
         processor: input.processor,
+        paymentMode,
         idempotencyKey: input.idempotencyKey,
         destinationAccountId: input.destinationAccountId,
         requestPayload: input.requestPayload
@@ -64,6 +68,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       || existing.requestId !== (input.requestId ?? null)
       || existing.requestBoostId !== (input.requestBoostId ?? null)
       || existing.operationType !== input.operationType
+      || existing.paymentMode !== paymentMode
       || existing.destinationAccountId !== input.destinationAccountId
     ) {
       throw new Error('live_room_payment_operation_identity_conflict');
@@ -74,7 +79,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         .set({
           status: 'retryable_failed',
           attemptCount: 0,
-          availableAt: new Date(),
+          availableAt: sql<Date>`statement_timestamp()`,
           leaseOwner: null,
           leaseExpiresAt: null,
           completedAt: null,
@@ -94,12 +99,17 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
   async function claim(workerId: string, operationId?: string): Promise<OperationRow | null> {
     if (!db) return null;
     return db.transaction(async (tx) => {
-      const now = new Date();
+      // Database-created eligibility and lease timestamps must use the same
+      // clock and precision. An application Date can lag even on one host,
+      // leaving a new capture pending, or prematurely reclaim another owner.
+      // Each SQL statement evaluates this afresh, including after lock waits.
+      const now = sql<Date>`statement_timestamp()`;
       const candidates = await tx
         .select()
         .from(liveRoomPaymentOperations)
         .where(and(
           ...(operationId ? [eq(liveRoomPaymentOperations.id, operationId)] : []),
+          eq(liveRoomPaymentOperations.paymentMode, paymentMode),
           lte(liveRoomPaymentOperations.availableAt, now),
           or(
             inArray(liveRoomPaymentOperations.status, ['pending', 'retryable_failed']),
@@ -119,7 +129,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         await tx
           .select({ id: payments.id })
           .from(payments)
-          .where(eq(payments.id, operation.paymentId))
+          .where(and(eq(payments.id, operation.paymentId), eq(payments.paymentMode, paymentMode)))
           .for('update')
           .limit(1);
         const [leasedSibling] = await tx
@@ -127,6 +137,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
           .from(liveRoomPaymentOperations)
           .where(and(
             eq(liveRoomPaymentOperations.paymentId, operation.paymentId),
+            eq(liveRoomPaymentOperations.paymentMode, paymentMode),
             eq(liveRoomPaymentOperations.status, 'leased'),
             ne(liveRoomPaymentOperations.id, operation.id),
             gt(liveRoomPaymentOperations.leaseExpiresAt, now)
@@ -140,12 +151,15 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
             status: 'leased',
             attemptCount: operation.attemptCount + 1,
             leaseOwner: leaseToken,
-            leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+            leaseExpiresAt: sql<Date>`statement_timestamp() + (${LEASE_MS} * interval '1 millisecond')`,
             lastAttemptAt: now,
             lastError: null,
             updatedAt: now
           })
-          .where(eq(liveRoomPaymentOperations.id, operation.id))
+          .where(and(
+            eq(liveRoomPaymentOperations.id, operation.id),
+            eq(liveRoomPaymentOperations.paymentMode, paymentMode)
+          ))
           .returning();
         if (leased) return leased;
       }
@@ -171,6 +185,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       })
       .where(and(
         eq(liveRoomPaymentOperations.id, operation.id),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.status, 'leased'),
         eq(liveRoomPaymentOperations.leaseOwner, operation.leaseOwner)
       ));
@@ -196,6 +211,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       })
       .where(and(
         eq(liveRoomPaymentOperations.id, operation.id),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.status, 'leased'),
         eq(liveRoomPaymentOperations.leaseOwner, operation.leaseOwner)
       ));
@@ -221,6 +237,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       })
       .where(and(
         eq(liveRoomPaymentOperations.paymentId, paymentId),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.operationType, 'authorize'),
         inArray(liveRoomPaymentOperations.status, ['awaiting_customer', 'pending', 'retryable_failed', 'leased'])
       ));
@@ -248,6 +265,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       })
       .where(and(
         eq(liveRoomPaymentOperations.id, operation.id),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.status, 'leased'),
         eq(liveRoomPaymentOperations.leaseOwner, operation.leaseOwner)
       ))
@@ -268,6 +286,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       })
       .where(and(
         eq(liveRoomPaymentOperations.paymentId, paymentId),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode),
         eq(liveRoomPaymentOperations.operationType, 'capture'),
         inArray(liveRoomPaymentOperations.status, ['pending', 'retryable_failed'])
       ));
@@ -281,6 +300,7 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
         .from(liveRoomPaymentOperations)
         .where(and(
           eq(liveRoomPaymentOperations.paymentId, paymentId),
+          eq(liveRoomPaymentOperations.paymentMode, paymentMode),
           eq(liveRoomPaymentOperations.operationType, 'authorize')
         ))
         .for('update')
@@ -289,15 +309,20 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
       await tx
         .select({ id: payments.id })
         .from(payments)
-        .where(eq(payments.id, paymentId))
+        .where(and(eq(payments.id, paymentId), eq(payments.paymentMode, paymentMode)))
         .for('update')
         .limit(1);
-      const now = new Date();
-      if (
-        operation.status === 'leased'
-        && operation.leaseExpiresAt
-        && operation.leaseExpiresAt > now
-      ) return { status: 'in_flight' as const };
+      const now = sql<Date>`statement_timestamp()`;
+      if (operation.status === 'leased') {
+        // Check at database precision after any payment-lock wait. A fast
+        // app clock must not let closeout steal an active provider operation.
+        const [lease] = await tx
+          .select({ active: sql<boolean>`${liveRoomPaymentOperations.leaseExpiresAt} > statement_timestamp()` })
+          .from(liveRoomPaymentOperations)
+          .where(eq(liveRoomPaymentOperations.id, operation.id))
+          .limit(1);
+        if (lease?.active) return { status: 'in_flight' as const };
+      }
       if (['awaiting_customer', 'succeeded'].includes(operation.status)) {
         return { status: 'provider_known' as const, operationId: operation.id };
       }
@@ -314,7 +339,10 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
             lastError: 'authorization_reopened_for_closeout_reconciliation',
             updatedAt: now
           })
-          .where(eq(liveRoomPaymentOperations.id, operation.id))
+          .where(and(
+            eq(liveRoomPaymentOperations.id, operation.id),
+            eq(liveRoomPaymentOperations.paymentMode, paymentMode)
+          ))
           .returning({ id: liveRoomPaymentOperations.id });
         return reopened
           ? { status: 'reconcile' as const, operationId: reopened.id }
@@ -333,7 +361,10 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
           leaseExpiresAt: null,
           updatedAt: now
         })
-        .where(eq(liveRoomPaymentOperations.id, operation.id));
+        .where(and(
+          eq(liveRoomPaymentOperations.id, operation.id),
+          eq(liveRoomPaymentOperations.paymentMode, paymentMode)
+        ));
       return { status: 'canceled' as const };
     });
   }
@@ -343,7 +374,10 @@ export function createLiveRoomPaymentOperationStore(databaseUrl?: string) {
     const [row] = await db
       .select()
       .from(liveRoomPaymentOperations)
-      .where(eq(liveRoomPaymentOperations.id, operationId))
+      .where(and(
+        eq(liveRoomPaymentOperations.id, operationId),
+        eq(liveRoomPaymentOperations.paymentMode, paymentMode)
+      ))
       .limit(1);
     return row ?? null;
   }

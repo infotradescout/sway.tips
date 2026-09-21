@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   escapePublicProfileMetadataAttribute,
   labelForPublicPerformerPrimaryRole,
@@ -8,6 +10,7 @@ import {
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
   normalizePublicProfilePrimaryRole,
+  normalizePublicProfileRoles,
   normalizePublicProfileSpecialties,
   normalizePublicProfileUrl,
   resolvePublicProfileHeroName,
@@ -26,6 +29,7 @@ import {
   RESERVED_PERFORMER_HANDLES
 } from '../src/server/performer-login';
 import { calculateSwayPaymentAmounts } from '../src/server/payment-service';
+import { estimateCardProcessingFeeCents } from '../src/payment-pricing';
 
 assert.equal(normalizePublicProfileUrl('javascript:alert(1)'), null);
 assert.equal(normalizePublicProfileUrl('data:text/html,<script>alert(1)</script>'), null);
@@ -99,6 +103,12 @@ assert.equal(normalizePublicProfilePrimaryRole('lawyer'), null);
 assert.equal(labelForPublicPerformerPrimaryRole('host'), 'Host / MC');
 assert.equal(labelForPublicPerformerPrimaryRole('Host / MC'), 'Host / MC');
 assert.equal(labelForPublicPerformerPrimaryRole('other'), 'Other');
+assert.deepEqual(
+  normalizePublicProfileRoles([' DJ ', 'Host / MC', 'dj', 'lawyer', 'Musician']),
+  ['dj', 'host', 'musician']
+);
+assert.deepEqual(normalizePublicProfileRoles(undefined, 'Creator'), ['creator']);
+assert.deepEqual(normalizePublicProfileRoles([], null), []);
 assert.equal(
   resolvePublicProfileHeroName({ handle: 'coreymack', stageName: 'Corey Mack', displayName: 'Legal Name' }),
   '@coreymack'
@@ -114,6 +124,10 @@ assert.equal(
 assert.equal(
   resolvePublicProfilePageKindLabel({ primaryRole: 'dj', specialties: ['Open format'], isPreview: false }),
   'DJ'
+);
+assert.equal(
+  resolvePublicProfilePageKindLabel({ primaryRole: 'dj', roles: ['dj', 'host', 'producer'], specialties: [], isPreview: false }),
+  'DJ · Host / MC · Producer'
 );
 assert.equal(
   resolvePublicProfilePageKindLabel({ primaryRole: null, specialties: ['Beatbox'], isPreview: false }),
@@ -136,7 +150,8 @@ assert.deepEqual(
     analyticsTag: 'keep-me',
     nested: { preserved: true },
     stageName: 'New name',
-    primaryRole: 'musician'
+    primaryRole: 'musician',
+    roles: ['musician']
   }
 );
 assert.deepEqual(
@@ -144,7 +159,14 @@ assert.deepEqual(
     { analyticsTag: 'keep-me', stageName: 'Old name', primaryRole: 'dj' },
     { stageName: null, primaryRole: 'host' }
   ),
-  { analyticsTag: 'keep-me', primaryRole: 'host' }
+  { analyticsTag: 'keep-me', primaryRole: 'host', roles: ['host'] }
+);
+assert.deepEqual(
+  mergePublicProfileMetadata(
+    { analyticsTag: 'keep-me', primaryRole: 'dj' },
+    { roles: ['dj', 'host', 'producer'] }
+  ),
+  { analyticsTag: 'keep-me', primaryRole: 'dj', roles: ['dj', 'host', 'producer'] }
 );
 
 assert.deepEqual(
@@ -209,17 +231,49 @@ const patronPaidAmounts = calculateSwayPaymentAmounts({
 });
 assert.equal(patronPaidAmounts.platformFeeCents, 100);
 assert.equal(patronPaidAmounts.platformFeeChargedToPatronCents, 100);
-assert.equal(patronPaidAmounts.amountTotalCents, 1_100);
-assert.equal(patronPaidAmounts.amountTotalCents - patronPaidAmounts.platformFeeCents, 1_000);
+assert.equal(patronPaidAmounts.processorFeeRecoveryCents, 64);
+assert.equal(patronPaidAmounts.amountTotalCents, 1_164);
+assert.equal(
+  patronPaidAmounts.amountTotalCents
+    - estimateCardProcessingFeeCents(patronPaidAmounts.amountTotalCents, { basisPoints: 290, fixedCents: 30 }),
+  1_100,
+  'configured incoming processing cost must not reduce performer earnings or Sway\'s $1 fee'
+);
 
 const performerPaidAmounts = calculateSwayPaymentAmounts({
   amountSubtotalCents: 1_000,
   platformFeeCents: 100,
   platformFeePayer: 'performer'
 });
+assert.deepEqual(performerPaidAmounts, patronPaidAmounts, 'legacy performer-paid input must be ignored so the customer always covers Sway checkout costs');
 assert.equal(performerPaidAmounts.platformFeeCents, 100);
-assert.equal(performerPaidAmounts.platformFeeChargedToPatronCents, 0);
-assert.equal(performerPaidAmounts.amountTotalCents, 1_000);
-assert.equal(performerPaidAmounts.amountTotalCents - performerPaidAmounts.platformFeeCents, 900);
+assert.equal(performerPaidAmounts.platformFeeChargedToPatronCents, 100);
+assert.equal(performerPaidAmounts.processorFeeRecoveryCents, 64);
+assert.equal(performerPaidAmounts.amountTotalCents, 1_164);
+
+for (const amountSubtotalCents of [1, 50, 100, 499, 500, 1_000, 10_000, 999_999]) {
+  const amounts = calculateSwayPaymentAmounts({ amountSubtotalCents, platformFeeCents: 100 });
+  const processorFee = estimateCardProcessingFeeCents(
+    amounts.amountTotalCents,
+    { basisPoints: 290, fixedCents: 30 }
+  );
+  assert.ok(
+    amounts.amountTotalCents - processorFee >= amountSubtotalCents + 100,
+    'gross-up must preserve the subtotal plus Sway fee across supported amounts'
+  );
+  if (amounts.amountTotalCents > 0) {
+    assert.ok(
+      amounts.amountTotalCents - 1
+        - estimateCardProcessingFeeCents(
+          amounts.amountTotalCents - 1,
+          { basisPoints: 290, fixedCents: 30 }
+        ) < amountSubtotalCents + 100,
+      'gross-up must use the lowest cent that preserves the protected net'
+    );
+  }
+}
+
+// Keep lifecycle regressions in the existing full profile contract gate.
+execFileSync(process.execPath, [fileURLToPath(new URL('./sway-profile-editor.behavior.test.mjs', import.meta.url))], { stdio: 'inherit' });
 
 console.log('Performer link profile behavior tests passed.');

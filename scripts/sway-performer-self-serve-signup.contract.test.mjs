@@ -31,6 +31,8 @@ async function main() {
   const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8');
   const schemaSource = readFileSync(join(root, 'src/db/schema.ts'), 'utf8');
   const signupCardSource = readFileSync(join(root, 'src/components/TalentSignupCard.tsx'), 'utf8');
+  const accountAccessSource = readFileSync(join(root, 'src/components/AccountAccess.tsx'), 'utf8');
+  const adminAccountsSource = readFileSync(join(root, 'src/shells/AdminAccountsPage.tsx'), 'utf8');
   const envExample = readFileSync(join(root, '.env.example'), 'utf8');
   const envContract = readFileSync(join(root, 'docs/SWAY_ENVIRONMENT_CONTRACT.md'), 'utf8');
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -47,6 +49,7 @@ async function main() {
 
   const {
     normalizePerformerHandle,
+    normalizePerformerHandleLookup,
     normalizePerformerDisplayName,
     PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
     PERFORMER_SIGNUP_SUCCESS_COPY
@@ -74,6 +77,14 @@ async function main() {
   assert.ok(!signupCardSource.includes("fetch('/api/talent/signup'"), 'Legacy performer UI must not submit a second account-creation API.');
   assert.ok(signupCardSource.includes("new URLSearchParams({ intent: 'performer' })"), 'Legacy performer UI must route creation into universal account signup.');
   assert.ok(signupCardSource.includes('Open local verification link'), 'Local mock signup must expose the verification link instead of implying real email delivery.');
+  assert.ok(signupCardSource.includes('const HANDLE_MIN_LENGTH = 4;') && signupCardSource.includes('const HANDLE_MAX_LENGTH = 30;'), 'Performer signup must explain and enforce the 4–30 handle rule.');
+  assert.ok(accountAccessSource.includes('minLength={4}') && accountAccessSource.includes('maxLength={30}'), 'Pro Mode activation must enforce the 4–30 handle rule before submit.');
+  assert.ok(
+    adminAccountsSource.includes('Existing legacy handles can stay unchanged.')
+      && adminAccountsSource.includes('if (handleChanged) body.handle = handle.trim();')
+      && adminAccountsSource.includes('handleRenameError'),
+    'Admin editing must preserve unchanged grandfathered handles and validate only real renames.'
+  );
 
   assert.ok(
     accessSource.includes("req.path === '/talent/login'")
@@ -109,17 +120,30 @@ async function main() {
   }
 
   assert.equal(normalizePerformerHandle('dj-sunset'), 'dj-sunset');
+  assert.equal(normalizePerformerHandle('abc'), null, 'Performer handles shorter than four characters must be rejected.');
+  assert.equal(normalizePerformerHandle('abcd'), 'abcd', 'Four-character performer handles must remain valid.');
+  assert.equal(normalizePerformerHandle('x'.repeat(31)), null, 'Performer handles longer than 30 characters must be rejected.');
+  assert.equal(normalizePerformerHandleLookup('3X'), '3X', 'Existing short handles must remain reachable until renamed.');
+  assert.equal(normalizePerformerHandleLookup('x'.repeat(31)), 'x'.repeat(31), 'Existing long handles must remain reachable until renamed.');
   assert.equal(normalizePerformerHandle('DJ-Sunset'), 'DJ-Sunset', 'Performer handles must allow performer-chosen casing.');
   assert.equal(normalizePerformerHandle('bad handle'), null, 'Performer handles must reject spaces.');
   assert.equal(normalizePerformerHandle('bad*handle'), null, 'Performer handles must reject unsupported characters.');
   assert.equal(normalizePerformerHandle('Admin'), null, 'Performer handles must reject reserved names case-insensitively.');
   assert.ok(
-    schemaSource.includes("uniqueIndex('idx_performers_handle_lower').on(sql`lower(${table.handle})`)"),
-    'Performer handle uniqueness must be case-insensitive at the schema level.'
+    schemaSource.includes("export const performerHandleClaims = pgTable('performer_handle_claims'")
+      && schemaSource.includes("name: 'idx_performers_handle_lower'")
+      && schemaSource.includes("columns: [table.normalizedHandle]"),
+    'Performer handle uniqueness must use one normalized authoritative namespace.'
   );
   assert.ok(
     readFileSync(join(root, 'drizzle/0013_performer_handle_case_insensitive.sql'), 'utf8').includes('idx_performers_handle_lower'),
-    'Performer handle migration must add the case-insensitive uniqueness index.'
+    'The historical performer handle migration must establish case-insensitive uniqueness.'
+  );
+  const handleClaimMigration = readFileSync(join(root, 'drizzle/0043_bored_sleeper.sql'), 'utf8');
+  assert.ok(
+    handleClaimMigration.includes('DROP INDEX "idx_performers_handle_lower"')
+      && handleClaimMigration.includes('ADD CONSTRAINT "idx_performers_handle_lower" PRIMARY KEY ("normalized_handle")'),
+    'The claim migration must atomically transfer case-insensitive uniqueness into the authoritative namespace.'
   );
   assert.equal(normalizePerformerDisplayName(' DJ Sunset '), 'DJ Sunset', 'Performer display names must trim.');
   assert.equal(normalizePerformerDisplayName(''), null, 'Performer display names must reject empty strings.');

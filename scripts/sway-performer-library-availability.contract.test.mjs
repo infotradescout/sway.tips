@@ -52,10 +52,14 @@ for (const term of [
   "app.post('/api/talent/library/sources'",
   "app.post('/api/talent/library/sources/:sourceId/rotate-key'",
   "app.post('/api/talent/library/sources/:sourceId/revoke'",
+  "app.post('/api/library/import-file'",
   "app.post('/api/library/sync'",
   'performerLibraryTracks',
   'performerLibrarySources',
+  "metadata: { importMode: 'browser_file' }",
   'replaceExisting',
+  'buildWindowsLibrarySyncLauncher',
+  "express.text({ type: ['text/plain', 'application/octet-stream'], limit: '10mb' })",
   'removedCount',
   "app.post(\"/api/music/search\"",
   "integrationMode: 'performer_library'"
@@ -89,17 +93,26 @@ for (const term of [
   'Catalog is connected automatically.',
   'Your owned or cleared audio stored in Sway.',
   'Potentially copyrighted music played from Spotify, DJ software, or another external source.',
-  'Advanced library connections',
-  'Link Any Library Program',
-  'Create linked source',
+  'Open reusable booth helper',
+  'Make a reusable booth helper',
+  '<PerformerSourceImportChoices',
+  'Create private Windows helper',
+  'Download Windows music helper',
+  'data-sway-windows-library-helper-download="true"',
   'Sync endpoint',
   'x-sway-library-key',
-  'Rotate key',
-  'Revoke source',
+  'Make fresh helper',
+  'role="alertdialog"',
+  'Disconnect source',
+  'Disconnect source',
   'Tracks available:',
   'npm run library:bridge -- --sync-key'
 ]) {
   if (!talentDashboard.includes(term)) failures.push(`TalentDashboard missing linked-source UX term: ${term}`);
+}
+
+if (talentDashboard.includes('window.confirm(')) {
+  failures.push('Linked-source key replacement and revoke must use the accessible in-page confirmation, not a blocking browser dialog.');
 }
 
 for (const term of [
@@ -112,7 +125,7 @@ for (const term of [
 
 for (const term of [
   '"library:bridge": "node scripts/sway-library-bridge.mjs"',
-  'Sway Library Bridge',
+  'Sway DJ Library Bridge',
   'POST /ingest',
   'replaceExisting',
   'x-sway-library-key'
@@ -128,4 +141,7 @@ if (failures.length) {
   process.exit(1);
 }
 
+// Preserve the static ownership checks above and require actual importer,
+// authenticated source-count and browser/persistence behavior in the same gate.
+await import('./sway-music-sources.acceptance.test.mjs');
 console.log('Performer library availability contract passed.');

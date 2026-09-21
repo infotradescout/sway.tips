@@ -71,7 +71,15 @@ if (access.includes('allowPublicOverlayAccess')) {
   failures.push('Overlay route guard must not be public.');
 }
 
-if (!/async\s+requireOverlayAccess[\s\S]{0,520}if \(await hasTalentRole\(db, actor\.actorId\)\)[\s\S]{0,180}allowed:\s*true/.test(access)) {
+const overlayGuardStart = access.indexOf('async requireOverlayAccess(req)');
+const overlayGuardEnd = access.indexOf('async requireDevSandboxAccess(req)', overlayGuardStart);
+const overlayGuardSource = overlayGuardStart >= 0 && overlayGuardEnd > overlayGuardStart
+  ? access.slice(overlayGuardStart, overlayGuardEnd)
+  : '';
+if (
+  !overlayGuardSource.includes("actor.sessionType === 'control_bridge'")
+  || !/if \(await hasTalentRole\(db, actor\.actorId\)\)[\s\S]{0,180}allowed:\s*true/.test(overlayGuardSource)
+) {
   failures.push('Overlay route guard must require a persisted performer session before serving overlay HTML.');
 }
 

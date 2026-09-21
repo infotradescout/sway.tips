@@ -7,6 +7,24 @@ const serviceSource = readFileSync(join(root, 'src/server/payment-service.ts'), 
 
 const failures = [];
 
+function sliceSource(startMarker, endMarker, label) {
+  const start = serverSource.indexOf(startMarker);
+  const end = serverSource.indexOf(endMarker, start + startMarker.length);
+  if (start === -1 || end === -1 || end <= start) {
+    failures.push(`Could not isolate ${label} source.`);
+    return '';
+  }
+  return serverSource.slice(start, end);
+}
+
+function requireGuardBefore(source, guard, sideEffect, message) {
+  const guardIndex = source.indexOf(guard);
+  const sideEffectIndex = source.indexOf(sideEffect);
+  if (guardIndex === -1 || sideEffectIndex === -1 || guardIndex > sideEffectIndex) {
+    failures.push(message);
+  }
+}
+
 // 1. authorizeAction must return 'authorized' ONLY when the provider confirms a
 //    real hold (requires_capture). Otherwise it must return requires_confirmation.
 for (const term of [
@@ -92,6 +110,111 @@ for (const term of [
     failures.push(`Server missing money-action gating term: ${term}`);
   }
 }
+
+// A room opened in one payment environment must never accept paid work after
+// the process starts in the other environment. Keep free actions available,
+// but fail closed before any paid amount, reservation, or room-mode mutation.
+const environmentMatcherSource = sliceSource(
+  'function roomPaymentEnvironmentMatchesRuntime',
+  'function resolveGitValue',
+  'room payment-environment matcher'
+);
+if (!/return Boolean\(\s*providerPaymentMode\s*&&\s*liveRoomPaymentRuntimeConfig\.moneyEnabled\s*&&\s*session\.paymentEnvironment === providerPaymentMode\s*\)/.test(environmentMatcherSource)) {
+  failures.push('Room payment-environment matcher must require an enabled provider whose mode exactly matches the room.');
+}
+
+const sellerRuntimeEligibilitySource = sliceSource(
+  'function isSellerRuntimeMoneyEligible',
+  'function roomPaymentEnvironmentMatchesRuntime',
+  'seller runtime-money eligibility helper'
+);
+for (const requiredEligibilityTerm of [
+  'liveRoomPaymentRuntimeConfig.moneyEnabled',
+  'isPerformerAllowedForRuntimeMoney(performerId)',
+  'sellerReady'
+]) {
+  if (!sellerRuntimeEligibilitySource.includes(requiredEligibilityTerm)) {
+    failures.push(`Seller runtime-money eligibility is missing: ${requiredEligibilityTerm}`);
+  }
+}
+
+const sessionStartRouteSource = sliceSource(
+  'app.post("/api/session/start"',
+  'app.post("/api/session/feature"',
+  'session start route'
+);
+for (const requiredStartFence of [
+  'const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(',
+  'paymentsEnabled: requestedPaymentsEnabled && runtimeSellerMoneyEligible',
+  'tipsEnabled: runtimeSellerMoneyEligible',
+  'settlementMode: runtimeSellerMoneyEligible',
+  'paymentEnvironment: runtimeSellerMoneyEligible'
+]) {
+  if (!sessionStartRouteSource.includes(requiredStartFence)) {
+    failures.push(`Room start must apply the live canary to every money capability: ${requiredStartFence}`);
+  }
+}
+
+const requestRouteSource = sliceSource(
+  'app.post("/api/request/create"',
+  'app.post("/api/request/boost"',
+  'request creation route'
+);
+if (!/if \(paymentsEnabledForAction && !roomPaymentEnvironmentMatchesRuntime\(roomState\.session\)\) \{[\s\S]{0,320}return rejectAfterConfirmedAuthorization\(409, \{[\s\S]{0,240}code: 'payment_environment_mismatch'/.test(requestRouteSource)) {
+  failures.push('Paid request/tip creation must reject and reverse a mismatched room payment environment with 409.');
+}
+requireGuardBefore(
+  requestRouteSource,
+  'if (paymentsEnabledForAction && !roomPaymentEnvironmentMatchesRuntime(roomState.session))',
+  'const amount_cents = paymentsEnabledForAction',
+  'Paid request/tip environment mismatch guard must run before computing the paid amount.'
+);
+requireGuardBefore(
+  requestRouteSource,
+  'if (paymentsEnabledForAction && !roomPaymentEnvironmentMatchesRuntime(roomState.session))',
+  'idempotencyStore.reservePendingAction(durableInput)',
+  'Paid request/tip environment mismatch guard must run before durable payment reservation.'
+);
+
+const boostRouteSource = sliceSource(
+  'app.post("/api/request/boost"',
+  'app.post("/api/request/triage"',
+  'request boost route'
+);
+if (!/if \(paymentsEnabledForRoom && !roomPaymentEnvironmentMatchesRuntime\(roomState\.session\)\) \{[\s\S]{0,320}return rejectAfterConfirmedAuthorization\(409, \{[\s\S]{0,240}code: 'payment_environment_mismatch'/.test(boostRouteSource)) {
+  failures.push('Paid boost creation must reject and reverse a mismatched room payment environment with 409.');
+}
+requireGuardBefore(
+  boostRouteSource,
+  'if (paymentsEnabledForRoom && !roomPaymentEnvironmentMatchesRuntime(roomState.session))',
+  'let amt = Math.max',
+  'Paid boost environment mismatch guard must run before computing the paid amount.'
+);
+requireGuardBefore(
+  boostRouteSource,
+  'if (paymentsEnabledForRoom && !roomPaymentEnvironmentMatchesRuntime(roomState.session))',
+  'idempotencyStore.reservePendingAction(durableInput)',
+  'Paid boost environment mismatch guard must run before durable payment reservation.'
+);
+
+const paymentsToggleRouteSource = sliceSource(
+  'app.post("/api/session/payments-enabled"',
+  'app.post("/api/session/window/preset/activate"',
+  'payments-enabled toggle route'
+);
+if (!/if \(enabled\) \{[\s\S]{0,800}if \(!roomPaymentEnvironmentMatchesRuntime\(roomState\.session\)\) \{[\s\S]{0,320}return res\.status\(409\)\.json\(\{[\s\S]{0,240}code: 'payment_environment_mismatch'/.test(paymentsToggleRouteSource)) {
+  failures.push('Enabling paid room mode must reject a mismatched room payment environment with 409.');
+}
+if (!paymentsToggleRouteSource.includes('const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(')
+  || !paymentsToggleRouteSource.includes('if (!runtimeSellerMoneyEligible)')) {
+  failures.push('Room payment enablement must use the same canary-aware seller eligibility fence as room start.');
+}
+requireGuardBefore(
+  paymentsToggleRouteSource,
+  'if (!roomPaymentEnvironmentMatchesRuntime(roomState.session))',
+  'roomState.session.paymentsEnabled = enabled',
+  'Room payment-environment mismatch guard must run before enabling paid room mode.'
+);
 
 // 4. No request/boost runtime item may be created in payment_pending state.
 if (/(newItem|newBoost)\.paymentStatus\s*=\s*['"]payment_pending['"]/.test(serverSource)) {

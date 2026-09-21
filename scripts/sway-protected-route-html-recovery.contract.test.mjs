@@ -83,6 +83,15 @@ requireIncludes(
   'Talent and overlay recovery HTML must link to the performer sign-in page.'
 );
 
+for (const term of [
+  "shell === 'talent' && req.method === 'GET' && isBrowserHtmlRequest(req)",
+  "req.originalUrl.startsWith('/talent/')",
+  "encodeURIComponent(req.originalUrl)",
+  "res.redirect(`/talent/login${requestedWorkspace}`)"
+]) {
+  requireIncludes(access, term, `Talent workspace recovery must preserve direct-login destination: ${term}`);
+}
+
 requireIncludes(
   access,
   "shell === 'admin'",

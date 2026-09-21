@@ -18,12 +18,15 @@ import {
   musicRecordingCredits,
   musicRecordings,
   musicDistributionDeliveries,
+  musicReleaseReportEvents,
+  musicReleaseReports,
   musicReleaseRecordings,
   musicReleases,
   musicReleaseStorageManifests,
   musicRightsDeclarationEvents,
   musicRightsDeclarations,
-  performers
+  performers,
+  users
 } from '../db/schema';
 import { parseAudioStorageProvider, type AudioObjectIdentity, type AudioObjectStore } from './audio-object-storage';
 import {
@@ -63,6 +66,15 @@ const RECORDING_SCOPED_RIGHTS = new Set([
   'master_control', 'composition_control', 'sample_clearance', 'cover_license',
   'beat_license', 'performer_consent', 'ai_disclosure'
 ]);
+const LYRICS_AUTHORSHIP = new Set(['not_declared', 'human', 'human_ai_assisted', 'generated', 'instrumental']);
+const COMPOSITION_AUTHORSHIP = new Set(['not_declared', 'human', 'human_ai_assisted', 'generated']);
+const VOCAL_PERFORMANCE = new Set(['not_declared', 'human', 'virtual_original', 'licensed_replica', 'mixed', 'instrumental']);
+const PRODUCTION_METHOD = new Set(['not_declared', 'human', 'ai_assisted', 'generated', 'mixed']);
+const RELEASE_REPORT_REASONS = new Set([
+  'copied_lyrics', 'unauthorized_voice', 'unlicensed_sample', 'missing_commercial_rights',
+  'incorrect_creation_credit', 'spam_or_duplicate', 'fake_engagement', 'impersonation'
+]);
+const RELEASE_REPORT_OUTCOMES = new Set(['dismissed', 'escalated', 'resolved']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function sha256Hex(value: string | Buffer) {
@@ -266,6 +278,92 @@ function normalizeCredits(values: Array<{ displayName?: string; role?: string }>
   return credits;
 }
 
+function normalizeCreationDisclosure(input: {
+  lyricsAuthorship?: string | null;
+  compositionAuthorship?: string | null;
+  vocalPerformance?: string | null;
+  productionMethod?: string | null;
+  lyricsExcerpt?: string | null;
+}) {
+  const lyricsAuthorship = (input.lyricsAuthorship ?? '').trim().toLowerCase();
+  const compositionAuthorship = (input.compositionAuthorship ?? '').trim().toLowerCase();
+  const vocalPerformance = (input.vocalPerformance ?? '').trim().toLowerCase();
+  const productionMethod = (input.productionMethod ?? '').trim().toLowerCase();
+  if (!LYRICS_AUTHORSHIP.has(lyricsAuthorship) || lyricsAuthorship === 'not_declared') {
+    throw new Error('Choose how the lyrics were authored.');
+  }
+  if (!COMPOSITION_AUTHORSHIP.has(compositionAuthorship) || compositionAuthorship === 'not_declared') {
+    throw new Error('Choose how the musical composition was authored.');
+  }
+  if (!VOCAL_PERFORMANCE.has(vocalPerformance) || vocalPerformance === 'not_declared') {
+    throw new Error('Choose how the vocal or featured performance was made.');
+  }
+  if (!PRODUCTION_METHOD.has(productionMethod) || productionMethod === 'not_declared') {
+    throw new Error('Choose how the recording was produced.');
+  }
+  const lyricsExcerpt = optionalReleaseText(input.lyricsExcerpt, 'Lyric excerpt', 500);
+  if (lyricsAuthorship === 'instrumental' && lyricsExcerpt) {
+    throw new Error('An instrumental recording cannot publish a lyric excerpt.');
+  }
+  return { lyricsAuthorship, compositionAuthorship, vocalPerformance, productionMethod, lyricsExcerpt };
+}
+
+function requiresSyntheticRightsDisclosure(recording: {
+  lyricsAuthorship: string;
+  compositionAuthorship: string;
+  vocalPerformance: string;
+  productionMethod: string;
+}) {
+  return ['human_ai_assisted', 'generated'].includes(recording.lyricsAuthorship)
+    || ['human_ai_assisted', 'generated'].includes(recording.compositionAuthorship)
+    || ['virtual_original', 'licensed_replica', 'mixed'].includes(recording.vocalPerformance)
+    || ['ai_assisted', 'generated', 'mixed'].includes(recording.productionMethod);
+}
+
+function buildPublicCreationDetails(recording: {
+  lyricsAuthorship: string;
+  compositionAuthorship: string;
+  vocalPerformance: string;
+  productionMethod: string;
+}) {
+  const publicTags: string[] = [];
+  const howMade: string[] = [];
+  if (recording.lyricsAuthorship === 'human') publicTags.push('Human-written lyrics');
+  if (recording.lyricsAuthorship === 'human_ai_assisted') publicTags.push('Human-led lyrics');
+  if (recording.lyricsAuthorship === 'generated') publicTags.push('Generated lyrics');
+  if (recording.lyricsAuthorship === 'instrumental') publicTags.push('Instrumental');
+  if (recording.vocalPerformance === 'virtual_original') publicTags.push('Original virtual artist');
+  if (recording.vocalPerformance === 'licensed_replica') publicTags.push('Licensed synthetic voice');
+
+  const compositionLabels: Record<string, string> = {
+    human: 'Human-composed music',
+    human_ai_assisted: 'Human-led composition with generative assistance',
+    generated: 'Generated musical composition'
+  };
+  const performanceLabels: Record<string, string> = {
+    human: 'Human performance',
+    virtual_original: 'Original virtual performance',
+    licensed_replica: 'Licensed synthetic voice performance',
+    mixed: 'Mixed human and virtual performance',
+    instrumental: 'Instrumental performance'
+  };
+  const productionLabels: Record<string, string> = {
+    human: 'Human production',
+    ai_assisted: 'AI-assisted production',
+    generated: 'Generative production',
+    mixed: 'Mixed human and generative production'
+  };
+  if (compositionLabels[recording.compositionAuthorship]) howMade.push(compositionLabels[recording.compositionAuthorship]);
+  if (performanceLabels[recording.vocalPerformance]) howMade.push(performanceLabels[recording.vocalPerformance]);
+  if (productionLabels[recording.productionMethod]) howMade.push(productionLabels[recording.productionMethod]);
+
+  const fullyGenerated = recording.lyricsAuthorship === 'generated'
+    && recording.compositionAuthorship === 'generated'
+    && ['virtual_original', 'licensed_replica'].includes(recording.vocalPerformance)
+    && recording.productionMethod === 'generated';
+  return { publicTags, howMade, fullyGenerated };
+}
+
 function normalizeRecordingDraft(input: {
   title: string;
   versionTitle?: string | null;
@@ -275,6 +373,11 @@ function normalizeRecordingDraft(input: {
   languageCode?: string | null;
   originalReleaseDate?: string | null;
   credits?: Array<{ displayName?: string; role?: string }> | null;
+  lyricsAuthorship?: string | null;
+  compositionAuthorship?: string | null;
+  vocalPerformance?: string | null;
+  productionMethod?: string | null;
+  lyricsExcerpt?: string | null;
 }) {
   const title = requiredReleaseText(input.title, 'Track title');
   const versionTitle = optionalReleaseText(input.versionTitle, 'Version title');
@@ -283,6 +386,7 @@ function normalizeRecordingDraft(input: {
   const languageCode = optionalReleaseText(input.languageCode, 'Language code', 3)?.toLowerCase() ?? null;
   const originalReleaseDate = optionalReleaseText(input.originalReleaseDate, 'Original release date', 10);
   const credits = normalizeCredits(input.credits);
+  const creation = normalizeCreationDisclosure(input);
   if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) {
     throw new Error('ISRC must use the 12-character ISRC format.');
   }
@@ -300,7 +404,8 @@ function normalizeRecordingDraft(input: {
     isExplicit: input.isExplicit === true,
     languageCode,
     originalReleaseDate,
-    credits
+    credits,
+    ...creation
   };
 }
 
@@ -325,7 +430,16 @@ function buildReleaseReadiness(input: {
     distributionMode: string;
     scheduledReleaseAt: Date | null;
   };
-  recordings: Array<{ recordingId: string; masterAssetVersionId: string | null; title: string; languageCode: string | null }>;
+  recordings: Array<{
+    recordingId: string;
+    masterAssetVersionId: string | null;
+    title: string;
+    languageCode: string | null;
+    lyricsAuthorship: string;
+    compositionAuthorship: string;
+    vocalPerformance: string;
+    productionMethod: string;
+  }>;
   credits: Array<{ recordingId: string; role: string }>;
   declarations: Array<{ recordingId: string | null; declarationType: string; outcome: string }>;
 }) {
@@ -362,10 +476,26 @@ function buildReleaseReadiness(input: {
     const recordingCredits = credits.filter((credit) => credit.recordingId === recording.recordingId);
     if (!recordingCredits.some((credit) => credit.role === 'primary_artist')) metadataIssues.push(`${recording.title}: primary artist credit is required.`);
     if (!recordingCredits.some((credit) => ['songwriter', 'composer'].includes(credit.role))) metadataIssues.push(`${recording.title}: songwriter or composer credit is required.`);
+    if (recording.lyricsAuthorship === 'not_declared') metadataIssues.push(`${recording.title}: declare how the lyrics were authored.`);
+    if (recording.compositionAuthorship === 'not_declared') metadataIssues.push(`${recording.title}: declare how the musical composition was authored.`);
+    if (recording.vocalPerformance === 'not_declared') metadataIssues.push(`${recording.title}: declare how the vocal or featured performance was made.`);
+    if (recording.productionMethod === 'not_declared') metadataIssues.push(`${recording.title}: declare how the recording was produced.`);
+    if (['human', 'human_ai_assisted'].includes(recording.lyricsAuthorship)
+      && !recordingCredits.some((credit) => credit.role === 'songwriter')) {
+      metadataIssues.push(`${recording.title}: human-written lyrics require a songwriter credit.`);
+    }
     for (const declarationType of REQUIRED_RECORDING_RIGHTS) {
       if (latestDeclarationByScope.get(`${recording.recordingId}:${declarationType}`)?.outcome !== 'verified') {
         rightsIssues.push(`${recording.title}: verified ${declarationType.replaceAll('_', ' ')} rights evidence is required.`);
       }
+    }
+    if (requiresSyntheticRightsDisclosure(recording)
+      && latestDeclarationByScope.get(`${recording.recordingId}:ai_disclosure`)?.outcome !== 'verified') {
+      rightsIssues.push(`${recording.title}: verified commercial-use evidence for synthetic performance or generative production is required.`);
+    }
+    if (recording.vocalPerformance === 'licensed_replica'
+      && latestDeclarationByScope.get(`${recording.recordingId}:performer_consent`)?.outcome !== 'verified') {
+      rightsIssues.push(`${recording.title}: verified consent from the replicated performer is required.`);
     }
   }
   for (const declarationType of REQUIRED_RELEASE_RIGHTS) {
@@ -376,6 +506,12 @@ function buildReleaseReadiness(input: {
   const issues = [...metadataIssues, ...rightsIssues];
   const requiredRights = [
     ...recordings.flatMap((recording) => REQUIRED_RECORDING_RIGHTS.map((type) => `${recording.recordingId}:${type}`)),
+    ...recordings
+      .filter(requiresSyntheticRightsDisclosure)
+      .map((recording) => `${recording.recordingId}:ai_disclosure`),
+    ...recordings
+      .filter((recording) => recording.vocalPerformance === 'licensed_replica')
+      .map((recording) => `${recording.recordingId}:performer_consent`),
     ...REQUIRED_RELEASE_RIGHTS.map((type) => `release:${type}`)
   ];
   return {
@@ -1434,6 +1570,11 @@ export function createAudioPublishingService(config: {
         isExplicit: musicRecordings.isExplicit,
         languageCode: musicRecordings.languageCode,
         originalReleaseDate: musicRecordings.originalReleaseDate,
+        lyricsAuthorship: musicRecordings.lyricsAuthorship,
+        compositionAuthorship: musicRecordings.compositionAuthorship,
+        vocalPerformance: musicRecordings.vocalPerformance,
+        productionMethod: musicRecordings.productionMethod,
+        lyricsExcerpt: musicRecordings.lyricsExcerpt,
         rightsStatus: musicRecordings.rightsStatus,
         discNumber: musicReleaseRecordings.discNumber,
         trackNumber: musicReleaseRecordings.trackNumber
@@ -1576,6 +1717,7 @@ export function createAudioPublishingService(config: {
     trackTitle: string;
     versionTitle?: string | null;
     primaryArtistName: string;
+    songwriterName: string;
     releaseType: string;
     upc?: string | null;
     isrc?: string | null;
@@ -1586,6 +1728,11 @@ export function createAudioPublishingService(config: {
     territories?: string[] | null;
     isExplicit?: boolean;
     languageCode?: string | null;
+    lyricsAuthorship?: string | null;
+    compositionAuthorship?: string | null;
+    vocalPerformance?: string | null;
+    productionMethod?: string | null;
+    lyricsExcerpt?: string | null;
   }) {
     if (!UUID_PATTERN.test(input.clientReleaseId)) throw new Error('clientReleaseId must be a UUID.');
     if (!RELEASE_TYPES.has(input.releaseType)) throw new Error('Release type is invalid.');
@@ -1593,6 +1740,7 @@ export function createAudioPublishingService(config: {
     const title = requiredReleaseText(input.title, 'Release title');
     const trackTitle = requiredReleaseText(input.trackTitle, 'Track title');
     const primaryArtistName = requiredReleaseText(input.primaryArtistName, 'Primary artist');
+    const songwriterName = requiredReleaseText(input.songwriterName, 'Songwriter credit name', 160);
     const versionTitle = optionalReleaseText(input.versionTitle, 'Version title');
     const labelName = optionalReleaseText(input.labelName, 'Label name');
     const pLine = optionalReleaseText(input.pLine, 'P line');
@@ -1602,6 +1750,8 @@ export function createAudioPublishingService(config: {
     const languageCode = optionalReleaseText(input.languageCode, 'Language code', 3)?.toLowerCase() ?? null;
     const originalReleaseDate = optionalReleaseText(input.originalReleaseDate, 'Original release date', 10);
     const territories = normalizeTerritories(input.territories);
+    const creation = normalizeCreationDisclosure(input);
+    const writingCreditRole = creation.lyricsAuthorship === 'instrumental' ? 'composer' : 'songwriter';
 
     if (upc && !/^[0-9]{8,14}$/.test(upc)) throw new Error('UPC must contain 8 through 14 digits.');
     if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) throw new Error('ISRC must use the 12-character ISRC format.');
@@ -1692,6 +1842,7 @@ export function createAudioPublishingService(config: {
         isExplicit: input.isExplicit === true,
         languageCode,
         originalReleaseDate,
+        ...creation,
         rightsStatus: 'draft',
         metadata: { masterSha256: master.sha256 }
       }).returning();
@@ -1702,6 +1853,11 @@ export function createAudioPublishingService(config: {
         discNumber: 1,
         trackNumber: 1
       });
+
+      await tx.insert(musicRecordingCredits).values([
+        { recordingId: recording.id, displayName: primaryArtistName, role: 'primary_artist', sequence: 0 },
+        { recordingId: recording.id, displayName: songwriterName, role: writingCreditRole, sequence: 1 }
+      ]);
 
       await tx.insert(auditEvents).values([
         {
@@ -1722,7 +1878,14 @@ export function createAudioPublishingService(config: {
           eventType: 'music_recording.create',
           previousStatus: null,
           nextStatus: 'draft',
-          metadata: { releaseId: release.id, masterAssetVersionId: master.id, masterSha256: master.sha256 }
+          metadata: {
+            releaseId: release.id,
+            masterAssetVersionId: master.id,
+            masterSha256: master.sha256,
+            lyricsAuthorship: creation.lyricsAuthorship,
+            vocalPerformance: creation.vocalPerformance,
+            writingCreditRole
+          }
         }
       ]);
 
@@ -1753,6 +1916,11 @@ export function createAudioPublishingService(config: {
     isExplicit?: boolean;
     languageCode?: string | null;
     credits?: Array<{ displayName?: string; role?: string }> | null;
+    lyricsAuthorship?: string | null;
+    compositionAuthorship?: string | null;
+    vocalPerformance?: string | null;
+    productionMethod?: string | null;
+    lyricsExcerpt?: string | null;
   }) {
     if (!RELEASE_TYPES.has(input.releaseType)) throw new Error('Release type is invalid.');
     if (!DISTRIBUTION_MODES.has(input.distributionMode)) throw new Error('Distribution mode is invalid.');
@@ -1769,6 +1937,7 @@ export function createAudioPublishingService(config: {
     const originalReleaseDate = optionalReleaseText(input.originalReleaseDate, 'Original release date', 10);
     const territories = normalizeTerritories(input.territories);
     const credits = normalizeCredits(input.credits);
+    const creation = normalizeCreationDisclosure(input);
     const scheduledReleaseAt = input.scheduledReleaseAt?.trim() ? new Date(input.scheduledReleaseAt) : null;
     if (upc && !/^[0-9]{8,14}$/.test(upc)) throw new Error('UPC must contain 8 through 14 digits.');
     if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(isrc)) throw new Error('ISRC must use the 12-character ISRC format.');
@@ -1864,6 +2033,7 @@ export function createAudioPublishingService(config: {
         isExplicit: input.isExplicit === true,
         languageCode,
         originalReleaseDate,
+        ...creation,
         rightsStatus: 'draft',
         updatedAt: now
       }).where(eq(musicRecordings.id, releaseRecording.recording.id)).returning();
@@ -1888,7 +2058,8 @@ export function createAudioPublishingService(config: {
           previousUpdatedAt: release.updatedAt.toISOString(),
           metadataRevision: Number((updatedRelease.metadata as any)?.metadataRevision ?? 2),
           creditCount: credits.length,
-          artworkAssetVersionId
+          artworkAssetVersionId,
+          creationDisclosure: creation
         }
       });
       return { release: updatedRelease, recording: updatedRecording, credits };
@@ -1918,6 +2089,11 @@ export function createAudioPublishingService(config: {
     languageCode?: string | null;
     originalReleaseDate?: string | null;
     credits?: Array<{ displayName?: string; role?: string }> | null;
+    lyricsAuthorship?: string | null;
+    compositionAuthorship?: string | null;
+    vocalPerformance?: string | null;
+    productionMethod?: string | null;
+    lyricsExcerpt?: string | null;
   }) {
     if (!UUID_PATTERN.test(input.clientRecordingId)) throw new Error('clientRecordingId must be a UUID.');
     const normalized = normalizeRecordingDraft(input);
@@ -2026,6 +2202,11 @@ export function createAudioPublishingService(config: {
         isExplicit: normalized.isExplicit,
         languageCode: normalized.languageCode,
         originalReleaseDate: normalized.originalReleaseDate,
+        lyricsAuthorship: normalized.lyricsAuthorship,
+        compositionAuthorship: normalized.compositionAuthorship,
+        vocalPerformance: normalized.vocalPerformance,
+        productionMethod: normalized.productionMethod,
+        lyricsExcerpt: normalized.lyricsExcerpt,
         rightsStatus: 'draft',
         metadata: { masterSha256: master.sha256 }
       }).returning();
@@ -2075,6 +2256,11 @@ export function createAudioPublishingService(config: {
     languageCode?: string | null;
     originalReleaseDate?: string | null;
     credits?: Array<{ displayName?: string; role?: string }> | null;
+    lyricsAuthorship?: string | null;
+    compositionAuthorship?: string | null;
+    vocalPerformance?: string | null;
+    productionMethod?: string | null;
+    lyricsExcerpt?: string | null;
   }) {
     const normalized = normalizeRecordingDraft(input);
     const [row] = await db
@@ -2125,6 +2311,11 @@ export function createAudioPublishingService(config: {
         isExplicit: normalized.isExplicit,
         languageCode: normalized.languageCode,
         originalReleaseDate: normalized.originalReleaseDate,
+        lyricsAuthorship: normalized.lyricsAuthorship,
+        compositionAuthorship: normalized.compositionAuthorship,
+        vocalPerformance: normalized.vocalPerformance,
+        productionMethod: normalized.productionMethod,
+        lyricsExcerpt: normalized.lyricsExcerpt,
         rightsStatus: 'draft',
         updatedAt: now
       }).where(and(
@@ -2149,6 +2340,8 @@ export function createAudioPublishingService(config: {
         metadata: {
           recordingId: recording.id,
           creditCount: normalized.credits.length,
+          lyricsAuthorship: normalized.lyricsAuthorship,
+          vocalPerformance: normalized.vocalPerformance,
           metadataRevision: previousMetadataRevision + 1
         }
       });
@@ -2793,6 +2986,151 @@ export function createAudioPublishingService(config: {
     ));
   }
 
+  async function createReleaseReport(input: {
+    releaseId: string;
+    reporterUserId: string;
+    reason: string;
+    details: string;
+  }) {
+    const reason = input.reason.trim().toLowerCase();
+    if (!RELEASE_REPORT_REASONS.has(reason)) {
+      throw new Error('Choose a concrete rights, credit, identity, or manipulation concern. AI use by itself is not reportable.');
+    }
+    const details = requiredReleaseText(input.details, 'Report evidence', 2000);
+    if (details.length < 40) throw new Error('Report evidence must be at least 40 characters so reviewers can investigate it.');
+    const [release] = await db
+      .select({
+        id: musicReleases.id,
+        status: musicReleases.status,
+        distributionMode: musicReleases.distributionMode,
+        ownerUserId: performers.ownerUserId
+      })
+      .from(musicReleases)
+      .innerJoin(performers, eq(performers.id, musicReleases.performerId))
+      .where(eq(musicReleases.id, input.releaseId))
+      .limit(1);
+    if (!release || release.distributionMode === 'private' || !['ready', 'scheduled', 'published'].includes(release.status)) {
+      throw new Error('Public release not found.');
+    }
+    if (release.ownerUserId === input.reporterUserId) throw new Error('Release owners cannot report their own release.');
+
+    return db.transaction(async (tx) => {
+      const [report] = await tx.insert(musicReleaseReports).values({
+        releaseId: release.id,
+        reporterUserId: input.reporterUserId,
+        reason,
+        details,
+        status: 'pending'
+      }).onConflictDoNothing().returning();
+      if (!report) throw new Error('You already have an active report for this release and reason.');
+      await tx.insert(musicReleaseReportEvents).values({
+        reportId: report.id,
+        actorUserId: input.reporterUserId,
+        eventType: 'submitted',
+        note: details,
+        metadata: { source: 'public_release', automaticReleaseAction: false }
+      });
+      await writeAudit(tx, {
+        actorType: 'account',
+        actorId: input.reporterUserId,
+        entityType: 'music_release_report',
+        entityId: report.id,
+        eventType: 'music_release.report_submitted',
+        metadata: { releaseId: release.id, reason, automaticReleaseAction: false }
+      });
+      return report;
+    });
+  }
+
+  async function listReleaseReports(input: { status?: string | null } = {}) {
+    const status = input.status?.trim().toLowerCase() || null;
+    if (status && !['pending', 'dismissed', 'escalated', 'resolved'].includes(status)) {
+      throw new Error('Release report status filter is invalid.');
+    }
+    const rows = await db
+      .select({
+        id: musicReleaseReports.id,
+        releaseId: musicReleaseReports.releaseId,
+        releaseTitle: musicReleases.title,
+        primaryArtistName: musicReleases.primaryArtistName,
+        reason: musicReleaseReports.reason,
+        details: musicReleaseReports.details,
+        status: musicReleaseReports.status,
+        reporterUserId: musicReleaseReports.reporterUserId,
+        reporterDisplayName: users.displayName,
+        reporterEmail: users.email,
+        createdAt: musicReleaseReports.createdAt,
+        updatedAt: musicReleaseReports.updatedAt
+      })
+      .from(musicReleaseReports)
+      .innerJoin(musicReleases, eq(musicReleases.id, musicReleaseReports.releaseId))
+      .innerJoin(users, eq(users.id, musicReleaseReports.reporterUserId))
+      .where(status ? eq(musicReleaseReports.status, status) : undefined)
+      .orderBy(desc(musicReleaseReports.createdAt));
+    const events = await db
+      .select({
+        reportId: musicReleaseReportEvents.reportId,
+        actorUserId: musicReleaseReportEvents.actorUserId,
+        eventType: musicReleaseReportEvents.eventType,
+        note: musicReleaseReportEvents.note,
+        createdAt: musicReleaseReportEvents.createdAt
+      })
+      .from(musicReleaseReportEvents)
+      .orderBy(asc(musicReleaseReportEvents.createdAt));
+    return rows.map((report) => ({
+      ...report,
+      releasePath: `/r/${report.releaseId}`,
+      events: events.filter((event) => event.reportId === report.id)
+    }));
+  }
+
+  async function reviewReleaseReport(input: {
+    reportId: string;
+    actorUserId: string;
+    outcome: string;
+    note: string;
+  }) {
+    const outcome = input.outcome.trim().toLowerCase();
+    if (!RELEASE_REPORT_OUTCOMES.has(outcome)) throw new Error('Release report outcome is invalid.');
+    const note = requiredReleaseText(input.note, 'Review note', 2000);
+    if (note.length < 20) throw new Error('Review note must be at least 20 characters and explain the evidence-based outcome.');
+    const [current] = await db.select().from(musicReleaseReports).where(eq(musicReleaseReports.id, input.reportId)).limit(1);
+    if (!current) throw new Error('Release report not found.');
+    if (!['pending', 'escalated'].includes(current.status)) throw new Error('Release report already has a final outcome.');
+    if (current.status === outcome) throw new Error(`Release report is already ${outcome}.`);
+
+    return db.transaction(async (tx) => {
+      const [report] = await tx.update(musicReleaseReports).set({
+        status: outcome,
+        updatedAt: new Date()
+      }).where(and(
+        eq(musicReleaseReports.id, current.id),
+        eq(musicReleaseReports.status, current.status)
+      )).returning();
+      if (!report) throw new Error('Release report changed before this review was saved.');
+      const [event] = await tx.insert(musicReleaseReportEvents).values({
+        reportId: report.id,
+        actorUserId: input.actorUserId,
+        eventType: outcome,
+        note,
+        metadata: { automaticReleaseAction: false }
+      }).returning();
+      await writeAudit(tx, {
+        actorType: 'account',
+        actorId: input.actorUserId,
+        entityType: 'music_release_report',
+        entityId: report.id,
+        eventType: `music_release.report_${outcome}`,
+        metadata: {
+          releaseId: report.releaseId,
+          previousStatus: current.status,
+          automaticReleaseAction: false
+        }
+      });
+      return { report, event };
+    });
+  }
+
   async function getPublicRelease(input: { releaseId: string }) {
     const [release] = await db.select({
       id: musicReleases.id,
@@ -2823,6 +3161,11 @@ export function createAudioPublishingService(config: {
       primaryArtistName: musicRecordings.primaryArtistName,
       isExplicit: musicRecordings.isExplicit,
       languageCode: musicRecordings.languageCode,
+      lyricsAuthorship: musicRecordings.lyricsAuthorship,
+      compositionAuthorship: musicRecordings.compositionAuthorship,
+      vocalPerformance: musicRecordings.vocalPerformance,
+      productionMethod: musicRecordings.productionMethod,
+      lyricsExcerpt: musicRecordings.lyricsExcerpt,
       rightsStatus: musicRecordings.rightsStatus,
       discNumber: musicReleaseRecordings.discNumber,
       trackNumber: musicReleaseRecordings.trackNumber
@@ -2850,15 +3193,28 @@ export function createAudioPublishingService(config: {
       .where(eq(musicDistributionDeliveries.releaseId, release.id))
       .orderBy(asc(musicDistributionDeliveries.destinationKey));
     const providerConfirmedLive = destinations.some((destination) => destination.deliveryStatus === 'live' && destination.liveAt);
+    const publicRecordings = recordings.map((recording) => {
+      const creation = buildPublicCreationDetails(recording);
+      return {
+        ...recording,
+        creation,
+        credits: credits.filter((credit) => credit.recordingId === recording.recordingId)
+      };
+    });
+    const creationTags = [...new Set([
+      ...publicRecordings.flatMap((recording) => recording.creation.publicTags),
+      'Rights checked'
+    ])];
     return {
       ...release,
       status: release.status === 'published' && !providerConfirmedLive ? 'ready' : release.status,
       artworkUrl: release.artworkAssetVersionId ? `/api/public/releases/${release.id}/artwork` : null,
       releasePath: `/r/${release.id}`,
-      recordings: recordings.map((recording) => ({
-        ...recording,
-        credits: credits.filter((credit) => credit.recordingId === recording.recordingId)
-      })),
+      creationTags,
+      humanWrittenLyrics: publicRecordings.some((recording) => recording.lyricsAuthorship === 'human'),
+      originalVirtualArtist: publicRecordings.some((recording) => recording.vocalPerformance === 'virtual_original'),
+      fullyGenerated: publicRecordings.length > 0 && publicRecordings.every((recording) => recording.creation.fullyGenerated),
+      recordings: publicRecordings,
       destinations
     };
   }
@@ -2903,6 +3259,9 @@ export function createAudioPublishingService(config: {
     reviewRightsDeclaration,
     grantReleaseReviewer,
     listRightsReviewQueue,
+    createReleaseReport,
+    listReleaseReports,
+    reviewReleaseReport,
     getPublicRelease,
     openPublicReleaseArtwork,
     downloadSharedOriginal

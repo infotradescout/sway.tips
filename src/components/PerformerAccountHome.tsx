@@ -6,25 +6,47 @@ export default function PerformerAccountHome({
   displayName,
   roleLabel,
   stripeReady,
+  musicStatus,
   paymentMode,
   emailVerified,
   onStartRoom,
-  onOpenLibrary
+  onOpenSources
 }: {
   performerHandle?: string | null;
   displayName: string;
   roleLabel: string;
   stripeReady: boolean;
+  musicStatus: 'loading' | 'ready' | 'empty' | 'error';
   paymentMode: 'test' | 'live' | 'unavailable';
   emailVerified: boolean;
   onStartRoom: () => void;
-  onOpenLibrary: () => void;
+  onOpenSources: () => void;
 }) {
-  const publicPath = performerHandle ? `/p/${performerHandle}` : null;
+  const publicPath = performerHandle ? '/talent/profile?preview=1' : null;
   const readiness = [
-    { done: emailVerified, label: 'Verify your account email' },
-    { done: Boolean(performerHandle), label: 'Set your performer name and public handle' },
-    { done: stripeReady, label: 'Finish Stripe test setup for paid-mode rehearsal', optional: true }
+    { done: emailVerified, label: 'Verify your account email', href: '/account/resend-verification' },
+    { done: Boolean(performerHandle), label: 'Set your performer name and public handle', href: '/talent/profile' },
+    {
+      done: musicStatus === 'ready',
+      pending: musicStatus === 'loading',
+      problem: musicStatus === 'error',
+      label: musicStatus === 'loading'
+        ? 'Checking music for audience requests…'
+        : musicStatus === 'error'
+          ? 'Check your saved music again'
+          : 'Add music for audience requests',
+      href: '/talent/connections'
+    },
+    {
+      done: stripeReady,
+      label: paymentMode === 'live'
+        ? 'Finish secure payout setup to start earning'
+        : paymentMode === 'test'
+          ? 'Finish test payout rehearsal (no real money)'
+          : 'Check money setup availability',
+      optional: true,
+      href: '/talent/account'
+    }
   ];
 
   return (
@@ -40,7 +62,11 @@ export default function PerformerAccountHome({
             <p className="mt-2 text-sm text-slate-400">Finish the essentials, run a free test room, then share your live link or QR.</p>
           </div>
           <div className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${stripeReady ? 'bg-cyan-500/15 text-cyan-200' : 'bg-amber-500/15 text-amber-200'}`}>
-            {stripeReady ? 'Test-money ready' : 'Free rooms only'}
+            {stripeReady && paymentMode === 'live'
+              ? 'Ready to earn'
+              : stripeReady && paymentMode === 'test'
+                ? 'Test-money ready'
+                : 'Free rooms only'}
           </div>
         </div>
 
@@ -52,19 +78,27 @@ export default function PerformerAccountHome({
               : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
         }`}>
           {paymentMode === 'live'
-            ? 'Stripe live mode — real charges. Complete payout setup before starting a paid room.'
+            ? stripeReady
+              ? 'Ready for live paid rooms. Stripe collects customer payments; your combined earnings cash out through PayPal or Venmo under PayPal’s eligibility and delivery status.'
+              : 'Live payments are locked. Save an approved PayPal or Venmo recipient before starting a paid room. Performers never create a Stripe payout account.'
             : paymentMode === 'test'
-              ? 'Stripe test mode — no real money moves. Start with a free room; use test cards only when rehearsing money flows.'
-              : 'Money actions are unavailable because Stripe could not be verified. Free rooms still work.'}
+              ? 'Test mode only — no real money moves. Start with a free room; use only provider-approved test values when rehearsing money flows.'
+              : 'Money actions are temporarily unavailable. Free rooms still work.'}
         </p>
 
         <ol className="mt-5 space-y-2" aria-label="First room readiness">
           {readiness.map((item) => (
             <li key={item.label} className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm">
-              {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <Circle className="h-4 w-4 shrink-0 text-slate-500" />}
-              <span className={item.done ? 'text-slate-300' : 'font-bold text-white'}>
-                {item.label}{item.optional && !item.done ? ' (only for paid rooms)' : ''}
-              </span>
+              {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : <Circle className={`h-4 w-4 shrink-0 ${item.problem ? 'text-amber-300' : 'text-slate-500'}`} />}
+              {item.done ? (
+                <span className="text-slate-300">{item.label}</span>
+              ) : item.pending ? (
+                <span role="status" className="text-slate-400">{item.label}</span>
+              ) : (
+                <a href={item.href} className="font-bold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white">
+                  {item.label}{item.optional ? ' (only for paid rooms)' : ''}
+                </a>
+              )}
             </li>
           ))}
         </ol>
@@ -83,14 +117,14 @@ export default function PerformerAccountHome({
             <Radio className="h-4 w-4" aria-hidden="true" />
             Start first room
           </button>
-          <button type="button" onClick={onOpenLibrary} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300 hover:text-white">
+          <button type="button" onClick={onOpenSources} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300 hover:text-white">
             <Music2 className="h-4 w-4" aria-hidden="true" />
-            Prepare request library
+            Add or update music
           </button>
           {publicPath ? (
             <a href={publicPath} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950 px-4 text-sm font-black text-white transition hover:border-white/30 sm:col-span-2">
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              Preview public page
+              Preview your page privately
             </a>
           ) : null}
         </div>

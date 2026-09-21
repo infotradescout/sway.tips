@@ -1,3 +1,5 @@
+import { createServer as createHttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -17,7 +19,7 @@ import { ActiveRoomSummary, BackendState, RequestItem, GigSession, BoostContribu
 import { LIVE_ROOM_LANGUAGE } from "./src/live-room-language";
 import { normalizeSafeAccountNextPath } from "./src/file-collaboration-routing";
 import { createSwayDb } from "./src/db/client";
-import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
+import { activeBlocks, activeRoomRegistry, audioAssets, audioProjectAssetVersions, audioProjects, gigAccessGrants, gigSessions, moderationEvents, moderationMutationKeys, musicReleases, payments, performerEvents, performerHandleClaims, performerLibrarySources, performerLibraryTracks, performerLoginChallenges, performerOnboardingStatusEnum, performerPartnerEntitlements, performerPartnerEntitlementStatusEvents, performerPartnerTermsAcceptances, performerPayoutKycReviews, performerPayoutPreferences, performerProfileLinks, performerProfilePreviews, performerPublicProfiles, performerSetlistTracks, performerMemberships, performerStripeConnectBindings, performers, promotionCampaigns, proModeStatusEvents, requestBoosts, requests, userRoleEnum, users } from "./src/db/schema";
 import { createAccessControl, routeFamilyGuard } from "./src/server/access-control";
 import {
   evaluateReleaseHealth,
@@ -30,6 +32,7 @@ import { createBusinessStore } from "./src/server/business-store";
 import { toAuditEntityUuid, writeAuditEvent } from "./src/server/audit-log";
 import { createConfiguredPaymentProvider } from "./src/server/payment-provider";
 import { resolveLiveRoomPaymentRuntimeConfig } from "./src/server/live-room-payment-config";
+import { resolveStripeProcessingFeeConfig } from "./src/server/payment-processing-config";
 import {
   createPaymentService,
   type CloseoutTotals,
@@ -46,6 +49,17 @@ import { projectPerformerRoomRecap } from "./src/server/live-room-recap";
 import { createPaymentWebhookService } from "./src/server/payment-webhook";
 import { verifyPerformerBootstrapToken } from "./src/server/performer-bootstrap";
 import { createPerformerSessionStore } from "./src/server/performer-session-store";
+import { createPlaybackControlStore } from "./src/server/playback-control-store";
+import { buildWindowsBoothLauncher } from "./src/server/windows-booth-launcher";
+import { buildWindowsLibrarySyncLauncher } from "./src/server/windows-library-sync-launcher";
+import { parseDjLibraryText } from "./src/dj-library-file-parser";
+import {
+  isPlaybackSourceKey,
+  isUuid as isPlaybackUuid,
+  normalizePlaybackCommandPayload,
+  validatePlaybackCommandInput,
+  type PlaybackCommandPayload
+} from "./src/playback-control";
 import { activateProModeWithPerformer, getProModeStatus } from "./src/server/pro-mode";
 import {
   activateClaimedPerformerAndProMode,
@@ -62,6 +76,7 @@ import {
   normalizePerformerDisplayName,
   normalizePerformerLoginEmail,
   normalizePerformerHandle,
+  normalizePerformerHandleLookup,
   normalizePerformerPhone,
   ACCOUNT_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_CLAIM_CODE_TTL_MS,
@@ -71,6 +86,7 @@ import {
   PERFORMER_LOGIN_CHALLENGE_TYPE_PASSWORD_RESET,
   PERFORMER_LOGIN_CHALLENGE_TYPE_VERIFY_EMAIL,
   PERFORMER_LOGIN_SUCCESS_COPY,
+  PERFORMER_HANDLE_REQUIREMENTS_COPY,
   PERFORMER_SIGNUP_SUCCESS_COPY,
   resolvePerformerLoginRedirectPath
 } from "./src/server/performer-login";
@@ -83,21 +99,35 @@ import {
 } from "./src/server/performer-password-auth";
 import { getMusicSourceCapabilityCatalog } from "./src/server/music-source-capabilities";
 import { importSpotifyPlaylist, isCatalogSearchConfigured, searchCatalog } from "./src/server/spotify-catalog";
+import { prepareSpotifyPlaylistSource, SpotifyPlaylistSourceConflict } from "./src/server/spotify-playlist-store";
 import { createConfiguredStripeConnectService } from "./src/server/stripe-connect";
-import { provisionStripeConnectRecipient } from "./src/server/stripe-connect-onboarding";
-import { createStripeConnectOnboardingStore } from "./src/server/stripe-connect-onboarding-store";
-import { handleStripeConnectReturn } from "./src/server/stripe-connect-return";
+import { createPayoutDestinationStore } from "./src/server/payout-destination-store";
+import { createPerformerWithdrawalService, MINIMUM_WITHDRAWAL_CENTS, persistedPayoutFailureCode } from "./src/server/performer-withdrawal-service";
+import { resolvePayoutDestinationCapabilities } from "./src/server/payout-destination-capabilities";
+import {
+  normalizePayoutDestinationKind,
+  normalizePayoutRecipient,
+  type PayoutDestinationKind
+} from "./src/payout-destination";
+import { createConfiguredPayoutRecipientCipher } from "./src/server/payout-recipient-crypto";
+import { createConfiguredPayPalPayoutsAdapter, PayPalPayoutsError } from "./src/server/paypal-payouts";
+import { resolvePayPalPayoutReadiness } from "./src/server/paypal-payout-readiness";
+import { createPerformerKycReviewStore, PERFORMER_KYC_PROCESS_APPROVAL_VERSION } from "./src/server/performer-kyc-review";
+import { createPayoutRecipientPrivacyService } from "./src/server/payout-recipient-privacy";
 import { reconcileStripeConnectPerformerStatus } from "./src/server/stripe-connect-status";
 import { handleStripeConnectAccountStatusWebhook } from "./src/server/stripe-connect-webhook";
 import { lookupLyrics } from "./src/server/lyrics-provider";
 import {
   escapePublicProfileMetadataAttribute,
   mergePublicProfileMetadata,
+  isPublicProfileSectionOrder,
+  readPublicProfileLayout,
+  resolvePublicProfileSectionOrder,
   normalizePublicProfileEmail,
   normalizePublicProfileFeaturedMedia,
   normalizePublicProfileLinks,
   normalizePublicProfilePhone,
-  normalizePublicProfilePrimaryRole,
+  normalizePublicProfileRoles,
   normalizePublicProfileSpecialties,
   normalizePublicProfileText,
   normalizePublicProfileUrl,
@@ -108,6 +138,7 @@ import {
 import { parsePerformerVisibilityState } from "./src/server/performer-visibility-control";
 import { buildSwayPartnerTermsSnapshot, SWAY_PARTNER_TERMS_HASH, SWAY_PARTNER_TERMS_TEXT, SWAY_PARTNER_TERMS_VERSION } from "./src/server/partner-entitlement";
 import { loadPartnerEntitlementStateForPerformer } from "./src/server/partner-entitlement-store";
+import { bindAffiliateReferral, bindAffiliateReferralForFirstClaim, loadSwayProgramMembershipForPerformer, readAffiliateReferralCode, registerAffiliateRoutes } from "./src/server/affiliate-program";
 import {
   issuePatronStatusReceipt,
   matchesPatronStatusReceipt,
@@ -262,6 +293,9 @@ const performerSessionStore = createPerformerSessionStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
 });
+const playbackControlStore = businessDb
+  ? createPlaybackControlStore({ db: businessDb })
+  : null;
 const performerLoginChallengeStore = createPerformerLoginChallengeStore({
   databaseUrl: process.env.DATABASE_URL,
   dbOverride: businessDb
@@ -339,14 +373,66 @@ const performerLoginMailer = createPerformerLoginMailer({
   isProduction
 });
 const paymentProvider = createConfiguredPaymentProvider(process.env);
+const stripeProcessingFeeConfig = resolveStripeProcessingFeeConfig(process.env);
 const stripeConnectService = createConfiguredStripeConnectService(process.env);
-const stripeConnectOnboardingStore = businessDb
-  ? createStripeConnectOnboardingStore(businessDb)
+const providerPaymentMode = paymentProvider?.mode ?? null;
+const connectPaymentMode = stripeConnectService?.mode ?? null;
+const connectRuntimeMode = connectPaymentMode ?? 'test';
+const paypalPayoutsProvider = createConfiguredPayPalPayoutsAdapter(process.env);
+const payoutRecipientCipher = createConfiguredPayoutRecipientCipher(process.env);
+const paypalPayoutsModeMatches = Boolean(
+  providerPaymentMode
+  && paypalPayoutsProvider
+  && providerPaymentMode === paypalPayoutsProvider.mode
+);
+const payoutDestinationStore = businessDb && payoutRecipientCipher && paypalPayoutsProvider
+  ? createPayoutDestinationStore(businessDb, payoutRecipientCipher, paypalPayoutsProvider.mode)
   : null;
+const payoutRecipientPrivacyService = businessDb
+  ? createPayoutRecipientPrivacyService(businessDb)
+  : null;
+const payoutDestinationCapabilities = resolvePayoutDestinationCapabilities({
+  env: process.env,
+  providerConfigured: Boolean(paypalPayoutsModeMatches),
+  destinationStorageConfigured: Boolean(payoutDestinationStore)
+});
+const paypalPayoutReadiness = resolvePayPalPayoutReadiness({
+  env: process.env,
+  providerMode: paypalPayoutsProvider?.mode ?? null,
+  providerFeeCents: paypalPayoutsProvider?.feeCents ?? null,
+  capabilities: payoutDestinationCapabilities
+});
+const paypalTestExecutionEnabled = Boolean(
+  paypalPayoutsModeMatches && paypalPayoutReadiness.testExecutionEnabled
+);
+const paypalLiveExecutionEnabled = Boolean(
+  paypalPayoutsModeMatches && paypalPayoutReadiness.liveExecutionEnabled
+);
+const performerKycReviewStore = businessDb
+  ? createPerformerKycReviewStore({
+      db: businessDb,
+      processApprovalVersion: paypalPayoutReadiness.kycProcessApprovalVersion
+    })
+  : null;
+const performerWithdrawalService = businessDb && payoutDestinationStore && paypalPayoutsProvider
+  ? createPerformerWithdrawalService({
+      db: businessDb,
+      destinationStore: payoutDestinationStore,
+      provider: paypalPayoutsProvider,
+      kycReviewStore: performerKycReviewStore,
+      liveCanaryPerformerId: paypalPayoutReadiness.liveCanaryPerformerId
+    })
+  : null;
+const hasConfirmedPayoutDestination = Object.values(payoutDestinationCapabilities).some(Boolean);
 const liveRoomPaymentRuntimeConfig = resolveLiveRoomPaymentRuntimeConfig({
   env: process.env,
   paymentProviderConfigured: Boolean(paymentProvider),
-  stripeConnectConfigured: Boolean(stripeConnectService),
+  payoutProviderConfigured: Boolean(
+    paypalPayoutsModeMatches
+    && paypalLiveExecutionEnabled
+    && hasConfirmedPayoutDestination
+  ),
+  processingPricingConfigured: stripeProcessingFeeConfig.livePricingApproved,
   durabilityWritesEnabled: liveRoomDurabilityWritesEnabled
 });
 const testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds({
@@ -358,15 +444,53 @@ const testModePlatformBalanceEnabled = testModePlatformBalancePerformerIds.size 
 const paymentService = createPaymentService({
   databaseUrl: process.env.DATABASE_URL,
   provider: paymentProvider,
+  paymentMode: providerPaymentMode ?? 'test',
+  newMoneyAllowedPerformerIds: liveRoomPaymentRuntimeConfig.mode === 'live'
+    && liveRoomPaymentRuntimeConfig.moneyEnabled
+    ? liveRoomPaymentRuntimeConfig.liveAllowedPerformerIds
+    : undefined,
+  enabledPayoutDestinationKinds: new Set(
+    (Object.entries(payoutDestinationCapabilities) as Array<[PayoutDestinationKind, boolean]>)
+      .filter(([, enabled]) => enabled)
+      .map(([destinationKind]) => destinationKind)
+  ),
+  payoutKycProcessApprovalVersion: paypalPayoutReadiness.kycProcessApprovalVersion,
+  processingPricing: stripeProcessingFeeConfig,
   testPlatformBalancePerformerIds: testModePlatformBalancePerformerIds
 });
 const paymentWebhookService = paymentProvider
   ? createPaymentWebhookService({
       databaseUrl: process.env.DATABASE_URL,
-      provider: paymentProvider,
-      expectedLivemode: liveRoomPaymentRuntimeConfig.mode === 'live'
+      provider: paymentProvider
     })
   : null;
+
+function isPerformerAllowedForRuntimeMoney(performerId: string | null | undefined) {
+  if (liveRoomPaymentRuntimeConfig.mode !== 'live') return true;
+  return Boolean(
+    performerId
+    && liveRoomPaymentRuntimeConfig.liveAllowedPerformerIds.has(performerId.trim().toLowerCase())
+  );
+}
+
+function isSellerRuntimeMoneyEligible(
+  performerId: string | null | undefined,
+  sellerReady: boolean
+) {
+  return Boolean(
+    liveRoomPaymentRuntimeConfig.moneyEnabled
+    && isPerformerAllowedForRuntimeMoney(performerId)
+    && sellerReady
+  );
+}
+
+function roomPaymentEnvironmentMatchesRuntime(session: { paymentEnvironment?: string | null }) {
+  return Boolean(
+    providerPaymentMode
+    && liveRoomPaymentRuntimeConfig.moneyEnabled
+    && session.paymentEnvironment === providerPaymentMode
+  );
+}
 
 function resolveGitValue(args: string[]): string | null {
   try {
@@ -448,6 +572,7 @@ const LIVE_ROOM_MUTATION_ROLLOUT_PATHS = [
   /^\/api\/moderation\/(?:hide|remove)(?:\/|$)/i,
   /^\/api\/talent\/control-bridge\/action(?:\/|$)/i
 ];
+registerAffiliateRoutes({ app, db: businessDb, accessControl, isProduction });
 app.use((req, res, next) => {
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   const isLiveRoomMutation = LIVE_ROOM_MUTATION_ROLLOUT_PATHS.some((pattern) => pattern.test(req.path));
@@ -504,7 +629,7 @@ function isShellAllowed(shell: SwayShell): boolean {
 }
 
 type DiscoveryFacts = {
-  entityType: 'performer' | 'event' | 'release' | 'live_room';
+  entityType: 'performer' | 'event' | 'release' | 'live_room' | 'directory';
   entityName: string;
   heading: string;
   summary: string;
@@ -567,7 +692,11 @@ type PublicPerformerDiscoveryProfile = {
 };
 
 type PublicPerformerDiscoveryResolution =
-  | { kind: 'public' | 'unlisted'; profile: PublicPerformerDiscoveryProfile }
+  | {
+      kind: 'public' | 'unlisted';
+      profile: PublicPerformerDiscoveryProfile;
+      resolvedViaAlias: boolean;
+    }
   | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
 const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
@@ -721,9 +850,10 @@ function injectShareMetadata(html: string, metadata: ShareMetadata) {
 }
 
 async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<PublicPerformerDiscoveryResolution> {
-  const normalizedHandle = normalizePerformerHandle(rawHandle);
+  const normalizedHandle = normalizePerformerHandleLookup(rawHandle);
   if (!normalizedHandle) return { kind: 'not_resolvable', profile: null };
   if (!businessDb) return { kind: 'unavailable', profile: null };
+  const requestedHandle = normalizedHandle.toLowerCase();
 
   try {
     const profiles = await businessDb
@@ -751,13 +881,25 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
         soundcloudUrl: performerPublicProfiles.soundcloudUrl,
         websiteUrl: performerPublicProfiles.websiteUrl,
         featuredMedia: performerPublicProfiles.featuredMedia,
-        updatedAt: performerPublicProfiles.updatedAt
+        updatedAt: performerPublicProfiles.updatedAt,
+        resolvedRedirect: performerHandleClaims.normalizedHandle
       })
       .from(performers)
       .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .leftJoin(
+        performerHandleClaims,
+        and(
+          eq(performerHandleClaims.performerId, performers.id),
+          eq(performerHandleClaims.normalizedHandle, requestedHandle),
+          eq(performerHandleClaims.claimKind, 'redirect')
+        )
+      )
       .where(and(
-        sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()}`,
+        or(
+          sql`lower(${performers.handle}) = ${requestedHandle}`,
+          isNotNull(performerHandleClaims.normalizedHandle)
+        ),
         sql`nullif(trim(${performers.bio}), '') is not null`
       ));
 
@@ -765,7 +907,7 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
 
     const candidate = profiles[0];
     if (!isDiscoveryEligibleHandle(candidate.handle)) return { kind: 'not_resolvable', profile: null };
-    const storedHandle = normalizePerformerHandle(candidate.handle);
+    const storedHandle = normalizePerformerHandleLookup(candidate.handle);
     const policy = evaluatePublicPerformerVisibility({
       claimed: true,
       hasOwner: Boolean(candidate.ownerUserId),
@@ -786,12 +928,73 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
       profile: {
         ...candidate,
         handle: storedHandle?.toLowerCase() ?? null
-      }
+      },
+      resolvedViaAlias: requestedHandle !== storedHandle?.toLowerCase()
     };
   } catch (error) {
     console.error('[sway.discovery] claimed performer resolution failed:', error);
     return { kind: 'unavailable', profile: null };
   }
+}
+
+// Reuse the canonical public-profile resolver. An open room is not a
+// prerequisite for discovering a page its owner has already published.
+async function listPublicPerformerDirectory(rawQuery: unknown = '', rawOffset: unknown = 0) {
+  if (!businessDb) throw new Error('Public performer discovery requires a durable database connection.');
+  const query = typeof rawQuery === 'string' ? rawQuery.trim().replace(/^@/, '').slice(0, 160) : '';
+  const requestedOffset = Number(rawOffset);
+  const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
+    ? Math.floor(Math.min(requestedOffset, 1_000_000) / 12) * 12 : 0;
+  const limit = 12;
+  const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = await businessDb.select({ handle: performers.handle })
+    .from(performers)
+    .innerJoin(users, eq(users.id, performers.ownerUserId))
+    .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+    .where(and(
+      eq(performers.visibilityState, 'public'),
+      eq(performers.isActive, true),
+      notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
+      sql`nullif(trim(${performers.handle}), '') is not null`,
+      sql`nullif(trim(${performers.bio}), '') is not null`,
+      sql`nullif(trim(${performers.displayName}), '') is not null`,
+      query ? or(
+        ilike(performers.handle, pattern),
+        ilike(performers.displayName, pattern),
+        ilike(performerPublicProfiles.headline, pattern),
+        ilike(performerPublicProfiles.city, pattern),
+        ilike(performers.bio, pattern)
+      ) : undefined
+    ))
+    .orderBy(asc(performers.displayName), asc(performers.id))
+    .limit(limit + 1)
+    .offset(offset);
+  const resolutions = await Promise.all(rows.slice(0, limit).map((row) => (
+    resolvePublicPerformerDiscovery(row.handle)
+  )));
+  if (resolutions.some((resolution) => resolution.kind === 'unavailable')) {
+    throw new Error('Unable to confirm public performer visibility.');
+  }
+  return {
+    performers: resolutions.flatMap((resolution) => {
+      if (resolution.kind !== 'public' || !resolution.profile.handle) return [];
+      const profile = resolution.profile;
+      return [{
+        handle: profile.handle!,
+        displayName: profile.displayName,
+        performerPath: `/p/${encodeURIComponent(profile.handle!)}`,
+        headline: profile.headline,
+        bio: profile.bio?.slice(0, 280) ?? null,
+        city: profile.city,
+        avatarUrl: normalizePublicProfileUrl(profile.avatarUrl),
+        updatedAt: profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
+          ? profile.updatedAt.toISOString() : null
+      }];
+    }),
+    hasMore: rows.length > limit,
+    offset,
+    limit
+  };
 }
 
 function toPublicShareProfile(
@@ -874,6 +1077,7 @@ const PUBLIC_PROFILE_NOT_FOUND_HTML = '<!doctype html><html><head><meta charset=
 const PUBLIC_PROFILE_UNAVAILABLE_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>Sway performer profile unavailable</title></head><body><main><h1>Performer profile unavailable</h1><p>Sway could not load this performer profile right now.</p></main></body></html>';
 
 function sendPublicProfileNotFound(res: express.Response) {
+  applyNoStoreHeaders(res);
   return res
     .status(404)
     .type('html')
@@ -882,11 +1086,18 @@ function sendPublicProfileNotFound(res: express.Response) {
 }
 
 function sendPublicProfileUnavailable(res: express.Response) {
+  applyNoStoreHeaders(res);
   return res
     .status(503)
     .type('html')
     .set('X-Robots-Tag', 'noindex, nofollow')
     .send(PUBLIC_PROFILE_UNAVAILABLE_HTML);
+}
+
+function canonicalPerformerRedirectPath(req: express.Request, canonicalHandle: string) {
+  const queryStart = req.originalUrl.indexOf('?');
+  const query = queryStart >= 0 ? req.originalUrl.slice(queryStart) : '';
+  return `/p/${encodeURIComponent(canonicalHandle)}${query}`;
 }
 
 async function renderPublicPerformerDocument(
@@ -899,6 +1110,10 @@ async function renderPublicPerformerDocument(
   if (resolution.kind === 'unavailable') return sendPublicProfileUnavailable(res);
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
     return sendPublicProfileNotFound(res);
+  }
+  if (resolution.resolvedViaAlias) {
+    applyNoStoreHeaders(res);
+    return res.redirect(308, canonicalPerformerRedirectPath(req, resolution.profile.handle!));
   }
 
   const profile = toPublicShareProfile(resolution.profile, resolution.kind);
@@ -1022,8 +1237,46 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
 
   if (!businessDb) return defaultMetadata;
 
+  if (req.path === '/discover') {
+    const directory = await listPublicPerformerDirectory(req.query.q, req.query.performerOffset);
+    const hasSearch = typeof req.query.q === 'string' && Boolean(req.query.q.trim());
+    const directoryCanonical = !hasSearch && directory.offset > 0
+      ? `/discover?performerOffset=${directory.offset}` : '/discover';
+    const summary = 'Find public performer pages, explore their music and upcoming shows, or enter an active live room.';
+    const relatedLinks = directory.performers.map((performer) => ({
+      label: `${performer.displayName} (@${performer.handle})${performer.city ? ` · ${performer.city}` : ''}`,
+      href: canonicalPublicUrl(performer.performerPath)
+    }));
+    if (directory.hasMore) {
+      const next = new URLSearchParams({ performerOffset: String(directory.offset + directory.limit) });
+      if (typeof req.query.q === 'string') next.set('q', req.query.q.slice(0, 160));
+      relatedLinks.push({ label: 'More performers', href: canonicalPublicUrl(`/discover?${next}`) });
+    }
+    return defaultShareMetadata(req, {
+      title: 'Discover performers, live rooms, and music on Sway',
+      description: summary,
+      url: directoryCanonical,
+      robots: hasSearch ? 'noindex, nofollow' : undefined,
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        itemListElement: directory.performers.map((performer, index) => ({
+          '@type': 'ListItem', position: directory.offset + index + 1,
+          name: performer.displayName, url: canonicalPublicUrl(performer.performerPath)
+        }))
+      },
+      discoveryFacts: {
+        entityType: 'directory', entityName: 'Sway performers',
+        heading: 'Discover performers, live rooms, and music', summary,
+        categories: ['Performers', 'Live rooms', 'Shows', 'Music'],
+        primaryActionLabel: 'Explore performers', primaryActionHref: '/discover#performers-heading',
+        relatedLinks
+      }
+    });
+  }
+
   if (pathParts[0] === 'p' && pathParts[1]) {
-    const normalizedHandle = normalizePerformerHandle(pathParts[1]);
+    const normalizedHandle = normalizePerformerHandleLookup(pathParts[1]);
     if (!normalizedHandle) return defaultMetadata;
 
     const profile = await findPublicShareProfile(normalizedHandle);
@@ -1122,7 +1375,8 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
       : release.scheduledReleaseAt
         ? `Planned for ${new Date(release.scheduledReleaseAt).toLocaleDateString('en-US')}.`
         : 'Release ready; destination delivery is not yet confirmed.';
-    const releaseDescription = `${dateCopy} View the official credits and provider-confirmed availability on Sway.`;
+    const creationCopy = release.creationTags.length ? `${release.creationTags.join(' · ')}. ` : '';
+    const releaseDescription = `${dateCopy} ${creationCopy}View the official credits and provider-confirmed availability on Sway.`;
     const canonicalReleaseUrl = canonicalPublicUrl(release.releasePath);
     return defaultShareMetadata(req, {
       title: `${release.title} by ${release.primaryArtistName}`,
@@ -1148,7 +1402,7 @@ async function resolveShareMetadata(req: express.Request): Promise<ShareMetadata
         entityName: release.title,
         heading: `${release.title} by ${release.primaryArtistName}`,
         summary: releaseDescription,
-        categories: ['Release', 'Self-Production'],
+        categories: ['Release', 'Self-Production', ...release.creationTags],
         primaryActionLabel: 'View release',
         primaryActionHref: canonicalReleaseUrl,
         relatedLinks: [
@@ -1574,7 +1828,7 @@ const privacyPageHtml = renderStaticDocument(
       <li>project membership, collaborator connections, selected-file access grants, comments, timecodes, change requests, approvals, revocations, and related audit events</li>
       <li>release-draft metadata, artwork references, UPCs, ISRCs, territories, recording credits, rights documents, declarations, review decisions, and readiness results</li>
       <li>content a performer chooses to publish on a public performer profile or an eligible public release page</li>
-      <li>payment processor identifiers and related lifecycle status</li>
+      <li>payment processor identifiers, the selected PayPal or Venmo destination, an encrypted recipient identifier, a masked recipient preview, and related payout lifecycle status; Sway does not store payout bank or card numbers</li>
       <li>native ticket offer, order, price-and-terms snapshot, admission, refund, performer-transfer, and reconciliation records when native ticket sales are enabled</li>
       <li>moderation reports, blocks, and audit events</li>
       <li>support and data deletion request metadata</li>
@@ -1630,6 +1884,8 @@ const paymentTermsPageHtml = renderStaticDocument(
     <p>Sway must only describe payment behavior that is actually implemented by the backend and processor configuration.</p>
     <ul>
       <li>request, tip, and boost submissions create payment-related records tied to the live room and request lifecycle</li>
+      <li>Stripe processes incoming customer card payments only; it does not choose or deliver a performer cash-out</li>
+      <li>the customer checkout total includes the applicable Sway platform fee, including Sway’s fixed $1 creator-direct transaction fee, while the performer’s stated request, tip, or boost amount is credited to performer earnings</li>
       <li>a denied or unresolved request may be voided or refunded according to the implemented lifecycle</li>
       <li>payment success is not final until backend confirmation is recorded</li>
       <li>processor timelines, disputes, and refunds may affect final settlement timing</li>
@@ -1640,15 +1896,21 @@ const paymentTermsPageHtml = renderStaticDocument(
 
 const payoutTermsPageHtml = renderStaticDocument(
   'Sway Performer Payout Terms',
-  'How performer payout eligibility and verification constraints work in Sway.',
+  'How combined performer earnings cash out to PayPal or Venmo through PayPal Payouts.',
   `
-    <p>Sway must not promise payouts before required verification and payout enablement are complete.</p>
+    <p>Stripe processes incoming customer card payments only. Captured performer amounts accumulate in one Sway earnings balance. Performer withdrawals use PayPal Payouts and never use a Stripe performer account.</p>
     <ul>
-      <li>performer payout access may require identity, tax, banking, or other verification steps</li>
-      <li>processor rules, disputes, reserve periods, and compliance reviews may delay payout timing</li>
-      <li>unverified performers must not be shown payout promises that the processor cannot support</li>
+      <li>the available destinations in this release are a PayPal account email or a genuine Venmo recipient identified by Venmo handle, account email, or U.S. mobile number</li>
+      <li>Sway encrypts the full recipient identifier at rest and shows only a masked preview after it is saved; payout and audit records do not contain the raw recipient</li>
+      <li>the performer must review the masked destination before confirming because money sent to a valid but incorrect recipient may not be recoverable</li>
+      <li>captured earnings accumulate across paid interactions; one combined cash-out creates one provider payout instead of one payout for every customer transaction</li>
+      <li>the minimum cash-out is $10; before confirmation Sway shows the gross cash-out, PayPal’s configured payout fee, Sway payout markup of $0, and the estimated amount delivered</li>
+      <li>the performer is never debited more than the disclosed payout fee; if PayPal reports a lower actual fee, the difference remains in the performer balance</li>
+      <li>refunds, disputes, reversals, risk holds, insufficient funds, an unclaimed recipient, PayPal review, or compliance obligations may reduce the available balance or delay, fail, hold, return, or cancel a cash-out</li>
+      <li>PayPal controls final delivery timing and recipient eligibility; a submitted payout is not described as paid until provider confirmation is recorded</li>
+      <li>real cash-out remains unavailable until PayPal approves Sway for production Payouts, the business account is verified and funded, production credentials and webhooks are installed, and Sway’s versioned release switches are enabled</li>
     </ul>
-    <p>Current payout terms must stay aligned with the configured payment provider and KYC state.</p>
+    <p>PayPal or Venmo recipients may need to sign in or claim a payment under PayPal’s rules. Sway does not promise a delivery speed that PayPal has not confirmed.</p>
   `
 );
 
@@ -1704,6 +1966,16 @@ app.use('/admin/discovery-observatory', async (req, res, next) => {
   next();
 });
 
+app.use('/admin/release-reports', async (req, res, next) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    res.status(adminAccess.status).send(adminAccess.reason);
+    return;
+  }
+  applyNoStoreHeaders(res);
+  next();
+});
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/assets') || req.path.startsWith('/shells')) {
     next();
@@ -1728,7 +2000,7 @@ function createInactiveSession(): GigSession {
     lastMutationActorUserId: null,
     talentName: "",
     talentRole: 'DJ',
-    feeType: 'patron',
+    feeType: 'patron' as const,
     minimumTip: 5,
     endGigTimerStartedAt: null,
     isFeatured: false,
@@ -1770,7 +2042,11 @@ let state: BackendState = createEmptyBackendState();
 let activeGigId: string | null = null;
 
 function syncActiveGigRouteContext(inputState: BackendState, gigId: string | null = activeGigId) {
-  inputState.activeGigId = inputState.session.status === 'active' ? (gigId ?? null) : null;
+  // This compatibility field identifies the selected snapshot, not registry membership.
+  const hasRoomIdentity = inputState.session.status === 'active'
+    || inputState.session.status === 'ending'
+    || inputState.session.status === 'closed';
+  inputState.activeGigId = hasRoomIdentity ? (gigId ?? null) : null;
 }
 
 function prepareRoomState(inputState: BackendState, gigId: string | null) {
@@ -1882,7 +2158,9 @@ async function loadRoomState(gigId: string) {
   const snapshot = await businessStore.hydrateStateByGigId(gigId, createEmptyBackendState());
   return {
     ...snapshot,
-    state: prepareRoomState(snapshot.state, snapshot.activeGigId)
+    // Closed rows keep their own recap identity without becoming active again.
+    state: prepareRoomState(snapshot.state, snapshot.roomStatus === 'ended'
+      && snapshot.state.session.status === 'closed' ? gigId : snapshot.activeGigId)
   };
 }
 
@@ -1982,7 +2260,8 @@ function buildActiveRoomSummary(roomState: BackendState, gigId: string, startedA
 async function listReadableActiveRooms(performerId?: string): Promise<ActiveRoomSummary[]> {
   if (!businessStore.hasDurableStore) {
     await refreshBusinessState();
-    return activeGigId ? [buildActiveRoomSummary(state, activeGigId)] : [];
+    return activeGigId && (state.session.status === 'active' || state.session.status === 'ending')
+      ? [buildActiveRoomSummary(state, activeGigId)] : [];
   }
 
   return businessStore.listActiveRoomSummaries(performerId);
@@ -2119,12 +2398,15 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
         preview_specialties: performerProfilePreviews.specialties,
         owner_user_id: performers.ownerUserId,
         email_verified_at: users.emailVerifiedAt,
-        charges_enabled: performers.chargesEnabled,
-        payouts_enabled: performers.payoutsEnabled,
-        stripe_connected_account_id: performers.stripeConnectedAccountId,
+        charges_enabled: performerStripeConnectBindings.chargesEnabled,
+        payouts_enabled: performerStripeConnectBindings.payoutsEnabled,
+        stripe_connected_account_id: performerStripeConnectBindings.stripeAccountId,
+        payout_destination_kind: performerPayoutPreferences.destinationKind,
+        payout_recipient_type: performerPayoutPreferences.recipientType,
+        payout_recipient_preview: performerPayoutPreferences.recipientValuePreview,
         performer_is_active: performers.isActive,
         onboarding_status: performers.onboardingStatus,
-        payment_account_status: performers.paymentAccountStatus,
+        payment_account_status: performerStripeConnectBindings.paymentAccountStatus,
         kyc_status: performers.kycStatus,
         payout_hold_reason: performers.payoutHoldReason
       })
@@ -2132,6 +2414,14 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       .innerJoin(users, eq(users.id, performers.ownerUserId))
       .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
       .leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))
+      .leftJoin(performerPayoutPreferences, and(
+        eq(performerPayoutPreferences.performerId, performers.id),
+        eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
+      ))
+      .leftJoin(performerStripeConnectBindings, and(
+        eq(performerStripeConnectBindings.performerId, performers.id),
+        eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+      ))
       .where(eq(performers.ownerUserId, actor.actorId))
       .limit(1);
 
@@ -2142,13 +2432,29 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
     const previewStageName = performerRow.preview_metadata && typeof performerRow.preview_metadata === 'object'
       ? normalizePublicProfileText((performerRow.preview_metadata as Record<string, unknown>).stageName, 80)
       : null;
+    const profileRoles = resolvePublicRoles(performerRow.profile_metadata);
+    const previewRoles = resolvePublicRoles(performerRow.preview_metadata);
+    const performerRoles = profileRoles.length ? profileRoles : previewRoles;
+    const payoutDestinationKind = normalizePayoutDestinationKind(performerRow.payout_destination_kind);
+    const currentPayoutKycApproved = liveRoomPaymentRuntimeConfig.mode === 'test'
+      || Boolean(await performerKycReviewStore?.loadCurrentApproval(performerRow.performer_id));
+    const livePayoutPreferenceReady = Boolean(
+      payoutDestinationKind
+      && payoutDestinationCapabilities[payoutDestinationKind]
+      && paypalLiveExecutionEnabled
+      && currentPayoutKycApproved
+    );
+    const testPlatformBalanceReady = isTestModePlatformBalancePerformerAllowed(
+      performerRow.performer_id,
+      testModePlatformBalancePerformerIds
+    );
     return {
       performer_id: performerRow.performer_id,
       display_name: performerRow.display_name,
       handle: performerRow.handle,
       stage_name: profileStageName || previewStageName,
-      primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)
-        || resolvePublicPrimaryRole(performerRow.preview_metadata),
+      primary_role: performerRoles[0] ?? null,
+      roles: performerRoles,
       specialties: performerRow.specialties?.length
         ? performerRow.specialties
         : performerRow.preview_specialties ?? [],
@@ -2157,20 +2463,23 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
       charges_enabled: performerRow.charges_enabled,
       payouts_enabled: performerRow.payouts_enabled,
       stripe_connected_account_id: performerRow.stripe_connected_account_id,
+      payout_destination_kind: payoutDestinationKind,
+      payout_recipient_type: performerRow.payout_recipient_type,
+      payout_recipient_preview: performerRow.payout_recipient_preview,
+      payout_kyc_approved: currentPayoutKycApproved,
       money_actions_ready: Boolean(
         performerRow.performer_is_active
+        && performerRow.email_verified_at
+        && liveRoomPaymentRuntimeConfig.moneyEnabled
+        && isPerformerAllowedForRuntimeMoney(performerRow.performer_id)
+        && performerRow.onboarding_status !== 'restricted'
         && performerRow.onboarding_status !== 'suspended'
-        && performerRow.payment_account_status === 'payouts_enabled'
-        && ['not_required', 'verified'].includes(performerRow.kyc_status)
-        && performerRow.charges_enabled
-        && performerRow.payouts_enabled
-        && performerRow.stripe_connected_account_id?.trim()
         && !performerRow.payout_hold_reason
+        && (liveRoomPaymentRuntimeConfig.mode === 'test'
+          ? testPlatformBalanceReady
+          : livePayoutPreferenceReady)
       ),
-      test_mode_platform_balance_allowed: isTestModePlatformBalancePerformerAllowed(
-        performerRow.performer_id,
-        testModePlatformBalancePerformerIds
-      )
+      test_mode_platform_balance_allowed: testPlatformBalanceReady
     };
   } catch (error) {
     console.warn('Unable to resolve authenticated performer profile for /api/state.', {
@@ -2181,13 +2490,18 @@ async function loadAuthenticatedPerformerProfile(req: express.Request) {
   }
 }
 
-async function resolveProtectedMutationActor(req: express.Request, res: express.Response, gigId?: string | null): Promise<ProtectedMutationActor | null> {
+async function resolveProtectedMutationActor(
+  req: express.Request,
+  res: express.Response,
+  gigId?: string | null,
+  options: { allowControlBridge?: boolean } = {}
+): Promise<ProtectedMutationActor | null> {
   if (!requirePersistentBusinessStore(res)) {
     return null;
   }
 
   if (gigId) {
-    const result = await accessControl.requireGigMutationAccess(req, gigId);
+    const result = await accessControl.requireGigMutationAccess(req, gigId, options);
     if (result.allowed === false) {
       res.status(result.status).json({ error: result.reason });
       return null;
@@ -2304,20 +2618,48 @@ async function performerSignupEmailExists(executor: any, email: string) {
   return Boolean(row);
 }
 
-async function performerHandleExists(executor: any, handle: string, options: { includePreviews?: boolean } = {}) {
+async function performerHandleExists(
+  executor: any,
+  handle: string,
+  options: { includePreviews?: boolean; excludePerformerId?: string } = {}
+) {
+  const normalizedHandle = handle.toLowerCase();
   const [row] = await executor
     .select({ id: performers.id })
     .from(performers)
-    .where(sql`lower(${performers.handle}) = ${handle.toLowerCase()}`)
+    .where(and(
+      sql`lower(${performers.handle}) = ${normalizedHandle}`,
+      ...(options.excludePerformerId ? [ne(performers.id, options.excludePerformerId)] : [])
+    ))
     .limit(1);
 
-  if (row || options.includePreviews === false) return Boolean(row);
+  if (row) return true;
+
+  const [claim] = await executor
+    .select({
+      normalizedHandle: performerHandleClaims.normalizedHandle,
+      performerId: performerHandleClaims.performerId,
+      claimKind: performerHandleClaims.claimKind
+    })
+    .from(performerHandleClaims)
+    .where(eq(performerHandleClaims.normalizedHandle, normalizedHandle))
+    .limit(1);
+
+  const isOwnedReservation = Boolean(
+    claim
+    && options.excludePerformerId
+    && claim.performerId === options.excludePerformerId
+    && claim.claimKind === 'reservation'
+  );
+  if ((claim && !isOwnedReservation) || options.includePreviews === false) {
+    return Boolean(claim && !isOwnedReservation);
+  }
 
   const [preview] = await executor
     .select({ id: performerProfilePreviews.id })
     .from(performerProfilePreviews)
     .where(and(
-      sql`lower(${performerProfilePreviews.handle}) = ${handle.toLowerCase()}`,
+      sql`lower(${performerProfilePreviews.handle}) = ${normalizedHandle}`,
       eq(performerProfilePreviews.isActive, true)
     ))
     .limit(1);
@@ -2352,9 +2694,14 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       handle: performers.handle,
       bio: performers.bio,
       visibilityState: performers.visibilityState,
-      stripeAccountId: performers.stripeConnectedAccountId
+      stripeAccountId: performerStripeConnectBindings.stripeAccountId,
+      paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus
     })
     .from(performers)
+    .leftJoin(performerStripeConnectBindings, and(
+      eq(performerStripeConnectBindings.performerId, performers.id),
+      eq(performerStripeConnectBindings.paymentMode, connectRuntimeMode)
+    ))
     .where(eq(performers.ownerUserId, actorUserId))
     .limit(1);
 
@@ -2522,8 +2869,13 @@ function resolvePublicStageName(input: {
 }
 
 function resolvePublicPrimaryRole(metadata: unknown) {
-  if (!metadata || typeof metadata !== 'object') return null;
-  return normalizePublicProfilePrimaryRole((metadata as Record<string, unknown>).primaryRole);
+  return resolvePublicRoles(metadata)[0] ?? null;
+}
+
+function resolvePublicRoles(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') return [];
+  const profileMetadata = metadata as Record<string, unknown>;
+  return normalizePublicProfileRoles(profileMetadata.roles, profileMetadata.primaryRole);
 }
 
 function normalizeLibrarySourceKey(value: unknown) {
@@ -2552,13 +2904,22 @@ function hashLibrarySyncKey(syncKey: string) {
   return createHash('sha256').update(syncKey, 'utf8').digest('hex');
 }
 
+function nextLibrarySourceVersion() {
+  return sql<Date>`greatest(date_trunc('milliseconds', clock_timestamp()), ${performerLibrarySources.updatedAt} + interval '1 millisecond')`;
+}
+
 async function upsertPerformerLibraryTrackBatch(executor: any, input: {
   performerId: string;
   sourceKey: string;
   sourceLabel: string;
   rawTracks: unknown[];
   replaceExisting?: boolean;
+  allowLocalPaths?: boolean;
 }) {
+  // All source track writers acquire the performer lock before source/track locks.
+  const [lockedPerformer] = await executor.select({ id: performers.id })
+    .from(performers).where(eq(performers.id, input.performerId)).for('update').limit(1);
+  if (!lockedPerformer) throw new Error('The performer account is no longer available.');
   const normalizedTracks = input.rawTracks
     .slice(0, 1000)
     .map((track) => {
@@ -2581,7 +2942,15 @@ async function upsertPerformerLibraryTrackBatch(executor: any, input: {
         album: album || null,
         artworkUrl: artworkUrl || null,
         searchableText,
-        metadata: (track as any)?.metadata && typeof (track as any).metadata === 'object' ? (track as any).metadata : null,
+        metadata: (() => {
+          const rawMetadata = (track as any)?.metadata;
+          if (!rawMetadata || typeof rawMetadata !== 'object' || Array.isArray(rawMetadata)) return null;
+          const metadata = { ...rawMetadata } as Record<string, unknown>;
+          if (!input.allowLocalPaths) {
+            for (const key of ['path', 'filePath', 'location', 'fileLocation']) delete metadata[key];
+          }
+          return metadata;
+        })(),
         lastSeenAt: new Date(),
         updatedAt: new Date()
       };
@@ -2775,6 +3144,14 @@ function isUniqueConstraintViolation(error: unknown, constraintName: string) {
 
   const candidate = error as { code?: string; constraint?: string };
   return candidate.code === '23505' && candidate.constraint === constraintName;
+}
+
+function isPerformerHandleConflict(error: unknown) {
+  return [
+    'idx_performers_handle',
+    'idx_performers_handle_lower',
+    'performer_handle_claims_pkey'
+  ].some((constraintName) => isUniqueConstraintViolation(error, constraintName));
 }
 
 async function persistStateWithAudit(input: {
@@ -3880,9 +4257,16 @@ app.get('/api/payment/config', (_req, res) => {
         ? 'Live-room money is temporarily paused by the durability safety switch.'
         : liveRoomPaymentRuntimeConfig.reason === 'mode_key_mismatch'
           ? 'Stripe publishable and secret keys must both be test or both be live.'
+          : liveRoomPaymentRuntimeConfig.reason === 'processing_fee_configuration_unapproved'
+            ? 'Live card-processing pricing has not been confirmed for this release.'
           : 'Stripe payment execution is not fully configured.',
       mode: liveRoomPaymentRuntimeConfig.mode,
       liveRoomMoneyEnabled: false,
+      payoutDestinationCapabilities,
+      processingPricing: {
+        basisPoints: stripeProcessingFeeConfig.basisPoints,
+        fixedCents: stripeProcessingFeeConfig.fixedCents
+      },
       testModePlatformBalanceEnabled: false
     });
   }
@@ -3891,8 +4275,224 @@ app.get('/api/payment/config', (_req, res) => {
     publishableKey: liveRoomPaymentRuntimeConfig.publishableKey,
     mode: liveRoomPaymentRuntimeConfig.mode,
     liveRoomMoneyEnabled: true,
+    payoutDestinationCapabilities,
+    processingPricing: {
+      basisPoints: stripeProcessingFeeConfig.basisPoints,
+      fixedCents: stripeProcessingFeeConfig.fixedCents
+    },
     testModePlatformBalanceEnabled
   });
+});
+
+app.get('/api/talent/payouts/balance', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !performerWithdrawalService) {
+    return res.status(503).json({ error: 'Performer balances require a durable database connection.' });
+  }
+  if (liveRoomPaymentRuntimeConfig.mode === 'unavailable') {
+    return res.status(503).json({ error: 'Performer balances are temporarily unavailable while payment mode is unresolved.' });
+  }
+  const balance = await performerWithdrawalService.getOwnerBalance({
+    ownerUserId: talentAccess.actor.actorId,
+    paymentMode: liveRoomPaymentRuntimeConfig.mode
+  });
+  if (balance.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+  return res.json({
+    pendingCents: balance.pendingCents,
+    availableCents: balance.availableCents,
+    reservedCents: balance.reservedCents,
+    deficitCents: balance.deficitCents,
+    currency: balance.currency,
+    minimumWithdrawalCents: MINIMUM_WITHDRAWAL_CENTS,
+    providerFeeCents: balance.providerFeeCents,
+    payoutMarkupCents: 0,
+    withdrawalsEnabled: balance.withdrawalRestriction === null && (liveRoomPaymentRuntimeConfig.mode === 'test'
+      ? paypalTestExecutionEnabled
+      : paypalLiveExecutionEnabled && isPerformerAllowedForRuntimeMoney(balance.performerId)),
+    withdrawalRestriction: balance.withdrawalRestriction,
+    providerMode: paypalPayoutsProvider?.mode ?? null
+  });
+});
+
+app.post('/api/talent/payouts/destination', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !payoutDestinationStore) {
+    return res.status(503).json({ error: 'Secure PayPal/Venmo payout storage is not configured.' });
+  }
+  const recipient = normalizePayoutRecipient({
+    destinationKind: req.body?.destinationKind,
+    recipientType: req.body?.recipientType,
+    recipientValue: req.body?.recipientValue
+  });
+  if (!recipient || payoutDestinationCapabilities[recipient.destinationKind] !== true) {
+    return res.status(422).json({
+      error: 'Enter a valid recipient for an enabled PayPal or Venmo destination.'
+    });
+  }
+  if (paypalPayoutsProvider?.mode === 'test' && recipient.destinationKind === 'venmo' && recipient.recipientType === 'phone') {
+    return res.status(422).json({
+      error: 'PayPal Sandbox does not support Venmo mobile recipients. Use a sandbox Venmo handle or email.'
+    });
+  }
+  const owner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!owner) return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
+  const verification = await loadPerformerOwnerVerificationState(talentAccess.actor.actorId);
+  if (!verification?.emailVerifiedAt || !verification.isActive) {
+    return res.status(403).json({ error: 'Verify and activate the performer account before saving a payout recipient.' });
+  }
+  const saved = await payoutDestinationStore.saveForOwner({
+    performerId: owner.performerId,
+    ownerUserId: talentAccess.actor.actorId,
+    recipient
+  });
+  if (saved.kind === 'not_found') return res.status(403).json({ error: 'Only the performer owner can select a payout destination.' });
+  if (saved.kind === 'withdrawal_in_progress') {
+    return res.status(409).json({
+      error: 'Wait until the current cash-out is complete before changing the payout destination.'
+    });
+  }
+  return res.json({
+    success: true,
+    destinationKind: saved.destinationKind,
+    recipientType: saved.recipientType,
+    recipientPreview: saved.recipientPreview,
+    encryptedAtRest: true
+  });
+});
+
+app.post('/api/talent/payouts/withdrawals', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !performerWithdrawalService) {
+    return res.status(503).json({ error: 'Performer withdrawals require a durable database connection.' });
+  }
+  const paymentMode = liveRoomPaymentRuntimeConfig.mode;
+  if (paymentMode !== 'test' && paymentMode !== 'live') {
+    return res.status(503).json({
+      error: 'Cash-out is unavailable while the payment environment is unresolved.',
+      code: 'payout_withdrawals_locked'
+    });
+  }
+  const owner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
+  if (!owner) return res.status(404).json({ error: 'Performer account not found.' });
+  const executionEnabled = paymentMode === 'test'
+    ? paypalTestExecutionEnabled
+    : paypalLiveExecutionEnabled && isPerformerAllowedForRuntimeMoney(owner.performerId);
+  if (!executionEnabled) {
+    return res.status(503).json({
+      error: paymentMode === 'live'
+        ? 'Real cash-out remains locked until PayPal activates Sway Payouts and the approved live release flags are set.'
+        : 'PayPal sandbox cash-out remains locked until the test execution switch is enabled.',
+      code: 'payout_withdrawals_locked'
+    });
+  }
+  const destinationKind = normalizePayoutDestinationKind(req.body?.destinationKind);
+  if (!destinationKind || payoutDestinationCapabilities[destinationKind] !== true) {
+    return res.status(422).json({ error: 'Choose an enabled payout destination.' });
+  }
+  const grossAmountCents = Number(req.body?.grossAmountCents);
+  const recipientConfirmation = normalizePayoutRecipient({
+    destinationKind,
+    recipientType: req.body?.recipientType,
+    recipientValue: req.body?.recipientConfirmationValue
+  });
+  if (!recipientConfirmation) {
+    return res.status(422).json({ error: 'Re-enter the exact saved payout recipient to confirm this cash-out.' });
+  }
+  const result = await performerWithdrawalService.requestWithdrawal({
+    ownerUserId: talentAccess.actor.actorId,
+    paymentMode,
+    idempotencyKey: req.body?.idempotencyKey,
+    destinationKind,
+    recipientConfirmation,
+    grossAmountCents
+  });
+  if (result.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+  if (result.kind === 'email_verification_required') return res.status(403).json({ error: 'Verify the performer account email before cashing out.' });
+  if (result.kind === 'account_restricted') return res.status(403).json({ error: 'Cash-out is blocked while the performer account has a restriction or payout hold.' });
+  if (result.kind === 'identity_verification_required') return res.status(403).json({ error: 'Current payout identity review is required before real cash-out.' });
+  if (result.kind === 'live_canary_not_allowed') return res.status(403).json({ error: 'Real cash-out is limited to the approved canary performer.' });
+  if (result.kind === 'live_canary_amount_required') return res.status(422).json({ error: 'The first real cash-out must be exactly $10.00.' });
+  if (result.kind === 'live_canary_already_used') return res.status(409).json({ error: 'The one-time real payout canary has already been used.' });
+  if (result.kind === 'invalid_idempotency_key') return res.status(422).json({ error: 'A valid cash-out request identity is required.' });
+  if (result.kind === 'invalid_recipient_confirmation') return res.status(422).json({ error: 'Re-enter the exact saved payout recipient to confirm this cash-out.' });
+  if (result.kind === 'below_minimum') return res.status(422).json({ error: 'The minimum cash-out amount is $10.00.' });
+  if (result.kind === 'insufficient_balance') return res.status(409).json({ error: 'Cash-out exceeds the available balance.', availableCents: result.availableCents });
+  if (result.kind === 'negative_balance') return res.status(409).json({ error: 'Cash-out is paused while a refund or dispute balance is resolved.', deficitCents: result.deficitCents });
+  if (result.kind === 'destination_not_ready') return res.status(409).json({ error: 'Save and confirm this payout destination before cashing out.' });
+  if (result.kind === 'destination_changed') return res.status(409).json({ error: 'The payout destination changed. Review the saved recipient before cashing out.' });
+  if (result.kind === 'idempotency_conflict') return res.status(409).json({ error: 'That cash-out request identity was already used for different details.' });
+  if (result.kind === 'fee_exceeds_amount') return res.status(422).json({ error: 'The provider fee must be less than the cash-out amount.' });
+  if (result.kind === 'provider_mode_mismatch') return res.status(503).json({ error: 'The PayPal payout environment does not match the Stripe payment environment.' });
+  if (result.kind === 'provider_rejected') return res.status(422).json({ error: 'PayPal rejected this payout destination or transfer.', withdrawal: { id: result.withdrawal.id, status: result.withdrawal.status } });
+  const withdrawal = result.withdrawal;
+  const accepted = result.kind === 'provider_retryable'
+    || result.kind === 'provider_review_required'
+    || result.kind === 'processing';
+  return res.status(result.kind === 'created' ? 201 : accepted ? 202 : 200).json({
+    replayed: result.kind === 'replay',
+    withdrawal: {
+      id: withdrawal.id,
+      status: withdrawal.status,
+      destinationKind: withdrawal.destinationKind,
+      recipientPreview: withdrawal.recipientPreview,
+      grossAmountCents: withdrawal.grossAmountCents,
+      providerFeeCents: withdrawal.providerFeeCents,
+      actualProviderFeeCents: withdrawal.actualProviderFeeCents,
+      payoutMarkupCents: 0,
+      netAmountCents: withdrawal.netAmountCents,
+      currency: withdrawal.currency,
+      provider: 'paypal_payouts',
+      paymentMode: withdrawal.paymentMode
+    }
+  });
+});
+
+app.post('/api/payouts/paypal/webhook', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody;
+  if (!paypalPayoutsProvider || !performerWithdrawalService || typeof rawBody !== 'string') {
+    return res.status(503).json({ error: 'PayPal payout webhook handling is unavailable.' });
+  }
+  const headers = {
+    authAlgo: req.header('paypal-auth-algo')?.trim() ?? '',
+    certUrl: req.header('paypal-cert-url')?.trim() ?? '',
+    transmissionId: req.header('paypal-transmission-id')?.trim() ?? '',
+    transmissionSig: req.header('paypal-transmission-sig')?.trim() ?? '',
+    transmissionTime: req.header('paypal-transmission-time')?.trim() ?? ''
+  };
+  if (Object.values(headers).some((value) => !value)) {
+    return res.status(400).json({ error: 'Required PayPal webhook verification headers are missing.' });
+  }
+  try {
+    const event = await paypalPayoutsProvider.verifyWebhook({ rawBody, headers });
+    const result = await performerWithdrawalService.ingestWebhook({
+      event,
+      rawBody,
+      paymentMode: paypalPayoutsProvider.mode
+    });
+    await payoutRecipientPrivacyService?.purgeDeferred(25);
+    return res.status(200).json({ received: true, result: result.kind });
+  } catch (error) {
+    const status = error instanceof PayPalPayoutsError && error.status >= 400 && error.status < 500
+      ? error.status
+      : 503;
+    console.error('PayPal payout webhook processing failed.', {
+      code: persistedPayoutFailureCode(error, 'paypal_payout_webhook_failed')
+    });
+    return res.status(status).json({ error: status === 503 ? 'PayPal payout reconciliation is temporarily unavailable.' : 'PayPal webhook verification failed.' });
+  }
 });
 
 app.post('/api/talent/invite/accept', async (req, res) => {
@@ -3969,6 +4569,7 @@ app.post('/api/talent/invite/accept', async (req, res) => {
 
       if (!account || account.passwordHash) return null;
 
+      await bindAffiliateReferralForFirstClaim(tx, account.userId, readAffiliateReferralCode(req));
       const completedAt = new Date();
       const [updatedUser] = await tx
         .update(users)
@@ -4198,6 +4799,7 @@ app.post('/api/talent/claim/accept', async (req, res) => {
       // "already has a password" guard. Whatever the artist submits here
       // overrides whatever was there before -- that's the handoff.
       const wasHandoff = Boolean(account.passwordHash);
+      await bindAffiliateReferralForFirstClaim(tx, account.userId, readAffiliateReferralCode(req));
       const completedAt = new Date();
       const [updatedUser] = await tx
         .update(users)
@@ -4436,7 +5038,12 @@ app.post('/api/talent/signup', async (req, res) => {
     return;
   }
 
-  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+  if (!normalizedHandle) {
+    res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    return;
+  }
+
+  if (!normalizedEmail || !normalizedDisplayName) {
     res.status(422).json({ error: 'Performer name, handle, and email are required.' });
     return;
   }
@@ -4599,10 +5206,7 @@ app.post('/api/talent/signup', async (req, res) => {
       deliveryResult.provider === 'mock' ? verificationLink : undefined
     ));
   } catch (error) {
-    if (
-      isUniqueConstraintViolation(error, 'idx_performers_handle') ||
-      isUniqueConstraintViolation(error, 'idx_performers_handle_lower')
-    ) {
+    if (isPerformerHandleConflict(error)) {
       res.status(409).json({ error: 'This handle is already taken.' });
       return;
     }
@@ -5473,6 +6077,7 @@ app.post('/api/account/signup', async (req, res) => {
           throw err;
         }
 
+        await bindAffiliateReferralForFirstClaim(tx, claim.actorUserId, readAffiliateReferralCode(req));
         const completedAt = new Date();
         const [updatedUser] = await tx
           .update(users)
@@ -5584,6 +6189,7 @@ app.post('/api/account/signup', async (req, res) => {
       role: 'patron',
       proModeStatus: 'disabled'
     }).returning({ id: users.id });
+    await bindAffiliateReferral(tx, account.id, readAffiliateReferralCode(req));
     const challenge = await performerLoginChallengeStore.issueChallenge({
       actorUserId: account.id,
       targetEmail: email,
@@ -5937,7 +6543,8 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
   }).from(performers).where(eq(performers.ownerUserId, actorId)).limit(1);
   const displayName = existingPerformer?.displayName ?? normalizePerformerDisplayName(req.body?.displayName);
   const handle = existingPerformer?.handle ?? normalizePerformerHandle(req.body?.handle);
-  if (!displayName || !handle) return res.status(422).json({ error: 'Performer name and handle are required.' });
+  if (!handle) return res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+  if (!displayName) return res.status(422).json({ error: 'Performer name is required.' });
   if (!existingPerformer && await performerHandleExists(businessDb, handle)) {
     return res.status(409).json({ error: 'This handle is already taken.' });
   }
@@ -5957,7 +6564,7 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
       redirectPath: '/talent'
     });
   } catch (error) {
-    if (isUniqueConstraintViolation(error, 'idx_performers_handle') || isUniqueConstraintViolation(error, 'idx_performers_handle_lower')) {
+    if (isPerformerHandleConflict(error)) {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
     throw error;
@@ -5967,30 +6574,57 @@ app.post('/api/account/pro-mode/activate', async (req, res) => {
 app.post('/api/talent/control-bridge/token', async (req, res) => {
   applyNoStoreHeaders(res);
 
-  const actor = await resolveProtectedMutationActor(req, res, parseDurableGigId(req.body?.gig_id));
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const actor = await resolveProtectedMutationActor(req, res, gigId);
   if (!actor) return;
 
-  if (!performerSessionStore.hasDurableStore) {
+  if (!performerSessionStore.hasDurableStore || !businessDb || !gigId) {
     res.status(503).json({ error: 'Control bridge token issuance requires durable session persistence.' });
     return;
   }
 
-  const bridgeSession = await performerSessionStore.issueSession({
-    actorUserId: actor.actorId,
-    issuedBy: actor.actorId,
-    ttlHours: 2
+  const bridgeSession = await businessDb.transaction(async (tx) => {
+    const [lockedGig] = await tx
+      .select({ id: gigSessions.id })
+      .from(gigSessions)
+      .where(eq(gigSessions.id, gigId))
+      .limit(1)
+      .for('update');
+    if (!lockedGig) throw new Error('The selected live room no longer exists.');
+
+    await performerSessionStore.revokeActiveSessionsForActorUser({
+      actorUserId: actor.actorId,
+      sessionType: 'control_bridge',
+      gigId,
+      executor: tx
+    });
+
+    return performerSessionStore.issueSession({
+      actorUserId: actor.actorId,
+      issuedBy: actor.actorId,
+      ttlHours: 6,
+      sessionType: 'control_bridge',
+      gigId,
+      metadata: {
+        purpose: 'dj_room_controller',
+        issuedFrom: 'performer_connections'
+      },
+      executor: tx
+    });
   });
 
-  const requestOrigin = typeof req.headers.origin === 'string' && req.headers.origin.trim()
-    ? req.headers.origin.trim().replace(/\/+$/, '')
-    : null;
-  const configuredBaseUrl = process.env.SWAY_APP_BASE_URL?.trim().replace(/\/+$/, '') || null;
-  const fallbackBaseUrl = `${req.protocol}://${req.get('host')}`;
-  const swayUrl = configuredBaseUrl || requestOrigin || fallbackBaseUrl;
-  const gigId = parseDurableGigId(req.body?.gig_id);
+  // The room token is embedded in the short-lived booth launcher. Never let a
+  // caller-selected Origin or Host decide where that launcher sends it.
+  const swayUrl = resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, '');
   const bridgeCommand = gigId
     ? `npm run control:bridge -- --gig-id ${gigId} --auth-token ${bridgeSession.token} --sway-url ${swayUrl}`
     : null;
+  const windowsLauncher = buildWindowsBoothLauncher({
+    swayUrl,
+    gigId,
+    bridgeToken: bridgeSession.token,
+    expiresAt: bridgeSession.expiresAt
+  });
 
   if (businessDb) {
     await writeAuditEvent(businessDb, {
@@ -6004,8 +6638,10 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
       metadata: {
         gigId,
         expiresAt: bridgeSession.expiresAt.toISOString(),
-        ttlHours: 2,
-        tokenTransport: 'bridge_auth_token'
+        ttlHours: 6,
+        sessionType: 'control_bridge',
+        tokenTransport: 'bridge_auth_token',
+        availableLaunchers: ['windows_cmd_v1']
       }
     });
   }
@@ -6017,6 +6653,7 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
     gigId,
     swayUrl,
     command: bridgeCommand,
+    windowsLauncher,
     tokenTransport: 'auth-token'
   });
 });
@@ -6097,7 +6734,7 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
   const roomContext = await resolveLegacyWritableRoom(req, res);
   if (!roomContext) return;
 
-  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId);
+  const actor = await resolveProtectedMutationActor(req, res, roomContext.gigId, { allowControlBridge: true });
   if (!actor) return;
 
   const replayGuard = await reserveControlBridgeMutation({
@@ -6209,6 +6846,231 @@ app.post('/api/talent/control-bridge/action/:action', async (req, res) => {
     action,
     result: { openUrl: provider.url(text), title: approved.title, subtitle: approved.subtitle }
   });
+});
+
+async function requireScopedControlBridge(
+  req: express.Request,
+  res: express.Response,
+  gigId: string
+) {
+  const access = await accessControl.requireGigMutationAccess(req, gigId, { allowControlBridge: true });
+  if (access.allowed === false) {
+    res.status(access.status).json({ error: access.reason });
+    return null;
+  }
+  if (access.actor.sessionType !== 'control_bridge') {
+    res.status(403).json({ error: 'A room-scoped control bridge token is required.' });
+    return null;
+  }
+  return access;
+}
+
+function readLibraryTrackPath(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  for (const key of ['path', 'filePath', 'location', 'fileLocation']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 2_048);
+  }
+  return null;
+}
+
+async function resolvePlaybackCommandPayload(input: {
+  gigId: string;
+  performerId: string;
+  action: string;
+  payload: PlaybackCommandPayload;
+}) {
+  const payload = normalizePlaybackCommandPayload(input.payload);
+  if (input.action !== 'load' || !businessDb) return payload;
+
+  const roomSnapshot = await loadRoomState(input.gigId);
+  const requestedRoomItem = payload.track?.requestId
+    ? roomSnapshot.state.requests.find((item) => item.id === payload.track?.requestId) ?? null
+    : null;
+  const sourceTrackId = requestedRoomItem?.sourceTrackId ?? payload.track?.sourceTrackId ?? null;
+  const libraryTrack = sourceTrackId && isPlaybackUuid(sourceTrackId)
+    ? (await businessDb
+        .select({
+          id: performerLibraryTracks.id,
+          externalTrackId: performerLibraryTracks.externalTrackId,
+          title: performerLibraryTracks.title,
+          artist: performerLibraryTracks.artist,
+          metadata: performerLibraryTracks.metadata
+        })
+        .from(performerLibraryTracks)
+        .where(and(
+          eq(performerLibraryTracks.id, sourceTrackId),
+          eq(performerLibraryTracks.performerId, input.performerId)
+        ))
+        .limit(1))[0] ?? null
+    : null;
+
+  return {
+    deck: payload.deck,
+    track: {
+      requestId: requestedRoomItem?.id ?? payload.track?.requestId ?? null,
+      sourceTrackId: libraryTrack?.id ?? sourceTrackId,
+      externalTrackId: libraryTrack?.externalTrackId ?? requestedRoomItem?.externalTrackId ?? payload.track?.externalTrackId ?? null,
+      title: libraryTrack?.title ?? requestedRoomItem?.title ?? payload.track?.title ?? null,
+      artist: libraryTrack?.artist ?? requestedRoomItem?.subtitle ?? payload.track?.artist ?? null,
+      // A local path is accepted only from the performer's persisted library
+      // metadata. Browser input cannot instruct the booth machine to open an
+      // arbitrary path.
+      path: readLibraryTrackPath(libraryTrack?.metadata)
+    }
+  };
+}
+
+app.post('/api/talent/playback/commands', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  if (!gigId || !businessDb || !playbackControlStore) {
+    return res.status(gigId ? 503 : 422).json({ error: gigId ? 'Playback control requires durable persistence.' : 'A valid gig_id is required.' });
+  }
+  const access = await accessControl.requireGigMutationAccess(req, gigId, { allowControlBridge: true });
+  if (access.allowed === false) return res.status(access.status).json({ error: access.reason });
+  if (!access.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+
+  const validated = validatePlaybackCommandInput({
+    clientCommandId: req.body?.clientCommandId,
+    sourceKey: req.body?.sourceKey,
+    action: req.body?.action,
+    payload: req.body?.payload
+  });
+  if (!validated.ok) return res.status(422).json({ error: validated.error });
+  if (access.actor.sessionType === 'control_bridge' && validated.command.sourceKey !== 'virtualdj') {
+    return res.status(403).json({ error: 'Control bridge tokens may queue only VirtualDJ commands for their scoped room.' });
+  }
+
+  const [gig] = await businessDb
+    .select({ performerId: gigSessions.performerId, status: gigSessions.status })
+    .from(gigSessions)
+    .where(eq(gigSessions.id, gigId))
+    .limit(1);
+  if (!gig) return res.status(404).json({ error: 'Live room not found.' });
+  if (!['active', 'closeout_pending'].includes(gig.status)) {
+    return res.status(409).json({ error: 'Playback control is available only while the room is live.' });
+  }
+
+  const payload = await resolvePlaybackCommandPayload({
+    gigId,
+    performerId: gig.performerId,
+    action: validated.command.action,
+    payload: validated.command.payload
+  });
+
+  try {
+    const created = await playbackControlStore.createCommand({
+      gigId,
+      performerId: gig.performerId,
+      actorUserId: access.actor.actorId,
+      clientCommandId: validated.command.clientCommandId,
+      sourceKey: validated.command.sourceKey,
+      action: validated.command.action,
+      payload
+    });
+    await writeAuditEvent(businessDb, {
+      actorId: access.actor.actorId,
+      actorType: access.role ?? 'performer',
+      entityType: 'playback_command',
+      entityId: created.command.id,
+      eventType: created.replay ? 'playback.command.replay' : 'playback.command.queue',
+      previousStatus: null,
+      nextStatus: created.command.status,
+      metadata: {
+        gigId,
+        sourceKey: created.command.sourceKey,
+        action: created.command.action,
+        clientCommandId: created.command.clientCommandId
+      }
+    });
+    return res.status(created.replay ? 200 : 202).json({ success: true, replay: created.replay, command: created.command });
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number' ? (error as { status: number }).status : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Playback command could not be queued.' });
+  }
+});
+
+app.get('/api/talent/playback/snapshot/:gigId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.params.gigId);
+  if (!gigId || !playbackControlStore) return res.status(gigId ? 503 : 404).json({ error: 'Playback snapshot is unavailable.' });
+  const access = await accessControl.requireGigMutationAccess(req, gigId);
+  if (access.allowed === false) return res.status(access.status).json({ error: access.reason });
+  return res.json(await playbackControlStore.getSnapshot({ gigId }));
+});
+
+app.get('/api/talent/control-bridge/state/:gigId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.params.gigId);
+  if (!gigId) return res.status(404).json({ error: 'Live room not found.' });
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  const roomSnapshot = await loadRoomState(gigId);
+  if (roomSnapshot.roomStatus === 'missing') return res.status(404).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY });
+  if (roomSnapshot.roomStatus === 'ended') return res.status(410).json({ error: ROOM_LOOKUP_ENDED_COPY });
+  return res.json({
+    session: roomSnapshot.state.session,
+    requests: roomSnapshot.state.requests,
+    performers: roomSnapshot.state.performers,
+    activeGigId: roomSnapshot.state.activeGigId,
+    playback: playbackControlStore ? await playbackControlStore.getSnapshot({ gigId }) : null
+  });
+});
+
+app.post('/api/talent/playback/bridge/claim', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const sourceKey = req.body?.sourceKey;
+  const bridgeInstanceId = normalizeLibraryText(req.body?.bridgeInstanceId, 128);
+  if (!gigId || !isPlaybackSourceKey(sourceKey) || !bridgeInstanceId) {
+    return res.status(422).json({ error: 'gig_id, sourceKey, and bridgeInstanceId are required.' });
+  }
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const commands = await playbackControlStore.claimCommands({ gigId, sourceKey, bridgeInstanceId });
+  return res.json({ commands });
+});
+
+app.post('/api/talent/playback/bridge/complete', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  const sourceKey = req.body?.sourceKey;
+  const bridgeInstanceId = normalizeLibraryText(req.body?.bridgeInstanceId, 128);
+  const commandId = parseDurableGigId(req.body?.commandId);
+  if (!gigId || !isPlaybackSourceKey(sourceKey) || !bridgeInstanceId || !commandId || typeof req.body?.success !== 'boolean') {
+    return res.status(422).json({ error: 'A valid command completion identity and success flag are required.' });
+  }
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const completion = await playbackControlStore.completeCommand({
+    gigId,
+    sourceKey,
+    bridgeInstanceId,
+    commandId,
+    success: req.body.success,
+    result: req.body?.result,
+    errorText: normalizeLibraryText(req.body?.error, 1_000)
+  });
+  if (!completion) return res.status(409).json({ error: 'Playback command is not claimed by this bridge.' });
+  return res.json({ success: true, replay: completion.replay, command: completion.command });
+});
+
+app.post('/api/talent/playback/bridge/state', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const gigId = parseDurableGigId(req.body?.gig_id);
+  if (!gigId) return res.status(422).json({ error: 'A valid gig_id is required.' });
+  const access = await requireScopedControlBridge(req, res, gigId);
+  if (!access) return;
+  if (!businessDb || !playbackControlStore) return res.status(503).json({ error: 'Playback control requires durable persistence.' });
+  const [gig] = await businessDb.select({ performerId: gigSessions.performerId }).from(gigSessions).where(eq(gigSessions.id, gigId)).limit(1);
+  if (!gig) return res.status(404).json({ error: 'Live room not found.' });
+  const stateRow = await playbackControlStore.upsertState({ gigId, performerId: gig.performerId, state: req.body?.state });
+  if (!stateRow) return res.status(422).json({ error: 'Playback state payload is invalid.' });
+  return res.status(202).json({ success: true, state: stateRow });
 });
 
 app.post('/api/admin/bootstrap', async (req, res) => {
@@ -6455,6 +7317,21 @@ const adminAccountSelectColumns = {
   payoutsEnabled: performers.payoutsEnabled,
   chargesEnabled: performers.chargesEnabled,
   payoutHoldReason: performers.payoutHoldReason,
+  payoutKycStatus: sql<string | null>`(
+    select ${performerPayoutKycReviews.status}
+    from ${performerPayoutKycReviews}
+    where ${performerPayoutKycReviews.performerId} = ${performers.id}
+      and ${performerPayoutKycReviews.processApprovalVersion} = ${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}
+    limit 1
+  )`,
+  payoutKycProcessApprovalVersion: sql<string>`${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}`,
+  payoutKycReviewedAt: sql<Date | null>`(
+    select ${performerPayoutKycReviews.reviewedAt}
+    from ${performerPayoutKycReviews}
+    where ${performerPayoutKycReviews.performerId} = ${performers.id}
+      and ${performerPayoutKycReviews.processApprovalVersion} = ${PERFORMER_KYC_PROCESS_APPROVAL_VERSION}
+    limit 1
+  )`,
   partnerEntitlementId: performerPartnerEntitlements.id,
   partnerTermsVersion: performerPartnerEntitlements.termsVersion,
   partnerTermsHash: performerPartnerEntitlements.termsHash,
@@ -6588,7 +7465,12 @@ app.post('/api/admin/accounts/onboard', async (req, res) => {
     ? req.body.onboardingStatus
     : 'gig_ready';
 
-  if (!normalizedEmail || !normalizedHandle || !normalizedDisplayName) {
+  if (!normalizedHandle) {
+    res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    return;
+  }
+
+  if (!normalizedEmail || !normalizedDisplayName) {
     res.status(422).json({ error: 'Performer name, handle, and email are required.' });
     return;
   }
@@ -6890,9 +7772,8 @@ app.post('/api/admin/performers/claim-link', async (req, res) => {
   } else {
     const normalizedHandle = normalizePerformerHandle(req.body?.handle);
     const normalizedDisplayName = normalizePerformerDisplayName(req.body?.displayName);
-    if (!normalizedHandle || !normalizedDisplayName) {
-      return res.status(422).json({ error: 'A handle and display name are required to create a new performer slot.' });
-    }
+    if (!normalizedHandle) return res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+    if (!normalizedDisplayName) return res.status(422).json({ error: 'A display name is required to create a new performer slot.' });
     if (await performerHandleExists(businessDb, normalizedHandle, { includePreviews: false })) {
       return res.status(409).json({ error: 'This handle is already taken.' });
     }
@@ -7083,18 +7964,22 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
 
   if (existingAccount.performerId) {
     if (req.body?.handle !== undefined) {
-      const normalizedHandle = normalizePerformerHandle(req.body.handle);
-      if (!normalizedHandle) {
-        res.status(422).json({ error: 'A valid handle is required.' });
+      const requestedHandle = normalizePerformerHandleLookup(req.body.handle);
+      const existingHandle = normalizePerformerHandleLookup(existingAccount.handle);
+      if (!requestedHandle) {
+        res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
         return;
       }
-      if (normalizedHandle.toLowerCase() !== (existingAccount.handle ?? '').toLowerCase()) {
-        const [conflict] = await businessDb
-          .select({ id: performers.id })
-          .from(performers)
-          .where(sql`lower(${performers.handle}) = ${normalizedHandle.toLowerCase()} and ${performers.id} != ${existingAccount.performerId}`)
-          .limit(1);
-        if (conflict) {
+      if (requestedHandle.toLowerCase() !== existingHandle?.toLowerCase()) {
+        const normalizedHandle = normalizePerformerHandle(req.body.handle);
+        if (!normalizedHandle) {
+          res.status(422).json({ error: PERFORMER_HANDLE_REQUIREMENTS_COPY });
+          return;
+        }
+        if (await performerHandleExists(businessDb, normalizedHandle, {
+          includePreviews: false,
+          excludePerformerId: existingAccount.performerId
+        })) {
           res.status(409).json({ error: 'This handle is already taken.' });
           return;
         }
@@ -7134,7 +8019,8 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
     return;
   }
 
-  await businessDb.transaction(async (tx) => {
+  try {
+    await businessDb.transaction(async (tx) => {
     if (Object.keys(userUpdates).length > 0) {
       await tx.update(users).set(userUpdates).where(eq(users.id, req.params.userId));
     }
@@ -7220,26 +8106,98 @@ app.patch('/api/admin/accounts/:userId', async (req, res) => {
       });
     }
 
-    await writeAuditEvent(tx, {
-      actorId: adminAccess.actor.actorId,
-      actorType: 'admin',
-      entityType: 'user',
-      entityId: req.params.userId,
-      eventType: 'admin_account.update',
-      previousStatus: null,
-      nextStatus: null,
-      metadata: {
-        targetEmail: existingAccount.email,
-        changedFields
-      }
+      await writeAuditEvent(tx, {
+        actorId: adminAccess.actor.actorId,
+        actorType: 'admin',
+        entityType: 'user',
+        entityId: req.params.userId,
+        eventType: 'admin_account.update',
+        previousStatus: null,
+        nextStatus: null,
+        metadata: {
+          targetEmail: existingAccount.email,
+          changedFields
+        }
+      });
     });
-  });
+  } catch (error) {
+    if (isPerformerHandleConflict(error)) {
+      res.status(409).json({ error: 'This handle is already taken.' });
+      return;
+    }
+    throw error;
+  }
 
   const [updatedAccount] = await loadAdminAccountsBaseQuery(businessDb)
     .where(eq(users.id, req.params.userId))
     .limit(1);
 
   res.json({ account: updatedAccount });
+});
+
+app.post('/api/admin/accounts/:userId/payout-kyc-review', async (req, res) => {
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) {
+    return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  }
+  if (!businessDb || !performerKycReviewStore?.configured) {
+    return res.status(503).json({
+      error: 'The current payout identity-review process has not been approved and configured.'
+    });
+  }
+  if (!adminAccess.actor.actorId || !UUID_PATTERN.test(req.params.userId)) {
+    return res.status(404).json({ error: 'Performer account not found.' });
+  }
+  applyNoStoreHeaders(res);
+
+  const [account] = await businessDb.select({ performerId: performers.id })
+    .from(users)
+    .innerJoin(performers, eq(performers.ownerUserId, users.id))
+    .where(eq(users.id, req.params.userId))
+    .limit(1);
+  if (!account) return res.status(404).json({ error: 'Performer account not found.' });
+
+  if (req.body?.action === 'approve') {
+    const result = await performerKycReviewStore.approve({
+      performerId: account.performerId,
+      reviewerUserId: adminAccess.actor.actorId,
+      evidenceReference: req.body?.evidenceReference
+    });
+    if (result.kind === 'invalid_evidence_reference') {
+      return res.status(422).json({
+        error: 'Enter an opaque identity-review evidence reference between 8 and 200 characters.'
+      });
+    }
+    if (result.kind === 'not_found') return res.status(404).json({ error: 'Performer account not found.' });
+    if (result.kind === 'process_not_approved') {
+      return res.status(503).json({ error: 'The current identity-review process is not approved.' });
+    }
+    return res.json({
+      payoutKycStatus: result.review.status,
+      payoutKycProcessApprovalVersion: result.review.processApprovalVersion,
+      payoutKycReviewedAt: result.review.reviewedAt
+    });
+  }
+
+  if (req.body?.action === 'revoke') {
+    const result = await performerKycReviewStore.revoke({
+      performerId: account.performerId,
+      reviewerUserId: adminAccess.actor.actorId
+    });
+    if (result.kind === 'not_found') {
+      return res.status(404).json({ error: 'No current approved payout identity review was found.' });
+    }
+    if (result.kind === 'process_not_approved') {
+      return res.status(503).json({ error: 'The current identity-review process is not approved.' });
+    }
+    return res.json({
+      payoutKycStatus: result.review.status,
+      payoutKycProcessApprovalVersion: result.review.processApprovalVersion,
+      payoutKycReviewedAt: result.review.reviewedAt
+    });
+  }
+
+  return res.status(422).json({ error: "action must be 'approve' or 'revoke'." });
 });
 
 app.post('/api/admin/accounts/:userId/reset-password', async (req, res) => {
@@ -7392,6 +8350,12 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
           actorUserId: adminAccess.actor.actorId
         });
       }
+
+      await payoutRecipientPrivacyService?.requestDeletion({
+        performerId: existingAccount.performerId,
+        actorUserId: adminAccess.actor.actorId,
+        executor: tx
+      });
     }
 
     if (performerSessionStore.hasDurableStore) {
@@ -7410,8 +8374,10 @@ app.delete('/api/admin/accounts/:userId', async (req, res) => {
       previousStatus: null,
       nextStatus: 'deleted',
       metadata: {
-        targetEmail: existingAccount.email,
-        targetHandle: existingAccount.handle
+        targetAccountId: existingAccount.id,
+        targetHadEmail: Boolean(existingAccount.email),
+        targetHadHandle: Boolean(existingAccount.handle),
+        rawIdentityDataStoredInAudit: false
       }
     });
   });
@@ -8720,6 +9686,130 @@ app.post('/api/talent/events/:eventId/cancel', async (req, res) => {
   }
 });
 
+app.get('/api/talent/profile/layout', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Profile layout requires a durable database connection.' });
+  }
+  const handle = normalizePerformerHandleLookup(req.query.handle)?.toLowerCase();
+  if (!handle || Object.keys(req.query).some((key) => key !== 'handle')) {
+    return res.status(422).json({ error: 'A valid public profile handle is required.' });
+  }
+  try {
+    const [profile] = await businessDb
+      .select({ handle: performers.handle, metadata: performerPublicProfiles.metadata })
+      .from(performers)
+      .leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))
+      .where(and(
+        eq(performers.ownerUserId, talentAccess.actor.actorId),
+        sql`lower(${performers.handle}) = ${handle}`
+      ))
+      .limit(1);
+    if (!profile) return res.status(403).json({ error: 'Only the owner can arrange this public profile.' });
+    return res.json({ handle: profile.handle, layout: readPublicProfileLayout(profile.metadata) });
+  } catch (error) {
+    console.error('Profile layout lookup failed:', error);
+    return res.status(503).json({ error: 'Profile layout could not be loaded. Try again.' });
+  }
+});
+
+app.post('/api/talent/profile/layout', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const talentAccess = await accessControl.requireTalentAccess(req);
+  if (talentAccess.allowed === false) {
+    return res.status(talentAccess.status).json({ error: talentAccess.reason });
+  }
+  if (!talentAccess.actor.actorId || !businessDb) {
+    return res.status(503).json({ error: 'Profile layout requires a durable database connection.' });
+  }
+  const handle = normalizePerformerHandleLookup(req.body?.handle)?.toLowerCase();
+  const expectedRevision = req.body?.expectedRevision;
+  const sectionOrder = req.body?.sectionOrder;
+  if (!handle || !req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+    || Object.keys(req.body).some((key) => !['handle', 'sectionOrder', 'expectedRevision'].includes(key))
+    || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER
+    || (sectionOrder !== null && !isPublicProfileSectionOrder(sectionOrder))) {
+    return res.status(422).json({ error: 'Provide a handle, current layout revision, and a unique list of valid sections, or null to reset.' });
+  }
+  try {
+    const result = await businessDb.transaction(async (tx) => {
+      // Lock the performer first even when its optional profile row does not yet
+      // exist. The full profile editor uses the same lock order before reading
+      // metadata, so concurrent content and layout saves preserve each other.
+      const [performer] = await tx
+        .select({ performerId: performers.id, handle: performers.handle })
+        .from(performers)
+        .where(and(
+          eq(performers.ownerUserId, talentAccess.actor.actorId),
+          sql`lower(${performers.handle}) = ${handle}`
+        ))
+        .for('update')
+        .limit(1);
+      if (!performer) return null;
+      const [profile] = await tx
+        .select({ metadata: performerPublicProfiles.metadata })
+        .from(performerPublicProfiles)
+        .where(eq(performerPublicProfiles.performerId, performer.performerId))
+        .for('update')
+        .limit(1);
+      const previous = readPublicProfileLayout(profile?.metadata);
+      if (previous.revision !== expectedRevision) {
+        return { conflict: true, handle: performer.handle, layout: previous };
+      }
+      const previousMetadata = profile?.metadata && typeof profile.metadata === 'object' && !Array.isArray(profile.metadata)
+        ? profile.metadata as Record<string, unknown>
+        : {};
+      const metadata = {
+        ...previousMetadata,
+        publicProfileLayout: {
+          sectionOrder: sectionOrder === null ? null : resolvePublicProfileSectionOrder({
+            roles: previousMetadata.roles,
+            primaryRole: previousMetadata.primaryRole,
+            sectionOrder
+          }),
+          revision: previous.revision + 1
+        }
+      };
+      const layout = readPublicProfileLayout(metadata);
+      await tx.insert(performerPublicProfiles)
+        .values({ performerId: performer.performerId, metadata, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: performerPublicProfiles.performerId,
+          set: { metadata, updatedAt: new Date() }
+        });
+      await writeAuditEvent(tx, {
+        actorId: talentAccess.actor.actorId,
+        actorType: 'performer',
+        entityType: 'performer',
+        entityId: performer.performerId,
+        eventType: 'performer_public_profile.layout_update',
+        previousStatus: previous.customized ? 'customized' : 'default',
+        nextStatus: layout.customized ? 'customized' : 'default',
+        metadata: {
+          operation: sectionOrder === null ? 'layout_reset' : 'layout_save',
+          previousRevision: previous.revision,
+          revision: layout.revision,
+          previousSectionOrder: previous.sectionOrder,
+          sectionOrder: layout.sectionOrder
+        }
+      });
+      return { conflict: false, handle: performer.handle, layout };
+    });
+    if (!result) return res.status(403).json({ error: 'Only the owner can arrange this public profile.' });
+    if (result.conflict) {
+      return res.status(409).json({ error: 'This layout changed in another tab. Reload it before saving again.', code: 'profile_layout_conflict', handle: result.handle, layout: result.layout });
+    }
+    return res.json({ handle: result.handle, layout: result.layout });
+  } catch (error) {
+    console.error('Profile layout save failed:', error);
+    return res.status(503).json({ error: 'The layout save could not be confirmed. Reload the saved layout before trying again.' });
+  }
+});
+
 app.get('/api/talent/profile/public', async (req, res) => {
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
@@ -8786,6 +9876,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
       primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
+      roles: resolvePublicRoles(profileRow?.metadata),
       specialties: profileRow?.specialties ?? [],
       city: profileRow?.city ?? null,
       avatarUrl: profileRow?.avatarUrl ?? null,
@@ -8993,7 +10084,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
   const headline = normalizePublicProfileText(req.body?.headline, 140);
   const stageNameProvided = req.body?.stageName !== undefined;
   const stageName = normalizePublicProfileText(req.body?.stageName, 80);
-  const primaryRole = normalizePublicProfilePrimaryRole(req.body?.primaryRole);
+  const rolesProvided = req.body?.roles !== undefined;
+  const roles = normalizePublicProfileRoles(req.body?.roles, req.body?.primaryRole);
+  const primaryRole = roles[0] ?? null;
   const specialtiesProvided = req.body?.specialties !== undefined;
   const specialties = normalizePublicProfileSpecialties(req.body?.specialties);
   const city = normalizePublicProfileText(req.body?.city, 80);
@@ -9011,8 +10104,11 @@ app.post('/api/talent/profile/public', async (req, res) => {
   if (specialtiesProvided && !Array.isArray(req.body?.specialties)) {
     return res.status(422).json({ error: 'Specialties must be an array.' });
   }
+  if (rolesProvided && !Array.isArray(req.body?.roles)) {
+    return res.status(422).json({ error: 'Performer roles must be an array.' });
+  }
   if (!primaryRole) {
-    return res.status(422).json({ error: 'Choose your primary role.' });
+    return res.status(422).json({ error: 'Choose at least one performer role.' });
   }
 
   const invalidUrlField = [
@@ -9042,15 +10138,26 @@ app.post('/api/talent/profile/public', async (req, res) => {
 
   const savedLinks = await businessDb.transaction(async (tx) => {
     const now = new Date();
+    const [lockedPerformer] = await tx
+      .select({ performerId: performers.id })
+      .from(performers)
+      .where(and(
+        eq(performers.id, performerOwner.performerId),
+        eq(performers.ownerUserId, talentAccess.actor.actorId)
+      ))
+      .for('update')
+      .limit(1);
+    if (!lockedPerformer) return null;
     const [existingProfile] = await tx
       .select({ metadata: performerPublicProfiles.metadata })
       .from(performerPublicProfiles)
       .where(eq(performerPublicProfiles.performerId, performerOwner.performerId))
+      .for('update')
       .limit(1);
 
     const nextMetadata = mergePublicProfileMetadata(existingProfile?.metadata, {
       ...(stageNameProvided ? { stageName } : {}),
-      primaryRole
+      roles
     });
 
     await tx
@@ -9129,7 +10236,9 @@ app.post('/api/talent/profile/public', async (req, res) => {
         hasBookingEmail: Boolean(bookingEmail),
         hasBookingPhone: Boolean(bookingPhone),
         linkCount: normalizedLinks.provided ? normalizedLinks.links.length : null,
-        primaryRole: primaryRole || null
+        primaryRole,
+        roles,
+        roleCount: roles.length
       }
     });
 
@@ -9150,6 +10259,8 @@ app.post('/api/talent/profile/public', async (req, res) => {
     return { links, metadata: nextMetadata };
   });
 
+  if (!savedLinks) return res.status(403).json({ error: 'Only the performer owner can manage this profile.' });
+
   return res.status(202).json({
     success: true,
     profile: {
@@ -9166,6 +10277,7 @@ app.post('/api/talent/profile/public', async (req, res) => {
         80
       ),
       primaryRole: resolvePublicPrimaryRole(savedLinks.metadata),
+      roles: resolvePublicRoles(savedLinks.metadata),
       specialties: specialties ?? [],
       city,
       avatarUrl,
@@ -9221,11 +10333,36 @@ app.post('/api/talent/library/import', async (req, res) => {
       performerId: performerOwner.performerId,
       sourceKey,
       sourceLabel,
-      rawTracks
+      rawTracks,
+      replaceExisting: true
     });
     if (!result.importedCount) {
       throw new Error('Imported tracks must include at least one valid title.');
     }
+
+    await tx
+      .insert(performerLibrarySources)
+      .values({
+        performerId: performerOwner.performerId,
+        sourceKey,
+        sourceLabel,
+        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
+        syncKeyPreview: 'file-import',
+        connectionStatus: 'active',
+        lastSyncedAt: new Date(),
+        metadata: { importMode: 'browser_file' },
+        updatedAt: new Date()
+      })
+      .onConflictDoUpdate({
+        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
+        set: {
+          sourceLabel,
+          connectionStatus: 'active',
+          lastSyncedAt: new Date(),
+          metadata: { importMode: 'browser_file' },
+          updatedAt: nextLibrarySourceVersion()
+        }
+      });
   });
 
   return res.status(202).json({
@@ -9259,17 +10396,18 @@ app.get('/api/talent/library/sources', async (req, res) => {
       syncKeyPreview: performerLibrarySources.syncKeyPreview,
       connectionStatus: performerLibrarySources.connectionStatus,
       lastSyncedAt: performerLibrarySources.lastSyncedAt,
-      trackCount: sql<number>`(
-        select count(*)::int
-        from ${performerLibraryTracks}
-        where ${performerLibraryTracks.performerId} = ${performerLibrarySources.performerId}
-          and ${performerLibraryTracks.sourceKey} = ${performerLibrarySources.sourceKey}
-      )`
+      updatedAt: performerLibrarySources.updatedAt,
+      trackCount: sql<number>`count(${performerLibraryTracks.id})::int`
     })
     .from(performerLibrarySources)
-    .where(eq(performerLibrarySources.performerId, performerOwner.performerId));
+    .leftJoin(performerLibraryTracks, and(
+      eq(performerLibraryTracks.performerId, performerLibrarySources.performerId),
+      eq(performerLibraryTracks.sourceKey, performerLibrarySources.sourceKey)
+    ))
+    .where(eq(performerLibrarySources.performerId, performerOwner.performerId))
+    .groupBy(performerLibrarySources.id);
 
-  return res.json({ sources });
+  return res.json({ performerId: performerOwner.performerId, sources });
 });
 
 app.get('/api/talent/library/tracks', async (req, res) => {
@@ -9287,10 +10425,27 @@ app.get('/api/talent/library/tracks', async (req, res) => {
     return res.status(403).json({ error: 'Only the performer owner can view this library.' });
   }
 
+  const rawOffset = req.query.offset ?? '0';
+  const expectedVersion = req.query.version;
+  if (typeof rawOffset !== 'string' || !/^\d{1,7}$/.test(rawOffset) || Number(rawOffset) > 1_000_000
+    || (expectedVersion !== undefined && (typeof expectedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(expectedVersion)))) {
+    return res.status(422).json({ error: 'Refresh your library before loading another page.' });
+  }
+  const offset = Number(rawOffset);
+  if (offset > 0 && !expectedVersion) return res.status(409).json({ error: 'Refresh your library before loading another page.' });
+  const libraryVersion = async () => {
+    const rows = await businessDb!.select({ id: performerLibrarySources.id, updatedAt: performerLibrarySources.updatedAt })
+      .from(performerLibrarySources).where(eq(performerLibrarySources.performerId, performerOwner.performerId))
+      .orderBy(performerLibrarySources.id);
+    return createHash('sha256').update(JSON.stringify(rows.map(row => [row.id, row.updatedAt.toISOString()]))).digest('hex');
+  };
+  const version = await libraryVersion();
+  if (expectedVersion && expectedVersion !== version) return res.status(409).json({ error: 'Your music changed while loading. Refresh Sources to load the current library.' });
   const [libraryRows, catalogRows] = await Promise.all([
     businessDb
       .select({
         id: performerLibraryTracks.id,
+        externalTrackId: performerLibraryTracks.externalTrackId,
         title: performerLibraryTracks.title,
         artist: performerLibraryTracks.artist,
         album: performerLibraryTracks.album,
@@ -9299,12 +10454,15 @@ app.get('/api/talent/library/tracks', async (req, res) => {
       })
       .from(performerLibraryTracks)
       .where(eq(performerLibraryTracks.performerId, performerOwner.performerId))
-      .orderBy(desc(performerLibraryTracks.updatedAt))
-      .limit(100),
+      .orderBy(performerLibraryTracks.id)
+      .limit(101)
+      .offset(offset),
     loadRequestableCatalogTracks(businessDb, { performerId: performerOwner.performerId, limit: 100 })
   ]);
 
+  if (await libraryVersion() !== version) return res.status(409).json({ error: 'Your music changed while loading. Refresh Sources to load the current library.' });
   return res.json({
+    performerId: performerOwner.performerId,
     catalog: {
       category: 'sway_catalog',
       label: 'Catalog audio',
@@ -9323,7 +10481,8 @@ app.get('/api/talent/library/tracks', async (req, res) => {
       category: 'external_request_music',
       label: 'External request music',
       playbackBoundary: 'external_source_required',
-      tracks: libraryRows.map((row) => ({ ...row, sourceKey: 'external' }))
+      tracks: libraryRows.slice(0, 100).map((row) => ({ ...row, sourceKey: 'external' })),
+      pagination: { offset, limit: 100, version, hasMore: libraryRows.length > 100, nextOffset: libraryRows.length > 100 ? offset + 100 : null }
     }
   });
 });
@@ -9342,6 +10501,7 @@ app.get('/api/talent/music/source-capabilities', async (req, res) => {
 });
 
 app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -9354,6 +10514,9 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   if (!performerOwner) {
     return res.status(403).json({ error: 'Only the performer owner can import Spotify playlist metadata.' });
   }
+  if (req.body?.performerId !== performerOwner.performerId) {
+    return res.status(409).json({ error: 'Your performer account changed. Refresh Sources before importing.' });
+  }
 
   const playlistUrl = normalizeLibraryText(req.body?.playlistUrl, 512);
   if (!playlistUrl) {
@@ -9363,14 +10526,19 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
   const imported = await importSpotifyPlaylist({
     playlistUrl,
     env: process.env,
-    limit: 100
+    limit: 1000
   });
 
-  if (!imported.configured) {
-    return res.status(503).json({ error: 'Spotify metadata import is not configured for this Sway environment.' });
-  }
-  if (!imported.playlistId) {
-    return res.status(422).json({ error: 'Enter a valid Spotify playlist URL, URI, or ID.' });
+  if (imported.status !== 'ready') {
+    const status = imported.status === 'rate_limited' ? 429
+      : ['invalid_playlist', 'no_importable_tracks', 'too_large'].includes(imported.status) ? 422
+        : imported.status === 'not_found' ? 404 : 503;
+    if (imported.retryAfterSeconds) res.setHeader('Retry-After', String(imported.retryAfterSeconds));
+    return res.status(status).json({
+      error: imported.error || 'Spotify could not provide the complete playlist. Your saved source was not changed.',
+      providerStatus: imported.status,
+      ...(imported.retryAfterSeconds ? { retryAfterSeconds: imported.retryAfterSeconds } : {})
+    });
   }
   if (!imported.tracks.length) {
     return res.status(422).json({ error: 'Sway could not import tracks from that Spotify playlist. Confirm the playlist is accessible to the configured Spotify app.' });
@@ -9378,64 +10546,47 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
 
   const sourceKey = `spotify-${imported.playlistId}`;
   const sourceLabel = imported.playlistName ? `Spotify: ${imported.playlistName}` : 'Spotify playlist';
-  const result = await businessDb.transaction(async (tx) => {
-    const upserted = await upsertPerformerLibraryTrackBatch(tx, {
-      performerId: performerOwner.performerId,
-      sourceKey,
-      sourceLabel,
-      rawTracks: imported.tracks.map((track) => ({
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? '',
-        artworkUrl: track.albumArt ?? '',
-        externalTrackId: track.externalTrackId,
-        metadata: {
-          sourceProvider: 'spotify',
-          spotifyUri: track.spotifyUri,
-          spotifyUrl: track.spotifyUrl,
-          playlistId: imported.playlistId
-        }
-      })),
-      replaceExisting: true
-    });
-
-    await tx
-      .insert(performerLibrarySources)
-      .values({
+  let result: Awaited<ReturnType<typeof upsertPerformerLibraryTrackBatch>>;
+  try {
+    result = await businessDb.transaction(async (tx) => {
+      await prepareSpotifyPlaylistSource(tx, {
+        actorId: talentAccess.actor.actorId!,
+        performerId: performerOwner.performerId,
+        sourceKey, sourceLabel,
+        expectedSource: req.body?.expectedSource,
+        generatedSyncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey())
+      });
+      return upsertPerformerLibraryTrackBatch(tx, {
         performerId: performerOwner.performerId,
         sourceKey,
         sourceLabel,
-        syncKeyHash: hashLibrarySyncKey(issueLibrarySyncKey()),
-        syncKeyPreview: 'spotify-import',
-        connectionStatus: 'active',
-        lastSyncedAt: new Date(),
-        metadata: {
-          sourceProvider: 'spotify',
-          playlistId: imported.playlistId,
-          importMode: 'metadata_only'
-        },
-        updatedAt: new Date()
-      })
-      .onConflictDoUpdate({
-        target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
-        set: {
-          sourceLabel,
-          connectionStatus: 'active',
-          lastSyncedAt: new Date(),
+        rawTracks: imported.tracks.map((track) => ({
+          title: track.title,
+          artist: track.artist,
+          album: track.album ?? '',
+          artworkUrl: track.albumArt ?? '',
+          externalTrackId: track.externalTrackId,
           metadata: {
             sourceProvider: 'spotify',
-            playlistId: imported.playlistId,
-            importMode: 'metadata_only'
-          },
-          updatedAt: new Date()
-        }
+            spotifyUri: track.spotifyUri,
+            spotifyUrl: track.spotifyUrl,
+            playlistId: imported.playlistId
+          }
+        })),
+        replaceExisting: true
       });
-
-    return upserted;
-  });
+    });
+  } catch (error) {
+    if (error instanceof SpotifyPlaylistSourceConflict) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    console.error('[sway.sources] Spotify import persistence could not be confirmed.');
+    return res.status(503).json({ error: 'The saved import could not be confirmed. Refresh Sources before retrying this playlist.' });
+  }
 
   return res.status(202).json({
     success: true,
+    performerId: performerOwner.performerId,
     sourceKey,
     sourceLabel,
     playlistId: imported.playlistId,
@@ -9447,6 +10598,7 @@ app.post('/api/talent/music/spotify/import-playlist', async (req, res) => {
 });
 
 app.post('/api/talent/library/sources', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -9470,7 +10622,7 @@ app.post('/api/talent/library/sources', async (req, res) => {
   const syncKeyHash = hashLibrarySyncKey(syncKey);
   const syncKeyPreview = `${syncKey.slice(0, 12)}...`;
 
-  await businessDb
+  const [created] = await businessDb
     .insert(performerLibrarySources)
     .values({
       performerId: performerOwner.performerId,
@@ -9481,27 +10633,61 @@ app.post('/api/talent/library/sources', async (req, res) => {
       connectionStatus: 'active',
       updatedAt: new Date()
     })
-    .onConflictDoUpdate({
-      target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey],
-      set: {
-        sourceLabel,
-        syncKeyHash,
-        syncKeyPreview,
-        connectionStatus: 'active',
-        updatedAt: new Date()
-      }
+    .onConflictDoNothing({
+      target: [performerLibrarySources.performerId, performerLibrarySources.sourceKey]
+    })
+    .returning({
+      id: performerLibrarySources.id,
+      sourceLabel: performerLibrarySources.sourceLabel,
+      connectionStatus: performerLibrarySources.connectionStatus
     });
+
+  if (!created) {
+    const [existing] = await businessDb
+      .select({
+        sourceLabel: performerLibrarySources.sourceLabel,
+        syncKeyPreview: performerLibrarySources.syncKeyPreview,
+        connectionStatus: performerLibrarySources.connectionStatus
+      })
+      .from(performerLibrarySources)
+      .where(and(
+        eq(performerLibrarySources.performerId, performerOwner.performerId),
+        eq(performerLibrarySources.sourceKey, sourceKey)
+      ))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(409).json({ error: 'That linked source changed while Sway was opening it. Refresh and try again.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      existing: true,
+      sourceKey,
+      sourceLabel: existing.sourceLabel,
+      syncKeyPreview: existing.syncKeyPreview,
+      connectionStatus: existing.connectionStatus,
+      syncEndpointPath: '/api/library/sync'
+    });
+  }
 
   return res.status(201).json({
     success: true,
+    existing: false,
     sourceKey,
-    sourceLabel,
+    sourceLabel: created.sourceLabel,
     syncKey,
-    syncEndpointPath: '/api/library/sync'
+    syncEndpointPath: '/api/library/sync',
+    windowsHelper: buildWindowsLibrarySyncLauncher({
+      swayUrl: resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, ''),
+      sourceKey,
+      syncKey
+    })
   });
 });
 
 app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) => {
+  applyNoStoreHeaders(res);
   const talentAccess = await accessControl.requireTalentAccess(req);
   if (talentAccess.allowed === false) {
     return res.status(talentAccess.status).json({ error: talentAccess.reason });
@@ -9526,7 +10712,7 @@ app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) =>
       syncKeyHash: nextSyncKeyHash,
       syncKeyPreview: nextSyncKeyPreview,
       connectionStatus: 'active',
-      updatedAt: new Date()
+      updatedAt: nextLibrarySourceVersion()
     })
     .where(and(
       eq(performerLibrarySources.id, sourceId),
@@ -9546,7 +10732,12 @@ app.post('/api/talent/library/sources/:sourceId/rotate-key', async (req, res) =>
     sourceKey: rotated.sourceKey,
     sourceLabel: rotated.sourceLabel,
     syncKey: nextSyncKey,
-    syncEndpointPath: '/api/library/sync'
+    syncEndpointPath: '/api/library/sync',
+    windowsHelper: buildWindowsLibrarySyncLauncher({
+      swayUrl: resolvePerformerLoginBaseUrl(process.env).trim().replace(/\/+$/, ''),
+      sourceKey: rotated.sourceKey,
+      syncKey: nextSyncKey
+    })
   });
 });
 
@@ -9569,7 +10760,7 @@ app.post('/api/talent/library/sources/:sourceId/revoke', async (req, res) => {
     .update(performerLibrarySources)
     .set({
       connectionStatus: 'revoked',
-      updatedAt: new Date()
+      updatedAt: nextLibrarySourceVersion()
     })
     .where(and(
       eq(performerLibrarySources.id, sourceId),
@@ -9704,6 +10895,7 @@ app.post('/api/talent/audio/releases', async (req, res) => {
       trackTitle: typeof req.body?.trackTitle === 'string' ? req.body.trackTitle : '',
       versionTitle: typeof req.body?.versionTitle === 'string' ? req.body.versionTitle : null,
       primaryArtistName: typeof req.body?.primaryArtistName === 'string' ? req.body.primaryArtistName : '',
+      songwriterName: typeof req.body?.songwriterName === 'string' ? req.body.songwriterName : '',
       releaseType: typeof req.body?.releaseType === 'string' ? req.body.releaseType : '',
       upc: typeof req.body?.upc === 'string' ? req.body.upc : null,
       isrc: typeof req.body?.isrc === 'string' ? req.body.isrc : null,
@@ -9715,7 +10907,12 @@ app.post('/api/talent/audio/releases', async (req, res) => {
         ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string')
         : null,
       isExplicit: req.body?.isExplicit === true,
-      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null
+      languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.status(result.created ? 201 : 200).json(result);
   } catch (error) {
@@ -9756,7 +10953,12 @@ app.patch('/api/talent/audio/releases/:releaseId', async (req, res) => {
       territories: Array.isArray(req.body?.territories) ? req.body.territories.filter((value: unknown): value is string => typeof value === 'string') : null,
       isExplicit: req.body?.isExplicit === true,
       languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
-      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.json(result);
   } catch (error) {
@@ -9789,7 +10991,12 @@ app.post('/api/talent/audio/releases/:releaseId/recordings', async (req, res) =>
       isExplicit: req.body?.isExplicit === true,
       languageCode: typeof req.body?.languageCode === 'string' ? req.body.languageCode : null,
       originalReleaseDate: typeof req.body?.originalReleaseDate === 'string' ? req.body.originalReleaseDate : null,
-      credits: Array.isArray(req.body?.credits) ? req.body.credits : null
+      credits: Array.isArray(req.body?.credits) ? req.body.credits : null,
+      lyricsAuthorship: typeof req.body?.lyricsAuthorship === 'string' ? req.body.lyricsAuthorship : null,
+      compositionAuthorship: typeof req.body?.compositionAuthorship === 'string' ? req.body.compositionAuthorship : null,
+      vocalPerformance: typeof req.body?.vocalPerformance === 'string' ? req.body.vocalPerformance : null,
+      productionMethod: typeof req.body?.productionMethod === 'string' ? req.body.productionMethod : null,
+      lyricsExcerpt: typeof req.body?.lyricsExcerpt === 'string' ? req.body.lyricsExcerpt : null
     });
     return res.status(result.created ? 201 : 200).json(result);
   } catch (error) {
@@ -10713,138 +11920,100 @@ app.post('/api/talent/setlist/remove', async (req, res) => {
   return res.json({ success: true, removed: true });
 });
 
-// Creates (if needed) the performer's Stripe recipient connected account and
-// returns a fresh Stripe-hosted onboarding link. Idempotent: reuses the
-// existing connected account on repeat calls instead of creating duplicates.
-function resolveStripeConnectOnboardingUrls() {
-  const appBaseUrl = resolvePerformerLoginBaseUrl(process.env).replace(/\/+$/, '');
-  return {
-    refreshUrl: `${appBaseUrl}/talent/connect/refresh`,
-    returnUrl: `${appBaseUrl}/talent/connect/return`
-  };
-}
-
-async function createStripeConnectOnboardingUrl(accountId: string) {
-  if (!stripeConnectService) throw new Error('stripe_connect_unavailable');
-  const { refreshUrl, returnUrl } = resolveStripeConnectOnboardingUrls();
-  return stripeConnectService.createOnboardingLink({ accountId, refreshUrl, returnUrl });
-}
-
-app.post('/api/talent/connect/onboard', async (req, res) => {
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) {
-    return res.status(talentAccess.status).json({ error: talentAccess.reason });
-  }
-  if (!talentAccess.actor.actorId || !businessDb) {
-    return res.status(503).json({ error: 'Performer payouts require a durable database connection.' });
-  }
-  if (!stripeConnectService || !stripeConnectOnboardingStore || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).json({ error: 'Stripe test-mode Connect onboarding is unavailable until payment execution is fully configured.' });
-  }
-
-  const performerOwner = await loadOwnedPerformerByActorUserId(talentAccess.actor.actorId);
-  if (!performerOwner) {
-    return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
-  }
-
-  try {
-    const provisioning = await provisionStripeConnectRecipient({
-      performerId: performerOwner.performerId,
-      ownerUserId: talentAccess.actor.actorId,
-      store: stripeConnectOnboardingStore,
-      stripe: stripeConnectService
-    });
-    if (provisioning.kind === 'not_found') {
-      return res.status(403).json({ error: 'Only the performer owner can connect a payout account.' });
-    }
-    if (provisioning.kind === 'unverified') {
-      return res.status(409).json({ error: 'A verified performer account email is required before Stripe onboarding.' });
-    }
-    if (provisioning.kind === 'busy') {
-      res.setHeader('Retry-After', '2');
-      return res.status(409).json({ error: 'Stripe onboarding is already being prepared. Retry in a moment.' });
-    }
-
-    const { url } = await createStripeConnectOnboardingUrl(provisioning.accountId);
-
-    return res.json({ success: true, url });
-  } catch (error) {
-    console.error('Stripe Connect onboarding failed.', {
-      message: error instanceof Error ? error.message : 'unknown_error'
-    });
-    return res.status(502).json({
-      error: 'Stripe Connect onboarding could not be started. Confirm Stripe Connect is enabled for the Stripe account and Render is using test-mode Stripe keys.'
-    });
-  }
-});
-
-app.get('/talent/connect/refresh', async (req, res) => {
+// Stripe is incoming-only for all new Sway money. Retire every performer-facing
+// Connect entry point before the historical compatibility handlers below can
+// run; old bindings and webhooks remain readable for prior transactions.
+const retiredStripePayoutResponse = (_req: express.Request, res: express.Response) => {
   applyNoStoreHeaders(res);
-  const talentAccess = await accessControl.requireTalentAccess(req);
-  if (talentAccess.allowed === false) {
-    return res.status(talentAccess.status).send('Authenticate as the performer owner to restart Stripe onboarding.');
-  }
-  if (!talentAccess.actor.actorId || !businessDb || !stripeConnectService || !liveRoomPaymentRuntimeConfig.connectEnabled) {
-    return res.status(503).send('Stripe onboarding is temporarily unavailable.');
-  }
+  return res.status(410).json({
+    error: 'Stripe performer payout onboarding is retired. Use PayPal or Venmo in Sway Money.',
+    code: 'stripe_performer_payouts_retired'
+  });
+};
+app.all('/api/talent/connect/onboard', retiredStripePayoutResponse);
+app.all('/talent/connect/refresh', retiredStripePayoutResponse);
+app.all('/talent/connect/return', retiredStripePayoutResponse);
 
-  const [owner] = await businessDb.select({
-    stripeAccountId: performers.stripeConnectedAccountId,
-    emailVerifiedAt: users.emailVerifiedAt
-  }).from(performers)
-    .innerJoin(users, eq(users.id, performers.ownerUserId))
-    .where(eq(performers.ownerUserId, talentAccess.actor.actorId))
-    .limit(1);
+app.post('/api/library/import-file',
+  async (req, res, next) => {
+    applyNoStoreHeaders(res);
+    if (!businessDb) return res.status(503).json({ error: 'Library import requires a durable database connection.' });
 
-  if (!owner?.emailVerifiedAt) {
-    return res.status(409).send('Verify the performer owner email before restarting Stripe onboarding.');
-  }
-  if (!owner.stripeAccountId) {
-    return res.status(409).send('Start Stripe onboarding from the performer account first.');
-  }
+    const bearerToken = req.header('authorization')?.startsWith('Bearer ')
+      ? req.header('authorization')?.slice('Bearer '.length).trim()
+      : null;
+    const rawSyncKey = req.header('x-sway-library-key')?.trim() || bearerToken || null;
+    if (!rawSyncKey) return res.status(401).json({ error: 'A valid library sync key is required.' });
 
-  try {
-    const { url } = await createStripeConnectOnboardingUrl(owner.stripeAccountId);
-    return res.redirect(303, url);
-  } catch (error) {
-    console.error('Stripe Connect onboarding refresh failed.', {
-      message: error instanceof Error ? error.message : 'unknown_error'
-    });
-    return res.status(502).send('Stripe onboarding could not be restarted. Return to the performer account and try again.');
-  }
-});
+    try {
+      const syncKeyHash = hashLibrarySyncKey(rawSyncKey);
+      const [sourceRow] = await businessDb
+        .select({
+          id: performerLibrarySources.id,
+          performerId: performerLibrarySources.performerId,
+          sourceKey: performerLibrarySources.sourceKey,
+          sourceLabel: performerLibrarySources.sourceLabel
+        })
+        .from(performerLibrarySources)
+        .where(and(
+          eq(performerLibrarySources.syncKeyHash, syncKeyHash),
+          eq(performerLibrarySources.connectionStatus, 'active')
+        ))
+        .limit(1);
+      if (!sourceRow) return res.status(403).json({ error: 'This music helper is no longer connected. Create a fresh helper in Sway.' });
+      res.locals.libraryImportSource = sourceRow;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  },
+  express.text({ type: ['text/plain', 'application/octet-stream'], limit: '10mb' }),
+  async (req, res) => {
+    const sourceRow = res.locals.libraryImportSource as {
+      id: string;
+      performerId: string;
+      sourceKey: string;
+      sourceLabel: string;
+    };
+    const filename = normalizeLibraryText(req.header('x-sway-library-filename'), 180);
+    const content = typeof req.body === 'string' ? req.body : '';
+    if (!filename || !content) {
+      return res.status(422).json({ error: 'Choose a supported DJ library export and try again.' });
+    }
 
-app.get('/talent/connect/return', async (req, res) => {
-  applyNoStoreHeaders(res);
-  return handleStripeConnectReturn({
-    req,
-    res,
-    runtimeAvailable: Boolean(
-      businessDb
-      && stripeConnectService
-      && liveRoomPaymentRuntimeConfig.connectEnabled
-    ),
-    requireTalentAccess: (request) => accessControl.requireTalentAccess(request),
-    loadOwnedPerformer: loadOwnedPerformerByActorUserId,
-    getAccountStatus: (accountId) => stripeConnectService!.getAccountStatus(accountId),
-    applyStatus: ({ performerId, ownerUserId, accountId, providerStatus }) => (
-      reconcileStripeConnectPerformerStatus({
-        db: businessDb!,
-        accountId,
-        status: providerStatus,
-        source: 'return',
-        actorId: ownerUserId,
-        expectedPerformerId: performerId,
-        expectedOwnerUserId: ownerUserId
-      })
-    ),
-    logError: (error) => {
-      console.error('Stripe Connect return reconciliation failed.', {
-        message: error instanceof Error ? error.message : 'unknown_error'
+    try {
+      const parsed = parseDjLibraryText(filename, content);
+      const result = await businessDb.transaction(async (tx) => {
+        const imported = await upsertPerformerLibraryTrackBatch(tx, {
+          performerId: sourceRow.performerId,
+          sourceKey: sourceRow.sourceKey,
+          sourceLabel: sourceRow.sourceLabel,
+          rawTracks: parsed.tracks,
+          replaceExisting: true,
+          allowLocalPaths: false
+        });
+        await tx
+          .update(performerLibrarySources)
+          .set({ lastSyncedAt: new Date(), updatedAt: nextLibrarySourceVersion() })
+          .where(eq(performerLibrarySources.id, sourceRow.id));
+        return imported;
+      });
+      return res.status(202).json({
+        success: true,
+        sourceKey: sourceRow.sourceKey,
+        format: parsed.format,
+        importedCount: result.importedCount,
+        removedCount: result.removedCount,
+        truncated: parsed.truncated,
+        replaceExisting: true
+      });
+    } catch (error) {
+      return res.status(422).json({
+        error: error instanceof Error ? error.message : 'Sway could not read that DJ library export.'
       });
     }
-  });
-});
+  }
+);
 
 app.post('/api/library/sync', async (req, res) => {
   if (!businessDb) {
@@ -10891,14 +12060,18 @@ app.post('/api/library/sync', async (req, res) => {
         sourceKey: sourceRow.sourceKey,
         sourceLabel: sourceRow.sourceLabel,
         rawTracks,
-        replaceExisting
+        replaceExisting,
+        // Only the booth-side sync-key lane may persist exact local paths.
+        // Browser imports remain metadata/search inputs and cannot instruct a
+        // playback bridge to open an arbitrary file on the DJ computer.
+        allowLocalPaths: true
       });
 
       await tx
         .update(performerLibrarySources)
         .set({
           lastSyncedAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: nextLibrarySourceVersion()
         })
         .where(eq(performerLibrarySources.id, sourceRow.id));
 
@@ -10961,12 +12134,26 @@ app.post("/api/payment/webhook", async (req, res) => {
     try {
       const accountEvent = await stripeConnectService.parseAccountUpdatedEvent({ rawBody, signatureHeader, webhookSecret });
       if (accountEvent) {
+        if (accountEvent.paymentMode !== connectRuntimeMode) {
+          if (!paymentWebhookService) {
+            return res.status(503).json({ error: 'Durable payment webhook processing is unavailable.' });
+          }
+          const durableResult = await paymentWebhookService.ingestWebhook({ rawBody, signatureHeader });
+          return res.json({
+            received: true,
+            result: { type: 'account.updated', status: 'ignored_opposite_mode', durableResult }
+          });
+        }
+        if (!accountEvent.accountId || !accountEvent.status) {
+          return res.status(400).json({ error: 'Connect webhook account status is incomplete.' });
+        }
         return handleStripeConnectAccountStatusWebhook({
           res,
           accountEvent,
           applyStatus: (event) => reconcileStripeConnectPerformerStatus({
             db: businessDb,
             accountId: event.accountId,
+            paymentMode: event.paymentMode,
             status: event.status,
             source: event.eventType.startsWith('v2.') ? 'webhook_v2' : 'webhook_v1',
             providerEventId: event.providerEventId,
@@ -11095,13 +12282,14 @@ app.get('/api/public/feed', async (_req, res) => {
     const activeRooms = await listReadableActiveRooms();
     const roomLimit = Math.max(1, Math.min(30, Number(_req.query?.limit) || 12));
     const eventLimit = Math.max(1, Math.min(30, Number(_req.query?.eventLimit) || 12));
+    const releaseLimit = Math.max(1, Math.min(30, Number(_req.query?.releaseLimit) || 12));
 
     if (!businessDb || !performerEventService) {
       return res.status(503).json({ error: 'Public performer discovery requires durable performer status checks.' });
     }
 
     const gigIds = activeRooms.map((room) => room.gigId);
-    const [details, publicEvents] = await Promise.all([
+    const [details, publicEvents, publicReleaseRows, performerDirectory] = await Promise.all([
       gigIds.length
         ? businessDb
             .select({
@@ -11132,13 +12320,27 @@ app.get('/api/public/feed', async (_req, res) => {
               sql`nullif(trim(${performers.displayName}), '') is not null`
             ))
         : Promise.resolve([]),
-      performerEventService.listPublicEvents({ limit: eventLimit })
+      performerEventService.listPublicEvents({ limit: eventLimit }),
+      businessDb
+        .select({ id: musicReleases.id })
+        .from(musicReleases)
+        .where(and(
+          ne(musicReleases.distributionMode, 'private'),
+          inArray(musicReleases.status, ['ready', 'scheduled', 'published'])
+        ))
+        .orderBy(desc(musicReleases.publishedAt), desc(musicReleases.scheduledReleaseAt), desc(musicReleases.updatedAt))
+        .limit(releaseLimit),
+      listPublicPerformerDirectory(_req.query.q, _req.query.performerOffset)
     ]);
 
     const detailsByGigId = new Map(details.map((row) => [row.gigId, row]));
     const selectedRooms = activeRooms
       .filter((room) => detailsByGigId.has(room.gigId))
       .slice(0, roomLimit);
+    const publicReleases = audioPublishingService
+      ? (await Promise.all(publicReleaseRows.map((release) => audioPublishingService!.getPublicRelease({ releaseId: release.id }))))
+        .filter((release) => release !== null)
+      : [];
 
     return res.json({
       rooms: selectedRooms
@@ -11168,7 +12370,29 @@ app.get('/api/public/feed', async (_req, res) => {
           }
         };
       }),
-      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket))
+      performerDirectory,
+      events: await Promise.all(publicEvents.map(toPublicEventResponseWithTicket)),
+      releases: publicReleases.map((release) => ({
+        id: release.id,
+        title: release.title,
+        primaryArtistName: release.primaryArtistName,
+        releaseType: release.releaseType,
+        status: release.status,
+        scheduledReleaseAt: release.scheduledReleaseAt,
+        publishedAt: release.publishedAt,
+        releasePath: release.releasePath,
+        artworkUrl: release.artworkUrl,
+        creationTags: release.creationTags,
+        humanWrittenLyrics: release.humanWrittenLyrics,
+        originalVirtualArtist: release.originalVirtualArtist,
+        fullyGenerated: release.fullyGenerated,
+        recordings: release.recordings.map((recording) => ({
+          recordingId: recording.recordingId,
+          title: recording.title,
+          lyricsExcerpt: recording.lyricsExcerpt,
+          credits: recording.credits
+        }))
+      }))
     });
   } catch (error) {
     console.error('Public feed lookup failed:', error);
@@ -11178,9 +12402,19 @@ app.get('/api/public/feed', async (_req, res) => {
 
 app.get('/api/public/performer/:handle/share-card.png', async (req, res) => {
   const resolution = await resolvePublicPerformerDiscovery(req.params.handle);
-  if (resolution.kind === 'unavailable') return res.status(503).send('Public performer profiles require a durable database connection.');
+  if (resolution.kind === 'unavailable') {
+    applyNoStoreHeaders(res);
+    return res.status(503).send('Public performer profiles require a durable database connection.');
+  }
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
+    applyNoStoreHeaders(res);
     return res.status(404).send('Performer profile not found.');
+  }
+  if (resolution.resolvedViaAlias) {
+    res.setHeader(
+      'Content-Location',
+      `/api/public/performer/${encodeURIComponent(resolution.profile.handle!)}/share-card.png`
+    );
   }
   const profile = toPublicShareProfile(resolution.profile, resolution.kind);
 
@@ -11205,6 +12439,69 @@ app.get('/api/public/releases/:releaseId', async (req, res) => {
     return res.json({ release });
   } catch (error) {
     return res.status(503).json({ error: error instanceof Error ? error.message : 'Public release is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/public/releases/:releaseId/reports', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const accountAccess = await accessControl.requireAuthenticatedAccountAccess(req);
+  if (accountAccess.allowed === false) return res.status(accountAccess.status).json({ error: accountAccess.reason });
+  if (!accountAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const report = await audioPublishingService.createReleaseReport({
+      releaseId: req.params.releaseId,
+      reporterUserId: accountAccess.actor.actorId,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : '',
+      details: typeof req.body?.details === 'string' ? req.body.details : ''
+    });
+    return res.status(201).json({ report: { id: report.id, status: report.status } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not submit this release report.';
+    const status = /already have an active report/i.test(message)
+      ? 409
+      : /owners cannot report/i.test(message)
+        ? 403
+        : /not found/i.test(message)
+          ? 404
+          : 422;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.get('/api/admin/release-reports', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!adminAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const reports = await audioPublishingService.listReleaseReports({
+      status: typeof req.query?.status === 'string' ? req.query.status : null
+    });
+    return res.json({ reports });
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not load release reports.' });
+  }
+});
+
+app.patch('/api/admin/release-reports/:reportId', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const adminAccess = await accessControl.requireAdminAccess(req);
+  if (adminAccess.allowed === false) return res.status(adminAccess.status).json({ error: adminAccess.reason });
+  if (!adminAccess.actor.actorId) return res.status(401).json({ error: 'Sway actor resolution required.' });
+  if (!requireAudioPublishingRuntime(res) || !audioPublishingService) return;
+  try {
+    const result = await audioPublishingService.reviewReleaseReport({
+      reportId: req.params.reportId,
+      actorUserId: adminAccess.actor.actorId,
+      outcome: typeof req.body?.outcome === 'string' ? req.body.outcome : '',
+      note: typeof req.body?.note === 'string' ? req.body.note : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not review release report.';
+    return res.status(/not found/i.test(message) ? 404 : /already|changed|final outcome/i.test(message) ? 409 : 422).json({ error: message });
   }
 });
 
@@ -11233,12 +12530,18 @@ app.get('/api/public/performer/:handle', async (req, res) => {
   if ((resolution.kind !== 'public' && resolution.kind !== 'unlisted') || !resolution.profile) {
     return res.status(404).json({ error: 'Performer profile not found.' });
   }
+  if (resolution.resolvedViaAlias) {
+    res.setHeader(
+      'Content-Location',
+      `/api/public/performer/${encodeURIComponent(resolution.profile.handle!)}`
+    );
+  }
 
   const profile = resolution.profile;
   try {
 
     const publicProfilePerformerId = profile.performerId;
-    const [[activeRoom], linkRows, partnerState, publicReleaseRows, publicEventRows] = await Promise.all([
+    const [[activeRoom], linkRows, partnerState, publicReleaseRows, publicEventRows, programMembership] = await Promise.all([
       businessDb
         .select({
           gigId: activeRoomRegistry.gigId,
@@ -11289,7 +12592,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         .limit(12),
       performerEventService
         ? performerEventService.listPublicEvents({ performerId: publicProfilePerformerId, limit: 12 })
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      loadSwayProgramMembershipForPerformer(businessDb, profile.performerId)
     ]);
 
     const activeRooms = await listReadableActiveRooms(profile.performerId);
@@ -11331,6 +12635,8 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         displayName: profile.displayName,
         stageName,
         primaryRole: resolvePublicPrimaryRole(effectiveMetadata),
+        roles: resolvePublicRoles(effectiveMetadata),
+        layout: readPublicProfileLayout(effectiveMetadata),
         handle: profile.handle,
         bio: effectiveBio,
         headline: effectiveHeadline,
@@ -11349,12 +12655,12 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         links: combinedLinkRows,
         featuredMedia: publicMedia,
         partner: {
-          active: partnerState?.isEffective ?? false,
-          kind: partnerState?.isEffective ? partnerState.partnerKind : null,
+          active: programMembership.isPartner || programMembership.isExclusive || (partnerState?.isEffective ?? false),
+          kind: programMembership.isExclusive ? 'exclusive' : programMembership.isPartner ? 'partner' : partnerState?.isEffective ? partnerState.partnerKind : null,
           termsVersion: partnerState?.isEffective ? partnerState.termsVersion : null
         },
         isPreview: false,
-        claimState: 'claimed'
+        claimState: profile.ownerEmailVerifiedAt ? 'claimed' : 'pending'
       },
       activeRoom: activeRoom
         ? {
@@ -11374,7 +12680,11 @@ app.get('/api/public/performer/:handle', async (req, res) => {
         scheduledReleaseAt: release.scheduledReleaseAt,
         publishedAt: release.publishedAt,
         releasePath: release.releasePath,
-        artworkUrl: release.artworkUrl
+        artworkUrl: release.artworkUrl,
+        creationTags: release.creationTags,
+        humanWrittenLyrics: release.humanWrittenLyrics,
+        originalVirtualArtist: release.originalVirtualArtist,
+        fullyGenerated: release.fullyGenerated
       })),
       events: await Promise.all(publicEventRows.map(toPublicEventResponseWithTicket))
     });
@@ -11547,6 +12857,22 @@ app.get("/api/state/:gigId", async (req, res) => {
   }
 
   if (roomSnapshot.roomStatus === 'ended') {
+    // A closed room is private history, never a reopened public room.
+    const privateRoomAccess = await accessControl.requireGigMutationAccess(req, requestedGigId);
+    if (privateRoomAccess.allowed) {
+      if (roomSnapshot.state.session.status !== 'closed'
+        || roomSnapshot.state.activeGigId !== requestedGigId) {
+        return res.status(503).json({ error: ROOM_LOOKUP_UNAVAILABLE_COPY, room_lookup: 'error' });
+      }
+      return res.json({
+        session: roomSnapshot.state.session,
+        requests: roomSnapshot.state.requests,
+        performers: roomSnapshot.state.performers,
+        activeGigId: roomSnapshot.state.activeGigId,
+        room_lookup: 'ended',
+        room_read_only: true
+      });
+    }
     return res.status(410).json({
       error: ROOM_LOOKUP_ENDED_COPY,
       message: ROOM_LOOKUP_ENDED_COPY,
@@ -11953,7 +13279,7 @@ app.post("/api/session/start", async (req, res) => {
     }
   }
 
-  const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
+  const { talentName, talentRole, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body;
   const requestedGigId = parseDurableGigId(gig_id);
   if (!requestedGigId) {
     return res.status(422).json({
@@ -11964,7 +13290,7 @@ app.post("/api/session/start", async (req, res) => {
   const requestedRoomConfig = {
     talentName: talentName || "DJ Pro",
     talentRole: talentRole || 'DJ',
-    feeType: feeType || 'patron',
+    feeType: 'patron' as const,
     minimumTip: Math.max(5, Number(minimumTip) || 5),
     paymentsEnabled: paymentsEnabled === true,
     searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'
@@ -11981,7 +13307,8 @@ app.post("/api/session/start", async (req, res) => {
       && session.feeType === requestedRoomConfig.feeType
       && session.minimumTip === requestedRoomConfig.minimumTip
       && session.paymentsEnabled === requestedRoomConfig.paymentsEnabled
-      && session.searchScope === requestedRoomConfig.searchScope;
+      && session.searchScope === requestedRoomConfig.searchScope
+      && (!(session.paymentsEnabled || session.tipsEnabled) || roomPaymentEnvironmentMatchesRuntime(session));
     if (ownedByCaller && sameConfig && session.status === 'active') {
       return { kind: 'replay' as const, state: existing.state };
     }
@@ -12004,7 +13331,7 @@ app.post("/api/session/start", async (req, res) => {
 
   if (requestedRoomConfig.paymentsEnabled && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return res.status(503).json({
-      error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+      error: 'Paid-room rehearsal is temporarily unavailable. You can still start a free room.',
       code: 'test_payment_runtime_unavailable'
     });
   }
@@ -12014,25 +13341,46 @@ app.post("/api/session/start", async (req, res) => {
         id: performers.id,
         isActive: performers.isActive,
         onboardingStatus: performers.onboardingStatus,
-        paymentAccountStatus: performers.paymentAccountStatus,
         kycStatus: performers.kycStatus,
-        chargesEnabled: performers.chargesEnabled,
-        payoutsEnabled: performers.payoutsEnabled,
-        stripeConnectedAccountId: performers.stripeConnectedAccountId,
-        payoutHoldReason: performers.payoutHoldReason
-      }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+        payoutDestinationKind: performerPayoutPreferences.destinationKind,
+        payoutHoldReason: performers.payoutHoldReason,
+        currentPayoutKycApproved: sql<boolean>`exists (
+          select 1
+          from ${performerPayoutKycReviews}
+          where ${performerPayoutKycReviews.performerId} = ${performers.id}
+            and ${performerPayoutKycReviews.processApprovalVersion} = ${paypalPayoutReadiness.kycProcessApprovalVersion ?? ''}
+            and ${performerPayoutKycReviews.status} = 'approved'
+        )`
+      }).from(performers)
+        .leftJoin(performerPayoutPreferences, and(
+          eq(performerPayoutPreferences.performerId, performers.id),
+          eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
+        ))
+        .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
     : [];
   const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
     seller,
     allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
       seller?.id,
       testModePlatformBalancePerformerIds
-    )
+    ),
+    allowPlatformBalance: liveRoomPaymentRuntimeConfig.mode === 'live'
+      && (seller?.payoutDestinationKind === 'paypal' || seller?.payoutDestinationKind === 'venmo')
   });
   const requestedPaymentsEnabled = requestedRoomConfig.paymentsEnabled;
+  const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
+    seller?.id,
+    sellerMoneyReadiness.ready
+  );
+  if (requestedPaymentsEnabled && !isPerformerAllowedForRuntimeMoney(seller?.id)) {
+    return res.status(403).json({
+      error: 'Live paid rooms are not enabled for this performer.',
+      code: 'live_money_performer_not_allowed'
+    });
+  }
   if (requestedPaymentsEnabled && !sellerMoneyReadiness.ready) {
     return res.status(409).json({
-      error: 'Complete Stripe identity, charge, and payout setup before starting a paid room.',
+      error: 'Complete secure identity and payout setup before starting a paid room.',
       code: 'seller_payout_not_ready'
     });
   }
@@ -12064,12 +13412,12 @@ app.post("/api/session/start", async (req, res) => {
     requestPresets: [...systemRequestPresets],
     operatingMode: 'manual',
     searchScope: requestedRoomConfig.searchScope,
-    paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready,
-    tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready,
-    settlementMode: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentsEnabled: requestedPaymentsEnabled && runtimeSellerMoneyEligible,
+    tipsEnabled: runtimeSellerMoneyEligible,
+    settlementMode: runtimeSellerMoneyEligible
       ? sellerMoneyReadiness.settlementMode
       : 'unavailable',
-    paymentEnvironment: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready
+    paymentEnvironment: runtimeSellerMoneyEligible
       ? liveRoomPaymentRuntimeConfig.mode
       : 'unavailable',
     totals: {
@@ -12351,8 +13699,14 @@ app.post("/api/session/payments-enabled", async (req, res) => {
   if (enabled) {
     if (!liveRoomPaymentRuntimeConfig.moneyEnabled) {
       return res.status(503).json({
-        error: 'Paid-room rehearsal is unavailable until Stripe test-mode payment execution is fully configured.',
+        error: 'Paid-room rehearsal is temporarily unavailable. You can still run free requests.',
         code: 'test_payment_runtime_unavailable'
+      });
+    }
+    if (!roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+      return res.status(409).json({
+        error: 'This room was opened under a different payment environment. Start a new room before accepting money.',
+        code: 'payment_environment_mismatch'
       });
     }
     const [seller] = businessDb && actor.actorId
@@ -12360,24 +13714,45 @@ app.post("/api/session/payments-enabled", async (req, res) => {
           id: performers.id,
           isActive: performers.isActive,
           onboardingStatus: performers.onboardingStatus,
-          paymentAccountStatus: performers.paymentAccountStatus,
           kycStatus: performers.kycStatus,
-          chargesEnabled: performers.chargesEnabled,
-          payoutsEnabled: performers.payoutsEnabled,
-          stripeConnectedAccountId: performers.stripeConnectedAccountId,
-          payoutHoldReason: performers.payoutHoldReason
-        }).from(performers).where(eq(performers.ownerUserId, actor.actorId)).limit(1)
+          payoutDestinationKind: performerPayoutPreferences.destinationKind,
+          payoutHoldReason: performers.payoutHoldReason,
+          currentPayoutKycApproved: sql<boolean>`exists (
+            select 1
+            from ${performerPayoutKycReviews}
+            where ${performerPayoutKycReviews.performerId} = ${performers.id}
+              and ${performerPayoutKycReviews.processApprovalVersion} = ${paypalPayoutReadiness.kycProcessApprovalVersion ?? ''}
+              and ${performerPayoutKycReviews.status} = 'approved'
+          )`
+        }).from(performers)
+          .leftJoin(performerPayoutPreferences, and(
+            eq(performerPayoutPreferences.performerId, performers.id),
+            eq(performerPayoutPreferences.paymentMode, paypalPayoutsProvider?.mode ?? '__unavailable__')
+          ))
+          .where(eq(performers.ownerUserId, actor.actorId)).limit(1)
       : [];
     const sellerMoneyReadiness = resolveLiveRoomSellerMoneyReadiness({
       seller,
       allowTestPlatformBalance: isTestModePlatformBalancePerformerAllowed(
         seller?.id,
         testModePlatformBalancePerformerIds
-      )
+      ),
+      allowPlatformBalance: liveRoomPaymentRuntimeConfig.mode === 'live'
+        && (seller?.payoutDestinationKind === 'paypal' || seller?.payoutDestinationKind === 'venmo')
     });
-    if (!sellerMoneyReadiness.ready) {
+    const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(
+      seller?.id,
+      sellerMoneyReadiness.ready
+    );
+    if (!isPerformerAllowedForRuntimeMoney(seller?.id)) {
+      return res.status(403).json({
+        error: 'Live paid rooms are not enabled for this performer.',
+        code: 'live_money_performer_not_allowed'
+      });
+    }
+    if (!runtimeSellerMoneyEligible) {
       return res.status(409).json({
-        error: 'Complete Stripe identity, charge, and payout setup before enabling paid requests.',
+        error: 'Complete secure identity and payout setup before enabling paid requests.',
         code: 'seller_payout_not_ready'
       });
     }
@@ -12522,6 +13897,8 @@ app.post("/api/request/create", async (req, res) => {
     amount,
     albumArt,
     sourceProvider,
+    sourceTrackId,
+    externalTrackId,
     spotifyUri,
     spotifyUrl,
     client_request_id,
@@ -12725,8 +14102,14 @@ app.post("/api/request/create", async (req, res) => {
 
   if (paymentsEnabledForAction && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return rejectAfterConfirmedAuthorization(503, {
-      error: 'This paid action is paused until Stripe test-mode payment execution is fully configured.',
+      error: 'This paid action is temporarily unavailable. Free room actions still work.',
       code: 'test_payment_runtime_unavailable'
+    });
+  }
+  if (paymentsEnabledForAction && !roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'This room belongs to a different payment environment and cannot accept this paid action.',
+      code: 'payment_environment_mismatch'
     });
   }
 
@@ -12734,9 +14117,11 @@ app.post("/api/request/create", async (req, res) => {
     ? Math.round(Math.max(Number(amount) || 0, roomState.session.minimumTip) * 100)
     : 0;
   const normalizedSourceProvider = normalizeLibraryText(sourceProvider, 80) || null;
+  const normalizedSourceTrackId = normalizeLibraryText(sourceTrackId, 128) || null;
+  const normalizedExternalTrackId = normalizeLibraryText(externalTrackId, 256) || null;
   const normalizedSpotifyUri = normalizeLibraryText(spotifyUri, 256) || null;
   const normalizedSpotifyUrl = normalizeLibraryText(spotifyUrl, 512) || null;
-  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSpotifyUri, normalizedSpotifyUrl });
+  const payload_hash = hashPayload({ type, targetType, title, subtitle, senderName, message, albumArt, normalizedSourceProvider, normalizedSourceTrackId, normalizedExternalTrackId, normalizedSpotifyUri, normalizedSpotifyUrl });
   const idempotencyFingerprint = createIdempotencyFingerprint({
     idempotency_key,
     patron_device_id_hash: resolvedPatronDeviceIdHash,
@@ -12858,7 +14243,9 @@ app.post("/api/request/create", async (req, res) => {
     : { kind: 'creator_direct' as const };
   const proposedFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution });
   const proposedPlatformFeeCents = paymentsEnabledForAction ? proposedFee.proposedPlatformFeeCents : 0;
-  const platformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
+  // Performer earnings are never reduced by Sway's checkout fee. The customer
+  // sees and pays that disclosed amount at checkout.
+  const platformFeePayer = 'patron' as const;
 
   const moderationOutcome = await moderationService.evaluateSubmission({
     senderName: senderName || "Patron",
@@ -12901,6 +14288,8 @@ app.post("/api/request/create", async (req, res) => {
     subtitle: isStraightTip ? 'Supported the talent directly!' : (subtitle || ''),
     albumArt: albumArt || (targetType === 'music' ? "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=150&h=150&fit=crop" : undefined),
     sourceProvider: isStraightTip ? null : normalizedSourceProvider,
+    sourceTrackId: isStraightTip ? null : normalizedSourceTrackId,
+    externalTrackId: isStraightTip ? null : normalizedExternalTrackId,
     spotifyUri: isStraightTip ? null : normalizedSpotifyUri,
     spotifyUrl: isStraightTip ? null : normalizedSpotifyUrl,
     senderName: senderName || "Anonymous Patron",
@@ -13005,7 +14394,11 @@ app.post("/api/request/create", async (req, res) => {
         payment_status: 'requires_confirmation',
         payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
-        client_secret: authorization.clientSecret
+        client_secret: authorization.clientSecret,
+        amount_subtotal_cents: authorization.amountSubtotalCents,
+        platform_fee_cents: authorization.platformFeeChargedToPatronCents,
+        processing_fee_recovery_cents: authorization.processorFeeRecoveryCents,
+        amount_total_cents: authorization.amountTotalCents
       });
     }
     if (authorization.status === 'processing') {
@@ -13346,8 +14739,14 @@ app.post("/api/request/boost", async (req, res) => {
   const paymentsEnabledForRoom = roomState.session.paymentsEnabled !== false;
   if (paymentsEnabledForRoom && !liveRoomPaymentRuntimeConfig.moneyEnabled) {
     return rejectAfterConfirmedAuthorization(503, {
-      error: 'Paid boosts are paused until Stripe test-mode payment execution is fully configured.',
+      error: 'Paid boosts are temporarily unavailable. Free room actions still work.',
       code: 'test_payment_runtime_unavailable'
+    });
+  }
+  if (paymentsEnabledForRoom && !roomPaymentEnvironmentMatchesRuntime(roomState.session)) {
+    return rejectAfterConfirmedAuthorization(409, {
+      error: 'This room belongs to a different payment environment and cannot accept this paid boost.',
+      code: 'payment_environment_mismatch'
     });
   }
   let amt = Math.max(Number(boostAmount) || 0, roomState.session.minimumTip); // Paid boosts follow the room minimum.
@@ -13525,7 +14924,7 @@ app.post("/api/request/boost", async (req, res) => {
     : { kind: 'creator_direct' as const };
   const proposedBoostFee = resolveProposedPlatformFee({ subtotalCents: amount_cents, attribution: boostAttribution });
   let appliedBoostPlatformFeeCents = paymentsEnabledForRoom ? proposedBoostFee.proposedPlatformFeeCents : 0;
-  const boostPlatformFeePayer = roomState.session.feeType === 'talent' ? 'performer' : 'patron';
+  const boostPlatformFeePayer = 'patron' as const;
 
   // As with requests, the boost must have a stable invisible database identity
   // before Stripe is contacted. Concurrent duplicates converge on this row.
@@ -13596,7 +14995,11 @@ app.post("/api/request/boost", async (req, res) => {
         payment_status: 'requires_confirmation',
         payment_id: authorization.paymentId,
         payment_intent_id: authorization.processorPaymentIntentId,
-        client_secret: authorization.clientSecret
+        client_secret: authorization.clientSecret,
+        amount_subtotal_cents: authorization.amountSubtotalCents,
+        platform_fee_cents: authorization.platformFeeChargedToPatronCents,
+        processing_fee_recovery_cents: authorization.processorFeeRecoveryCents,
+        amount_total_cents: authorization.amountTotalCents
       });
     }
     if (authorization.status === 'processing') {
@@ -14411,7 +15814,7 @@ app.get('/sitemap.xml', async (_req, res) => {
     const rowsByHandle = new Map<string, typeof profileRows>();
     for (const row of profileRows) {
       if (!isDiscoveryEligibleHandle(row.handle)) continue;
-      const normalizedHandle = normalizePerformerHandle(row.handle)?.toLowerCase();
+      const normalizedHandle = normalizePerformerHandleLookup(row.handle)?.toLowerCase();
       if (!normalizedHandle) continue;
       const existing = rowsByHandle.get(normalizedHandle) ?? [];
       existing.push(row);
@@ -14677,6 +16080,7 @@ app.post("/api/music/search", (req, res) => {
     const libraryRows = await businessDb
       .select({
         id: performerLibraryTracks.id,
+        externalTrackId: performerLibraryTracks.externalTrackId,
         title: performerLibraryTracks.title,
         artist: performerLibraryTracks.artist,
         album: performerLibraryTracks.album,
@@ -14716,6 +16120,8 @@ app.post("/api/music/search", (req, res) => {
         })),
         ...libraryRows.map((row) => ({
           id: row.id,
+          sourceTrackId: row.id,
+          externalTrackId: row.externalTrackId,
           title: row.title,
           artist: row.artist,
           albumArt: row.artworkUrl || albumArt,
@@ -14740,13 +16146,13 @@ app.post("/api/music/search", (req, res) => {
 });
 
 app.get('/:handle', async (req, res, next) => {
-  const normalizedHandle = normalizePerformerHandle(req.params.handle);
+  const normalizedHandle = normalizePerformerHandleLookup(req.params.handle);
   if (!normalizedHandle) return next();
 
   try {
     const profile = await findPublicShareProfile(normalizedHandle);
     if (!profile) return next();
-    return res.redirect(308, `/p/${encodeURIComponent(profile.handle)}`);
+    return res.redirect(308, canonicalPerformerRedirectPath(req, profile.handle));
   } catch (error) {
     return next(error);
   }
@@ -14809,6 +16215,52 @@ function startLiveRoomPaymentWorker() {
   timer.unref();
 }
 
+function startPerformerPayoutWorker() {
+  const executionEnabled = paypalPayoutsProvider?.mode === 'test'
+    ? paypalTestExecutionEnabled
+    : paypalLiveExecutionEnabled;
+  if (!performerWithdrawalService || !executionEnabled) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await performerWithdrawalService.reconcilePending(25);
+    } catch (error) {
+      console.error(
+        '[sway.payouts] PayPal reconciliation iteration failed:',
+        error instanceof Error ? error.message : error
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), 30_000);
+  timer.unref();
+}
+
+function startPayoutRecipientPrivacyWorker() {
+  if (!payoutRecipientPrivacyService) return;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await payoutRecipientPrivacyService.purgeDeferred(100);
+    } catch {
+      // Privacy failures are intentionally logged without provider or recipient
+      // payloads; the durable deletion marker makes the next tick retry.
+      console.error('[sway.payouts] deferred recipient privacy purge failed');
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), 60_000);
+  timer.unref();
+}
+
 function startAudioUploadCleanupWorker() {
   if (!audioPublishingService) return;
   let running = false;
@@ -14848,6 +16300,8 @@ async function startServer() {
   await refreshBusinessState();
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
+  startPerformerPayoutWorker();
+  startPayoutRecipientPrivacyWorker();
   startAudioUploadCleanupWorker();
 
   if (process.env.NODE_ENV !== "production") {
@@ -14926,7 +16380,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // Shared compute only: GrindZone keeps separate pairing and no Sway database access.
+  let phoneHost: any = null;
+  if (process.env.GRINDZONE_PHONE_ENABLED === 'true') {
+    const entry = pathToFileURL(path.join(process.cwd(), 'node_modules/.grindzone-phone', '58ceb46de0ab10463dcdd7187985d91d8b4bf45a', 'cloud/shared-host.mjs')).href;
+    const phoneModule = await import(entry);
+    phoneHost = await phoneModule.startSharedPhone({publicBase: process.env.GRINDZONE_PHONE_BASE, key: process.env.GRINDZONE_PHONE_KEY});
+  }
+  const httpServer = createHttpServer(phoneHost ? phoneHost.wrap(app) : app);
+  phoneHost?.attach(httpServer);
+  httpServer.once('error', () => { void phoneHost?.close(); });
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }

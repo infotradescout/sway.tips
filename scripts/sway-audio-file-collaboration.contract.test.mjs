@@ -225,7 +225,7 @@ for (const term of ['Content-Disposition', 'inline; filename=']) {
   if (!server.includes(term)) failures.push(`Owner Catalog playback route is missing: ${term}`);
 }
 for (const term of [
-  '<audio controls preload="metadata"',
+  '<audio controls preload="none"',
   'Add audio to Catalog',
   'Allow requests',
   'Remove from requests',

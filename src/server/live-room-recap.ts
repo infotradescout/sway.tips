@@ -1,5 +1,8 @@
 import type { GigSession, PerformerRoomRecap } from '../types';
-import { SWAY_TEST_PLATFORM_BALANCE_DESTINATION } from './live-room-seller-readiness';
+import {
+  SWAY_PLATFORM_BALANCE_DESTINATION,
+  SWAY_TEST_PLATFORM_BALANCE_DESTINATION
+} from './live-room-seller-readiness';
 
 export type LiveRoomRecapPayment = {
   id: string;
@@ -84,20 +87,28 @@ export function projectPerformerRoomRecap(input: {
   const hasTestPlatformBalance = input.payments.some((payment) =>
     payment.destinationAccountId === SWAY_TEST_PLATFORM_BALANCE_DESTINATION
   );
+  const hasLivePlatformBalance = input.payments.some((payment) =>
+    payment.destinationAccountId === SWAY_PLATFORM_BALANCE_DESTINATION
+  );
   const hasConnectedAccount = input.payments.some((payment) =>
     Boolean(payment.destinationAccountId)
     && payment.destinationAccountId !== SWAY_TEST_PLATFORM_BALANCE_DESTINATION
+    && payment.destinationAccountId !== SWAY_PLATFORM_BALANCE_DESTINATION
   );
-  const settlementMode = hasTestPlatformBalance && hasConnectedAccount
+  const settlementModeCount = [hasTestPlatformBalance, hasLivePlatformBalance, hasConnectedAccount].filter(Boolean).length;
+  const settlementMode = settlementModeCount > 1
     ? 'mixed' as const
     : hasTestPlatformBalance
       ? 'platform_test_balance' as const
-      : hasConnectedAccount
-        ? 'connected_account' as const
-        : input.runtimeSessionState.settlementMode === 'platform_test_balance'
-            || input.runtimeSessionState.settlementMode === 'connected_account'
-          ? input.runtimeSessionState.settlementMode
-          : 'no_paid_activity' as const;
+      : hasLivePlatformBalance
+        ? 'platform_balance' as const
+        : hasConnectedAccount
+          ? 'connected_account' as const
+          : input.runtimeSessionState.settlementMode === 'platform_test_balance'
+              || input.runtimeSessionState.settlementMode === 'platform_balance'
+              || input.runtimeSessionState.settlementMode === 'connected_account'
+            ? input.runtimeSessionState.settlementMode
+            : 'no_paid_activity' as const;
   const paymentEnvironment = input.runtimeSessionState.paymentEnvironment === 'test'
       || input.runtimeSessionState.paymentEnvironment === 'live'
     ? input.runtimeSessionState.paymentEnvironment

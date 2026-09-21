@@ -6,17 +6,22 @@ import { performerSessions } from '../db/schema';
 
 export const PERFORMER_SESSION_COOKIE_NAME = 'sway_performer_session';
 const DEFAULT_PERFORMER_SESSION_TTL_HOURS = 12;
+export type PerformerSessionType = 'browser' | 'control_bridge';
 
 export type IssuedPerformerSession = {
   sessionId: string;
   token: string;
   expiresAt: Date;
+  sessionType: PerformerSessionType;
+  gigId: string | null;
 };
 
 export type ResolvedPerformerSession = {
   sessionId: string;
   actorUserId: string;
   expiresAt: Date;
+  sessionType: PerformerSessionType;
+  gigId: string | null;
 };
 
 type DbExecutor = SwayDb | any;
@@ -96,16 +101,25 @@ export function createPerformerSessionStore({
       actorUserId,
       issuedBy,
       ttlHours,
+      sessionType = 'browser',
+      gigId = null,
+      metadata = null,
       executor
     }: {
       actorUserId: string;
       issuedBy?: string | null;
       ttlHours?: number | null;
+      sessionType?: PerformerSessionType;
+      gigId?: string | null;
+      metadata?: Record<string, unknown> | null;
       executor?: DbExecutor | null;
     }): Promise<IssuedPerformerSession> {
       const writer = executorOrDb(executor);
       if (!writer) {
         throw new Error('Performer session issuance requires a durable database connection.');
+      }
+      if (sessionType === 'control_bridge' && !gigId) {
+        throw new Error('Control bridge sessions require an explicit gig scope.');
       }
 
       const token = randomBytes(32).toString('base64url');
@@ -121,6 +135,9 @@ export function createPerformerSessionStore({
         .values({
           actorUserId,
           tokenHash,
+          sessionType,
+          gigId,
+          metadata,
           expiresAt,
           revokedAt: null,
           lastSeenAt: now,
@@ -134,7 +151,9 @@ export function createPerformerSessionStore({
       return {
         sessionId: inserted.id,
         token,
-        expiresAt: inserted.expiresAt
+        expiresAt: inserted.expiresAt,
+        sessionType,
+        gigId
       };
     },
 
@@ -147,7 +166,9 @@ export function createPerformerSessionStore({
         .select({
           id: performerSessions.id,
           actorUserId: performerSessions.actorUserId,
-          expiresAt: performerSessions.expiresAt
+          expiresAt: performerSessions.expiresAt,
+          sessionType: performerSessions.sessionType,
+          gigId: performerSessions.gigId
         })
         .from(performerSessions)
         .where(and(
@@ -164,7 +185,9 @@ export function createPerformerSessionStore({
       return {
         sessionId: row.id,
         actorUserId: row.actorUserId,
-        expiresAt: row.expiresAt
+        expiresAt: row.expiresAt,
+        sessionType: row.sessionType as PerformerSessionType,
+        gigId: row.gigId
       };
     },
 
@@ -200,25 +223,33 @@ export function createPerformerSessionStore({
     async revokeActiveSessionsForActorUser({
       actorUserId,
       executor,
-      now = new Date()
+      now = new Date(),
+      sessionType,
+      gigId
     }: {
       actorUserId: string;
       executor?: DbExecutor | null;
       now?: Date;
+      sessionType?: PerformerSessionType;
+      gigId?: string | null;
     }) {
       const writer = executorOrDb(executor);
       if (!writer) return [];
+
+      const conditions = [
+        eq(performerSessions.actorUserId, actorUserId),
+        isNull(performerSessions.revokedAt),
+        gt(performerSessions.expiresAt, now)
+      ];
+      if (sessionType) conditions.push(eq(performerSessions.sessionType, sessionType));
+      if (gigId) conditions.push(eq(performerSessions.gigId, gigId));
 
       return writer
         .update(performerSessions)
         .set({
           revokedAt: now
         })
-        .where(and(
-          eq(performerSessions.actorUserId, actorUserId),
-          isNull(performerSessions.revokedAt),
-          gt(performerSessions.expiresAt, now)
-        ))
+        .where(and(...conditions))
         .returning({
           id: performerSessions.id,
           actorUserId: performerSessions.actorUserId

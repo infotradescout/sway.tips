@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import type { ReleaseCredit, ReleaseDraft, ReleaseMaster, ReleaseRecording } from './PerformerReleaseDrafts';
+import RecordingCreationDisclosureFields, {
+  EMPTY_RECORDING_CREATION_DISCLOSURE,
+  type RecordingCreationDisclosure
+} from './RecordingCreationDisclosureFields';
 
 const CREDIT_ROLES = [
   ['primary_artist', 'Primary artist'], ['featured_artist', 'Featured artist'], ['songwriter', 'Songwriter'],
@@ -9,7 +13,7 @@ const CREDIT_ROLES = [
   ['performer', 'Performer'], ['publisher', 'Publisher'], ['other', 'Other']
 ] as const;
 
-type TrackValues = {
+type TrackValues = RecordingCreationDisclosure & {
   title: string;
   versionTitle: string;
   primaryArtistName: string;
@@ -48,6 +52,7 @@ function TrackFields({
         <label className="text-[11px] text-slate-400">Original release date<input type="date" value={values.originalReleaseDate} onChange={(event) => onValues({ ...values, originalReleaseDate: event.target.value })} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white" /></label>
         <label className="flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-slate-300 sm:col-span-2"><input type="checkbox" checked={values.isExplicit} onChange={(event) => onValues({ ...values, isExplicit: event.target.checked })} /> Explicit content</label>
       </div>
+      <RecordingCreationDisclosureFields values={values} onChange={(creation) => onValues({ ...values, ...creation })} />
       <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-2">
         <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-black text-white">Track credits</p><button type="button" onClick={() => onCredits([...credits, { displayName: '', role: 'other' }])} className="rounded border border-violet-500/30 px-2 py-1 text-[10px] font-bold text-violet-100">Add credit</button></div>
         <div className="mt-2 space-y-2">{credits.map((credit, index) => (
@@ -86,12 +91,20 @@ function TrackEditor({
     isrc: recording.isrc || '',
     languageCode: recording.languageCode || 'en',
     originalReleaseDate: recording.originalReleaseDate || release.originalReleaseDate || '',
-    isExplicit: recording.isExplicit === true
+    isExplicit: recording.isExplicit === true,
+    lyricsAuthorship: recording.lyricsAuthorship === 'not_declared' ? '' : recording.lyricsAuthorship,
+    compositionAuthorship: recording.compositionAuthorship === 'not_declared' ? '' : recording.compositionAuthorship,
+    vocalPerformance: recording.vocalPerformance === 'not_declared' ? '' : recording.vocalPerformance,
+    productionMethod: recording.productionMethod === 'not_declared' ? '' : recording.productionMethod,
+    lyricsExcerpt: recording.lyricsExcerpt || ''
   });
   const [credits, setCredits] = useState<ReleaseCredit[]>(recording.credits.length ? recording.credits : initialCredits(recording.primaryArtistName));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const editable = release.status === 'draft';
+  const creationDisclosureComplete = Boolean(
+    values.lyricsAuthorship && values.compositionAuthorship && values.vocalPerformance && values.productionMethod
+  );
 
   const save = async () => {
     setBusy(true);
@@ -128,7 +141,7 @@ function TrackEditor({
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <button type="button" onClick={() => onMove(recording.recordingId, -1)} disabled={busy || index === 0} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-white/10 text-[11px] font-bold text-white disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" />Move up</button>
             <button type="button" onClick={() => onMove(recording.recordingId, 1)} disabled={busy || index === count - 1} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-white/10 text-[11px] font-bold text-white disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" />Move down</button>
-            <button type="button" onClick={save} disabled={busy} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg bg-violet-600 text-[11px] font-black text-white disabled:opacity-40"><Save className="h-3.5 w-3.5" />Save track</button>
+            <button type="button" onClick={save} disabled={busy || !creationDisclosureComplete} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg bg-violet-600 text-[11px] font-black text-white disabled:opacity-40"><Save className="h-3.5 w-3.5" />Save track</button>
             <button type="button" onClick={() => onRemove(recording.recordingId)} disabled={busy || count === 1} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-rose-500/30 text-[11px] font-bold text-rose-200 disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" />Remove</button>
           </div>
         </div>
@@ -154,12 +167,16 @@ export default function PerformerReleaseTrackBuilder({
   const [masterAssetVersionId, setMasterAssetVersionId] = useState('');
   const [values, setValues] = useState({
     title: '', versionTitle: '', primaryArtistName: release.primaryArtistName, isrc: '',
-    languageCode: 'en', originalReleaseDate: release.originalReleaseDate || '', isExplicit: false
+    languageCode: 'en', originalReleaseDate: release.originalReleaseDate || '', isExplicit: false,
+    ...EMPTY_RECORDING_CREATION_DISCLOSURE
   });
   const [credits, setCredits] = useState<ReleaseCredit[]>(initialCredits(release.primaryArtistName));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const editable = release.status === 'draft';
+  const creationDisclosureComplete = Boolean(
+    values.lyricsAuthorship && values.compositionAuthorship && values.vocalPerformance && values.productionMethod
+  );
 
   useEffect(() => {
     if (!availableMasters.some((master) => master.versionId === masterAssetVersionId)) {
@@ -185,7 +202,11 @@ export default function PerformerReleaseTrackBuilder({
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Could not add this track.');
       setNotice(`Track ${data.trackNumber} added from the verified master.`);
-      setValues({ title: '', versionTitle: '', primaryArtistName: release.primaryArtistName, isrc: '', languageCode: 'en', originalReleaseDate: release.originalReleaseDate || '', isExplicit: false });
+      setValues({
+        title: '', versionTitle: '', primaryArtistName: release.primaryArtistName, isrc: '', languageCode: 'en',
+        originalReleaseDate: release.originalReleaseDate || '', isExplicit: false,
+        ...EMPTY_RECORDING_CREATION_DISCLOSURE
+      });
       setCredits(initialCredits(release.primaryArtistName));
       await onSaved();
     } catch (error) {
@@ -262,7 +283,7 @@ export default function PerformerReleaseTrackBuilder({
             <div className="mt-3">
               <label className="text-[11px] text-slate-400">Verified master<select value={masterAssetVersionId} onChange={(event) => setMasterAssetVersionId(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white">{availableMasters.map((master) => <option key={master.versionId} value={master.versionId}>{master.title || master.originalFilename} · v{master.versionNumber}</option>)}</select></label>
               <div className="mt-3"><TrackFields values={values} credits={credits} onValues={setValues} onCredits={setCredits} /></div>
-              <button type="button" onClick={addTrack} disabled={busy || !masterAssetVersionId || !values.title} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-violet-600 text-xs font-black text-white disabled:opacity-40"><Plus className="h-4 w-4" />Add track to release</button>
+              <button type="button" onClick={addTrack} disabled={busy || !masterAssetVersionId || !values.title || !creationDisclosureComplete} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-violet-600 text-xs font-black text-white disabled:opacity-40"><Plus className="h-4 w-4" />Add track to release</button>
             </div>
           ) : <p className="mt-3 text-[11px] text-slate-400">Upload another verified audio master to this Catalog project before adding a track.</p>}
         </details>

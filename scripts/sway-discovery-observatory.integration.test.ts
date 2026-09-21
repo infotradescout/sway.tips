@@ -23,12 +23,19 @@ const eventId = '30000000-0000-4000-8000-000000000002';
 async function applyAllMigrations(database: PGlite) {
   for (const migrationFile of migrationFiles) {
     const migrationSql = readFileSync(join(migrationDirectory, migrationFile), 'utf8');
-    for (const [index, statement] of migrationSql.split('--> statement-breakpoint').map((value) => value.trim()).filter(Boolean).entries()) {
-      try {
-        await database.exec(statement);
-      } catch (error) {
-        throw new Error(`Migration failed: ${migrationFile}, statement ${index + 1}`, { cause: error });
+    await database.exec('BEGIN');
+    try {
+      for (const [index, statement] of migrationSql.split('--> statement-breakpoint').map((value) => value.trim()).filter(Boolean).entries()) {
+        try {
+          await database.exec(statement);
+        } catch (error) {
+          throw new Error(`Migration failed: ${migrationFile}, statement ${index + 1}`, { cause: error });
+        }
       }
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
     }
   }
 }

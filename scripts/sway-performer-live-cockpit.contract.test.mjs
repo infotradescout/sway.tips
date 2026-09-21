@@ -6,12 +6,13 @@ const talentApp = readFileSync(join(root, 'src/shells/TalentApp.tsx'), 'utf8');
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 const performerRoomShare = readFileSync(join(root, 'src/components/PerformerRoomShare.tsx'), 'utf8');
 const performerAudienceScreen = readFileSync(join(root, 'src/components/PerformerAudienceScreen.tsx'), 'utf8');
+const liveStyles = readFileSync(join(root, 'src/index.css'), 'utf8');
 const performerCockpit = `${talentDashboard}\n${performerRoomShare}\n${performerAudienceScreen}`;
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
 
 for (const term of [
-  "if (session.status !== 'inactive')",
+  'if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace))',
   'h-[var(--sway-viewport-height,100vh)] overflow-hidden',
   '<TalentDashboard',
   '<SplitViewShell'
@@ -19,7 +20,7 @@ for (const term of [
   if (!talentApp.includes(term)) failures.push(`TalentApp missing performer cockpit routing term: ${term}`);
 }
 
-const activeBranchStart = talentApp.indexOf("if (session.status !== 'inactive')");
+const activeBranchStart = talentApp.indexOf('if (shouldRenderPerformerLiveRoom(session.status, requestedWorkspace))');
 const activeBranchEnd = activeBranchStart === -1 ? -1 : talentApp.indexOf('return (', talentApp.indexOf('return (', activeBranchStart) + 1);
 const activeBranch = activeBranchStart === -1 || activeBranchEnd === -1
   ? ''
@@ -38,13 +39,22 @@ for (const term of [
   'Scan to open this live Sway room',
   'Scan to Request',
   'h-[var(--sway-viewport-height,100vh)] overflow-hidden',
-  'grid-rows-[auto_auto_auto_auto_minmax(0,1fr)_auto]',
-  'landscape:grid-rows-[auto_auto_minmax(0,1fr)_auto]',
-  'landscape:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]',
-  'landscape:hidden',
+  'className="sway-live-layout"',
+  'className="sway-live-content"',
+  'data-mobile-panel={mobilePanel}',
   "aria-label=\"Live-night sections\""
 ]) {
-  if (!performerCockpit.includes(term)) failures.push(`Performer cockpit missing no-scroll cockpit term: ${term}`);
+  if (!performerCockpit.includes(term)) failures.push(`Performer cockpit missing bounded workspace term: ${term}`);
+}
+
+for (const term of ['.sway-live-content { flex: 1; min-height: 0;', 'overflow-y: auto;', '(min-width: 900px) and (min-height: 600px)', '.sway-live-layout[data-mobile-panel="share"]', '.sway-live-layout[data-mobile-panel="settings"]']) {
+  if (!liveStyles.includes(term)) failures.push(`Live layout must preserve responsive, reachable controls: ${term}`);
+}
+if (talentDashboard.includes('more visible after clearing the top items.')) {
+  failures.push('Reaching later requests must never require clearing earlier requests.');
+}
+if (!talentDashboard.includes('aria-label={`${title} request pages`}')) {
+  failures.push('Bounded request panels must provide accessible page navigation.');
 }
 
 const compactQrStart = performerRoomShare.indexOf('function PerformerRoomQr');
@@ -62,7 +72,7 @@ if (!performerRoomShare.includes('<PerformerRoomQr activeGigId={activeGigId} siz
   failures.push('Both compact share and audience panels must render the real room QR.');
 }
 
-if (talentDashboard.match(/session\.status !== 'inactive'/g)?.length !== 1) {
+if (talentDashboard.match(/shouldRenderPerformerLiveRoom\(session\.status, inactiveWorkspace\)/g)?.length !== 1) {
   failures.push('TalentDashboard must have one active-room branch and no second live-session renderer below it.');
 }
 

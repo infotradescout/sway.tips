@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -22,6 +23,7 @@ function requireExcludes(label, source, terms) {
 
 const talentDashboard = read('src/components/TalentDashboard.tsx');
 const performerRoomSetup = read('src/components/PerformerRoomSetup.tsx');
+const performerAccountHome = read('src/components/PerformerAccountHome.tsx');
 const performerRoomControls = read('src/components/PerformerRoomControls.tsx');
 const patronView = read('src/components/PatronView.tsx');
 const server = read('server.ts');
@@ -34,32 +36,34 @@ const app = read('src/App.tsx');
 
 requireIncludes('TalentDashboard', talentDashboard, [
   "useState<'live' | 'share' | 'settings'>('live')",
-  "useState<InactivePerformerWorkspace>('home')",
+  'resolveInactivePerformerWorkspace(window.location.pathname, window.location.hash)',
   'data-sway-performer-app-navigation="true"',
   'aria-label="Performer sections"',
   "inactiveWorkspace === 'home'",
   "inactiveWorkspace === 'room'",
+  "inactiveWorkspace === 'connections'",
+  "inactiveWorkspace === 'shows'",
   "inactiveWorkspace === 'library'",
   "inactiveWorkspace === 'catalog'",
   "inactiveWorkspace === 'profile'",
   "inactiveWorkspace === 'account'",
-  "onStartRoom={() => setInactiveWorkspace('room')}",
+  "onStartRoom={() => openInactiveWorkspace('room')}",
   'Start a Room',
   'LIVE_ROOM_LANGUAGE.shareRoom',
   "{ id: 'settings', label: LIVE_ROOM_LANGUAGE.controls }",
   'LIVE_ROOM_LANGUAGE.copyRoomLink',
-  'Request library',
+  'Advanced source setup',
   'data-sway-library-workspace="true"',
-  'Synced catalogs and external music sources used for audience requests.',
+  'Only for a Windows booth computer that will update the same saved source more than once.',
   'data-sway-audio-catalog="true"',
   'Audio catalog',
   'masters, beats, mixes, spoken word, audiobooks, demos',
   'data-sway-account-workspace="true"',
-  'Money & access',
+  'Payments & payout setup',
   "fetch('/api/payment/config'",
   "data?.mode === 'test'",
-  'Money actions are unavailable because Stripe could not be verified. Free rooms remain available.',
-  'Stripe test mode only. Test requests, tips, and boosts do not move real money or reach a bank.',
+  'Secure payout setup is temporarily unavailable. Your current payout preference is unchanged. Free rooms remain available.',
+  'Test mode only. Test requests, tips, and boosts do not move real money or reach a payout destination.',
   'Backers',
   '<PerformerRoomSetup',
   'performerName={welcomePerformerName}'
@@ -76,13 +80,28 @@ requireIncludes('PerformerRoomSetup', performerRoomSetup, [
   'Open requests',
   'Ready to go live',
   'disabled={!performerEmailVerified || isStarting}',
-  'Stripe test mode — no real money moves',
+  'Test mode — no real money moves',
   'globalThis.crypto.randomUUID()',
   'gig_id: string',
   "useState(false)",
   "role=\"alert\"",
   'Customers may still type a manual request',
   'No real money moves.'
+]);
+
+requireIncludes('PerformerAccountHome live-money guidance', performerAccountHome, [
+  "paymentMode === 'live'",
+  'Finish secure payout setup to start earning',
+  'Ready to earn',
+  'Ready for live paid rooms.',
+  'Performers never create a Stripe payout account.',
+  'your combined earnings cash out through PayPal or Venmo',
+  'Finish test payout rehearsal (no real money)',
+  'Test-money ready'
+]);
+
+requireExcludes('PerformerAccountHome live-money guidance', performerAccountHome, [
+  'Finish money setup for paid-mode rehearsal'
 ]);
 
 requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSetup, [
@@ -92,7 +111,8 @@ requireExcludes('PerformerRoomSetup account-identity questions', performerRoomSe
 ]);
 
 requireIncludes('Session start request scope', server, [
-  'const { talentName, talentRole, feeType, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
+  'const { talentName, talentRole, minimumTip, paymentsEnabled, searchScope, gig_id } = req.body',
+  "feeType: 'patron' as const",
   "searchScope: (searchScope === 'catalog' ? 'catalog' : 'library') as 'catalog' | 'library'",
   'loadMatchingStartedRoom',
   "error.message === 'gig_session_state_revision_conflict'",
@@ -142,8 +162,9 @@ requireIncludes('PatronView', patronView, [
 ]);
 
 requireIncludes('Runtime money mode', server, [
-  'paymentsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && requestedPaymentsEnabled && sellerMoneyReadiness.ready',
-  'tipsEnabled: liveRoomPaymentRuntimeConfig.moneyEnabled && sellerMoneyReadiness.ready',
+  'paymentsEnabled: requestedPaymentsEnabled && runtimeSellerMoneyEligible',
+  'tipsEnabled: runtimeSellerMoneyEligible',
+  'const runtimeSellerMoneyEligible = isSellerRuntimeMoneyEligible(',
   "code: 'test_payment_runtime_unavailable'",
   "code: 'room_start_id_required'",
   'minimumTip: Math.max(5, Number(minimumTip) || 5)',
@@ -174,18 +195,33 @@ requireIncludes('OverlayApp', overlayApp, [
   'Boosts'
 ]);
 
+// Captured payment action count is not fulfilled request count. Require the
+// actual request filter and rendered counter, plus executable amount boundaries.
 requireIncludes('VictoryScreen', victoryScreen, [
   'Night recap',
   'Fulfilled requests',
-  '{session.totals.totalCount} Requests'
+  "request.type === 'request' && request.status === 'fulfilled'",
+  'data-testid="recap-fulfilled">{fulfilled}',
+  'data-sway-recap-history="true"',
+  'formatRecapMoney(session.totals.accumulatedFees)',
+  "disabled={!payment.canShare || shareState === 'pending'}",
+  'Share recap text'
 ]);
 
 requireExcludes('VictoryScreen', victoryScreen, [
   'no card was charged',
   '{session.totals.totalCount} Gigs',
+  '{session.totals.totalCount} Requests',
   'Start New Gig Session',
-  'GIG CLEARED SUCCESSFULLY'
+  'GIG CLEARED SUCCESSFULLY',
+  'Share Recap to Instagram &amp; TikTok Stories'
 ]);
+
+try {
+  execFileSync(process.execPath, ['--import', 'tsx', 'scripts/sway-recap-display.behavior.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 30_000 });
+} catch {
+  failures.push('Recap amount, settlement or sharing behavior failed.');
+}
 
 for (const [label, source] of [
   ['TalentApp', talentApp],

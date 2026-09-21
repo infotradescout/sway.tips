@@ -374,10 +374,18 @@ async function main() {
       paymentsEnabled: true,
       searchScope: 'catalog'
     });
-    assertStatus(unavailablePaidRoom, 503, 'paid room fails closed without verified Stripe test execution', server);
+    assertStatus(unavailablePaidRoom, 503, 'paid room fails closed without verified Stripe incoming execution', server);
     assert.equal(unavailablePaidRoom.body.code, 'test_payment_runtime_unavailable');
-    const unavailableConnect = await primary.client.post('/api/talent/connect/onboard', {});
-    assertStatus(unavailableConnect, 503, 'Connect fails closed without verified Stripe test execution', server);
+    const retiredStripePayoutSetup = await primary.client.post('/api/talent/connect/onboard', {});
+    assertStatus(retiredStripePayoutSetup, 410, 'Stripe performer payout onboarding is permanently retired', server);
+    assert.equal(retiredStripePayoutSetup.body.code, 'stripe_performer_payouts_retired');
+    const unavailablePayoutSetup = await primary.client.post('/api/talent/payouts/destination', {
+      destinationKind: 'paypal',
+      recipientType: 'email',
+      recipientValue: 'sandbox-recipient@example.test'
+    });
+    assertStatus(unavailablePayoutSetup, 503, 'PayPal destination storage fails closed without its encryption key', server);
+    assert.equal(unavailablePayoutSetup.body.error, 'Secure PayPal/Venmo payout storage is not configured.');
 
     const gigId = randomUUID();
     const roomStartBody = {
@@ -405,7 +413,7 @@ async function main() {
       gig_id: gigId,
       enabled: true
     });
-    assertStatus(unavailablePaidToggle, 503, 'paid-room toggle fails closed without verified Stripe test execution', server);
+    assertStatus(unavailablePaidToggle, 503, 'paid-room toggle fails closed without verified Stripe incoming execution', server);
     assert.equal(unavailablePaidToggle.body.code, 'test_payment_runtime_unavailable');
 
     const initialRooms = await primary.client.get('/api/talent/active-rooms');

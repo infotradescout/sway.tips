@@ -47,8 +47,8 @@ requireIncludes(
 );
 requireIncludes(
   talentApp,
-  "fetch('/api/talent/active-rooms')",
-  'TalentApp must load read-only active room summaries from /api/talent/active-rooms.'
+  "fetch('/api/talent/active-rooms', { signal: controller.signal })",
+  'TalentApp must load read-only active room summaries from /api/talent/active-rooms with cancellation.'
 );
 requireIncludes(
   talentLoginCard,
@@ -222,5 +222,13 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
+
+// Keep room-list failure recovery in the existing hard contract chain.
+await import('./sway-performer-room-list-recovery.behavior.test.mjs');
+if (process.exitCode) process.exit(process.exitCode);
+
+// Room setup must preserve guarded, explicit submission on every entry path.
+await import('./sway-room-setup-submission.behavior.test.mjs');
+if (process.exitCode) process.exit(process.exitCode);
 
 console.log('Sway live room readiness contract passed.');

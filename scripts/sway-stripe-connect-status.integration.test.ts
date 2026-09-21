@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { SwayDb } from '../src/db/client';
 import * as schema from '../src/db/schema';
 import { reconcileStripeConnectPerformerStatus } from '../src/server/stripe-connect-status';
@@ -21,8 +21,26 @@ async function applyAllMigrations(database: PGlite) {
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())
       .filter(Boolean);
-    for (const statement of statements) await database.exec(statement);
+    await database.exec('BEGIN');
+    try {
+      for (const statement of statements) await database.exec(statement);
+      await database.exec('COMMIT');
+    } catch (error) {
+      await database.exec('ROLLBACK');
+      throw error;
+    }
   }
+}
+
+function matchesDatabaseError(pattern: RegExp) {
+  return (error: unknown) => {
+    const wrapped = error as { message?: unknown; cause?: { message?: unknown } };
+    assert.match(
+      [wrapped?.message, wrapped?.cause?.message].filter(Boolean).join('\n'),
+      pattern
+    );
+    return true;
+  };
 }
 
 const ids = {
@@ -58,6 +76,7 @@ const firstCheck = new Date('2026-08-11T11:00:00Z');
 const first = await reconcileStripeConnectPerformerStatus({
   db,
   accountId: 'acct_status_original',
+  paymentMode: 'test',
   status: readyStatus,
   source: 'return',
   actorId: ids.owner,
@@ -99,6 +118,7 @@ await handleStripeConnectAccountStatusWebhook({
   res: replayResponse,
   accountEvent: {
     accountId: 'acct_status_original',
+    paymentMode: 'test',
     status: readyStatus,
     providerEventId: 'evt_status_replay',
     eventType: 'v2.core.account.updated'
@@ -106,6 +126,7 @@ await handleStripeConnectAccountStatusWebhook({
   applyStatus: (event) => reconcileStripeConnectPerformerStatus({
     db,
     accountId: event.accountId,
+    paymentMode: event.paymentMode,
     status: event.status,
     source: 'webhook_v2',
     providerEventId: event.providerEventId,
@@ -129,6 +150,7 @@ assert.equal(
 const wrongOwner = await reconcileStripeConnectPerformerStatus({
   db,
   accountId: 'acct_status_original',
+  paymentMode: 'test',
   status: { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false },
   source: 'return',
   actorId: ids.outsider,
@@ -137,12 +159,25 @@ const wrongOwner = await reconcileStripeConnectPerformerStatus({
 });
 assert.deepEqual(wrongOwner, { kind: 'not_found' });
 
-await db.update(schema.performers)
-  .set({ stripeConnectedAccountId: 'acct_status_rebound' })
-  .where(eq(schema.performers.id, ids.performer));
+await assert.rejects(
+  db.update(schema.performers)
+    .set({ stripeConnectedAccountId: 'acct_status_rebound' })
+    .where(eq(schema.performers.id, ids.performer)),
+  matchesDatabaseError(/stripe_connect_test_binding_identity_conflict/)
+);
+await assert.rejects(
+  db.update(schema.performerStripeConnectBindings)
+    .set({ stripeAccountId: 'acct_status_rebound' })
+    .where(and(
+      eq(schema.performerStripeConnectBindings.performerId, ids.performer),
+      eq(schema.performerStripeConnectBindings.paymentMode, 'test')
+    )),
+  matchesDatabaseError(/stripe_connect_binding_identity_is_immutable/)
+);
 const staleAccount = await reconcileStripeConnectPerformerStatus({
   db,
-  accountId: 'acct_status_original',
+  accountId: 'acct_status_rebound',
+  paymentMode: 'test',
   status: { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false },
   source: 'return',
   actorId: ids.owner,
@@ -156,7 +191,8 @@ assert.equal(performer.paymentAccountStatus, 'payouts_enabled', 'stale account c
 const disabledCheck = new Date('2026-08-11T11:10:00Z');
 const disabled = await reconcileStripeConnectPerformerStatus({
   db,
-  accountId: 'acct_status_rebound',
+  accountId: 'acct_status_original',
+  paymentMode: 'test',
   status: { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: true },
   source: 'webhook_v1',
   providerEventId: 'evt_current_status',
@@ -179,9 +215,9 @@ await assert.rejects(
     ownerUserId: ids.duplicateOwner,
     displayName: 'Duplicate Destination',
     handle: 'duplicate-destination',
-    stripeConnectedAccountId: 'acct_status_rebound'
+    stripeConnectedAccountId: 'acct_status_original'
   }),
-  /unique|duplicate/i
+  matchesDatabaseError(/unique|duplicate/i)
 );
 
 await database.close();

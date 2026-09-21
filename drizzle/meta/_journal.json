@@ -260,6 +260,111 @@
       "when": 1786599613422,
       "tag": "0036_wet_susan_delgado",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787857703362,
+      "tag": "0037_brief_komodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787863763721,
+      "tag": "0038_edgewyze_profile_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787864906533,
+      "tag": "0039_edgewyze_public_link_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787974560674,
+      "tag": "0040_dj_playback_control",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788108845279,
+      "tag": "0041_short_dakota_north",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788140198237,
+      "tag": "0042_chubby_killer_shrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788149493860,
+      "tag": "0043_bored_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788220800000,
+      "tag": "0044_edgewize_identity_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788307200000,
+      "tag": "0045_provider_neutral_payout_destinations",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788229455064,
+      "tag": "0046_accumulated_performer_withdrawals",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788316421454,
+      "tag": "0047_glorious_calypso",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788364484124,
+      "tag": "0048_tranquil_master_mold",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1788366600203,
+      "tag": "0049_fresh_prism",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1788894000000,
+      "tag": "0050_automatic_affiliates",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1788894001000,
+      "tag": "0051_friend_public_profiles",
+      "breakpoints": true
     }
   ]
 }

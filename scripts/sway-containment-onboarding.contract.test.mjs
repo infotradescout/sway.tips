@@ -76,22 +76,29 @@ assert.equal(talentApp.includes('TalentSignupCard'), false, 'The split performer
 
 for (const required of [
   "'seller_payout_not_ready'",
-  'usesTestPlatformBalance ? undefined : operation.destinationAccountId',
-  'usesTestPlatformBalance ? undefined : payment.platformFee'
+  'const usesPlatformBalance = isSwayPlatformBalanceDestination(operation.destinationAccountId)',
+  'usesPlatformBalance ? undefined : operation.destinationAccountId',
+  'usesPlatformBalance ? undefined : payment.platformFee'
 ]) {
   assert.equal(paymentService.includes(required), true, `Payout gate missing: ${required}`);
 }
 for (const required of [
-  "seller?.paymentAccountStatus === 'payouts_enabled'",
-  'seller?.chargesEnabled',
-  'seller?.payoutsEnabled',
-  'connectedAccountId',
+  'SWAY_PLATFORM_BALANCE_DESTINATION',
+  "seller.onboardingStatus !== 'restricted'",
+  "seller.onboardingStatus !== 'suspended'",
+  '!seller.payoutHoldReason',
+  'input.allowPlatformBalance',
   'input.allowTestPlatformBalance',
   'isTestModePlatformBalancePerformerAllowed',
   'SWAY_TEST_PLATFORM_BALANCE_DESTINATION'
 ]) {
   assert.equal(sellerReadiness.includes(required), true, `Seller readiness contract missing: ${required}`);
 }
+assert.equal(
+  sellerReadiness.includes("seller?.paymentAccountStatus === 'payouts_enabled'"),
+  false,
+  'New Stripe charges must not depend on historical Connect payout readiness.'
+);
 assert.match(
   server,
   /testModePlatformBalancePerformerIds = resolveTestModePlatformBalancePerformerIds\([\s\S]+liveRoomPaymentRuntimeConfig\.mode[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED[\s\S]+SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS/,

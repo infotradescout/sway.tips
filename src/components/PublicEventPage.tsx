@@ -162,11 +162,13 @@ function formatUsd(cents: number) {
 export function PublicEventCard({
   event,
   showExternalPolicy = false,
-  showPerformer = false
+  showPerformer = false,
+  compact = false
 }: {
   event: PublicEventDto;
   showExternalPolicy?: boolean;
   showPerformer?: boolean;
+  compact?: boolean;
 }) {
   const cancelled = isEventCancelled(event);
   const started = hasEventStarted(event);
@@ -177,18 +179,18 @@ export function PublicEventCard({
   useEffect(() => setCoverFailed(false), [event.coverImageUrl]);
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70">
-      <div className="grid gap-4 p-4 sm:grid-cols-[6.5rem_minmax(0,1fr)]">
+    <article data-event-card-layout={compact ? 'compact' : 'full'} className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70">
+      <div className={`grid gap-4 p-4 ${compact ? 'grid-cols-[4rem_minmax(0,1fr)]' : 'sm:grid-cols-[6.5rem_minmax(0,1fr)]'}`}>
         {event.coverImageUrl && !coverFailed ? (
           <img
             src={event.coverImageUrl}
             alt={`${event.title} event artwork`}
             loading="lazy"
             onError={() => setCoverFailed(true)}
-            className="aspect-square w-full rounded-xl border border-white/10 object-cover sm:h-[6.5rem]"
+            className={`aspect-square w-full rounded-xl border border-white/10 object-cover ${compact ? 'h-16' : 'sm:h-[6.5rem]'}`}
           />
         ) : (
-          <div className="grid aspect-square w-full place-items-center rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/10 text-fuchsia-200 sm:h-[6.5rem]">
+          <div className={`grid aspect-square w-full place-items-center rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/10 text-fuchsia-200 ${compact ? 'h-16' : 'sm:h-[6.5rem]'}`}>
             <CalendarDays className="h-8 w-8" aria-hidden="true" />
           </div>
         )}

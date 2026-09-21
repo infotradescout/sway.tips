@@ -1,43 +1,52 @@
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import process from 'node:process';
+import {
+  VirtualDjNetworkControl,
+  VIRTUALDJ_NETWORK_CONTROL_REQUIREMENTS
+} from './lib/virtualdj-network-control.mjs';
 
 const HELP_TEXT = `
-Sway Control Bridge
+Sway DJ Control Bridge
 
-Starts a local HTTP bridge so Stream Deck, Companion, MIDI routers, foot pedals,
-or small scripts can trigger performer cockpit actions without screen tapping.
+Runs on the booth computer. Sway sends durable playback commands to this
+bridge; the bridge controls VirtualDJ through its official Network Control
+extension and returns command results plus current deck state to Sway.
 
 Usage:
-  npm run control:bridge -- --gig-id <gig-id> --auth-token <dashboard-issued-token>
+  npm run control:bridge -- \\
+    --gig-id <gig-id> \\
+    --auth-token <dashboard-issued-token> \\
+    --virtualdj-url http://127.0.0.1:8088
 
-Options:
-  --gig-id <id>          Required live room/gig id
-  --auth-token <text>    Preferred short-lived bridge token from the performer dashboard
-  --auth-cookie <text>   Legacy Cookie header fallback for local development
-  --sway-url <url>       Defaults to https://app.sway.tips
-  --host <host>          Defaults to 127.0.0.1
-  --port <port>          Defaults to 4315
+Required:
+  --gig-id <id>                Live room id
+  --auth-token <token>         Room-scoped bridge token from Sway
 
-HTTP actions:
-  GET  /health
-  GET  /state
-  GET  /preset/actions
-  GET  /preset/companion
-  GET  /preset/stream-deck
-  GET  /top/text
-  GET  /top/search
-  POST /action/toggle-requests
-  POST /action/fulfill-top
-  POST /action/hide-top
-  POST /action/approve-pending
-  POST /action/veto-pending
-  POST /action/open-top-source
-  POST /action/search-top-spotify
-  POST /action/search-top-soundcloud
-  POST /action/search-top-youtube
+VirtualDJ:
+  --virtualdj-url <url>        Network Control URL (default http://127.0.0.1:8088)
+  --virtualdj-password <text>  Network Control bearer password, when configured
+  --deck <1-8>                 Target deck (default 1)
+  --allow-remote-virtualdj     Permit a non-loopback Network Control URL
+
+Local hardware endpoint:
+  --host <host>                Listener (default 127.0.0.1)
+  --port <port>                Listener (default 4315)
+  --local-token <token>        Local HTTP secret (random when omitted)
+  --allow-remote-listen        Permit a non-loopback listener
+
+Cloud:
+  --sway-url <url>             Defaults to https://app.sway.tips
+
+Protected local routes are listed at GET /preset/actions and include room
+triage plus load/play/pause/stop/cue/next/previous playback controls.
 `;
 
-const ACTIONS = new Set([
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const ROOM_ACTIONS = new Set([
   'toggle-requests',
   'fulfill-top',
   'hide-top',
@@ -48,88 +57,27 @@ const ACTIONS = new Set([
   'search-top-soundcloud',
   'search-top-youtube'
 ]);
-
+const PLAYBACK_ACTIONS = new Set(['load-top', 'play', 'pause', 'stop', 'cue', 'next', 'previous']);
 const SEARCH_PROVIDERS = {
-  spotify: {
-    label: 'Spotify search',
-    url: (query) => `spotify:search:${encodeURIComponent(query)}`
-  },
-  soundcloud: {
-    label: 'SoundCloud search',
-    url: (query) => `https://soundcloud.com/search/sounds?q=${encodeURIComponent(query)}`
-  },
-  youtube: {
-    label: 'YouTube search',
-    url: (query) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
-  }
+  spotify: { label: 'Spotify search', url: (query) => `spotify:search:${encodeURIComponent(query)}` },
+  soundcloud: { label: 'SoundCloud search', url: (query) => `https://soundcloud.com/search/sounds?q=${encodeURIComponent(query)}` },
+  youtube: { label: 'YouTube search', url: (query) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}` }
 };
 
 const PRESET_ACTIONS = [
-  {
-    id: 'toggle-requests',
-    label: 'Pause / Resume',
-    method: 'POST',
-    path: '/action/toggle-requests',
-    color: '#22c55e',
-    description: 'Toggle inbound audience requests for the live room.'
-  },
-  {
-    id: 'fulfill-top',
-    label: 'Clear Top',
-    method: 'POST',
-    path: '/action/fulfill-top',
-    color: '#06b6d4',
-    description: 'Mark the current top approved/crowd-ranked request fulfilled.'
-  },
-  {
-    id: 'hide-top',
-    label: 'Hide Top',
-    method: 'POST',
-    path: '/action/hide-top',
-    color: '#f59e0b',
-    description: 'Hide the current top approved/crowd-ranked request.'
-  },
-  {
-    id: 'search-top-spotify',
-    label: 'Spotify Search',
-    method: 'POST',
-    path: '/action/search-top-spotify',
-    color: '#1db954',
-    description: 'Return a Spotify search deep link for the top crowd pick.'
-  },
-  {
-    id: 'search-top-soundcloud',
-    label: 'SoundCloud Search',
-    method: 'POST',
-    path: '/action/search-top-soundcloud',
-    color: '#ff5500',
-    description: 'Return a SoundCloud search URL for the top crowd pick.'
-  },
-  {
-    id: 'search-top-youtube',
-    label: 'YouTube Search',
-    method: 'POST',
-    path: '/action/search-top-youtube',
-    color: '#ef4444',
-    description: 'Return a YouTube search URL for the top crowd pick.'
-  },
-  {
-    id: 'approve-pending',
-    label: 'Approve Pending',
-    method: 'POST',
-    path: '/action/approve-pending',
-    color: '#84cc16',
-    description: 'Approve the oldest visible pending request.'
-  },
-  {
-    id: 'veto-pending',
-    label: 'Deny Pending',
-    method: 'POST',
-    path: '/action/veto-pending',
-    color: '#f43f5e',
-    description: 'Deny the oldest visible pending request.'
-  }
-];
+  ['load-top', 'Load Crowd Pick', '/playback/load-top', '#a855f7', 'Resolve and load the top approved request into VirtualDJ.'],
+  ['play', 'Play', '/playback/play', '#22c55e', 'Start the configured VirtualDJ deck.'],
+  ['pause', 'Pause', '/playback/pause', '#f59e0b', 'Pause the configured VirtualDJ deck.'],
+  ['cue', 'Cue', '/playback/cue', '#06b6d4', 'Return the configured VirtualDJ deck to cue.'],
+  ['next', 'Next', '/playback/next', '#8b5cf6', 'Load the next VirtualDJ browser item.'],
+  ['previous', 'Previous', '/playback/previous', '#6366f1', 'Load the previous VirtualDJ browser item.'],
+  ['stop', 'Stop', '/playback/stop', '#ef4444', 'Stop the configured VirtualDJ deck.'],
+  ['toggle-requests', 'Pause / Resume Requests', '/action/toggle-requests', '#14b8a6', 'Toggle inbound audience requests.'],
+  ['fulfill-top', 'Clear Top Request', '/action/fulfill-top', '#0ea5e9', 'Mark the top approved request fulfilled.'],
+  ['hide-top', 'Hide Top Request', '/action/hide-top', '#f97316', 'Hide the top approved request.'],
+  ['approve-pending', 'Approve Pending', '/action/approve-pending', '#84cc16', 'Approve the oldest pending request.'],
+  ['veto-pending', 'Deny Pending', '/action/veto-pending', '#f43f5e', 'Deny the oldest pending request.']
+].map(([id, label, route, color, description]) => ({ id, label, route, color, description, method: 'POST' }));
 
 function parseArgs(argv) {
   const result = {};
@@ -138,83 +86,96 @@ function parseArgs(argv) {
     if (!token.startsWith('--')) continue;
     const key = token.slice(2);
     const next = argv[index + 1];
-    if (!next || next.startsWith('--')) {
-      result[key] = true;
-      continue;
+    if (!next || next.startsWith('--')) result[key] = true;
+    else {
+      result[key] = next;
+      index += 1;
     }
-    result[key] = next;
-    index += 1;
   }
   return result;
 }
 
+function normalizeBaseUrl(value, fallback) {
+  const raw = typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  return raw.replace(/\/+$/, '');
+}
+
+function normalizePort(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 65_535 ? parsed : fallback;
+}
+
+function topApprovedRequest(state) {
+  const requests = Array.isArray(state?.requests) ? state.requests : [];
+  return requests
+    .filter((request) => !request.hidden && !request.removed && !request.shadowBanned && request.status === 'approved')
+    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))[0] || null;
+}
+
+function topPendingRequest(state) {
+  const requests = Array.isArray(state?.requests) ? state.requests : [];
+  return requests
+    .filter((request) => !request.hidden && !request.removed && !request.shadowBanned && request.status === 'hold')
+    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())[0] || null;
+}
+
+function topRequestText(request) {
+  if (!request) return null;
+  return [request.title, request.subtitle]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+    .join(' - ') || null;
+}
+
+function topRequestPayload(request) {
+  const text = topRequestText(request);
+  if (!request || !text) return null;
+  return {
+    id: request.id,
+    sourceTrackId: request.sourceTrackId || null,
+    externalTrackId: request.externalTrackId || null,
+    title: request.title || null,
+    artist: request.subtitle || null,
+    text,
+    amount: request.amount || 0,
+    searches: Object.fromEntries(Object.entries(SEARCH_PROVIDERS).map(([key, provider]) => [
+      key,
+      { label: provider.label, url: provider.url(text) }
+    ]))
+  };
+}
+
+function safeTokenEqual(candidate, expected) {
+  if (typeof candidate !== 'string' || !candidate || candidate.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
+}
+
+function localRequestAuthorized(req, requestUrl) {
+  const authorization = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || null;
+  const headerToken = typeof req.headers['x-sway-bridge-token'] === 'string' ? req.headers['x-sway-bridge-token'] : null;
+  return safeTokenEqual(requestUrl.searchParams.get('token') || bearer || headerToken, localToken);
+}
+
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-headers': 'content-type',
-    'content-type': 'application/json; charset=utf-8'
+    'cache-control': 'no-store',
+    'content-type': 'application/json; charset=utf-8',
+    'x-content-type-options': 'nosniff'
   });
   res.end(JSON.stringify(payload, null, 2));
 }
 
-function normalizeBaseUrl(value) {
-  const raw = typeof value === 'string' && value.trim() ? value.trim() : 'https://app.sway.tips';
-  return raw.replace(/\/+$/, '');
+function sendText(res, statusCode, value) {
+  res.writeHead(statusCode, {
+    'cache-control': 'no-store',
+    'content-type': 'text/plain; charset=utf-8',
+    'x-content-type-options': 'nosniff'
+  });
+  res.end(value);
 }
 
-function localBridgeUrl(path) {
-  return `http://${listenHost}:${listenPort}${path}`;
-}
-
-function buildActionPreset(format) {
-  const actions = PRESET_ACTIONS.map((action, index) => ({
-    ...action,
-    slot: index + 1,
-    url: localBridgeUrl(action.path)
-  }));
-
-  return {
-    schema: 'sway-control-bridge-preset.v1',
-    format,
-    bridge: {
-      host: listenHost,
-      port: listenPort,
-      healthUrl: localBridgeUrl('/health'),
-      stateUrl: localBridgeUrl('/state'),
-      topTextUrl: localBridgeUrl('/top/text'),
-      topSearchUrl: localBridgeUrl('/top/search')
-    },
-    actions,
-    companion: {
-      module: 'Generic HTTP Request',
-      importMode: 'create one POST button per action URL',
-      buttons: actions.map((action) => ({
-        page: 1,
-        row: Math.floor((action.slot - 1) / 4) + 1,
-        column: ((action.slot - 1) % 4) + 1,
-        text: action.label,
-        request: {
-          method: action.method,
-          url: action.url
-        },
-        color: action.color
-      }))
-    },
-    streamDeck: {
-      importMode: 'map each item to a Website/Open URL or HTTP Request action',
-      buttons: actions.map((action) => ({
-        slot: action.slot,
-        title: action.label,
-        url: action.url,
-        method: action.method,
-        color: action.color
-      }))
-    }
-  };
-}
-
-async function readUpstreamJson(response) {
+async function readJson(response) {
   const text = await response.text();
   if (!text) return null;
   try {
@@ -224,87 +185,253 @@ async function readUpstreamJson(response) {
   }
 }
 
-async function fetchRoomState({ swayUrl, gigId, authHeaders }) {
-  const response = await fetch(`${swayUrl}/api/state/${encodeURIComponent(gigId)}`, {
-    method: 'GET',
-    headers: {
-      accept: 'application/json',
-      ...authHeaders
+async function cloudRequest(route, { method = 'GET', body } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${swayUrl}${route}`, {
+      method,
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${authToken}`,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' })
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: controller.signal
+    });
+    const data = await readJson(response);
+    if (!response.ok) {
+      const error = new Error(typeof data?.error === 'string' ? data.error : `Sway returned ${response.status}.`);
+      error.status = response.status;
+      error.payload = data;
+      throw error;
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function fetchRoomState() {
+  return cloudRequest(`/api/talent/control-bridge/state/${encodeURIComponent(gigId)}`);
+}
+
+function runRoomAction(action) {
+  return cloudRequest(`/api/talent/control-bridge/action/${action}`, {
+    method: 'POST',
+    body: { gig_id: gigId }
+  });
+}
+
+async function queuePlaybackAction(action) {
+  let track = null;
+  let cloudAction = action;
+  if (action === 'load-top') {
+    const state = await fetchRoomState();
+    const top = topApprovedRequest(state);
+    if (!top) throw new Error('No approved request is available to load.');
+    cloudAction = 'load';
+    track = {
+      requestId: top.id,
+      sourceTrackId: top.sourceTrackId || null,
+      externalTrackId: top.externalTrackId || null,
+      title: top.title || null,
+      artist: top.subtitle || null
+    };
+  }
+  return cloudRequest('/api/talent/playback/commands', {
+    method: 'POST',
+    body: {
+      gig_id: gigId,
+      clientCommandId: randomUUID(),
+      sourceKey: 'virtualdj',
+      action: cloudAction,
+      payload: { deck, track }
     }
   });
-  const data = await readUpstreamJson(response);
-  if (!response.ok) {
-    throw new Error(typeof data?.error === 'string' ? data.error : `State request failed with ${response.status}.`);
-  }
-  return data;
 }
 
-function visibleRequests(state) {
-  const requests = Array.isArray(state?.requests) ? state.requests : [];
-  return requests.filter((request) => !request.hidden && !request.removed && !request.shadowBanned);
+function localBridgeUrl(route) {
+  const hostname = listenHost === '::1' ? '[::1]' : listenHost;
+  const url = new URL(`http://${hostname}:${listenPort}${route}`);
+  url.searchParams.set('token', localToken);
+  return url.toString();
 }
 
-function topApprovedRequest(state) {
-  return visibleRequests(state)
-    .filter((request) => request.status === 'approved')
-    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))[0] || null;
-}
-
-function topPendingRequest(state) {
-  return visibleRequests(state)
-    .filter((request) => request.status === 'hold')
-    .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())[0] || null;
-}
-
-function topRequestText(request) {
-  if (!request) return null;
-  const title = typeof request.title === 'string' ? request.title.trim() : '';
-  const subtitle = typeof request.subtitle === 'string' ? request.subtitle.trim() : '';
-  return [title, subtitle].filter(Boolean).join(' - ');
-}
-
-function topRequestPayload(request) {
-  const text = topRequestText(request);
-  if (!request || !text) return null;
-  const searches = Object.fromEntries(
-    Object.entries(SEARCH_PROVIDERS).map(([key, provider]) => [key, {
-      label: provider.label,
-      url: provider.url(text)
-    }])
-  );
+function buildPreset(format) {
+  const actions = PRESET_ACTIONS.map((action, index) => ({
+    ...action,
+    slot: index + 1,
+    url: localBridgeUrl(action.route)
+  }));
   return {
-    id: request.id,
-    title: request.title,
-    subtitle: request.subtitle,
-    text,
-    spotifyUrl: request.spotifyUrl || null,
-    searches
-  };
-}
-
-function resolveAuthHeaders({ authToken, authCookie }) {
-  if (authToken) return { authorization: `Bearer ${authToken}` };
-  if (authCookie) return { cookie: authCookie };
-  return {};
-}
-
-// The cloud endpoint resolves the target request (top approved / oldest
-// pending) itself, so this is a thin forwarder rather than a translator.
-async function runAction({ action, swayUrl, authHeaders, gigId }) {
-  const response = await fetch(`${swayUrl}/api/talent/control-bridge/action/${action}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...authHeaders
+    schema: 'sway-control-bridge-preset.v2',
+    format,
+    bridge: {
+      healthUrl: localBridgeUrl('/health'),
+      stateUrl: localBridgeUrl('/state'),
+      topTextUrl: localBridgeUrl('/top/text'),
+      security: 'loopback-only token; no browser CORS'
     },
-    body: JSON.stringify({ gig_id: gigId })
-  });
-  const data = await readUpstreamJson(response);
-  return {
-    ok: response.ok,
-    status: response.status,
-    upstream: data
+    actions,
+    companion: {
+      module: 'Generic HTTP Request',
+      buttons: actions.map((action) => ({
+        page: Math.floor((action.slot - 1) / 8) + 1,
+        row: Math.floor(((action.slot - 1) % 8) / 4) + 1,
+        column: ((action.slot - 1) % 4) + 1,
+        text: action.label,
+        color: action.color,
+        request: { method: action.method, url: action.url }
+      }))
+    },
+    streamDeck: {
+      importMode: 'map each item to an HTTP Request action',
+      buttons: actions.map((action) => ({
+        slot: action.slot,
+        title: action.label,
+        color: action.color,
+        method: action.method,
+        url: action.url
+      }))
+    }
   };
+}
+
+function loadLedger(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (parsed?.gigId !== gigId || parsed?.sourceKey !== 'virtualdj') return null;
+    return {
+      version: 1,
+      gigId,
+      sourceKey: 'virtualdj',
+      bridgeInstanceId: typeof parsed.bridgeInstanceId === 'string' ? parsed.bridgeInstanceId : randomUUID(),
+      outcomes: parsed.outcomes && typeof parsed.outcomes === 'object' ? parsed.outcomes : {},
+      pendingCompletionIds: Array.isArray(parsed.pendingCompletionIds) ? parsed.pendingCompletionIds : []
+    };
+  } catch (error) {
+    console.warn(`Ignoring unreadable bridge ledger: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function saveLedger() {
+  const outcomeEntries = Object.entries(ledger.outcomes)
+    .sort(([, a], [, b]) => String(b.finishedAt).localeCompare(String(a.finishedAt)))
+    .slice(0, 200);
+  ledger.outcomes = Object.fromEntries(outcomeEntries);
+  ledger.pendingCompletionIds = [...new Set(ledger.pendingCompletionIds)].filter((id) => ledger.outcomes[id]);
+  mkdirSync(path.dirname(ledgerPath), { recursive: true, mode: 0o700 });
+  const tempPath = `${ledgerPath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(ledger, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  renameSync(tempPath, ledgerPath);
+}
+
+async function flushCompletions() {
+  for (const commandId of [...ledger.pendingCompletionIds]) {
+    const outcome = ledger.outcomes[commandId];
+    if (!outcome) continue;
+    try {
+      await cloudRequest('/api/talent/playback/bridge/complete', {
+        method: 'POST',
+        body: {
+          gig_id: gigId,
+          sourceKey: 'virtualdj',
+          bridgeInstanceId: ledger.bridgeInstanceId,
+          commandId,
+          success: outcome.success,
+          result: outcome.result || {},
+          error: outcome.error || null
+        }
+      });
+      ledger.pendingCompletionIds = ledger.pendingCompletionIds.filter((id) => id !== commandId);
+      saveLedger();
+    } catch (error) {
+      lastCloudError = error instanceof Error ? error.message : String(error);
+      break;
+    }
+  }
+}
+
+async function executeClaimedCommand(command) {
+  if (!ledger.outcomes[command.id]) {
+    let outcome;
+    try {
+      const result = await virtualDj.executeCommand(command);
+      const finishedAt = new Date().toISOString();
+      outcome = { success: true, result: { ...result, executedAt: finishedAt }, error: null, finishedAt };
+    } catch (error) {
+      outcome = {
+        success: false,
+        result: {},
+        error: error instanceof Error ? error.message : String(error),
+        finishedAt: new Date().toISOString()
+      };
+    }
+    // Persist the local execution outcome before acknowledging the cloud.
+    // A lost network response therefore cannot turn a completed command into
+    // a second booth-side execution after restart.
+    ledger.outcomes[command.id] = outcome;
+    ledger.pendingCompletionIds.push(command.id);
+    saveLedger();
+  } else if (!ledger.pendingCompletionIds.includes(command.id)) {
+    ledger.pendingCompletionIds.push(command.id);
+    saveLedger();
+  }
+}
+
+async function pushDeckState() {
+  let state;
+  try {
+    state = await virtualDj.readState(deck);
+    lastVirtualDjError = null;
+  } catch (error) {
+    lastVirtualDjError = error instanceof Error ? error.message : String(error);
+    state = {
+      sourceKey: 'virtualdj',
+      transport: 'virtualdj_network_control_http',
+      connectionStatus: 'disconnected',
+      deck,
+      observedAt: new Date().toISOString(),
+      metadata: { error: lastVirtualDjError }
+    };
+  }
+  await cloudRequest('/api/talent/playback/bridge/state', {
+    method: 'POST',
+    body: {
+      gig_id: gigId,
+      state: { ...state, bridgeInstanceId: ledger.bridgeInstanceId }
+    }
+  });
+  lastStatePushAt = Date.now();
+}
+
+async function bridgeTick() {
+  if (tickRunning) return;
+  tickRunning = true;
+  try {
+    await flushCompletions();
+    const claimed = await cloudRequest('/api/talent/playback/bridge/claim', {
+      method: 'POST',
+      body: {
+        gig_id: gigId,
+        sourceKey: 'virtualdj',
+        bridgeInstanceId: ledger.bridgeInstanceId
+      }
+    });
+    for (const command of Array.isArray(claimed?.commands) ? claimed.commands : []) {
+      await executeClaimedCommand(command);
+    }
+    await flushCompletions();
+    if (Date.now() - lastStatePushAt >= 2_000) await pushDeckState();
+    lastCloudError = null;
+  } catch (error) {
+    lastCloudError = error instanceof Error ? error.message : String(error);
+  } finally {
+    tickRunning = false;
+  }
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -315,116 +442,136 @@ if (args.help || args.h) {
 
 const gigId = typeof args['gig-id'] === 'string' ? args['gig-id'] : process.env.SWAY_CONTROL_GIG_ID;
 const authToken = typeof args['auth-token'] === 'string' ? args['auth-token'] : process.env.SWAY_CONTROL_AUTH_TOKEN;
-const legacyAuthCookie = typeof args['auth-cookie'] === 'string' ? args['auth-cookie'] : process.env.SWAY_CONTROL_AUTH_COOKIE;
-const authHeaders = resolveAuthHeaders({ authToken, authCookie: legacyAuthCookie });
-const swayUrl = normalizeBaseUrl(typeof args['sway-url'] === 'string' ? args['sway-url'] : process.env.SWAY_CONTROL_SWAY_URL);
+const swayUrl = normalizeBaseUrl(typeof args['sway-url'] === 'string' ? args['sway-url'] : process.env.SWAY_CONTROL_SWAY_URL, 'https://app.sway.tips');
 const listenHost = typeof args.host === 'string' ? args.host : process.env.SWAY_CONTROL_BRIDGE_HOST || '127.0.0.1';
-const listenPort = Number(typeof args.port === 'string' ? args.port : process.env.SWAY_CONTROL_BRIDGE_PORT || '4315');
+const listenPort = normalizePort(typeof args.port === 'string' ? args.port : process.env.SWAY_CONTROL_BRIDGE_PORT, 4315);
+const localToken = typeof args['local-token'] === 'string'
+  ? args['local-token']
+  : process.env.SWAY_CONTROL_LOCAL_TOKEN || randomBytes(24).toString('base64url');
+const deck = Math.min(8, Math.max(1, Number.parseInt(String(args.deck || process.env.SWAY_CONTROL_DECK || '1'), 10) || 1));
+const virtualDjUrl = normalizeBaseUrl(typeof args['virtualdj-url'] === 'string' ? args['virtualdj-url'] : process.env.SWAY_VIRTUALDJ_URL, 'http://127.0.0.1:8088');
+const virtualDjPassword = typeof args['virtualdj-password'] === 'string' ? args['virtualdj-password'] : process.env.SWAY_VIRTUALDJ_PASSWORD;
 
-if (!gigId || (!authToken && !legacyAuthCookie)) {
-  console.error('Missing required gig id or auth token. Pass --gig-id and --auth-token, or set SWAY_CONTROL_GIG_ID and SWAY_CONTROL_AUTH_TOKEN.');
-  console.error('');
+if (!gigId || !authToken) {
+  console.error('Missing --gig-id or --auth-token. Both are required.');
   console.error(HELP_TEXT.trim());
   process.exit(1);
 }
+if (!LOOPBACK_HOSTS.has(listenHost) && !args['allow-remote-listen']) {
+  console.error('The local bridge binds only to loopback unless --allow-remote-listen is explicit.');
+  process.exit(1);
+}
+
+const ledgerPath = path.join(homedir(), '.sway', `control-bridge-${gigId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
+const ledger = loadLedger(ledgerPath) || {
+  version: 1,
+  gigId,
+  sourceKey: 'virtualdj',
+  bridgeInstanceId: randomUUID(),
+  outcomes: {},
+  pendingCompletionIds: []
+};
+saveLedger();
+
+const virtualDj = new VirtualDjNetworkControl({
+  baseUrl: virtualDjUrl,
+  password: virtualDjPassword,
+  deck,
+  allowRemote: Boolean(args['allow-remote-virtualdj'])
+});
+let lastCloudError = null;
+let lastVirtualDjError = null;
+let lastStatePushAt = 0;
+let tickRunning = false;
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') return sendJson(res, 204, {});
+  const requestUrl = new URL(req.url || '/', `http://${listenHost}:${listenPort}`);
+  if (req.method === 'OPTIONS') return sendJson(res, 405, { ok: false, error: 'Browser cross-origin requests are disabled.' });
+  if (!localRequestAuthorized(req, requestUrl)) return sendJson(res, 401, { ok: false, error: 'Local bridge token required.' });
 
-  if (req.method === 'GET' && req.url === '/health') {
+  if (req.method === 'GET' && requestUrl.pathname === '/health') {
     return sendJson(res, 200, {
-      ok: true,
-      bridge: 'sway-control-bridge',
-      swayUrl,
+      ok: !lastCloudError && !lastVirtualDjError,
+      bridge: 'sway-dj-control-bridge',
       gigId,
-      actions: [...ACTIONS]
+      sourceKey: 'virtualdj',
+      bridgeInstanceId: ledger.bridgeInstanceId,
+      pendingCompletions: ledger.pendingCompletionIds.length,
+      cloudError: lastCloudError,
+      sourceError: lastVirtualDjError,
+      requirements: VIRTUALDJ_NETWORK_CONTROL_REQUIREMENTS
     });
   }
 
-  if (req.method === 'GET' && req.url === '/state') {
+  if (req.method === 'GET' && requestUrl.pathname === '/state') {
     try {
-      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
-      const approved = topApprovedRequest(state);
-      const pending = topPendingRequest(state);
+      const state = await fetchRoomState();
       return sendJson(res, 200, {
         ok: true,
         session: state.session,
-        topApproved: approved ? { ...topRequestPayload(approved), amount: approved.amount } : null,
-        topPending: pending ? { id: pending.id, title: pending.title, subtitle: pending.subtitle, amount: pending.amount } : null
+        playback: state.playback,
+        topApproved: topRequestPayload(topApprovedRequest(state)),
+        topPending: topRequestPayload(topPendingRequest(state))
       });
     } catch (error) {
-      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read room state.' });
+      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  if (req.method === 'GET' && req.url === '/preset/actions') {
-    return sendJson(res, 200, buildActionPreset('generic-http-actions'));
-  }
-
-  if (req.method === 'GET' && req.url === '/preset/companion') {
-    return sendJson(res, 200, buildActionPreset('bitfocus-companion-generic-http'));
-  }
-
-  if (req.method === 'GET' && req.url === '/preset/stream-deck') {
-    return sendJson(res, 200, buildActionPreset('stream-deck-url-actions'));
-  }
-
-  if (req.method === 'GET' && req.url === '/top/text') {
+  if (req.method === 'GET' && requestUrl.pathname === '/top/text') {
     try {
-      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
-      const approved = topApprovedRequest(state);
-      const text = topRequestText(approved);
-      if (!text) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
-      res.writeHead(200, {
-        'access-control-allow-origin': '*',
-        'content-type': 'text/plain; charset=utf-8'
-      });
-      return res.end(text);
+      const text = topRequestText(topApprovedRequest(await fetchRoomState()));
+      return text ? sendText(res, 200, text) : sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
     } catch (error) {
-      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read top request.' });
+      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  if (req.method === 'GET' && req.url === '/top/search') {
+  if (req.method === 'GET' && ['/preset/actions', '/preset/companion', '/preset/stream-deck'].includes(requestUrl.pathname)) {
+    return sendJson(res, 200, buildPreset(requestUrl.pathname.split('/').at(-1)));
+  }
+
+  const roomMatch = req.method === 'POST' ? requestUrl.pathname.match(/^\/action\/([a-z-]+)$/) : null;
+  if (roomMatch) {
+    const action = roomMatch[1];
+    if (!ROOM_ACTIONS.has(action)) return sendJson(res, 404, { ok: false, error: 'Unknown room action.' });
     try {
-      const state = await fetchRoomState({ swayUrl, gigId, authHeaders });
-      const approved = topApprovedRequest(state);
-      const payload = topRequestPayload(approved);
-      if (!payload) return sendJson(res, 409, { ok: false, error: 'No approved request is available.' });
-      return sendJson(res, 200, { ok: true, top: payload });
+      return sendJson(res, 200, { ok: true, action, upstream: await runRoomAction(action) });
     } catch (error) {
-      return sendJson(res, 502, { ok: false, error: error instanceof Error ? error.message : 'Unable to read top request.' });
+      return sendJson(res, Number(error?.status) || 502, { ok: false, action, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  const actionMatch = req.method === 'POST' && typeof req.url === 'string'
-    ? req.url.match(/^\/action\/([a-z-]+)$/)
-    : null;
-  if (actionMatch) {
-    const action = actionMatch[1];
-    if (!ACTIONS.has(action)) return sendJson(res, 404, { ok: false, error: 'Unknown action.' });
+  const playbackMatch = req.method === 'POST' ? requestUrl.pathname.match(/^\/playback\/([a-z-]+)$/) : null;
+  if (playbackMatch) {
+    const action = playbackMatch[1];
+    if (!PLAYBACK_ACTIONS.has(action)) return sendJson(res, 404, { ok: false, error: 'Unknown playback action.' });
     try {
-      const result = await runAction({ action, swayUrl, authHeaders, gigId });
-      return sendJson(res, result.status, {
-        ok: result.ok,
-        action,
-        upstream: result.upstream
-      });
+      return sendJson(res, 202, { ok: true, action, upstream: await queuePlaybackAction(action) });
     } catch (error) {
-      return sendJson(res, 502, { ok: false, action, error: error instanceof Error ? error.message : 'Bridge action failed.' });
+      return sendJson(res, Number(error?.status) || 502, { ok: false, action, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  return sendJson(res, 404, {
-    ok: false,
-    error: 'Route not found. Use GET /health, GET /state, or POST /action/<name>.'
-  });
+  return sendJson(res, 404, { ok: false, error: 'Route not found.' });
 });
 
+const interval = setInterval(bridgeTick, 1_000);
+interval.unref();
 server.listen(listenPort, listenHost, () => {
-  console.log(`Sway Control Bridge listening at http://${listenHost}:${listenPort}`);
-  console.log(`Forwarding performer controls to ${swayUrl} for gig ${gigId}`);
-  console.log('POST button triggers to /action/toggle-requests, /action/fulfill-top, /action/hide-top, /action/approve-pending, /action/veto-pending, /action/open-top-source, or /action/search-top-spotify|soundcloud|youtube');
-  console.log('Read the current crowd pick at GET /top/text or GET /top/search');
-  console.log('Download button presets at GET /preset/actions, /preset/companion, or /preset/stream-deck');
+  console.log(`Sway DJ Control Bridge: ${localBridgeUrl('/health')}`);
+  console.log(`Room ${gigId} -> ${swayUrl}`);
+  console.log(`VirtualDJ deck ${deck} -> ${virtualDjUrl}`);
+  console.log(`Hardware presets: ${localBridgeUrl('/preset/actions')}`);
+  console.log('The URLs contain the local-only bridge token; treat exported presets as secrets.');
+  void bridgeTick();
 });
+
+function shutdown() {
+  clearInterval(interval);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 2_000).unref();
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

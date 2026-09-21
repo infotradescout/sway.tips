@@ -1,0 +1,1296 @@
+{
+  "schemaVersion": 1,
+  "capturedAtUtc": "2026-09-06T01:34:55.177089+00:00",
+  "decision": "Continue draft; release HOLD. No merge, deployment, main-branch or live-money change.",
+  "startingCommit": "7e8c9e89667affb167460ed8ae2942ee3494453c",
+  "codeCommit": "75beea5dc2e3cbce911533debaf645cc143a4049",
+  "codeTree": "5ae137f61e3405041ae0c9855904bd7d7c22695c",
+  "sourceSha256": {
+    "src/shells/TalentApp.tsx": "ee8aab6dac07635d471428cdf215f1c77ae3a5fb9b77b948e27c4a94d6154db1",
+    "scripts/sway-performer-account-reads.behavior.test.mjs": "235c61de67025ec30847b5db333dc3a39799bba332686c8913f6765784ce1331",
+    "scripts/sway-performer-room-start.browser.test.mjs": "290a26c83af5f1ceb4a8d786dae823e864e00cb3d68def8ba0d3e09cbed0696a",
+    "scripts/sway-live-room-readiness.contract.test.mjs": "aad2a74ddee5d786691bd8df77523aa49205fc32820054649d847f9e8f692fd5",
+    "package.json": "bda1cf41d8262b35106682dcaf7eecc214190145cecbe4bc1688c6e432679205",
+    "package-lock.json": "a79d4b38b461166c19596e9fdad94ac143818a767edec31597afb33f258a7caf"
+  },
+  "runtime": {
+    "node": "v24.19.0",
+    "react": "19.2.7",
+    "reactDom": "19.2.7",
+    "jsdom": "26.1.0",
+    "platform": "Linux Node component environment"
+  },
+  "scope": "Actual performer shell and locked React/ReactDOM in Node JSDOM. Child UI, room-state hook and all HTTP are mocked. No browser/layout, real account, server authorization, persistence or provider proof.",
+  "accountReadRuns": {
+    "account-reads-baseline": {
+      "node": "v24.19.0",
+      "react": "19.2.7",
+      "shellSha256": "efa029c1086f81ce8036c34cac4c7ca11b6e684d9d8a46cc05492041b41f3303",
+      "scope": "Actual performer shell and locked React/ReactDOM in Node JSDOM. Child UI, room-state hook and all HTTP are mocked. No browser/layout, real account, server authorization, persistence or provider proof.",
+      "results": [
+        {
+          "name": "newer-profile-response-wins",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'Old name'\n- 'New name'\n"
+        },
+        {
+          "name": "older-profile-failure-cannot-clear-newer-profile",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'Confirmed name'\n"
+        },
+        {
+          "name": "profile-ordering-includes-delayed-json-body",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'owner-A'\n- 'owner-B'\n         ^\n"
+        },
+        {
+          "name": "newer-room-list-response-wins",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'obsolete-room'\n- 'current-room'\n"
+        },
+        {
+          "name": "room-list-ordering-includes-delayed-json-body",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'obsolete-room'\n- 'current-room'\n"
+        },
+        {
+          "name": "account-change-clears-old-selection-and-room-list",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'room-A' !== null\n"
+        },
+        {
+          "name": "old-account-room-response-cannot-enter-new-account",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: New account must read its own room registry"
+        },
+        {
+          "name": "profile-access-loss-clears-room-selection",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'room-A' !== null\n"
+        },
+        {
+          "name": "room-registry-access-loss-clears-private-context",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ {\n+   display_name: 'Performer A',\n+   email_verified_at: '2026-09-06T00:00:00Z',\n+   handle: 'performer-a',\n+   owner_user_id: 'owner-A',\n+   performer_id: 'performer-A',\n+   primary_role: 'dj',\n+   roles: [\n+     'dj'\n+   ],\n+   specialties: []\n+ }\n- null\n"
+        },
+        {
+          "name": "same-account-profile-save-preserves-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "empty-registry-preserves-ending-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "logout-intent-rejects-older-profile-and-room-reads",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'owner-B'\n- 'owner-A'\n         ^\n"
+        },
+        {
+          "name": "unmount-cancels-both-read-streams",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- true\n"
+        },
+        {
+          "name": "normal-start-still-selects-confirmed-room",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-during-start-cannot-restore-old-room",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'room-A' !== null\n"
+        },
+        {
+          "name": "same-account-save-does-not-cancel-start",
+          "status": "PASS"
+        }
+      ]
+    },
+    "account-reads-review": {
+      "node": "v24.19.0",
+      "react": "19.2.7",
+      "shellSha256": "6c240848661a0c2b8b851db7935ccb7de7acee42213c23f765c54a45092e41a0",
+      "scope": "Actual performer shell and locked React/ReactDOM in Node JSDOM. Child UI, room-state hook and all HTTP are mocked. No browser/layout, real account, server authorization, persistence or provider proof.",
+      "results": [
+        {
+          "name": "newer-profile-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "older-profile-failure-cannot-clear-newer-profile",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "newer-room-list-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "room-list-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-clears-old-selection-and-room-list",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-room-response-cannot-enter-new-account",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-access-loss-clears-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "room-registry-access-loss-clears-private-context",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-profile-save-preserves-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "empty-registry-preserves-ending-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "logout-intent-rejects-older-profile-and-room-reads",
+          "status": "PASS"
+        },
+        {
+          "name": "unmount-cancels-both-read-streams",
+          "status": "PASS"
+        },
+        {
+          "name": "normal-start-still-selects-confirmed-room",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-during-start-cannot-restore-old-room",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-save-does-not-cancel-start",
+          "status": "PASS"
+        },
+        {
+          "name": "temporary-profile-failure-preserves-confirmed-room-and-recovers",
+          "status": "PASS"
+        },
+        {
+          "name": "initial-profile-failure-is-visible-on-performer-home",
+          "status": "PASS"
+        },
+        {
+          "name": "registry-access-loss-invalidates-pending-profile-response",
+          "status": "PASS"
+        },
+        {
+          "name": "obsolete-registry-denial-cannot-clear-newer-success",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-action-completion-cannot-cancel-new-account-read",
+          "status": "PASS"
+        },
+        {
+          "name": "failed-logout-shows-error-and-restores-refresh",
+          "status": "PASS"
+        },
+        {
+          "name": "co-batched-account-switch-cannot-auto-select-old-room",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'room-A' !== null\n"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-A-B-A",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n10 !== 9\n"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-access-loss-and-recovery",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n8 !== 7\n"
+        }
+      ]
+    },
+    "account-reads-denial-probe": {
+      "node": "v24.19.0",
+      "react": "19.2.7",
+      "shellSha256": "9867bf5a0b90d17d8e246b8fb3abb8c26c7ddc374fe73e5755d2d1f8500123b5",
+      "scope": "Actual performer shell and locked React/ReactDOM in Node JSDOM. Child UI, room-state hook and all HTTP are mocked. No browser/layout, real account, server authorization, persistence or provider proof.",
+      "results": [
+        {
+          "name": "newer-profile-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "older-profile-failure-cannot-clear-newer-profile",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "newer-room-list-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "room-list-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-clears-old-selection-and-room-list",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-room-response-cannot-enter-new-account",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-access-loss-clears-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "room-registry-access-loss-clears-private-context",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-profile-save-preserves-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "empty-registry-preserves-ending-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "logout-intent-rejects-older-profile-and-room-reads",
+          "status": "PASS"
+        },
+        {
+          "name": "unmount-cancels-both-read-streams",
+          "status": "PASS"
+        },
+        {
+          "name": "normal-start-still-selects-confirmed-room",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-during-start-cannot-restore-old-room",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-save-does-not-cancel-start",
+          "status": "PASS"
+        },
+        {
+          "name": "temporary-profile-failure-preserves-confirmed-room-and-recovers",
+          "status": "PASS"
+        },
+        {
+          "name": "initial-profile-failure-is-visible-on-performer-home",
+          "status": "PASS"
+        },
+        {
+          "name": "registry-access-loss-invalidates-pending-profile-response",
+          "status": "PASS"
+        },
+        {
+          "name": "obsolete-registry-denial-cannot-clear-newer-success",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-action-completion-cannot-cancel-new-account-read",
+          "status": "PASS"
+        },
+        {
+          "name": "failed-logout-shows-error-and-restores-refresh",
+          "status": "PASS"
+        },
+        {
+          "name": "co-batched-account-switch-cannot-auto-select-old-room",
+          "status": "PASS"
+        },
+        {
+          "name": "old-registry-denial-cannot-cancel-newer-account-profile",
+          "status": "FAIL",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'owner-B'\n"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-A-B-A",
+          "status": "PASS"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-access-loss-and-recovery",
+          "status": "PASS"
+        }
+      ]
+    },
+    "account-reads-final": {
+      "node": "v24.19.0",
+      "react": "19.2.7",
+      "shellSha256": "ee8aab6dac07635d471428cdf215f1c77ae3a5fb9b77b948e27c4a94d6154db1",
+      "scope": "Actual performer shell and locked React/ReactDOM in Node JSDOM. Child UI, room-state hook and all HTTP are mocked. No browser/layout, real account, server authorization, persistence or provider proof.",
+      "results": [
+        {
+          "name": "newer-profile-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "older-profile-failure-cannot-clear-newer-profile",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "newer-room-list-response-wins",
+          "status": "PASS"
+        },
+        {
+          "name": "room-list-ordering-includes-delayed-json-body",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-clears-old-selection-and-room-list",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-room-response-cannot-enter-new-account",
+          "status": "PASS"
+        },
+        {
+          "name": "profile-access-loss-clears-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "room-registry-access-loss-clears-private-context",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-profile-save-preserves-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "empty-registry-preserves-ending-room-selection",
+          "status": "PASS"
+        },
+        {
+          "name": "logout-intent-rejects-older-profile-and-room-reads",
+          "status": "PASS"
+        },
+        {
+          "name": "unmount-cancels-both-read-streams",
+          "status": "PASS"
+        },
+        {
+          "name": "normal-start-still-selects-confirmed-room",
+          "status": "PASS"
+        },
+        {
+          "name": "account-change-during-start-cannot-restore-old-room",
+          "status": "PASS"
+        },
+        {
+          "name": "same-account-save-does-not-cancel-start",
+          "status": "PASS"
+        },
+        {
+          "name": "temporary-profile-failure-preserves-confirmed-room-and-recovers",
+          "status": "PASS"
+        },
+        {
+          "name": "initial-profile-failure-is-visible-on-performer-home",
+          "status": "PASS"
+        },
+        {
+          "name": "registry-access-loss-invalidates-pending-profile-response",
+          "status": "PASS"
+        },
+        {
+          "name": "obsolete-registry-denial-cannot-clear-newer-success",
+          "status": "PASS"
+        },
+        {
+          "name": "old-account-action-completion-cannot-cancel-new-account-read",
+          "status": "PASS"
+        },
+        {
+          "name": "failed-logout-shows-error-and-restores-refresh",
+          "status": "PASS"
+        },
+        {
+          "name": "co-batched-account-switch-cannot-auto-select-old-room",
+          "status": "PASS"
+        },
+        {
+          "name": "old-registry-denial-cannot-cancel-newer-account-profile",
+          "status": "PASS"
+        },
+        {
+          "name": "newer-profile-delayed-json-survives-older-registry-denial",
+          "status": "PASS"
+        },
+        {
+          "name": "queued-new-profile-survives-old-registry-denial",
+          "status": "PASS"
+        },
+        {
+          "name": "older-profile-delayed-json-is-revoked-by-newer-registry-denial",
+          "status": "PASS"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-A-B-A",
+          "status": "PASS"
+        },
+        {
+          "name": "expired-action-cannot-cancel-current-read-access-loss-and-recovery",
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "independentReview": {
+    "method": "Selective Intelligence Guided Council, one read-only Objector, fresh context, same provider/model family (Grade 1 independence).",
+    "initialFindings": [
+      "Co-batched account B profile and account A rooms could auto-select an A room.",
+      "An old action finishing after A-B-A or access-loss/recovery could cancel the current registry read."
+    ],
+    "initialDisposition": "Both sustained and corrected; 25 permanent scenarios plus 3 independent probes passed at the intermediate source.",
+    "finalSourceSha256": "ee8aab6dac07635d471428cdf215f1c77ae3a5fb9b77b948e27c4a94d6154db1",
+    "finalDenialReview": {
+      "status": "PASS",
+      "executedCases": 8,
+      "additionalProbes": [
+        "Newer profile delayed JSON survives older registry denial.",
+        "Queued B profile update survives A registry denial.",
+        "Newer registry denial revokes older pending profile JSON."
+      ],
+      "note": "These three probes were added to the final permanent 29-case runner. Read-only component review, not browser or server-authorization proof."
+    }
+  },
+  "validation": {
+    "npmCi": {
+      "status": "PASS",
+      "command": "npm ci --cache /workspace/scratch/6393ad485b8c/npm-cache --no-audit --no-fund",
+      "note": "Clean install of the corrected lockfile completed; existing package metadata retained."
+    },
+    "lint": {
+      "status": "PASS",
+      "command": "npm run lint",
+      "exitCode": 0
+    },
+    "build": {
+      "status": "PASS",
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    "fullContractGate": {
+      "status": "FAIL",
+      "command": "npm run test:contracts",
+      "exitCode": 1,
+      "reason": "Required Playwright Chromium executable is unavailable. The rendered refund-confirmation prerequisite failed inside sway-payment-closeout-db-backed.contract.test.mjs. The new 29-case account-read runner passed before this failure. No gate was bypassed or softened."
+    },
+    "supplementalContracts": {
+      "status": "PARTIAL",
+      "exitCode": 0,
+      "pass": 124,
+      "fail": 0,
+      "blocked": 2,
+      "method": "Parse the unchanged test:contracts command chain from package.json; execute each command independently except the two browser-dependent wrapper commands explicitly marked BLOCKED in results. This does not constitute a passing full gate.",
+      "commands": [
+        "node --import tsx scripts/sway-performer-withdrawal.behavior.test.ts",
+        "node scripts/sway-edgewyze-profile-cleanup.contract.test.mjs",
+        "node scripts/sway-performer-handle-claim.contract.test.mjs",
+        "node scripts/sway-songwriter-first-synthetic-music.contract.test.mjs",
+        "node scripts/contract-check.mjs",
+        "node scripts/sway-performer-visibility-control.contract.test.mjs",
+        "node scripts/sway-organic-performer-discovery.contract.test.mjs",
+        "node scripts/sway-product-structure.contract.test.mjs",
+        "node scripts/sway-organic-discovery.contract.test.mjs",
+        "node scripts/sway-discovery-observatory.contract.test.mjs",
+        "node scripts/sway-public-discovery-contract.contract.test.mjs",
+        "node scripts/sway-product-baseline.contract.test.mjs",
+        "node scripts/sway-live-pilot-readiness.contract.test.mjs",
+        "node scripts/sway-live-pilot-evidence.contract.test.mjs",
+        "node scripts/sway-contract-gate-normalization.contract.test.mjs",
+        "node scripts/sway-auto-closeout.contract.test.mjs",
+        "node scripts/sway-business-store-boundary.contract.test.mjs",
+        "node scripts/sway-business-store-production-persistence.contract.test.mjs",
+        "node scripts/sway-captive-portal-preflight.contract.test.mjs",
+        "node scripts/sway-database-schema.contract.test.mjs",
+        "node scripts/sway-performer-link-profile.contract.test.mjs",
+        "node scripts/sway-deferred-kyc.contract.test.mjs",
+        "node scripts/sway-degraded-connection-state.contract.test.mjs",
+        "node scripts/sway-degraded-idempotency-persistence.contract.test.mjs",
+        "node scripts/sway-demo-fixture-harness.contract.test.mjs",
+        "node scripts/sway-production-demo-boundary.contract.test.mjs",
+        "node scripts/sway-host-subdomain-routing.contract.test.mjs",
+        "node scripts/sway-identity-ownership-authorization.contract.test.mjs",
+        "node scripts/sway-idempotency-fingerprint.contract.test.mjs",
+        "node scripts/sway-idempotent-submit.contract.test.mjs",
+        "node scripts/sway-installable-app.contract.test.mjs",
+        "node scripts/sway-live-room-readiness.contract.test.mjs",
+        "node scripts/sway-live-night-spine.contract.test.mjs",
+        "node scripts/sway-moderation-durable-block-runtime.contract.test.mjs",
+        "node scripts/sway-moderation-active-blocks-postgres.contract.test.mjs",
+        "node scripts/sway-moderation-safety-layer.contract.test.mjs",
+        "node scripts/sway-native-minimum-functionality.contract.test.mjs",
+        "node scripts/sway-native-utility.contract.test.mjs",
+        "node scripts/sway-offline-client-resilience.contract.test.mjs",
+        "node scripts/sway-offline-pending-ttl.contract.test.mjs",
+        "node scripts/sway-patron-recovery.contract.test.mjs",
+        "node scripts/sway-patron-public-logo-background.contract.test.mjs",
+        "node scripts/sway-invalid-patron-room-recovery.contract.test.mjs",
+        "node scripts/sway-payment-execution.contract.test.mjs",
+        "node scripts/sway-payment-authorization-gating.contract.test.mjs",
+        "node scripts/sway-fee-policy.contract.test.mjs",
+        "node scripts/sway-payment-webhook-stripe.contract.test.mjs",
+        "node scripts/sway-performer-account-reads.behavior.test.mjs",
+        "node scripts/sway-payment-closeout-db-backed.contract.test.mjs",
+        "node scripts/sway-stripe-connect-onboarding.contract.test.mjs",
+        "node scripts/sway-persisted-middleware-guards.contract.test.mjs",
+        "node scripts/sway-persisted-access-store-readiness.contract.test.mjs",
+        "node scripts/sway-performer-browser-session.contract.test.mjs",
+        "node scripts/sway-performer-email-login.contract.test.mjs",
+        "node scripts/sway-performer-self-serve-signup.contract.test.mjs",
+        "node scripts/sway-performer-library-availability.contract.test.mjs",
+        "node scripts/sway-dj-integration.contract.test.mjs",
+        "node scripts/sway-music-source-capability.contract.test.mjs",
+        "node scripts/sway-crowd-autopilot.contract.test.mjs",
+        "node scripts/sway-performer-hardware-mapping.contract.test.mjs",
+        "node scripts/sway-performer-connections.contract.test.mjs",
+        "node scripts/sway-control-bridge.contract.test.mjs",
+        "node scripts/sway-control-bridge-token.contract.test.mjs",
+        "node scripts/sway-windows-booth-launcher.contract.test.mjs",
+        "node scripts/sway-control-bridge-cloud-action.contract.test.mjs",
+        "node scripts/sway-performer-control-noop-guards.contract.test.mjs",
+        "node scripts/sway-durable-performer-control-idempotency.contract.test.mjs",
+        "node scripts/sway-protected-route-html-recovery.contract.test.mjs",
+        "node scripts/sway-public-cta-integrity.contract.test.mjs",
+        "node scripts/sway-link-preview-metadata.contract.test.mjs",
+        "node scripts/sway-mission-fit.contract.test.mjs",
+        "node scripts/sway-faq-surface.contract.test.mjs",
+        "node scripts/sway-release-gate.contract.test.mjs",
+        "node scripts/sway-complete-product-readiness.contract.test.mjs",
+        "node scripts/sway-role-route-separation.contract.test.mjs",
+        "node scripts/sway-schema-before-middleware.contract.test.mjs",
+        "node scripts/sway-separate-vite-entrypoints.contract.test.mjs",
+        "node scripts/sway-server-route-decoupling.contract.test.mjs",
+        "node scripts/sway-surface-terminology.contract.test.mjs",
+        "node scripts/sway-app-unification.contract.test.mjs",
+        "node scripts/sway-telemetry.contract.test.mjs",
+        "node scripts/patron-payment-truth.contract.test.mjs",
+        "node scripts/sway-payment-modal-viewport.contract.test.mjs",
+        "node scripts/sway-admin-account-deletion.contract.test.mjs",
+        "node scripts/sway-performer-live-cockpit.contract.test.mjs",
+        "node scripts/sway-overlay-projector-qr.contract.test.mjs",
+        "node scripts/sway-overlay-queue-motion.contract.test.mjs",
+        "node scripts/sway-active-gig-route-context.contract.test.mjs",
+        "node scripts/sway-public-room-state.behavior.test.mjs",
+        "node scripts/sway-active-room-registry.contract.test.mjs",
+        "node scripts/sway-performer-share-kit.contract.test.mjs",
+        "node scripts/sway-gig-scoped-room-truth.contract.test.mjs",
+        "node scripts/sway-mobile-splitview-polish.contract.test.mjs",
+        "node scripts/sway-mobile-demo-chrome.contract.test.mjs",
+        "node scripts/sway-mobile-topbar-copy.contract.test.mjs",
+        "node scripts/sway-surface-split-architecture-plan.contract.test.mjs",
+        "node scripts/sway-phase1-shell-scaffold.contract.test.mjs",
+        "node scripts/sway-phase2-shell-migration.contract.test.mjs",
+        "node scripts/sway-phase3-operator-admin-runtime-split.contract.test.mjs",
+        "node scripts/sway-phase4-operator-runtime-extraction.contract.test.mjs",
+        "node scripts/sway-phase5-admin-ops-runtime-extraction.contract.test.mjs",
+        "node scripts/sway-phase6-admin-ops-fragment-extraction.contract.test.mjs",
+        "node scripts/sway-phase7-admin-ops-fragment-extraction.contract.test.mjs",
+        "node scripts/sway-phase8-admin-ops-fragment-extraction.contract.test.mjs",
+        "node scripts/sway-phase9-admin-ops-fragment-extraction.contract.test.mjs",
+        "node scripts/sway-phase10-admin-ops-fragment-extraction.contract.test.mjs",
+        "node scripts/sway-ugc-control-placeholders.contract.test.mjs",
+        "node scripts/sway-app-store-legal-surface.contract.test.mjs",
+        "node scripts/sway-universal-account-pro-mode.contract.test.mjs",
+        "node scripts/sway-account-claim-onboarding.contract.test.mjs",
+        "node scripts/sway-patron-room-lookup-transient-error-state.contract.test.mjs",
+        "node scripts/sway-deploy-migration-gate.contract.test.mjs",
+        "node scripts/sway-release-health.contract.test.mjs",
+        "node scripts/sway-audio-publishing-foundation.contract.test.mjs",
+        "node scripts/sway-audio-publishing-migration.contract.test.mjs",
+        "node scripts/sway-audio-file-collaboration.contract.test.mjs",
+        "node scripts/sway-collaborator-inbox.contract.test.mjs",
+        "node scripts/sway-release-drafts.contract.test.mjs",
+        "node scripts/sway-multitrack-releases.contract.test.mjs",
+        "node scripts/sway-continuum-connector.contract.test.mjs",
+        "node scripts/sway-public-event-listings.contract.test.mjs",
+        "node scripts/sway-event-ticket-native-ga.contract.test.mjs",
+        "node scripts/sway-native-ticket-production-proof.contract.test.mjs",
+        "node scripts/sway-containment-onboarding.contract.test.mjs",
+        "node scripts/sway-live-room-test-money-config.contract.test.mjs",
+        "node scripts/sway-audio-storage-policy.contract.test.mjs"
+      ],
+      "results": [
+        {
+          "test": "scripts/sway-performer-withdrawal.behavior.test.ts",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-edgewyze-profile-cleanup.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-handle-claim.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-songwriter-first-synthetic-music.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/contract-check.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-visibility-control.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-organic-performer-discovery.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-product-structure.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-organic-discovery.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-discovery-observatory.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-public-discovery-contract.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-product-baseline.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-live-pilot-readiness.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-live-pilot-evidence.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-contract-gate-normalization.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-auto-closeout.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-business-store-boundary.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-business-store-production-persistence.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-captive-portal-preflight.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-database-schema.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-link-profile.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-deferred-kyc.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-degraded-connection-state.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-degraded-idempotency-persistence.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-demo-fixture-harness.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-production-demo-boundary.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-host-subdomain-routing.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-identity-ownership-authorization.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-idempotency-fingerprint.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-idempotent-submit.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-installable-app.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-live-room-readiness.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-live-night-spine.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-moderation-durable-block-runtime.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-moderation-active-blocks-postgres.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-moderation-safety-layer.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-native-minimum-functionality.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-native-utility.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-offline-client-resilience.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-offline-pending-ttl.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-patron-recovery.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-patron-public-logo-background.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-invalid-patron-room-recovery.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-payment-execution.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-payment-authorization-gating.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-fee-policy.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-payment-webhook-stripe.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-account-reads.behavior.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-payment-closeout-db-backed.contract.test.mjs",
+          "status": "BLOCKED",
+          "reason": "Requires real browser execution. PC offline; required local browser unavailable; cloud fixture navigation denied by browser policy."
+        },
+        {
+          "test": "scripts/sway-stripe-connect-onboarding.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-persisted-middleware-guards.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-persisted-access-store-readiness.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-browser-session.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-email-login.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-self-serve-signup.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-library-availability.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-dj-integration.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-music-source-capability.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-crowd-autopilot.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-hardware-mapping.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-connections.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-control-bridge.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-control-bridge-token.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-windows-booth-launcher.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-control-bridge-cloud-action.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-control-noop-guards.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-durable-performer-control-idempotency.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-protected-route-html-recovery.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-public-cta-integrity.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-link-preview-metadata.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-mission-fit.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-faq-surface.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-release-gate.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-complete-product-readiness.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-role-route-separation.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-schema-before-middleware.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-separate-vite-entrypoints.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-server-route-decoupling.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-surface-terminology.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-app-unification.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-telemetry.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/patron-payment-truth.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-payment-modal-viewport.contract.test.mjs",
+          "status": "BLOCKED",
+          "reason": "Requires real browser execution. PC offline; required local browser unavailable; cloud fixture navigation denied by browser policy."
+        },
+        {
+          "test": "scripts/sway-admin-account-deletion.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-live-cockpit.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-overlay-projector-qr.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-overlay-queue-motion.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-active-gig-route-context.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-public-room-state.behavior.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-active-room-registry.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-performer-share-kit.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-gig-scoped-room-truth.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-mobile-splitview-polish.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-mobile-demo-chrome.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-mobile-topbar-copy.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-surface-split-architecture-plan.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase1-shell-scaffold.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase2-shell-migration.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase3-operator-admin-runtime-split.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase4-operator-runtime-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase5-admin-ops-runtime-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase6-admin-ops-fragment-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase7-admin-ops-fragment-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase8-admin-ops-fragment-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase9-admin-ops-fragment-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-phase10-admin-ops-fragment-extraction.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-ugc-control-placeholders.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-app-store-legal-surface.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-universal-account-pro-mode.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-account-claim-onboarding.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-patron-room-lookup-transient-error-state.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-deploy-migration-gate.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-release-health.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-audio-publishing-foundation.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-audio-publishing-migration.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-audio-file-collaboration.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-collaborator-inbox.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-release-drafts.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-multitrack-releases.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-continuum-connector.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-public-event-listings.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-event-ticket-native-ga.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-native-ticket-production-proof.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-containment-onboarding.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-live-room-test-money-config.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        },
+        {
+          "test": "scripts/sway-audio-storage-policy.contract.test.mjs",
+          "status": "PASS",
+          "exitCode": 0
+        }
+      ]
+    },
+    "diffCheck": {
+      "status": "PASS",
+      "command": "git diff --check"
+    }
+  },
+  "dependencyChange": {
+    "newDirectDevDependency": "jsdom@26.1.0",
+    "newDevOnlyLockEntries": 36,
+    "existingNonrootLockEntriesChanged": 0,
+    "runtimeDependenciesChanged": false
+  },
+  "unexecuted": [
+    "Full browser integration with actual child UI and useSwayState.",
+    "Exact-dependency 13-case room-start and 13-case response-order browser suites.",
+    "Complete current-change 49-case readiness browser suite.",
+    "Windows and physical-device checks.",
+    "Fresh hosted separate-actor account/room authorization and payment-provider/payout proof."
+  ],
+  "accessLimits": [
+    "Owner PC unavailable.",
+    "Cloud Browser explicitly denied isolated fixture navigation; no alternate browser or navigation workaround attempted."
+  ],
+  "logSha256": {
+    "sway-ci-corrected.log": "8eb28d57a1d33019abdfa3653483bc78f269c21a1983825f5ef347289757d787",
+    "sway-lint-final.log": "f6909b044a2662ef7c179234b8f029192229304f293543c543e2906866d42cad",
+    "sway-build-final.log": "c3502239f8a40b57c984c75d73afae9fa7064268528ee3a771228cb9149c9bbf",
+    "sway-contracts-final.log": "a4585e977ba13be7db6cb8be17ffea7c5c3a921bb69413e5488a1b84f57fb5c7",
+    "nonbrowser-contracts-final.log": "0cabd7172adb47e72bd3d3ee3034b8cf1886ddfa89bdee93e92fdeeb73db8ee7"
+  }
+}

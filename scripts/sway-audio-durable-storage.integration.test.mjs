@@ -29,6 +29,7 @@ const server = read('server.ts');
 const renderBlueprint = read('render.yaml');
 const envExample = read('.env.example');
 const filesSurface = read('src/components/PerformerAudioFiles.tsx');
+const catalogReader = read('src/performer-catalog-reads.ts');
 const productionProof = read('scripts/sway-production-audio-proof.mjs');
 const productionEvidenceAudit = read('scripts/sway-production-audio-evidence-audit.mjs');
 const productionFixtureGenerator = read('scripts/sway-generate-audio-proof-fixture.mjs');
@@ -137,8 +138,9 @@ if (!filesSurface.includes('body: JSON.stringify({ maxUses: 1 })')
   || !filesSurface.includes('Create one-time link')) {
   failures.push('The Catalog one-time-link control must create an actual single-use share grant.');
 }
-if (!filesSurface.includes('const projectId = await refreshProjects();')
-  || !filesSurface.includes('if (projectId) await refreshAssets(projectId);')) {
+if (!filesSurface.includes('usePerformerCatalog()')
+  || !catalogReader.includes('selectProject(projectId, false);')
+  || !catalogReader.includes('if (projectId) void refreshAssets(projectId);')) {
   failures.push('Opening Files & projects must load sealed versions for the automatically selected project.');
 }
 for (const term of [
@@ -272,6 +274,11 @@ class InMemoryR2Client {
 }
 
 async function runBehaviorProof() {
+  // Prove initial selected-project loading and recovery behavior, not the old
+  // component's inline-fetch spelling. Storage-provider proof below is unchanged.
+  execFileSync(process.execPath, ['--import', 'tsx', 'scripts/sway-performer-catalog-reads.behavior.test.mjs'], {
+    cwd: root, stdio: 'inherit', timeout: 30_000
+  });
   const tempRoot = mkdtempSync(join(tmpdir(), 'sway-audio-storage-'));
   const dispatcherBundle = join(tempRoot, 'audio-object-storage.cjs');
   const r2Bundle = join(tempRoot, 'audio-object-storage-r2.cjs');

@@ -7,15 +7,26 @@ const sessionStore = readFileSync(join(root, 'src/server/performer-session-store
 const talentDashboard = readFileSync(join(root, 'src/components/TalentDashboard.tsx'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const failures = [];
+const tokenRouteStart = server.indexOf("app.post('/api/talent/control-bridge/token'");
+const tokenRouteEnd = server.indexOf('const CONTROL_BRIDGE_ACTIONS', tokenRouteStart);
+const tokenRoute = tokenRouteStart >= 0 && tokenRouteEnd > tokenRouteStart
+  ? server.slice(tokenRouteStart, tokenRouteEnd)
+  : '';
 
 for (const term of [
   "app.post('/api/talent/control-bridge/token'",
-  'resolveProtectedMutationActor(req, res, parseDurableGigId(req.body?.gig_id))',
+  'const actor = await resolveProtectedMutationActor(req, res, gigId)',
   'Control bridge token issuance requires durable session persistence.',
-  'ttlHours: 2',
+  'ttlHours: 6',
+  "sessionType: 'control_bridge'",
+  'gigId,',
   "eventType: 'performer_control_bridge.token.issue'",
   "tokenTransport: 'bridge_auth_token'",
   'bridgeToken: bridgeSession.token',
+  'buildWindowsBoothLauncher({',
+  'windowsLauncher,',
+  "availableLaunchers: ['windows_cmd_v1']",
+  'resolvePerformerLoginBaseUrl(process.env)',
   "tokenTransport: 'auth-token'",
   'command: bridgeCommand'
 ]) {
@@ -34,12 +45,18 @@ for (const term of [
 }
 
 for (const term of [
-  'Local bridge token',
+  'Booth connection',
   '/api/talent/control-bridge/token',
   'setBridgeCommand',
+  'setWindowsBoothLauncher',
   'bridgeTokenStatus',
-  'Create a short-lived token for Stream Deck, Companion, or scripts.',
+  'Create a six-hour connection for VirtualDJ, Stream Deck, or Companion.',
+  'Replace connection',
+  'data-sway-windows-booth-download="true"',
+  'Download Sway Booth for Windows',
+  'Advanced Stream Deck / Companion setup',
   'buildDashboardBridgePreset',
+  'downloadBase64File',
   'downloadJsonFile',
   'data-sway-control-bridge-preset-download="true"',
   'Download button preset',
@@ -49,6 +66,10 @@ for (const term of [
   if (!talentDashboard.includes(term)) {
     failures.push(`Talent dashboard missing bridge token UX term: ${term}`);
   }
+}
+
+if (tokenRoute.includes('req.headers.origin') || tokenRoute.includes("req.get('host')")) {
+  failures.push('Control bridge launchers must not derive their token destination from caller-controlled Origin/Host headers.');
 }
 
 for (const forbidden of [
@@ -65,6 +86,9 @@ for (const forbidden of [
 const testContracts = packageJson.scripts?.['test:contracts'] ?? '';
 if (!testContracts.includes('node scripts/sway-control-bridge-token.contract.test.mjs')) {
   failures.push('test:contracts must include the control bridge token contract.');
+}
+if (!testContracts.includes('node scripts/sway-windows-booth-launcher.contract.test.mjs')) {
+  failures.push('test:contracts must execute the Windows booth launcher behavior/security test.');
 }
 
 if (failures.length) {

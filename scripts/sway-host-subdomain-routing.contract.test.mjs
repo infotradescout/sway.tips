@@ -19,7 +19,7 @@ for (const term of [
   'shouldRedirectToAppHost',
   'buildAppHostRedirectUrl',
   "app.get('/:handle'",
-  "res.redirect(308, `/p/${encodeURIComponent(profile.handle)}`)",
+  'res.redirect(308, canonicalPerformerRedirectPath(req, profile.handle))',
   'req.originalUrl',
   'redirect(308, buildAppHostRedirectUrl(req.originalUrl))',
   "if (urlPath === '/') return 'public';",

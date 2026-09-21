@@ -24,10 +24,62 @@ services:
       - key: SWAY_LIVE_ROOM_DURABILITY_WRITES_DISABLED
         value: "false"
       # Explicit test-money pilot switch. Code ignores this switch with live
-      # Stripe keys; live money still requires a payout-ready connected account.
+      # Stripe keys; live money requires the independent PayPal payout gate.
       - key: SWAY_TEST_MODE_PLATFORM_BALANCE_ENABLED
         value: "false"
       - key: SWAY_TEST_MODE_PLATFORM_BALANCE_PERFORMER_IDS
+        value: ""
+      # The customer checkout gross-up preserves the performer's stated amount
+      # and Sway's platform fee. Live Stripe collection stays locked until the
+      # exact account pricing is reviewed and the versioned confirmation flips.
+      - key: SWAY_STRIPE_PROCESSING_FEE_BPS
+        value: "290"
+      - key: SWAY_STRIPE_PROCESSING_FIXED_CENTS
+        value: "30"
+      - key: SWAY_STRIPE_PROCESSING_FEE_CONFIRMED
+        value: "false"
+      - key: SWAY_STRIPE_PROCESSING_FEE_APPROVAL_VERSION
+        value: ""
+      # PayPal/Venmo performer payouts remain fail-closed until PayPal approves
+      # Sway, live credentials/webhook are installed, and the versioned release
+      # flags below are deliberately enabled. Stripe remains incoming-only.
+      - key: SWAY_PAYOUT_RECIPIENT_ENCRYPTION_KEY_BASE64
+        sync: false
+      - key: SWAY_PAYPAL_PAYOUTS_MODE
+        sync: false
+      - key: SWAY_PAYPAL_PAYOUTS_CLIENT_ID
+        sync: false
+      - key: SWAY_PAYPAL_PAYOUTS_CLIENT_SECRET
+        sync: false
+      - key: SWAY_PAYPAL_PAYOUTS_WEBHOOK_ID
+        sync: false
+      - key: SWAY_PAYPAL_PAYOUTS_FEE_CENTS
+        value: "25"
+      - key: SWAY_PAYPAL_PAYOUTS_CONFIRMED
+        value: "false"
+      - key: SWAY_PAYPAL_VENMO_PAYOUTS_CONFIRMED
+        value: "false"
+      - key: SWAY_PAYPAL_PAYOUTS_TEST_EXECUTION_ENABLED
+        value: "false"
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_EXECUTION_ENABLED
+        value: "false"
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_APPROVAL_VERSION
+        value: ""
+      - key: SWAY_PAYPAL_VENMO_PAYOUTS_LIVE_APPROVAL_VERSION
+        value: ""
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_FUNDING_CONFIRMED
+        value: "false"
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_FUNDING_VERSION
+        value: ""
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_FEE_CONFIRMED
+        value: "false"
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_FEE_VERSION
+        value: ""
+      - key: SWAY_PERFORMER_KYC_PROCESS_APPROVAL_VERSION
+        value: ""
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_CANARY_PERFORMER_ID
+        value: ""
+      - key: SWAY_PAYPAL_PAYOUTS_LIVE_CANARY_VERSION
         value: ""
       # Native ticket money remains explicitly closed in production until the
       # versioned approval, legal, finance, support, and live-proof gates pass.

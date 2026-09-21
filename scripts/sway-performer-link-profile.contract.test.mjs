@@ -372,11 +372,16 @@ for (const term of [
   'requestPayload',
   'feePolicyFromPayload(payload)',
   'calculateSwayPaymentAmounts',
-  "input.platformFeePayer === 'performer' ? 'performer' : 'patron'",
-  "platformFeePayer === 'patron'",
-  'amountTotalCents: input.amountSubtotalCents + platformFeeChargedToPatronCents',
-  'applicationFeeAmountCents: usesTestPlatformBalance ? undefined : payment.platformFee',
+  'calculateCustomerPaidProcessingRecovery',
+  "const platformFeePayer = 'patron' as const",
+  'const platformFeeChargedToPatronCents = input.platformFeeCents',
+  'processorFeeRecovery: amounts.processorFeeRecoveryCents',
+  'const usesPlatformBalance = isSwayPlatformBalanceDestination(operation.destinationAccountId)',
+  'destinationAccountId: usesPlatformBalance ? undefined : operation.destinationAccountId',
+  'applicationFeeAmountCents: usesPlatformBalance ? undefined : payment.platformFee',
+  "usesPlatformBalance ? 'platform_balance' : 'connected_account'",
   'sway_platform_fee_cents: String(payment.platformFee)',
+  'sway_processing_recovery_cents: String(payment.processorFeeRecovery)',
   "sway_platform_fee_payer: recordString(payload, 'platformFeePayer')",
   "sway_fee_charged_to_patron_cents: String(recordNumber(payload, 'platformFeeChargedToPatronCents')"
 ]) requireIncludes(paymentService, term, 'Central payment fee enforcement');
@@ -454,6 +459,7 @@ for (const term of [
 const shareProfileLookup = sliceBetween(server, 'async function resolvePublicPerformerDiscovery', 'async function findPublicShareProfile', 'share profile lookup');
 for (const term of [
   'visibilityState: performers.visibilityState',
+  'ownerEmailVerifiedAt: users.emailVerifiedAt',
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
   'nullif(trim(${performers.bio}), \'\') is not null',
   'profiles.length !== 1',
@@ -498,8 +504,11 @@ for (const term of [
   'normalizePublicProfileFeaturedMedia',
   'booking: publicBooking',
   'partnerState?.isEffective',
-  "claimState: 'claimed'"
+  'isPreview: false',
+  "claimState: profile.ownerEmailVerifiedAt ? 'claimed' : 'pending'"
 ]) requireIncludes(publicPerformerRoute, term, 'Public performer route');
+// Publishing a linked profile must not imply that its owner has claimed and verified the account.
+requireExcludes(publicPerformerRoute, "claimState: 'claimed'", 'Public performer claim state');
 for (const term of ['performerProfilePreviews', 'suspendedPerformer', 'curatedPreview', 'preview.claimedPerformerId']) {
   requireExcludes(publicPerformerRoute, term, 'Public performer route');
 }
@@ -507,6 +516,8 @@ requireExcludes(publicPerformerRoute, 'existingPerformer', 'Public performer rou
 const publicPayload = publicPerformerRoute.slice(publicPerformerRoute.indexOf('return res.json({'));
 for (const forbidden of [
   'performerId: profile.performerId',
+  'ownerUserId:',
+  'ownerEmailVerifiedAt:',
   'id: performerProfileLinks.id',
   'grantedAt:',
   'termsHash:',
@@ -531,6 +542,8 @@ for (const term of [
   'resolvePublicProfileHeroName',
   'resolvePublicProfilePageKindLabel',
   'primaryRole: string | null',
+  'roles: string[]',
+  'roles: profile.roles',
   'stageName: string | null',
   'canonicalHandle',
   'claims and verifies the profile',
@@ -560,8 +573,11 @@ for (const term of [
 ]) requireIncludes(editor, term, 'Authenticated profile editor');
 for (const term of [
   'What kind of performer are you?',
+  'Select all that apply.',
   'PUBLIC_PERFORMER_PRIMARY_ROLES',
-  'primaryRole: form.primaryRole || null',
+  'type="checkbox"',
+  'roles: form.roles',
+  'primaryRole: form.roles[0] || null',
   'Stage name — optional',
   'Your @handle is the main public name'
 ]) requireIncludes(editor, term, 'Authenticated profile editor identity fields');
@@ -569,21 +585,24 @@ for (const term of [
 for (const term of [
   'mergePublicProfileMetadata',
   'primaryRole',
+  'roles: performerRoles',
+  'roles: resolvePublicRoles(savedLinks.metadata)',
   'stageName',
   'profile_metadata: performerPublicProfiles.metadata',
   'preview_metadata: performerProfilePreviews.metadata',
-  'primary_role: resolvePublicPrimaryRole(performerRow.profile_metadata)',
+  'primary_role: performerRoles[0] ?? null',
   'stage_name: profileStageName || previewStageName',
   '.leftJoin(performerPublicProfiles, eq(performerPublicProfiles.performerId, performers.id))',
   '.leftJoin(performerProfilePreviews, eq(performerProfilePreviews.claimedPerformerId, performers.id))',
   ': performerRow.preview_specialties ?? []',
-  "return res.status(422).json({ error: 'Choose your primary role.' })"
+  "return res.status(422).json({ error: 'Choose at least one performer role.' })"
 ]) requireIncludes(server, term, 'Profile identity API and console state');
 
 for (const term of [
   'resolvePublicProfileHeroName',
   'resolvePublicProfilePageKindLabel',
   'performerProfile?.primary_role',
+  'performerProfile?.roles',
   'performerProfile?.specialties',
   'Ready to start a live room · ${performerRoleLabel}'
 ]) requireIncludes(talentApp, term, 'Handle-first performer console');
@@ -620,7 +639,8 @@ for (const term of [
   'PatronNoSessionRecovery'
 ]) requireIncludes(patronApp, term, 'Patron route separation');
 requireExcludes(patronApp, 'performerHandle={route.name', 'Patron route separation');
-requireIncludes(sharedShell, 'if (!statePath || isDemoModeEnabled()) return;', 'Standalone profile polling guard');
+requireIncludes(sharedShell, 'scope.path && !isDemoModeEnabled() ? setInterval', 'Standalone profile polling guard');
+requireIncludes(sharedShell, "if (!scope.path) { clear('missing', null); return; }", 'Standalone profile fetch guard');
 
 for (const term of [
   "SWAY_DISPOSABLE_MIGRATION_PROOF === '1'",

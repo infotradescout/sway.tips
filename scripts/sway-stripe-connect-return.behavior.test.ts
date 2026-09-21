@@ -25,6 +25,7 @@ function responseRecorder() {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: false }),
     loadOwnedPerformer: async () => null,
     getAccountStatus: async () => {
@@ -33,7 +34,7 @@ function responseRecorder() {
     },
     applyStatus: async () => ({ kind: 'not_found' })
   });
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=auth' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=auth' }]);
   assert.equal(touchedProvider, false);
 }
 
@@ -44,6 +45,7 @@ function responseRecorder() {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => {
       throw new Error('session database unavailable');
     },
@@ -55,7 +57,7 @@ function responseRecorder() {
     }
   });
   assert.equal(logged, true);
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -65,6 +67,7 @@ function responseRecorder() {
     req: {},
     res: response,
     runtimeAvailable: false,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => {
       loadedOwner = true;
@@ -74,7 +77,7 @@ function responseRecorder() {
     applyStatus: async () => ({ kind: 'updated', performerId })
   });
   assert.equal(loadedOwner, false);
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -83,12 +86,13 @@ function responseRecorder() {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => null,
     getAccountStatus: async () => ready,
     applyStatus: async () => ({ kind: 'updated', performerId })
   });
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -98,6 +102,7 @@ function responseRecorder() {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => {
       throw new Error('database unavailable while loading owner');
@@ -109,7 +114,7 @@ function responseRecorder() {
     }
   });
   assert.equal(logged, true);
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -119,6 +124,7 @@ function responseRecorder() {
     req: { query: { account: 'acct_attacker_supplied' } },
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async (requestedOwnerId) => {
       assert.equal(requestedOwnerId, ownerId);
@@ -133,8 +139,14 @@ function responseRecorder() {
       return { kind: 'updated', performerId };
     }
   });
-  assert.deepEqual(applied, { performerId, ownerUserId: ownerId, accountId, providerStatus: ready });
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=return' }]);
+  assert.deepEqual(applied, {
+    performerId,
+    ownerUserId: ownerId,
+    accountId,
+    paymentMode: 'test',
+    providerStatus: ready
+  });
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=return' }]);
 }
 
 for (const failure of ['provider', 'database'] as const) {
@@ -145,6 +157,7 @@ for (const failure of ['provider', 'database'] as const) {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => ({ performerId, stripeAccountId: accountId }),
     getAccountStatus: async () => {
@@ -162,7 +175,7 @@ for (const failure of ['provider', 'database'] as const) {
   });
   assert.equal(applied, failure === 'database');
   assert.equal(logged, true);
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -171,12 +184,13 @@ for (const failure of ['provider', 'database'] as const) {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => ({ performerId, stripeAccountId: accountId }),
     getAccountStatus: async () => ready,
     applyStatus: async () => ({ kind: 'not_found' })
   });
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=pending' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=pending' }]);
 }
 
 {
@@ -185,12 +199,13 @@ for (const failure of ['provider', 'database'] as const) {
     req: {},
     res: response,
     runtimeAvailable: true,
+    paymentMode: 'test',
     requireTalentAccess: async () => ({ allowed: true, actor: { actorId: ownerId } }),
     loadOwnedPerformer: async () => ({ performerId, stripeAccountId: accountId }),
     getAccountStatus: async () => ready,
     applyStatus: async () => ({ kind: 'unchanged', performerId })
   });
-  assert.deepEqual(redirects, [{ status: 303, path: '/talent?connect=return' }]);
+  assert.deepEqual(redirects, [{ status: 303, path: '/talent/account?connect=return' }]);
 }
 
 console.log('Stripe Connect return behavior test passed.');

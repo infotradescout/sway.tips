@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { CheckCircle2, Disc3, FileCheck2, Loader2, Plus, Save, ShieldCheck } from 'lucide-react';
 import PerformerReleaseTrackBuilder from './PerformerReleaseTrackBuilder';
+import RecordingCreationDisclosureFields, {
+  EMPTY_RECORDING_CREATION_DISCLOSURE,
+  type RecordingCreationDisclosure
+} from './RecordingCreationDisclosureFields';
 
 export type ReleaseMaster = {
   versionId: string;
@@ -26,6 +30,11 @@ export type ReleaseRecording = {
   isExplicit: boolean;
   languageCode: string | null;
   originalReleaseDate: string | null;
+  lyricsAuthorship: string;
+  compositionAuthorship: string;
+  vocalPerformance: string;
+  productionMethod: string;
+  lyricsExcerpt: string | null;
   rightsStatus: string;
   discNumber: number;
   trackNumber: number;
@@ -69,7 +78,7 @@ const RIGHTS_TYPES = [
   ['master_control', 'Master control'], ['composition_control', 'Composition control'],
   ['sample_clearance', 'Sample clearance'], ['cover_license', 'Cover license'],
   ['beat_license', 'Beat license'], ['artwork_control', 'Artwork control'],
-  ['performer_consent', 'Performer consent'], ['ai_disclosure', 'AI disclosure'],
+  ['performer_consent', 'Performer consent'], ['ai_disclosure', 'Synthetic performance / AI production rights'],
   ['distribution_authorization', 'Distribution authorization']
 ];
 
@@ -129,6 +138,13 @@ function ReleaseEditor({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [reviewerConnectionId, setReviewerConnectionId] = useState('');
+  const needsSyntheticRights = release.recordings.some((recording) => (
+    ['human_ai_assisted', 'generated'].includes(recording.lyricsAuthorship)
+    || ['human_ai_assisted', 'generated'].includes(recording.compositionAuthorship)
+    || ['virtual_original', 'licensed_replica', 'mixed'].includes(recording.vocalPerformance)
+    || ['ai_assisted', 'generated', 'mixed'].includes(recording.productionMethod)
+  ));
+  const needsVoiceConsent = release.recordings.some((recording) => recording.vocalPerformance === 'licensed_replica');
 
   useEffect(() => {
     if (!release.recordings.some((recording) => recording.recordingId === rights.recordingId)) {
@@ -150,6 +166,11 @@ function ReleaseEditor({
           isrc: leadRecording?.isrc || null,
           isExplicit: leadRecording?.isExplicit === true,
           languageCode: leadRecording?.languageCode || null,
+          lyricsAuthorship: leadRecording?.lyricsAuthorship || null,
+          compositionAuthorship: leadRecording?.compositionAuthorship || null,
+          vocalPerformance: leadRecording?.vocalPerformance || null,
+          productionMethod: leadRecording?.productionMethod || null,
+          lyricsExcerpt: leadRecording?.lyricsExcerpt || null,
           credits: leadRecording?.credits.length
             ? leadRecording.credits
             : [{ displayName: leadRecording?.primaryArtistName || release.primaryArtistName, role: 'primary_artist' }],
@@ -239,6 +260,7 @@ function ReleaseEditor({
 
       <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
         <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-amber-200" /><p className="text-xs font-black text-white">Immutable rights evidence</p></div>
+        {needsSyntheticRights ? <p className="mt-2 text-[11px] leading-5 text-amber-100">This release uses synthetic performance or generative production. Add the commercial-use terms as “Synthetic performance / AI production rights.”{needsVoiceConsent ? ' A licensed voice replica also needs a verified Performer consent declaration.' : ''} The songwriter credit remains the lead authorship credit.</p> : null}
         {rightsDocuments.some((asset) => asset.projectId === release.projectId) ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <select value={rights.declarationType} onChange={(event) => setRights({ ...rights, declarationType: event.target.value })} className="min-h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-xs text-white">{RIGHTS_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
@@ -286,6 +308,8 @@ export default function PerformerReleaseDrafts() {
   const [trackTitle, setTrackTitle] = useState('');
   const [versionTitle, setVersionTitle] = useState('');
   const [primaryArtistName, setPrimaryArtistName] = useState('');
+  const [songwriterName, setSongwriterName] = useState('');
+  const [creation, setCreation] = useState<RecordingCreationDisclosure>(EMPTY_RECORDING_CREATION_DISCLOSURE);
   const [releaseType, setReleaseType] = useState('single');
   const [upc, setUpc] = useState('');
   const [isrc, setIsrc] = useState('');
@@ -359,6 +383,7 @@ export default function PerformerReleaseDrafts() {
           trackTitle: trackTitle || title,
           versionTitle,
           primaryArtistName,
+          songwriterName,
           releaseType,
           upc,
           isrc,
@@ -368,7 +393,8 @@ export default function PerformerReleaseDrafts() {
           originalReleaseDate,
           territories: territories.split(',').map((value) => value.trim()).filter(Boolean),
           languageCode,
-          isExplicit
+          isExplicit,
+          ...creation
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -380,6 +406,7 @@ export default function PerformerReleaseDrafts() {
       setVersionTitle('');
       setUpc('');
       setIsrc('');
+      setCreation(EMPTY_RECORDING_CREATION_DISCLOSURE);
       await refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not create release draft.');
@@ -424,8 +451,11 @@ export default function PerformerReleaseDrafts() {
             <label className="text-xs font-bold text-slate-300">Release title<input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
             <label className="text-xs font-bold text-slate-300">Primary artist<input required maxLength={200} value={primaryArtistName} onChange={(event) => setPrimaryArtistName(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
             <label className="text-xs font-bold text-slate-300">Track title<input required maxLength={200} value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} placeholder="Defaults to release title" className="mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-white" /></label>
+            <label className="text-xs font-bold text-slate-300">Songwriter or composer credit name<input required maxLength={160} value={songwriterName} onChange={(event) => setSongwriterName(event.target.value)} placeholder="Public pen name or credited name" className="mt-1 min-h-11 w-full rounded-xl border border-cyan-500/30 bg-slate-900 px-3 text-sm text-white" /><span className="mt-1 block text-[10px] font-normal leading-4 text-slate-500">This public credit—not your private account identity—identifies who wrote the words or composition.</span></label>
             <label className="text-xs font-bold text-slate-300">Release type<select value={releaseType} onChange={(event) => setReleaseType(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-white"><option value="single">Single</option><option value="ep">EP</option><option value="album">Album</option><option value="comedy_special">Comedy special</option><option value="spoken_word">Spoken word</option><option value="other">Other</option></select></label>
           </div>
+
+          <RecordingCreationDisclosureFields values={creation} onChange={setCreation} />
 
           <details className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
             <summary className="cursor-pointer list-none text-xs font-bold text-slate-400">Identifiers and release details</summary>
@@ -443,7 +473,7 @@ export default function PerformerReleaseDrafts() {
             </div>
           </details>
 
-          <button type="submit" disabled={submitting || !selectedMaster} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-black text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="submit" disabled={submitting || !selectedMaster || !songwriterName || !creation.lyricsAuthorship || !creation.compositionAuthorship || !creation.vocalPerformance || !creation.productionMethod} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-black text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50">
             <Plus className="h-4 w-4" aria-hidden="true" />
             {submitting ? 'Saving release draft…' : 'Create private release draft'}
           </button>
