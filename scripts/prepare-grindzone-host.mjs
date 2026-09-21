@@ -5,8 +5,8 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='c8b0f74353c9b01fea212dbc0941f5f2867ad9a0';
-export const downloadSourceSha='c8b0f74353c9b01fea212dbc0941f5f2867ad9a0';
+export const sourceSha='3744c4e08cd878f51767a64b89ad4162be89644b';
+export const downloadSourceSha='3744c4e08cd878f51767a64b89ad4162be89644b';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -30,12 +30,14 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const evidence=path.join(target,'phone-acceptance');
   run(target,process.execPath,['tools/verify-phone-connection.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-zone-workspace.mjs',hostRoot,'local',evidence]);
+  run(target,process.execPath,['tools/verify-hidden-zones.mjs',hostRoot,'local',evidence]);
   let live=null;
   try{const response=await fetch('https://sway.tips/api/release-health',{signal:AbortSignal.timeout(10000)});if(response.ok)live=await response.json();}catch{}
   // A same-source redeploy performs the public-network check only after this host revision is live.
   if(live?.commit===process.env.RENDER_GIT_COMMIT&&live?.status==='ok'){
     run(target,process.execPath,['tools/verify-phone-connection.mjs',hostRoot,'live',evidence]);
     run(target,process.execPath,['tools/verify-zone-workspace.mjs',hostRoot,'live',evidence]);
+    run(target,process.execPath,['tools/verify-hidden-zones.mjs',hostRoot,'live',evidence]);
   }else console.log('GRINDZONE_PHONE_LIVE_PENDING: this source has not reached the public host yet.');
   // Compile the reviewed version into the existing host without rewriting the large canonical server source.
   // All application code is unchanged by this binding except the one exact relay dependency argument.
@@ -50,7 +52,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   if(bytes.length!==manifest.bytes||createHash('sha256').update(bytes).digest('hex')!==manifest.sha256)throw Error('GrindZone download integrity failed');
   const published=path.resolve('dist/grindzone-download');mkdirSync(published,{recursive:true});
   copyFileSync(archive,path.join(published,manifest.filename));copyFileSync(path.join(download,'release.json'),path.join(published,'release.json'));
-  for(const mode of ['local','live'])for(const kind of ['phone','zones']){
+  for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery']){
     const report=path.join(evidence,mode+'-'+kind+'.json');if(!existsSync(report))continue;
     const result=JSON.parse(readFileSync(report,'utf8'));if(result.passed!==true||result.source!==downloadSourceSha)throw Error('Phone acceptance is incomplete or stale');
     copyFileSync(report,path.join(published,mode+'-'+kind+'.json'));copyFileSync(path.join(evidence,mode+'-'+kind+'.png'),path.join(published,mode+'-'+kind+'.png'));
