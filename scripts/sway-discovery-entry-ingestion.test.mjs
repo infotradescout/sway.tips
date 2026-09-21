@@ -113,7 +113,7 @@ try {
   assert.equal(report.cases.length, 2);
   assert(report.cases.every(row => row.passed), 'Private-to-public ingestion regression failed');
   report.result = 'pass';
-} catch (error) { report.error = String(error.stack || error); process.exitCode = 1; }
+} catch (error) { report.error = String(error.stack || error); }
 finally {
   globalThis.fetch = originalFetch; restoreGlobal('window', previousWindow); restoreGlobal('document', previousDocument);
   if (child && child.exitCode === null && child.signalCode === null) {
@@ -128,3 +128,5 @@ finally {
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(report, null, 2));
   console.log('DISCOVERY_INGESTION_SUMMARY ' + JSON.stringify(report));
 }
+// Embedded database cleanup must not reset a failed proof to a successful exit.
+if (report.result !== 'pass') process.exit(1);
