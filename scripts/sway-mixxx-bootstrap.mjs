@@ -47,9 +47,9 @@ print('MIXXX_PACKAGES '+json.dumps(result))
  writeFileSync(join(root,'uris.txt'),uris);writeFileSync(join(root,'download.py'),py);await run('download','python3',[join(root,'download.py')],{timeout:360000});
  const deps=join(root,'deps');env.PATH=join(deps,'usr/bin')+':'+env.PATH;env.LD_LIBRARY_PATH=[join(deps,'usr/lib/x86_64-linux-gnu'),join(deps,'lib/x86_64-linux-gnu')].join(':');env.QT_PLUGIN_PATH=join(deps,'usr/lib/x86_64-linux-gnu/qt5/plugins');
  receipt.packages=JSON.parse(readFileSync(join(root,'package-receipt.json'),'utf8'));
- await run('version',join(deps,'usr/bin/mixxx'),['--version']);
- await run('help',join(deps,'usr/bin/mixxx'),['--help']);
- await run('runtime-details','sh',['-c',`ldd '${deps}/usr/bin/mixxx'; cat '${deps}/usr/include/portmidi.h' | grep -A15 -E 'PmDeviceInfo|Pm_OpenInput|Pm_Read|Pm_Poll|Pm_WriteShort';`]);
+ // Mixxx 2.3 prints its version in --help; --version is not a supported option.
+ const help=await run('version-and-help',join(deps,'usr/bin/mixxx'),['--help'],{timeout:20000});
+ assert.match(help,/Mixxx v2\.3\.3/);receipt.mixxxVersion='2.3.3';
  receipt.status='real_binary_prepared_not_playback_acceptance';
  if(process.env.SWAY_MIXXX_EXECUTE_NATIVE==='true'){
    const {runNative}=await import('./sway-mixxx-native-run.mjs');
