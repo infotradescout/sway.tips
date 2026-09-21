@@ -16,3 +16,6 @@ test('disabled shared-phone feature performs no build or disk writes',async()=>{
  try{process.chdir(dir);delete process.env.GRINDZONE_PHONE_ENABLED;const module=await import(script.href+'?disabled-test');assert.match(module.sourceSha,/^[a-f0-9]{40}$/);assert.equal(module.sourceSha,module.downloadSourceSha);assert.deepEqual(readdirSync(dir),[]);}
  finally{process.chdir(cwd);if(previous===undefined)delete process.env.GRINDZONE_PHONE_ENABLED;else process.env.GRINDZONE_PHONE_ENABLED=previous;rmSync(dir,{recursive:true,force:true});}
 });
+// Preserve node:test failures explicitly for the existing hard-contract convention.
+// Wait until asynchronous tests finish; never force a successful exit.
+process.on('beforeExit', () => { if (process.exitCode) process.exit(1); });

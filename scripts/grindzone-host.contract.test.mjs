@@ -17,3 +17,6 @@ test('shared phone hosting is optional and cannot replace the main app or migrat
  assert.match(prepare,/GIT_TERMINAL_PROMPT:'0'/);assert.match(prepare,/--ignore-scripts/);
  assert.match(read('public/sw.js'),/url\.pathname === '\/grindzone' \|\| url\.pathname\.startsWith\('\/grindzone\/'\)/);
 });
+// Preserve node:test failures explicitly for the existing hard-contract convention.
+// Wait until asynchronous tests finish; never force a successful exit.
+process.on('beforeExit', () => { if (process.exitCode) process.exit(1); });
