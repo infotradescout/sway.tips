@@ -116,13 +116,27 @@ function isValidPayload(payload: Record<string, unknown>): payload is ShellFrict
   );
 }
 
+// Mirrors the existing server entry_path acceptance boundary. This does not
+// grant publication or establish that any route visitor is a real person.
+function isSupportedPublicEntryPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 300
+    && !/[?#]/.test(value)
+    && /^\/(?:$|p\/[^\s]+|e\/[0-9a-f-]{36}|g\/[0-9a-f-]{36}|r\/[0-9a-f-]{36}|discover\/?$)/i.test(value);
+}
+
 export function sendFrictionEvent(event: string, payload: Record<string, unknown>) {
   try {
     if (!isAllowedEvent(event)) return;
     if (!hasOnlyAllowedPayloadKeys(payload)) return;
     if (!isValidPayload(payload)) return;
 
-    const attributionChannel = payload.attribution_channel || captureDiscoveryAttribution().channel;
+    const currentPath = typeof window === 'undefined' ? undefined : window.location.pathname;
+    const attributionChannel = payload.attribution_channel || (
+      isSupportedPublicEntryPath(currentPath) ? captureDiscoveryAttribution().channel : undefined
+    );
+    const storedEntry = getDiscoveryEntryPath();
+    const entryPath = isSupportedPublicEntryPath(storedEntry) ? storedEntry
+      : isSupportedPublicEntryPath(currentPath) ? currentPath : undefined;
     void fetch('/api/analytics/shell', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -135,8 +149,8 @@ export function sendFrictionEvent(event: string, payload: Record<string, unknown
         has_session_context: payload.has_session_context,
         build_commit: payload.build_commit,
         journey_id: getOrCreateDiscoveryJourneyId(),
-        entry_path: getDiscoveryEntryPath(),
-        attribution_channel: attributionChannel,
+        ...(entryPath ? { entry_path: entryPath } : {}),
+        ...(attributionChannel ? { attribution_channel: attributionChannel } : {}),
         ...(payload.entity_kind ? { entity_kind: payload.entity_kind } : {}),
         ...(payload.entity_key ? { entity_key: payload.entity_key } : {}),
         ...(payload.action_kind ? { action_kind: payload.action_kind } : {}),
