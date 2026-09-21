@@ -24,7 +24,11 @@ test('a local deletion failure does not bypass a working tab-session identifier'
  browser({local:{...storage(),removeItem(){throw new Error('local blocked')}},session});assert.equal(a.getOrCreateDiscoveryJourneyId(),id);
 });
 test('tab session survives reload but separate tabs and denied-storage pages rotate',()=>{
- const session=storage();browser({session});const id=a.getOrCreateDiscoveryJourneyId();browser({session});assert.equal(a.getOrCreateDiscoveryJourneyId(),id);
+ const local=storage(),session=storage();local.setItem(KEY,'aaaf0000-1111-4111-8111-111111111111');
+ const originalSet=local.setItem;local.setItem=(key,value)=>{assert.notEqual(key,KEY,'Journey IDs must not persist in localStorage');originalSet(key,value);};
+ browser({local,session});const id=a.getOrCreateDiscoveryJourneyId();assert.equal(local.getItem(KEY),null,'Remove the old persistent journey ID');
+ assert.equal(session.getItem(KEY),id,'Use tab session storage for the journey ID');
+ browser({local,session});assert.equal(a.getOrCreateDiscoveryJourneyId(),id);assert.equal(local.getItem(KEY),null);
  browser();assert.notEqual(a.getOrCreateDiscoveryJourneyId(),id);
  browser({denied:true});const page=a.getOrCreateDiscoveryJourneyId();browser({denied:true});assert.notEqual(a.getOrCreateDiscoveryJourneyId(),page);
 });
