@@ -1,5 +1,7 @@
 // Explicit isolated modes never run production or repeat other evidence gates.
-if (process.env.SWAY_DISCOVERY_ATTRIBUTION_PROOF === 'true') {
+if (process.env.SWAY_DISCOVERY_ATTRIBUTION_CONTRACT_RESUME === 'true') {
+  await import('./sway-discovery-attribution-contract-resume.mjs');
+} else if (process.env.SWAY_DISCOVERY_ATTRIBUTION_PROOF === 'true') {
   await import('./sway-discovery-attribution-proof.mjs');
 } else if (process.env.SWAY_PUBLIC_INFO_SCOPED_SUPPLEMENT === 'true') {
   await import('./sway-public-information-scoped-proof.mjs');
