@@ -1,5 +1,7 @@
 // Explicit isolated modes never change production or repeat other evidence gates.
-if (process.env.SWAY_ACQUISITION_QUALITY_PROOF === 'true') {
+if (process.env.SWAY_ACQUISITION_INGRESS_INSPECT === 'true') {
+  await import('./inspect-acquisition-ingress.mjs');
+} else if (process.env.SWAY_ACQUISITION_QUALITY_PROOF === 'true') {
   await import('./sway-acquisition-quality-proof.mjs');
 } else if (process.env.SWAY_DISCOVERY_ENTRY_PROOF === 'true') {
   await import('./sway-discovery-entry-proof.mjs');
