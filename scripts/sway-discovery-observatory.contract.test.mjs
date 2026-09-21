@@ -62,8 +62,9 @@ requireIncludes(server, 'recordDirectTipDiscoveryOutcome', 'Committed durable ti
 requireIncludes(server, 'await idempotencyStore.completePendingAction', 'Tip evidence must follow durable action completion.');
 requireIncludes(patronShared, "'x-sway-discovery-entry-once': '1'", 'Room proof must use the one-shot authoritative state boundary.');
 requireIncludes(patronApp, 'discovery_journey_id: getOrCreateDiscoveryJourneyId()', 'Tip persistence must receive the pseudonymous journey ID.');
-requireIncludes(attribution, 'window.sessionStorage.getItem(JOURNEY_ID_KEY)', 'Journey IDs must be session scoped.');
-requireIncludes(attribution, 'window.localStorage.removeItem(JOURNEY_ID_KEY)', 'Old persistent journey IDs must be removed.');
+// The behavior gate below proves tab-session persistence, legacy-key removal,
+// no persistent journey writes, and denied-storage continuity. It must not
+// require unsafe window.storage property access outside the error boundary.
 if (attribution.includes('window.localStorage.setItem(JOURNEY_ID_KEY')) failures.push('Journey IDs must not persist in localStorage.');
 requireIncludes(observatory, 'One pseudonymous top-level browser-tab session.', 'Dashboard must document the distinct-journey grain.');
 
@@ -150,6 +151,15 @@ if (failures.length) {
   process.exit(1);
 }
 
+const journeyEvidence = execFileSync(process.execPath, ['--import', 'tsx', '--test', '--test-reporter=tap', 'scripts/sway-discovery-attribution.test.mjs'], {
+  cwd: root,
+  encoding: 'utf8',
+  timeout: 30000
+});
+console.log(journeyEvidence);
+assert.match(journeyEvidence, /^# pass 9\s*$/m, 'All journey-boundary tests must execute.');
+assert.match(journeyEvidence, /^# fail 0\s*$/m);
+assert.match(journeyEvidence, /^# skipped 0\s*$/m);
 execFileSync(process.execPath, ['--import', 'tsx', 'scripts/sway-discovery-observatory.behavior.test.ts'], {
   cwd: root,
   stdio: 'inherit'
