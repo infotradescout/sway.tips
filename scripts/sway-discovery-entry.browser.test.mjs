@@ -7,7 +7,9 @@ import { chromium } from 'playwright';
 
 const output=path.resolve('tmp/public-entry-qa/discovery-entry');
 fs.mkdirSync(output,{recursive:true});
-const compiled=buildSync({stdin:{contents:"import PublicDiscoverPage from './src/components/PublicDiscoverPage'; import {mountSwayShell} from './src/entries/mount'; import {sendDiscoveryEvent} from './src/shells/frictionClient'; window.discoveryEntryTest={sendDiscoveryEvent}; mountSwayShell(<PublicDiscoverPage/>);",resolveDir:process.cwd(),sourcefile:'discovery-entry-fixture.tsx',loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',loader:{'.css':'empty'},define:{'process.env.NODE_ENV':'"production"'}}).outputFiles[0].text;
+// Import the shipped entry point, including PatronAppShell and PatronApp, not
+// a direct directory mount that bypasses their startup hooks and campaign reads.
+const compiled=buildSync({stdin:{contents:"import './src/entries/patron'; import {sendDiscoveryEvent} from './src/shells/frictionClient'; import {captureCampaignCode} from './src/shells/campaignAttribution'; window.discoveryEntryTest={sendDiscoveryEvent,captureCampaignCode};",resolveDir:process.cwd(),sourcefile:'discovery-entry-fixture.tsx',loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',loader:{'.css':'empty'},define:{'process.env.NODE_ENV':'"production"','import.meta.env':'{"MODE":"production","PROD":true,"DEV":false,"BASE_URL":"/","VITE_SWAY_DEMO_MODE":"false"}'}}).outputFiles[0].text;
 const received=[];
 const server=http.createServer((req,res)=>{
  if(req.method==='POST'&&req.url==='/api/analytics/shell'){
@@ -17,7 +19,7 @@ const server=http.createServer((req,res)=>{
  if(req.url==='/fixture.js'){res.writeHead(200,{'content-type':'application/javascript'});res.end(compiled);return;}
  if(req.url.startsWith('/api/public/feed')){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({rooms:[],events:[],releases:[],performerDirectory:{performers:[],hasMore:false}}));return;}
  if(req.url==='/sw.js'){res.writeHead(404);res.end();return;}
- res.writeHead(200,{'content-type':'text/html'});res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Owned discovery component check</title><div id="root"></div><script src="/fixture.js"></script>');
+ res.writeHead(200,{'content-type':'text/html'});res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Owned full patron entry check</title><div id="root"></div><script src="/fixture.js"></script>');
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin='http://127.0.0.1:'+server.address().port;
@@ -32,7 +34,7 @@ try{
    if(storage==='methods-denied')for(const key of ['getItem','setItem','removeItem'])Storage.prototype[key]=function(){throw new DOMException('Diagnostic storage denial','SecurityError');};
    if(storage==='write-quota')Storage.prototype.setItem=function(){throw new DOMException('Diagnostic quota limit','QuotaExceededError');};
   },storage);
-  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(5000);
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.stack||e.message));page.setDefaultTimeout(5000);
   const row={width,storage,passed:false},start=received.length;
   try{
    await page.goto(origin+'/discover?utm_source=google',{waitUntil:'domcontentloaded'});
@@ -50,6 +52,15 @@ try{
    assert(landing&&search,'Actual directory must emit landing and deliberate search events');
    assert.equal(landing.attribution_channel,'google','Omitted source must retain the captured first touch');assert.equal(search.attribution_channel,'google');
    assert.equal(search.journey_id,landing.journey_id);assert.equal(landing.entry_path,'/discover');assert.equal(search.entry_path,'/discover');
+   const campaign=await page.evaluate(()=>{
+    history.replaceState(null,'','/discover?utm_source=google&camp=owned-test-campaign');
+    const fromQuery=window.discoveryEntryTest.captureCampaignCode();
+    history.replaceState(null,'','/discover?utm_source=google');
+    return {fromQuery,afterQuery:window.discoveryEntryTest.captureCampaignCode()};
+   });
+   assert.equal(campaign.fromQuery,'owned-test-campaign','Current campaign hint survives an unavailable storage write');
+   assert.equal(campaign.afterQuery,storage==='available'?'owned-test-campaign':null,'No unavailable campaign persistence may be invented');
+   row.campaignStorageOptional=true;
    const prior=received.length;
    await page.evaluate(()=>{const payload={shell:'patron',surface:'public-discover',route_family:'public-discover',has_route_context:true,has_session_context:false,build_commit:'owned-fixture'};
     window.discoveryEntryTest.sendDiscoveryEvent('discovery_primary_action',{...payload,attribution_channel:'referral'});
@@ -64,7 +75,7 @@ try{
  }
 }finally{
  await browser?.close();await new Promise(resolve=>server.close(resolve));
- fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({scope:'Actual PublicDiscoverPage, mountSwayShell, SwayInstallPrompt and frictionClient in Chromium. Feed and telemetry receiver are isolated fixtures. CSS omitted: not a visual or production-ingestion proof.',results},null,2));
+ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({scope:'Full shipped patron entry, PatronAppShell, PatronApp, directory, mount, install prompt and telemetry client in Chromium. Public environment, feed and telemetry are isolated fixtures; CSS omitted. Not a visual, production-ingestion, commission or payment proof.',results},null,2));
 }
-assert.equal(results.length,8);assert(results.every(r=>r.passed),'Discovery entry browser checks failed: '+JSON.stringify(results.filter(r=>!r.passed)));
+assert.equal(results.length,8);assert(results.every(r=>r.passed),'Full patron entry browser checks failed: '+JSON.stringify(results.filter(r=>!r.passed)));
 console.log('DISCOVERY_ENTRY_BROWSER_SUMMARY '+JSON.stringify({passed:results.length,failed:0}));
