@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { runDiscoveryTraffic } from './discovery-traffic';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
@@ -817,6 +818,6 @@ export function routeFamilyGuard(accessControl: AccessControl) {
     }
 
     writeResolvedActor(req, result.actor);
-    next();
+    runDiscoveryTraffic(req, next);
   };
 }
