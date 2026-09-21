@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { createSwayDb, type SwayDb } from '../db/client';
 import { gigAccessGrants, gigSessions, performerMemberships, performers, users } from '../db/schema';
 import { createPerformerSessionStore, type PerformerSessionType, type ResolvedPerformerSession } from './performer-session-store';
+import { applyTrafficTruthToTelemetryRequest, shouldHard404ScannerRequest } from './traffic-truth-request';
 
 export type SwayActor = {
   actorId: string | null;
@@ -488,6 +489,9 @@ export function createAccessControl({
   }
 
   async function hydrateRequestActor(req: Request) {
+    // server.ts runs hydration after JSON parsing for every request, including
+    // APIs that intentionally bypass the document-only routeFamilyGuard.
+    applyTrafficTruthToTelemetryRequest(req);
     if (hasResolvedActor(req)) {
       return resolveActor(req);
     }
@@ -741,6 +745,17 @@ export function createAccessControl({
 
 export function routeFamilyGuard(accessControl: AccessControl) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    // Traffic classification is analytics-only; original authorization follows unchanged.
+    applyTrafficTruthToTelemetryRequest(req);
+    if (shouldHard404ScannerRequest(req)) {
+      res.status(404).set({
+        'Cache-Control': 'no-store',
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Robots-Tag': 'noindex, nofollow'
+      }).send('Not found.');
+      return;
+    }
     const shell = req.headers['x-sway-shell'];
     const demoPreviewShellAllowed =
       process.env.NODE_ENV !== 'production' &&
