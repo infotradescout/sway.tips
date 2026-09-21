@@ -11,6 +11,7 @@
     "check": "npm run lint",
     "lint": "tsc --noEmit",
     "validate": "npm run lint && npm run build && npm run test:payment-pricing && npm run test:contracts",
+    "pretest:contracts": "node scripts/prepare-contract-browser.mjs",
     "readiness:report": "node scripts/sway-complete-product-readiness.mjs",
     "readiness:assert": "node scripts/sway-complete-product-readiness.mjs --assert-ready",
     "fixture:audio:production": "node scripts/sway-generate-audio-proof-fixture.mjs",
