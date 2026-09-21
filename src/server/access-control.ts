@@ -566,7 +566,8 @@ export function createAccessControl({
           req,
           actor,
           fallbackPolicy ?? createFallbackAccessPolicy(),
-          fallbackVerificationConfig ?? createFallbackVerificationConfig()
+          fallbackVerificationConfig ?? createFallbackVerificationConfig(),
+          { allowSupport: false }
         );
       }
       if (await hasAdminRole(db, actor.actorId)) {
