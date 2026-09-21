@@ -1,5 +1,7 @@
 'use strict';
 
+const { buildPublicInformationMetadata } = require('./sway-public-information-metadata.cjs');
+
 // Retain this entry point for existing NODE_OPTIONS configuration. About and
 // FAQ have different jobs; neither may reduce Sway to an opening DJ beta.
 const styles = `
@@ -8,7 +10,7 @@ const styles = `
 `;
 const footer = `<footer aria-label="Sway help and terms"><a href="/about">About Sway</a><a href="/faq">FAQ</a><a href="/support">Support</a><a href="/privacy">Privacy Policy</a><a href="/terms">Terms</a><a href="/privacy/data-deletion">Data deletion</a><a href="/legal/payments">Payment terms</a><a href="/legal/payouts">Payout terms</a><a href="/legal/tickets">Ticket terms</a></footer>`;
 function renderPage(path, title, description, content) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#05050b"><title>${title}</title><meta name="description" content="${description}"><link rel="canonical" href="https://app.sway.tips${path}"><style>${styles}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="page"><nav class="topbar" aria-label="Sway navigation"><a class="brand" href="/">Sway</a><div class="links"><a href="/discover">Discover</a><a href="/home">Join a room</a><a href="/account/login">Log in</a></div></nav><main id="main">${content}</main>${footer}</div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#05050b">${buildPublicInformationMetadata(path, title, description, content)}<style>${styles}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="page"><nav class="topbar" aria-label="Sway navigation"><a class="brand" href="/">Sway</a><div class="links"><a href="/discover">Discover</a><a href="/home">Join a room</a><a href="/account/login">Log in</a></div></nav><main id="main">${content}</main>${footer}</div></body></html>`;
 }
 const ABOUT_PAGE_HTML = renderPage('/about', 'About Sway | Every Way to Play', 'Your performer page, live rooms, music projects, and release work in one Sway account.', `
 <header class="hero"><h1>About Sway</h1><p class="intro">Sway connects your performer page, live audience, music projects, and release work in one account. Fans, DJs, musicians, songwriters, and collaborators use different parts of the same platform.</p><div class="actions"><a class="action primary" href="/account/signup?intent=performer">Create your performer page</a><a class="action" href="/home">Join a live room</a></div></header>
