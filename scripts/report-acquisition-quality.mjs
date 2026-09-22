@@ -111,6 +111,7 @@ async function main() {
   try { await client.connect(); console.log(JSON.stringify(await queryAcquisitionQuality(client,args.start,args.end),null,2)); }
   finally { await client.end(); }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Bundled server modules share the entry URL; only the named standalone report may run its CLI.
+if (process.argv[1] && /(?:^|[\\/])report-acquisition-quality\.mjs$/.test(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(() => { console.error('Acquisition report unavailable: validate the UTC window, database access and query timeout. No partial totals reported.'); process.exitCode=1; });
 }

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { SwayDb } from '../db/client';
 import type { AccessControl } from './access-control';
 import { runDiscoveryTraffic } from './discovery-traffic';
+import { registerAcquisitionQualityRoutes } from './acquisition-quality-routes';
 
 type Executor = Pick<SwayDb, 'execute'>;
 const CODE = /^[a-f0-9]{32}$/;
@@ -112,6 +113,7 @@ export async function loadAffiliateOverview(db: Executor, userId: string) {
 
 export function registerAffiliateRoutes(input: { app: Express; db: SwayDb | null; accessControl: AccessControl; isProduction: boolean }) {
   const { app, db, accessControl, isProduction } = input;
+  registerAcquisitionQualityRoutes({ app, db, accessControl });
   // First valid explicit share lasts 30 days in this browser. The stable
   // account relationship begins at signup. Clean profiles do not silently
   // replace the sharer with the profile owner.

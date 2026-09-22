@@ -9,7 +9,7 @@ const server = read('server.ts');
 const observatory = read('src/server/discovery-observatory.ts');
 const store = read('src/server/discovery-observatory-store.ts');
 const adminEntry = read('src/entries/admin.tsx');
-const adminPage = read('src/shells/DiscoveryObservatoryPage.tsx');
+const adminPage = read('src/shells/DiscoveryEvidencePage.tsx');
 const patronApp = read('src/shells/PatronApp.tsx');
 const attribution = read('src/shells/discoveryAttribution.ts');
 const patronShared = read('src/shells/shared.tsx');
@@ -161,6 +161,10 @@ assert.match(journeyEvidence, /^# pass 9\s*$/m, 'All journey-boundary tests must
 assert.match(journeyEvidence, /^# fail 0\s*$/m);
 assert.match(journeyEvidence, /^# skipped 0\s*$/m);
 execFileSync(process.execPath, ['--import', 'tsx', 'scripts/sway-discovery-observatory.behavior.test.ts'], {
+  cwd: root,
+  stdio: 'inherit'
+});
+execFileSync(process.execPath, ['--import', 'tsx', '--test', 'scripts/sway-acquisition-dashboard.test.mjs'], {
   cwd: root,
   stdio: 'inherit'
 });
