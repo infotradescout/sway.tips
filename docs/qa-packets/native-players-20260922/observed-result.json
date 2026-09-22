@@ -1,0 +1,76 @@
+{
+  "project": "Sway",
+  "evidenceKind": "Observed summary from connected Render build logs and deployment API; not downloaded raw hosted artifact bytes",
+  "date": "2026-09-22",
+  "result": "pass_with_bounded_scope",
+  "candidate": "4cde5a5afd68a5e9ab91d5eeb09bd76bdaaf145f",
+  "launcher": "e7aac9ca48fab66b9643b1c03f18c9caa33c13c6",
+  "serviceId": "srv-daesln0u01pc73fso5kg",
+  "deploymentId": "dep-dapek7jm8hqs739hh2lg",
+  "deploymentStatus": "live",
+  "deploymentFinishedAt": "2026-09-22T20:53:12.375623Z",
+  "acceptanceFinishedAt": "2026-09-22T20:53:09.096Z",
+  "realPlayerBrowserLogSha256": "800fd3ef09bdba9d665354d3b3bade8008edcda59c82970e9988465dff8d9e6e",
+  "artifactBase": "https://sway-release-proof.onrender.com/native-players/4cde5a5afd68a5e9ab91d5eeb09bd76bdaaf145f/",
+  "rawArtifactsDownloaded": false,
+  "scope": {
+    "actualReactNativePlayerPanel": true,
+    "chromiumVersion": "148.0.7778.96",
+    "originalPlayers": ["VLC 3.0.23", "mpv 0.35.1"],
+    "environment": "Disposable Debian Linux; generated WAV tracks; dummy/null audio sinks",
+    "browserOrigin": "https://app.sway.tips",
+    "originHandling": "Exact candidate panel bundled and served by browser test interception; not a production page or signed-in room",
+    "localNetworkPermission": "granted_by_browser_automation",
+    "addedNetworkSecurityBypassFlags": [],
+    "independentReadOnlyPlayerObservation": true,
+    "playbackPositionAdvancementRequired": true,
+    "fullSignedInApplication": false,
+    "physicalAudioAcceptance": false,
+    "ownerComputerInstallation": false
+  },
+  "targetedTests": { "tests": 35, "passed": 35, "failed": 0, "skipped": 0, "exit": 0 },
+  "browserChecks": [
+    "Pairing exposes both configured programs without a default player or autoplay",
+    "Explicit VLC Play advances VLC only; unsupported Cue is absent",
+    "Switching to mpv sends nothing; explicit mpv Play and Pause affect mpv only",
+    "Lost VLC Next acknowledgement is held durably; reconnect does not repeat it",
+    "Browser reload and re-pairing preserve the exact uncertain ID without a new command",
+    "Explicit review never replays; a new deliberate Pause has a new command identity",
+    "Owner remount forgets browser authority; preview cannot pair; pairing key is not stored in browser storage"
+  ],
+  "browserChecksPassed": 7,
+  "browserPlaybackCommands": 6,
+  "lostVlcAcknowledgements": 1,
+  "downstreamVlcNextCalls": 1,
+  "pendingUnknownAfterReview": false,
+  "sourceCleanAfterRun": true,
+  "ownedWorkspaceRemoved": true,
+  "ownedPlayersTerminated": true,
+  "priorArtifactsPreserved": 30,
+  "repairs": [
+    { "commit": "02d9b1d60e1f678d93c8f4f4a45e045895ce463f", "file": "scripts/lib/native-player-registry.mjs", "change": "Restore missing function-closing brace in published native registry" },
+    { "commit": "087f4d9e445e3d96a6e9c33f6ac18a97eb9580e0", "file": "src/native-player-client.mjs", "change": "Bind default Window.fetch to globalThis; fix Illegal invocation before pairing request" },
+    { "commit": "4cde5a5afd68a5e9ab91d5eeb09bd76bdaaf145f", "file": "scripts/sway-native-player-host.test.mjs", "change": "Repair assertion syntax and add default fetch receiver regression" }
+  ],
+  "failedAttempts": [
+    { "deployment": "dep-dapeefnf3r2c73cf97n0", "candidate": "ab21803ee2c735a211411f0e80402cea33b6ad12", "result": "fail", "reason": "Unexpected end of input in the published registry; both real players loaded paused but no browser commands ran" },
+    { "deployment": "dep-dapegu60tbcc73aki1a0", "candidate": "02d9b1d60e1f678d93c8f4f4a45e045895ce463f", "result": "fail", "reason": "Browser pairing timeout before the configured-player selector appeared" },
+    { "deployment": "dep-dapeic2jnfac7386krag", "candidate": "15499d3eb373876f1b3962815d17e63358834d03", "result": "fail", "reason": "Diagnostics identified Failed to execute fetch on Window: Illegal invocation; no playback commands sent" }
+  ],
+  "remainingBoundaries": [
+    "Customer installer and normal player onboarding",
+    "Full signed-in Sources and performer-room flow",
+    "Physical Windows/macOS installation, browser consent and real audio outputs",
+    "mpv-specific lost-ack browser scenario; this run injects downstream loss only for VLC",
+    "Additional transport actions, player integrations and paid-provider eligibility/acceptance",
+    "Production merge and release; this receipt does not authorize or claim them"
+  ],
+  "sideEffects": {
+    "productionDeployment": false,
+    "productionDatabaseOrPaymentChanges": false,
+    "sharedHostGrindZoneChanges": false,
+    "desktopCommanderUsed": false,
+    "newServices": 0,
+    "oldRegistryMixxxFullHostedGatesRepeated": false
+  }
+}
