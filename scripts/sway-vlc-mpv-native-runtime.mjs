@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
@@ -56,6 +56,13 @@ async function until(work,label) {
  throw Error(label+'; '+(last?.message||'not ready'));
 }
 try {
+ const focused=spawnSync(process.execPath,['--test','--test-reporter=tap','scripts/sway-native-player-adapters.test.mjs','scripts/sway-native-player-host.test.mjs'],{cwd:checkout,env:process.env,encoding:'utf8',timeout:60000,maxBuffer:8*1024*1024});
+ const focusedLog=(focused.stdout||'')+(focused.stderr||'');
+ fs.writeFileSync(path.join(out,'native-focused-regression.log'),focusedLog);process.stdout.write(focusedLog);
+ const count=name=>{const match=focusedLog.match(new RegExp('^# '+name+' (\\d+)\\s*$','m'));return match?Number(match[1]):null;};
+ receipt.targetedTests={exit:focused.status,signal:focused.signal,error:focused.error?.message||null,tests:count('tests'),passed:count('pass'),failed:count('fail'),skipped:count('skipped')};
+ assert.equal(focused.status,0,'Exact-source native host/adapter regression failed');
+ assert.equal(receipt.targetedTests.failed,0);assert.equal(receipt.targetedTests.skipped,0);
  const sampleRate=8000,seconds=180,samples=sampleRate*seconds;
  const wave=Buffer.alloc(44+samples*2);
  wave.write('RIFF');wave.writeUInt32LE(wave.length-8,4);wave.write('WAVEfmt ',8);wave.writeUInt32LE(16,16);wave.writeUInt16LE(1,20);wave.writeUInt16LE(1,22);wave.writeUInt32LE(sampleRate,24);wave.writeUInt32LE(sampleRate*2,28);wave.writeUInt16LE(2,32);wave.writeUInt16LE(16,34);wave.write('data',36);wave.writeUInt32LE(samples*2,40);
