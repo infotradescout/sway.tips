@@ -20,14 +20,18 @@ export async function exerciseNativePlayerBrowser({ configs, out, realPlayers = 
   const temp = mkdtempSync(join(tmpdir(), 'sway-native-browser-'));
   mkdirSync(out, { recursive: true });
   const report = { passed: false, scope: realPlayers ? 'Native panel and real local host/adapters with stock players' : 'Native panel and real local host/adapters with protocol fixtures',
-    fullSignedInApplication: false, realPlayers, securityBypassFlags: [], checks: [], mutations: [] };
+    fullSignedInApplication: false, realPlayers, securityBypassFlags: [], checks: [], mutations: [], consoleErrors: [], network: [] };
   const record = name => { report.checks.push(name); console.log('NATIVE_PLAYER_BROWSER_PASS ' + name); };
   const token = randomBytes(32).toString('base64url');
   const store = openNativePlayerStore({ filename: join(temp, 'journal.json'), actorId: 'test-authorized-local-operator' });
-  let host, browser, context;
+  let host, browser, context, page;
   try {
     const hub = new NativePlayerHub({ configs, actorId: 'test-authorized-local-operator', store });
     host = await startNativePlayerHost({ hub, token, port: 4316, expiresAt: Date.now() + 600000 });
+    const hostProbe = await fetch('http://127.0.0.1:4316/v1/connections', { headers: { origin: ORIGIN, authorization: 'Bearer ' + token } });
+    report.nodeHostProbe = { status: hostProbe.status, connections: (await hostProbe.json()).connections?.length };
+    assert.equal(report.nodeHostProbe.status, 200);
+    assert.equal(report.nodeHostProbe.connections, configs.length);
     const result = await build({ stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import Panel from './src/components/NativePlayerConnections.tsx';const root=createRoot(document.getElementById('root'));let actor='operator-a';window.__mount=(next=actor,preview=false)=>{actor=next;root.render(React.createElement(Panel,{key:actor,preview}))};window.__mount();`,
       resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic' });
     const bundle = result.outputFiles[0].text;
@@ -52,7 +56,12 @@ export async function exerciseNativePlayerBrowser({ configs, out, realPlayers = 
       }
       productionRequests.push(url.origin + url.pathname); return route.abort();
     });
-    const page = await context.newPage(); page.on('pageerror', error => errors.push(String(error)));
+    page = await context.newPage();
+    const redact = value => String(value).replaceAll(token, '[redacted]');
+    page.on('pageerror', error => { errors.push(redact(error)); report.consoleErrors.push(redact(error)); });
+    page.on('console', entry => { if (entry.type() === 'error') report.consoleErrors.push(redact(entry.text())); });
+    page.on('requestfailed', request => { const url = new URL(request.url()); report.network.push({ event: 'failed', origin: url.origin, path: url.pathname, error: redact(request.failure()?.errorText) }); });
+    page.on('response', response => { const url = new URL(response.url()); if (url.origin === 'http://127.0.0.1:4316') report.network.push({ event: 'response', path: url.pathname, status: response.status() }); });
     const mount = async () => page.goto(ORIGIN + '/__native-player-check');
     const panel = page.locator('[data-sway-native-players]');
     const button = name => panel.getByRole('button', { name, exact: true });
@@ -61,7 +70,7 @@ export async function exerciseNativePlayerBrowser({ configs, out, realPlayers = 
       while (Date.now() < end) { if (await work()) return; await new Promise(r => setTimeout(r, 100)); }
       throw new Error(message + '; UI: ' + await panel.innerText());
     };
-    const pair = async () => { await panel.getByLabel('Private player pairing key').fill(token); await button('Link player computer').click(); await panel.getByLabel('Configured player target').waitFor(); };
+    const pair = async () => { await panel.getByLabel('Private player pairing key').fill(token); await button('Link player computer').click(); await until(() => panel.getByLabel('Configured player target').isVisible(), 'Pairing did not expose the configured players'); };
     const select = async id => { await panel.getByLabel('Configured player target').selectOption(id); await until(() => button('Play selected local player').isEnabled(), 'Selected player did not become ready'); };
     const clickAction = async (action, predicate) => { await button(action + ' selected local player').click(); await until(async () => predicate(await observe()), action + ' did not affect the intended original player'); await until(() => button('Pause selected local player').isEnabled(), 'Action did not finish'); };
     const commands = () => report.mutations.filter(row => row.path === '/v1/command');
@@ -71,15 +80,18 @@ export async function exerciseNativePlayerBrowser({ configs, out, realPlayers = 
     await select(vlc.id); assert.equal(await button('Cue selected local player').count(), 0);
     await clickAction('Play', state => state.vlc.playing === true && state.mpv.playing === false);
     record('Explicit VLC Play affects VLC only; unsupported Cue is absent');
+    await page.screenshot({ path: join(out, 'vlc-playing.png'), fullPage: true });
     await clickAction('Pause', state => state.vlc.playing === false);
     await select(mpv.id); assert.equal(commands().length, 2);
     await clickAction('Play', state => state.mpv.playing === true && state.vlc.playing === false);
+    await page.screenshot({ path: join(out, 'mpv-playing.png'), fullPage: true });
     await clickAction('Pause', state => state.mpv.playing === false);
     record('Switching to mpv sends nothing; separate mpv Play/Pause affect mpv only');
     await select(vlc.id); loseNextResponse(); const beforeUnknown = commands().length;
     await button('Next selected local player').click();
     await panel.getByText('Uncertain delivery is held. Reconnect cannot authorize a repeat.', { exact: true }).waitFor();
     assert.equal(commands().length, beforeUnknown + 1); assert.equal(await button('Play selected local player').isDisabled(), true);
+    await page.screenshot({ path: join(out, 'uncertain-delivery-held.png'), fullPage: true });
     const unknownId = commands().at(-1).id;
     await until(() => button('Reconnect selected player').isEnabled(), 'Reconnect remained busy');
     await button('Reconnect selected player').click();
@@ -114,7 +126,14 @@ export async function exerciseNativePlayerBrowser({ configs, out, realPlayers = 
     assert.deepEqual(errors, []); assert.deepEqual(productionRequests, []);
     report.pendingUnknownAfterReview = hub.list().some(c => c.uncertain); assert.equal(report.pendingUnknownAfterReview, false);
     report.passed = true;
-  } catch (error) { report.error = String(error.stack || error); throw error; }
+  } catch (error) {
+    report.error = String(error.stack || error).replaceAll(token, '[redacted]');
+    if (page) {
+      try { report.failureUi = (await page.locator('body').innerText()).replaceAll(token, '[redacted]').slice(0, 12000); await page.screenshot({ path: join(out, 'native-player-failure.png'), fullPage: true }); }
+      catch (captureError) { report.captureError = String(captureError).replaceAll(token, '[redacted]'); }
+    }
+    throw error;
+  }
   finally {
     try { await context?.close(); await browser?.close(); await host?.close(); store.close(); rmSync(temp, { recursive: true, force: true }); report.cleanup = 'owned browser, host, lock and workspace closed'; }
     catch (error) { report.passed = false; report.cleanupError = String(error); throw error; }
