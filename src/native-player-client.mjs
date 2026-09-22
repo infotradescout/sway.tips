@@ -24,7 +24,8 @@ export function parseNativeConnection(value) {
 }
 export class NativePlayerClient {
   #key; #base; #fetch; #signal; #timeout;
-  constructor({ pairingKey, port = 4316, signal, fetchImpl = fetch, timeoutMs = 10000 }) {
+  // Window.fetch requires its original receiver; Node-only tests did not expose this.
+  constructor({ pairingKey, port = 4316, signal, fetchImpl = globalThis.fetch.bind(globalThis), timeoutMs = 10000 }) {
     if (typeof pairingKey !== 'string' || !/^[\w-]{32,128}$/.test(pairingKey) || !Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('Enter the private pairing key displayed on your player computer.');
     }
