@@ -1,5 +1,7 @@
 // Explicit isolated modes preserve each task's execution and evidence boundary.
-if (process.env.SWAY_QUALITY_DASHBOARD_OBSERVE) {
+if (process.env.SWAY_RETAINED_TAINT_PROOF === 'true') {
+  await import('./sway-retained-taint-proof.mjs');
+} else if (process.env.SWAY_QUALITY_DASHBOARD_OBSERVE) {
   await import('./sway-quality-dashboard-live.mjs');
 } else if (process.env.SWAY_QUALITY_FINAL_SOURCE_ONLY === 'true') {
   await import('./sway-quality-final-source.mjs');
