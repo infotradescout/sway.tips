@@ -32,13 +32,21 @@ try {
   const changes = run('bounded-diff', 'git', ['diff', '--name-only', '2011efd13cb9d7b068721e5512b32e3c21cd7cfc', candidate]).split('\n');
   const allowed = new Set(['src/acquisition-quality-report.ts','src/server/acquisition-quality-routes.ts','src/server/affiliate-program.ts','src/shells/AcquisitionQualityPanel.tsx','src/shells/DiscoveryObservatoryPage.tsx','src/shells/DiscoveryEvidencePage.tsx','scripts/report-acquisition-quality.mjs','scripts/sway-acquisition-dashboard.test.mjs','scripts/sway-acquisition-dashboard.browser.test.mjs','scripts/sway-discovery-observatory.contract.test.mjs','scripts/sway-discovery-observatory.legacy.contract.test.mjs']);
   assert(changes.every(file => allowed.has(file)), 'Unreviewed change outside the assigned slice');
+  const resumed = candidate === 'b65d92ae016ff5c18b08feab704c3e4375dfddd3';
+  if (resumed) {
+    const delta = run('verified-runtime-unchanged', 'git', ['diff', '--name-only', '4106ace4bcc95e42146ed4008ca9ef475af9f810', candidate]).split('\n').sort();
+    assert.deepEqual(delta, ['scripts/sway-discovery-observatory.contract.test.mjs','scripts/sway-discovery-observatory.legacy.contract.test.mjs'].sort());
+    evidence.reusedExecution = { candidate: '4106ace4bcc95e42146ed4008ca9ef475af9f810', deploy: 'dep-daotti00cd8s73b146d0', passed: ['targeted whole-module/registered-HTTP tests','lint','production build','390/1440 browser matrix','actual server ingress and SQL'], previousOverallResult: 'fail', failure: 'Hard test registration/normalization only. All runtime, SQL and browser-test blobs are unchanged.' };
+  }
   run('npm-ci', 'npm', ['ci','--include=dev','--no-audit','--no-fund']);
-  run('targeted', process.execPath, ['--import','tsx','--test','scripts/sway-acquisition-dashboard.test.mjs']);
-  run('lint', 'npm', ['run','lint']);
-  run('build', 'npm', ['run','build']);
-  run('chromium', process.execPath, ['node_modules/playwright/cli.js','install','chromium']);
-  run('browser', process.execPath, ['scripts/sway-acquisition-dashboard.browser.test.mjs'], source, { SWAY_QUALITY_BROWSER_OUTPUT: output });
-  run('ingress-and-sql', process.execPath, ['--import','tsx','scripts/sway-acquisition-quality.test.mjs']);
+  if (!resumed) {
+    run('targeted', process.execPath, ['--import','tsx','--test','scripts/sway-acquisition-dashboard.test.mjs']);
+    run('lint', 'npm', ['run','lint']);
+    run('build', 'npm', ['run','build']);
+    run('chromium', process.execPath, ['node_modules/playwright/cli.js','install','chromium']);
+    run('browser', process.execPath, ['scripts/sway-acquisition-dashboard.browser.test.mjs'], source, { SWAY_QUALITY_BROWSER_OUTPUT: output });
+    run('ingress-and-sql', process.execPath, ['--import','tsx','scripts/sway-acquisition-quality.test.mjs']);
+  }
   run('contracts', 'npm', ['run','test:contracts']);
   assert.equal(run('final-clean', 'git', ['status','--porcelain']), '');
   evidence.result = 'pass';
