@@ -1,5 +1,7 @@
 // Explicit isolated modes preserve each task's execution and evidence boundary.
-if (process.env.SWAY_RETAINED_TAINT_PROOF === 'true') {
+if (process.env.SWAY_VLC_MPV_NATIVE_PROOF === 'true') {
+  await import('./sway-vlc-mpv-native-proof.mjs');
+} else if (process.env.SWAY_RETAINED_TAINT_PROOF === 'true') {
   await import('./sway-retained-taint-proof.mjs');
 } else if (process.env.SWAY_QUALITY_DASHBOARD_OBSERVE) {
   await import('./sway-quality-dashboard-live.mjs');
