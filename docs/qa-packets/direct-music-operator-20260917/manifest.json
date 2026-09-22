@@ -1,0 +1,20 @@
+{
+  "head": "e1332755c84076417574a6bd22b5402a24efc484",
+  "files": [
+    {
+      "name": "browser.json",
+      "bytes": 3140,
+      "sha256": "afbb5403cf29df3ab0f10059f695322afca17addfee9c5ae1f7bd1785d86ffb3"
+    },
+    {
+      "name": "native-environment.json",
+      "bytes": 573,
+      "sha256": "e067c24e8a4ddd5010138b465f94b91a2a43d8f0b33bc17b7be2182d33bd4b2c"
+    },
+    {
+      "name": "summary.json",
+      "bytes": 748,
+      "sha256": "8c353d7c0bd0edd8415e5886e8e9e6a0e584d798e7faabb9a32e8592976ffc31"
+    }
+  ]
+}

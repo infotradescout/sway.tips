@@ -1,3 +1,4 @@
+import { registerDirectMusicRoutes } from './src/server/direct-music/routes';
 import { createServer as createHttpServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 /**
@@ -573,6 +574,7 @@ const LIVE_ROOM_MUTATION_ROLLOUT_PATHS = [
   /^\/api\/talent\/control-bridge\/action(?:\/|$)/i
 ];
 registerAffiliateRoutes({ app, db: businessDb, accessControl, isProduction });
+registerDirectMusicRoutes({ app, db: businessDb, authorize: accessControl.requireTalentAccess, env: process.env });
 app.use((req, res, next) => {
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   const isLiveRoomMutation = LIVE_ROOM_MUTATION_ROLLOUT_PATHS.some((pattern) => pattern.test(req.path));

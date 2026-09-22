@@ -1,0 +1,48 @@
+{
+  "objective": "Deliberate operator command to the selected original player, without replay after uncertain delivery or reconnect",
+  "observedAtUtc": "2026-09-21T02:16:27.744757+00:00",
+  "sourceBase": "7c9f17217a38e952794b2d4c315a567aeee0dfbf",
+  "sourceBinding": "Exact files fetched through GitHub, verified against their Git blob SHA before testing. Patched runtime and test blobs below equal the published blobs. This was not a whole-repository checkout test.",
+  "runtime": {"platform": "linux", "node": "v22.16.0"},
+  "testedBlobs": {
+    "scripts/lib/virtualdj-network-control.mjs": "aca0ff2e28fe8deb9ac9dd5cd536039fb5ac6854",
+    "scripts/lib/control-bridge-execution.mjs": "147fc46fbb1040cbbafdcac2c97fc3aa68f2041b",
+    "scripts/sway-virtualdj-network-control.behavior.test.mjs": "0564eb101b4c567ce9098eb819cdc14331b4202a"
+  },
+  "bug": {
+    "reproduced": true,
+    "before": "One Play invocation produced POST /execute then POST /unexpected-player carrying the same deck 2 play on body; adapter returned executed:true.",
+    "after": "The existing transport rejects HTTP redirects, preventing automatic second requests or trusting another endpoint's playback state.",
+    "reproductionLogSha256": "40c118edb7098c75a92c30e8464b1a4be4c748cd05645568460b6ee5b202d846"
+  },
+  "red": {"command": "node --test scripts/sway-virtualdj-network-control.behavior.test.mjs", "exitCode": 1, "tests": 17, "passed": 8, "failed": 9, "skipped": 0, "logSha256": "62661c1fd686ae9b116a2d45bac541ff97cf3af09e72ceee3c5ab59b161e0c04"},
+  "green": {
+    "command": "node --test scripts/sway-virtualdj-network-control.behavior.test.mjs",
+    "exitCode": 0, "tests": 17, "passed": 17, "failed": 0, "skipped": 0, "cancelled": 0,
+    "logSha256": "5b1f63aba02068aa4e6d6aebc1d72b7da78ddfe32b876cd2363f23617d6acada",
+    "scope": "Six preserved adapter tests plus eleven new real-HTTP/protocol tests: 301/302/303/307/308 no-retargeting, second-endpoint 307/308 rejection, redirected query rejection, direct deck-specific play/pause, and separate-process redirect/lost-response restart cases."
+  },
+  "restartProof": {
+    "actualOwnedNodeProcesses": 4,
+    "scenarios": ["redirect then restart", "socket-response loss then restart"],
+    "requestsPerScenarioBeforeRestart": 1,
+    "requestsPerScenarioAfterRestart": 1,
+    "unknownOutcomePreserved": true,
+    "bridgeIdentityPreserved": true,
+    "laterBatchPlayBlocked": true,
+    "boundary": "Actual executeClaimedOnce/executeClaimedBatch and adapter with owned durable files, not full CLI/CMD startup"
+  },
+  "cleanup": {"ownedListenersClosed": true, "ownedChildrenExited": true, "temporaryLedgersRemoved": true},
+  "limitations": {
+    "protocolFixturesNotInstalledVirtualDj": true,
+    "originalPlayerObserved": false,
+    "audiblePlaybackObserved": false,
+    "nativeWindowsExecuted": false,
+    "outerCmdStartupExecuted": false,
+    "fullApplicationRouteExecuted": false,
+    "fullRepositoryGateExecuted": false,
+    "overallUserCompletionCriterionMet": false
+  },
+  "externalEffects": {"desktopCommanderUsed": false, "providerCalls": 0, "productionWrites": 0, "newServices": 0, "renderDeploys": 0, "registryProofRepeated": false, "unchangedHostedGatesRepeated": false},
+  "nextBoundary": "Authorized installed original-player observation and native Windows outer-CMD startup remain unverified. Do not repeat completed merge or registry work."
+}

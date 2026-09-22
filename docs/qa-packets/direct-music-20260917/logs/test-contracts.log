@@ -1,0 +1,1209 @@
+
+> sway-tips@0.0.0 test:contracts
+> node --import tsx scripts/sway-public-profile-layout.behavior.test.ts && node --import tsx scripts/sway-performer-withdrawal.behavior.test.ts && node scripts/sway-edgewyze-profile-cleanup.contract.test.mjs && node scripts/sway-performer-handle-claim.contract.test.mjs && node scripts/sway-songwriter-first-synthetic-music.contract.test.mjs && node scripts/contract-check.mjs && node scripts/sway-performer-visibility-control.contract.test.mjs && node scripts/sway-organic-performer-discovery.contract.test.mjs && node scripts/sway-product-structure.contract.test.mjs && node scripts/sway-organic-discovery.contract.test.mjs && node scripts/sway-discovery-observatory.contract.test.mjs && node scripts/sway-public-discovery-contract.contract.test.mjs && node scripts/sway-product-baseline.contract.test.mjs && node scripts/sway-live-pilot-readiness.contract.test.mjs && node scripts/sway-live-pilot-evidence.contract.test.mjs && node scripts/sway-contract-gate-normalization.contract.test.mjs && node scripts/sway-auto-closeout.contract.test.mjs && node scripts/sway-business-store-boundary.contract.test.mjs && node scripts/sway-business-store-production-persistence.contract.test.mjs && node scripts/sway-captive-portal-preflight.contract.test.mjs && node scripts/sway-database-schema.contract.test.mjs && node scripts/sway-performer-link-profile.contract.test.mjs && node scripts/sway-deferred-kyc.contract.test.mjs && node scripts/sway-degraded-connection-state.contract.test.mjs && node scripts/sway-degraded-idempotency-persistence.contract.test.mjs && node scripts/sway-demo-fixture-harness.contract.test.mjs && node scripts/sway-production-demo-boundary.contract.test.mjs && node scripts/sway-host-subdomain-routing.contract.test.mjs && node scripts/sway-identity-ownership-authorization.contract.test.mjs && node scripts/sway-idempotency-fingerprint.contract.test.mjs && node scripts/sway-idempotent-submit.contract.test.mjs && node scripts/sway-installable-app.contract.test.mjs && node scripts/sway-live-room-readiness.contract.test.mjs && node scripts/sway-live-night-spine.contract.test.mjs && node scripts/sway-moderation-durable-block-runtime.contract.test.mjs && node scripts/sway-moderation-active-blocks-postgres.contract.test.mjs && node scripts/sway-moderation-safety-layer.contract.test.mjs && node scripts/sway-native-minimum-functionality.contract.test.mjs && node scripts/sway-native-utility.contract.test.mjs && node scripts/sway-offline-client-resilience.contract.test.mjs && node scripts/sway-offline-pending-ttl.contract.test.mjs && node scripts/sway-patron-recovery.contract.test.mjs && node scripts/sway-patron-public-logo-background.contract.test.mjs && node scripts/sway-invalid-patron-room-recovery.contract.test.mjs && node scripts/sway-payment-execution.contract.test.mjs && node scripts/sway-payment-authorization-gating.contract.test.mjs && node scripts/sway-fee-policy.contract.test.mjs && node scripts/sway-payment-webhook-stripe.contract.test.mjs && node scripts/sway-performer-account-reads.behavior.test.mjs && node scripts/sway-payment-closeout-db-backed.contract.test.mjs && node scripts/sway-stripe-connect-onboarding.contract.test.mjs && node scripts/sway-persisted-middleware-guards.contract.test.mjs && node scripts/sway-persisted-access-store-readiness.contract.test.mjs && node scripts/sway-performer-browser-session.contract.test.mjs && node scripts/sway-performer-email-login.contract.test.mjs && node scripts/sway-performer-self-serve-signup.contract.test.mjs && node scripts/sway-performer-library-availability.contract.test.mjs && node scripts/sway-dj-integration.contract.test.mjs && node scripts/sway-music-source-capability.contract.test.mjs && node scripts/sway-crowd-autopilot.contract.test.mjs && node scripts/sway-performer-hardware-mapping.contract.test.mjs && node scripts/sway-performer-connections.contract.test.mjs && node scripts/sway-control-bridge.contract.test.mjs && node scripts/sway-control-bridge-token.contract.test.mjs && node scripts/sway-windows-booth-launcher.contract.test.mjs && node scripts/sway-control-bridge-cloud-action.contract.test.mjs && node scripts/sway-performer-control-noop-guards.contract.test.mjs && node scripts/sway-durable-performer-control-idempotency.contract.test.mjs && node scripts/sway-protected-route-html-recovery.contract.test.mjs && node scripts/sway-public-cta-integrity.contract.test.mjs && node scripts/sway-link-preview-metadata.contract.test.mjs && node scripts/sway-mission-fit.contract.test.mjs && node scripts/sway-faq-surface.contract.test.mjs && node scripts/sway-release-gate.contract.test.mjs && node scripts/sway-complete-product-readiness.contract.test.mjs && node scripts/sway-role-route-separation.contract.test.mjs && node scripts/sway-schema-before-middleware.contract.test.mjs && node scripts/sway-separate-vite-entrypoints.contract.test.mjs && node scripts/sway-server-route-decoupling.contract.test.mjs && node scripts/sway-surface-terminology.contract.test.mjs && node scripts/sway-app-unification.contract.test.mjs && node scripts/sway-telemetry.contract.test.mjs && node scripts/patron-payment-truth.contract.test.mjs && node scripts/sway-payment-modal-viewport.contract.test.mjs && node scripts/sway-admin-account-deletion.contract.test.mjs && node scripts/sway-performer-live-cockpit.contract.test.mjs && node scripts/sway-overlay-projector-qr.contract.test.mjs && node scripts/sway-overlay-queue-motion.contract.test.mjs && node scripts/sway-active-gig-route-context.contract.test.mjs && node scripts/sway-public-room-state.behavior.test.mjs && node scripts/sway-active-room-registry.contract.test.mjs && node scripts/sway-performer-share-kit.contract.test.mjs && node scripts/sway-gig-scoped-room-truth.contract.test.mjs && node scripts/sway-mobile-splitview-polish.contract.test.mjs && node scripts/sway-mobile-demo-chrome.contract.test.mjs && node scripts/sway-mobile-topbar-copy.contract.test.mjs && node scripts/sway-surface-split-architecture-plan.contract.test.mjs && node scripts/sway-phase1-shell-scaffold.contract.test.mjs && node scripts/sway-phase2-shell-migration.contract.test.mjs && node scripts/sway-phase3-operator-admin-runtime-split.contract.test.mjs && node scripts/sway-phase4-operator-runtime-extraction.contract.test.mjs && node scripts/sway-phase5-admin-ops-runtime-extraction.contract.test.mjs && node scripts/sway-phase6-admin-ops-fragment-extraction.contract.test.mjs && node scripts/sway-phase7-admin-ops-fragment-extraction.contract.test.mjs && node scripts/sway-phase8-admin-ops-fragment-extraction.contract.test.mjs && node scripts/sway-phase9-admin-ops-fragment-extraction.contract.test.mjs && node scripts/sway-phase10-admin-ops-fragment-extraction.contract.test.mjs && node scripts/sway-ugc-control-placeholders.contract.test.mjs && node scripts/sway-app-store-legal-surface.contract.test.mjs && node scripts/sway-universal-account-pro-mode.contract.test.mjs && node scripts/sway-account-claim-onboarding.contract.test.mjs && node scripts/sway-patron-room-lookup-transient-error-state.contract.test.mjs && node scripts/sway-deploy-migration-gate.contract.test.mjs && node scripts/sway-release-health.contract.test.mjs && node scripts/sway-audio-publishing-foundation.contract.test.mjs && node scripts/sway-audio-publishing-migration.contract.test.mjs && node scripts/sway-audio-file-collaboration.contract.test.mjs && node scripts/sway-collaborator-inbox.contract.test.mjs && node scripts/sway-release-drafts.contract.test.mjs && node scripts/sway-multitrack-releases.contract.test.mjs && node scripts/sway-continuum-connector.contract.test.mjs && node scripts/sway-public-event-listings.contract.test.mjs && node scripts/sway-event-ticket-native-ga.contract.test.mjs && node scripts/sway-native-ticket-production-proof.contract.test.mjs && node scripts/sway-containment-onboarding.contract.test.mjs && node scripts/sway-live-room-test-money-config.contract.test.mjs && node scripts/sway-audio-storage-policy.contract.test.mjs
+
+Public profile layout behavior: role defaults, owner overrides, legacy fallback, reset, and metadata preservation passed.
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-payout-destination-capabilities.behavior.test.ts
+Payout destination capability behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-payout-destination-capabilities.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-payout-destination.behavior.test.ts
+Payout destination behavior test passed (53 migrations).
+WITHDRAWAL_PREREQUISITE_PASS ./sway-payout-destination.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-payment-pricing.behavior.test.ts
+Customer-paid incoming processing pricing behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-payment-pricing.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-paypal-payouts.behavior.test.ts
+PayPal Payouts adapter behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-paypal-payouts.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-paypal-payout-readiness.behavior.test.ts
+PayPal-only readiness regression matrix passed: 26 cases.
+PayPal/Venmo production readiness behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-paypal-payout-readiness.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-payout-recipient-privacy.behavior.test.ts
+Payout recipient privacy deletion behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-payout-recipient-privacy.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-performer-payout-kyc.behavior.test.ts
+Performer payout KYC review behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-performer-payout-kyc.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-performer-live-withdrawal-canary.behavior.test.ts
+One-use exact-$10 live PayPal payout canary behavior test passed.
+WITHDRAWAL_PREREQUISITE_PASS ./sway-performer-live-withdrawal-canary.behavior.test.ts
+WITHDRAWAL_PREREQUISITE_BEGIN ./sway-withdrawal-refund-concurrency.integration.test.ts
+Withdrawal/refund lock-order integration test passed (embedded-postgres; serialized protocol proof, strict real concurrency not claimed).
+WITHDRAWAL_PREREQUISITE_PASS ./sway-withdrawal-refund-concurrency.integration.test.ts
+PayPal/Venmo accumulated performer withdrawal behavior test passed (53 migrations).
+EdgeWyze cleanup migrations preserve identity ownership, booking contact, releases, access, and money state.
+PASS performer handle claims provide one atomic durable namespace
+Songwriter-first synthetic music contract passed.
+Sway disposable database guard contract tests passed.
+Sway core product completion contract passed.
+Sway live-room payment durability migration contract passed.
+Sway contract check passed.
+VISIBILITY_REQUEST_PASS read confirms explicit draft
+VISIBILITY_REQUEST_PASS one explicit draft write sends only the choice
+VISIBILITY_REQUEST_PASS read confirms explicit unlisted
+VISIBILITY_REQUEST_PASS one explicit unlisted write sends only the choice
+VISIBILITY_REQUEST_PASS read confirms explicit public
+VISIBILITY_REQUEST_PASS one explicit public write sends only the choice
+VISIBILITY_REQUEST_PASS state parser rejects null
+VISIBILITY_REQUEST_PASS state parser rejects undefined
+VISIBILITY_REQUEST_PASS state parser rejects "hidden"
+VISIBILITY_REQUEST_PASS state parser rejects ""
+VISIBILITY_REQUEST_PASS state parser rejects []
+VISIBILITY_REQUEST_PASS state parser rejects {}
+VISIBILITY_REQUEST_PASS state parser rejects 1
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: {}
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: {"profile":{}}
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: {"profile":[]}
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: {"profile":{"visibilityState":"unknown"}}
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: null
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: []
+VISIBILITY_REQUEST_PASS unreadable saved state is never Draft: "html"
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: {}
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: {"visibilityState":"draft"}
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: {"visibilityState":"hidden"}
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: {"success":false,"visibilityState":"public"}
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: {"error":"denied","visibilityState":"public"}
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: null
+VISIBILITY_REQUEST_PASS invalid publication acknowledgement never succeeds: []
+VISIBILITY_REQUEST_PASS read 401 rejects before a stalled body
+VISIBILITY_REQUEST_PASS read 403 rejects before a stalled body
+VISIBILITY_REQUEST_PASS read bounds a transport that ignores abort
+VISIBILITY_REQUEST_PASS read bounds a stalled JSON body
+VISIBILITY_REQUEST_PASS read unreadable JSON is not a success
+VISIBILITY_REQUEST_PASS write 401 rejects before a stalled body
+VISIBILITY_REQUEST_PASS write 403 rejects before a stalled body
+VISIBILITY_REQUEST_PASS write bounds a transport that ignores abort
+VISIBILITY_REQUEST_PASS write bounds a stalled JSON body
+VISIBILITY_REQUEST_PASS write unreadable JSON is not a success
+VISIBILITY_REQUEST_PASS 500 never retries an uncertain publication
+VISIBILITY_REQUEST_PASS 502 never retries an uncertain publication
+VISIBILITY_REQUEST_PASS 503 never retries an uncertain publication
+VISIBILITY_REQUEST_PASS 409 remains an explicit rejection
+VISIBILITY_REQUEST_PASS 422 remains an explicit rejection
+VISIBILITY_REQUEST_PASS 429 remains an explicit rejection
+VISIBILITY_REQUEST_PASS network loss never repeats a publication
+VISIBILITY_REQUEST_PASS already cancelled work never sends
+VISIBILITY_REQUEST_PASS stop waiting settles without a retry or claim of undo
+VISIBILITY_REQUEST_PASS late headers after cancellation do not read or apply a body
+VISIBILITY_REQUEST_PASS late body after deadline cannot establish success
+VISIBILITY_REQUEST_PASS invalid deadline 0 never sends
+VISIBILITY_REQUEST_PASS invalid deadline -1 never sends
+VISIBILITY_REQUEST_PASS invalid deadline NaN never sends
+VISIBILITY_REQUEST_PASS invalid deadline Infinity never sends
+VISIBILITY_REQUEST_PASS invalid requested state never sends
+VISIBILITY_REQUEST_PASS success cleans up the cancellation listener
+VISIBILITY_REQUEST_SUMMARY 54 PASS / 0 FAIL
+Sway performer visibility control contract passed.
+PASS sway-organic-performer-discovery contract
+Sway product structure contract passed.
+Sway organic discovery contract passed.
+Sway Discovery Observatory behavior tests passed.
+Sway Discovery Observatory contract passed.
+Public discovery contract passed.
+Product baseline contract passed.
+Sway live pilot readiness contract passed.
+Sway live pilot evidence contract passed.
+Contract gate normalization passed.
+Auto-closeout contract passed.
+Business store boundary contract passed.
+Business store production persistence contract passed.
+Captive portal preflight contract passed.
+Database schema contract passed.
+Performer link profile contract passed.
+Deferred KYC contract passed.
+Degraded connection state contract passed.
+Degraded idempotency persistence contract passed.
+Demo fixture harness contract passed.
+Production demo boundary contract passed.
+Host subdomain routing contract passed.
+Identity/ownership/authorization contract passed.
+Idempotency fingerprint contract passed.
+Idempotent submit contract passed.
+Installable app contract passed.
+{
+  "proof": "isolated actual-source logic and source wiring; not React/browser/server/production",
+  "sourceSha256": "fbd1c4f199cc4cc501ad68462a5075a399705578547e18afc58dedcaabb90546",
+  "passed": 37,
+  "failed": 0,
+  "results": [
+    {
+      "name": "HTTP 404 preserves confirmed rooms and exposes recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 429 preserves confirmed rooms and exposes recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 500 preserves confirmed rooms and exposes recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 502 preserves confirmed rooms and exposes recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 503 preserves confirmed rooms and exposes recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "initial failure exposes recovery without inventing a room",
+      "status": "PASS"
+    },
+    {
+      "name": "network rejection exposes recovery without losing rooms",
+      "status": "PASS"
+    },
+    {
+      "name": "unreadable JSON exposes recovery without losing rooms",
+      "status": "PASS"
+    },
+    {
+      "name": "null is not mistaken for an empty room list",
+      "status": "PASS"
+    },
+    {
+      "name": "missing rooms is not mistaken for an empty room list",
+      "status": "PASS"
+    },
+    {
+      "name": "null rooms is not mistaken for an empty room list",
+      "status": "PASS"
+    },
+    {
+      "name": "object rooms is not mistaken for an empty room list",
+      "status": "PASS"
+    },
+    {
+      "name": "string rooms is not mistaken for an empty room list",
+      "status": "PASS"
+    },
+    {
+      "name": "confirmed empty room list replaces old rows and clears recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "confirmed nonempty list replaces rows and clears recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "late failure cannot overwrite a newer successful refresh",
+      "status": "PASS"
+    },
+    {
+      "name": "late success cannot hide a newer refresh error",
+      "status": "PASS"
+    },
+    {
+      "name": "delayed JSON cannot clear a newer recovery message",
+      "status": "PASS"
+    },
+    {
+      "name": "account change suppresses late failure and its notice",
+      "status": "PASS"
+    },
+    {
+      "name": "account change during JSON prevents both rows and errors crossing accounts",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 401 clears protected rows/profile rather than keeping a stale recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP 403 clears protected rows/profile rather than keeping a stale recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "older denial cannot revoke a newer account already queued in state",
+      "status": "PASS"
+    },
+    {
+      "name": "superseded context cannot launch a read",
+      "status": "PASS"
+    },
+    {
+      "name": "logout blocks fresh reads and their timers",
+      "status": "PASS"
+    },
+    {
+      "name": "logout cancellation suppresses a delayed error",
+      "status": "PASS"
+    },
+    {
+      "name": "unmounted context suppresses a late result",
+      "status": "PASS"
+    },
+    {
+      "name": "a stalled read times out visibly and ignores late success",
+      "status": "PASS"
+    },
+    {
+      "name": "retry after timeout restores confirmed rooms and clears notice",
+      "status": "PASS"
+    },
+    {
+      "name": "superseded timeout cannot interrupt a fresh read",
+      "status": "PASS"
+    },
+    {
+      "name": "demo mode never performs a real room read",
+      "status": "PASS"
+    },
+    {
+      "name": "auth entry clears local room recovery without fetching",
+      "status": "PASS"
+    },
+    {
+      "name": "unknown performer identity cannot perform a room read",
+      "status": "PASS"
+    },
+    {
+      "name": "retry callback invokes only the two account read paths",
+      "status": "PASS"
+    },
+    {
+      "name": "recovery notice is account scoped even before layout cleanup",
+      "status": "PASS"
+    },
+    {
+      "name": "closed, live and home views each expose the same guarded read-only recovery",
+      "status": "PASS"
+    },
+    {
+      "name": "account-context creation and logout clear previous recovery notice",
+      "status": "PASS"
+    }
+  ]
+}
+PASS Verified free setup sends performer-selected values unchanged
+PASS Unverified account cannot submit when the disabled button is bypassed
+PASS Blank performer name is rejected ("")
+PASS Blank performer name is rejected ("   ")
+PASS Paid setup rejects unavailable readiness false/false
+PASS Paid setup rejects unavailable readiness false/true
+PASS Paid setup rejects unavailable readiness true/false
+PASS Confirmed paid eligibility retains requested settings
+PASS Free room remains available with money actions unavailable
+PASS Two same-turn submissions invoke creation once
+PASS Rendered busy state blocks submission
+PASS UUID failure is visible and unlocks the form
+PASS Rejected room creation is visible and unlocks the form
+PASS Unchanged retry reuses its room identifier
+PASS No automatic retry happens after a rejection
+PASS Revoked paid eligibility blocks a subsequent retry
+PASS Revoked email verification blocks a subsequent retry
+PASS Settings controls cannot change during pending creation
+PASS Unavailable payments do not advertise available tips
+{"suite":"room-setup-submission","passed":19,"failed":0,"proof":"extracted actual callbacks with mocked state/network and source wiring; not React, browser, backend, persistence or provider proof"}
+Sway live room readiness contract passed.
+PASS saved dollar amount 0 is formatted once
+PASS saved dollar amount 1.25 is formatted once
+PASS saved dollar amount 12.34 is formatted once
+PASS saved dollar amount 1234567.89 is formatted once
+PASS invalid amount null is never fabricated as zero or shared
+PASS invalid amount undefined is never fabricated as zero or shared
+PASS invalid amount 12.34 is never fabricated as zero or shared
+PASS invalid amount NaN is never fabricated as zero or shared
+PASS invalid amount Infinity is never fabricated as zero or shared
+PASS invalid amount -Infinity is never fabricated as zero or shared
+PASS invalid amount -1 is never fabricated as zero or shared
+PASS invalid amount [object Object] is never fabricated as zero or shared
+PASS invalid amount  is never fabricated as zero or shared
+PASS sharing boundary test/platform_test_balance
+PASS sharing boundary test/platform_balance
+PASS sharing boundary test/connected_account
+PASS sharing boundary test/unavailable
+PASS sharing boundary test/mixed
+PASS sharing boundary test/undefined
+PASS sharing boundary live/platform_test_balance
+PASS sharing boundary live/platform_balance
+PASS sharing boundary live/connected_account
+PASS sharing boundary live/unavailable
+PASS sharing boundary live/mixed
+PASS sharing boundary live/undefined
+PASS sharing boundary unavailable/platform_test_balance
+PASS sharing boundary unavailable/platform_balance
+PASS sharing boundary unavailable/connected_account
+PASS sharing boundary unavailable/unavailable
+PASS sharing boundary unavailable/mixed
+PASS sharing boundary unavailable/undefined
+PASS sharing boundary undefined/platform_test_balance
+PASS sharing boundary undefined/platform_balance
+PASS sharing boundary undefined/connected_account
+PASS sharing boundary undefined/unavailable
+PASS sharing boundary undefined/mixed
+PASS sharing boundary undefined/undefined
+PASS recap text describes captured volume, not earnings or a confirmed cash-out
+RECAP_DISPLAY_TOTAL 38 PASS 38 FAIL 0
+Sway live-night spine contract passed.
+Moderation durable block runtime contract passed.
+Moderation active_blocks block/revoke/reactivate PostgreSQL integration test passed (embedded-postgres).
+Moderation active-block PostgreSQL contract passed.
+Moderation safety layer contract passed.
+Native minimum functionality contract passed.
+Native utility contract passed.
+Offline client resilience contract passed.
+Offline pending TTL contract passed.
+Patron recovery contract passed.
+{
+  "sourceSha256": "e1baf12101d36db5190b3d7f23716b107a7ca9385cd88b58435b8d207eee5d8c",
+  "scope": "Static source contract only; not browser, artwork, signup, payment or production proof.",
+  "passed": 8,
+  "failed": 0,
+  "results": [
+    {
+      "name": "creator is the first entry action",
+      "status": "PASS"
+    },
+    {
+      "name": "audience, discovery and ordinary accounts remain separate",
+      "status": "PASS"
+    },
+    {
+      "name": "buttons are available without the reveal script",
+      "status": "PASS"
+    },
+    {
+      "name": "about link does not start hidden or blurred",
+      "status": "PASS"
+    },
+    {
+      "name": "footer is visible and participates in document flow",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop introduction does not depend on the reveal script",
+      "status": "PASS"
+    },
+    {
+      "name": "entry text may wrap and keyboard focus is visible",
+      "status": "PASS"
+    },
+    {
+      "name": "existing approved artwork and trust links remain",
+      "status": "PASS"
+    }
+  ]
+}
+Patron/public logo background and immediate access contract passed.
+Invalid patron room recovery contract passed.
+Payment execution contract passed.
+Payment authorization gating contract passed.
+Fee policy contract passed.
+PAYMENT_CLOCK_CASE {"name":"new database-due operation is claimable with app clock behind","passed":true}
+PAYMENT_CLOCK_CASE {"name":"future operation is not executed early with app clock ahead","passed":true}
+PAYMENT_CLOCK_CASE {"name":"lease length is based on database time when app clock is ahead","passed":true}
+PAYMENT_CLOCK_CASE {"name":"active sibling prevents overlapping capture and reversal under skew","passed":true}
+PAYMENT_CLOCK_CASE {"name":"expired lease can be reclaimed behind app clock and old owner is fenced","passed":true}
+PAYMENT_CLOCK_CASE {"name":"retry backoff is not backdated by the app clock","passed":true}
+PAYMENT_CLOCK_CASE {"name":"closeout cannot steal an unexpired authorization under app clock skew","passed":true}
+PAYMENT_CLOCK_CASE {"name":"closeout recovers an expired authorization even with app clock behind","passed":true}
+PAYMENT_CLOCK_CASE {"name":"two independent callers still obtain one operation owner","passed":true}
+PAYMENT_CLOCK_CASE {"name":"database-due verified webhook is processed with app clock behind","passed":true}
+PAYMENT_CLOCK_CASE {"name":"future webhook retry is not processed early with app clock ahead","passed":true}
+PAYMENT_CLOCK_CASE {"name":"active webhook lease is not stolen by an ahead app clock","passed":true}
+PAYMENT_CLOCK_CASE {"name":"expired webhook lease is recovered despite a behind app clock","passed":true}
+PAYMENT_CLOCK_CASE {"name":"unresolved webhook retains database-based retry delay","passed":true}
+PAYMENT_CLOCK_CASE {"name":"webhook signature and altered replay protections remain enforced","passed":true}
+PAYMENT_CLOCK_SUMMARY {"database":"embedded-postgres","cases":15,"failures":0,"outcomes":[{"name":"new database-due operation is claimable with app clock behind","passed":true},{"name":"future operation is not executed early with app clock ahead","passed":true},{"name":"lease length is based on database time when app clock is ahead","passed":true},{"name":"active sibling prevents overlapping capture and reversal under skew","passed":true},{"name":"expired lease can be reclaimed behind app clock and old owner is fenced","passed":true},{"name":"retry backoff is not backdated by the app clock","passed":true},{"name":"closeout cannot steal an unexpired authorization under app clock skew","passed":true},{"name":"closeout recovers an expired authorization even with app clock behind","passed":true},{"name":"two independent callers still obtain one operation owner","passed":true},{"name":"database-due verified webhook is processed with app clock behind","passed":true},{"name":"future webhook retry is not processed early with app clock ahead","passed":true},{"name":"active webhook lease is not stolen by an ahead app clock","passed":true},{"name":"expired webhook lease is recovered despite a behind app clock","passed":true},{"name":"unresolved webhook retains database-based retry delay","passed":true},{"name":"webhook signature and altered replay protections remain enforced","passed":true}]}
+Stripe webhook verification contract passed.
+{ name: 'newer-profile-response-wins', status: 'PASS' }
+{
+  name: 'older-profile-failure-cannot-clear-newer-profile',
+  status: 'PASS'
+}
+{ name: 'profile-ordering-includes-delayed-json-body', status: 'PASS' }
+{ name: 'newer-room-list-response-wins', status: 'PASS' }
+{
+  name: 'room-list-ordering-includes-delayed-json-body',
+  status: 'PASS'
+}
+{
+  name: 'account-change-clears-old-selection-and-room-list',
+  status: 'PASS'
+}
+{
+  name: 'old-account-room-response-cannot-enter-new-account',
+  status: 'PASS'
+}
+{ name: 'profile-access-loss-clears-room-selection', status: 'PASS' }
+{
+  name: 'room-registry-access-loss-clears-private-context',
+  status: 'PASS'
+}
+{
+  name: 'same-account-profile-save-preserves-selection',
+  status: 'PASS'
+}
+{
+  name: 'empty-registry-preserves-ending-room-selection',
+  status: 'PASS'
+}
+{
+  name: 'logout-intent-rejects-older-profile-and-room-reads',
+  status: 'PASS'
+}
+{ name: 'unmount-cancels-both-read-streams', status: 'PASS' }
+{ name: 'normal-start-still-selects-confirmed-room', status: 'PASS' }
+{
+  name: 'account-change-during-start-cannot-restore-old-room',
+  status: 'PASS'
+}
+{ name: 'same-account-save-does-not-cancel-start', status: 'PASS' }
+{
+  name: 'temporary-profile-failure-preserves-confirmed-room-and-recovers',
+  status: 'PASS'
+}
+{
+  name: 'initial-profile-failure-is-visible-on-performer-home',
+  status: 'PASS'
+}
+{
+  name: 'registry-access-loss-invalidates-pending-profile-response',
+  status: 'PASS'
+}
+{
+  name: 'obsolete-registry-denial-cannot-clear-newer-success',
+  status: 'PASS'
+}
+{
+  name: 'old-account-action-completion-cannot-cancel-new-account-read',
+  status: 'PASS'
+}
+{
+  name: 'failed-logout-shows-error-and-restores-refresh',
+  status: 'PASS'
+}
+{
+  name: 'co-batched-account-switch-cannot-auto-select-old-room',
+  status: 'PASS'
+}
+{
+  name: 'old-registry-denial-cannot-cancel-newer-account-profile',
+  status: 'PASS'
+}
+{
+  name: 'newer-profile-delayed-json-survives-older-registry-denial',
+  status: 'PASS'
+}
+{
+  name: 'queued-new-profile-survives-old-registry-denial',
+  status: 'PASS'
+}
+{
+  name: 'older-profile-delayed-json-is-revoked-by-newer-registry-denial',
+  status: 'PASS'
+}
+{
+  name: 'expired-action-cannot-cancel-current-read-A-B-A',
+  status: 'PASS'
+}
+{
+  name: 'expired-action-cannot-cancel-current-read-access-loss-and-recovery',
+  status: 'PASS'
+}
+Performer account read behavior: 29/29 PASS
+Sway refund confirmation browser interaction test passed.
+Response-order Playwright Chromium: 148.0.7778.96
+[
+  {
+    "scenario": "newer-read",
+    "status": "PASS"
+  },
+  {
+    "scenario": "401",
+    "status": "PASS"
+  },
+  {
+    "scenario": "403",
+    "status": "PASS"
+  },
+  {
+    "scenario": "404",
+    "status": "PASS"
+  },
+  {
+    "scenario": "410",
+    "status": "PASS"
+  },
+  {
+    "scenario": "503",
+    "status": "PASS"
+  },
+  {
+    "scenario": "offline",
+    "status": "PASS"
+  },
+  {
+    "scenario": "closed-current",
+    "status": "PASS"
+  },
+  {
+    "scenario": "wrong-room-pending",
+    "status": "PASS"
+  },
+  {
+    "scenario": "same-room-current",
+    "status": "PASS"
+  },
+  {
+    "scenario": "access-headers-before-body",
+    "status": "PASS"
+  },
+  {
+    "scenario": "expired-body-response",
+    "status": "PASS"
+  },
+  {
+    "scenario": "recovered-before-old-action",
+    "status": "PASS"
+  }
+]
+Room response-order browser checks passed (13).
+{ name: 'normal-create', status: 'PASS' }
+{ name: 'fresh-room-read-not-old-snapshot', status: 'PASS' }
+{ name: 'switch-during-create', status: 'PASS' }
+{ name: 'A-B-A-during-create', status: 'PASS' }
+{ name: 'repeated-start', status: 'PASS' }
+{ name: 'mismatched-response', status: 'PASS' }
+{ name: 'missing-room-response', status: 'PASS' }
+{ name: 'explicit-retry-same-room-id', status: 'PASS' }
+{ name: 'no-automatic-write-retry', status: 'PASS' }
+{ name: 'account-change-during-create', status: 'PASS' }
+{ name: 'logout-during-create', status: 'PASS' }
+{ name: 'unmount-during-create', status: 'PASS' }
+{ name: 'same-account-profile-refresh', status: 'PASS' }
+Performer room-start isolation: 13/13 PASS.
+Payment closeout DB-backed contract passed.
+Incoming-only Stripe and PayPal/Venmo payout contract passed.
+Persisted middleware guard contract passed.
+Protected performer session rejected. { path: undefined, ip: null, reason: 'invalid_or_expired_session' }
+Protected performer session rejected. { path: undefined, ip: null, reason: 'invalid_or_expired_session' }
+Protected performer session rejected. { path: undefined, ip: null, reason: 'invalid_or_expired_session' }
+Protected performer session rejected. { path: undefined, ip: null, reason: 'invalid_or_expired_session' }
+Persisted access store readiness contract passed.
+Performer browser session contract passed.
+Performer login email delivery unavailable: missing SWAY_EMAIL_PROVIDER, SWAY_EMAIL_API_KEY, SWAY_EMAIL_FROM, or SWAY_APP_BASE_URL.
+Performer email login contract passed.
+Performer self-serve signup contract passed.
+Sources acceptance correctly rejects missing Chromium after actual PGlite startup and cleanup.
+PASS Apple library scalar metadata, entities and millisecond duration
+PASS Apple incomplete dictionary rejected
+PASS Serato history CSV accepts song column
+PASS Common transferred playlist headers
+PASS Quoted comma/newline and escaped quote
+PASS Semicolon-delimited CSV
+PASS TSV playlist
+PASS Apple/Serato tabbed text
+PASS BOM removed
+PASS Plain performer setlist
+PASS CR-only list
+PASS PLS indexed order, duration, path privacy
+PASS XSPF song metadata
+PASS Exactly 1000 is not truncated
+PASS 1001 is explicitly truncated
+PASS Unknown formats left to existing parsers
+PASS Unclosed quote rejected
+PASS Missing title header rejected
+PASS Entity declarations rejected without network
+PASS HTML renamed as text rejected
+PASS Remote link not falsely imported as song
+PASS Stable track IDs
+PASS Empty list rejected
+PASS Existing M3U entry retained
+PASS Public parser reaches Apple import
+PASS UTF-16 uploaded Apple text
+{"passed":26,"failed":0,"scope":"source export parser tests; no provider requests or production writes"}
+PASS Two different CSV exports retain separate source identities
+PASS Repeating the same export retains its source identity
+PASS Same filename from different named services stays separate
+PASS Private folder path never appears in saved label or identity
+PASS Duplicate rows removed before the server receives them
+PASS Successful import requires checked sources, consent and exact receipt
+PASS Cancellation never posts or refreshes saved records
+PASS Replacement names the existing source before consent
+PASS Synced-source collision is refused
+PASS Malformed source response cannot authorize a write
+PASS Invalid song list makes no server request
+PASS Malformed success response is not shown as saved
+PASS Foreign performer receipt is not shown as saved
+PASS Wrong imported count is not shown as saved
+PASS Account change before source check completes prevents POST
+PASS Preview mode never imports
+PASS Oversized list requires explicit truncation consent
+PASS Refresh failure does not pretend committed save was lost
+{"passed":18,"failed":0,"scope":"Actual import helper with injected HTTP responses; browser/database proof is separate"}
+Source counts passed through actual API: source isolation, performer isolation, zero-track source, replacement, unauthenticated denial.
+✔ observed true and false playback state remain distinct (27.1464ms)
+✔ unknown playback responses never manufacture a connected paused deck (3.472ms)
+✔ a non-cooperative fetch times out without replaying the deck command (1001.8774ms)
+✔ the deadline also bounds a response body that ignores cancellation (1014.825ms)
+✔ negative, unreadable and HTTP-error replies never acknowledge execution (1.5179ms)
+✔ exact-path loading keeps its source command and acknowledged result (0.7145ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2054.5142
+SWAY_SOURCE_BROWSER_PASS Eight named file choices are mounted in the real performer Sources page
+SWAY_SOURCE_BROWSER_PASS Two CSV exports save as separate sources through the actual API
+SWAY_SOURCE_BROWSER_PASS Canceling a replacement performs no write and preserves both existing lists
+SWAY_SOURCE_BROWSER_PASS Confirmed replacement updates only the matching saved export
+SWAY_SOURCE_BROWSER_PASS Apple, rekordbox, Traktor, VirtualDJ, M3U, PLS, XSPF, TXT and TSV each persist through real browser imports
+SWAY_SOURCE_BROWSER_PASS The same filename imported from another named music app creates a separate source without replacing existing tracks
+SWAY_SOURCE_BROWSER_PASS Browser POST bodies contain song metadata, not local file paths or audio
+SWAY_SOURCE_BROWSER_PASS Invalid file is rejected before POST and does not erase prior sources
+SWAY_SOURCE_BROWSER_PASS Saved imports survive reload and are found in the actual Requests library
+SWAY_SOURCE_BROWSER_PASS A separately signed-up performer cannot read the first performer sources
+SWAY_SOURCE_BROWSER_PASS Server restart preserves all twelve sources and database-backed active tracks
+SWAY_SOURCE_BROWSER_PASS Desktop, 390px and 320px Sources layouts stay within the viewport
+SWAY_SOURCE_BROWSER_PASS Both real account journeys complete without browser page errors
+SWAY_SOURCE_BROWSER_SUMMARY {"startedAt":"2026-09-17T15:44:18.242Z","checks":["Eight named file choices are mounted in the real performer Sources page","Two CSV exports save as separate sources through the actual API","Canceling a replacement performs no write and preserves both existing lists","Confirmed replacement updates only the matching saved export","Apple, rekordbox, Traktor, VirtualDJ, M3U, PLS, XSPF, TXT and TSV each persist through real browser imports","The same filename imported from another named music app creates a separate source without replacing existing tracks","Browser POST bodies contain song metadata, not local file paths or audio","Invalid file is rejected before POST and does not erase prior sources","Saved imports survive reload and are found in the actual Requests library","A separately signed-up performer cannot read the first performer sources","Server restart preserves all twelve sources and database-backed active tracks","Desktop, 390px and 320px Sources layouts stay within the viewport","Both real account journeys complete without browser page errors"],"passed":true,"providerCalls":0,"productionWrites":false,"databaseKind":"embedded-postgres","finishedAt":"2026-09-17T15:45:22.000Z"}
+Performer library availability contract passed.
+Sway DJ library importer tests passed.
+Sway DJ source controller tests passed.
+Sway playback control store integration tests passed.
+Sway DJ integration contract passed.
+Music source capability contract passed.
+Crowd autopilot contract passed.
+Performer hardware mapping contract passed.
+▶ Direct music provider boundary rejects ambiguous or unsafe responses
+  ✔ immutable account identity survives public ID changes and omission (23.4729ms)
+  ✔ missing or malformed immutable identity never falls back to public ID (4.1591ms)
+  ✔ token shape, expiry, refresh identity and granted scopes are verified (1.2856ms)
+  ✔ a redirect is refused and never followed with authorization (0.3943ms)
+  ✔ provider status and retry delay remain distinct, without leaking its error body (0.6662ms)
+  ✔ a valid no-active-player response is distinct from malformed playback (0.8219ms)
+  ✔ oversized or unreadable provider JSON cannot become a success (6.7932ms)
+  ✔ unsafe, looping or truncated library paging is rejected rather than fetched (2.6914ms)
+  ✔ provider next URL yields only a validated offset, never a fetchable arbitrary URL (0.7524ms)
+  ✔ migrated item envelopes, unavailable tracks, local songs and episodes are handled distinctly (0.3655ms)
+  ✔ invalid commands and playlist paths cause zero provider calls (0.3064ms)
+  ✔ whole request and body deadlines work even when transport ignores abort (42.183ms)
+  ✔ encrypted credentials cannot be copied to another connection or altered (0.9716ms)
+✔ Direct music provider boundary rejects ambiguous or unsafe responses (87.2631ms)
+▶ Direct music browser client validates identity and never replays unknown commands
+  ✔ foreign owner, connection generation and malformed tracks are refused (2.1521ms)
+  ✔ stale playback observations cannot enable controls (0.6335ms)
+  ✔ a definite provider rejection retains its receipt rather than becoming uncertain (0.4084ms)
+  ✔ transport failure triggers exactly one command request, not an automatic retry (0.1878ms)
+  ✔ account-lifetime cancellation rejects late data even if the fetcher completes (0.3123ms)
+  ✔ pre-aborted account lifetimes do not make any request (0.1564ms)
+  ✔ a stalled response body has a bounded client lifetime (24.2548ms)
+✔ Direct music browser client validates identity and never replays unknown commands (29.0792ms)
+✔ Direct music migration preserves unrelated schema and supplies the current generated snapshot (11.2938ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 130.6073
+▶ Direct account connection and external control: actual store/router, synthetic provider
+  ✔ provider approval and key configuration are independent fail-closed requirements (1.8778ms)
+  ✔ a different account cannot inspect or begin another performer connection (14.0244ms)
+  ✔ PKCE and browser binding are generated, with only hashes and encrypted verifier stored (21.504ms)
+  ✔ foreign callback identity and browser nonce fail before token exchange (7.1085ms)
+  ✔ successful authorization stores an encrypted, account-bound reusable connection (78.4134ms)
+  ✔ a consumed callback cannot exchange or overwrite again (4.1024ms)
+  ✔ service restart reuses the saved connection, not an uploaded catalog (11.6205ms)
+  ✔ library changes arrive directly from the provider without a file or stored-track replacement (42.7701ms)
+  ✔ restricted or missing players are not selectable; selecting a player does not play (32.515ms)
+  ✔ Play reaches the chosen provider device; receipt is accepted, never a fabricated playing state (36.2043ms)
+  ✔ the same command ID never executes twice and cannot be reused for another action (21.2844ms)
+  ✔ pause, resume, next, previous, queue and transfer have explicit provider commands (125.7794ms)
+  ✔ lost command response stays uncertain and replay does not resend (32.9616ms)
+  ✔ two concurrent submissions with one command identity reach the provider once (34.373ms)
+  ✔ expired token refresh preserves an omitted replacement refresh token (30.2896ms)
+  ✔ rate-limit cooldown is persisted and stops repeated provider requests (23.2622ms)
+  ✔ revoked authorization clears control eligibility until explicit reconnect (119.1188ms)
+  ✔ missing permissions preserve the previous connection instead of publishing a false success (31.6787ms)
+  ✔ changed ownership during provider authorization cannot attach credentials to a new owner (38.6511ms)
+  ✔ disconnect deletes credentials, provider identity and command history but preserves legacy music (28.339ms)
+  ✔ real HTTP routes enforce access, same-origin writes and one-use browser-bound callbacks (178.4807ms)
+  ✔ expired and superseded authorization attempts cannot call the token endpoint (30.9605ms)
+DIRECT_MUSIC_INTEGRATION_COMPLETE {"database":"embedded-postgres","provider":"synthetic","realProviderCalls":0,"productionWrites":false,"providerRequests":43,"commands":9,"tokenExchanges":7}
+  ✔ disconnect still works when operator approval is withdrawn or the encryption key is unavailable (38.108ms)
+✔ Direct account connection and external control: actual store/router, synthetic provider (990.0784ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1011.9126
+DIRECT_MUSIC_BROWSER_PASS Direct account connection appears before file imports and requires no live room or CSV
+DIRECT_MUSIC_BROWSER_PASS Provider consent cancellation returns useful feedback without attaching an account
+DIRECT_MUSIC_BROWSER_PASS Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route
+DIRECT_MUSIC_BROWSER_PASS Selecting a currently available player persists the target without starting audio; restricted devices stay disabled
+DIRECT_MUSIC_BROWSER_PASS Accepted Play command does not fabricate Playing before a separately observed provider response
+DIRECT_MUSIC_BROWSER_PASS Play, pause, resume, queue and next use the selected external player and display only reported track/state
+DIRECT_MUSIC_BROWSER_PASS Provider playlist edit appears automatically without uploading files or overwriting a saved request list
+DIRECT_MUSIC_BROWSER_PASS Search and saved songs are read from the connected account
+DIRECT_MUSIC_BROWSER_PASS Lost command outcome disables controls until manual verification and never automatically resends
+DIRECT_MUSIC_BROWSER_PASS Unavailable playback feedback removes control permission and supports explicit recovery
+DIRECT_MUSIC_BROWSER_PASS Connected account, music browsing and player controls fit desktop and narrow mobile screens
+DIRECT_MUSIC_BROWSER_PASS A separate real account and a cross-origin mutation cannot use another account’s connection
+DIRECT_MUSIC_BROWSER_PASS Authenticated connection and selected device survive actual server restart and browser reload
+DIRECT_MUSIC_BROWSER_PASS Confirmed disconnect deletes authorization and command records without deleting request libraries; cancel preserves access
+DIRECT_MUSIC_BROWSER_PASS Absent provider approval cannot be mistaken for a working connection or enabled by a user checkbox
+DIRECT_MUSIC_BROWSER_SUMMARY {"startedAt":"2026-09-17T15:45:46.527Z","scope":"Actual signed-in application with synthetic OAuth consent and provider replies. No real music provider, physical playback, or production writes.","checks":["Direct account connection appears before file imports and requires no live room or CSV","Provider consent cancellation returns useful feedback without attaching an account","Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route","Selecting a currently available player persists the target without starting audio; restricted devices stay disabled","Accepted Play command does not fabricate Playing before a separately observed provider response","Play, pause, resume, queue and next use the selected external player and display only reported track/state","Provider playlist edit appears automatically without uploading files or overwriting a saved request list","Search and saved songs are read from the connected account","Lost command outcome disables controls until manual verification and never automatically resends","Unavailable playback feedback removes control permission and supports explicit recovery","Connected account, music browsing and player controls fit desktop and narrow mobile screens","A separate real account and a cross-origin mutation cannot use another account’s connection","Authenticated connection and selected device survive actual server restart and browser reload","Confirmed disconnect deletes authorization and command records without deleting request libraries; cancel preserves access","Absent provider approval cannot be mistaken for a working connection or enabled by a user checkbox"],"passed":true,"database":"embedded-postgres","providerRequests":44,"externalCommands":6,"actualProviderCalls":0,"actualAudioPlayback":false,"finishedAt":"2026-09-17T15:47:42.870Z"}
+▶ Spotify catalog behavior at the mocked provider boundary
+  ✔ search uses development-compatible limits and canonical track references (24.8325ms)
+  ✔ unconfigured and empty searches do not call the provider (0.5319ms)
+  ✔ invalid and deceptive playlist URLs are rejected before authentication (1.0514ms)
+  ✔ legacy and migrated playlists follow every page and retain stable source IDs (3.1295ms)
+  ✔ a successful empty playlist is distinct from denied contents and unavailable entries (1.8092ms)
+  ✔ a playlist beyond the old first-page limit is imported completely (3.4169ms)
+  ✔ Spotify local-file markers on playlist entries do not invalidate available catalog songs (0.6559ms)
+  ✔ duplicate songs across playlist pages count as one saved source track (0.832ms)
+  ✔ same-size playlist edits during pagination cannot replace a saved source with mixed versions (1.6643ms)
+  ✔ paginated imports require a starting playlist version (0.691ms)
+  ✔ playlists larger than the bound never return a truncated import (0.7501ms)
+  ✔ missing metadata, truncated pages, and unreadable tracks never appear complete (2.6599ms)
+  ✔ provider pagination cannot send credentials to another origin or playlist (0.9414ms)
+  ✔ pagination loops, changed totals, and skipped offsets are refused atomically (0.8808ms)
+  ✔ failed later pages return no importable batch and expose safe provider status (1.1031ms)
+  ✔ revoked token refreshes once and persistent rejection stops (0.3502ms)
+  ✔ refreshed token can recover a request without losing its playlist (0.315ms)
+  ✔ credential rotation cannot reuse another app’s cached token (0.326ms)
+  ✔ tokens are cached until their bounded early expiry (0.3999ms)
+  ✔ concurrent searches share one credential exchange (0.3733ms)
+  ✔ bad token responses and token-endpoint rejection retain configuration truth (0.7496ms)
+  ✔ request deadline aborts a stalled provider and produces a retryable timeout (8.2552ms)
+  ✔ whole-operation deadline bounds long pagination even when individual pages respond (0.9652ms)
+  ✔ unreadable JSON and malformed search envelopes are not reported as empty successes (0.9008ms)
+  ✔ wholly and partly malformed search items fail without partial results (2.3875ms)
+  ✔ a valid empty provider search remains a successful empty result (0.6598ms)
+  ✔ legacy HTTP search retains library fallback on token rejection without changing credential configuration (0.4926ms)
+  ✔ legacy HTTP search retains library fallback on rate limits and unreadable results (1.2922ms)
+  ✔ legacy HTTP search does not mistake a valid empty catalog for a failed provider (0.4028ms)
+✔ Spotify catalog behavior at the mocked provider boundary (68.1922ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 75.7431
+▶ Current Spotify route cannot persist an incomplete provider batch
+  ✔ denied account access stops before provider and persistence (2.034ms)
+  ✔ a non-owner stops before provider and persistence (0.5627ms)
+  ✔ deceptive playlist URLs cannot reach provider or persistence (0.6462ms)
+  ✔ an incomplete first page never replaces saved music (24.2093ms)
+  ✔ a failed later page never replaces saved music (2.0662ms)
+  ✔ a changed playlist snapshot never replaces saved music (1.8115ms)
+  ✔ the current HTTP route still enforces its explicit 1000-item ceiling without truncation (1.2496ms)
+  ✔ a complete deduplicated playlist below that ceiling reaches the existing writer once (1.2922ms)
+  ✔ a changed performer rejects before provider access (0.2287ms)
+  ✔ source conflict becomes 409 without touching tracks (0.7068ms)
+  ✔ 251 tracks through the actual route are not capped at the old first-page ceiling (1.7902ms)
+✔ Current Spotify route cannot persist an incomplete provider batch (39.1804ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48.5587
+PASS Only exact Spotify playlist references are accepted
+PASS Successful write carries owner identity and requires matching receipt
+PASS Replacement cancellation makes no write
+PASS missing source list prevents replacement
+PASS invalid source record prevents replacement
+PASS source identity collision prevents replacement
+PASS Replacement sends the exact observed source version
+PASS Foreign source-list owner cannot authorize a write
+PASS Missing saved source version prevents replacement
+PASS foreign owner is never displayed as saved
+PASS different playlist is never displayed as saved
+PASS missing confirmation is never displayed as saved
+PASS empty saved import is never displayed as saved
+PASS malformed count is never displayed as saved
+PASS Provider failure is retained and does not refresh or replay
+PASS Lost POST response never retries automatically
+PASS Account change during preflight prevents POST
+PASS Late response after account change cannot refresh or claim success
+PASS Confirmed save survives a failed dashboard refresh
+PASS Preview and canceled lifetime do no work
+{"passed":20,"failed":0,"scope":"Import workflow with provider-boundary responses; live Spotify acceptance remains separate."}
+{"passed":true,"rejectedBeforeTrackMutation":16,"database":"embedded-postgres","scope":"Source ownership, absent identity reservation, replacement version, source kind, and rollback; standalone concurrency not claimed."}
+▶ saved library pagination never presents an incomplete or mixed snapshot as complete
+  ✔ all 251 tracks are returned with stable pages and owner (19.8052ms)
+  ✔ a changed source version rejects the entire read (1.0846ms)
+  ✔ foreign account, missing paging, invalid tracks and repeated IDs fail closed (2.2198ms)
+  ✔ a skipped or empty continuing page cannot loop or hide tracks (0.8997ms)
+  ✔ provider-independent HTTP failure is visible, not a partial success (0.5284ms)
+  ✔ pre-aborted account lifetime never fetches (0.2378ms)
+✔ saved library pagination never presents an incomplete or mixed snapshot as complete (26.2378ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.946
+SWAY_SPOTIFY_FLOW_PASS Combined TalentApp header, keyboard import choices and library-first layouts work at desktop and mobile sizes
+SWAY_SPOTIFY_FLOW_PASS 251-track playlist saves through signed-in React UI, actual HTTP routes and database
+SWAY_SPOTIFY_FLOW_PASS Canceled replacement sends no POST and preserves both saved sources
+SWAY_SPOTIFY_FLOW_PASS Rate limit displays retry guidance and leaves saved playlist and source version unchanged
+SWAY_SPOTIFY_FLOW_PASS Later-page failure and changed provider snapshot cannot partially replace saved tracks
+SWAY_SPOTIFY_FLOW_PASS Oversized playlist is explicitly rejected, never silently truncated
+SWAY_SPOTIFY_FLOW_PASS Confirmed replacement changes only the selected source and advances its version
+SWAY_SPOTIFY_FLOW_PASS Two simultaneous replacements with one observed version yield one success and one conflict
+SWAY_SPOTIFY_FLOW_PASS A real stale browser preflight cannot overwrite a newer saved playlist
+SWAY_SPOTIFY_FLOW_PASS Foreign performer and copied source receipts cannot cross account boundaries
+SWAY_SPOTIFY_FLOW_PASS Ownership changed during provider loading is rejected inside the write transaction
+SWAY_SPOTIFY_FLOW_PASS Revocation advances source version even with clock skew and rejects a stale restore
+SWAY_SPOTIFY_FLOW_PASS Saved source state and account isolation survive process restart
+SWAY_SPOTIFY_FLOW_PASS Sources opens a real free room, preserves library, confirms one room file, and refuses unobserved playback
+SWAY_SPOTIFY_FLOW_PASS Desktop and mobile Sources journeys have no page errors or horizontal overflow
+SWAY_SPOTIFY_FLOW_SUMMARY {"startedAt":"2026-09-17T15:47:58.529Z","checks":["Combined TalentApp header, keyboard import choices and library-first layouts work at desktop and mobile sizes","251-track playlist saves through signed-in React UI, actual HTTP routes and database","Canceled replacement sends no POST and preserves both saved sources","Rate limit displays retry guidance and leaves saved playlist and source version unchanged","Later-page failure and changed provider snapshot cannot partially replace saved tracks","Oversized playlist is explicitly rejected, never silently truncated","Confirmed replacement changes only the selected source and advances its version","Two simultaneous replacements with one observed version yield one success and one conflict","A real stale browser preflight cannot overwrite a newer saved playlist","Foreign performer and copied source receipts cannot cross account boundaries","Ownership changed during provider loading is rejected inside the write transaction","Revocation advances source version even with clock skew and rejects a stale restore","Saved source state and account isolation survive process restart","Sources opens a real free room, preserves library, confirms one room file, and refuses unobserved playback","Desktop and mobile Sources journeys have no page errors or horizontal overflow"],"passed":true,"providerCalls":0,"productionWrites":false,"databaseKind":"embedded-postgres","simulatedProviderRequests":21,"finishedAt":"2026-09-17T15:48:59.552Z"}
+SOURCE_PLAYER_BEHAVIOR_PASS exact server-shaped bytes and identity
+SOURCE_PLAYER_BEHAVIOR_PASS foreign room
+SOURCE_PLAYER_BEHAVIOR_PASS missing envelope
+SOURCE_PLAYER_BEHAVIOR_PASS malformed envelope
+SOURCE_PLAYER_BEHAVIOR_PASS missing launcher
+SOURCE_PLAYER_BEHAVIOR_PASS foreign filename
+SOURCE_PLAYER_BEHAVIOR_PASS invalid contentType
+SOURCE_PLAYER_BEHAVIOR_PASS invalid contentBase64
+SOURCE_PLAYER_BEHAVIOR_PASS invalid sha256
+SOURCE_PLAYER_BEHAVIOR_PASS invalid expiresAt
+SOURCE_PLAYER_BEHAVIOR_PASS bad base64 alphabet
+SOURCE_PLAYER_BEHAVIOR_PASS bad base64 length
+SOURCE_PLAYER_BEHAVIOR_PASS oversized file
+SOURCE_PLAYER_BEHAVIOR_PASS expired file
+SOURCE_PLAYER_BEHAVIOR_PASS excessive lifetime
+SOURCE_PLAYER_BEHAVIOR_PASS bad room cannot submit
+SOURCE_PLAYER_BEHAVIOR_PASS one exact room POST without credential persistence
+SOURCE_PLAYER_BEHAVIOR_PASS access loss 401
+SOURCE_PLAYER_BEHAVIOR_PASS access loss 403
+SOURCE_PLAYER_BEHAVIOR_PASS failed request never retries itself
+SOURCE_PLAYER_BEHAVIOR_PASS pre-aborted request never posts
+SOURCE_PLAYER_BEHAVIOR_PASS abort-insensitive fetch deadline
+SOURCE_PLAYER_BEHAVIOR_PASS whole-body deadline
+SOURCE_PLAYER_BEHAVIOR_PASS late response after cancellation remains rejected
+SOURCE_PLAYER_BEHAVIOR_COMPLETE 24
+SOURCE_PLAYER_BROWSER_RESULT {"name":"confirmed-setup-download-and-control","width":1440,"status":"PASS","posts":3}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"cancel-and-readiness-guards","width":1440,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"preserved-source-import-actions","width":1440,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-account-isolation","width":1440,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-room-isolation","width":1440,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"integrity-failure-no-download","width":1440,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"access-loss-clears-controls","width":1440,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"expired-file-cleared","width":1440,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"stale-playback-remains-disabled","width":1440,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"confirmed-setup-download-and-control","width":390,"status":"PASS","posts":3}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"cancel-and-readiness-guards","width":390,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"preserved-source-import-actions","width":390,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-account-isolation","width":390,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-room-isolation","width":390,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"integrity-failure-no-download","width":390,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"access-loss-clears-controls","width":390,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"expired-file-cleared","width":390,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"stale-playback-remains-disabled","width":390,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"confirmed-setup-download-and-control","width":320,"status":"PASS","posts":3}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"cancel-and-readiness-guards","width":320,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"preserved-source-import-actions","width":320,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-account-isolation","width":320,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"late-result-room-isolation","width":320,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"integrity-failure-no-download","width":320,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"access-loss-clears-controls","width":320,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"expired-file-cleared","width":320,"status":"PASS","posts":1}
+SOURCE_PLAYER_BROWSER_RESULT {"name":"stale-playback-remains-disabled","width":320,"status":"PASS","posts":0}
+SOURCE_PLAYER_BROWSER_COMPLETE 27 artifacts\readiness-223\sources-player-1789660140422
+SWAY_DESIGN_IMAGE_1440 {"sourceSha256":"3a6ce0670e5fd1213f808806eab85db8ee92a3aae9a8cbd0bf4b74b896988957","previewSha256":"5bcc9f4e5b862523c46f78dba7b6d6150d4089da2115414577c861322212232d","bytes":35044}
+SWAY_SOURCE_DESIGN_RESULT {"width":1440,"readyMs":176,"assetMode":"production-built","status":"PASS","filePickerActions":8,"keyboardDisclosure":true,"liveCockpitExcluded":true,"overflow":false}
+SWAY_SOURCE_DESIGN_RESULT {"width":1024,"readyMs":144,"assetMode":"production-built","status":"PASS","filePickerActions":8,"keyboardDisclosure":true,"liveCockpitExcluded":true,"overflow":false}
+SWAY_SOURCE_DESIGN_RESULT {"width":768,"readyMs":155,"assetMode":"production-built","status":"PASS","filePickerActions":8,"keyboardDisclosure":true,"liveCockpitExcluded":true,"overflow":false}
+SWAY_DESIGN_IMAGE_390 {"sourceSha256":"2852ea1190418313fcfc4f09daaaf72189862181087a9691b9057206bee32c05","previewSha256":"d097a6bf71d15da5d1aeaac352e9e806f2ea5557a08739bcfbad9c2952cc4452","bytes":54074}
+SWAY_SOURCE_DESIGN_RESULT {"width":390,"readyMs":150,"assetMode":"production-built","status":"PASS","filePickerActions":8,"keyboardDisclosure":true,"liveCockpitExcluded":true,"overflow":false}
+SWAY_SOURCE_DESIGN_RESULT {"width":320,"readyMs":150,"assetMode":"production-built","status":"PASS","filePickerActions":8,"keyboardDisclosure":true,"liveCockpitExcluded":true,"overflow":false}
+SOURCE_PLAYER_SETUP_CONTRACT_PASS
+Performer Connections contract passed.
+Sway control bridge contract passed.
+Sway control bridge token contract passed.
+Sway Windows booth launcher tests passed.
+Sway Windows booth launcher contract passed.
+Sway control bridge cloud action contract passed.
+Performer/control noop guard contract passed.
+Durable performer/control idempotency contract passed.
+Protected route HTML recovery contract passed.
+Public CTA integrity contract passed.
+Link preview metadata contract passed.
+Sway mission fit contract passed.
+PUBLIC_INFORMATION_RUNTIME_PASS route separation, identity, unchanged routes, settings, repeated installation and stale-content rejection
+PUBLIC_INFORMATION_BROWSER_PASS about-320x568-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-320x568-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-320x568-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-320x568-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-390x844-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-390x844-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-390x844-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-390x844-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-844x390-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-844x390-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-844x390-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-844x390-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-768x1024-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-768x1024-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-768x1024-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-768x1024-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-1366x768-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-1366x768-no-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-1366x768-scripts
+PUBLIC_INFORMATION_BROWSER_PASS faq-1366x768-scripts
+PUBLIC_INFORMATION_BROWSER_PASS about-320x568-no-scripts-double-text
+PUBLIC_INFORMATION_BROWSER_PASS faq-320x568-no-scripts-double-text
+PUBLIC_INFORMATION_BROWSER_SUMMARY {"passed":22,"failed":0}
+PUBLIC_ARTWORK_BROWSER_PASS 320x568
+PUBLIC_ARTWORK_BROWSER_PASS 390x844
+PUBLIC_ARTWORK_BROWSER_PASS 844x390
+PUBLIC_ARTWORK_BROWSER_PASS 1366x768
+PUBLIC_ARTWORK_BROWSER_SUMMARY {"passed":4,"failed":0}
+FAQ surface source and real browser contract passed.
+Sway release gate contract passed.
+Sway complete-product readiness contract passed.
+Role route separation contract passed.
+Schema-before-middleware contract passed.
+Separate Vite entrypoints contract passed.
+Server route decoupling contract passed.
+Surface terminology contract passed.
+Sway app unification behavior test passed.
+Sway app unification contract passed.
+Sway telemetry contract passed.
+Patron payment truth contract passed.
+Sway payment modal rendered viewport interaction test passed.
+Sway payment modal viewport contract passed.
+Admin account deletion contract passed.
+Performer live cockpit contract passed.
+Overlay projector QR contract passed.
+Overlay queue motion contract passed.
+Active gig route context contract passed.
+Sway public room state behavioral test passed.
+Active room registry database proof skipped: explicit disposable-database approval not set.
+Active room registry contract passed.
+Performer share kit contract passed.
+ROOM_CONTEXT_PASS active keeps the explicitly selected room identity without changing its state
+ROOM_CONTEXT_PASS ending keeps the explicitly selected room identity without changing its state
+ROOM_CONTEXT_PASS closed keeps the explicitly selected room identity without changing its state
+ROOM_CONTEXT_PASS inactive cannot claim a room identity
+ROOM_CONTEXT_PASS unknown cannot claim a room identity
+ROOM_CONTEXT_PASS active with explicit null never borrows the global room
+ROOM_CONTEXT_PASS ending with explicit null never borrows the global room
+ROOM_CONTEXT_PASS closed with explicit null never borrows the global room
+ROOM_CONTEXT_PASS durable active read preserves the selected room and history
+ROOM_CONTEXT_PASS durable ending read preserves the selected room and history
+ROOM_CONTEXT_PASS durable closed read binds to its confirmed row rather than an absent active room
+ROOM_CONTEXT_PASS durable closed read binds to its confirmed row rather than another active room
+ROOM_CONTEXT_PASS a missing durable room cannot inherit the requested or global identity
+ROOM_CONTEXT_PASS an inconsistent live snapshot is not relabeled as the requested room
+ROOM_CONTEXT_PASS development-only active read preserves its exact room
+ROOM_CONTEXT_PASS development-only ending read preserves its exact room
+ROOM_CONTEXT_PASS development-only closed read preserves its exact room
+ROOM_CONTEXT_PASS development-only reads never borrow a different room
+ROOM_CONTEXT_SUMMARY {"passed":18,"failed":0}
+CLOSED_ROOM_READ_PASS authorized closed read retains the exact room and its read-only history
+CLOSED_ROOM_READ_PASS unprivileged or revoked access cannot read a closed history
+CLOSED_ROOM_READ_PASS inconsistent closed snapshot is unavailable: {"status":"active"}
+CLOSED_ROOM_READ_PASS inconsistent closed snapshot is unavailable: {"id":"22222222-2222-4222-8222-222222222222"}
+CLOSED_ROOM_READ_PASS inconsistent closed snapshot is unavailable: {"id":null}
+CLOSED_ROOM_READ_PASS invalid or missing rooms remain unavailable: {"kind":"missing"}
+CLOSED_ROOM_READ_PASS invalid or missing rooms remain unavailable: {"kind":"inactive"}
+CLOSED_ROOM_READ_PASS invalid or missing rooms remain unavailable: {"requested":"not-a-room"}
+CLOSED_ROOM_READ_PASS active authorized reads retain existing private behavior
+CLOSED_ROOM_READ_PASS active public reads still use only the public projection
+CLOSED_ROOM_READ_PASS development registry does not confuse active identity with membership
+CLOSED_ROOM_READ_PASS development registry does not confuse ending identity with membership
+CLOSED_ROOM_READ_PASS development registry does not confuse closed identity with membership
+CLOSED_ROOM_READ_PASS development registry does not confuse inactive identity with membership
+CLOSED_ROOM_READ_PASS development registry does not confuse unknown identity with membership
+CLOSED_ROOM_READ_SUMMARY {"passed":15,"failed":0}
+ROOM_SELECTION_PASS no confirmed identity cannot read or write a selection
+ROOM_SELECTION_PASS remembered room survives a new read without storing private state
+ROOM_SELECTION_PASS a second account does not inherit the first account room
+ROOM_SELECTION_PASS clearing an account leaves another account selection untouched
+ROOM_SELECTION_PASS reselection updates only the intended account
+ROOM_SELECTION_PASS invalid room ids clear stale selections rather than becoming routes
+ROOM_SELECTION_PASS malformed stored values are rejected and removed
+ROOM_SELECTION_PASS unavailable storage does not break room actions
+ROOM_SELECTION_PASS blocked or full storage never throws into the interface
+ROOM_SELECTION_PASS server rendering has no browser storage dependency
+ROOM_SELECTION_SUMMARY {"passed":10,"failed":0}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"same room under another account clears private history before its response","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"late action from account A cannot populate account B","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"A to B to A rejects the superseded read and action","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"ordinary rerenders preserve the current confirmed account snapshot","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"a private closed recap is cleared on the same-room account change","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"390x844","name":"denied access cannot be repopulated by an earlier recap callback","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"same room under another account clears private history before its response","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"late action from account A cannot populate account B","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"A to B to A rejects the superseded read and action","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"ordinary rerenders preserve the current confirmed account snapshot","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"a private closed recap is cleared on the same-room account change","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"844x390","name":"denied access cannot be repopulated by an earlier recap callback","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"same room under another account clears private history before its response","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"late action from account A cannot populate account B","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"A to B to A rejects the superseded read and action","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"ordinary rerenders preserve the current confirmed account snapshot","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"a private closed recap is cleared on the same-room account change","passed":true}
+ROOM_ACCOUNT_SCOPE_RESULT {"viewport":"1366x768","name":"denied access cannot be repopulated by an earlier recap callback","passed":true}
+ROOM_ACCOUNT_SCOPE_SUMMARY {"passed":18,"failed":0,"limits":"Actual shared React hook in Chromium; synthetic loopback reads and account context, not a real authentication or provider test."}
+Gig-scoped room truth contract passed.
+Mobile SplitView polish contract passed.
+Mobile demo chrome contract passed.
+Mobile top-bar copy contract passed.
+Surface split architecture plan contract passed.
+Phase 1 shell scaffold contract passed.
+Phase 2 shell migration contract passed.
+Phase 3 operator/admin runtime split contract passed.
+Phase 4 operator runtime extraction contract passed.
+Phase 5 admin ops runtime extraction contract passed.
+Phase 6 admin ops fragment extraction contract passed.
+Phase 7 admin ops fragment extraction contract passed.
+Phase 8 admin ops fragment extraction contract passed.
+Phase 9 admin ops fragment extraction contract passed.
+Phase 10 admin ops fragment extraction contract passed.
+UGC control placeholders contract passed.
+App Store legal surface contract passed.
+Universal account Pro Mode contract passed.
+Account claim-code onboarding contract passed.
+{ name: 'edited-code-ignores-200-cleared', status: 'PASS' }
+{ name: 'edited-code-ignores-400-cleared', status: 'PASS' }
+{ name: 'edited-code-ignores-503-cleared', status: 'PASS' }
+{ name: 'edited-code-ignores-200-second-code', status: 'PASS' }
+{ name: 'edited-code-ignores-400-second-code', status: 'PASS' }
+{ name: 'edited-code-ignores-503-second-code', status: 'PASS' }
+{ name: 'newer-code-wins-out-of-order-lookups', status: 'PASS' }
+{ name: 'submit-validates-current-code-once', status: 'PASS' }
+{ name: 'failed-submit-lookup-never-creates-account', status: 'PASS' }
+{
+  name: 'explicit-submit-retries-temporary-failure-408',
+  status: 'PASS'
+}
+{
+  name: 'explicit-submit-retries-temporary-failure-429',
+  status: 'PASS'
+}
+{
+  name: 'explicit-submit-retries-temporary-failure-500',
+  status: 'PASS'
+}
+{
+  name: 'explicit-submit-retries-temporary-failure-503',
+  status: 'PASS'
+}
+{
+  name: 'explicit-submit-retries-temporary-failure-599',
+  status: 'PASS'
+}
+{
+  name: 'explicit-submit-retries-temporary-failure-network',
+  status: 'PASS'
+}
+{ name: 'superseded-submit-stops-cleared', status: 'PASS' }
+{ name: 'superseded-submit-stops-replacement-code', status: 'PASS' }
+{
+  name: 'previous-valid-code-does-not-validate-new-submit',
+  status: 'PASS'
+}
+{ name: 'returning-to-same-code-ignores-old-200', status: 'PASS' }
+{ name: 'returning-to-same-code-ignores-old-400', status: 'PASS' }
+{ name: 'failed-blur-check-stops-waiting-submit', status: 'PASS' }
+{
+  name: 'cleared-prefilled-code-ignores-initial-lookup',
+  status: 'PASS'
+}
+Signup claim component proof: 22/22 passed; synthetic HTTP and JSDOM.
+Patron room lookup transient error state contract passed.
+Deploy migration gate contract passed.
+Delayed-query observed response time: 0ms
+Release health contract passed.
+Audio publishing foundation contract passed.
+Applied 53 migrations and verified audio-publishing database invariants.
+Audio file collaboration contract passed.
+Sway Collaborator Inbox behavior test passed.
+Sway Collaborator Inbox contract passed.
+Release draft contract passed.
+Multi-track release contract passed.
+Continuum connector contract passed.
+PASS both reads start independently and list resolves without ticket readiness
+PASS ticket network failure does not hide a valid schedule
+PASS schedule failure preserves confirmed shows
+PASS missing schedule does not masquerade as empty
+PASS null schedule does not masquerade as empty
+PASS object schedule does not masquerade as empty
+PASS string schedule does not masquerade as empty
+PASS confirmed empty list clears previous shows
+PASS 401 on endpoint 0 clears private state and prevents late repopulation
+PASS 403 on endpoint 0 clears private state and prevents late repopulation
+PASS 401 on endpoint 1 clears private state and prevents late repopulation
+PASS 403 on endpoint 1 clears private state and prevents late repopulation
+PASS ticket denial after schedule success still revokes private state
+PASS superseding refresh cancels both old reads and ignores stale bodies
+PASS old access denial cannot revoke a newer successful refresh
+PASS deadline bounds endpoint 0 transport and late completion
+PASS deadline bounds endpoint 0 body and late completion
+PASS deadline bounds endpoint 1 transport and late completion
+PASS deadline bounds endpoint 1 body and late completion
+PASS disposal cancels all reads and suppresses all later callbacks
+PASS refresh removes previous permission and quotes immediately
+PASS explicit recovery after denied access can reload without automatic mutation
+PASS unreadable JSON on endpoint 0 is handled without an unhandled rejection
+PASS unreadable JSON on endpoint 1 is handled without an unhandled rejection
+EVENT_READ_TOTAL 24 PASS 24 FAIL 0
+Public event listings behavior tests passed.
+Public event listings integration test passed (53 migrations).
+Public event listings contract passed (0026_brave_maggott.sql).
+Event ticket contract behavior test passed.
+Event ticket Stripe provider behavior test passed.
+Native event ticket migration integration test passed (53 migrations).
+Native ticket service integration test passed (53 migrations).
+Native GA event ticket contract passed (0027_warm_ultron.sql).
+Native ticket production proof contract passed.
+Sway containment and canonical onboarding contract passed.
+Sway incoming-only Stripe and PayPal/Venmo readiness behavior test passed.
+Sway live-room recap behavior test passed.
+CATALOG_READ_RESULT {"name":"projects and files load while storage is stalled","status":"PASS"}
+CATALOG_READ_RESULT {"name":"project switch clears rows before new response","status":"PASS"}
+CATALOG_READ_RESULT {"name":"A to B to A ignores both delayed previous reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"HTTP 404 retains same-project rows as read-only","status":"PASS"}
+CATALOG_READ_RESULT {"name":"HTTP 409 retains same-project rows as read-only","status":"PASS"}
+CATALOG_READ_RESULT {"name":"HTTP 429 retains same-project rows as read-only","status":"PASS"}
+CATALOG_READ_RESULT {"name":"HTTP 500 retains same-project rows as read-only","status":"PASS"}
+CATALOG_READ_RESULT {"name":"HTTP 503 retains same-project rows as read-only","status":"PASS"}
+CATALOG_READ_RESULT {"name":"malformed file response is not empty","status":"PASS"}
+CATALOG_READ_RESULT {"name":"failed project read preserves selection and rows","status":"PASS"}
+CATALOG_READ_RESULT {"name":"confirmed empty project list clears previous files","status":"PASS"}
+CATALOG_READ_RESULT {"name":"manual new-project choice survives delayed list","status":"PASS"}
+CATALOG_READ_RESULT {"name":"old list cannot erase confirmed newly created project","status":"PASS"}
+CATALOG_READ_RESULT {"name":"projects 401 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"files 401 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"storage 401 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"projects 403 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"files 403 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"storage 403 clears private state and cancels other reads","status":"PASS"}
+CATALOG_READ_RESULT {"name":"late storage success cannot repopulate revoked context; explicit reload recovers","status":"PASS"}
+CATALOG_READ_RESULT {"name":"stop prevents completion and start works after strict lifecycle cleanup","status":"PASS"}
+CATALOG_READ_RESULT {"name":"recovery sends GET reads only and rejects unlisted selection","status":"PASS"}
+CATALOG_READ_RESULT {"name":"deadline includes stalled JSON body","status":"PASS"}
+CATALOG_READ_RESULT {"name":"abort settles transport that ignores signal","status":"PASS"}
+CATALOG_READ_RESULT {"name":"missing projects","status":"PASS"}
+CATALOG_READ_RESULT {"name":"duplicate projects","status":"PASS"}
+CATALOG_READ_RESULT {"name":"missing versions","status":"PASS"}
+CATALOG_READ_RESULT {"name":"orphan version","status":"PASS"}
+CATALOG_READ_RESULT {"name":"bad checksum","status":"PASS"}
+CATALOG_READ_RESULT {"name":"bad storage","status":"PASS"}
+CATALOG_READ_RESULT {"name":"zero storage divisor","status":"PASS"}
+CATALOG_READ_SUMMARY {"total":31,"passed":31,"failed":[]}
+Audio storage policy contract passed.

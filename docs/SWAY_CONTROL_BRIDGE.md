@@ -184,6 +184,26 @@ loopback VirtualDJ process from the cloud.
   to Sway's server-configured app origin, and never accepts a caller-selected
   remote VirtualDJ host.
 
+## Windows interruption recovery (PR249 candidate)
+
+The Windows room-file generator now reserves an unknown command outcome on disk
+before contacting the player. It keeps the same bridge identity on restart,
+retries cloud completion without replaying the player action, and refuses an
+unreadable or wrong-room ledger rather than silently replacing its history.
+Uncertain and pending outcomes are never removed merely to meet the recent-history limit.
+
+After an uncertain result, later actions remain stopped. The booth window checks
+current player state and asks the performer to inspect the original deck and type
+`CONTINUE` before accepting new commands. Canceling stops the connector without
+clearing the receipt. This confirmation permits new actions; it never replays the
+old command. Unreadable state cannot be labeled paused or authorize recovery.
+
+These changes apply to newly generated files from the candidate. Previously
+downloaded room files do not update themselves. Native tests execute the generated
+PowerShell against synthetic boundaries and temporary ledgers, including an abrupt
+process exit/restart. This is not proof of an installed extension, actual audio,
+or production release. See `docs/process/2026-09-19-windows-booth-recovery.md`.
+
 ## Failure behavior
 
 - Bridge offline: controller shows disconnected and does not queue a command.

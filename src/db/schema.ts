@@ -2986,3 +2986,43 @@ export const mediaConnectorLinks = pgTable('media_connector_links', {
     name: 'media_connector_links_asset_project_fk'
   })
 }));
+
+// Direct provider authorization is separate from uploaded request-list metadata.
+export const directMusicCredentials = pgTable('direct_music_credentials', {
+  connectionId: uuid('connection_id').primaryKey().references(() => performerMusicSourceConnections.id, { onDelete: 'cascade' }),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  revision: uuid('revision').notNull(),
+  sealedTokens: text('sealed_tokens').notNull(),
+  selectedDeviceId: text('selected_device_id'),
+  cooldownUntil: timestamp('cooldown_until', { withTimezone: true }),
+  commandLeaseId: uuid('command_lease_id'),
+  commandLeaseUntil: timestamp('command_lease_until', { withTimezone: true }),
+  ...timestamps
+}, table => ({ performerIdx: index('direct_music_credentials_performer_idx').on(table.performerId) }));
+
+export const directMusicOAuthAttempts = pgTable('direct_music_oauth_attempts', {
+  stateHash: text('state_hash').primaryKey(),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  browserHash: text('browser_hash').notNull(),
+  sealedVerifier: text('sealed_verifier').notNull(),
+  expectedConnectionId: uuid('expected_connection_id'),
+  expectedRevision: uuid('expected_revision'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, table => ({ expiryIdx: index('direct_music_oauth_expiry_idx').on(table.expiresAt) }));
+
+export const directMusicCommands = pgTable('direct_music_commands', {
+  id: uuid('id').primaryKey(),
+  connectionId: uuid('connection_id').notNull().references(() => performerMusicSourceConnections.id, { onDelete: 'cascade' }),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  performerId: uuid('performer_id').notNull().references(() => performers.id),
+  requestHash: text('request_hash').notNull(),
+  status: text('status').notNull(),
+  code: text('code'),
+  message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull()
+}, table => ({ connectionIdx: index('direct_music_commands_connection_idx').on(table.connectionId) }));

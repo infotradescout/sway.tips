@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-09-17T16:18:33.797Z",
+  "scope": "Actual signed-in application with synthetic OAuth consent and provider replies. No real music provider, physical playback, or production writes.",
+  "checks": [
+    "Direct account connection appears before file imports and requires no live room or CSV",
+    "Provider consent cancellation returns useful feedback without attaching an account",
+    "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
+    "Selecting a currently available player persists the target without starting audio; restricted devices stay disabled",
+    "Accepted Play command does not fabricate Playing before a separately observed provider response",
+    "Play, pause, resume, queue and next use the selected external player and display only reported track/state",
+    "Provider playlist edit appears automatically without uploading files or overwriting a saved request list",
+    "Search and saved songs are read from the connected account",
+    "Lost command outcome disables controls until manual verification and never automatically resends",
+    "Unavailable playback feedback removes control permission and supports explicit recovery",
+    "Connected account, music browsing and player controls fit desktop and narrow mobile screens",
+    "A separate real account and a cross-origin mutation cannot use another account’s connection",
+    "Only the authenticated connection owner can operate the player; anonymous and foreign-account commands never reach the source",
+    "Authenticated connection and selected device survive actual server restart and browser reload",
+    "Confirmed disconnect deletes authorization and command records without deleting request libraries; cancel preserves access",
+    "Absent provider approval cannot be mistaken for a working connection or enabled by a user checkbox"
+  ],
+  "passed": true,
+  "database": "real-postgres",
+  "operatorBoundary": {
+    "checks": [
+      {
+        "action": "play",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "resume",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "pause",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "next",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "previous",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "queue",
+        "anonymous": 401,
+        "foreignAccount": 403
+      },
+      {
+        "action": "transfer",
+        "anonymous": 401,
+        "foreignAccount": 403
+      }
+    ],
+    "foreignTarget": 403,
+    "externalCommandDelta": 0,
+    "commandReceiptDelta": 0,
+    "realProviderCalls": 0,
+    "scope": "Actual application sessions/HTTP/database; provider simulated. Forged approval/payment fields are not real paid-request or webhook tests."
+  },
+  "providerRequests": 44,
+  "externalCommands": 6,
+  "actualProviderCalls": 0,
+  "actualAudioPlayback": false,
+  "finishedAt": "2026-09-17T16:20:41.924Z"
+}
