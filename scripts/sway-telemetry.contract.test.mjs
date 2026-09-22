@@ -138,6 +138,11 @@ if (quality.status !== 0) {
   console.error('Actual acquisition-quality ingestion/report regression failed:', quality.error || quality.status);
   process.exit(1);
 }
+const retainedTaint = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'scripts/sway-acquisition-retained-taint.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 60000 });
+if (retainedTaint.status !== 0) {
+  console.error('Retained-history acquisition exclusion regression failed:', retainedTaint.error || retainedTaint.status);
+  process.exit(1);
+}
 await import('./sway-discovery-entry.browser.test.mjs');
 const ingestion = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/sway-discovery-entry-ingestion.test.mjs'], { cwd: root, stdio: 'inherit', timeout: 180000 });
 if (ingestion.status !== 0) {
