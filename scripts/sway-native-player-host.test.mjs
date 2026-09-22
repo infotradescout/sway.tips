@@ -39,7 +39,7 @@ async function setup(t) {
 test('unpaired origins, missing keys, expired keys and query-string keys cannot control a player', async t => {
   const f = await setup(t);
   for (const headers of [{}, { origin }, { origin: 'https://other.invalid', authorization: 'Bearer ' + f.token }, { origin, authorization: 'Bearer wrong' }]) {
-    assert.ok([401, 403].includes((await fetch(f.base + '/v1/connections', { headers })).status);
+    assert.ok([401, 403].includes((await fetch(f.base + '/v1/connections', { headers })).status));
   }
   assert.equal((await fetch(f.base + '/v1/connections?token=' + f.token, { headers: { origin } })).status, 401);
   f.expire(); await assert.rejects(f.client.list(), /expired/); assert.equal(f.commands.length, 0);
@@ -110,4 +110,18 @@ test('native HTTP bodies are size-bounded while streaming and cannot grant unkno
   const value = { connections: [{ id: randomUUID(), revision: randomUUID(), targetKey: '0'.repeat(64), program: 'serato', deck: 1,
     capabilities: { actions: ['play'] }, uncertain: false, pendingReview: [] }], expiresAt: new Date(Date.now() + 10000).toISOString() };
   await assert.rejects(new NativePlayerClient({ pairingKey: 'x'.repeat(43), fetchImpl: async () => new Response(JSON.stringify(value)) }).list(), /No implemented/);
+});
+test('default native browser fetch retains its global receiver and sends pairing only once', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', function (url, init) {
+    assert.equal(this, globalThis, 'Window.fetch must not be invoked with the NativePlayerClient as its receiver.');
+    calls++;
+    assert.equal(url, 'http://127.0.0.1:4316/v1/connections');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.redirect, 'error');
+    return Promise.resolve(new Response(JSON.stringify({ connections: [], expiresAt: new Date(Date.now() + 10000).toISOString() })));
+  });
+  const client = new NativePlayerClient({ pairingKey: 'x'.repeat(43) });
+  assert.deepEqual(await client.list(), []);
+  assert.equal(calls, 1);
 });
