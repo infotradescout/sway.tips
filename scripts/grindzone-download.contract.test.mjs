@@ -23,7 +23,7 @@ test('saved-game workflow runs before packaging and includes public-network veri
  assert.equal(source.split(local).length,2);assert.equal(source.split(live).length,2);
  assert.ok(source.indexOf(local)<source.indexOf("const download=path.join(target,'downloads')"));
  assert.ok(source.indexOf(live)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
- assert.match(source,/\['phone','zones','discovery','cache','studio','save-data','locations','herds'\]/);
+ assert.match(source,/\['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play'\]/);
  assert.match(source,/Required local acceptance report missing/);
  assert.match(source,/result\.passed!==true\|\|result\.source!==downloadSourceSha/);
  assert.doesNotMatch(source,/writeFileSync\([^\n]*stat-definitions\.json/);
@@ -51,4 +51,16 @@ test('herd reference generation precedes native acceptance and both herd browser
  }
  assert.match(source,/mode\+'-herds\.json'/);assert.match(source,/report\.realPlayerSaveVerified!==false/);
  assert.match(source,/mode\+'-herds\.png'/);assert.match(source,/Required local acceptance report missing/);
+});
+test('no-PC browser journey is required in both modes without claiming account synchronization',()=>{
+ const source=readFileSync(script,'utf8');
+ for(const mode of ['local','live']){
+  const call=`run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'${mode}',evidence]);`;
+  assert.equal(source.split(call).length,2);
+  assert.ok(source.indexOf(call)<source.indexOf("const download=path.join(target,'downloads')"));
+  if(mode==='live')assert.ok(source.indexOf(call)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
+ }
+ assert.match(source,/report\.pcProcessesCreated!==0/);assert.match(source,/report\.accountSyncVerified!==false/);
+ assert.match(source,/mode\+'-browser-play\.json'/);assert.match(source,/mode\+'-browser-play\.png'/);
+ assert.match(source,/Browser-only progress is not account sync/);
 });
