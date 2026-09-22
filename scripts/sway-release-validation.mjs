@@ -1,5 +1,7 @@
 // Explicit isolated modes preserve each task's execution and evidence boundary.
-if (process.env.SWAY_QUALITY_REGRESSION_ISOLATION === 'true') {
+if (process.env.SWAY_QUALITY_FINAL_SOURCE_ONLY === 'true') {
+  await import('./sway-quality-final-source.mjs');
+} else if (process.env.SWAY_QUALITY_REGRESSION_ISOLATION === 'true') {
   await import('./sway-quality-regression-isolation.mjs');
 } else if (process.env.SWAY_QUALITY_DASHBOARD_SHA) {
   await import('./sway-quality-dashboard-proof.mjs');
