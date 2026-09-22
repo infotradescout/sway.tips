@@ -46,7 +46,7 @@
   "sourceCleanAfterRun": true,
   "ownedWorkspaceRemoved": true,
   "ownedPlayersTerminated": true,
-  "priorArtifactsPreserved": 30,
+  "priorArtifactsPreserved": 29,
   "repairs": [
     { "commit": "02d9b1d60e1f678d93c8f4f4a45e045895ce463f", "file": "scripts/lib/native-player-registry.mjs", "change": "Restore missing function-closing brace in published native registry" },
     { "commit": "087f4d9e445e3d96a6e9c33f6ac18a97eb9580e0", "file": "src/native-player-client.mjs", "change": "Bind default Window.fetch to globalThis; fix Illegal invocation before pairing request" },
