@@ -24,3 +24,4 @@ export function createNativePlayerAdapter(config) {
   const targetKey = createHash('sha256').update(JSON.stringify(target)).digest('hex');
   // Authentication secrets are deliberately not part of a public connection description.
   return Object.freeze({ adapter: Object.freeze(adapter), target, targetKey, capabilities });
+}
