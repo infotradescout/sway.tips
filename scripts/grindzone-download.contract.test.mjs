@@ -23,8 +23,19 @@ test('saved-game workflow runs before packaging and includes public-network veri
  assert.equal(source.split(local).length,2);assert.equal(source.split(live).length,2);
  assert.ok(source.indexOf(local)<source.indexOf("const download=path.join(target,'downloads')"));
  assert.ok(source.indexOf(live)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
- assert.match(source,/\['phone','zones','discovery','cache','studio','save-data'\]/);
+ assert.match(source,/\['phone','zones','discovery','cache','studio','save-data','locations'\]/);
  assert.match(source,/Required local acceptance report missing/);
  assert.match(source,/result\.passed!==true\|\|result\.source!==downloadSourceSha/);
  assert.doesNotMatch(source,/writeFileSync\([^\n]*stat-definitions\.json/);
+});
+test('event locations preserve every prior local and live workflow and require their own matching reports',()=>{
+ const source=readFileSync(script,'utf8');
+ for(const name of ['hunt-locations','save-data','phone-connection','zone-workspace','hidden-zones','phone-cache','studio-screenshots'])for(const mode of ['local','live']){
+  const call=`run(target,process.execPath,['tools/verify-${name}.mjs',hostRoot,'${mode}',evidence]);`;
+  assert.equal(source.split(call).length,2,name+' '+mode);
+  assert.ok(source.indexOf(call)<source.indexOf("const download=path.join(target,'downloads')"));
+ }
+ assert.match(source,/mode\+'-locations\.json'/);assert.match(source,/report\.source!==downloadSourceSha/);
+ assert.match(source,/report\.automaticExactKillGpsVerified!==false/);assert.match(source,/bytes\.length>65536/);
+ assert.match(source,/mode\+'-locations\.png'/);
 });
