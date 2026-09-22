@@ -1,5 +1,7 @@
 // Explicit isolated modes preserve each task's execution and evidence boundary.
-if (process.env.SWAY_ACQUISITION_QUALITY_OBSERVE) {
+if (process.env.SWAY_QUALITY_DASHBOARD_SHA) {
+  await import('./sway-quality-dashboard-proof.mjs');
+} else if (process.env.SWAY_ACQUISITION_QUALITY_OBSERVE) {
   await import('./sway-acquisition-quality-production.mjs');
 } else if (process.env.SWAY_ACQUISITION_INGRESS_INSPECT === 'true') {
   await import('./inspect-acquisition-ingress.mjs');
