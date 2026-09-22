@@ -32,7 +32,15 @@ WITH events AS (
   FROM events e
   WHERE e.quality='browser_candidate' AND e.metadata->>'stage'='entry'
     AND e.event_type='discovery_landing' AND e.metadata->>'journey_id' IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM events bad WHERE bad.entity_id=e.entity_id AND bad.quality IN ('automation_signal','qa_signal'))
+    -- Exclusions use all retained shell-friction events, not the reporting subset.
+    -- A later retained signal can revise an earlier candidate; deleted history is unknown.
+    AND NOT EXISTS (
+      SELECT 1 FROM public.audit_events bad
+      WHERE bad.entity_type='shell_friction' AND bad.entity_id=e.entity_id
+        AND bad.metadata#>>'{traffic_quality,version}'='1'
+        AND bad.metadata#>>'{traffic_quality,basis}'='server_observed_request_signals'
+        AND bad.metadata#>>'{traffic_quality,classification}' IN ('automation_signal','qa_signal')
+    )
   ORDER BY e.entity_id,e.created_at,e.event_id
 ), durable AS (
   SELECT o.*, c.source_group AS entry_source,
@@ -93,7 +101,7 @@ export async function queryAcquisitionQuality(client, start, end) {
     return {
       schemaVersion: 1, product: 'sway', start: window[0], endExclusive: window[1], capturedAt: new Date().toISOString(),
       ...result.rows[0].report,
-      limitations: 'Request signals are spoofable. Browser candidates are not verified people. Source labels are not verified organic referrals. Linked outcomes require a prior matching candidate action and existing server-confirmed completion, not a click. Missing/legacy classification is not backfilled. No audience estimate is inferred from an empty result. Outcome links are bounded to this window; later returns and cross-device paths are not inferred.'
+      limitations: 'Request signals are spoofable. Browser candidates are not verified people. Source labels are not verified organic referrals. Linked outcomes require a prior matching candidate action and existing server-confirmed completion, not a click. Missing/legacy classification is not backfilled. No audience estimate is inferred from an empty result. Outcome links are bounded to this window; later returns and cross-device paths are not inferred. Candidate exclusion checks all retained shell-friction events for the same journey, including signals before or after the selected window and other event types. Later retained signals may revise historical candidate counts; expired or deleted history is unavailable, not proof of a clean lifetime.'
     };
   } catch (error) { await client.query('ROLLBACK'); throw error; }
 }
