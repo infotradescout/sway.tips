@@ -1,12 +1,13 @@
 /** Pinned GrindZone build and acceptance on existing compute. No player or host credentials enter tests. */
+import {publishManagedGrindZone} from './grindzone-managed-package.mjs';
 import {execFileSync} from 'node:child_process';
 import {existsSync,mkdirSync,readdirSync,readFileSync,copyFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='0e78b5917b399563e90829f65919d04e8d1eed3e';
-export const downloadSourceSha='0e78b5917b399563e90829f65919d04e8d1eed3e';
+export const sourceSha='3ebbfd28cc3e9fc57c211b231ecae7364eb690c0';
+export const downloadSourceSha='3ebbfd28cc3e9fc57c211b231ecae7364eb690c0';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -113,4 +114,5 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   }
   writeFileSync(path.join(published,'index.html'),`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>GrindZone for Windows</title><style>body{margin:0;padding:28px;background:#101711;color:#eef0e9;font:18px/1.6 system-ui}main{max-width:700px;margin:5vh auto}h1{font-size:42px;line-height:1.1}a{color:#ffae65}.download{display:inline-block;padding:14px 22px;background:#ec8c39;color:#111;border-radius:8px;font-weight:700;text-decoration:none}small{display:block;overflow-wrap:anywhere;color:#b8c1b5}.note{border-left:3px solid #ec8c39;padding-left:18px;margin-top:26px}</style><main><small>WINDOWS X64 PREVIEW</small><h1>GrindZone</h1><p>Without a PC? <a href="/grindzone/play/">Open the browser journal and maps</a>. Browser-only progress is not account sync.</p><p>Download the complete app, extract the folder, and open <strong>START.cmd</strong>. Its runtime is included.</p><a class="download" href="GrindZone-Windows-x64.zip?v=${downloadSourceSha}" download>Download GrindZone for Windows</a><h2>Connect your phone</h2><ol><li>Open the new GrindZone copy on your PC.</li><li>Go to <strong>Settings → Connect my phone</strong> and approve private access.</li><li>Scan the QR with your phone camera, then tap <strong>Connect this phone</strong>.</li></ol><p>No activation key, remote-control software, separate Node.js installation, or browser extension is needed.</p><div class="note"><strong>Keep GrindZone running on your PC while using the live phone view.</strong><p>Use the new download, not an older running copy. Close the older app before starting this version; this download does not stop or replace it automatically.</p></div><p>Your game saves stay on your machine. Only the paired phone can see its permitted live view; turn off phone access in Settings to disconnect it. Optional private copies in the phone browser are managed and deleted separately in phone Settings.</p><p><a href="release.json">Download verification</a> · <a href="local-phone.json">Browser acceptance record</a> · <a href="local-save-data.json">Saved-game workflow verification</a> · <a href="local-locations.json">Event-location verification</a> · <a href="local-herds.json">Herd and trophy verification</a> · <a href="local-browser-play.json">No-PC browser verification</a></p><small>Source ${downloadSourceSha}<br>Archive SHA-256 ${manifest.sha256}<br>Browser tests use a disposable Linux app and synthetic saves. Your Windows launch and physical-phone scan are not claimed by those tests.</small></main></html>`,{encoding:'utf8'});
   console.log('GRINDZONE_WINDOWS_DOWNLOAD '+JSON.stringify(manifest));
+  await publishManagedGrindZone({target,published,sourceRevision:downloadSourceSha,cleanEnv,verifyLive:live?.commit===process.env.RENDER_GIT_COMMIT&&live?.status==='ok'});
 }
