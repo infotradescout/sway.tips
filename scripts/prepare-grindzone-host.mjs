@@ -6,8 +6,8 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='3ebbfd28cc3e9fc57c211b231ecae7364eb690c0';
-export const downloadSourceSha='3ebbfd28cc3e9fc57c211b231ecae7364eb690c0';
+export const sourceSha='2c1bd928ace82271646097bad09be138173820af';
+export const downloadSourceSha='2c1bd928ace82271646097bad09be138173820af';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
