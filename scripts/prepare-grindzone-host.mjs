@@ -6,8 +6,8 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='2717d1243bea1c5cd5c4716f71410f9c2c96c2a4';
-export const downloadSourceSha='2717d1243bea1c5cd5c4716f71410f9c2c96c2a4';
+export const sourceSha='a525f9cb3228dd846a0ca85460038554d82742a6';
+export const downloadSourceSha='a525f9cb3228dd846a0ca85460038554d82742a6';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -63,6 +63,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   console.log('GRINDZONE_NATIVE_TESTS_PASSED '+downloadSourceSha);
   run(hostRoot,process.execPath,['node_modules/playwright/cli.js','install','chromium']);
   const evidence=path.join(target,'phone-acceptance');
+  run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-population-insights.mjs',path.join(evidence,'insights')]);
   run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'local',evidence]);
   await browserPlayPreview(evidence,'local');
@@ -80,6 +81,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   try{const response=await fetch('https://sway.tips/api/release-health',{signal:AbortSignal.timeout(10000)});if(response.ok)live=await response.json();}catch{}
   // A same-source redeploy performs the public-network check only after this host revision is live.
   if(live?.commit===process.env.RENDER_GIT_COMMIT&&live?.status==='ok'){
+    run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'live',evidence]);
     run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'live',evidence]);
     await browserPlayPreview(evidence,'live');
     run(target,process.execPath,['tools/verify-herds.mjs',hostRoot,'live',evidence]);
