@@ -1,13 +1,14 @@
 /** Pinned GrindZone build and acceptance on existing compute. No player or host credentials enter tests. */
-import {publishManagedGrindZone} from './grindzone-managed-package.mjs';
+import {publishManagedGrindZone,verifyNativePortableMetadata} from './grindzone-managed-package.mjs';
 import {execFileSync} from 'node:child_process';
 import {existsSync,mkdirSync,readdirSync,readFileSync,copyFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='1cbef9b70f50650fa9c550b5e80461414405cb4b';
-export const downloadSourceSha='ea4214c3d60011b4f1ae201d39d90fc157f329d5';
+export const sourceSha='e6d7fe96d2b9789f0dfcd27543dd216ba212995c';
+export const downloadSourceSha='e6d7fe96d2b9789f0dfcd27543dd216ba212995c';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -106,6 +107,8 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   if(manifest.sourceRevision!==downloadSourceSha||manifest.filename!=='GrindZone-Windows-x64.zip'||manifest.playerDataIncluded!==false||manifest.privateEnrollmentIncluded!==false||manifest.runtimeVersion!=='24.21.0')throw Error('Wrong GrindZone download manifest');
   const archive=path.join(download,manifest.filename),bytes=readFileSync(archive);
   if(bytes.length!==manifest.bytes||createHash('sha256').update(bytes).digest('hex')!==manifest.sha256)throw Error('GrindZone download integrity failed');
+  const {zipEntry}=await import(pathToFileURL(path.join(target,'tools/build-windows-download.mjs')).href);
+  verifyNativePortableMetadata(JSON.parse(zipEntry(bytes,'GrindZone/PORTABLE-PACKAGE.json').toString('utf8')),downloadSourceSha);
   const published=path.resolve('dist/grindzone-download');mkdirSync(published,{recursive:true});
   copyFileSync(archive,path.join(published,manifest.filename));copyFileSync(path.join(download,'release.json'),path.join(published,'release.json'));
   for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play']){
