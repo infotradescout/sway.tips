@@ -14,6 +14,7 @@ test('shared phone hosting is optional and cannot replace the main app or migrat
  const bound=bindPhoneSource(server,pin);assert.ok(bound.includes("'node_modules/.grindzone-phone', '"+pin+"'"));
  assert.equal(bound.replace("'node_modules/.grindzone-phone', '"+pin+"'","'node_modules/.grindzone-phone', '"+legacyPhoneSource+"'"),server);
  assert.match(prepare,/bindPhoneSource\(readFileSync/);assert.match(prepare,/await build\(/);
- assert.match(prepare,/GIT_TERMINAL_PROMPT:'0'/);assert.match(prepare,/--ignore-scripts/);
+ assert.match(prepare,/GIT_TERMINAL_PROMPT:'0'/);assert.match(prepare,/npmCiInvocation\(\)/);
+ assert.match(read('scripts/grindzone-npm-command.mjs'),/--ignore-scripts/);
  assert.match(read('public/sw.js'),/url\.pathname === '\/grindzone' \|\| url\.pathname\.startsWith\('\/grindzone\/'\)/);
 });
