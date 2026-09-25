@@ -8,8 +8,8 @@ import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
 import {npmCiInvocation} from './grindzone-npm-command.mjs';
-export const sourceSha='234a782c72b27af4e716d8162e87e7dc8c17a4e9';
-export const downloadSourceSha='234a782c72b27af4e716d8162e87e7dc8c17a4e9';
+export const sourceSha='b8d411fc2c41057f1a5274a521510da0481154a0';
+export const downloadSourceSha='b8d411fc2c41057f1a5274a521510da0481154a0';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
