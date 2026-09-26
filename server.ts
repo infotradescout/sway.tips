@@ -639,6 +639,10 @@ type DiscoveryFacts = {
   primaryActionLabel: string;
   primaryActionHref: string;
   relatedLinks: Array<{ label: string; href: string }>;
+  bookingContact?: {
+    email?: string | null;
+    phone?: string | null;
+  } | null;
   lastUpdated?: string | null;
 };
 
@@ -786,6 +790,19 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
   const categoryHtml = categories.length
     ? `<p data-discovery="categories">${categories.map((value) => escapeDiscoveryHtmlText(value)).join(' · ')}</p>`
     : '';
+  const bookingEmail = facts.bookingContact?.email?.trim() || '';
+  const bookingPhone = facts.bookingContact?.phone?.trim() || '';
+  const bookingParts = [
+    bookingEmail
+      ? `<a href="mailto:${escapeDiscoveryHtmlText(bookingEmail)}">${escapeDiscoveryHtmlText(bookingEmail)}</a>`
+      : '',
+    bookingPhone
+      ? `<a href="tel:${escapeDiscoveryHtmlText(bookingPhone)}">${escapeDiscoveryHtmlText(bookingPhone)}</a>`
+      : ''
+  ].filter(Boolean);
+  const bookingHtml = bookingParts.length
+    ? `<p data-discovery="booking">Booking: ${bookingParts.join(' · ')}</p>`
+    : '';
 
   return [
     '<main id="sway-discovery-first-response" data-sway-discovery="server-rendered">',
@@ -794,6 +811,7 @@ function renderDiscoveryBodyHtml(facts: DiscoveryFacts) {
     `  <p data-discovery="entity"><span data-discovery="entity-name">${escapeDiscoveryHtmlText(facts.entityName)}</span> · <span data-discovery="entity-type">${escapeDiscoveryHtmlText(facts.entityType)}</span></p>`,
     location,
     categoryHtml,
+    bookingHtml,
     `  <p data-discovery="primary-action"><a href="${escapeDiscoveryHtmlText(facts.primaryActionHref)}">${escapeDiscoveryHtmlText(facts.primaryActionLabel)}</a></p>`,
     related ? `  <ul data-discovery="related-links">${related}</ul>` : '',
     lastUpdated,
@@ -1138,6 +1156,12 @@ function buildPublicPerformerShareMetadata(
       location: profile.city,
       primaryActionLabel: 'View performer page',
       primaryActionHref: canonicalProfileUrl,
+      bookingContact: profile.booking.available
+        ? {
+            email: profile.booking.email,
+            phone: profile.booking.phone
+          }
+        : null,
       relatedLinks: [
         ...publicIdentityLinks.map((entry) => ({
           label: socialLabelByKey[entry.key] || 'Public link',
