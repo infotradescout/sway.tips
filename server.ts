@@ -2918,6 +2918,8 @@ async function loadOwnedPerformerByActorUserId(actorUserId: string) {
       handle: performers.handle,
       bio: performers.bio,
       visibilityState: performers.visibilityState,
+      isActive: performers.isActive,
+      onboardingStatus: performers.onboardingStatus,
       stripeAccountId: performerStripeConnectBindings.stripeAccountId,
       paymentAccountStatus: performerStripeConnectBindings.paymentAccountStatus
     })
@@ -10089,6 +10091,17 @@ app.get('/api/talent/profile/public', async (req, res) => {
   const profileMetadata = profileRow?.metadata && typeof profileRow.metadata === 'object'
     ? profileRow.metadata as Record<string, unknown>
     : null;
+  const publicVisibility = explainPublicPerformerVisibility({
+    claimed: true,
+    hasOwner: true,
+    isActive: performerOwner.isActive,
+    onboardingStatus: performerOwner.onboardingStatus,
+    visibilityState: performerOwner.visibilityState,
+    handle: performerOwner.handle,
+    displayName: performerOwner.displayName,
+    conflicted: false,
+    moderationBlocked: false
+  });
 
   return res.json({
     profile: {
@@ -10097,6 +10110,7 @@ app.get('/api/talent/profile/public', async (req, res) => {
       displayName: performerOwner.displayName,
       bio: performerOwner.bio,
       visibilityState: performerOwner.visibilityState,
+      publicVisibility,
       headline: profileRow?.headline ?? null,
       stageName: normalizePublicProfileText(profileMetadata?.stageName, 80),
       primaryRole: resolvePublicPrimaryRole(profileRow?.metadata),
