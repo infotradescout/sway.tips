@@ -398,6 +398,33 @@ async function main() {
       assert.deepEqual(JSON.parse(found.body).performerDirectory.performers.map(row => row.handle), ['publicartist']);
     }
 
+    // A public owner-published headline is sufficient descriptive text even
+    // when the older base bio field is blank. Keep this profile temporary so
+    // the pagination fixture below retains its established counts.
+    const headlineOnlyOwner = '10000000-0000-4000-8000-000000000099';
+    const headlineOnlyPerformer = '20000000-0000-4000-8000-000000000099';
+    await proof.query(`INSERT INTO users (id, email, display_name, role, email_verified_at)
+      VALUES ('${headlineOnlyOwner}', 'headline-only@sway.test', 'Headline Only Owner', 'performer', NOW())`);
+    await proof.query(`INSERT INTO performers
+      (id, owner_user_id, handle, display_name, bio, is_active, onboarding_status, visibility_state)
+      VALUES ('${headlineOnlyPerformer}', '${headlineOnlyOwner}', 'HeadlineOnlyArtist', 'Headline Only Artist', NULL, true, 'gig_ready', 'public')`);
+    await proof.query(`INSERT INTO performer_public_profiles
+      (performer_id, headline, specialties, city, metadata)
+      VALUES ('${headlineOnlyPerformer}', 'Live DJ and event performer', '["dj","events"]'::jsonb, 'Pensacola', '{"roles":["dj"]}'::jsonb)`);
+    const headlineOnlyApi = await request(port, '/api/public/performer/headlineonlyartist');
+    assert.equal(headlineOnlyApi.status, 200);
+    assert.equal(JSON.parse(headlineOnlyApi.body).profile.handle, 'headlineonlyartist');
+    const headlineOnlySearch = JSON.parse((await request(port, '/api/public/feed?q=Live%20DJ')).body);
+    assert.deepEqual(headlineOnlySearch.performerDirectory.performers.map(row => row.handle), ['headlineonlyartist']);
+    const headlineOnlyHtml = await request(port, '/p/headlineonlyartist');
+    assert.equal(headlineOnlyHtml.status, 200);
+    assert.match(headlineOnlyHtml.body, /Live DJ and event performer/);
+    assert.match((await request(port, '/sitemap.xml')).body, /\/p\/headlineonlyartist/);
+    await proof.query(`DELETE FROM performer_public_profiles WHERE performer_id='${headlineOnlyPerformer}'`);
+    await proof.query(`DELETE FROM performer_handle_claims WHERE performer_id='${headlineOnlyPerformer}'`);
+    await proof.query(`DELETE FROM performers WHERE id='${headlineOnlyPerformer}'`);
+    await proof.query(`DELETE FROM users WHERE id='${headlineOnlyOwner}'`);
+
     // Exercise a result beyond the first page rather than truncating the directory.
     await proof.query(`INSERT INTO performers (id, owner_user_id, handle, display_name, bio, is_active, onboarding_status, visibility_state)
       SELECT ('20000000-0000-4000-8001-' || lpad(n::text, 12, '0'))::uuid, '${OWNER_IDS[0]}',
