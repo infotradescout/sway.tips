@@ -513,7 +513,29 @@ export type PublicPerformerPolicyResult =
   | { kind: 'unlisted'; visibility: 'unlisted' }
   | { kind: 'not_resolvable' };
 
-export function evaluatePublicPerformerVisibility(input: {
+export type PublicPerformerVisibilityReason =
+  | 'public'
+  | 'owner_unlisted'
+  | 'owner_draft'
+  | 'unclaimed'
+  | 'owner_missing'
+  | 'inactive'
+  | 'handle_conflict'
+  | 'moderation_blocked'
+  | 'onboarding_blocked'
+  | 'invalid_handle'
+  | 'missing_display_name';
+
+export type PublicPerformerVisibilityExplanation = {
+  policy: PublicPerformerPolicyResult;
+  reason: PublicPerformerVisibilityReason;
+  discoveryParity: {
+    tierNeutral: true;
+    paidTierRequired: false;
+  };
+};
+
+export function explainPublicPerformerVisibility(input: {
   claimed: boolean;
   hasOwner: boolean;
   isActive: boolean;
@@ -523,27 +545,50 @@ export function evaluatePublicPerformerVisibility(input: {
   displayName: string | null | undefined;
   conflicted?: boolean;
   moderationBlocked?: boolean;
-}): PublicPerformerPolicyResult {
+}): PublicPerformerVisibilityExplanation {
   const canonicalHandle = typeof input.handle === 'string' ? input.handle.trim().toLowerCase() : '';
   const displayName = typeof input.displayName === 'string' ? input.displayName.trim() : '';
   const status = typeof input.onboardingStatus === 'string'
     ? input.onboardingStatus.trim().toLowerCase()
     : '';
+  const parity = { tierNeutral: true, paidTierRequired: false } as const;
+  const privateResult = (reason: PublicPerformerVisibilityReason): PublicPerformerVisibilityExplanation => ({
+    policy: { kind: 'not_resolvable' },
+    reason,
+    discoveryParity: parity
+  });
 
-  if (
-    !input.claimed
-    || !input.hasOwner
-    || !input.isActive
-    || input.conflicted
-    || input.moderationBlocked
-    || ['restricted', 'suspended', 'inactive', 'deleted'].includes(status)
-    || !/^[a-z0-9_-]{1,64}$/.test(canonicalHandle)
-    || !displayName
-  ) {
-    return { kind: 'not_resolvable' };
+  if (!input.claimed) return privateResult('unclaimed');
+  if (!input.hasOwner) return privateResult('owner_missing');
+  if (!input.isActive) return privateResult('inactive');
+  if (input.conflicted) return privateResult('handle_conflict');
+  if (input.moderationBlocked) return privateResult('moderation_blocked');
+  if (['restricted', 'suspended', 'inactive', 'deleted'].includes(status)) {
+    return privateResult('onboarding_blocked');
   }
+  if (!/^[a-z0-9_-]{1,64}$/.test(canonicalHandle)) {
+    return privateResult('invalid_handle');
+  }
+  if (!displayName) return privateResult('missing_display_name');
+  if (input.visibilityState === 'public') {
+    return {
+      policy: { kind: 'public', visibility: 'public' },
+      reason: 'public',
+      discoveryParity: parity
+    };
+  }
+  if (input.visibilityState === 'unlisted') {
+    return {
+      policy: { kind: 'unlisted', visibility: 'unlisted' },
+      reason: 'owner_unlisted',
+      discoveryParity: parity
+    };
+  }
+  return privateResult('owner_draft');
+}
 
-  if (input.visibilityState === 'public') return { kind: 'public', visibility: 'public' };
-  if (input.visibilityState === 'unlisted') return { kind: 'unlisted', visibility: 'unlisted' };
-  return { kind: 'not_resolvable' };
+export function evaluatePublicPerformerVisibility(
+  input: Parameters<typeof explainPublicPerformerVisibility>[0]
+): PublicPerformerPolicyResult {
+  return explainPublicPerformerVisibility(input).policy;
 }
