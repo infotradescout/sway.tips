@@ -69,6 +69,9 @@ export class VirtualDjNetworkControl {
       return await Promise.race([deadline, (async () => {
         const response = await this.fetchImpl(`${this.baseUrl}/${endpoint}`, {
           method: 'POST',
+          // The operator selected this endpoint. A redirect must not resend a
+          // command, switch players, or make another endpoint's state trusted.
+          redirect: 'error',
           headers: {
             'content-type': 'text/plain; charset=utf-8',
             ...(this.password ? { authorization: `Bearer ${this.password}` } : {})

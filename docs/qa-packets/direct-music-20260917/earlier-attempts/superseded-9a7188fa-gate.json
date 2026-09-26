@@ -1,0 +1,38 @@
+{
+  "head": "9a7188fa5709b7feacbe75d53685f09aac7f737e",
+  "status": "cancelled_superseded",
+  "fullGatePassed": false,
+  "reason": "Stopped the owned process tree after reproducing mutable-ID account linking; the corrected source requires a new exact-head full gate.",
+  "steps": [
+    {
+      "name": "lint",
+      "status": "passed",
+      "provenance": "Sequential runner advanced to build only after lint exit 0."
+    },
+    {
+      "name": "build",
+      "exitCode": 0,
+      "durationMs": 20324
+    },
+    {
+      "name": "test:contracts",
+      "status": "cancelled_not_completed"
+    }
+  ],
+  "logs": [
+    {
+      "name": "lint",
+      "sha256": "99a517f1f9c1b733437cea34b01c425b8ab9806c81dc1cdb22eb21416399076f"
+    },
+    {
+      "name": "build",
+      "sha256": "4bcb57351d1ff752ee19de732bab28c8df27af3dfadb0aa99c3219e8afefda75"
+    },
+    {
+      "name": "test-contracts",
+      "sha256": "de5972963265e5ea2dfaf96f69ccf7dff265563bbce71667ff53a6c3db0294d3"
+    }
+  ],
+  "realProviderCalls": 0,
+  "productionWrites": false
+}
