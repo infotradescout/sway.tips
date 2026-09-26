@@ -52,6 +52,27 @@ for (const term of [
 }
 requireExcludes(visibilityRoute, 'req.body?.performerId', 'Owner visibility route must not trust a caller performer id');
 requireIncludes(server, 'visibilityState: performerOwner.visibilityState', 'Profile responses expose persisted visibility');
+requireIncludes(server, 'const publicVisibility = explainPublicPerformerVisibility({', 'Owner profile response explains public visibility');
+requireIncludes(server, 'publicVisibility,', 'Owner profile response returns public visibility explanation');
+const policySource = read('src/server/public-profile.ts');
+for (const term of [
+  'explainPublicPerformerVisibility',
+  "'owner_unlisted'",
+  "'owner_draft'",
+  "'onboarding_blocked'",
+  'tierNeutral: true',
+  'paidTierRequired: false'
+]) {
+  requireIncludes(policySource, term, 'Tier-neutral public visibility policy');
+}
+const explanationBlock = policySource.slice(
+  policySource.indexOf('export function explainPublicPerformerVisibility'),
+  policySource.indexOf('export function evaluatePublicPerformerVisibility')
+);
+requireExcludes(explanationBlock, 'partner', 'Partner status must not gate discovery');
+requireExcludes(explanationBlock, 'subscription', 'Subscription status must not gate discovery');
+requireExcludes(explanationBlock, 'premium', 'Premium status must not gate discovery');
+requireExcludes(explanationBlock, 'payment', 'Payment status must not gate discovery');
 
 const profileStart = server.indexOf("app.post('/api/talent/profile/public'");
 const libraryStart = server.indexOf("app.post('/api/talent/library/import'", profileStart);
