@@ -121,6 +121,7 @@ import {
   escapePublicProfileMetadataAttribute,
   mergePublicProfileMetadata,
   isPublicProfileSectionOrder,
+  labelForPublicPerformerPrimaryRole,
   readPublicProfileLayout,
   resolvePublicProfileSectionOrder,
   normalizePublicProfileEmail,
@@ -660,6 +661,14 @@ type PublicShareProfile = {
   city: string | null;
   avatarUrl: string | null;
   specialties: string[] | null;
+  roles: string[];
+  booking: {
+    email: string | null;
+    phone: string | null;
+    available: boolean;
+    verificationRequired: boolean;
+  };
+  socialLinks: Record<string, string | null>;
   updatedAt: Date | null;
   visibility: 'public' | 'unlisted';
 };
@@ -1009,6 +1018,20 @@ function toPublicShareProfile(
     city: profile.city,
     avatarUrl: profile.avatarUrl,
     specialties: profile.specialties,
+    roles: resolvePublicRoles(profile.metadata),
+    booking: resolveVerifiedPublicBookingContact({
+      email: profile.bookingEmail,
+      phone: profile.bookingPhone,
+      ownerEmailVerifiedAt: profile.ownerEmailVerifiedAt
+    }),
+    socialLinks: toPublicSocialLinks({
+      facebookUrl: profile.facebookUrl,
+      instagramUrl: profile.instagramUrl,
+      tiktokUrl: profile.tiktokUrl,
+      youtubeUrl: profile.youtubeUrl,
+      soundcloudUrl: profile.soundcloudUrl,
+      websiteUrl: profile.websiteUrl
+    }),
     updatedAt: profile.updatedAt,
     visibility
   };
@@ -1018,15 +1041,80 @@ function buildPublicPerformerShareMetadata(
   req: express.Request,
   profile: PublicShareProfile
 ): ShareMetadata {
-  const title = `@${profile.handle} on Sway`;
-  const description = profile.headline?.trim() || profile.bio?.trim() || 'Public performer profile on Sway.';
   const canonicalProfileUrl = canonicalPublicUrl(`/p/${profile.handle}`);
-  const categories = Array.isArray(profile.specialties)
+  const profilePageId = `${canonicalProfileUrl}#profile-page`;
+  const performerEntityId = `${canonicalProfileUrl}#performer`;
+  const specialtyCategories = Array.isArray(profile.specialties)
     ? profile.specialties.map((value) => String(value).trim()).filter(Boolean).slice(0, 8)
     : [];
+  const roleLabels = profile.roles
+    .map((role) => labelForPublicPerformerPrimaryRole(role))
+    .filter((value): value is string => Boolean(value));
+  const categories = [...new Set([...roleLabels, ...specialtyCategories])].slice(0, 10);
   const lastUpdated = profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
     ? profile.updatedAt.toISOString().slice(0, 10)
     : null;
+  const title = [
+    profile.displayName,
+    `(@${profile.handle})`,
+    profile.city ? `— ${profile.city}` : '',
+    '| Sway'
+  ].filter(Boolean).join(' ');
+  const baseSummary = profile.headline?.trim()
+    || profile.bio?.trim()
+    || `${profile.displayName} is a public performer on Sway.`;
+  const discoveryContext = [
+    profile.city ? `Based in ${profile.city}.` : '',
+    categories.length ? `Performer focus: ${categories.slice(0, 4).join(', ')}.` : ''
+  ].filter(Boolean).join(' ');
+  const description = `${baseSummary} ${discoveryContext}`.replace(/\s+/g, ' ').trim().slice(0, 300);
+  const socialLabelByKey: Record<string, string> = {
+    website: 'Official website',
+    facebook: 'Facebook',
+    instagram: 'Instagram',
+    tiktok: 'TikTok',
+    youtube: 'YouTube',
+    soundcloud: 'SoundCloud'
+  };
+  const publicIdentityLinks = Object.entries(profile.socialLinks)
+    .flatMap(([key, url]) => url ? [{ key, url }] : []);
+  const sameAs = [...new Set(publicIdentityLinks.map((entry) => entry.url))];
+  const profilePageSchema = {
+    '@type': 'ProfilePage',
+    '@id': profilePageId,
+    name: title,
+    description,
+    url: canonicalProfileUrl,
+    dateModified: lastUpdated || undefined,
+    mainEntity: { '@id': performerEntityId },
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Sway',
+      url: CANONICAL_APP_ORIGIN
+    }
+  };
+  const performerSchema = {
+    '@type': 'Person',
+    '@id': performerEntityId,
+    name: profile.displayName,
+    alternateName: `@${profile.handle}`,
+    description: profile.bio?.trim() || profile.headline?.trim() || undefined,
+    url: canonicalProfileUrl,
+    image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
+    homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
+    mainEntityOfPage: { '@id': profilePageId },
+    jobTitle: roleLabels.length ? roleLabels.join(' · ') : undefined,
+    knowsAbout: categories.length ? categories : undefined,
+    sameAs: sameAs.length ? sameAs : undefined,
+    contactPoint: profile.booking.available && (profile.booking.email || profile.booking.phone)
+      ? {
+          '@type': 'ContactPoint',
+          contactType: 'booking',
+          email: profile.booking.email || undefined,
+          telephone: profile.booking.phone || undefined
+        }
+      : undefined
+  };
 
   return defaultShareMetadata(req, {
     title,
@@ -1038,15 +1126,7 @@ function buildPublicPerformerShareMetadata(
     structuredData: profile.visibility === 'public'
       ? {
           '@context': 'https://schema.org',
-          '@type': 'Person',
-          name: profile.displayName,
-          alternateName: `@${profile.handle}`,
-          description: profile.bio?.trim() || undefined,
-          url: canonicalProfileUrl,
-          image: normalizePublicProfileUrl(profile.avatarUrl) || undefined,
-          homeLocation: profile.city ? { '@type': 'Place', name: profile.city } : undefined,
-          mainEntityOfPage: canonicalProfileUrl,
-          knowsAbout: categories.length ? categories : undefined
+          '@graph': [profilePageSchema, performerSchema]
         }
       : undefined,
     discoveryFacts: {
@@ -1059,6 +1139,13 @@ function buildPublicPerformerShareMetadata(
       primaryActionLabel: 'View performer page',
       primaryActionHref: canonicalProfileUrl,
       relatedLinks: [
+        ...publicIdentityLinks.map((entry) => ({
+          label: socialLabelByKey[entry.key] || 'Public link',
+          href: entry.url
+        })),
+        ...(profile.roles.includes('dj')
+          ? [{ label: 'DJ song request app', href: canonicalPublicUrl('/dj-song-request-app') }]
+          : [{ label: 'Live music request app', href: canonicalPublicUrl('/live-music-request-app') }]),
         { label: 'Discover shows and live rooms', href: canonicalPublicUrl('/discover') },
         { label: 'About Sway', href: canonicalPublicUrl('/about') }
       ],
