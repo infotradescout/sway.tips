@@ -268,6 +268,9 @@ async function main() {
     assert.match(publicHtml.body, /Official website/);
     assert.match(publicHtml.body, /Instagram/);
     assert.match(publicHtml.body, /DJ song request app/);
+    assert.match(publicHtml.body, /data-discovery="booking"/);
+    assert.match(publicHtml.body, /booking@publicartist\.test/);
+    assert.match(publicHtml.body, /\+1-850-555-0150/);
 
     const trackedPublicHtml = await request(port, '/p/PublicArtist?utm_source=organic');
     assert.equal(trackedPublicHtml.status, 200);
