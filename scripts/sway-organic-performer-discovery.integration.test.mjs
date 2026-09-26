@@ -72,7 +72,7 @@ async function seedDatabase(query) {
       (performer_id, headline, specialties, city, avatar_url, booking_email, booking_phone, instagram_url, website_url, metadata)
     VALUES
       ('${PUBLIC_PERFORMER}', 'Canonical headline', '["songwriter","live"]'::jsonb, 'Pensacola', 'https://cdn.test/public.png', 'booking@publicartist.test', '+1-850-555-0150', 'https://instagram.com/publicartist', 'https://publicartist.example', '{"canonicalMarker":"yes","roles":["dj"]}'::jsonb),
-      ('${UNLISTED_PERFORMER}', 'Unlisted headline', '["producer"]'::jsonb, 'Mobile', 'https://cdn.test/unlisted.png', '{"canonicalMarker":"unlisted"}'::jsonb)
+      ('${UNLISTED_PERFORMER}', 'Unlisted headline', '["producer"]'::jsonb, 'Mobile', 'https://cdn.test/unlisted.png', NULL, NULL, NULL, NULL, '{"canonicalMarker":"unlisted"}'::jsonb)
   `);
 
   await query(`
