@@ -69,9 +69,9 @@ async function seedDatabase(query) {
 
   await query(`
     INSERT INTO performer_public_profiles
-      (performer_id, headline, specialties, city, avatar_url, metadata)
+      (performer_id, headline, specialties, city, avatar_url, booking_email, booking_phone, instagram_url, website_url, metadata)
     VALUES
-      ('${PUBLIC_PERFORMER}', 'Canonical headline', '["songwriter","live"]'::jsonb, 'Pensacola', 'https://cdn.test/public.png', '{"canonicalMarker":"yes"}'::jsonb),
+      ('${PUBLIC_PERFORMER}', 'Canonical headline', '["songwriter","live"]'::jsonb, 'Pensacola', 'https://cdn.test/public.png', 'booking@publicartist.test', '+1-850-555-0150', 'https://instagram.com/publicartist', 'https://publicartist.example', '{"canonicalMarker":"yes","roles":["dj"]}'::jsonb),
       ('${UNLISTED_PERFORMER}', 'Unlisted headline', '["producer"]'::jsonb, 'Mobile', 'https://cdn.test/unlisted.png', '{"canonicalMarker":"unlisted"}'::jsonb)
   `);
 
@@ -248,7 +248,26 @@ async function main() {
     const jsonLdMatch = publicHtml.body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/i);
     assert.ok(jsonLdMatch, 'public performer HTML must contain one parseable JSON-LD script');
     const jsonLdPayload = JSON.parse(jsonLdMatch[1]);
-    assert.equal(jsonLdPayload.description, JSON_LD_XSS_PAYLOAD, 'malicious fixture text must survive only as inert JSON-LD data');
+    assert.equal(jsonLdPayload['@context'], 'https://schema.org');
+    assert.ok(Array.isArray(jsonLdPayload['@graph']), 'public performer JSON-LD must use an entity graph');
+    const profilePageNode = jsonLdPayload['@graph'].find((node) => node?.['@type'] === 'ProfilePage');
+    const personNode = jsonLdPayload['@graph'].find((node) => node?.['@type'] === 'Person');
+    assert.ok(profilePageNode, 'profile page node must be present');
+    assert.ok(personNode, 'performer person node must be present');
+    assert.equal(personNode.description, JSON_LD_XSS_PAYLOAD, 'malicious fixture text must survive only as inert JSON-LD data');
+    assert.equal(personNode.jobTitle, 'DJ');
+    assert.deepEqual(
+      [...personNode.sameAs].sort(),
+      ['https://instagram.com/publicartist', 'https://publicartist.example'].sort(),
+      'public website and socials must become sameAs identities'
+    );
+    assert.equal(personNode.contactPoint?.contactType, 'booking');
+    assert.equal(personNode.contactPoint?.email, 'booking@publicartist.test');
+    assert.equal(personNode.contactPoint?.telephone, '+1-850-555-0150');
+    assert.equal(profilePageNode.mainEntity?.['@id'], personNode['@id']);
+    assert.match(publicHtml.body, /Official website/);
+    assert.match(publicHtml.body, /Instagram/);
+    assert.match(publicHtml.body, /DJ song request app/);
 
     const trackedPublicHtml = await request(port, '/p/PublicArtist?utm_source=organic');
     assert.equal(trackedPublicHtml.status, 200);
