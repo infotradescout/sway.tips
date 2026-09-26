@@ -133,6 +133,7 @@ import {
   normalizePublicProfileText,
   normalizePublicProfileUrl,
   resolveVerifiedPublicBookingContact,
+  explainPublicPerformerVisibility,
   evaluatePublicPerformerVisibility,
   type PerformerVisibilityState
 } from "./src/server/public-profile";
