@@ -927,7 +927,7 @@ async function resolvePublicPerformerDiscovery(rawHandle: unknown): Promise<Publ
           sql`lower(${performers.handle}) = ${requestedHandle}`,
           isNotNull(performerHandleClaims.normalizedHandle)
         ),
-        sql`nullif(trim(${performers.bio}), '') is not null`
+        publicPerformerDescriptionWhere
       ));
 
     if (profiles.length !== 1) return { kind: 'not_resolvable', profile: null };
@@ -983,7 +983,7 @@ async function listPublicPerformerDirectory(rawQuery: unknown = '', rawOffset: u
       eq(performers.isActive, true),
       notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
       sql`nullif(trim(${performers.handle}), '') is not null`,
-      sql`nullif(trim(${performers.bio}), '') is not null`,
+      publicPerformerDescriptionWhere,
       sql`nullif(trim(${performers.displayName}), '') is not null`,
       query ? or(
         ilike(performers.handle, pattern),
@@ -12540,7 +12540,7 @@ app.get('/api/public/feed', async (_req, res) => {
               notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
               eq(performers.visibilityState, 'public'),
               sql`nullif(trim(${performers.handle}), '') is not null`,
-              sql`nullif(trim(${performers.bio}), '') is not null`,
+              publicPerformerDescriptionWhere,
               sql`nullif(trim(${performers.displayName}), '') is not null`
             ))
         : Promise.resolve([]),
@@ -15920,6 +15920,11 @@ function isDiscoveryEligibleHandle(handle: string | null | undefined) {
   return Boolean(handle && !INTERNAL_TEST_PROFILE_HANDLES.has(handle.trim().toLowerCase()));
 }
 
+const publicPerformerDescriptionWhere = or(
+  sql`nullif(trim(${performers.bio}), '') is not null`,
+  sql`nullif(trim(${performerPublicProfiles.headline}), '') is not null`
+);
+
 function escapeXml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -15968,7 +15973,8 @@ app.get('/llms.txt', (_req, res) => {
     'Venue/location facts appear on event pages when published; Sway does not invent standalone venue catalog pages.',
     'Live Rooms (/g/{id}) are operating product pages when a room is active; Self-Production releases are a separate lane.',
     'Sway.DIO is not a live discovery surface.',
-    'Only published, public, non-suspended records belong in search results. Planned delivery is not represented as confirmed store availability.'
+    'Only published, public, non-suspended records with meaningful public descriptive text belong in search results. A performer bio or owner-published public headline can supply that description.',
+    'Planned delivery is not represented as confirmed store availability.'
   ].join('\n'));
 });
 
@@ -16023,7 +16029,7 @@ app.get('/sitemap.xml', async (_req, res) => {
           eq(performers.isActive, true),
           notInArray(performers.onboardingStatus, ['restricted', 'suspended']),
           sql`nullif(trim(${performers.handle}), '') is not null`,
-          sql`nullif(trim(${performers.bio}), '') is not null`,
+          publicPerformerDescriptionWhere,
           sql`nullif(trim(${performers.displayName}), '') is not null`
         )),
       // Venue/location is event context only — no fake /v/ venue URLs.
