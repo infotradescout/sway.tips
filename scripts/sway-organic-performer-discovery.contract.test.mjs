@@ -29,6 +29,8 @@ requireText(server, "'@type': 'ProfilePage'", 'profile page schema');
 requireText(server, "'@type': 'Person'", 'performer entity schema');
 requireText(server, "sameAs: sameAs.length ? sameAs : undefined", 'public identity sameAs');
 requireText(server, "contactType: 'booking'", 'public booking contact schema');
+requireText(server, 'data-discovery="booking"', 'visible public booking facts');
+requireText(server, 'bookingContact: profile.booking.available', 'verified booking first-response projection');
 requireText(server, "resolveVerifiedPublicBookingContact({", 'verified booking projection');
 requireText(server, "toPublicSocialLinks({", 'public social identity projection');
 requireText(server, "label: 'DJ song request app'", 'DJ intent internal link');
