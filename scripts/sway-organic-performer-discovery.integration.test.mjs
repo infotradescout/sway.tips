@@ -421,6 +421,7 @@ async function main() {
     assert.match(headlineOnlyHtml.body, /Live DJ and event performer/);
     assert.match((await request(port, '/sitemap.xml')).body, /\/p\/headlineonlyartist/);
     await proof.query(`DELETE FROM performer_public_profiles WHERE performer_id='${headlineOnlyPerformer}'`);
+    await proof.query(`DELETE FROM performer_handle_claims WHERE performer_id='${headlineOnlyPerformer}'`);
     await proof.query(`DELETE FROM performers WHERE id='${headlineOnlyPerformer}'`);
     await proof.query(`DELETE FROM users WHERE id='${headlineOnlyOwner}'`);
 
