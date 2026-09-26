@@ -26,7 +26,8 @@ Covered families: exact name, category + location, specific event / release, pro
 | Q2 | category + location | `"{specialty} {city}" live requests` / `DJ {city} Sway` | Eligible `/p/{handle}` with city + specialty facts | Page shows location + categories in first response | _not run — HOLD_ |
 | Q3 | specific event | `"{event title}" {city/date}` | `/e/{event-id}` when published public future event exists | Event in sitemap; first response Event JSON-LD + Attend action | _not run — HOLD_ |
 | Q4 | specific release | `"{release title}" {artist} Sway` | `/r/{release-id}` when non-private ready/scheduled/published | Release in sitemap; MusicAlbum JSON-LD; no fake store claim | _not run — HOLD_ |
-| Q5 | problem phrasing | `crowd song requests tip DJ live` / `send song request during show` | `/`, `/discover`, or live-eligible performer | Landing explains Live Rooms; no demo/fake performers as live inventory | _not run — HOLD_ |
+| Q5 | problem phrasing | `DJ song request app` / `QR song request app` / `send song request during show` | `/dj-song-request-app`, `/qr-song-request-app`, or `/live-music-request-app` | Canonical first-response HTML explains performer-controlled Live Rooms without claiming automatic playback | _not run — HOLD_ |
+| Q6 | event-use phrasing | `wedding DJ song requests` / `wedding song request QR code` | `/wedding-dj-song-requests` | Canonical first-response HTML explains the generic Live Room workflow in wedding context without inventing wedding-only functionality | _not run — HOLD_ |
 
 ## Seed addresses for post-deploy verification (real handles observed 2026-08-07)
 
@@ -37,6 +38,10 @@ Use only if still eligible after deploy:
 - `https://app.sway.tips/p/calliehines`
 - `https://app.sway.tips/p/coreymack`
 - `https://app.sway.tips/p/drewmaze`
+- `https://app.sway.tips/dj-song-request-app`
+- `https://app.sway.tips/qr-song-request-app`
+- `https://app.sway.tips/wedding-dj-song-requests`
+- `https://app.sway.tips/live-music-request-app`
 - `https://app.sway.tips/robots.txt`
 - `https://app.sway.tips/sitemap.xml`
 - `https://app.sway.tips/llms.txt`

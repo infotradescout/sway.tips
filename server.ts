@@ -699,8 +699,8 @@ type PublicPerformerDiscoveryResolution =
     }
   | { kind: 'not_resolvable' | 'unavailable'; profile: null };
 
-const DEFAULT_SHARE_TITLE = 'Sway | Every Way to Play';
-const DEFAULT_SHARE_DESCRIPTION = 'Sway gives performers one place for public profiles, releases, events, tickets, live rooms, Requests, Tips, Boosts, and direct audience support.';
+const DEFAULT_SHARE_TITLE = 'Sway | Song Request App for DJs and Live Performers';
+const DEFAULT_SHARE_DESCRIPTION = 'Sway is a performer-controlled song request app for live shows. Audiences scan a QR code or open a room link to send requests while the performer keeps control of the queue.';
 const DEFAULT_SHARE_IMAGE_PATH = '/social-preview.png?v=4';
 const DEFAULT_SHARE_IMAGE_WIDTH = 1672;
 const DEFAULT_SHARE_IMAGE_HEIGHT = 941;
@@ -1693,6 +1693,116 @@ function renderStaticDocument(title: string, description: string, bodyHtml: stri
 </html>`;
 }
 
+function renderSearchIntentDocument(input: {
+  path: string;
+  title: string;
+  description: string;
+  bodyHtml: string;
+}) {
+  const canonicalUrl = canonicalPublicUrl(input.path);
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: input.title,
+    description: input.description,
+    url: canonicalUrl,
+    about: {
+      '@type': 'SoftwareApplication',
+      name: 'Sway',
+      applicationCategory: 'MultimediaApplication',
+      operatingSystem: 'Web',
+      url: CANONICAL_APP_ORIGIN
+    }
+  };
+  const html = renderStaticDocument(
+    input.title,
+    input.description,
+    input.bodyHtml,
+    'Sway Live Rooms'
+  );
+  return html.replace(
+    '</head>',
+    `    <link rel="canonical" href="${escapeStaticDocumentText(canonicalUrl)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sway" />
+    <meta property="og:title" content="${escapeStaticDocumentText(input.title)}" />
+    <meta property="og:description" content="${escapeStaticDocumentText(input.description)}" />
+    <meta property="og:url" content="${escapeStaticDocumentText(canonicalUrl)}" />
+    <script type="application/ld+json">${JSON.stringify(structuredData).replace(/</g, '\\u003c')}</script>
+  </head>`
+  );
+}
+
+const djSongRequestPageHtml = renderSearchIntentDocument({
+  path: '/dj-song-request-app',
+  title: 'DJ Song Request App | Sway',
+  description: 'Sway gives DJs a performer-controlled web room for song requests at live shows. Guests scan a QR code or open a room link, send a request, and the DJ keeps control of the queue.',
+  bodyHtml: `
+    <p class="hero-note"><strong>Sway is a song request app built around performer control.</strong> Guests use a web link or QR code to send music or custom requests during a live show. The DJ decides what is reviewed, approved, ordered, fulfilled, denied, or removed.</p>
+    <h2>How DJ song requests work in Sway</h2>
+    <ol class="steps">
+      <li><strong>Start a Live Room.</strong> The performer creates the room and shares its durable link or QR code.</li>
+      <li><strong>Guests send requests from their phones.</strong> The audience does not need a native app to use the web room.</li>
+      <li><strong>The DJ stays in control.</strong> A request is audience input, not a promise that a song will be played.</li>
+      <li><strong>The room keeps the outcome visible.</strong> Request state stays connected to the room instead of disappearing into texts or handwritten notes.</li>
+    </ol>
+    <h2>Built for a real live set</h2>
+    <p>Sway separates audience demand from performer authority. DJs can pause requests, review them manually, use supported room workflows, and close the room when the set ends.</p>
+    <div class="primary-actions"><a href="/about">See how Sway works</a><a href="/discover">Discover performers on Sway</a></div>
+  `
+});
+
+const qrSongRequestPageHtml = renderSearchIntentDocument({
+  path: '/qr-song-request-app',
+  title: 'QR Song Request App for Live Shows | Sway',
+  description: 'Use a Sway QR code or room link to collect song requests at a live show while the performer controls the queue and decides what gets played.',
+  bodyHtml: `
+    <p class="hero-note"><strong>Replace shouted requests and scattered messages with one performer-controlled room.</strong> Put the Sway QR code where the audience can see it, or share the room link directly.</p>
+    <h2>What the QR code does</h2>
+    <ol class="steps">
+      <li><strong>Open the correct performer room.</strong> The QR code routes the guest to that live session.</li>
+      <li><strong>Let the guest submit a request.</strong> The request enters Sway with its room context instead of becoming an unstructured message.</li>
+      <li><strong>Keep the final decision with the performer.</strong> Sway does not turn a guest request into an automatic playback command or a promise to perform it.</li>
+    </ol>
+    <h2>No audience app download required</h2>
+    <p>The guest experience works in the web browser. The room link and QR code are meant to reduce friction at the exact moment someone wants to make a request.</p>
+    <div class="primary-actions"><a href="/about">Learn about Live Rooms</a><a href="/discover">See public Sway profiles and shows</a></div>
+  `
+});
+
+const weddingDjRequestsPageHtml = renderSearchIntentDocument({
+  path: '/wedding-dj-song-requests',
+  title: 'Wedding DJ Song Requests | Sway',
+  description: 'Sway gives wedding DJs a QR-code song request workflow for the reception while the DJ keeps control of what enters the queue and what is actually played.',
+  bodyHtml: `
+    <p class="hero-note"><strong>Guests can request songs without taking over the reception playlist.</strong> A wedding DJ can share one Sway Live Room by QR code or link and review requests from that room during the event.</p>
+    <h2>A request channel that still respects the DJ</h2>
+    <ul>
+      <li>Guests send requests from their own phones.</li>
+      <li>The DJ can review, approve, order, fulfill, deny, or remove requests.</li>
+      <li>A submitted request never guarantees that the song will be played.</li>
+      <li>The same public performer identity can link people into the active room when the DJ chooses to go live.</li>
+    </ul>
+    <h2>Useful beyond weddings</h2>
+    <p>The Live Room workflow is not wedding-specific software. The same performer-controlled request flow can be used at private events, bars, clubs, parties, and other live shows.</p>
+    <div class="primary-actions"><a href="/about">See the Live Room workflow</a><a href="/faq">Read the Sway FAQ</a></div>
+  `
+});
+
+const liveMusicRequestPageHtml = renderSearchIntentDocument({
+  path: '/live-music-request-app',
+  title: 'Live Music Request App for Performers | Sway',
+  description: 'Sway gives DJs and live performers one web room for audience requests, public profiles, events, and the live request workflow while the performer keeps operational control.',
+  bodyHtml: `
+    <p class="hero-note"><strong>Sway is not a visitor-operated jukebox.</strong> It is a performer-controlled request layer for real-world shows.</p>
+    <h2>For DJs, bands, singers, and other live performers</h2>
+    <p>Audience members can open the performer’s Live Room, make a music or custom request, and follow its status. The performer decides how the room is run and what happens next.</p>
+    <h2>One public path into the live experience</h2>
+    <p>Eligible performers can have a public Sway profile, published events, releases, and an active Live Room. Those public entities give search engines and people stable addresses instead of temporary screen state.</p>
+    <div class="primary-actions"><a href="/discover">Discover Sway performers</a><a href="/about">About Sway</a></div>
+  `
+});
+
 function renderSupportPageHtml(reference: { type: 'order' | 'ticket'; id: string } | null = null) {
   const supportEmail = nativeTicketRuntimeConfig.supportEmail;
   const referenceLabel = reference
@@ -1747,6 +1857,9 @@ const aboutPageHtml = renderStaticDocument(
       <article class="card"><h3>Your Catalog and collaborators</h3><p>Self-Production files and collaboration: private, original-quality storage for masters and works in progress. Uploads are sealed with integrity evidence, versioned, playable by the owner, shareable by permission, and connected to review and release work.</p></article>
       <article class="card"><h3>Your publishing and distribution</h3><p>Self-Production release prep plus one external-distribution outlet (DistroKid-class workflow) inside the same account—not the definition of Sway. The current release workspace assembles singles, EPs, and albums from verified masters, with an ordered track list, per-track metadata and credits, artwork, identifiers, territories, and reviewed rights evidence. It prepares a release but does not send it to stores: provider-backed delivery, royalty accounting, splits, payouts, true pre-saves, and safe distributor cutover are not live.</p></article>
     </div>
+
+    <h2>Use Sway for live song requests</h2>
+    <p>Start with the workflow that matches what people are trying to do: <a href="/dj-song-request-app">DJ song requests</a>, <a href="/qr-song-request-app">QR song requests</a>, <a href="/wedding-dj-song-requests">wedding DJ requests</a>, or the broader <a href="/live-music-request-app">live music request workflow</a>.</p>
 
     <h2>How Sway works for an audience member</h2>
     <ol class="steps">
@@ -15731,6 +15844,10 @@ app.get('/llms.txt', (_req, res) => {
     '',
     '## Public surfaces',
     `- [About Sway](${CANONICAL_APP_ORIGIN}/about)`,
+    `- [DJ song request app](${CANONICAL_APP_ORIGIN}/dj-song-request-app)`,
+    `- [QR song request app](${CANONICAL_APP_ORIGIN}/qr-song-request-app)`,
+    `- [Wedding DJ song requests](${CANONICAL_APP_ORIGIN}/wedding-dj-song-requests)`,
+    `- [Live music request app](${CANONICAL_APP_ORIGIN}/live-music-request-app)`,
     `- [Discover performers, shows, and live rooms](${CANONICAL_APP_ORIGIN}/discover)`,
     `- [FAQ](${CANONICAL_APP_ORIGIN}/faq)`,
     `- [Terms](${CANONICAL_APP_ORIGIN}/terms)`,
@@ -15753,7 +15870,21 @@ app.get('/sitemap.xml', async (_req, res) => {
       .send('Sitemap temporarily unavailable.');
   }
 
-  const staticPaths = ['/', '/about', '/discover', '/faq', '/terms', '/privacy', '/legal/payments', '/legal/payouts', '/legal/tickets'];
+  const staticPaths = [
+    '/',
+    '/about',
+    '/dj-song-request-app',
+    '/qr-song-request-app',
+    '/wedding-dj-song-requests',
+    '/live-music-request-app',
+    '/discover',
+    '/faq',
+    '/terms',
+    '/privacy',
+    '/legal/payments',
+    '/legal/payouts',
+    '/legal/tickets'
+  ];
   type SitemapEntry = { loc: string; lastmod?: string | null };
   const entries = new Map<string, SitemapEntry>();
   for (const route of staticPaths) {
@@ -15889,6 +16020,22 @@ app.get('/support', (req, res) => {
       ? { type: 'ticket' as const, id: ticketId }
       : null;
   res.type('html').send(renderSupportPageHtml(reference));
+});
+
+app.get('/dj-song-request-app', (_req, res) => {
+  res.type('html').set('Cache-Control', 'public, max-age=900').send(djSongRequestPageHtml);
+});
+
+app.get('/qr-song-request-app', (_req, res) => {
+  res.type('html').set('Cache-Control', 'public, max-age=900').send(qrSongRequestPageHtml);
+});
+
+app.get('/wedding-dj-song-requests', (_req, res) => {
+  res.type('html').set('Cache-Control', 'public, max-age=900').send(weddingDjRequestsPageHtml);
+});
+
+app.get('/live-music-request-app', (_req, res) => {
+  res.type('html').set('Cache-Control', 'public, max-age=900').send(liveMusicRequestPageHtml);
 });
 
 app.get('/faq', (_req, res) => {
