@@ -1068,7 +1068,7 @@ function buildPublicPerformerShareMetadata(
     : [];
   const roleLabels = profile.roles
     .map((role) => labelForPublicPerformerPrimaryRole(role))
-    .filter((value): value is string => Boolean(value));
+    .filter((value) => Boolean(value));
   const categories = [...new Set([...roleLabels, ...specialtyCategories])].slice(0, 10);
   const lastUpdated = profile.updatedAt instanceof Date && !Number.isNaN(profile.updatedAt.getTime())
     ? profile.updatedAt.toISOString().slice(0, 10)
