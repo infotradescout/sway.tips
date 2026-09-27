@@ -33,7 +33,16 @@ for (const term of [
   'Canonical discovery host',
   'discovery_landing',
   'discovery_entity_view',
-  'discovery_primary_action'
+  'discovery_primary_action',
+  "app.get('/dj-song-request-app'",
+  "app.get('/qr-song-request-app'",
+  "app.get('/wedding-dj-song-requests'",
+  "app.get('/live-music-request-app'",
+  "path: '/dj-song-request-app'",
+  "path: '/qr-song-request-app'",
+  "path: '/wedding-dj-song-requests'",
+  "path: '/live-music-request-app'",
+  "'@type': 'SoftwareApplication'"
 ]) {
   if (!server.includes(term)) failures.push(`Organic discovery implementation missing: ${term}`);
 }

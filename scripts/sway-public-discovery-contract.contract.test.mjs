@@ -80,7 +80,16 @@ for (const term of [
   'ne(musicReleases.distributionMode, \'private\')',
   'discovery_landing',
   'discovery_entity_view',
-  'discovery_primary_action'
+  'discovery_primary_action',
+  "app.get('/dj-song-request-app'",
+  "app.get('/qr-song-request-app'",
+  "app.get('/wedding-dj-song-requests'",
+  "app.get('/live-music-request-app'",
+  "const staticPaths = [",
+  "'/dj-song-request-app'",
+  "'/qr-song-request-app'",
+  "'/wedding-dj-song-requests'",
+  "'/live-music-request-app'"
 ]) {
   requireIncludes(server, term, 'server.ts discovery foundation');
 }

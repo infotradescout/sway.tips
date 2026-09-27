@@ -25,6 +25,21 @@ requireText(policy, '!input.hasOwner', 'shared visibility policy');
 requireText(policy, "input.visibilityState === 'public'", 'shared visibility policy');
 requireText(policy, "input.visibilityState === 'unlisted'", 'shared visibility policy');
 requireText(server, 'resolvePublicPerformerDiscovery', 'server discovery resolver');
+requireText(server, 'const publicPerformerDescriptionWhere = or(', 'shared public description eligibility');
+requireText(server, "nullif(trim(${performerPublicProfiles.headline}), '') is not null", 'public headline eligibility');
+if ((server.match(/publicPerformerDescriptionWhere/g) || []).length < 5) {
+  failures.push('server discovery surfaces must share publicPerformerDescriptionWhere');
+}
+requireText(server, "'@type': 'ProfilePage'", 'profile page schema');
+requireText(server, "'@type': 'Person'", 'performer entity schema');
+requireText(server, "sameAs: sameAs.length ? sameAs : undefined", 'public identity sameAs');
+requireText(server, "contactType: 'booking'", 'public booking contact schema');
+requireText(server, 'data-discovery="booking"', 'visible public booking facts');
+requireText(server, 'bookingContact: profile.booking.available', 'verified booking first-response projection');
+requireText(server, "resolveVerifiedPublicBookingContact({", 'verified booking projection');
+requireText(server, "toPublicSocialLinks({", 'public social identity projection');
+requireText(server, "label: 'DJ song request app'", 'DJ intent internal link');
+requireText(server, "label: 'Live music request app'", 'performer intent internal link');
 requireText(server, 'sendPublicProfileNotFound', 'server profile boundary');
 requireText(server, 'sendPublicProfileUnavailable', 'server profile boundary');
 requireText(server, 'PUBLIC_PROFILE_NOT_FOUND_HTML', 'server profile boundary');
@@ -81,7 +96,7 @@ const llmsBlock = routeBlock("app.get('/llms.txt'");
 if (llmsBlock.includes('businessDb') || llmsBlock.includes('performerProfilePreviews')) {
   failures.push('llms.txt: static crawler guidance must not enumerate performers or depend on the database');
 }
-requireText(llmsBlock, 'Only published, public, non-suspended records belong in search results.', 'llms.txt static guidance');
+requireText(llmsBlock, 'meaningful public descriptive text', 'llms.txt static guidance');
 
 if (packageJson.scripts?.['test:integration:performer-discovery'] !== 'node --import tsx scripts/sway-organic-performer-discovery.integration.test.mjs') {
   failures.push('package scripts: focused performer discovery integration command is missing');
