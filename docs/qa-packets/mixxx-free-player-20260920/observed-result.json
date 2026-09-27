@@ -1,0 +1,92 @@
+{
+  "receiptKind": "Observed summary of connected Render execution logs and deploy metadata; not a downloaded copy of the full native log",
+  "objective": "Deliberate Sway operator control of a free original player without automatic replay after uncertainty or reconnect",
+  "result": "PASS_BOUNDED_REAL_MIXXX_LAB",
+  "productionReady": false,
+  "execution": {
+    "serviceId": "srv-daesln0u01pc73fso5kg",
+    "workspaceId": "tea-d191jph5pdvs73drglkg",
+    "deployId": "dep-daoad0btqb8s73ei05ng",
+    "launcherCommit": "b913047b9da66eb038e1f12c130853f7174607e2",
+    "launcherBranch": "audit/readiness-223-room-recovery",
+    "swayUiSource": "68b6e8dc6e61cc1e3b0ca530ef11d0f0b5b93d5f",
+    "nativeStartedAt": "2026-09-21T03:38:09.555Z",
+    "nativeFinishedAt": "2026-09-21T03:38:30.894Z",
+    "evidenceDeployStatus": "live",
+    "evidencePublishedAt": "2026-09-21T03:38:36.844529Z",
+    "platform": "Linux / Debian 12",
+    "player": "Stock Mixxx 2.3.3 Debian package",
+    "playerPackageSha256": "601efc4756d2b3c7514f2f903a19e1941821d4f3bf722af6726e812c0c3d9db8",
+    "accountSubscriptionsUsed": 0
+  },
+  "sourceIdentity": {
+    "src/components/PerformerPlaybackController.tsx": "daac19e23452cd7fdeac5667d6e02276731d8dbc",
+    "src/browser-midi-playback.ts": "a4f66057658af2ff5acbde3fce6a4b63c070c4df",
+    "src/playback-control.ts": "1899069fb33c3ec834dbf0b9f52694ec1eb0d924",
+    "mappingJsBlob": "41d37a8968f71dfb2904944fd4e427605bdcbde6",
+    "mappingXmlBlob": "d21925987c60a83dd69356ceb23a89572bf5a28a",
+    "mappingJsSha256": "4b2d94e42c57aa13df2251dc90783fd3ad05eaeae6f59ee9e0388e23e180943b",
+    "mappingXmlSha256": "b1125475e2bd52095bba02655240c48465f545823768f9086f1e6c7b5cf7578d"
+  },
+  "checks": [
+    {"name": "Both generated tracks load with both decks paused and zero startup MIDI", "passed": true},
+    {"name": "Actual Sway connect and output selection send zero commands", "passed": true},
+    {"name": "Sway Play advances Mixxx deck 2 while deck 1 stays paused", "passed": true},
+    {"name": "Actual Mixxx audio output is non-silent during Play", "passed": true},
+    {"name": "Sway Pause stops position and produces silent audio output", "passed": true},
+    {"name": "Disconnect/reconnect sends nothing and requires output reselection", "passed": true},
+    {"name": "A response lost after real Play dispatch remains uncertain without automatic resend", "passed": true},
+    {"name": "Reconnect and browser reload do not replay the uncertain command", "passed": true},
+    {"name": "A genuinely new deliberate Pause stops Mixxx after reconnect", "passed": true},
+    {"name": "Explicit Stop resets the actual deck position", "passed": true}
+  ],
+  "audio": {
+    "sampleRate": 48000,
+    "channels": 2,
+    "playing": {"samples": 98304, "rms": 0.043259003, "peak": 0.061180077, "rawFloat32Sha256": "aa2962128e8a2c956b9073b6d9b3a2629ace16534c52cfb11083410bb7c7f010"},
+    "paused": {"samples": 96256, "rms": 0, "peak": 0, "rawFloat32Sha256": "b80948c1aae775acd3f549b180473333463df14d22586c06aa46c921502bb9b0"},
+    "source": "Actual Mixxx JACK outputs captured by an owned client; the capture client synthesizes no audio"
+  },
+  "midi": {
+    "sentPackets": [[145,37,127],[129,37,0],[145,38,127],[129,38,0],[145,37,127],[145,38,127],[129,38,0],[145,39,127],[129,39,0]],
+    "automaticReplayObserved": false,
+    "actualTargetDeck": 2,
+    "otherDeckStayedPaused": true,
+    "uncertainAction": "Second Play; its press reached Mixxx but the test browser MIDI output threw afterward, before Note Off",
+    "mechanism": "Actual Sway component and sender, test-only virtual MIDI output/cable, stock Mixxx MIDI parser and mapping runtime"
+  },
+  "unitTests": {"command": "node --test scripts/sway-mixxx-mapping.test.mjs", "testedFileBlob": "7d22d606dca38fe8020f8ff6b9357e83a4ce6216", "scope": "Same test bytes executed under the original local tests/mapping.test.mjs filename, with the same relative mapping path; mocked engine unit checks", "tests": 12, "pass": 12, "fail": 0, "skipped": 0, "cancelled": 0, "exitCode": 0, "tapSha256": "5a3aa457cd23911330fe7ad385e1318fe67e78726fb26edcc7d6a0e9030ec703"},
+  "xmlValidation": "ElementTree parsed 16 bindings and confirmed the four deck channels and four supported notes",
+  "cleanup": {"mixxxProcessClosed": true, "mixxxSignal": "SIGTERM", "jackProcessClosed": true, "jackSignal": "SIGKILL after bounded graceful attempt", "displayClosed": true, "temporaryWorkspaceRemoved": true, "firstRunDialogKeyHelper": "Corrected focus-safe interaction; final outer runner exited successfully"},
+  "limits": {
+    "fullSignedInApplication": false,
+    "realOsWebMidiPermissionAndDriver": false,
+    "physicalWindowsOrMac": false,
+    "windowsBoothCmd": false,
+    "spotifyOrVirtualDj": false,
+    "swayReceivesMixxxPlaybackFeedback": false,
+    "nativeDecksExercised": [2],
+    "nativeActionsExercised": ["play", "pause", "stop"],
+    "cueAndOtherDecks": "Unit mapping coverage only",
+    "playerStateObserver": "Separate read-only test instrumentation, not a production Sway feedback integration",
+    "audioDevice": "JACK dummy backend, not a physical speaker",
+    "completeRepositoryGate": "Not rerun; existing Sources acceptance gains the bounded mapping unit test"
+  },
+  "earlierAttempts": {
+    "preservedInGitAndRenderLogs": true,
+    "lastAttemptBeforePass": {"launcher": "b8423242a29d415579ef368da71432c34d71b616", "deploy": "dep-daoa9vugekts73bg4880", "nativeChecksPassed": 10, "outerResult": "failed", "reason": "xdotool targeted key release hit BadWindow after the dialog had closed"},
+    "otherSetupCorrections": ["Task-owned signed package indexes", "Mixxx 2.3 help identity uses expected exit 2", "Actual first-run music-directory dialog", "Place generated media first in legacy CLI arguments"]
+  },
+  "externalEffects": {"desktopCommanderUsed": false, "newServicesCreated": 0, "existingProofServiceReused": true, "productionDeploys": 0, "productionDatabaseWrites": 0, "providerActivations": 0, "paidAccounts": 0, "unchangedHostedGatesRepeated": false, "registryProofRepeated": false},
+  "artifacts": {
+    "base": "https://sway-release-proof.onrender.com/",
+    "nativeReceipt": "mixxx-native.json",
+    "outerReceipt": "mixxx-bootstrap.json",
+    "actualMixxxScreenshotPlaying": "mixxx-actual-player-playing.png",
+    "actualMixxxScreenshotPaused": "mixxx-actual-player-paused.png",
+    "swayScreenshotPlaying": "mixxx-sway-playing.png",
+    "actualAudioPlaying": "mixxx-actual-playing.wav",
+    "actualAudioPaused": "mixxx-actual-paused.wav",
+    "note": "Runner writes and successful publication observed. Public artifact bytes were not downloaded into this chat; this summary is not the full original receipt. Preserve outputs before reusing the service."
+  }
+}

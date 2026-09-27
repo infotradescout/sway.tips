@@ -1,0 +1,61 @@
+{
+  "runtimeCommit": "39d85f514bbbbf21f1eaff79fa15db4e72e03072",
+  "runtimeTree": "6f20bb12f53d4c0a612fa3787c865b7c9cc760c0",
+  "technicalGate": "passed",
+  "localGateSteps": [
+    {
+      "name": "lint",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 33956,
+      "passed": true
+    },
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 9877,
+      "passed": true
+    },
+    {
+      "name": "test:contracts",
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 837986,
+      "passed": true
+    }
+  ],
+  "topLevelContractCommands": 127,
+  "embeddedBrowser": {
+    "passed": true,
+    "checks": 15,
+    "database": "embedded-postgres"
+  },
+  "nativeBrowser": {
+    "passed": true,
+    "checks": 15,
+    "database": "real-postgres"
+  },
+  "nativeStoreRouterTests": 24,
+  "realProviderCalls": 0,
+  "actualAudioPlayback": false,
+  "providerApprovalEstablished": false,
+  "releaseDecision": "HOLD",
+  "productionChangesPerformed": false,
+  "emailSent": false,
+  "visualReview": {
+    "images": [
+      "native/connected-320.png",
+      "native/connected-1440.png"
+    ],
+    "observations": [
+      "Inspected actual application captures using synthetic provider state.",
+      "Controls and library remain readable without visible overlap in these two captures."
+    ],
+    "notProofOfPhysicalPlayback": true
+  },
+  "completedAt": "2026-09-17T15:53:44.691Z"
+}

@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "project": "sway.tips",
+  "pullRequest": 249,
+  "branch": "implement/direct-music-control-20260916",
+  "testedCommit": "58a6fc0dc984176427c6261490732b16ca1544f0",
+  "testedTree": "850be132c500bfc3b59489265f405e6fd8ea6ca3",
+  "recordedAt": "2026-09-19T23:02:17.682Z",
+  "state": "reconnect_local_validation_passed",
+  "releaseApproved": false,
+  "productionWrites": false,
+  "fullGate": {
+    "schema": "sway.direct-player.full-gate.v1",
+    "head": "58a6fc0dc984176427c6261490732b16ca1544f0",
+    "command": "npm run validate",
+    "validateScript": "npm run lint && npm run build && npm run test:payment-pricing && npm run test:contracts",
+    "contractCommandCount": 128,
+    "providerEnvironmentInherited": false,
+    "audiblePlaybackAuthorized": false,
+    "startedAt": "2026-09-19T22:42:30.179Z",
+    "result": {
+      "exitCode": 0,
+      "signal": null
+    },
+    "skips": [
+      "Active room registry database proof skipped: explicit disposable-database approval not set."
+    ],
+    "finishedAt": "2026-09-19T22:58:42.966Z",
+    "finalHead": "58a6fc0dc984176427c6261490732b16ca1544f0",
+    "trackedChanges": "",
+    "cachedChanges": "",
+    "logSha256": "3854e2e8942cf6a253f662859c3a9b7459fe94ef91495b5e1c48130400cf6c65",
+    "passed": true
+  },
+  "registrySupplement": {
+    "schema": "sway.direct-player.registry-supplement.v1",
+    "head": "58a6fc0dc984176427c6261490732b16ca1544f0",
+    "startedAt": "2026-09-19T22:43:01.287Z",
+    "command": "node scripts/sway-active-room-registry.contract.test.mjs",
+    "databaseKind": "embedded-postgres",
+    "standaloneConcurrencyClaimed": false,
+    "inheritedProviderEnvironment": false,
+    "passed": true,
+    "cleanupErrors": [],
+    "databaseHost": "127.0.0.1",
+    "databasePort": 63120,
+    "databaseName": "sway_embedded_disposable_test_pr249_active_room_registry",
+    "result": {
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false
+    },
+    "skips": [],
+    "successMarker": true,
+    "databaseClosed": true,
+    "listenerClosed": true,
+    "finalHead": "58a6fc0dc984176427c6261490732b16ca1544f0",
+    "trackedChanges": "",
+    "cachedChanges": "",
+    "finishedAt": "2026-09-19T22:43:25.613Z",
+    "logSha256": "6332baae5a6961a67435269ca391688c170783b29581546d22450e49bf867291"
+  },
+  "browserWithinFullGate": {
+    "startedAt": "2026-09-19T22:49:30.134Z",
+    "scope": "Actual signed-in application with synthetic OAuth consent and provider replies. No real music provider, physical playback, or production writes.",
+    "checks": [
+      "Direct account connection appears before file imports and requires no live room or CSV",
+      "Provider consent cancellation returns useful feedback without attaching an account",
+      "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
+      "Selecting a currently available player persists the target without starting audio; restricted devices stay disabled",
+      "Accepted Play command does not fabricate Playing before a separately observed provider response",
+      "Play, pause, resume, queue and next use the selected external player and display only reported track/state",
+      "Provider playlist edit appears automatically without uploading files or overwriting a saved request list",
+      "Search and saved songs are read from the connected account",
+      "Lost command outcome disables controls until manual verification and never automatically resends",
+      "Unavailable playback feedback removes control permission and supports explicit recovery",
+      "Connected account, music browsing and player controls fit desktop and narrow mobile screens",
+      "A separate real account and a cross-origin mutation cannot use another account’s connection",
+      "Only the authenticated connection owner can operate the player; anonymous and foreign-account commands never reach the source",
+      "Authenticated connection and selected device survive actual server restart and browser reload",
+      "Cross-tab reconnect clears previous playback, library and devices until current authorization reads succeed, without autoplay",
+      "Late old-authorization search rejection cannot revoke or overwrite the reconnected account",
+      "Confirmed disconnect deletes authorization and command records without deleting request libraries; cancel preserves access",
+      "Absent provider approval cannot be mistaken for a working connection or enabled by a user checkbox"
+    ],
+    "passed": true,
+    "database": "embedded-postgres",
+    "operatorBoundary": {
+      "checks": [
+        {
+          "action": "play",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "resume",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "pause",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "next",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "previous",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "queue",
+          "anonymous": 401,
+          "foreignAccount": 403
+        },
+        {
+          "action": "transfer",
+          "anonymous": 401,
+          "foreignAccount": 403
+        }
+      ],
+      "foreignTarget": 403,
+      "externalCommandDelta": 0,
+      "commandReceiptDelta": 0,
+      "realProviderCalls": 0,
+      "scope": "Actual application sessions/HTTP/database; provider simulated. Forged approval/payment fields are not real paid-request or webhook tests."
+    },
+    "providerRequests": 70,
+    "externalCommands": 6,
+    "actualProviderCalls": 0,
+    "actualAudioPlayback": false,
+    "finishedAt": "2026-09-19T22:51:28.369Z"
+  },
+  "directMusicIntegration": {
+    "database": "embedded-postgres",
+    "provider": "synthetic",
+    "realProviderCalls": 0,
+    "productionWrites": false,
+    "providerRequests": 43,
+    "commands": 9,
+    "tokenExchanges": 7
+  },
+  "testedFileSha256": {
+    "src/components/PerformerDirectMusicConnection.tsx": "5e198c0a7b84464761b2af8625fd380d7d61f352d75ffe8dce9e093d6f42f148",
+    "scripts/sway-direct-music.browser.test.mjs": "e2ac530bab6622a3ef0a24cd751e9588b190919624c8ee797c99084b77274f86",
+    "package.json": "27206c334a8f6236f6b72238b80633239efe97a242b82a275e685f7c9e4e8924",
+    "package-lock.json": "a79d4b38b461166c19596e9fdad94ac143818a767edec31597afb33f258a7caf"
+  },
+  "logLocations": {
+    "fullGate": "../sway-reconnect-20260919/full-gate-2026-09-19T22-42-30-071Z/full-gate.log",
+    "registry": "../sway-registry-2026-09-19T22-43-01-285Z.log",
+    "preservedEarlierProofs": "../sway-reconnect-20260919/full-gate-2026-09-19T22-42-30-071Z/preserved"
+  },
+  "scope": "Actual local Sway application sessions, HTTP and owned embedded PostgreSQL with simulated provider consent/API. No real-provider approval, physical playback, standalone database concurrency, main merge or production deployment proved.",
+  "remainingAcceptance": [
+    "Provider-approved real account and physical device/playback verification",
+    "Separate production merge/deploy authority and exact-release acceptance"
+  ],
+  "resume": "Resume from this tested candidate or a docs-only descendant. Do not rerun the same full gate unless runtime/test/dependency changes invalidate it. Preserve historical failed attempts."
+}

@@ -244,6 +244,7 @@ async function runDatabaseProof() {
   const trackedGigIds = await store.listTrackedGigIds();
   assert.equal(new Set(trackedGigIds).size, 3, 'Three concurrent active rooms must remain distinct in the registry.');
 
+  const hydratedRoomStates = [];
   for (let index = 0; index < gigIds.length; index += 1) {
     const snapshot = await store.hydrateStateByGigId(gigIds[index], createRoomState(gigIds[index], `Fallback ${index}`));
     assert.equal(snapshot.roomStatus, 'active', 'Each active room must hydrate as active.');
@@ -251,6 +252,7 @@ async function runDatabaseProof() {
     assert.equal(snapshot.state.session.talentName, roomStates[index].session.talentName, 'Each room must retain its own session state.');
     assert.equal(snapshot.state.requests[0].gigId, gigIds[index], 'Each room must retain its own request state.');
     assert.notEqual(snapshot.state.session.talentName, roomStates[(index + 1) % roomStates.length].session.talentName, 'A room lookup must never return another room state.');
+    hydratedRoomStates.push(snapshot.state);
   }
 
   const safeLegacy = await store.hydrateState(createRoomState(gigIds[0], 'Fallback Legacy'));
@@ -266,10 +268,37 @@ async function runDatabaseProof() {
   });
   assert.equal(missingRoom.roomStatus, 'missing', 'Invalid room IDs must fail closed.');
 
-  const endedRoomState = createRoomState(gigIds[2], 'DJ Sol');
+  async function assertRejectedCloseLeavesRoomUnchanged(state, expectedState, label) {
+    state.session.status = 'closed';
+    state.session.requestsOpen = false;
+    await assert.rejects(
+      store.persistState({ state, activeGigId: gigIds[2] }),
+      { message: 'gig_session_state_revision_conflict' },
+      `${label} must not close a persisted room.`
+    );
+    const snapshot = await store.hydrateStateByGigId(gigIds[2], createRoomState(gigIds[2], 'Fallback rejected close'));
+    assert.equal(snapshot.roomStatus, 'active', `${label} must leave the registry active.`);
+    assert.equal(snapshot.activeGigId, gigIds[2], `${label} must preserve the active room identity.`);
+    assert.deepEqual(snapshot.state, expectedState, `${label} must not change the durable room or request state.`);
+  }
+
+  const originalRoomState = hydratedRoomStates[2];
+  assert.ok(Number.isInteger(originalRoomState.session.stateRevision), 'A hydrated room must carry its durable revision.');
+  const missingRevisionClose = structuredClone(originalRoomState);
+  delete missingRevisionClose.session.stateRevision;
+  await assertRejectedCloseLeavesRoomUnchanged(missingRevisionClose, originalRoomState, 'A close without a revision');
+
+  const refreshedRoomState = structuredClone(originalRoomState);
+  await store.persistState({ state: refreshedRoomState, activeGigId: gigIds[2] });
+  const refreshedSnapshot = await store.hydrateStateByGigId(gigIds[2], createRoomState(gigIds[2], 'Fallback refreshed room'));
+  assert.equal(refreshedSnapshot.state.session.stateRevision, originalRoomState.session.stateRevision + 1, 'A current room write must advance its durable revision once.');
+  await assertRejectedCloseLeavesRoomUnchanged(structuredClone(originalRoomState), refreshedSnapshot.state, 'A close using a stale revision');
+
+  const endedRoomState = structuredClone(refreshedSnapshot.state);
   endedRoomState.session.status = 'closed';
   endedRoomState.session.requestsOpen = false;
   await store.persistState({ state: endedRoomState, activeGigId: gigIds[2] });
+  assert.equal(endedRoomState.session.stateRevision, refreshedSnapshot.state.session.stateRevision + 1, 'A current close must advance its durable revision once.');
 
   const endedSnapshot = await store.hydrateStateByGigId(gigIds[2], {
     session: createInactiveSession(),
@@ -279,6 +308,7 @@ async function runDatabaseProof() {
   });
   assert.equal(endedSnapshot.roomStatus, 'ended', 'Ended room behavior must remain preserved.');
   assert.equal(endedSnapshot.activeGigId, null, 'Ended rooms must not remain active in route context.');
+  console.log('Active room registry database proof passed: isolated rooms, rejected missing/stale revisions, unchanged state after rejection, and current-revision close.');
 }
 
 if (failures.length) {

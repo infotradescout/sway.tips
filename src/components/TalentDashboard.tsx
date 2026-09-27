@@ -1,3 +1,4 @@
+import PerformerDirectMusicConnection from './PerformerDirectMusicConnection';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -1311,6 +1312,7 @@ function PerformerConnectionsWorkspace({
         <h2 className="mt-1 font-display text-xl font-black text-white">Your music</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-300">Add each music source once. It stays on your account and is ready for every future room.</p>
       </header>
+      <PerformerDirectMusicConnection />
 
       <div className="space-y-5 p-5">
         <section data-sway-linked-sources="true">

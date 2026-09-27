@@ -1,0 +1,125 @@
+{
+  "runtimeCommit": "39d85f514bbbbf21f1eaff79fa15db4e72e03072",
+  "files": [
+    {
+      "path": "earlier-attempts/browser-device-read-race.json",
+      "bytes": 4047,
+      "sha256": "aa5e067b6a5df056b7e3886ad18c3b37ff3de85692157ffdaa748ddff6a6271a"
+    },
+    {
+      "path": "earlier-attempts/gate-device-read-race.json",
+      "bytes": 772,
+      "sha256": "1d337ee821fc4d02b76fce590016cbfdab9bdc97254d1e07b19d5673b1bb6fae"
+    },
+    {
+      "path": "earlier-attempts/immutable-identity-red-9a7188fa.json",
+      "bytes": 239,
+      "sha256": "5c4a2af4f7186feca59c10a1e4c15dbc0cb32baf2171d7388d6581a72a88dfb4"
+    },
+    {
+      "path": "earlier-attempts/initial-gate-missing-snapshot.json",
+      "bytes": 772,
+      "sha256": "a0459cbc7c997595c27088337ccfcc0511a03a3eea269ff5fa2c1aecde040d19"
+    },
+    {
+      "path": "earlier-attempts/superseded-9a7188fa-gate.json",
+      "bytes": 1035,
+      "sha256": "e3261c15c13b0df5c3c17a051435d9c00cc13451dd77009b4be38d98e9ce721d"
+    },
+    {
+      "path": "embedded/results.json",
+      "bytes": 1987,
+      "sha256": "4ecdad1ff3f30f471aef55bae7460ee12957507038dfa1f8ed9e8efc33b869e4"
+    },
+    {
+      "path": "focused-precommit.json",
+      "bytes": 439,
+      "sha256": "77964a2cc897de20782f78810972ee0ad5cebd8bb94c167e0561d5a28a0d95bc"
+    },
+    {
+      "path": "full-gate.json",
+      "bytes": 770,
+      "sha256": "03a573f001d4fb570eca27583c2746d3570af8ba637be9f805315d3925a66ba9"
+    },
+    {
+      "path": "logs/build.log",
+      "bytes": 4397,
+      "sha256": "e3b99b5efc250771bd3e3483d403c280e79d327ad7968854c9990df60dac6bac"
+    },
+    {
+      "path": "logs/lint.log",
+      "bytes": 39,
+      "sha256": "2925eb64c28dd65cc1f1226deec83b43928dbef489f99e0764617ff228f38f1a"
+    },
+    {
+      "path": "logs/test-contracts.log",
+      "bytes": 80112,
+      "sha256": "a39a6ad4a7089f981eadf65894f748e2ba79282f5ff600a44d364f633c889ec8"
+    },
+    {
+      "path": "native/connected-1440.png",
+      "bytes": 56317,
+      "sha256": "c5e70e91eafaca553625cc41fa6355ff2309a015ebf00ef9bd03a6d530443473"
+    },
+    {
+      "path": "native/connected-320.png",
+      "bytes": 57059,
+      "sha256": "9548d43b50d88c54f8cad9c590954872afa8bd2742cb862ca0508798a23aeab2"
+    },
+    {
+      "path": "native/connected-390.png",
+      "bytes": 55104,
+      "sha256": "79445302b6696067a326d9e9cc998bc16a29462878d948aa6aed9dc29dfb5c20"
+    },
+    {
+      "path": "native/environment.json",
+      "bytes": 573,
+      "sha256": "e1c1efc267884d52ab29866547f0cc04c12c68b217432d3a120ce0b7de88ac7c"
+    },
+    {
+      "path": "native/results.json",
+      "bytes": 1983,
+      "sha256": "e37309b98dd0570ee6448930bdcaf06cbf210c98089be344ddb7af3c5212efb5"
+    },
+    {
+      "path": "original-5d13581e-native/connected-1440.png",
+      "bytes": 56317,
+      "sha256": "c5e70e91eafaca553625cc41fa6355ff2309a015ebf00ef9bd03a6d530443473"
+    },
+    {
+      "path": "original-5d13581e-native/connected-320.png",
+      "bytes": 57059,
+      "sha256": "9548d43b50d88c54f8cad9c590954872afa8bd2742cb862ca0508798a23aeab2"
+    },
+    {
+      "path": "original-5d13581e-native/environment.json",
+      "bytes": 573,
+      "sha256": "00c2a41f419031d605417cd0d4f0873c0e32c1bc34fc5939a5371037ed112712"
+    },
+    {
+      "path": "original-5d13581e-native/results.json",
+      "bytes": 1983,
+      "sha256": "4607d0b3bb69643ec3b61692702eecdb55d71c9724f129ecbfed8dd3221fbfac"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3964,
+      "sha256": "e6b7d0ca0b9d78098170e1e229e14668993b3e4dcce23c16a7b8e616fa2fa89f"
+    },
+    {
+      "path": "runners/windows-exact-head-gates.mjs",
+      "bytes": 2733,
+      "sha256": "9eaedc89de993a2e2c79ef7d52c64e23862c38d1ea92c2f5cd25cc877572e4ac"
+    },
+    {
+      "path": "runners/windows-native-proof.mjs",
+      "bytes": 3398,
+      "sha256": "5e98e584d08f7c5dd1b54bb6814b255020c0b7ef22094abf6c091ca51a28673e"
+    },
+    {
+      "path": "summary.json",
+      "bytes": 1486,
+      "sha256": "43433768f919b4f38d528db6f7409c969a59e860b4d4e3ca521ce5ef9af9098f"
+    }
+  ]
+}

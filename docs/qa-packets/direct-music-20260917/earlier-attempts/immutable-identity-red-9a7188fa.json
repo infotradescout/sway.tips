@@ -1,0 +1,8 @@
+{
+  "head": "9a7188fa5709b7feacbe75d53685f09aac7f737e",
+  "observedAt": "2026-09-17T15:30:56.100Z",
+  "expectedAccountId": "immutable-account-id",
+  "actualAccountId": "mutable-public-user-id",
+  "passed": false,
+  "realProviderCalls": 0
+}

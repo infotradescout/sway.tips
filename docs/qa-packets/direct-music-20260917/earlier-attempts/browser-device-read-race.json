@@ -1,0 +1,24 @@
+{
+  "startedAt": "2026-09-17T03:57:22.842Z",
+  "scope": "Actual signed-in application with synthetic OAuth consent and provider replies. No real music provider, physical playback, or production writes.",
+  "checks": [
+    "Direct account connection appears before file imports and requires no live room or CSV",
+    "Provider consent cancellation returns useful feedback without attaching an account",
+    "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
+    "Selecting a currently available player persists the target without starting audio; restricted devices stay disabled",
+    "Accepted Play command does not fabricate Playing before a separately observed provider response",
+    "Play, pause, resume, queue and next use the selected external player and display only reported track/state",
+    "Provider playlist edit appears automatically without uploading files or overwriting a saved request list",
+    "Search and saved songs are read from the connected account",
+    "Lost command outcome disables controls until manual verification and never automatically resends",
+    "Unavailable playback feedback removes control permission and supports explicit recovery",
+    "Connected account, music browsing and player controls fit desktop and narrow mobile screens",
+    "A separate real account and a cross-origin mutation cannot use another account’s connection"
+  ],
+  "passed": false,
+  "database": "embedded-postgres",
+  "stage": "Other listener signup",
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ ''\n- 'fixture-laptop'\n\n    at file:///C:/Users/flavo/AppData/Local/Temp/sway-sources-flow-20260916/scripts/sway-direct-music.browser.test.mjs:583:10",
+  "visibleText": "SWAY PERFORMER\n\nLive Rooms, music, files, and account\n\nLog out\nHome\nLive Room\nSources\nShows\nRequests\nUploads\nPublic Page\nMoney\n\nSOURCES\n\nYour music\n\nAdd each music source once. It stays on your account and is ready for every future room.\n\nCONNECT AND CONTROL\n\nPlay from your music account.\n\nSign in with your service, choose where music plays, and control it here. The source player handles the audio. No library export or upload is required.\n\nReconnect Spotify\nConnected fixture listener · Account connected\nDisconnect\nRefresh connection\nPlayback destination\nChoose a player\n\nOpen Spotify on the intended computer, phone, or supported speaker, then refresh players. No music starts until you choose an action.\n\nRefresh players and playback\n\nPlayback state is not confirmed. Controls stay unavailable until the player can be checked.\n\nResume\nPause\nPrevious\nNext\nMove playback to this device\nSearch\nMy playlists\nSaved songs\nRefresh library\n\nRead directly from your connected Spotify account. Updates refresh automatically while this screen is open.\n\nLoading connected library…\n\nSaved for every room\n0 tracks\n\nNo music added yet\n\nChoose a music service, library, or song list below.\n\nADD MUSIC\n\nBring your music with you.\n\nChoose a library, playlist, or your own tracks.\n\nImport library or setlist\nDJ apps, Apple Music, local files, and song lists\nSpotify playlist\nAdd a song list using a playlist link\nMusic uploaded to Sway\nManage your audio files and request availability\nOther music services and DJ apps\n\nFile imports add song information, not audio. They do not connect a streaming account or give playback permission.\n\nPLAYBACK\n\nYour live setup\n\nAudio stays in your player. Use Sway to send supported controls and see its reported state.\n\nVirtualDJ\n\nTrack loading · playback · feedback\n\nStart a live room to connect playback. Your saved music stays ready between rooms.\n\nOpen Live Room\nSet up VirtualDJ connection\nOpen playback controls\nSetup requirements\nSerato, rekordbox, Traktor, djay, and MIDI-mapped apps\nMusic service versus playback app\nAdvanced: reusable booth computer helper",
+  "finishedAt": "2026-09-17T03:58:49.424Z"
+}

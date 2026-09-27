@@ -1,0 +1,51 @@
+{
+  "candidate": "5d13581e130f5e7a2d9644e12f093f3f8070a6ed",
+  "tree": "d71035130a3c3ec61678cd921b7b8874c4a02e10",
+  "provenance": "Transcribed from the directly observed completion output of the owned Windows native runner, process 123924. The original local report and screenshots remain under tmp/direct-music-proof. Later Desktop Commander requests stopped responding; original file bytes were not fetched into this evidence commit.",
+  "environment": {
+    "head": "5d13581e130f5e7a2d9644e12f093f3f8070a6ed",
+    "headAfter": "5d13581e130f5e7a2d9644e12f093f3f8070a6ed",
+    "startedAt": "2026-09-17T04:04:42.728Z",
+    "finishedAt": "2026-09-17T04:06:54.791Z",
+    "database": "PostgreSQL 18.4 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit",
+    "steps": [
+      {"file": "scripts/sway-direct-music.integration.test.ts", "exitCode": 0},
+      {"file": "scripts/sway-direct-music.browser.test.mjs", "exitCode": 0}
+    ],
+    "passed": true
+  },
+  "browser": {
+    "startedAt": "2026-09-17T04:05:01.094Z",
+    "finishedAt": "2026-09-17T04:06:54.216Z",
+    "database": "real-postgres",
+    "passed": true,
+    "providerRequests": 44,
+    "externalCommands": 6,
+    "actualProviderCalls": 0,
+    "actualAudioPlayback": false,
+    "checks": [
+      "Direct account connection appears before file imports and requires no live room or CSV",
+      "Provider consent cancellation returns useful feedback without attaching an account",
+      "Actual OAuth callback validates PKCE and saves encrypted account credentials through the normal signed-in route",
+      "Selecting a currently available player persists the target without starting audio; restricted devices stay disabled",
+      "Accepted Play command does not fabricate Playing before a separately observed provider response",
+      "Play, pause, resume, queue and next use the selected external player and display only reported track/state",
+      "Provider playlist edit appears automatically without uploading files or overwriting a saved request list",
+      "Search and saved songs are read from the connected account",
+      "Lost command outcome disables controls until manual verification and never automatically resends",
+      "Unavailable playback feedback removes control permission and supports explicit recovery",
+      "Connected account, music browsing and player controls fit desktop and narrow mobile screens",
+      "A separate real account and a cross-origin mutation cannot use another account's connection",
+      "Authenticated connection and selected device survive actual server restart and browser reload",
+      "Confirmed disconnect deletes authorization and command records without deleting request libraries; cancel preserves access",
+      "Absent provider approval cannot be mistaken for a working connection or enabled by a user checkbox"
+    ]
+  },
+  "visualReview": {
+    "scope": "Agent inspection of actual application panel captures with synthetic provider state, not a generated concept or real Spotify account.",
+    "inspected": ["tmp/direct-music-proof/native/connected-1440.png", "tmp/direct-music-proof/native/connected-320.png"],
+    "observations": ["Device controls and provider library appear together and remain readable.", "Narrow mobile controls wrap without horizontal page overflow.", "Refreshed-state feedback no longer retains a misleading unknown-command notice."],
+    "archivedImageBytes": false
+  },
+  "limitations": ["OAuth consent and Spotify API replies were simulated.", "No real provider authorization, eligible physical player or audible playback was tested.", "This receipt does not claim the separate complete regression suite passed.", "No production database, provider configuration or payment settings were changed."]
+}

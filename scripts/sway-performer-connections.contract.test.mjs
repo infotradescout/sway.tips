@@ -182,7 +182,11 @@ assert(shell.includes('const TalentDashboard = withSourcePlayerContext(BaseTalen
 for (const required of ['props.activeGigId === gigId', "props.session.status === 'active'", '!props.roomActionsBlocked', 'profile?.owner_user_id', 'onSelectRoom: props.onSelectGigId', '<TalentDashboard {...props} />']) assert(wrapper.includes(required), required);
 for (const required of ['context.accountId, context.performerId, context.gigId, context.ready, context.previewMode', 'lifetime.current !== scope', 'request.current?.abort()', 'busyRef.current', 'confirmReplacement', 'SourcePlayerAccessError', 'Date.parse(download.expiresAt) <= Date.now()', 'player connection is not confirmed yet', '<PerformerPlaybackController']) assert(setup.includes(required), required);
 for (const forbidden of ['localStorage', 'sessionStorage', 'document.cookie', "'/api/state'"]) assert(!setup.includes(forbidden), forbidden);
+assert(dashboard.includes('<PerformerDirectMusicConnection />'), 'Sources must mount direct account control in the real workspace.');
 for (const args of [
+  ['--import', 'tsx', 'scripts/sway-direct-music-boundaries.test.ts'],
+  ['--import', 'tsx', 'scripts/sway-direct-music.integration.test.ts'],
+  ['--import', 'tsx', 'scripts/sway-direct-music.browser.test.mjs'],
   ['--import', 'tsx', 'scripts/sway-spotify-catalog.behavior.test.ts'],
   ['--import', 'tsx', 'scripts/sway-spotify-current-route.behavior.test.mjs'],
   ['--import', 'tsx', 'scripts/sway-spotify-playlist-import.behavior.test.mjs'],

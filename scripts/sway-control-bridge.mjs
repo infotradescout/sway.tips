@@ -4,6 +4,7 @@ import http from 'node:http';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { executeClaimedOnce, executeClaimedBatch, validateExecutionLedger } from './lib/control-bridge-execution.mjs';
 import {
   VirtualDjNetworkControl,
   VIRTUALDJ_NETWORK_CONTROL_REQUIREMENTS
@@ -302,7 +303,8 @@ function loadLedger(filePath) {
   try {
     if (!existsSync(filePath)) return null;
     const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
-    if (parsed?.gigId !== gigId || parsed?.sourceKey !== 'virtualdj') return null;
+    if (parsed?.gigId !== gigId || parsed?.sourceKey !== 'virtualdj') throw new Error('Invalid bridge ledger identity.');
+    validateExecutionLedger(parsed);
     return {
       version: 1,
       gigId,
@@ -312,16 +314,19 @@ function loadLedger(filePath) {
       pendingCompletionIds: Array.isArray(parsed.pendingCompletionIds) ? parsed.pendingCompletionIds : []
     };
   } catch (error) {
-    console.warn(`Ignoring unreadable bridge ledger: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    throw new Error(`Cannot safely resume the bridge ledger: ${error instanceof Error ? error.message : String(error)}. Preserve it and inspect the original player before recovery.`);
   }
 }
 
 function saveLedger() {
-  const outcomeEntries = Object.entries(ledger.outcomes)
+  const pending = new Set(ledger.pendingCompletionIds);
+  const outcomeEntries = Object.entries(ledger.outcomes).filter(([id]) => !pending.has(id))
     .sort(([, a], [, b]) => String(b.finishedAt).localeCompare(String(a.finishedAt)))
     .slice(0, 200);
-  ledger.outcomes = Object.fromEntries(outcomeEntries);
+  ledger.outcomes = Object.fromEntries([
+    ...outcomeEntries,
+    ...Object.entries(ledger.outcomes).filter(([id]) => pending.has(id))
+  ]);
   ledger.pendingCompletionIds = [...new Set(ledger.pendingCompletionIds)].filter((id) => ledger.outcomes[id]);
   mkdirSync(path.dirname(ledgerPath), { recursive: true, mode: 0o700 });
   const tempPath = `${ledgerPath}.${process.pid}.tmp`;
@@ -356,30 +361,8 @@ async function flushCompletions() {
 }
 
 async function executeClaimedCommand(command) {
-  if (!ledger.outcomes[command.id]) {
-    let outcome;
-    try {
-      const result = await virtualDj.executeCommand(command);
-      const finishedAt = new Date().toISOString();
-      outcome = { success: true, result: { ...result, executedAt: finishedAt }, error: null, finishedAt };
-    } catch (error) {
-      outcome = {
-        success: false,
-        result: {},
-        error: error instanceof Error ? error.message : String(error),
-        finishedAt: new Date().toISOString()
-      };
-    }
-    // Persist the local execution outcome before acknowledging the cloud.
-    // A lost network response therefore cannot turn a completed command into
-    // a second booth-side execution after restart.
-    ledger.outcomes[command.id] = outcome;
-    ledger.pendingCompletionIds.push(command.id);
-    saveLedger();
-  } else if (!ledger.pendingCompletionIds.includes(command.id)) {
-    ledger.pendingCompletionIds.push(command.id);
-    saveLedger();
-  }
+  return executeClaimedOnce({ command, ledger, persist: saveLedger,
+    execute: (claimed) => virtualDj.executeCommand(claimed) });
 }
 
 async function pushDeckState() {
@@ -413,6 +396,12 @@ async function bridgeTick() {
   tickRunning = true;
   try {
     await flushCompletions();
+    // Do not accumulate more player commands while a prior outcome cannot
+    // reach Sway. Continue publishing observed state during recovery.
+    if (ledger.pendingCompletionIds.length) {
+      if (Date.now() - lastStatePushAt >= 2_000) await pushDeckState();
+      return;
+    }
     const claimed = await cloudRequest('/api/talent/playback/bridge/claim', {
       method: 'POST',
       body: {
@@ -421,9 +410,7 @@ async function bridgeTick() {
         bridgeInstanceId: ledger.bridgeInstanceId
       }
     });
-    for (const command of Array.isArray(claimed?.commands) ? claimed.commands : []) {
-      await executeClaimedCommand(command);
-    }
+    await executeClaimedBatch(Array.isArray(claimed?.commands) ? claimed.commands : [], executeClaimedCommand);
     await flushCompletions();
     if (Date.now() - lastStatePushAt >= 2_000) await pushDeckState();
     lastCloudError = null;

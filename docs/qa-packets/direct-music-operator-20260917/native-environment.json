@@ -1,0 +1,22 @@
+{
+  "head": "e1332755c84076417574a6bd22b5402a24efc484",
+  "startedAt": "2026-09-17T16:18:03.596Z",
+  "steps": [
+    {
+      "file": "scripts/sway-direct-music.integration.test.ts",
+      "exitCode": 0
+    },
+    {
+      "file": "scripts/sway-direct-music.browser.test.mjs",
+      "exitCode": 0
+    }
+  ],
+  "passed": true,
+  "database": {
+    "version": "PostgreSQL 18.4 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit",
+    "pid": 35140,
+    "port": 55528
+  },
+  "finishedAt": "2026-09-17T16:20:42.446Z",
+  "headAfter": "e1332755c84076417574a6bd22b5402a24efc484"
+}

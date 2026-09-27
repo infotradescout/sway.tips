@@ -1,0 +1,18 @@
+{
+  "supplementalVerificationHead": "e1332755c84076417574a6bd22b5402a24efc484",
+  "runtimeEquivalentTo": "39d85f514bbbbf21f1eaff79fa15db4e72e03072",
+  "fullGateRerun": false,
+  "priorRuntimeGate": "docs/qa-packets/direct-music-20260917/full-gate.json",
+  "storeRouterTests": 24,
+  "browserChecks": 16,
+  "unauthorizedAttempts": 15,
+  "unauthorizedExternalCommands": 0,
+  "unauthorizedCommandReceipts": 0,
+  "structureContract": "Sway product structure contract passed.",
+  "browserSyntax": "passed",
+  "actualProviderCalls": 0,
+  "actualAudioPlayback": false,
+  "productionChanges": false,
+  "emailActions": false,
+  "scope": "Native PostgreSQL and actual signed-in Sway application; provider responses synthetic. Test/documentation-only update."
+}
