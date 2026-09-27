@@ -7,8 +7,9 @@ import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
-export const sourceSha='97d995f7a47d68af543e2d8d0c6e46df3a60f8ec';
-export const downloadSourceSha='97d995f7a47d68af543e2d8d0c6e46df3a60f8ec';
+import {npmCiInvocation} from './grindzone-npm-command.mjs';
+export const sourceSha='afb14f16f77f04311124a9661a43cdb2fb3d89b2';
+export const downloadSourceSha='afb14f16f77f04311124a9661a43cdb2fb3d89b2';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -16,7 +17,7 @@ function prepare(directory,sha){
   if(!existsSync(target)){mkdirSync(target,{recursive:true});run(target,'git',['init','--quiet']);run(target,'git',['fetch','--quiet','--depth','1','https://github.com/infotradescout/cotw-field-companion.git',sha]);run(target,'git',['checkout','--quiet','--detach','FETCH_HEAD']);}
   const actual=execFileSync('git',['rev-parse','HEAD'],{cwd:target,env:cleanEnv,encoding:'utf8'}).trim();if(actual!==sha)throw Error('GrindZone source mismatch');
   run(target,'git',['diff','--exit-code','HEAD','--']);
-  run(target,process.platform==='win32'?'npm.cmd':'npm',['ci','--prefix','cloud','--ignore-scripts','--no-audit','--no-fund']);
+  const npmCi=npmCiInvocation();run(target,npmCi.command,npmCi.args);
   return target;
 }
 /** Bounded visual receipt from the synthetic test browser only, never from a connected player. */
@@ -52,7 +53,7 @@ async function browserPlayPreview(evidence,mode){
 }
 if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   const hostRoot=process.cwd();
-  run(hostRoot,process.execPath,['--test','scripts/grindzone-build-binding.test.mjs','scripts/grindzone-host.contract.test.mjs','scripts/grindzone-download.contract.test.mjs']);
+  run(hostRoot,process.execPath,['--test','scripts/grindzone-build-binding.test.mjs','scripts/grindzone-npm-command.test.mjs','scripts/grindzone-host.contract.test.mjs','scripts/grindzone-download.contract.test.mjs']);
   const relay=prepare('.grindzone-phone',sourceSha);
   const target=sourceSha===downloadSourceSha?relay:prepare('.grindzone-download',downloadSourceSha);
   // Derive only public species facts from the hash-verified pinned upstream file, before all app gates.

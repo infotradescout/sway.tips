@@ -461,7 +461,7 @@ for (const term of [
   'visibilityState: performers.visibilityState',
   'ownerEmailVerifiedAt: users.emailVerifiedAt',
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
-  'nullif(trim(${performers.bio}), \'\') is not null',
+  'publicPerformerDescriptionWhere',
   'profiles.length !== 1',
   'evaluatePublicPerformerVisibility'
 ]) requireIncludes(shareProfileLookup, term, 'Share profile lookup');
@@ -486,7 +486,7 @@ for (const term of [
   "eq(performers.visibilityState, 'public')",
   '.innerJoin(users, eq(users.id, performers.ownerUserId))',
   "sql`nullif(trim(${performers.handle}), '') is not null`",
-  "sql`nullif(trim(${performers.bio}), '') is not null`",
+  'publicPerformerDescriptionWhere',
   "sql`nullif(trim(${performers.displayName}), '') is not null`",
   'const selectedRooms = activeRooms',
   '.filter((room) => detailsByGigId.has(room.gigId))',
