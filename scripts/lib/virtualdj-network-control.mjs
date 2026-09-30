@@ -29,6 +29,27 @@ function normalizeDeck(value) {
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 8 ? parsed : 1;
 }
 
+function comparableText(value) {
+  return String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+}
+
+function comparablePath(value) {
+  // File names can differ only by whitespace, Unicode or case. Without an
+  // authoritative filesystem identity, fail closed instead of conflating them.
+  return typeof value === 'string' ? value.replace(/\\/g, '/') : '';
+}
+
+function commandConfirmation(action, track, state) {
+  if (action === 'load') {
+    const requestedPath = comparablePath(track.path);
+    if (requestedPath && requestedPath === comparablePath(state.trackPath)) return 'exact_track_confirmed';
+    return 'source_acknowledged';
+  }
+  if (action === 'play' && state.playing === true) return 'source_state_confirmed';
+  if (action === 'pause' && state.playing === false) return 'source_state_confirmed';
+  return 'source_acknowledged';
+}
+
 export class VirtualDjNetworkControl {
   constructor({
     baseUrl = 'http://127.0.0.1:8088',
@@ -76,12 +97,29 @@ export class VirtualDjNetworkControl {
           body: script,
           signal: controller.signal
         });
-        const body = await response.text();
         if (!response.ok) {
-          throw new Error(`VirtualDJ ${endpoint} rejected the request (${response.status}): ${body || 'no response body'}`);
+          // Never expose an echoed booth-local script or path in cloud errors.
+          throw new Error(`VirtualDJ ${endpoint} rejected the request (${response.status}).`);
         }
+        const body = await response.text();
         return body.trim();
       })()]);
+    } catch (error) {
+      if (error instanceof Error && [
+        'VirtualDJ command response timed out. The command may have reached your deck. Check playback before sending another command.',
+        'VirtualDJ playback status timed out.'
+      ].includes(error.message)) throw error;
+      if (error instanceof Error && !/ rejected the request \(/.test(error.message)) {
+        if (endpoint === 'execute') {
+          const uncertain = new Error('VirtualDJ response was lost; command outcome is uncertain. Check the selected deck before retrying.');
+          uncertain.cause = error;
+          throw uncertain;
+        }
+        const unavailable = new Error('VirtualDJ state request failed.');
+        unavailable.cause = error;
+        throw unavailable;
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -95,7 +133,7 @@ export class VirtualDjNetworkControl {
     const result = await this.request('execute', script);
     // Network Control documents exactly true/false for /execute. Query-style
     // values such as 1 or on are not an execution acknowledgement.
-    if (result !== 'true') throw new Error(`VirtualDJ returned ${result || 'false'} for: ${script}`);
+    if (result !== 'true') throw new Error('VirtualDJ rejected the command.');
     return result;
   }
 
@@ -149,11 +187,7 @@ export class VirtualDjNetworkControl {
           loadMatchMode = 'exact_library_path';
           break;
         }
-        const query = [trimText(track.artist, 200), trimText(track.title, 200)].filter(Boolean).join(' ');
-        if (!query) throw new Error('VirtualDJ load requires an exact library path or a title/artist search.');
-        script = `search "${escapeVdjString(query)}" & browser_scroll "top" & deck ${deck} load`;
-        loadMatchMode = 'virtualdj_search_first_result';
-        break;
+        throw new Error('VirtualDJ automatic load requires an exact synced booth path. Load this track manually.');
       }
       case 'play':
         script = `deck ${deck} play on`;
@@ -178,12 +212,26 @@ export class VirtualDjNetworkControl {
     }
 
     await this.execute(script);
+    let observation = null;
+    try {
+      observation = await this.readState(deck);
+    } catch {
+      // Acceptance remains real even when follow-up state cannot confirm it.
+    }
     return {
       executed: true,
+      acknowledgement: 'accepted',
       deck,
       action: command.action,
       script,
-      loadMatchMode
+      loadMatchMode,
+      confirmationStatus: observation ? commandConfirmation(command.action, track, observation) : 'source_acknowledged',
+      observedAt: observation?.observedAt || null,
+      observedDeck: observation?.deck || deck,
+      observedTrackTitle: observation?.trackTitle || null,
+      observedTrackArtist: observation?.trackArtist || null,
+      observedPlaying: typeof observation?.playing === 'boolean' ? observation.playing : null,
+      observation
     };
   }
 }

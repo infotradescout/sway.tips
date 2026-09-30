@@ -3,6 +3,7 @@ import type { SwayDb } from '../db/client';
 import { playbackCommands, playbackStates } from '../db/schema';
 import {
   isPlaybackStateFresh,
+  normalizePlaybackCompletionResult,
   normalizePlaybackStateInput,
   type PlaybackAction,
   type PlaybackCommandPayload,
@@ -24,6 +25,25 @@ function normalizeResult(value: unknown) {
     : {};
 }
 
+function publicPlaybackErrorText(value: unknown) {
+  const text = String(value ?? '');
+  return /outcome is uncertain|response was lost|command response timed out|command may have reached/i.test(text)
+    ? 'Source acknowledgement was lost; playback outcome is uncertain. Check the selected deck before sending another command.'
+    : 'Source could not complete the command.';
+}
+
+function commandPayload(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as PlaybackCommandPayload
+    : {};
+}
+
+function differentIntentError() {
+  const error = new Error('clientCommandId was already used for a different playback command.');
+  (error as Error & { status?: number }).status = 409;
+  return error;
+}
+
 export function createPlaybackControlStore({ db }: { db: SwayDb }) {
   async function expireCommands(executor: DbExecutor, now = new Date()) {
     return executor
@@ -42,6 +62,41 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
   }
 
   return {
+    async getCurrentTarget(input: { gigId: string; sourceKey: PlaybackSourceKey }) {
+      const [state] = await db
+        .select({
+          sourceKey: playbackStates.sourceKey,
+          transport: playbackStates.transport,
+          bridgeInstanceId: playbackStates.bridgeInstanceId,
+          connectionStatus: playbackStates.connectionStatus,
+          deck: playbackStates.deck,
+          observedAt: playbackStates.observedAt
+        })
+        .from(playbackStates)
+        .where(eq(playbackStates.gigId, input.gigId))
+        .limit(1);
+      if (!state || state.sourceKey !== input.sourceKey || state.connectionStatus !== 'connected'
+        || !isPlaybackStateFresh(state.observedAt)) return null;
+      return state;
+    },
+
+    async requireCommandTarget(input: {
+      gigId: string;
+      sourceKey: PlaybackSourceKey;
+      expectedBridgeInstanceId: unknown;
+    }) {
+      const target = await this.getCurrentTarget(input);
+      // The caller's observed identity is only a precondition. The persisted,
+      // fresh state remains the authority for the execution target.
+      if (typeof input.expectedBridgeInstanceId !== 'string' || !input.expectedBridgeInstanceId
+        || !target?.bridgeInstanceId || target.bridgeInstanceId !== input.expectedBridgeInstanceId) {
+        const error = new Error('Player connection changed. Refresh playback status and check the selected player before sending another command.');
+        Object.assign(error, { status: 409, code: 'playback_connection_changed' });
+        throw error;
+      }
+      return target;
+    },
+
     async createCommand(input: {
       gigId: string;
       performerId: string;
@@ -50,6 +105,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
       sourceKey: PlaybackSourceKey;
       action: PlaybackAction;
       payload: PlaybackCommandPayload;
+      callerIntentFingerprint: string;
       ttlMs?: number;
     }) {
       const now = new Date();
@@ -65,7 +121,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
           clientCommandId: input.clientCommandId,
           sourceKey: input.sourceKey,
           action: input.action,
-          payload: input.payload,
+          payload: { ...input.payload, callerIntentFingerprint: input.callerIntentFingerprint },
           status: 'queued',
           expiresAt,
           updatedAt: now
@@ -89,13 +145,78 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
       if (!existing) throw new Error('Playback command idempotency reservation could not be resolved.');
       const sameIntent = existing.sourceKey === input.sourceKey
         && existing.action === input.action
-        && JSON.stringify(existing.payload ?? {}) === JSON.stringify(input.payload ?? {});
-      if (!sameIntent) {
-        const error = new Error('clientCommandId was already used for a different playback command.');
-        (error as Error & { status?: number }).status = 409;
-        throw error;
-      }
+        && commandPayload(existing.payload).callerIntentFingerprint === input.callerIntentFingerprint;
+      if (!sameIntent) throw differentIntentError();
       return { command: existing, replay: true };
+    },
+
+    async getCommandReplay(input: {
+      gigId: string;
+      clientCommandId: string;
+      sourceKey: PlaybackSourceKey;
+      action: PlaybackAction;
+      callerIntentFingerprint: string;
+    }) {
+      const [existing] = await db
+        .select()
+        .from(playbackCommands)
+        .where(and(
+          eq(playbackCommands.gigId, input.gigId),
+          eq(playbackCommands.clientCommandId, input.clientCommandId)
+        ))
+        .limit(1);
+      if (!existing) return null;
+      if (existing.sourceKey !== input.sourceKey || existing.action !== input.action
+        || commandPayload(existing.payload).callerIntentFingerprint !== input.callerIntentFingerprint) {
+        throw differentIntentError();
+      }
+      return existing;
+    },
+
+    async replaceConnectionGeneration(input: {
+      gigId: string;
+      sourceKey: PlaybackSourceKey;
+      executor?: DbExecutor;
+    }) {
+      const executor = input.executor ?? db;
+      const now = new Date();
+      const disconnected = await executor
+        .update(playbackStates)
+        .set({ connectionStatus: 'disconnected', observedAt: now, updatedAt: now })
+        .where(and(
+          eq(playbackStates.gigId, input.gigId),
+          eq(playbackStates.sourceKey, input.sourceKey)
+        ))
+        .returning({ gigId: playbackStates.gigId });
+      const queued = await executor
+        .update(playbackCommands)
+        .set({
+          status: 'expired',
+          errorText: 'Command was not sent because the playback connection was replaced.',
+          failedAt: now,
+          updatedAt: now
+        })
+        .where(and(
+          eq(playbackCommands.gigId, input.gigId),
+          eq(playbackCommands.sourceKey, input.sourceKey),
+          eq(playbackCommands.status, 'queued')
+        ))
+        .returning({ id: playbackCommands.id });
+      const claimed = await executor
+        .update(playbackCommands)
+        .set({
+          status: 'expired',
+          errorText: 'Source acknowledgement was lost during connection replacement; playback outcome is uncertain. Check the selected deck before sending another command.',
+          failedAt: now,
+          updatedAt: now
+        })
+        .where(and(
+          eq(playbackCommands.gigId, input.gigId),
+          eq(playbackCommands.sourceKey, input.sourceKey),
+          eq(playbackCommands.status, 'claimed')
+        ))
+        .returning({ id: playbackCommands.id });
+      return { disconnected: disconnected.length, queued: queued.length, claimed: claimed.length };
     },
 
     async claimCommands(input: {
@@ -112,13 +233,16 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
 
       return db.transaction(async (tx) => {
         await expireCommands(tx, now);
+        // A claimed transport command has an uncertain outcome when its lease
+        // expires. Requeueing can make a different bridge repeat load/next/
+        // previous after the first booth already executed it. Fail closed and
+        // require the performer to inspect the source before another command.
         await tx
           .update(playbackCommands)
           .set({
-            status: 'queued',
-            claimedBy: null,
-            claimedAt: null,
-            claimExpiresAt: null,
+            status: 'expired',
+            errorText: 'Source acknowledgement was lost; playback outcome is uncertain. Check the selected deck before sending another command.',
+            failedAt: now,
             updatedAt: now
           })
           .where(and(
@@ -136,6 +260,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
             eq(playbackCommands.gigId, input.gigId),
             eq(playbackCommands.sourceKey, input.sourceKey),
             eq(playbackCommands.status, 'queued'),
+            sql`${playbackCommands.payload}->>'targetBridgeInstanceId' = ${input.bridgeInstanceId}`,
             gt(playbackCommands.expiresAt, now)
           ))
           .orderBy(asc(playbackCommands.createdAt))
@@ -171,41 +296,46 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
       errorText?: string | null;
     }) {
       const now = new Date();
-      const [completed] = await db
-        .update(playbackCommands)
-        .set({
-          status: input.success ? 'succeeded' : 'failed',
-          completedAt: input.success ? now : null,
-          failedAt: input.success ? null : now,
-          result: normalizeResult(input.result),
-          errorText: input.success ? null : String(input.errorText || 'Source rejected the command.').slice(0, 1_000),
-          claimExpiresAt: null,
-          updatedAt: now
-        })
-        .where(and(
-          eq(playbackCommands.id, input.commandId),
-          eq(playbackCommands.gigId, input.gigId),
-          eq(playbackCommands.sourceKey, input.sourceKey),
-          inArray(playbackCommands.status, ['claimed', 'expired']),
-          eq(playbackCommands.claimedBy, input.bridgeInstanceId)
-        ))
-        .returning();
-
-      if (completed) return { command: completed, replay: false };
-
-      const [existing] = await db
-        .select()
-        .from(playbackCommands)
-        .where(and(
-          eq(playbackCommands.id, input.commandId),
-          eq(playbackCommands.gigId, input.gigId),
-          eq(playbackCommands.sourceKey, input.sourceKey)
-        ))
-        .limit(1);
-      if (existing && ['succeeded', 'failed'].includes(existing.status)) {
-        return { command: existing, replay: true };
-      }
-      return null;
+      return db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(playbackCommands)
+          .where(and(
+            eq(playbackCommands.id, input.commandId),
+            eq(playbackCommands.gigId, input.gigId),
+            eq(playbackCommands.sourceKey, input.sourceKey)
+          ))
+          .limit(1)
+          .for('update');
+        if (existing && ['succeeded', 'failed'].includes(existing.status)) {
+          return { command: existing, replay: true };
+        }
+        if (!existing || !['claimed', 'expired'].includes(existing.status)
+          || existing.claimedBy !== input.bridgeInstanceId) return null;
+        const payload = commandPayload(existing.payload);
+        const result = normalizePlaybackCompletionResult(input.result, {
+          action: existing.action as PlaybackAction,
+          targetDeck: typeof payload.deck === 'number' ? payload.deck : null,
+          claimedAt: existing.claimedAt,
+          completionReceivedAt: input.success ? now : null
+        });
+        const [completed] = await tx
+          .update(playbackCommands)
+          .set({
+            status: input.success ? 'succeeded' : 'failed',
+            completedAt: input.success ? now : null,
+            failedAt: input.success ? null : now,
+            result,
+            // Bridge errors are untrusted and may include an echoed VirtualDJ
+            // script or booth-local file path. Persist only a public category.
+            errorText: input.success ? null : publicPlaybackErrorText(input.errorText),
+            claimExpiresAt: null,
+            updatedAt: now
+          })
+          .where(eq(playbackCommands.id, existing.id))
+          .returning();
+        return completed ? { command: completed, replay: false } : null;
+      });
     },
 
     async upsertState(input: {
@@ -216,6 +346,9 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
       const state = normalizePlaybackStateInput(input.state);
       if (!state) return null;
       const now = new Date();
+      const reportedObservedAt = state.observedAt as Date;
+      const stateMetadata = { ...(state.metadata ?? {}) };
+      delete stateMetadata.reportedObservedAt;
       const values = {
         gigId: input.gigId,
         performerId: input.performerId,
@@ -232,8 +365,15 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
         positionMs: state.positionMs,
         durationMs: state.durationMs,
         bpmTimes100: state.bpmTimes100,
-        observedAt: state.observedAt as Date,
-        metadata: state.metadata,
+        // Server receipt time owns row ordering and freshness. A bridge clock
+        // can be wrong or hostile without pinning a future state forever.
+        observedAt: now,
+        metadata: {
+          ...stateMetadata,
+          ...(Math.abs(reportedObservedAt.getTime() - now.getTime()) <= 86_400_000
+            ? { reportedObservedAt: reportedObservedAt.toISOString() }
+            : {})
+        },
         updatedAt: now
       };
 
@@ -245,8 +385,7 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
           set: {
             ...values,
             revision: sql`${playbackStates.revision} + 1`
-          },
-          setWhere: lte(playbackStates.observedAt, state.observedAt as Date)
+          }
         })
         .returning();
 
@@ -269,14 +408,57 @@ export function createPlaybackControlStore({ db }: { db: SwayDb }) {
       return {
         state: playbackState
           ? {
-              ...playbackState,
+              gigId: playbackState.gigId,
+              sourceKey: playbackState.sourceKey,
+              transport: playbackState.transport,
+              bridgeInstanceId: playbackState.bridgeInstanceId,
+              deck: playbackState.deck,
+              trackTitle: playbackState.trackTitle,
+              trackArtist: playbackState.trackArtist,
+              externalTrackId: playbackState.externalTrackId,
+              playing: playbackState.playing,
+              positionMs: playbackState.positionMs,
+              durationMs: playbackState.durationMs,
+              bpmTimes100: playbackState.bpmTimes100,
+              revision: playbackState.revision,
+              observedAt: playbackState.observedAt,
               fresh: isPlaybackStateFresh(playbackState.observedAt, now.getTime()),
               connectionStatus: isPlaybackStateFresh(playbackState.observedAt, now.getTime())
                 ? playbackState.connectionStatus
                 : 'disconnected'
             }
           : null,
-        commands
+        commands: commands.map((command) => {
+          const payload = commandPayload(command.payload);
+          const result = normalizePlaybackCompletionResult(command.result, {
+            action: command.action as PlaybackAction,
+            targetDeck: typeof payload.deck === 'number' ? payload.deck : null,
+            claimedAt: command.claimedAt,
+            // Historical confirmations are evaluated against the immutable
+            // server receipt boundary, never re-aged against this snapshot.
+            completionReceivedAt: command.completedAt
+          });
+          return {
+            id: command.id,
+            gigId: command.gigId,
+            sourceKey: command.sourceKey,
+            action: command.action,
+            status: command.status,
+            errorText: command.errorText,
+            createdAt: command.createdAt,
+            updatedAt: command.updatedAt,
+            result: {
+              acknowledgement: result.acknowledgement ?? null,
+              confirmationStatus: result.confirmationStatus ?? null,
+              observedAt: result.observedAt ?? null,
+              observedDeck: result.observedDeck ?? null,
+              observedTrackTitle: result.observedTrackTitle ?? null,
+              observedTrackArtist: result.observedTrackArtist ?? null,
+              observedPlaying: result.observedPlaying ?? null,
+              loadMatchMode: result.loadMatchMode ?? null
+            }
+          };
+        })
       };
     }
   };

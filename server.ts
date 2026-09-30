@@ -57,6 +57,8 @@ import {
   isPlaybackSourceKey,
   isUuid as isPlaybackUuid,
   normalizePlaybackCommandPayload,
+  playbackCallerIntentText,
+  projectPlaybackCommandReceipt,
   validatePlaybackCommandInput,
   type PlaybackCommandPayload
 } from "./src/playback-control";
@@ -6805,7 +6807,7 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
   const actor = await resolveProtectedMutationActor(req, res, gigId);
   if (!actor) return;
 
-  if (!performerSessionStore.hasDurableStore || !businessDb || !gigId) {
+  if (!performerSessionStore.hasDurableStore || !businessDb || !playbackControlStore || !gigId) {
     res.status(503).json({ error: 'Control bridge token issuance requires durable session persistence.' });
     return;
   }
@@ -6823,6 +6825,11 @@ app.post('/api/talent/control-bridge/token', async (req, res) => {
       actorUserId: actor.actorId,
       sessionType: 'control_bridge',
       gigId,
+      executor: tx
+    });
+    await playbackControlStore.replaceConnectionGeneration({
+      gigId,
+      sourceKey: 'virtualdj',
       executor: tx
     });
 
@@ -7180,12 +7187,53 @@ app.post('/api/talent/playback/commands', async (req, res) => {
     return res.status(409).json({ error: 'Playback control is available only while the room is live.' });
   }
 
-  const payload = await resolvePlaybackCommandPayload({
+  const callerIntentFingerprint = createHash('sha256')
+    .update(playbackCallerIntentText(validated.command), 'utf8')
+    .digest('hex');
+  try {
+    const replay = await playbackControlStore.getCommandReplay({
+      gigId,
+      clientCommandId: validated.command.clientCommandId,
+      sourceKey: validated.command.sourceKey,
+      action: validated.command.action,
+      callerIntentFingerprint
+    });
+    if (replay) {
+      return res.json({ success: true, replay: true, command: projectPlaybackCommandReceipt(replay) });
+    }
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number' ? (error as { status: number }).status : 400;
+    return res.status(status).json({ error: error instanceof Error ? error.message : 'Playback command could not be recovered.' });
+  }
+
+  let target: Awaited<ReturnType<typeof playbackControlStore.getCurrentTarget>> = null;
+  try {
+    if (validated.command.sourceKey === 'virtualdj') {
+      target = await playbackControlStore.requireCommandTarget({
+        gigId, sourceKey: 'virtualdj', expectedBridgeInstanceId: req.body?.expectedBridgeInstanceId
+      });
+    }
+  } catch (error) {
+    const status = typeof (error as { status?: number })?.status === 'number' ? (error as { status: number }).status : 400;
+    return res.status(status).json({
+      error: error instanceof Error ? error.message : 'Playback target could not be confirmed.',
+      code: (error as { code?: string })?.code
+    });
+  }
+
+  const resolvedPayload = await resolvePlaybackCommandPayload({
     gigId,
     performerId: gig.performerId,
     action: validated.command.action,
     payload: validated.command.payload
   });
+  if (validated.command.action === 'load' && !resolvedPayload.track?.path) {
+    return res.status(409).json({ error: 'This track has no synced booth path. Load it manually in VirtualDJ.' });
+  }
+  const payload: PlaybackCommandPayload = {
+    ...resolvedPayload,
+    targetBridgeInstanceId: target?.bridgeInstanceId ?? null
+  };
 
   try {
     const created = await playbackControlStore.createCommand({
@@ -7195,7 +7243,8 @@ app.post('/api/talent/playback/commands', async (req, res) => {
       clientCommandId: validated.command.clientCommandId,
       sourceKey: validated.command.sourceKey,
       action: validated.command.action,
-      payload
+      payload,
+      callerIntentFingerprint
     });
     await writeAuditEvent(businessDb, {
       actorId: access.actor.actorId,
@@ -7212,7 +7261,11 @@ app.post('/api/talent/playback/commands', async (req, res) => {
         clientCommandId: created.command.clientCommandId
       }
     });
-    return res.status(created.replay ? 200 : 202).json({ success: true, replay: created.replay, command: created.command });
+    return res.status(created.replay ? 200 : 202).json({
+      success: true,
+      replay: created.replay,
+      command: projectPlaybackCommandReceipt(created.command)
+    });
   } catch (error) {
     const status = typeof (error as { status?: number })?.status === 'number' ? (error as { status: number }).status : 400;
     return res.status(status).json({ error: error instanceof Error ? error.message : 'Playback command could not be queued.' });
@@ -7283,7 +7336,11 @@ app.post('/api/talent/playback/bridge/complete', async (req, res) => {
     errorText: normalizeLibraryText(req.body?.error, 1_000)
   });
   if (!completion) return res.status(409).json({ error: 'Playback command is not claimed by this bridge.' });
-  return res.json({ success: true, replay: completion.replay, command: completion.command });
+  return res.json({
+    success: true,
+    replay: completion.replay,
+    command: projectPlaybackCommandReceipt(completion.command)
+  });
 });
 
 app.post('/api/talent/playback/bridge/state', async (req, res) => {

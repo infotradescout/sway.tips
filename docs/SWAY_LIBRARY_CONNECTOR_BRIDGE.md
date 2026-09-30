@@ -90,8 +90,8 @@ to open a file.
 The booth bridge authenticates with a source-specific sync key and is the only
 import lane allowed to persist exact local paths. Those paths let the
 room-scoped VirtualDJ bridge load the requested file. Generic MIDI sources
-cannot accept track identity and therefore use title/artist search or manual
-selection instead.
+cannot accept track identity and therefore require manual selection in the
+playback application.
 
 ## Security
 

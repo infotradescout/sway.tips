@@ -27,7 +27,7 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><Harness/>
 function installFixture(options) {
   const originalFetch = window.fetch.bind(window);
   const f = window.__playback = {
-    config: { mode: 'ready', status: 200, title: null, payload: undefined, postMode: 'ready', postStatus: 200, midiHold: false, ...options },
+    config: { mode: 'ready', status: 200, title: null, payload: undefined, postMode: 'ready', postStatus: 200, bridgeInstanceId: 'bridge-fixture', midiHold: false, ...options },
     calls: [], held: [], heldPosts: [], heldMidi: [], sends: [], midiRequests: 0, unexpected: [],
     access: { outputs: new Map(), onstatechange: null }
   };
@@ -46,7 +46,8 @@ function installFixture(options) {
     Storage.prototype.setItem = () => { throw new DOMException('Fixture storage denied', 'SecurityError'); };
   }
   f.snapshot = (room, title) => ({ state: {
-    gigId: room, sourceKey: 'virtualdj', connectionStatus: 'connected',
+    gigId: room, sourceKey: 'virtualdj', transport: 'virtualdj_network_control_http',
+    bridgeInstanceId: f.config.bridgeInstanceId, connectionStatus: 'connected', deck: 1, playing: false,
     trackTitle: title || `Track ${room}`, trackArtist: 'Fixture artist',
     bpmTimes100: 12800, observedAt: new Date(Date.now()).toISOString(), fresh: true
   }, commands: [] });
@@ -68,6 +69,14 @@ function installFixture(options) {
       return Promise.resolve(response(body, status));
     }
     if (method === 'POST' && url.pathname === '/api/talent/playback/commands') {
+      if (f.config.postMode === 'hold-delivery') return new Promise(resolve => f.heldPosts.push({ call, release: () => {
+        resolve(response({ error: 'Player connection changed. Refresh playback status and check the selected player before sending another command.',
+          code: 'playback_connection_changed' }, 409));
+      } }));
+      if (f.config.postMode === 'connection-changed') return Promise.resolve(response({
+        error: 'Player connection changed. Refresh playback status and check the selected player before sending another command.',
+        code: 'playback_connection_changed'
+      }, 409));
       if (f.config.postMode === 'reject') return Promise.reject(new TypeError('Synthetic response lost'));
       const body = { command: { id: `command-${f.calls.length}`, ...call.body, status: 'queued' } };
       if (f.config.postMode === 'hold') return new Promise(resolve => f.heldPosts.push({ call, release: () => resolve(response(body, f.config.postStatus)) }));
@@ -85,7 +94,7 @@ const results = [];
 const play = (page, deck = 1) => page.getByRole('button', { name: `Play deck ${deck}`, exact: true });
 const refresh = page => page.getByRole('button', { name: 'Refresh playback status', exact: true });
 const posts = page => page.evaluate(() => window.__playback.calls.filter(call => call.method === 'POST'));
-const ready = page => page.getByRole('status').filter({ hasText: /^VirtualDJ linked$/ }).waitFor({ state: 'visible' });
+const ready = page => page.getByRole('status').filter({ hasText: /^VirtualDJ Network Control · Deck 1/ }).waitFor({ state: 'visible' });
 const hardware = (page, actions) => page.evaluate(actions => {
   for (const action of actions) window.dispatchEvent(new CustomEvent('sway:playback-action', { detail: action }));
 }, actions);
@@ -145,13 +154,12 @@ try {
     });
     await run('malformed-and-cross-room-status-cannot-enable', viewport, {}, async page => {
       await ready(page);
-      for (const kind of ['missing', 'wrong-room', 'bad-command', 'bad-time', 'future-time']) {
+      for (const kind of ['missing', 'wrong-room', 'bad-time', 'future-time']) {
         await page.evaluate(kind => {
           const f = window.__playback;
           const body = f.snapshot('room-a');
           if (kind === 'missing') { f.config.payload = {}; return; }
           if (kind === 'wrong-room') body.state.gigId = 'room-b';
-          if (kind === 'bad-command') body.commands = [null];
           if (kind === 'bad-time') body.state.observedAt = 'bad-date';
           if (kind === 'future-time') body.state.observedAt = new Date(Date.now() + 60_000).toISOString();
           f.config.payload = body;
@@ -161,6 +169,20 @@ try {
         await hardware(page, ['play']);
       }
       assert.equal((await posts(page)).length, 0);
+      await page.evaluate(() => {
+        const f = window.__playback;
+        const body = f.snapshot('room-a');
+        body.commands = [null, {
+          id: 'historical-command', gigId: 'room-a', action: 'stop', status: 'succeeded',
+          createdAt: new Date().toISOString(), errorText: { legacy: true },
+          result: { acknowledgement: { legacy: true }, confirmationStatus: 'future_vendor_value', observedDeck: 999 }
+        }];
+        f.config.payload = body;
+      });
+      await refresh(page).click();
+      await ready(page);
+      await disabled(page, false);
+      await page.getByText('Fixture artist — Track room-a', { exact: true }).waitFor();
     });
     await run('blocked-storage-does-not-break-controls', viewport, { storageDenied: true }, async page => {
       await ready(page);
@@ -196,6 +218,7 @@ try {
       assert.equal(sent[0].body.action, 'load');
       assert.equal(sent[0].body.payload.track.requestId, 'request-one');
       assert.equal(sent[0].body.payload.deck, 1);
+      assert.equal(sent[0].body.expectedBridgeInstanceId, 'bridge-fixture');
       assert.match(sent[0].body.clientCommandId, /^[0-9a-f-]{36}$/);
       assert.equal(await page.getByLabel('Target deck', { exact: true }).isDisabled(), true);
       await refresh(page).click();
@@ -215,6 +238,34 @@ try {
       const alert = page.getByRole('alert');
       assert.equal(await alert.evaluate(el => getComputedStyle(el).whiteSpace), 'normal');
       assert.equal(await alert.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+    });
+    await run('player-replacement-rejects-observed-connection-and-recovers', viewport, {}, async page => {
+      await ready(page);
+      await page.evaluate(() => {
+        const f = window.__playback;
+        f.config.bridgeInstanceId = 'replacement-player-b';
+        f.config.postMode = 'connection-changed';
+        f.config.mode = 'hold';
+      });
+      await play(page).click();
+      await page.getByRole('alert').filter({ hasText: 'Player connection changed. Refresh playback status' }).waitFor();
+      await disabled(page);
+      await hardware(page, ['play', 'next']);
+      const rejected = await posts(page);
+      assert.equal(rejected.length, 1);
+      assert.equal(rejected[0].body.expectedBridgeInstanceId, 'bridge-fixture', 'the command carries the player actually observed before replacement');
+      assert.equal(rejected[0].body.payload.targetBridgeInstanceId, undefined, 'the browser cannot select an execution target');
+      assert.equal(await page.getByText(/It may have reached your deck/).count(), 0, 'a confirmed rejection has clear recovery guidance');
+      await page.evaluate(() => { window.__playback.config.mode = 'ready'; window.__playback.config.postMode = 'ready'; });
+      await refresh(page).click();
+      await ready(page);
+      await disabled(page, false);
+      assert.equal((await posts(page)).length, 1, 'status recovery never resends the rejected action');
+      await play(page).click();
+      const deliberate = await posts(page);
+      assert.equal(deliberate.length, 2);
+      assert.equal(deliberate[1].body.expectedBridgeInstanceId, 'replacement-player-b');
+      assert.notEqual(deliberate[1].body.clientCommandId, rejected[0].body.clientCommandId);
     });
     await run('old-room-response-cannot-populate-new-room', viewport, {}, async page => {
       await ready(page);
@@ -246,7 +297,7 @@ try {
       await page.waitForFunction(() => window.__playback.held.length > 0);
       await page.getByLabel('Playback source', { exact: true }).selectOption('generic_midi');
       await page.evaluate(() => { for (const item of window.__playback.held) item.release(); });
-      assert.equal(await page.getByText('VirtualDJ linked', { exact: true }).count(), 0);
+      assert.equal(await page.getByText(/VirtualDJ Network Control · Deck 1/).count(), 0);
       await page.getByRole('button', { name: 'Toggle fixture preview', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: 'Choose MIDI output', exact: true }).isDisabled(), true);
       await hardware(page, ['play', 'load']);
@@ -335,6 +386,30 @@ try {
     });
   }
   const desktop = { width: 1366, height: 768 };
+  await run('delayed-command-keeps-first-observed-player-after-refresh', desktop, { postMode: 'hold-delivery' }, async page => {
+    await ready(page);
+    await play(page).click();
+    await page.waitForFunction(() => window.__playback.heldPosts.length === 1);
+    const original = (await posts(page))[0];
+    await page.evaluate(() => { window.__playback.config.bridgeInstanceId = 'replacement-player-b'; });
+    await refresh(page).click();
+    await ready(page);
+    await disabled(page);
+    assert.deepEqual((await posts(page))[0].body, original.body, 'read-only refresh cannot rewrite an in-flight command identity or observed player');
+    assert.equal(original.body.expectedBridgeInstanceId, 'bridge-fixture');
+    await page.evaluate(() => { window.__playback.config.mode = 'hold'; window.__playback.heldPosts[0].release(); });
+    await page.getByRole('alert').filter({ hasText: 'Player connection changed. Refresh playback status' }).waitFor();
+    await disabled(page);
+    await page.evaluate(() => { window.__playback.config.mode = 'ready'; window.__playback.config.postMode = 'ready'; });
+    await refresh(page).click();
+    await ready(page);
+    assert.equal((await posts(page)).length, 1, 'recovery remains GET-only');
+    await play(page).click();
+    const deliberate = await posts(page);
+    assert.equal(deliberate.length, 2);
+    assert.equal(deliberate[1].body.expectedBridgeInstanceId, 'replacement-player-b');
+    assert.notEqual(deliberate[1].body.clientCommandId, original.body.clientCommandId);
+  });
   for (const mode of ['hold', 'body-hold']) {
     await run(`${mode}-deadline-and-nonoverlapping-poll`, desktop, { mode }, async page => {
       await page.waitForFunction(() => window.__playback.held.length > 0);
@@ -350,6 +425,31 @@ try {
       assert.equal((await posts(page)).length, 0);
     });
   }
+  await run('selected-deck-never-shows-another-decks-track', desktop, {}, async page => {
+    await ready(page);
+    await page.getByLabel('Target deck', { exact: true }).selectOption('2');
+    await page.getByRole('status').filter({ hasText: 'Deck 2 selected · last source state is Deck 1' }).waitFor();
+    assert.equal(await page.getByText('Fixture artist — Track room-a', { exact: true }).count(), 0);
+    await play(page, 2).click();
+    assert.equal((await posts(page))[0].body.payload.deck, 2);
+  });
+  await run('accepted-command-is-not-called-confirmed-playback', desktop, {}, async page => {
+    await ready(page);
+    await page.evaluate(() => {
+      const f = window.__playback;
+      const body = f.snapshot('room-a');
+      body.commands = [{
+        id: 'command-accepted', action: 'next', status: 'succeeded', errorText: null,
+        createdAt: new Date().toISOString(), result: {
+          acknowledgement: 'accepted', confirmationStatus: 'source_acknowledged', observedDeck: 1
+        }
+      }];
+      f.config.payload = body;
+    });
+    await refresh(page).click();
+    await page.getByRole('status').filter({ hasText: 'accepted by VirtualDJ on Deck 1, but playback state did not confirm' }).waitFor();
+    assert.equal(await page.getByText(/next confirmed/i).count(), 0);
+  });
 } finally {
   await browser?.close();
   await vite?.close();
@@ -359,5 +459,5 @@ try {
   }, null, 2));
 }
 console.log('PLAYBACK_RECOVERY_BROWSER_SUMMARY', JSON.stringify({ passed: results.filter(r => r.status === 'PASS').length, failed: results.filter(r => r.status !== 'PASS').length, total: results.length }));
-assert.equal(results.length, 38, 'Every planned scenario must execute');
+assert.equal(results.length, 44, 'Every planned scenario must execute');
 assert.ok(results.every(result => result.status === 'PASS'), 'Playback recovery browser proof failed');

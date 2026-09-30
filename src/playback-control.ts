@@ -1,9 +1,38 @@
 export const PLAYBACK_SOURCE_KEYS = ['virtualdj', 'generic_midi'] as const;
 export const PLAYBACK_ACTIONS = ['load', 'play', 'pause', 'stop', 'cue', 'next', 'previous'] as const;
+export const PLAYBACK_CONFIRMATION_STATUSES = ['exact_track_confirmed', 'source_state_confirmed', 'source_acknowledged'] as const;
+export const PLAYBACK_LOAD_MATCH_MODES = ['exact_library_path'] as const;
+// Allow only small ordinary clock/transport skew around the server-owned
+// claim-to-completion window. Booth evidence outside it cannot confirm.
+export const PLAYBACK_EVIDENCE_CLOCK_SKEW_MS = 5_000;
 
 export type PlaybackSourceKey = (typeof PLAYBACK_SOURCE_KEYS)[number];
 export type PlaybackAction = (typeof PLAYBACK_ACTIONS)[number];
 export type PlaybackCommandStatus = 'queued' | 'claimed' | 'succeeded' | 'failed' | 'expired';
+export type PlaybackConfirmationStatus = (typeof PLAYBACK_CONFIRMATION_STATUSES)[number];
+export type PlaybackLoadMatchMode = (typeof PLAYBACK_LOAD_MATCH_MODES)[number];
+
+export function projectPlaybackCommandReceipt(command: {
+  id: string;
+  clientCommandId: string;
+  gigId: string;
+  sourceKey: string;
+  action: string;
+  status: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}) {
+  return {
+    id: command.id,
+    clientCommandId: command.clientCommandId,
+    gigId: command.gigId,
+    sourceKey: command.sourceKey,
+    action: command.action,
+    status: command.status,
+    createdAt: command.createdAt,
+    updatedAt: command.updatedAt
+  };
+}
 
 export type PlaybackTrackReference = {
   requestId?: string | null;
@@ -17,6 +46,23 @@ export type PlaybackTrackReference = {
 export type PlaybackCommandPayload = {
   deck?: number | null;
   track?: PlaybackTrackReference | null;
+  // Assigned by the server from a fresh observed source state. Browser input
+  // is deliberately not allowed to choose or spoof a bridge instance.
+  targetBridgeInstanceId?: string | null;
+  // Immutable identity of normalized browser/local-button intent. Target and
+  // resolved booth execution details are deliberately excluded.
+  callerIntentFingerprint?: string | null;
+};
+
+export type PlaybackCompletionResult = {
+  acknowledgement: 'accepted' | null;
+  confirmationStatus: PlaybackConfirmationStatus;
+  observedAt: string | null;
+  observedDeck: number | null;
+  observedTrackTitle: string | null;
+  observedTrackArtist: string | null;
+  observedPlaying: boolean | null;
+  loadMatchMode: PlaybackLoadMatchMode | null;
 };
 
 export type PlaybackStateInput = {
@@ -44,6 +90,86 @@ function normalizeText(value: unknown, maxLength = MAX_TEXT_LENGTH) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+export function playbackCallerIntentText(input: {
+  sourceKey: PlaybackSourceKey;
+  action: PlaybackAction;
+  payload: PlaybackCommandPayload;
+}) {
+  const payload = normalizePlaybackCommandPayload(input.payload);
+  return JSON.stringify({
+    sourceKey: input.sourceKey,
+    action: input.action,
+    deck: payload.deck ?? null,
+    track: payload.track ? {
+      requestId: payload.track.requestId ?? null,
+      sourceTrackId: payload.track.sourceTrackId ?? null,
+      externalTrackId: payload.track.externalTrackId ?? null,
+      title: payload.track.title ?? null,
+      artist: payload.track.artist ?? null,
+      path: payload.track.path ?? null
+    } : null
+  });
+}
+
+export function normalizePlaybackCompletionResult(value: unknown, context: {
+  action: PlaybackAction;
+  targetDeck: number | null;
+  claimedAt: Date | string | number | null;
+  completionReceivedAt: Date | string | number | null;
+}): PlaybackCompletionResult {
+  const input = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const observedDeck = normalizePlaybackDeck(input.observedDeck);
+  const observedPlaying = typeof input.observedPlaying === 'boolean' ? input.observedPlaying : null;
+  const targetMatches = context.targetDeck !== null && observedDeck === context.targetDeck;
+  const rawObservedAt = typeof input.observedAt === 'string' ? input.observedAt : null;
+  const observedAtMs = rawObservedAt ? Date.parse(rawObservedAt) : NaN;
+  const claimedAtMs = context.claimedAt instanceof Date
+    ? context.claimedAt.getTime()
+    : typeof context.claimedAt === 'number'
+      ? context.claimedAt
+      : Date.parse(String(context.claimedAt ?? ''));
+  const completionReceivedAtMs = context.completionReceivedAt instanceof Date
+    ? context.completionReceivedAt.getTime()
+    : typeof context.completionReceivedAt === 'number'
+      ? context.completionReceivedAt
+      : Date.parse(String(context.completionReceivedAt ?? ''));
+  const observedAt = Number.isFinite(observedAtMs)
+    && Number.isFinite(claimedAtMs)
+    && Number.isFinite(completionReceivedAtMs)
+    && observedAtMs >= claimedAtMs - PLAYBACK_EVIDENCE_CLOCK_SKEW_MS
+    && observedAtMs <= completionReceivedAtMs + PLAYBACK_EVIDENCE_CLOCK_SKEW_MS
+    ? new Date(observedAtMs).toISOString()
+    : null;
+  const loadMatchMode = PLAYBACK_LOAD_MATCH_MODES.includes(input.loadMatchMode as PlaybackLoadMatchMode)
+    ? input.loadMatchMode as PlaybackLoadMatchMode
+    : null;
+  const acknowledgement = input.acknowledgement === 'accepted' ? 'accepted' : null;
+  const canConfirm = acknowledgement === 'accepted' && observedAt !== null && targetMatches;
+  let confirmationStatus: PlaybackConfirmationStatus = 'source_acknowledged';
+  if (canConfirm && context.action === 'load' && loadMatchMode === 'exact_library_path'
+    && input.confirmationStatus === 'exact_track_confirmed') {
+    confirmationStatus = 'exact_track_confirmed';
+  } else if (canConfirm && context.action === 'play' && observedPlaying === true
+    && input.confirmationStatus === 'source_state_confirmed') {
+    confirmationStatus = 'source_state_confirmed';
+  } else if (canConfirm && context.action === 'pause' && observedPlaying === false
+    && input.confirmationStatus === 'source_state_confirmed') {
+    confirmationStatus = 'source_state_confirmed';
+  }
+  return {
+    acknowledgement,
+    confirmationStatus,
+    observedAt,
+    observedDeck,
+    observedTrackTitle: normalizeText(input.observedTrackTitle, 200),
+    observedTrackArtist: normalizeText(input.observedTrackArtist, 200),
+    observedPlaying,
+    loadMatchMode
+  };
 }
 
 function normalizeNonNegativeInteger(value: unknown) {

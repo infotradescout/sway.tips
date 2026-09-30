@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { homedir } from 'node:os';
@@ -8,6 +8,13 @@ import {
   VirtualDjNetworkControl,
   VIRTUALDJ_NETWORK_CONTROL_REQUIREMENTS
 } from './lib/virtualdj-network-control.mjs';
+import {
+  acceptedTargetDeck,
+  bridgeAuthGeneration,
+  isPlaybackCompletionReceipt,
+  restoreBridgeLedger,
+  submitReservedPlaybackCommand
+} from './lib/control-bridge-ledger.mjs';
 
 const HELP_TEXT = `
 Sway DJ Control Bridge
@@ -239,15 +246,20 @@ async function queuePlaybackAction(action) {
       artist: top.subtitle || null
     };
   }
-  return cloudRequest('/api/talent/playback/commands', {
-    method: 'POST',
-    body: {
-      gig_id: gigId,
-      clientCommandId: randomUUID(),
-      sourceKey: 'virtualdj',
-      action: cloudAction,
-      payload: { deck, track }
-    }
+  const intent = { sourceKey: 'virtualdj', action: cloudAction, payload: { deck: activeDeck, track } };
+  return submitReservedPlaybackCommand({
+    ledger,
+    intent,
+    persist: saveLedger,
+    submit: (clientCommandId) => cloudRequest('/api/talent/playback/commands', {
+      method: 'POST',
+      body: {
+        gig_id: gigId,
+        clientCommandId,
+        expectedBridgeInstanceId: ledger.bridgeInstanceId,
+        ...intent
+      }
+    })
   });
 }
 
@@ -298,22 +310,14 @@ function buildPreset(format) {
   };
 }
 
-function loadLedger(filePath) {
+function loadLedger(filePath, options) {
   try {
-    if (!existsSync(filePath)) return null;
+    if (!existsSync(filePath)) return restoreBridgeLedger(null, options);
     const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
-    if (parsed?.gigId !== gigId || parsed?.sourceKey !== 'virtualdj') return null;
-    return {
-      version: 1,
-      gigId,
-      sourceKey: 'virtualdj',
-      bridgeInstanceId: typeof parsed.bridgeInstanceId === 'string' ? parsed.bridgeInstanceId : randomUUID(),
-      outcomes: parsed.outcomes && typeof parsed.outcomes === 'object' ? parsed.outcomes : {},
-      pendingCompletionIds: Array.isArray(parsed.pendingCompletionIds) ? parsed.pendingCompletionIds : []
-    };
+    return restoreBridgeLedger(parsed, options);
   } catch (error) {
     console.warn(`Ignoring unreadable bridge ledger: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    return restoreBridgeLedger(null, options);
   }
 }
 
@@ -329,12 +333,26 @@ function saveLedger() {
   renameSync(tempPath, ledgerPath);
 }
 
+function publicCommandResult(result) {
+  if (!result || typeof result !== 'object') return {};
+  return {
+    acknowledgement: result.acknowledgement || null,
+    confirmationStatus: result.confirmationStatus || null,
+    observedAt: result.observedAt || null,
+    observedDeck: result.observedDeck || null,
+    observedTrackTitle: result.observedTrackTitle || null,
+    observedTrackArtist: result.observedTrackArtist || null,
+    observedPlaying: typeof result.observedPlaying === 'boolean' ? result.observedPlaying : null,
+    loadMatchMode: result.loadMatchMode || null
+  };
+}
+
 async function flushCompletions() {
   for (const commandId of [...ledger.pendingCompletionIds]) {
     const outcome = ledger.outcomes[commandId];
     if (!outcome) continue;
     try {
-      await cloudRequest('/api/talent/playback/bridge/complete', {
+      const receipt = await cloudRequest('/api/talent/playback/bridge/complete', {
         method: 'POST',
         body: {
           gig_id: gigId,
@@ -342,10 +360,15 @@ async function flushCompletions() {
           bridgeInstanceId: ledger.bridgeInstanceId,
           commandId,
           success: outcome.success,
-          result: outcome.result || {},
+          // Never return the executed script or booth-local track path to the
+          // browser-facing cloud snapshot.
+          result: publicCommandResult(outcome.result),
           error: outcome.error || null
         }
       });
+      if (!isPlaybackCompletionReceipt(receipt, { commandId, gigId, sourceKey: 'virtualdj', success: outcome.success })) {
+        throw new Error('Sway did not confirm this command result. Completion will retry without executing the player command again.');
+      }
       ledger.pendingCompletionIds = ledger.pendingCompletionIds.filter((id) => id !== commandId);
       saveLedger();
     } catch (error) {
@@ -359,7 +382,22 @@ async function executeClaimedCommand(command) {
   if (!ledger.outcomes[command.id]) {
     let outcome;
     try {
-      const result = await virtualDj.executeCommand(command);
+      const expiresAt = Date.parse(command?.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new Error('Sway command expired before the player could execute it.');
+      }
+      const targetDeck = command?.payload?.deck ?? activeDeck;
+      if (!Number.isInteger(targetDeck) || targetDeck < 1 || targetDeck > 8) {
+        throw new Error('Sway command did not identify a valid target deck.');
+      }
+      // A player may receive the command even when its response is lost.
+      // Preserve its intended deck before the attempt so reconnect continues
+      // observing that deck instead of silently returning to a startup default.
+      activeDeck = targetDeck;
+      ledger.targetDeck = targetDeck;
+      saveLedger();
+      if (expiresAt <= Date.now()) throw new Error('Sway command expired before the player could execute it.');
+      const result = await virtualDj.executeCommand({ ...command, payload: { ...command.payload, deck: targetDeck } });
       const finishedAt = new Date().toISOString();
       outcome = { success: true, result: { ...result, executedAt: finishedAt }, error: null, finishedAt };
     } catch (error) {
@@ -380,12 +418,13 @@ async function executeClaimedCommand(command) {
     ledger.pendingCompletionIds.push(command.id);
     saveLedger();
   }
+  return ledger.outcomes[command.id]?.result || null;
 }
 
-async function pushDeckState() {
+async function pushDeckState(observedState = null) {
   let state;
   try {
-    state = await virtualDj.readState(deck);
+    state = observedState || await virtualDj.readState(activeDeck);
     lastVirtualDjError = null;
   } catch (error) {
     lastVirtualDjError = error instanceof Error ? error.message : String(error);
@@ -393,7 +432,7 @@ async function pushDeckState() {
       sourceKey: 'virtualdj',
       transport: 'virtualdj_network_control_http',
       connectionStatus: 'disconnected',
-      deck,
+      deck: activeDeck,
       observedAt: new Date().toISOString(),
       metadata: { error: lastVirtualDjError }
     };
@@ -412,6 +451,9 @@ async function bridgeTick() {
   if (tickRunning) return;
   tickRunning = true;
   try {
+    // Establish the source/target identity before any queued command can be
+    // bound to this bridge.
+    if (lastStatePushAt === 0) await pushDeckState();
     await flushCompletions();
     const claimed = await cloudRequest('/api/talent/playback/bridge/claim', {
       method: 'POST',
@@ -422,7 +464,15 @@ async function bridgeTick() {
       }
     });
     for (const command of Array.isArray(claimed?.commands) ? claimed.commands : []) {
-      await executeClaimedCommand(command);
+      const result = await executeClaimedCommand(command);
+      if (result?.deck) {
+        activeDeck = acceptedTargetDeck(activeDeck, result);
+        ledger.targetDeck = activeDeck;
+        saveLedger();
+      }
+      if (result?.observation) {
+        await pushDeckState(result.observation);
+      }
     }
     await flushCompletions();
     if (Date.now() - lastStatePushAt >= 2_000) await pushDeckState();
@@ -449,6 +499,7 @@ const localToken = typeof args['local-token'] === 'string'
   ? args['local-token']
   : process.env.SWAY_CONTROL_LOCAL_TOKEN || randomBytes(24).toString('base64url');
 const deck = Math.min(8, Math.max(1, Number.parseInt(String(args.deck || process.env.SWAY_CONTROL_DECK || '1'), 10) || 1));
+let activeDeck = deck;
 const virtualDjUrl = normalizeBaseUrl(typeof args['virtualdj-url'] === 'string' ? args['virtualdj-url'] : process.env.SWAY_VIRTUALDJ_URL, 'http://127.0.0.1:8088');
 const virtualDjPassword = typeof args['virtualdj-password'] === 'string' ? args['virtualdj-password'] : process.env.SWAY_VIRTUALDJ_PASSWORD;
 
@@ -463,14 +514,9 @@ if (!LOOPBACK_HOSTS.has(listenHost) && !args['allow-remote-listen']) {
 }
 
 const ledgerPath = path.join(homedir(), '.sway', `control-bridge-${gigId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
-const ledger = loadLedger(ledgerPath) || {
-  version: 1,
-  gigId,
-  sourceKey: 'virtualdj',
-  bridgeInstanceId: randomUUID(),
-  outcomes: {},
-  pendingCompletionIds: []
-};
+const authGeneration = bridgeAuthGeneration(authToken);
+const ledger = loadLedger(ledgerPath, { gigId, authGeneration, deck });
+activeDeck = ledger.targetDeck || deck;
 saveLedger();
 
 const virtualDj = new VirtualDjNetworkControl({
@@ -561,7 +607,7 @@ interval.unref();
 server.listen(listenPort, listenHost, () => {
   console.log(`Sway DJ Control Bridge: ${localBridgeUrl('/health')}`);
   console.log(`Room ${gigId} -> ${swayUrl}`);
-  console.log(`VirtualDJ deck ${deck} -> ${virtualDjUrl}`);
+  console.log(`VirtualDJ deck ${activeDeck} -> ${virtualDjUrl}`);
   console.log(`Hardware presets: ${localBridgeUrl('/preset/actions')}`);
   console.log('The URLs contain the local-only bridge token; treat exported presets as secrets.');
   void bridgeTick();

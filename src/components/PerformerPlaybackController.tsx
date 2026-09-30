@@ -12,9 +12,13 @@ import type { RequestItem } from '../types';
 
 type PlaybackStateSnapshot = {
   sourceKey: PlaybackSourceKey;
+  transport: string;
+  bridgeInstanceId: string;
   connectionStatus: 'connected' | 'degraded' | 'disconnected';
+  deck: number | null;
   trackTitle: string | null;
   trackArtist: string | null;
+  playing: boolean | null;
   bpmTimes100: number | null;
   observedAt: string;
   fresh: boolean;
@@ -25,6 +29,11 @@ type PlaybackCommandSnapshot = {
   status: 'queued' | 'claimed' | 'succeeded' | 'failed' | 'expired';
   errorText: string | null;
   createdAt: string;
+  result: {
+    acknowledgement: string | null;
+    confirmationStatus: 'exact_track_confirmed' | 'source_state_confirmed' | 'source_acknowledged' | null;
+    observedDeck: number | null;
+  };
 };
 type PlaybackSnapshot = { state: PlaybackStateSnapshot | null; commands: PlaybackCommandSnapshot[] };
 type PlaybackMessage = { tone: 'success' | 'pending' | 'error'; text: string };
@@ -64,7 +73,11 @@ function parseSnapshot(value: unknown, gigId: string): PlaybackSnapshot {
     const raw = value.state;
     if (!record(raw) || (raw.gigId !== undefined && raw.gigId !== gigId)
       || !isPlaybackSourceKey(raw.sourceKey)
+      || typeof raw.transport !== 'string' || !raw.transport
+      || typeof raw.bridgeInstanceId !== 'string' || !raw.bridgeInstanceId
       || !['connected', 'degraded', 'disconnected'].includes(String(raw.connectionStatus))
+      || (raw.deck !== null && raw.deck !== undefined && (!Number.isInteger(raw.deck) || Number(raw.deck) < 1 || Number(raw.deck) > 8))
+      || (raw.playing !== null && raw.playing !== undefined && typeof raw.playing !== 'boolean')
       || typeof raw.observedAt !== 'string' || !Number.isFinite(Date.parse(raw.observedAt))
       || typeof raw.fresh !== 'boolean'
       || (raw.bpmTimes100 != null && (typeof raw.bpmTimes100 !== 'number' || !Number.isFinite(raw.bpmTimes100) || raw.bpmTimes100 < 0))) {
@@ -72,22 +85,37 @@ function parseSnapshot(value: unknown, gigId: string): PlaybackSnapshot {
     }
     state = {
       sourceKey: raw.sourceKey,
+      transport: raw.transport,
+      bridgeInstanceId: raw.bridgeInstanceId,
       connectionStatus: raw.connectionStatus as PlaybackStateSnapshot['connectionStatus'],
+      deck: raw.deck == null ? null : Number(raw.deck),
       trackTitle: nullableText(raw.trackTitle), trackArtist: nullableText(raw.trackArtist),
+      playing: typeof raw.playing === 'boolean' ? raw.playing : null,
       bpmTimes100: raw.bpmTimes100 == null ? null : raw.bpmTimes100 as number,
       observedAt: raw.observedAt, fresh: raw.fresh
     };
   }
-  const commands = value.commands.map((raw): PlaybackCommandSnapshot => {
+  const commands = value.commands.flatMap((raw): PlaybackCommandSnapshot[] => {
     if (!record(raw) || typeof raw.id !== 'string' || !raw.id
       || (raw.gigId !== undefined && raw.gigId !== gigId)
       || !isPlaybackAction(raw.action)
       || !['queued', 'claimed', 'succeeded', 'failed', 'expired'].includes(String(raw.status))
       || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt))) {
-      throw new Error('Unreadable playback status.');
+      return [];
     }
-    return { id: raw.id, action: raw.action, status: raw.status as PlaybackCommandSnapshot['status'],
-      errorText: nullableText(raw.errorText), createdAt: raw.createdAt };
+    const rawResult = record(raw.result) ? raw.result : {};
+    const confirmationStatus = ['exact_track_confirmed', 'source_state_confirmed', 'source_acknowledged'].includes(String(rawResult.confirmationStatus))
+      ? rawResult.confirmationStatus as PlaybackCommandSnapshot['result']['confirmationStatus']
+      : null;
+    const candidateDeck = rawResult.observedDeck == null ? null : Number(rawResult.observedDeck);
+    const observedDeck = candidateDeck !== null && Number.isInteger(candidateDeck) && candidateDeck >= 1 && candidateDeck <= 8 ? candidateDeck : null;
+    return [{ id: raw.id, action: raw.action, status: raw.status as PlaybackCommandSnapshot['status'],
+      errorText: typeof raw.errorText === 'string' ? raw.errorText : null, createdAt: raw.createdAt,
+      result: {
+        acknowledgement: rawResult.acknowledgement === 'accepted' ? 'accepted' : null,
+        confirmationStatus,
+        observedDeck
+      } }];
   });
   return { state, commands };
 }
@@ -108,6 +136,7 @@ async function withDeadline<T>(controller: AbortController, operation: () => Pro
   }
 }
 class PlaybackAccessError extends Error {}
+class PlaybackConnectionChangedError extends Error {}
 
 const ACTION_BUTTONS: Array<{ action: PlaybackAction; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { action: 'previous', label: 'Previous', icon: SkipBack },
@@ -126,7 +155,15 @@ function latestCommandMessage(commands: PlaybackCommandSnapshot[], now: number):
   if (latest.status === 'failed' || latest.status === 'expired') {
     return { tone: 'error', text: latest.errorText || `${latest.action} failed.` };
   }
-  if (latest.status === 'succeeded') return { tone: 'success', text: `${latest.action} confirmed by VirtualDJ.` };
+  if (latest.status === 'succeeded') {
+    const target = latest.result.observedDeck ? ` on Deck ${latest.result.observedDeck}` : '';
+    if (latest.result.acknowledgement !== 'accepted') {
+      return { tone: 'pending', text: `${latest.action} has no compatible VirtualDJ acknowledgement${target}. Check the selected deck before another command.` };
+    }
+    if (latest.result.confirmationStatus === 'exact_track_confirmed') return { tone: 'success', text: `Exact requested track confirmed${target} by VirtualDJ source state.` };
+    if (latest.result.confirmationStatus === 'source_state_confirmed') return { tone: 'success', text: `${latest.action} confirmed${target} by VirtualDJ source state.` };
+    return { tone: 'pending', text: `${latest.action} was accepted by VirtualDJ${target}, but playback state did not confirm the outcome. Check the selected deck before another command.` };
+  }
   return { tone: 'pending', text: `${latest.action} ${latest.status}.` };
 }
 
@@ -239,6 +276,7 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
   const virtualDjConnected = Boolean(!snapshotError && !accessLost.current && snapshot.state?.fresh
     && snapshot.state.sourceKey === 'virtualdj' && snapshot.state.connectionStatus === 'connected'
     && isPlaybackStateFresh(snapshot.state.observedAt, now));
+  const deckStateMatches = virtualDjConnected && snapshot.state?.deck === deck;
   const topRequest = approvedRequests[0] || null;
   const message = localMessage || (sourceKey === 'virtualdj' ? latestCommandMessage(snapshot.commands, now) : null);
   const canControl = !previewMode && Boolean(gigId) && !pendingAction && !accessLost.current
@@ -316,20 +354,29 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
       // A single deliberate action gets one durable command identity. There is
       // no automatic POST retry, including on timeout or a lost response.
       const clientCommandId = crypto.randomUUID();
+      // Pin the observed player and intent at this click, even if a status
+      // refresh reports a replacement player while this request is in flight.
+      const commandBody = JSON.stringify({ gig_id: gigId, clientCommandId, sourceKey: 'virtualdj', action,
+        expectedBridgeInstanceId: snapshot.state?.bridgeInstanceId,
+        payload: { deck, track: action === 'load' && topRequest ? {
+          requestId: topRequest.id, sourceTrackId: topRequest.sourceTrackId || null,
+          externalTrackId: topRequest.externalTrackId || null,
+          title: topRequest.title, artist: topRequest.subtitle || null
+        } : null }
+      });
       await withDeadline(controller, async () => {
         const response = await fetch('/api/talent/playback/commands', {
           method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ gig_id: gigId, clientCommandId, sourceKey: 'virtualdj', action,
-            payload: { deck, track: action === 'load' && topRequest ? {
-              requestId: topRequest.id, sourceTrackId: topRequest.sourceTrackId || null,
-              externalTrackId: topRequest.externalTrackId || null,
-              title: topRequest.title, artist: topRequest.subtitle || null
-            } : null }
-          })
+          body: commandBody
         });
         if (response.status === 401 || response.status === 403) throw new PlaybackAccessError();
         const data: unknown = await response.json();
-        if (!response.ok || !record(data)) throw new Error('Command confirmation unavailable.');
+        if (response.status === 409 && record(data) && data.code === 'playback_connection_changed') {
+          throw new PlaybackConnectionChangedError();
+        }
+        if (!response.ok || !record(data)) {
+          throw new Error(record(data) && typeof data.error === 'string' ? data.error : 'Command confirmation unavailable.');
+        }
       });
       if (lifetime.current !== scope || accessLost.current) return;
       setLocalMessage({ tone: 'pending', text: `${action} submitted; waiting for VirtualDJ acknowledgement.` });
@@ -345,6 +392,15 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
         setSnapshot(EMPTY_SNAPSHOT);
         setSnapshotError('Your room access changed. Check your account, then refresh playback status.');
         setLocalMessage(null);
+      } else if (error instanceof PlaybackConnectionChangedError) {
+        readRevision.current += 1;
+        readController.current?.abort();
+        readController.current = null;
+        setReading(false);
+        setSnapshot(EMPTY_SNAPSHOT);
+        setLocalMessage({ tone: 'error', text: 'Player connection changed. Refresh playback status and check the selected player before sending another command. Sway did not send this command.' });
+      } else if (error instanceof Error && error.message.includes('no synced booth path')) {
+        setLocalMessage({ tone: 'error', text: 'This request has no synced booth path. Load it manually in VirtualDJ; Sway did not send a load command.' });
       } else {
         setLocalMessage({ tone: 'error', text: 'The command could not be confirmed. It may have reached your deck. Check playback before sending another command. Refreshing status will not resend it.' });
       }
@@ -369,7 +425,11 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
   const sourceStatus = previewMode ? 'Preview only — playback controls are off'
     : !gigId ? 'Open a room to use playback controls'
       : sourceKey === 'virtualdj'
-        ? virtualDjConnected ? 'VirtualDJ linked' : snapshotError || (reading ? 'Checking playback status…' : 'Bridge offline or status expired')
+        ? virtualDjConnected
+          ? deckStateMatches
+            ? `VirtualDJ Network Control · Deck ${deck} · ${snapshot.state?.playing ? 'playing' : 'ready'} · source state confirmed`
+            : `VirtualDJ connected · Deck ${deck} selected · last source state is ${snapshot.state?.deck ? `Deck ${snapshot.state.deck}` : 'not deck-specific'}`
+          : snapshotError || (reading ? 'Checking playback status…' : 'Bridge offline or status expired')
         : selectedMidiOutput ? `MIDI → ${selectedMidiOutput.name || 'output'}` : 'Choose a connected MIDI output';
 
   return (
@@ -380,18 +440,18 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
         <div className="flex min-w-0 items-center gap-2">
           <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${canControl ? 'bg-emerald-400' : 'bg-amber-400'}`} />
           <p className="min-w-0 break-words text-xs font-black text-white">
-            {sourceKey === 'virtualdj' && virtualDjConnected && snapshot.state?.trackTitle
+            {sourceKey === 'virtualdj' && deckStateMatches && snapshot.state?.trackTitle
               ? `${snapshot.state.trackArtist ? `${snapshot.state.trackArtist} — ` : ''}${snapshot.state.trackTitle}`
               : topRequest ? `Up next: ${topRequest.title}` : 'No approved crowd pick'}
           </p>
-          {sourceKey === 'virtualdj' && virtualDjConnected && snapshot.state?.bpmTimes100 ? (
+          {sourceKey === 'virtualdj' && deckStateMatches && snapshot.state?.bpmTimes100 ? (
             <span className="shrink-0 font-mono text-[10px] text-fuchsia-200">{(snapshot.state.bpmTimes100 / 100).toFixed(1)} BPM</span>
           ) : null}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <select value={sourceKey} onChange={event => onSourceChange(event.target.value as PlaybackSourceKey)}
             aria-label="Playback source" className="min-h-10 max-w-full rounded-lg border border-white/10 bg-slate-950 px-2 text-xs font-bold text-white">
-            <option value="virtualdj">VirtualDJ · full control</option>
+            <option value="virtualdj">VirtualDJ · Network Control</option>
             <option value="generic_midi">MIDI · one-way</option>
           </select>
           <select value={deck} onChange={event => setDeck(Number(event.target.value))} disabled={pendingAction !== null}
@@ -430,6 +490,9 @@ function PlaybackSession({ gigId, approvedRequests, previewMode = false, sourceK
         ))}
       </div>
       <p role="status" className="min-w-0 break-words text-xs leading-5 text-slate-300 sm:col-span-2">{sourceStatus}</p>
+      {sourceKey === 'virtualdj' ? (
+        <p className="min-w-0 break-words text-[11px] leading-5 text-slate-400 sm:col-span-2">Target: VirtualDJ Network Control on Deck {deck}. Automatic load requires an exact booth path from a completed library sync; title/artist search never auto-loads. Play and pause can be source-state confirmed. Stop, cue, next, and previous remain accepted until stronger source evidence exists. Audio stays in VirtualDJ.</p>
+      ) : null}
       {sourceKey === 'virtualdj' && !previewMode && gigId ? (
         <button type="button" onClick={() => void refreshSnapshot(true)}
           className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/20 px-3 text-xs font-bold text-white sm:col-span-2">

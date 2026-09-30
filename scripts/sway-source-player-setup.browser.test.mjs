@@ -36,7 +36,7 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><Harness/>
 
 function installFixture({ template, options }) {
   const original = window.fetch.bind(window);
-  const f = window.__sources = { options: { mode: 'ready', status: 200, badHash: false, offline: false, stale: false, expiryMs: 60_000, ...options }, calls: [], held: [], imports: [], unexpected: [] };
+  const f = window.__sources = { options: { mode: 'ready', status: 200, badHash: false, offline: false, stale: false, expiryMs: 60_000, ...options }, calls: [], receipts: [], held: [], imports: [], unexpected: [] };
   window.fetch = (input, init = {}) => {
     const url = new URL(String(input), location.href);
     if (!url.pathname.startsWith('/api/')) return original(input, init);
@@ -50,9 +50,24 @@ function installFixture({ template, options }) {
     }
     if (call.path.startsWith('/api/talent/playback/snapshot/') && call.method === 'GET') {
       const gigId = call.path.split('/').at(-1);
-      return Promise.resolve(response({ state: { gigId, sourceKey: 'virtualdj', connectionStatus: f.options.offline ? 'disconnected' : 'connected', observedAt: new Date(Date.now() - (f.options.stale ? 120_000 : 0)).toISOString(), fresh: !f.options.stale, trackTitle: 'Synthetic source track', trackArtist: 'Fixture artist', bpmTimes100: 12000 }, commands: [] }));
+      return Promise.resolve(response({ state: {
+        gigId, sourceKey: 'virtualdj', transport: 'virtualdj_network_control_http',
+        bridgeInstanceId: `synthetic-bridge-${gigId}`, deck: 1, playing: false,
+        connectionStatus: f.options.offline || f.options.stale ? 'disconnected' : 'connected',
+        observedAt: new Date(Date.now() - (f.options.stale ? 120_000 : 0)).toISOString(), fresh: !f.options.stale,
+        trackTitle: 'Synthetic source track', trackArtist: 'Fixture artist', externalTrackId: null,
+        bpmTimes100: 12000, positionMs: 0, durationMs: null, revision: 0
+      }, commands: [] }));
     }
-    if (call.path === '/api/talent/playback/commands' && call.method === 'POST') return Promise.resolve(response({ command: { id: 'synthetic-command', status: 'queued' } }));
+    if (call.path === '/api/talent/playback/commands' && call.method === 'POST') {
+      const command = {
+        id: `synthetic-command-${call.body.clientCommandId}`, clientCommandId: call.body.clientCommandId,
+        gigId: call.body.gig_id, sourceKey: call.body.sourceKey, action: call.body.action,
+        status: 'queued', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+      };
+      f.receipts.push(command);
+      return Promise.resolve(response({ success: true, replay: false, command }, 202));
+    }
     f.unexpected.push(call.path); return Promise.resolve(response({}, 500));
   };
 }
@@ -98,14 +113,26 @@ try {
       assert.equal(file.suggestedFilename(), 'sway-booth-11111111.cmd');
       assert.equal(readFileSync(await file.path(), 'utf8'), fixtureText);
       await page.getByRole('button', { name: 'Open playback controls', exact: true }).click();
-      await page.getByRole('status').filter({ hasText: /^VirtualDJ linked$/ }).waitFor();
+      await page.getByRole('status').filter({ hasText: /^VirtualDJ Network Control.*Deck 1.*ready.*source state confirmed$/ }).waitFor();
       await page.getByRole('button', { name: 'Play deck 1', exact: true }).click();
+      await page.getByRole('status').filter({ hasText: 'play submitted; waiting for VirtualDJ acknowledgement.' }).waitFor();
       const commands = (await posts(page)).filter(call => call.path.endsWith('/commands'));
       assert.equal(commands.length, 1); assert.equal(commands[0].body.gig_id, roomA); assert.equal(commands[0].body.action, 'play');
+      assert.equal(commands[0].body.expectedBridgeInstanceId, `synthetic-bridge-${roomA}`);
+      assert.equal(commands[0].body.payload.deck, 1);
+      assert.equal(commands[0].body.payload.targetBridgeInstanceId, undefined, 'the browser precondition cannot select the execution target');
+      assert.match(commands[0].body.clientCommandId, /^[0-9a-f-]{36}$/);
+      const playReceipt = await page.evaluate(() => window.__sources.receipts[0]);
+      assert.equal(playReceipt.clientCommandId, commands[0].body.clientCommandId);
+      assert.equal(playReceipt.gigId, roomA); assert.equal(playReceipt.sourceKey, 'virtualdj');
+      assert.equal(playReceipt.action, 'play'); assert.equal(playReceipt.status, 'queued');
+      assert.equal(playReceipt.payload, undefined, 'fixture POST receipts retain the public server projection');
       await page.getByLabel('Target deck', { exact: true }).selectOption('2');
       await page.getByRole('button', { name: 'Load top', exact: true }).click();
       const loads = (await posts(page)).filter(call => call.path.endsWith('/commands') && call.body.action === 'load');
       assert.equal(loads.length, 1); assert.equal(loads[0].body.gig_id, roomA);
+      assert.equal(loads[0].body.expectedBridgeInstanceId, `synthetic-bridge-${roomA}`);
+      assert.notEqual(loads[0].body.clientCommandId, commands[0].body.clientCommandId);
       assert.equal(loads[0].body.payload.deck, 2);
       assert.deepEqual(loads[0].body.payload.track, { requestId: 'approved-top', sourceTrackId: 'track-top', externalTrackId: 'external-top', title: 'Top approved pick', artist: 'Fixture artist' });
       const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
@@ -157,6 +184,11 @@ try {
       await page.getByRole('button', { name: 'Open playback controls', exact: true }).click();
       await page.getByRole('status').filter({ hasText: 'Bridge offline or status expired' }).waitFor();
       assert.equal(await page.getByRole('button', { name: 'Play deck 1', exact: true }).isDisabled(), true);
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('sway:playback-action', { detail: 'play' })));
+      await page.getByRole('button', { name: 'Refresh playback status', exact: true }).click();
+      await page.getByRole('status').filter({ hasText: 'Bridge offline or status expired' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Play deck 1', exact: true }).isDisabled(), true,
+        'refreshing stale source state must keep playback disabled');
       assert.equal((await posts(page)).length, 0);
     });
   }

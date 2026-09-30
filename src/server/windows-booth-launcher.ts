@@ -55,6 +55,7 @@ function validateInput(input: {
 }
 
 function buildPowerShellBody(input: ReturnType<typeof validateInput>) {
+  const authGeneration = createHash('sha256').update(input.bridgeToken, 'utf8').digest('hex');
   return String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -62,9 +63,9 @@ $ProgressPreference = 'SilentlyContinue'
 $SwayUrl = ${powershellLiteral(input.swayUrl)}
 $GigId = ${powershellLiteral(input.gigId)}
 $AuthToken = ${powershellLiteral(input.bridgeToken)}
+$AuthGeneration = ${powershellLiteral(authGeneration)}
 $ExpiresAt = [DateTimeOffset]::Parse(${powershellLiteral(input.expiresAt)})
 $SourceKey = 'virtualdj'
-$BridgeInstanceId = [Guid]::NewGuid().ToString()
 $createdNew = $false
 $BoothMutex = [System.Threading.Mutex]::new($true, "Local\SwayBooth-$GigId", [ref]$createdNew)
 if (-not $createdNew) {
@@ -92,8 +93,21 @@ function ConvertTo-VirtualDjText([object]$Value) {
   return $text
 }
 
-function Test-SwayTrue([object]$Value) {
-  return ([string]$Value).Trim() -match '^(true|yes|on|1)$'
+function ConvertFrom-VirtualDjPlaying([object]$Value) {
+  $text = ([string]$Value).Trim()
+  if ($text -match '^(true|yes|on|1)$') { return $true }
+  if ($text -match '^(false|no|off|0)$') { return $false }
+  throw 'VirtualDJ returned an unreadable playback state.'
+}
+
+function ConvertTo-ComparableText([object]$Value) {
+  if ($null -eq $Value) { return '' }
+  return (([string]$Value).Normalize([Text.NormalizationForm]::FormKC).Trim().ToLowerInvariant() -replace '\s+', ' ')
+}
+
+function ConvertTo-ComparablePath([object]$Value) {
+  if ($null -eq $Value) { return '' }
+  return ([string]$Value).Replace('\', '/')
 }
 
 function Invoke-SwayRequest([string]$Route, [string]$Method = 'GET', [object]$Body = $null) {
@@ -128,19 +142,30 @@ function Invoke-VirtualDjRequest([string]$Endpoint, [string]$Script) {
     TimeoutSec = 5
     UseBasicParsing = $true
   }
-  $response = Invoke-WebRequest @parameters
+  try {
+    $response = Invoke-WebRequest @parameters
+  } catch {
+    if ($Endpoint -eq 'execute') {
+      if ($null -ne $_.Exception.Response) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+        throw "VirtualDJ rejected the command (HTTP $statusCode)."
+      }
+      throw 'VirtualDJ response was lost; command outcome is uncertain. Check the selected deck before retrying.'
+    }
+    throw 'VirtualDJ state request failed.'
+  }
   return ([string]$response.Content).Trim()
 }
 
 function Invoke-VirtualDjExecute([string]$Script) {
   $result = Invoke-VirtualDjRequest 'execute' $Script
-  if (-not (Test-SwayTrue $result)) {
-    throw "VirtualDJ rejected: $Script"
+  if ($result -cne 'true') {
+    throw 'VirtualDJ rejected the command.'
   }
   return $result
 }
 
-function Invoke-VirtualDjCommand([object]$Command) {
+function Resolve-TargetDeck([object]$Command) {
   $payload = $Command.payload
   $targetDeck = $Deck
   if ($null -ne $payload -and $null -ne $payload.deck) {
@@ -149,9 +174,16 @@ function Invoke-VirtualDjCommand([object]$Command) {
       $targetDeck = $candidateDeck
     }
   }
+  return $targetDeck
+}
+
+function Invoke-VirtualDjCommand([object]$Command) {
+  $payload = $Command.payload
+  $targetDeck = Resolve-TargetDeck $Command
 
   $script = $null
   $loadMatchMode = $null
+  $track = $null
   switch ([string]$Command.action) {
     'load' {
       $track = $payload.track
@@ -160,12 +192,7 @@ function Invoke-VirtualDjCommand([object]$Command) {
         $script = 'deck ' + $targetDeck + ' load "' + (ConvertTo-VirtualDjText $path) + '"'
         $loadMatchMode = 'exact_library_path'
       } else {
-        $artist = if ($null -ne $track) { [string]$track.artist } else { '' }
-        $title = if ($null -ne $track) { [string]$track.title } else { '' }
-        $query = "$artist $title".Trim()
-        if ([string]::IsNullOrWhiteSpace($query)) { throw 'This request has no playable path or searchable title.' }
-        $script = 'search "' + (ConvertTo-VirtualDjText $query) + '" & browser_scroll "top" & deck ' + $targetDeck + ' load'
-        $loadMatchMode = 'virtualdj_search_first_result'
+        throw 'VirtualDJ automatic load requires an exact synced booth path. Load this track manually.'
       }
     }
     'play' { $script = "deck $targetDeck play on" }
@@ -177,23 +204,51 @@ function Invoke-VirtualDjCommand([object]$Command) {
     default { throw "Unsupported playback action: $($Command.action)" }
   }
 
+  $commandExpiresAt = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse([string]$Command.expiresAt, [ref]$commandExpiresAt) -or
+      [DateTimeOffset]::UtcNow -ge $commandExpiresAt) {
+    throw 'Playback command expired or has an invalid deadline. Send a fresh command.'
+  }
   [void](Invoke-VirtualDjExecute $script)
+  Start-Sleep -Milliseconds 150
+  $state = $null
+  try { $state = Read-VirtualDjState $targetDeck } catch { $state = $null }
+  $confirmationStatus = 'source_acknowledged'
+  if ($null -ne $state -and [string]$Command.action -eq 'load') {
+    $requestedPath = if ($null -ne $track) { ConvertTo-ComparablePath $track.path } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($requestedPath) -and $requestedPath -ceq (ConvertTo-ComparablePath $state.trackPath)) {
+      $confirmationStatus = 'exact_track_confirmed'
+    }
+  } elseif ($null -ne $state -and [string]$Command.action -eq 'play' -and [bool]$state.playing) {
+    $confirmationStatus = 'source_state_confirmed'
+  } elseif ($null -ne $state -and [string]$Command.action -eq 'pause' -and -not [bool]$state.playing) {
+    $confirmationStatus = 'source_state_confirmed'
+  }
   return @{
-    executed = $true
-    deck = $targetDeck
-    action = [string]$Command.action
-    script = $script
-    loadMatchMode = $loadMatchMode
+    result = @{
+      acknowledgement = 'accepted'
+      deck = $targetDeck
+      action = [string]$Command.action
+      loadMatchMode = $loadMatchMode
+      confirmationStatus = $confirmationStatus
+      observedAt = if ($null -ne $state) { $state.observedAt } else { $null }
+      observedDeck = if ($null -ne $state) { $state.deck } else { $targetDeck }
+      observedTrackTitle = if ($null -ne $state) { $state.trackTitle } else { $null }
+      observedTrackArtist = if ($null -ne $state) { $state.trackArtist } else { $null }
+      observedPlaying = if ($null -ne $state) { $state.playing } else { $null }
+    }
+    state = $state
   }
 }
 
-function Read-VirtualDjState {
-  $title = Invoke-VirtualDjRequest 'query' "deck $Deck get_title"
-  $artist = Invoke-VirtualDjRequest 'query' "deck $Deck get_artist"
-  $filePath = Invoke-VirtualDjRequest 'query' "deck $Deck get_filepath"
-  $playing = Invoke-VirtualDjRequest 'query' "deck $Deck play"
-  $position = Invoke-VirtualDjRequest 'query' "deck $Deck get_position"
-  $bpmText = Invoke-VirtualDjRequest 'query' "deck $Deck get_bpm"
+function Read-VirtualDjState([int]$TargetDeck = $Deck) {
+  $title = Invoke-VirtualDjRequest 'query' "deck $TargetDeck get_title"
+  $artist = Invoke-VirtualDjRequest 'query' "deck $TargetDeck get_artist"
+  $filePath = Invoke-VirtualDjRequest 'query' "deck $TargetDeck get_filepath"
+  $playing = Invoke-VirtualDjRequest 'query' "deck $TargetDeck play"
+  $playingValue = ConvertFrom-VirtualDjPlaying $playing
+  $position = Invoke-VirtualDjRequest 'query' "deck $TargetDeck get_position"
+  $bpmText = Invoke-VirtualDjRequest 'query' "deck $TargetDeck get_bpm"
   $bpm = 0.0
   $bpmTimes100 = $null
   if ([double]::TryParse($bpmText, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bpm)) {
@@ -204,11 +259,11 @@ function Read-VirtualDjState {
     transport = 'virtualdj_network_control_http_windows_companion'
     bridgeInstanceId = $BridgeInstanceId
     connectionStatus = 'connected'
-    deck = $Deck
+    deck = $TargetDeck
     trackTitle = if ([string]::IsNullOrWhiteSpace($title)) { $null } else { $title }
     trackArtist = if ([string]::IsNullOrWhiteSpace($artist)) { $null } else { $artist }
     trackPath = if ([string]::IsNullOrWhiteSpace($filePath)) { $null } else { $filePath }
-    playing = Test-SwayTrue $playing
+    playing = $playingValue
     positionMs = $null
     durationMs = $null
     bpmTimes100 = $bpmTimes100
@@ -230,7 +285,15 @@ function Save-Ledger {
   foreach ($entry in $entries) { $bounded[[string]$entry.Key] = $entry.Value }
   $script:Ledger = $bounded
   $temporaryPath = "$LedgerPath.tmp"
-  ($Ledger | ConvertTo-Json -Depth 12 -Compress) | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+  $document = @{
+    version = 2
+    authGeneration = $AuthGeneration
+    bridgeInstanceId = $BridgeInstanceId
+    targetDeck = $Deck
+    outcomes = $Ledger
+    pendingCompletionIds = @($PendingCompletionIds)
+  }
+  ($document | ConvertTo-Json -Depth 12 -Compress) | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
   Move-Item -LiteralPath $temporaryPath -Destination $LedgerPath -Force
 }
 
@@ -244,7 +307,33 @@ function Complete-SwayCommand([string]$CommandId, [object]$Entry) {
     result = $Entry.result
     error = $Entry.error
   }
-  [void](Invoke-SwayRequest '/api/talent/playback/bridge/complete' 'POST' $body)
+  $receipt = Invoke-SwayRequest '/api/talent/playback/bridge/complete' 'POST' $body
+  $expectedStatus = if ([bool]$Entry.success) { 'succeeded' } else { 'failed' }
+  if ($null -eq $receipt -or $receipt.success -isnot [bool] -or -not $receipt.success -or
+      $null -eq $receipt.command -or [string]$receipt.command.id -cne $CommandId -or
+      [string]$receipt.command.gigId -cne $GigId -or [string]$receipt.command.sourceKey -cne $SourceKey -or
+      [string]$receipt.command.status -cne $expectedStatus) {
+    throw 'Sway has not confirmed this command result. Completion will retry.'
+  }
+}
+
+function Flush-PendingCompletions {
+  foreach ($commandId in @($PendingCompletionIds)) {
+    $entry = $Ledger[[string]$commandId]
+    if ($null -eq $entry) {
+      $script:PendingCompletionIds = @($PendingCompletionIds | Where-Object { $_ -ne $commandId })
+      Save-Ledger
+      continue
+    }
+    try {
+      Complete-SwayCommand ([string]$commandId) $entry
+      $script:PendingCompletionIds = @($PendingCompletionIds | Where-Object { $_ -ne $commandId })
+      Save-Ledger
+    } catch {
+      Write-Host 'Command result will retry before another claim.' -ForegroundColor Yellow
+      break
+    }
+  }
 }
 
 Clear-Host
@@ -272,6 +361,35 @@ try {
 }
 $VirtualDjUrl = "http://127.0.0.1:$port"
 
+$ledgerDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Sway'
+[void](New-Item -ItemType Directory -Path $ledgerDirectory -Force)
+$LedgerPath = Join-Path $ledgerDirectory "booth-ledger-$GigId.json"
+$BridgeInstanceId = [Guid]::NewGuid().ToString()
+$Ledger = @{}
+$PendingCompletionIds = @()
+if (Test-Path -LiteralPath $LedgerPath) {
+  try {
+    $savedLedger = (Get-Content -LiteralPath $LedgerPath -Raw) | ConvertFrom-Json
+    if ([int]$savedLedger.version -eq 2 -and [string]$savedLedger.authGeneration -eq $AuthGeneration) {
+      $savedBridgeId = [string]$savedLedger.bridgeInstanceId
+      $parsedBridgeId = [Guid]::Empty
+      if ([Guid]::TryParse($savedBridgeId, [ref]$parsedBridgeId)) { $BridgeInstanceId = $savedBridgeId }
+      $Ledger = ConvertTo-LedgerTable $savedLedger.outcomes
+      $PendingCompletionIds = @($savedLedger.pendingCompletionIds | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      $savedTargetDeck = 0
+      if ([int]::TryParse([string]$savedLedger.targetDeck, [ref]$savedTargetDeck) -and $savedTargetDeck -ge 1 -and $savedTargetDeck -le 8) {
+        $Deck = $savedTargetDeck
+      }
+    }
+  } catch {
+    $Ledger = @{}
+    $PendingCompletionIds = @()
+  }
+}
+Save-Ledger
+# Completion delivery does not depend on VirtualDJ still being reachable.
+Flush-PendingCompletions
+
 Write-SwayHeading 'Checking VirtualDJ'
 try {
   $clock = Invoke-VirtualDjRequest 'query' 'get_clock'
@@ -282,14 +400,6 @@ try {
   throw
 }
 
-$ledgerDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Sway'
-[void](New-Item -ItemType Directory -Path $ledgerDirectory -Force)
-$LedgerPath = Join-Path $ledgerDirectory "booth-ledger-$GigId.json"
-$Ledger = @{}
-if (Test-Path -LiteralPath $LedgerPath) {
-  try { $Ledger = ConvertTo-LedgerTable ((Get-Content -LiteralPath $LedgerPath -Raw) | ConvertFrom-Json) } catch { $Ledger = @{} }
-}
-
 Write-SwayHeading 'Connected'
 Write-Host 'Leave this window open during the room. Sway now controls VirtualDJ.' -ForegroundColor Green
 Write-Host 'Press Ctrl+C to disconnect.' -ForegroundColor DarkGray
@@ -298,6 +408,14 @@ $lastCloudWarning = $null
 
 while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
   try {
+    # Publish the connected player/deck before Sway binds any command to this
+    # short-lived bridge instance. Network failures stay in the retry loop.
+    if ([DateTimeOffset]::UtcNow -ge $nextStateAt) {
+      $state = Read-VirtualDjState $Deck
+      [void](Invoke-SwayRequest '/api/talent/playback/bridge/state' 'POST' @{ gig_id = $GigId; state = $state })
+      $nextStateAt = [DateTimeOffset]::UtcNow.AddSeconds(2)
+    }
+    Flush-PendingCompletions
     $claim = Invoke-SwayRequest '/api/talent/playback/bridge/claim' 'POST' @{
       gig_id = $GigId
       sourceKey = $SourceKey
@@ -308,10 +426,15 @@ while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
       if ([string]::IsNullOrWhiteSpace($commandId)) { continue }
       $entry = $Ledger[$commandId]
       if ($null -eq $entry) {
+        # The claimed command's deck is deliberate intent even if its response is lost.
+        $Deck = Resolve-TargetDeck $command
+        Save-Ledger
+        $execution = $null
         try {
-          $result = Invoke-VirtualDjCommand $command
-          $entry = @{ success = $true; result = $result; error = $null; completedAt = [DateTimeOffset]::UtcNow.ToString('o') }
-          Write-Host "Confirmed $($command.action) on deck $($result.deck)." -ForegroundColor Green
+          $execution = Invoke-VirtualDjCommand $command
+          $Deck = [int]$execution.result.deck
+          $entry = @{ success = $true; result = $execution.result; error = $null; completedAt = [DateTimeOffset]::UtcNow.ToString('o') }
+          Write-Host "VirtualDJ accepted $($command.action) on deck $($execution.result.deck); observation: $($execution.result.confirmationStatus)." -ForegroundColor Green
         } catch {
           $message = $_.Exception.Message
           if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
@@ -319,10 +442,20 @@ while ([DateTimeOffset]::UtcNow -lt $ExpiresAt) {
           Write-Host "VirtualDJ could not run $($command.action): $message" -ForegroundColor Red
         }
         $Ledger[$commandId] = $entry
+        if ($PendingCompletionIds -notcontains $commandId) { $PendingCompletionIds += $commandId }
         Save-Ledger
+        # Cloud observation delivery cannot change the durable player outcome.
+        if ([bool]$entry.success -and $null -ne $execution.state) {
+          try {
+            [void](Invoke-SwayRequest '/api/talent/playback/bridge/state' 'POST' @{ gig_id = $GigId; state = $execution.state })
+            $nextStateAt = [DateTimeOffset]::UtcNow.AddSeconds(2)
+          } catch {
+            Write-Host 'Player state will retry; the accepted command result is saved.' -ForegroundColor Yellow
+          }
+        }
       }
-      try { Complete-SwayCommand $commandId $entry } catch { Write-Host 'Command result will retry.' -ForegroundColor Yellow }
     }
+    Flush-PendingCompletions
 
     if ([DateTimeOffset]::UtcNow -ge $nextStateAt) {
       $state = Read-VirtualDjState

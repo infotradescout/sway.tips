@@ -4,6 +4,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 const bridge = readFileSync(join(root, 'scripts/sway-control-bridge.mjs'), 'utf8');
 const adapter = readFileSync(join(root, 'scripts/lib/virtualdj-network-control.mjs'), 'utf8');
+const ledger = readFileSync(join(root, 'scripts/lib/control-bridge-ledger.mjs'), 'utf8');
 const docs = readFileSync(join(root, 'docs/SWAY_CONTROL_BRIDGE.md'), 'utf8');
 const packageJson = readFileSync(join(root, 'package.json'), 'utf8');
 const failures = [];
@@ -37,6 +38,11 @@ for (const term of [
   'flushCompletions',
   'executeClaimedCommand',
   'pendingCompletionIds',
+  'publicCommandResult',
+  'activeDeck',
+  'acceptedTargetDeck',
+  'bridgeAuthGeneration',
+  'submitReservedPlaybackCommand',
   'Local bridge token required.',
   'Browser cross-origin requests are disabled.'
 ]) {
@@ -44,11 +50,32 @@ for (const term of [
 }
 
 for (const term of [
+  'reservePlaybackSubmission',
+  'await persist();',
+  'await submit(submission.clientCommandId)',
+  'resolvePlaybackSubmission',
+  'ledger.submissions[submission.intentKey] = retained'
+]) {
+  if (!ledger.includes(term)) failures.push(`Control bridge ledger missing durable submission term: ${term}`);
+}
+const reserveIndex = ledger.indexOf('const submission = reservePlaybackSubmission');
+const firstPersistIndex = ledger.indexOf('await persist();', reserveIndex);
+const submitIndex = ledger.indexOf('await submit(submission.clientCommandId)', firstPersistIndex);
+const receiptValidationIndex = ledger.indexOf('command.clientCommandId !== submission.clientCommandId', submitIndex);
+const resolveIndex = ledger.indexOf('resolvePlaybackSubmission(ledger, submission.intentKey, submission.clientCommandId)', receiptValidationIndex);
+const clearedPersistIndex = ledger.indexOf('await persist();', resolveIndex);
+if (!(reserveIndex >= 0 && reserveIndex < firstPersistIndex && firstPersistIndex < submitIndex
+  && submitIndex < receiptValidationIndex && receiptValidationIndex < resolveIndex && resolveIndex < clearedPersistIndex)) {
+  failures.push('Control bridge ledger must reserve, persist, submit, validate receipt identity, resolve matching identity, and persist the clear in that order.');
+}
+
+for (const term of [
   "this.request('query', script)",
   "this.request('execute', script)",
   "case 'load'",
   'exact_library_path',
-  'virtualdj_search_first_result',
+  'exact_track_confirmed',
+  'source_acknowledged',
   "case 'play'",
   "case 'pause'",
   "case 'stop'",
@@ -60,6 +87,9 @@ for (const term of [
   "license: 'Pro'"
 ]) {
   if (!adapter.includes(term)) failures.push(`VirtualDJ adapter missing required term: ${term}`);
+}
+for (const forbidden of ['virtualdj_search_first_result', 'metadata_match_only', 'browser_scroll "top"']) {
+  if (adapter.includes(forbidden)) failures.push(`VirtualDJ adapter retains unsafe search-load behavior: ${forbidden}`);
 }
 
 for (const term of [

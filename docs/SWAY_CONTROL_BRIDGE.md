@@ -10,9 +10,11 @@ the Sway repository, or a terminal. An advanced Node bridge additionally
 provides authenticated localhost buttons for Stream Deck, Bitfocus Companion,
 MIDI routers, foot pedals, and scripts. Together these paths support:
 
-- exact-path load of a synced crowd pick
+- exact-path load of a crowd pick with a completed booth-library sync; Sway
+  never auto-loads a title/artist search result
 - play, pause, stop, cue, next, and previous
-- deck title, artist, path, play state, and BPM feedback in Sway
+- selected-deck title, artist, play state, and BPM feedback in Sway; booth-local
+  paths stay out of browser snapshots
 - request pause/resume, approve, deny, fulfill, and hide actions
 - current top-request text for overlays and automation
 
@@ -89,15 +91,35 @@ Those URLs contain a random local token. Treat an exported preset as a secret.
 
 Dashboard and hardware actions do not fire-and-forget into the booth:
 
-1. Sway durably queues a room-scoped command with a client idempotency key.
-2. The authenticated bridge claims commands on a short lease.
+1. Sway durably queues a room-scoped command with a client idempotency key and
+   binds it to the fresh bridge instance and explicit target deck.
+2. Only that authenticated bridge can claim the command on its short lease.
 3. The bridge executes the matching VirtualDJ action.
-4. It writes the outcome to a bounded local ledger before acknowledging Sway.
-5. It retries completion delivery without repeating a locally completed action.
-6. Sway records `succeeded`, `failed`, or `expired` and displays the result.
+4. It observes the selected deck after the command. Only a matching exact
+   booth path can confirm an exact load. A request without that path fails
+   before VirtualDJ mutation and must be loaded manually.
+5. It writes the outcome to a bounded local ledger before acknowledging Sway.
+6. It retries completion delivery without repeating a locally completed action.
+7. Sway keeps VirtualDJ acceptance separate from source-state confirmation and
+   displays stale, failed, or uncertain outcomes explicitly.
 
-The bridge also pushes low-rate deck state every two seconds. Stale state is
-shown as disconnected rather than pretending the source is still online.
+An expired claim lease is never requeued for another booth execution. If the
+completion acknowledgement is lost, Sway marks the outcome uncertain until the
+original bridge supplies its ledger result or the performer checks the deck.
+
+The bridge also pushes low-rate deck state every two seconds. Sway uses server
+receipt time—not the booth clock—to order those updates and determine
+freshness. Stale state is shown as disconnected rather than pretending the
+source is still online.
+
+Play can be source-state confirmed only from `playing=true`; pause can be
+confirmed only from `playing=false`. Stop and cue remain acknowledged rather
+than confirmed because the current Network Control evidence does not
+distinguish those outcomes from an already-paused deck. Confirmation evidence
+must also fall within the server-owned claim-to-completion interval, with at
+most five seconds of clock/transport skew on either boundary. Older deck state
+cannot confirm a newly claimed command, while a valid saved completion remains
+confirmed on later reads because Sway retains its server completion boundary.
 
 ## Local protected endpoints
 
@@ -170,7 +192,12 @@ loopback VirtualDJ process from the cloud.
 
 - Cloud bridge tokens expire after 6 hours and are scoped to one room.
 - Issuing another bridge token revokes the previous active bridge token for the
-  same account and room.
+  same account and room, disconnects its state, expires unsent commands, and
+  marks already-claimed work uncertain without replay.
+- Local ledgers bind their restart-stable claimant identity to a non-secret
+  fingerprint of that token generation. A same-token restart can deliver a
+  saved completion; a replacement token rotates the identity and clears the
+  unreachable prior generation locally.
 - Bridge tokens are rejected by general performer, account, admin, and overlay
   routes.
 - Playback claim, completion, and state routes require that exact room scope.
@@ -187,8 +214,18 @@ loopback VirtualDJ process from the cloud.
 ## Failure behavior
 
 - Bridge offline: controller shows disconnected and does not queue a command.
-- VirtualDJ rejects a verb: command becomes failed with the returned error.
+- VirtualDJ rejects a verb: command becomes failed with a safe public error;
+  booth scripts, paths, and raw response bodies are not returned.
+- Crowd pick has no exact synced booth path: Sway sends no VirtualDJ execute
+  request and asks the performer to load it manually.
 - Cloud response lost after execution: local outcome is retried, not re-run.
+- Any failed or non-2xx cloud command submission retains its local command id;
+  only a positive Sway receipt clears it, and different actions fail closed
+  until that replay succeeds or the two-minute local safety window expires.
+- Claim lease lost before completion: the command is not executed again; Sway
+  reports an uncertain outcome and asks the performer to check the selected deck.
+- VirtualDJ accepts a command but the follow-up state read fails: Sway reports
+  accepted but unconfirmed, never confirmed playback.
 - Command never claimed: it expires after the bounded command window.
 - State stops arriving: Sway projects the source as disconnected after 15
   seconds.
