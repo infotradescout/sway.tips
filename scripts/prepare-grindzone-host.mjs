@@ -8,8 +8,8 @@ import path from 'node:path';
 import {build} from 'esbuild';
 import {bindPhoneSource} from './grindzone-build-binding.mjs';
 import {npmCiInvocation} from './grindzone-npm-command.mjs';
-export const sourceSha='f79302b6d01def0dfcb3469e51637ccc6ccf6bb7';
-export const downloadSourceSha='f79302b6d01def0dfcb3469e51637ccc6ccf6bb7';
+export const sourceSha='c3af225fc299c45822f4c62eaa69fb69df4cbabf';
+export const downloadSourceSha='c3af225fc299c45822f4c62eaa69fb69df4cbabf';
 const cleanEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>['PATH','HOME','USERPROFILE','SYSTEMROOT','TMP','TEMP','TMPDIR','LANG','LC_ALL','PLAYWRIGHT_BROWSERS_PATH'].includes(key)));
 const run=(cwd,command,args)=>execFileSync(command,args,{cwd,env:{...cleanEnv,GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},stdio:'inherit',timeout:240000});
 function prepare(directory,sha){
@@ -59,6 +59,12 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   // Derive only public species facts from the hash-verified pinned upstream file, before all app gates.
   run(target,process.execPath,['tools/build-herd-reference.mjs']);
   if(relay!==target)run(relay,process.execPath,['tools/build-herd-reference.mjs']);
+  run(target,process.execPath,['tools/prepare-harvest-ocr.mjs']);
+  if(relay!==target)run(relay,process.execPath,['tools/prepare-harvest-ocr.mjs']);
+  // The sealed intake verifier compares the exact previous reader's backup rejection.
+  run(target,'git',['fetch','--quiet','--depth','1','https://github.com/infotradescout/cotw-field-companion.git','f79302b6d01def0dfcb3469e51637ccc6ccf6bb7']);
+  if(execFileSync('git',['rev-parse','HEAD'],{cwd:target,env:cleanEnv,encoding:'utf8'}).trim()!==downloadSourceSha)throw Error('Intake history fetch changed source');
+  run(target,'git',['diff','--exit-code','HEAD','--']);
   const tests=readdirSync(path.join(target,'tests')).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>'tests/'+name);
   if(tests.length<20)throw Error('GrindZone source tests missing');
   run(target,process.execPath,['--test','--test-reporter=tap',...tests]);
@@ -69,6 +75,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   run(target,process.execPath,['tools/verify-population-insights.mjs',path.join(evidence,'insights')]);
   run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'local',evidence]);
   await browserPlayPreview(evidence,'local');
+  run(target,process.execPath,['tools/verify-harvest-intake.mjs',hostRoot,'local',evidence]);
   run(target,process.execPath,['tools/verify-herds.mjs',hostRoot,'local',evidence]);
   await herdPreview(evidence,'local');
   run(target,process.execPath,['tools/verify-hunt-locations.mjs',hostRoot,'local',evidence]);
@@ -86,6 +93,7 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
     run(target,process.execPath,['tools/verify-herd-recovery.mjs',hostRoot,'live',evidence]);
     run(target,process.execPath,['tools/verify-browser-play.mjs',hostRoot,'live',evidence]);
     await browserPlayPreview(evidence,'live');
+    run(target,process.execPath,['tools/verify-harvest-intake.mjs',hostRoot,'live',evidence]);
     run(target,process.execPath,['tools/verify-herds.mjs',hostRoot,'live',evidence]);
     await herdPreview(evidence,'live');
     run(target,process.execPath,['tools/verify-hunt-locations.mjs',hostRoot,'live',evidence]);
@@ -112,12 +120,14 @@ if(process.env.GRINDZONE_PHONE_ENABLED==='true'){
   verifyNativePortableMetadata(JSON.parse(zipEntry(bytes,'GrindZone/PORTABLE-PACKAGE.json').toString('utf8')),downloadSourceSha);
   const published=path.resolve('dist/grindzone-download');mkdirSync(published,{recursive:true});
   copyFileSync(archive,path.join(published,manifest.filename));copyFileSync(path.join(download,'release.json'),path.join(published,'release.json'));
-  for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play']){
+  for(const mode of ['local','live'])for(const kind of ['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play','harvest-intake']){
     const report=path.join(evidence,mode+'-'+kind+'.json');
     if(!existsSync(report)){if(mode==='local')throw Error('Required local acceptance report missing: '+kind);continue;}
     const result=JSON.parse(readFileSync(report,'utf8'));if(result.passed!==true||result.source!==downloadSourceSha)throw Error('Phone acceptance is incomplete or stale');
     copyFileSync(report,path.join(published,mode+'-'+kind+'.json'));copyFileSync(path.join(evidence,mode+'-'+kind+'.png'),path.join(published,mode+'-'+kind+'.png'));
   }
+  copyFileSync(path.join(target,'public/vendor/ocr/manifest.json'),path.join(published,'ocr-manifest.json'));
+  console.log('GRINDZONE_OCR_MANIFEST '+readFileSync(path.join(target,'public/vendor/ocr/manifest.json'),'utf8'));
   writeFileSync(path.join(published,'index.html'),`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>GrindZone for Windows</title><style>body{margin:0;padding:28px;background:#101711;color:#eef0e9;font:18px/1.6 system-ui}main{max-width:700px;margin:5vh auto}h1{font-size:42px;line-height:1.1}a{color:#ffae65}.download{display:inline-block;padding:14px 22px;background:#ec8c39;color:#111;border-radius:8px;font-weight:700;text-decoration:none}small{display:block;overflow-wrap:anywhere;color:#b8c1b5}.note{border-left:3px solid #ec8c39;padding-left:18px;margin-top:26px}</style><main><small>WINDOWS X64 PREVIEW</small><h1>GrindZone</h1><p>Without a PC? <a href="/grindzone/play/">Open the browser journal and maps</a>. Browser-only progress is not account sync.</p><p>Download the complete app, extract the folder, and open <strong>START.cmd</strong>. Its runtime is included.</p><a class="download" href="GrindZone-Windows-x64.zip?v=${downloadSourceSha}" download>Download GrindZone for Windows</a><h2>Connect your phone</h2><ol><li>Open the new GrindZone copy on your PC.</li><li>Go to <strong>Settings → Connect my phone</strong> and approve private access.</li><li>Scan the QR with your phone camera, then tap <strong>Connect this phone</strong>.</li></ol><p>No activation key, remote-control software, separate Node.js installation, or browser extension is needed.</p><div class="note"><strong>Keep GrindZone running on your PC while using the live phone view.</strong><p>Use the new download, not an older running copy. Close the older app before starting this version; this download does not stop or replace it automatically.</p></div><p>Your game saves stay on your machine. Only the paired phone can see its permitted live view; turn off phone access in Settings to disconnect it. Optional private copies in the phone browser are managed and deleted separately in phone Settings.</p><p><a href="release.json">Download verification</a> · <a href="local-phone.json">Browser acceptance record</a> · <a href="local-save-data.json">Saved-game workflow verification</a> · <a href="local-locations.json">Event-location verification</a> · <a href="local-herds.json">Herd and trophy verification</a> · <a href="local-browser-play.json">No-PC browser verification</a></p><small>Source ${downloadSourceSha}<br>Archive SHA-256 ${manifest.sha256}<br>Browser tests use a disposable Linux app and synthetic saves. Your Windows launch and physical-phone scan are not claimed by those tests.</small></main></html>`,{encoding:'utf8'});
   console.log('GRINDZONE_WINDOWS_DOWNLOAD '+JSON.stringify(manifest));
   await publishManagedGrindZone({target,published,sourceRevision:downloadSourceSha,cleanEnv,verifyLive:live?.commit===process.env.RENDER_GIT_COMMIT&&live?.status==='ok'});
