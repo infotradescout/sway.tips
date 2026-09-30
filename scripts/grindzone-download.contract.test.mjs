@@ -35,7 +35,7 @@ test('saved-game workflow runs before packaging and includes public-network veri
  assert.equal(source.split(local).length,2);assert.equal(source.split(live).length,2);
  assert.ok(source.indexOf(local)<source.indexOf("const download=path.join(target,'downloads')"));
  assert.ok(source.indexOf(live)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
- assert.match(source,/\['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play'\]/);
+ assert.match(source,/\['phone','zones','discovery','cache','studio','save-data','locations','herds','browser-play','harvest-intake'\]/);
  assert.match(source,/Required local acceptance report missing/);
  assert.match(source,/result\.passed!==true\|\|result\.source!==downloadSourceSha/);
  assert.doesNotMatch(source,/writeFileSync\([^\n]*stat-definitions\.json/);
@@ -75,4 +75,23 @@ test('no-PC browser journey is required in both modes without claiming account s
  assert.match(source,/report\.pcProcessesCreated!==0/);assert.match(source,/report\.accountSyncVerified!==false/);
  assert.match(source,/mode\+'-browser-play\.json'/);assert.match(source,/mode\+'-browser-play\.png'/);
  assert.match(source,/Browser-only progress is not account sync/);
+});
+
+test('pinned OCR preparation precedes source and browser gates and intake reports are published',()=>{
+ const source=readFileSync(script,'utf8'),prepare="run(target,process.execPath,['tools/prepare-harvest-ocr.mjs']);";
+ assert.equal(source.split(prepare).length,2);
+ assert.ok(source.indexOf(prepare)<source.indexOf("run(target,process.execPath,['--test','--test-reporter=tap',...tests])"));
+ for(const mode of ['local','live']){
+  const call=`run(target,process.execPath,['tools/verify-harvest-intake.mjs',hostRoot,'${mode}',evidence]);`;
+  assert.equal(source.split(call).length,2);
+  assert.ok(source.indexOf(prepare)<source.indexOf(call));
+  assert.ok(source.indexOf(call)<source.indexOf("const download=path.join(target,'downloads')"));
+  if(mode==='live')assert.ok(source.indexOf(call)>source.indexOf('live?.commit===process.env.RENDER_GIT_COMMIT'));
+ }
+ assert.match(source,/'browser-play','harvest-intake'\]/);
+ assert.match(source,/copyFileSync\(report,path.join\(published,mode\+'-'\+kind\+'.json'\)\)/);
+ assert.match(source,/copyFileSync\(path.join\(evidence,mode\+'-'\+kind\+'.png'\)/);
+ assert.match(source,/public\/vendor\/ocr\/manifest.json/);
+ assert.match(source,/GRINDZONE_OCR_MANIFEST/);
+ assert.match(source,/run\(target,'git',\['fetch','--quiet','--depth','1','https:\/\/github.com\/infotradescout\/cotw-field-companion.git','f79302b6d01def0dfcb3469e51637ccc6ccf6bb7'\]\)/);
 });
