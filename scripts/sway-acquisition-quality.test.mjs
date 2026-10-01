@@ -10,7 +10,7 @@ import { ACQUISITION_QUALITY_SQL, validateAcquisitionWindow } from './report-acq
 
 for (const key of ['DATABASE_URL','TEST_DATABASE_URL','SWAY_REAL_POSTGRES_PROOF_DATABASE_URL','STRIPE_SECRET_KEY','SESSION_SECRET','BREVO_API_KEY','SENDGRID_API_KEY','SMTP_PASS']) assert(!process.env[key], 'No inherited credentials: '+key);
 assert.notEqual(process.env.SWAY_REQUIRE_REAL_POSTGRES_PROOF, 'true');
-const report={passed:false, checks:[], scope:'Canonical source server.ts launched with Node/TSX in test mode, request guard and audit writes with isolated PGlite/PostgreSQL-protocol data. Request signals and conversion fixtures are synthetic; no production writes or verified human audience.'};
+const report={passed:false, checks:[], scope:'Canonical source server.ts launched with Node/TSX ESM-only loader in test mode, request guard and audit writes with isolated PGlite/PostgreSQL-protocol data. Request signals and conversion fixtures are synthetic; no production writes or verified human audience.'};
 const browserHeaders={
   'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36',
   'referer':'https://app.sway.tips/discover', 'origin':'https://app.sway.tips',
@@ -79,7 +79,8 @@ try {
   const password=new URL(db.databaseUrl).password;
   for(const value of [db.databaseUrl,password,decodeURIComponent(password),encodeURIComponent(password),encodeURIComponent(decodeURIComponent(password))])secrets.add(value);
   startedAt=performance.now();
-  child=spawn(process.execPath,['--import','tsx','server.ts'],{cwd:root,env:{...process.env,NODE_ENV:'test',HOST:'127.0.0.1',PORT:String(port),DATABASE_URL:db.databaseUrl,SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION:'true'},stdio:['ignore','pipe','pipe']});
+  // This source entry is ESM; avoid installing global CJS transform hooks.
+  child=spawn(process.execPath,['--import','tsx/esm','server.ts'],{cwd:root,env:{...process.env,NODE_ENV:'test',HOST:'127.0.0.1',PORT:String(port),DATABASE_URL:db.databaseUrl,SWAY_SKIP_STARTUP_BUSINESS_STATE_HYDRATION:'true'},stdio:['ignore','pipe','pipe']});
   lifecycle.pid=child.pid??null;
   // Register closure immediately, before probes or cleanup can observe exit.
   childClosed=new Promise(resolve=>child.once('close',(code,signal)=>{lifecycle.close={code,signal};resolve();}));
