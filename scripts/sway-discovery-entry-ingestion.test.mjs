@@ -46,14 +46,23 @@ try {
   child.stdout.on('data', data => { serverLog = (serverLog + data).slice(-20000); });
   child.stderr.on('data', data => { serverLog = (serverLog + data).slice(-20000); });
   let ready = false;
-  for (let attempt = 0; attempt < 150; attempt++) {
+  // Match the bounded source-startup budget used by acquisition quality: cold
+  // Node/TSX imports can exceed the old 150 immediate-failure polling attempts.
+  const startupStarted = performance.now();
+  const startupDeadline = startupStarted + 90_000;
+  let startupAttempts = 0;
+  while (performance.now() < startupDeadline) {
     if (child.exitCode !== null || child.signalCode !== null) break;
+    startupAttempts++;
+    const probeTimeout = Math.max(1, Math.floor(Math.min(1000, startupDeadline - performance.now())));
     try {
-      const response = await originalFetch(origin + '/api/build-marker', { signal: AbortSignal.timeout(1000) });
-      if (response.ok && (response.headers.get('content-type') || '').includes('json')) { ready = true; break; }
+      const response = await originalFetch(origin + '/api/build-marker', { signal: AbortSignal.timeout(probeTimeout) });
+      if (performance.now() < startupDeadline && response.ok && (response.headers.get('content-type') || '').includes('json')) { ready = true; break; }
     } catch { /* The owned server may still be starting. */ }
-    await delay(200);
+    const remaining = startupDeadline - performance.now();
+    if (remaining > 0) await delay(Math.min(200, remaining));
   }
+  report.startup = { pid: child.pid ?? null, budgetMs: 90_000, elapsedMs: Math.round(performance.now() - startupStarted), attempts: startupAttempts, ready };
   assert(ready, 'Owned application did not start: ' + serverLog);
   for (const denied of [false, true]) {
     const local = storage(), session = storage();

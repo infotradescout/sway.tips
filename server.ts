@@ -2411,11 +2411,7 @@ async function persistBusinessStateForRoom(roomState: BackendState, gigId: strin
 }
 
 async function resolveLegacyWritableRoom(req: express.Request, res: express.Response) {
-  if (skipStartupBusinessStateHydration) {
-    console.warn('[sway.startup] skipping live-room state hydration for a non-production HTTP proof.');
-  } else {
-    await refreshBusinessState();
-  }
+  await refreshBusinessState();
 
   const requestedGigId = parseDurableGigId(req.body?.gig_id);
   const targetGigId = requestedGigId ?? activeGigId;
@@ -16647,7 +16643,11 @@ async function startServer() {
     audioObjectStoreVerified = true;
     console.log(`[sway.audio] verified private ${audioObjectStore.provider} bucket access.`);
   }
-  await refreshBusinessState();
+  if (skipStartupBusinessStateHydration) {
+    console.warn('[sway.startup] skipping live-room state hydration for a non-production HTTP proof.');
+  } else {
+    await refreshBusinessState();
+  }
   startEventTicketWorker();
   startLiveRoomPaymentWorker();
   startPerformerPayoutWorker();
@@ -16740,7 +16740,7 @@ async function startServer() {
   const httpServer = createHttpServer(phoneHost ? phoneHost.wrap(app) : app);
   phoneHost?.attach(httpServer);
   httpServer.once('error', () => { void phoneHost?.close(); });
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, process.env.NODE_ENV === 'test' ? '127.0.0.1' : '0.0.0.0', () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }
