@@ -167,3 +167,36 @@ test('browser rejects missing or mismatched accepted action/program/deck acknowl
     await assert.rejects(client.command(connection, { id, action: 'play' }), /acknowledgement/);
   }
 });
+
+test('relative and rooted Windows metadata paths are hidden by both browser boundaries', async t => {
+  const item = { id: randomUUID(), revision: randomUUID(), targetKey: 'a'.repeat(64), program: 'vlc', deck: 1,
+    capabilities: { actions: ['play'] }, uncertain: false, pendingReview: [] };
+  let title, artist;
+  const observed = () => ({ connectionId: item.id, revision: item.revision, targetKey: item.targetKey,
+    sourceKey: 'vlc', deck: 1, playing: false, connectionStatus: 'connected', trackTitle: title,
+    trackArtist: artist, positionMs: 0, durationMs: 10, observedAt: new Date().toISOString() });
+  const token = 'x'.repeat(43);
+  const host = await startNativePlayerHost({ hub: { list: () => [item], readState: async () => observed() },
+    token, expiresAt: Date.now() + 10000, port: 0 });
+  t.after(() => host.close());
+  const viaHost = new NativePlayerClient({ pairingKey: token, port: host.port,
+    fetchImpl: (url, init) => fetch(url, { ...init, headers: { ...init.headers, origin } }) });
+  const [connection] = await viaHost.list();
+  const viaClient = new NativePlayerClient({ pairingKey: token,
+    fetchImpl: async () => new Response(JSON.stringify({ state: observed() })) });
+  for (const path of ['private\\music\\secret.mp3', '\\private\\music\\secret.mp3', 'C:\\private\\music\\secret.mp3', '/private/music/secret.mp3']) {
+    title = artist = path;
+    const raw = await (await fetch(`http://127.0.0.1:${host.port}/v1/state?connectionId=${item.id}&revision=${item.revision}`,
+      { headers: { origin, authorization: 'Bearer ' + token } })).json();
+    assert.equal(raw.state.trackTitle, null); assert.equal(raw.state.trackArtist, null);
+    for (const client of [viaHost, viaClient]) {
+      const value = await client.state(connection);
+      assert.equal(value.trackTitle, null); assert.equal(value.trackArtist, null);
+    }
+  }
+  title = 'A public track title'; artist = 'A public artist';
+  for (const client of [viaHost, viaClient]) {
+    const value = await client.state(connection);
+    assert.equal(value.trackTitle, title); assert.equal(value.trackArtist, artist);
+  }
+});

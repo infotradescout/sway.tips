@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 // This is the browser serialization boundary, not a dump of adapter/config data.
 const metadata = value => typeof value === 'string' && value.length <= 500
-  && !/(?:[a-z]:[\\/]|\\\\|\/|file:|https?:|[\x00-\x1f])/i.test(value) ? value : null;
+  && !/(?:[\\/]|file:|https?:|[\x00-\x1f])/i.test(value) ? value : null;
 const connection = value => ({ id: value.id, revision: value.revision, targetKey: value.targetKey,
   program: value.program, deck: value.deck, capabilities: { actions: value.capabilities.actions },
   uncertain: value.uncertain, pendingReview: value.pendingReview.map(item => ({ id: item.id, action: item.action, finishedAt: item.finishedAt })) });
